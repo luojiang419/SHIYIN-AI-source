@@ -16,6 +16,7 @@ PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
 PORTABLE_SMOKE = ROOT / "tools" / "smoke-portable.ps1"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_VERSION_RESOLVER = ROOT / "tools" / "resolve-release-version.py"
+GITIGNORE = ROOT / ".gitignore"
 
 
 class DesktopUpdaterContractTests(unittest.TestCase):
@@ -96,6 +97,10 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("source-sha:$SourceSha", publish)
         self.assertIn("SHIYIN-AI-v$Version-windows-x64.zip", publish)
         self.assertIn("VERSION_PATTERN", resolver)
+
+    def test_ci_keeps_tauri_frontend_placeholder_in_public_source(self):
+        self.assertTrue((ROOT / "desktop-placeholder" / "index.html").is_file())
+        self.assertNotIn("desktop-placeholder/", GITIGNORE.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

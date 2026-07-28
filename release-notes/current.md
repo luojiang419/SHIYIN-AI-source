@@ -1,3 +1,3 @@
-# SHIYIN AI v1.0.84
-- 修复更新后启动失败：便携后端现在完整打包 WebSocket 运行时模块。
-- 修复生成服务启动时提示“没有名为 websockets.exceptions 的模块”。
+# SHIYIN AI v1.0.85
+- 修复从旧版本更新后残留后端文件，导致 `httptools` 运行时混用及启动超时的问题。
+- 更新时完整替换 `app` 目录，同时保留用户的 `data` 数据目录。

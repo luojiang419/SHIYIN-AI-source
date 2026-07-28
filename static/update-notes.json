@@ -1,14 +1,14 @@
 {
-  "version": "1.0.84",
-  "updated_at": "2026-07-28T20:30:00+08:00",
+  "version": "1.0.85",
+  "updated_at": "2026-07-28T21:45:00+08:00",
   "items": [
     {
       "type": "fix",
-      "text": "修复更新后启动失败：便携后端完整打包 WebSocket 运行时模块"
+      "text": "修复旧版更新后残留后端文件导致 httptools 运行时混用和启动超时"
     },
     {
       "type": "fix",
-      "text": "修复生成服务启动时提示没有名为 websockets.exceptions 的模块"
+      "text": "更新时完整替换 app 目录，同时保留用户 data 数据目录"
     }
   ]
 }

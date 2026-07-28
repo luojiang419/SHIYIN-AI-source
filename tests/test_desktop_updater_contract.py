@@ -106,6 +106,14 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("SHIYIN-AI-v$Version-windows-x64.zip", publish)
         self.assertIn("VERSION_PATTERN", resolver)
 
+    def test_updater_replaces_the_app_directory_and_ci_runs_its_regression_test(self):
+        updater = UPDATER.read_text(encoding="utf-8")
+        workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("fn replace_app_directory", updater)
+        self.assertIn("fs::rename(&source, &target)", updater)
+        self.assertIn("replace_app_directory(&staged, root)?", updater)
+        self.assertIn("cargo test --manifest-path src-tauri/Cargo.toml updater::tests --locked", workflow)
+
     def test_ci_keeps_tauri_frontend_placeholder_in_public_source(self):
         self.assertTrue((ROOT / "desktop-placeholder" / "index.html").is_file())
         self.assertNotIn("desktop-placeholder/", GITIGNORE.read_text(encoding="utf-8"))

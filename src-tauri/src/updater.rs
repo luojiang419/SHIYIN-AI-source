@@ -735,6 +735,46 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn replace_app_directory(staged: &Path, root: &Path) -> Result<(), String> {
+    let source = staged.join("app");
+    let target = root.join("app");
+    if !source.is_dir() {
+        return Err("更新包缺少 app 目录。".into());
+    }
+    let backup = root.join(format!(".app-backup-{}", Uuid::new_v4()));
+    if target.exists() {
+        fs::rename(&target, &backup)
+            .map_err(|e| format!("无法备份旧 app 目录：{e}"))?;
+    }
+    if let Err(error) = fs::rename(&source, &target) {
+        if backup.exists() {
+            let _ = fs::rename(&backup, &target);
+        }
+        return Err(format!("无法替换 app 目录：{error}"));
+    }
+    if backup.exists() {
+        fs::remove_dir_all(backup).map_err(|e| format!("无法清理旧 app 目录：{e}"))?;
+    }
+    Ok(())
+}
+
+fn copy_release_root_files(staged: &Path, root: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(staged).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name() == "app" {
+            continue;
+        }
+        let from = entry.path();
+        let to = root.join(entry.file_name());
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            copy_directory(&from, &to)?;
+        } else {
+            fs::copy(&from, &to).map_err(|e| format!("无法替换 {}：{e}", to.display()))?;
+        }
+    }
+    Ok(())
+}
+
 fn apply_session(
     root: &Path,
     data: &Path,
@@ -763,7 +803,8 @@ fn apply_session(
         let _ = fs::remove_dir_all(&extraction);
         return Err("更新包缺少 SHIYIN AI 主程序或 app 目录。".into());
     }
-    copy_directory(&staged, root)?;
+    replace_app_directory(&staged, root)?;
+    copy_release_root_files(&staged, root)?;
     clear_pending(data);
     let _ = fs::remove_dir_all(&extraction);
     log(data, &format!("v{version} 安装完成，正在重启"));
@@ -808,5 +849,24 @@ mod tests {
                 .is_ok());
             }
         }
+    }
+
+    #[test]
+    fn replacing_app_directory_removes_stale_runtime_files_and_keeps_data() {
+        let install_root = std::env::temp_dir().join(format!("shiyin-updater-test-{}", Uuid::new_v4()));
+        let staged = install_root.join("staged");
+        fs::create_dir_all(install_root.join("app").join("backend")).unwrap();
+        fs::create_dir_all(staged.join("app").join("backend")).unwrap();
+        fs::create_dir_all(install_root.join("data")).unwrap();
+        fs::write(install_root.join("app").join("backend").join("stale.pyd"), b"old").unwrap();
+        fs::write(staged.join("app").join("backend").join("current.pyd"), b"new").unwrap();
+        fs::write(install_root.join("data").join("keep.txt"), b"user data").unwrap();
+
+        replace_app_directory(&staged, &install_root).unwrap();
+
+        assert!(!install_root.join("app").join("backend").join("stale.pyd").exists());
+        assert_eq!(fs::read(install_root.join("app").join("backend").join("current.pyd")).unwrap(), b"new");
+        assert_eq!(fs::read(install_root.join("data").join("keep.txt")).unwrap(), b"user data");
+        fs::remove_dir_all(install_root).unwrap();
     }
 }

@@ -1260,6 +1260,53 @@ html.studio-theme-dark body .ec-result-frame {
     }
 }
 
+/* 紧凑桌面宽度：优先保证生成操作可见，参考素材改为横向可滚动。 */
+@media (min-width:861px) and (max-width:1220px) {
+    .ec-universal-dock {
+        width:calc(100vw - 36px);
+        gap:12px;
+        padding:12px;
+    }
+    .ec-universal-dock-inputs {
+        min-width:0;
+        overflow-x:auto;
+        overflow-y:hidden;
+        overscroll-behavior-x:contain;
+        scrollbar-width:thin;
+    }
+    .ec-universal-dock .ec-input-slots,
+    .ec-universal-dock .ec-input-slots.has-studio-reference {
+        width:max-content;
+        min-width:100%;
+        grid-template-columns:repeat(6,minmax(104px,1fr));
+        overflow:visible;
+    }
+    .ec-universal-dock .ec-input-slots.has-studio-reference {
+        grid-template-columns:repeat(7,minmax(104px,1fr));
+    }
+    .ec-universal-dock-actions {
+        flex:0 0 176px;
+        min-width:176px;
+    }
+    .ec-universal-dock .ec-generate-actions {
+        min-width:0;
+        height:100%;
+        grid-template-columns:minmax(0,1fr);
+        grid-template-rows:minmax(0,1fr) 56px;
+        gap:10px;
+    }
+    .ec-universal-dock .ec-add-reference-action {
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        min-height:0;
+        height:auto;
+    }
+    .ec-universal-dock .ec-generate-actions .ec-primary-button {
+        min-height:56px;
+    }
+}
+
 /* 一键换衣：精致衣橱工作台布局。 */
 .ec-page.is-try-on {
     padding-bottom:22px;

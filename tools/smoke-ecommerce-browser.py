@@ -505,6 +505,41 @@ async def run(args) -> dict:
             model_panel_image = await devtools.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False})
             (output_dir / "ecommerce-model-panel.png").write_bytes(base64.b64decode(model_panel_image["data"]))
 
+            compact_desktop_layouts = []
+            for compact_width in (861, 960, 1043, 1100, 1220):
+                await devtools.call("Emulation.setDeviceMetricsOverride", {
+                    "width": compact_width,
+                    "height": 1000,
+                    "deviceScaleFactor": 1,
+                    "mobile": False,
+                })
+                await asyncio.sleep(0.15)
+                compact_desktop_layouts.append(await devtools.evaluate("""
+                    (() => {
+                        const dock=document.getElementById('universalDock').getBoundingClientRect();
+                        const generate=document.getElementById('generateButton').getBoundingClientRect();
+                        const add=document.getElementById('addUniversalReference').getBoundingClientRect();
+                        const inputs=document.querySelector('.ec-universal-dock-inputs');
+                        const inputStyle=getComputedStyle(inputs);
+                        return {
+                            viewport:innerWidth,
+                            generateInsideDock:generate.left >= dock.left - 1 && generate.right <= dock.right + 1 && generate.top >= dock.top - 1 && generate.bottom <= dock.bottom + 1,
+                            addInsideDock:add.left >= dock.left - 1 && add.right <= dock.right + 1 && add.top >= dock.top - 1 && add.bottom <= dock.bottom + 1,
+                            inputsScrollable:inputStyle.overflowX === 'auto' && inputs.scrollWidth >= inputs.clientWidth,
+                        };
+                    })()
+                """))
+
+            await devtools.call("Emulation.setDeviceMetricsOverride", {
+                "width": 1440,
+                "height": 1000,
+                "deviceScaleFactor": 1,
+                "mobile": False,
+            })
+            await asyncio.sleep(0.15)
+            if not all(item["generateInsideDock"] and item["addInsideDock"] and item["inputsScrollable"] for item in compact_desktop_layouts):
+                raise AssertionError(f"Compact desktop universal dock layout failed: {compact_desktop_layouts}")
+
             await devtools.call("Emulation.setDeviceMetricsOverride", {
                 "width": 390,
                 "height": 844,
@@ -972,6 +1007,7 @@ async def run(args) -> dict:
                 "main_works": main_works,
                 "main_return": main_return,
                 "mobile_layout": mobile_layout,
+                "compact_desktop_layouts": compact_desktop_layouts,
                 "crop_setup": crop_setup,
                 "crop_runtime": crop_runtime,
                 "crop_persistence": crop_persistence,

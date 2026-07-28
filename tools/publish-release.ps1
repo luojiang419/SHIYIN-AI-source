@@ -117,9 +117,9 @@ $(Get-Content -Raw -LiteralPath $notesPath)
     }
     $releaseId = $draft.id
     $uploadBase = $draft.upload_url -replace '\{\?name,label\}$', ''
-    Invoke-GitHubApi -Method Post -Uri "$uploadBase?name=$([Uri]::EscapeDataString($assetName))" -InFile $assetPath -ContentType 'application/octet-stream' | Out-Null
+    Invoke-GitHubApi -Method Post -Uri "${uploadBase}?name=$([Uri]::EscapeDataString($assetName))" -InFile $assetPath -ContentType 'application/octet-stream' | Out-Null
     $checksumName = [IO.Path]::GetFileName($checksumPath)
-    Invoke-GitHubApi -Method Post -Uri "$uploadBase?name=$([Uri]::EscapeDataString($checksumName))" -InFile $checksumPath -ContentType 'text/plain' | Out-Null
+    Invoke-GitHubApi -Method Post -Uri "${uploadBase}?name=$([Uri]::EscapeDataString($checksumName))" -InFile $checksumPath -ContentType 'text/plain' | Out-Null
 
     $draftCheck = Invoke-GitHubApi -Method Get -Uri "$apiBase/releases/$releaseId"
     $remoteAsset = @($draftCheck.assets | Where-Object { $_.name -eq $assetName })

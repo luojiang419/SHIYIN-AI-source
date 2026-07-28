@@ -77,6 +77,8 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('luojiang419/SHIYIN-AI', publish)
         self.assertIn('function Get-Sha256', publish)
         self.assertNotIn('Get-FileHash', publish)
+        self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($assetName))"', publish)
+        self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($checksumName))"', publish)
         self.assertIn('SHIYIN-AI-v$version-windows-x64', PORTABLE_SMOKE.read_text(encoding="utf-8"))
 
     def test_version_sources_are_three_part_and_synchronized(self):

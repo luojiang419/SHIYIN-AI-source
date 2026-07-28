@@ -3,7 +3,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 
-hiddenimports = collect_submodules("uvicorn") + ["multipart"]
+hiddenimports = collect_submodules("uvicorn") + collect_submodules("websockets") + ["multipart"]
 
 a = Analysis(
     ["backend_entry.py"],

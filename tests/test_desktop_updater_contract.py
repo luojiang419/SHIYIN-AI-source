@@ -14,6 +14,8 @@ APP_SETTINGS = ROOT / "static" / "app-settings.html"
 BUILD_SCRIPT = ROOT / "tools" / "build-portable.ps1"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
 PORTABLE_SMOKE = ROOT / "tools" / "smoke-portable.ps1"
+BACKEND_SPEC = ROOT / "canvas-backend.spec"
+REQUIREMENTS = ROOT / "requirements.txt"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_VERSION_RESOLVER = ROOT / "tools" / "resolve-release-version.py"
 GITIGNORE = ROOT / ".gitignore"
@@ -80,6 +82,10 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($assetName))"', publish)
         self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($checksumName))"', publish)
         self.assertIn('SHIYIN-AI-v$version-windows-x64', PORTABLE_SMOKE.read_text(encoding="utf-8"))
+
+    def test_portable_backend_collects_websocket_runtime_modules(self):
+        self.assertIn("websockets", REQUIREMENTS.read_text(encoding="utf-8").splitlines())
+        self.assertIn('collect_submodules("websockets")', BACKEND_SPEC.read_text(encoding="utf-8"))
 
     def test_version_sources_are_three_part_and_synchronized(self):
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()

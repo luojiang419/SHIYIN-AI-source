@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-downloaded-update"
+description = "Enables the apply_downloaded_update command without any pre-configured scope."
+commands.allow = ["apply_downloaded_update"]
+
+[[permission]]
+identifier = "deny-apply-downloaded-update"
+description = "Denies the apply_downloaded_update command without any pre-configured scope."
+commands.deny = ["apply_downloaded_update"]

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>软件设置</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'system';
+                if(theme === 'system') theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                if(theme === 'dark') document.documentElement.classList.add('studio-theme-dark');
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/js/theme.js?v=2026.07.23.no-native-context-menu.1"></script>
+    <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.07.23.app-settings.2">
+    <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.07.26.light-theme.3">
+</head>
+<body>
+    <main class="app-settings-page">
+        <header class="app-settings-header">
+            <span>GENERAL</span>
+            <h1 data-i18n="appSettings.title">软件设置</h1>
+            <p data-i18n="appSettings.description">管理桌面软件的运行、关闭与生成图片保存位置。</p>
+        </header>
+
+        <section class="app-settings-card" aria-labelledby="closeBehaviorTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>WINDOW</span>
+                    <h2 id="closeBehaviorTitle" data-i18n="appSettings.closeBehavior">关闭软件行为</h2>
+                </div>
+                <strong id="saveStatus" role="status"></strong>
+            </div>
+            <fieldset id="closeBehaviorOptions" disabled>
+                <label class="app-settings-option">
+                    <input type="radio" name="closeBehavior" value="minimize_to_tray">
+                    <span class="app-settings-option-copy">
+                        <b data-i18n="appSettings.minimizeToTray">最小化到托盘</b>
+                        <small data-i18n="appSettings.minimizeToTrayHint">点击窗口关闭按钮后继续在后台运行，可从托盘重新打开。</small>
+                    </span>
+                    <i aria-hidden="true"></i>
+                </label>
+                <label class="app-settings-option">
+                    <input type="radio" name="closeBehavior" value="exit">
+                    <span class="app-settings-option-copy">
+                        <b data-i18n="appSettings.exitSoftware">退出软件</b>
+                        <small data-i18n="appSettings.exitSoftwareHint">点击窗口关闭按钮后停止后台服务并完全退出。</small>
+                    </span>
+                    <i aria-hidden="true"></i>
+                </label>
+            </fieldset>
+            <p id="closeBehaviorNote" class="app-settings-note" data-i18n="appSettings.appliesImmediately">修改后立即生效，并会在下次启动时保留。</p>
+        </section>
+
+        <section class="app-settings-card" aria-labelledby="generatedOutputTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>OUTPUT</span>
+                    <h2 id="generatedOutputTitle" data-i18n="appSettings.generatedOutput">生成图片保存位置</h2>
+                </div>
+            </div>
+            <div class="app-settings-output-control">
+                <label for="generatedOutputDir" data-i18n="appSettings.currentOutputDirectory">当前保存目录</label>
+                <div class="app-settings-output-row">
+                    <input id="generatedOutputDir" type="text" readonly>
+                    <button id="chooseGeneratedOutput" type="button" data-i18n="appSettings.chooseDirectory">选择文件夹</button>
+                    <button id="resetGeneratedOutput" type="button" class="secondary" data-i18n="appSettings.useDefaultDirectory">恢复默认</button>
+                </div>
+                <p id="generatedOutputHint"></p>
+            </div>
+            <p class="app-settings-note" data-i18n="appSettings.generatedOutputNaming">生成成功后自动保存副本，文件名格式为 SHIYIN-000001-YYYYMMDD。</p>
+        </section>
+
+        <section class="app-settings-card" aria-labelledby="updateSettingsTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>UPDATE</span>
+                    <h2 id="updateSettingsTitle">软件更新</h2>
+                </div>
+                <strong id="updateSaveStatus" role="status"></strong>
+            </div>
+            <div class="app-settings-update-grid">
+                <label>更新策略
+                    <select id="updatePolicy">
+                        <option value="automatic">自动检查并下载</option>
+                        <option value="manual">仅手动检查</option>
+                        <option value="disabled">关闭更新</option>
+                    </select>
+                </label>
+                <label>更新网络
+                    <select id="updateNetworkMode">
+                        <option value="automaticProxy">自动检测代理</option>
+                        <option value="manualProxy">手动代理</option>
+                        <option value="direct">直连</option>
+                    </select>
+                </label>
+                <label class="app-settings-update-proxy">手动代理地址
+                    <input id="updateManualProxy" type="url" placeholder="http://127.0.0.1:7890">
+                </label>
+                <button id="checkDesktopUpdate" type="button">检查更新</button>
+            </div>
+            <p class="app-settings-note">更新源固定为公开 GitHub Release；下载完成后可选择立即更新或下次启动更新。</p>
+        </section>
+    </main>
+    <script src="/static/js/app-settings.js?v=2026.07.26.close-prompt.1"></script>
+</body>
+</html>

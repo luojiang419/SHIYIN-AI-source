@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-defer-downloaded-update"
+description = "Enables the defer_downloaded_update command without any pre-configured scope."
+commands.allow = ["defer_downloaded_update"]
+
+[[permission]]
+identifier = "deny-defer-downloaded-update"
+description = "Denies the defer_downloaded_update command without any pre-configured scope."
+commands.deny = ["defer_downloaded_update"]

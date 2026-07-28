@@ -1,0 +1,31 @@
+# 本地依赖与构建产物
+node_modules/
+python/
+.build/
+dist/
+src-tauri/target/
+
+# 本地运行数据、测试输出与浏览器配置
+data/
+output/
+desktop-placeholder/
+案例/
+packages/
+*.log
+
+# 开发过程档案不进入公开源码仓库
+backup/
+进度快照/
+避坑指南/
+
+# 本地凭据与覆盖配置
+.env
+.env.*
+!.env.example
+canvas_core/secrets.local.py
+api文档/
+
+# Python 缓存
+__pycache__/
+.pytest_cache/
+*.py[cod]

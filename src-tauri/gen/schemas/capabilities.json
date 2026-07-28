@@ -1,0 +1,1 @@
+{"desktop-update":{"identifier":"desktop-update","description":"允许主窗口的本地服务页面调用桌面更新命令。","remote":{"urls":["http://127.0.0.1:*"]},"local":true,"windows":["main"],"permissions":["allow-get-update-settings","allow-save-update-settings","allow-check-for-update","allow-download-update","allow-defer-downloaded-update","allow-apply-downloaded-update"]}}

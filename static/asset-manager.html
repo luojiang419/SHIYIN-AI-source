@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-studio-scale="off">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/images/logo.png" type="image/png">
+    <title>素材库管理</title>
+    <script>
+        (function(){
+            try {
+                var theme = localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light';
+                if(theme === 'dark') {
+                    document.documentElement.classList.add('studio-theme-dark');
+                    document.documentElement.classList.add('theme-dark');
+                }
+            } catch(e) {}
+        })();
+    </script>
+    <script src="/static/vendor/js/lucide.js?v=2026.06.30.1782781876"></script>
+    <script src="/static/js/theme.js?v=2026.07.23.no-native-context-menu.1"></script>
+    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.30.1782781876">
+    <link rel="stylesheet" href="/static/css/asset-manager.css?v=2026.07.24.reference-types.1">
+    <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.07.26.light-theme.3">
+</head>
+<body>
+    <div class="asset-page">
+        <header class="asset-page-head">
+            <div>
+                <div class="asset-title">服装电商素材库</div>
+                <div class="asset-sub">按商品、拍摄类型、季节场景、渠道状态管理服装电商素材。</div>
+            </div>
+            <div class="asset-head-actions">
+                <div id="assetStatus" class="asset-status">准备就绪</div>
+                <button id="refreshBtn" class="asset-btn" type="button"><i data-lucide="refresh-cw"></i><span>刷新</span></button>
+            </div>
+        </header>
+
+        <div class="asset-tabs">
+            <button id="assetTabAssets" class="active" type="button" data-tab="assets"><i data-lucide="shirt"></i><span>服装素材</span></button>
+            <button id="assetTabPrompts" type="button" data-tab="prompts"><i data-lucide="text-cursor-input"></i><span>提示词库</span></button>
+            <button id="assetTabReferenceTypes" type="button" data-tab="reference-types"><i data-lucide="tags"></i><span>参考类型</span></button>
+            <button id="assetTabCanvasAssets" type="button" data-tab="canvas-assets"><i data-lucide="layout-dashboard"></i><span>画布资产</span></button>
+            <button id="assetTabLocal" type="button" data-tab="local"><i data-lucide="folder-open"></i><span>本地素材</span></button>
+        </div>
+
+        <main id="assetManagerRoot" class="asset-manager-root"></main>
+    </div>
+
+    <input id="assetUploadInput" type="file" accept="image/*,video/*,audio/*" multiple hidden>
+    <script src="/static/js/asset-manager.js?v=2026.07.25.detail-reference.1"></script>
+</body>
+</html>

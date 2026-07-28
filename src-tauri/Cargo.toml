@@ -1,0 +1,37 @@
+[package]
+name = "canvas-desktop"
+version = "1.0.78"
+description = "SHIYIN AI Windows portable desktop host"
+authors = ["SHIYIN AI contributors"]
+edition = "2021"
+license-file = "../LICENSE"
+
+[lib]
+name = "canvas_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "SHIYIN-AI"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+arboard = "3.6.1"
+open = "5.3.2"
+rfd = { version = "0.15.4", features = ["common-controls-v6"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10.9"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2.3.6"
+ureq = { version = "3.1.4", features = ["json"] }
+uuid = { version = "1.18.1", features = ["v4"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

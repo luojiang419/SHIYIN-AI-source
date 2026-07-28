@@ -1,0 +1,1574 @@
+/*
+ * SHIYIN unified theme bridge.
+ * Loaded after legacy page styles to align every workspace iframe with the
+ * ecommerce visual system without rewriting each page.
+ */
+:root {
+    color-scheme:light;
+    --studio-bg:#f6eee4;
+    --studio-panel:#faf2e7;
+    --studio-panel-raised:#fffaf4;
+    --studio-panel-soft:#efe2d2;
+    --studio-control:#f7efe5;
+    --studio-control-hover:#f1e5d7;
+    --studio-text:#332d28;
+    --studio-text-soft:#58514b;
+    --studio-muted:#766f68;
+    --studio-faint:#9b9288;
+    --studio-border:rgba(91,74,54,.12);
+    --studio-border-strong:rgba(91,74,54,.24);
+    --studio-accent:#9a6636;
+    --studio-accent-contrast:#fff9f0;
+    --studio-accent-soft:#ead8c4;
+    --studio-success:#26734d;
+    --studio-danger:#b42318;
+    --studio-danger-soft:#fceae8;
+    --studio-grid:rgba(126,88,52,.16);
+    --studio-shadow-color:rgba(92,72,48,.13);
+    --studio-shadow:0 16px 34px rgba(102,78,50,.13),0 2px 7px rgba(92,72,48,.08),inset 0 1px 0 rgba(255,255,255,.88);
+    --studio-shadow-raised:0 28px 80px rgba(92,72,48,.14),0 3px 10px rgba(92,72,48,.08),inset 0 1px 0 rgba(255,255,255,.82);
+
+    --bg:var(--studio-bg);
+    --page:var(--studio-bg);
+    --panel:color-mix(in srgb,var(--studio-panel) 94%,transparent);
+    --panel-solid:var(--studio-panel);
+    --card:var(--studio-panel-raised);
+    --card-solid:var(--studio-panel-raised);
+    --soft:var(--studio-control);
+    --soft-2:var(--studio-control-hover);
+    --line:var(--studio-border);
+    --line-2:var(--studio-border-strong);
+    --line-strong:var(--studio-border-strong);
+    --text:var(--studio-text);
+    --muted:var(--studio-muted);
+    --faint:var(--studio-faint);
+    --strong:var(--studio-accent);
+    --strong-text:var(--studio-accent-contrast);
+    --accent:var(--studio-accent);
+    --accent-soft:var(--studio-accent-soft);
+    --accent-line:var(--studio-border-strong);
+    --shadow:var(--studio-shadow-color);
+    --shadow-strong:rgba(104,80,52,.18);
+
+    --chat-bg:var(--studio-bg);
+    --chat-panel:var(--studio-panel);
+    --chat-panel-2:var(--studio-control);
+    --chat-soft:var(--studio-control-hover);
+    --chat-line:var(--studio-border);
+    --chat-line-2:var(--studio-border-strong);
+    --chat-text:var(--studio-text);
+    --chat-muted:var(--studio-muted);
+    --chat-faint:var(--studio-faint);
+    --chat-strong:var(--studio-accent);
+    --chat-strong-text:var(--studio-accent-contrast);
+    --chat-strong-hover:#80532d;
+    --chat-active-bg:var(--studio-accent-soft);
+    --chat-active-text:var(--studio-accent);
+    --chat-active-border:var(--studio-border-strong);
+    --chat-user-bg:var(--studio-accent);
+    --chat-user-text:var(--studio-accent-contrast);
+    --chat-shadow:rgba(110,86,58,.12);
+
+    --wk-bg:var(--studio-bg);
+    --wk-panel:var(--studio-panel);
+    --wk-soft:var(--studio-panel-soft);
+    --wk-control:var(--studio-control);
+    --wk-text:var(--studio-text);
+    --wk-text-soft:var(--studio-text-soft);
+    --wk-muted:var(--studio-muted);
+    --wk-border:var(--studio-border);
+    --wk-border-strong:var(--studio-border-strong);
+    --wk-accent:var(--studio-accent);
+    --wk-accent-contrast:var(--studio-accent-contrast);
+    --wk-shadow:var(--studio-shadow);
+
+    --as-bg:var(--studio-bg);
+    --as-panel:var(--studio-panel);
+    --as-text:var(--studio-text);
+    --as-soft:var(--studio-text-soft);
+    --as-muted:var(--studio-muted);
+    --as-line:var(--studio-border);
+    --as-control:var(--studio-control);
+    --as-accent:var(--studio-accent);
+}
+
+html.studio-theme-dark,
+html.theme-dark,
+body.studio-theme-dark,
+body.theme-dark {
+    color-scheme:dark;
+    --studio-bg:#1a1a1a;
+    --studio-panel:#1e1e1e;
+    --studio-panel-raised:#20201f;
+    --studio-panel-soft:#222221;
+    --studio-control:#292928;
+    --studio-control-hover:#30302f;
+    --studio-text:#f0eee9;
+    --studio-text-soft:#d2d0cb;
+    --studio-muted:#a7a6a2;
+    --studio-faint:#7b7a77;
+    --studio-border:rgba(255,255,255,.08);
+    --studio-border-strong:rgba(255,255,255,.16);
+    --studio-accent:#3a3a39;
+    --studio-accent-contrast:#f4f2ed;
+    --studio-accent-soft:#2b2b2a;
+    --studio-success:#72d6a0;
+    --studio-danger:#ff8d86;
+    --studio-danger-soft:#3a1c1d;
+    --studio-grid:rgba(255,255,255,.12);
+    --studio-shadow-color:rgba(0,0,0,.30);
+    --studio-shadow:0 18px 42px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.04);
+    --studio-shadow-raised:0 24px 62px rgba(0,0,0,.42),0 3px 12px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05);
+    --bg:var(--studio-bg);
+    --page:var(--studio-bg);
+    --panel:color-mix(in srgb,var(--studio-panel) 92%,transparent);
+    --panel-solid:var(--studio-panel);
+    --card:var(--studio-panel-raised);
+    --card-solid:var(--studio-panel-raised);
+    --soft:var(--studio-control);
+    --soft-2:var(--studio-control-hover);
+    --line:var(--studio-border);
+    --line-2:var(--studio-border-strong);
+    --line-strong:var(--studio-border-strong);
+    --text:var(--studio-text);
+    --muted:var(--studio-muted);
+    --faint:var(--studio-faint);
+    --strong:var(--studio-accent);
+    --strong-text:var(--studio-accent-contrast);
+    --accent:var(--studio-accent);
+    --accent-soft:var(--studio-accent-soft);
+    --accent-line:var(--studio-border-strong);
+    --shadow:var(--studio-shadow-color);
+    --shadow-strong:rgba(0,0,0,.42);
+
+    --chat-bg:var(--studio-bg);
+    --chat-panel:var(--studio-panel);
+    --chat-panel-2:var(--studio-control);
+    --chat-soft:var(--studio-control-hover);
+    --chat-line:var(--studio-border);
+    --chat-line-2:var(--studio-border-strong);
+    --chat-text:var(--studio-text);
+    --chat-muted:var(--studio-muted);
+    --chat-faint:var(--studio-faint);
+    --chat-strong:var(--studio-accent);
+    --chat-strong-text:var(--studio-accent-contrast);
+    --chat-strong-hover:#454543;
+    --chat-active-bg:var(--studio-accent-soft);
+    --chat-active-text:var(--studio-text);
+    --chat-active-border:var(--studio-border-strong);
+    --chat-user-bg:#3a3a39;
+    --chat-user-text:#f4f2ed;
+    --chat-shadow:rgba(0,0,0,.30);
+
+    --wk-bg:var(--studio-bg);
+    --wk-panel:var(--studio-panel);
+    --wk-soft:var(--studio-panel-soft);
+    --wk-control:var(--studio-control);
+    --wk-text:var(--studio-text);
+    --wk-text-soft:var(--studio-text-soft);
+    --wk-muted:var(--studio-muted);
+    --wk-border:var(--studio-border);
+    --wk-border-strong:var(--studio-border-strong);
+    --wk-accent:var(--studio-accent);
+    --wk-accent-contrast:var(--studio-accent-contrast);
+    --wk-shadow:var(--studio-shadow);
+
+    --as-bg:var(--studio-bg);
+    --as-panel:var(--studio-panel);
+    --as-text:var(--studio-text);
+    --as-soft:var(--studio-text-soft);
+    --as-muted:var(--studio-muted);
+    --as-line:var(--studio-border);
+    --as-control:var(--studio-control);
+    --as-accent:var(--studio-accent);
+}
+
+html,
+body {
+    background:var(--studio-bg);
+}
+
+html.studio-theme-dark,
+html.studio-theme-dark body,
+html.theme-dark,
+html.theme-dark body,
+body.studio-theme-dark,
+body.theme-dark {
+    background:var(--studio-bg) !important;
+    color:var(--studio-text) !important;
+}
+
+input,
+textarea,
+select {
+    caret-color:var(--studio-accent);
+}
+
+::placeholder {
+    color:color-mix(in srgb,var(--studio-muted) 68%,transparent) !important;
+}
+
+/* GPT page */
+.chat-shell,
+.chat-shell .messages {
+    background:var(--chat-bg) !important;
+}
+
+.chat-shell .topbar {
+    background:color-mix(in srgb,var(--chat-bg) 76%,transparent) !important;
+    border-bottom-color:var(--chat-line) !important;
+}
+
+.chat-shell .composer-wrap {
+    background:linear-gradient(to top,var(--chat-bg) 82%,color-mix(in srgb,var(--chat-bg) 0%,transparent)) !important;
+}
+
+.chat-shell .composer,
+.chat-shell .chat-rail,
+.chat-shell .history-popover,
+.chat-shell .system-prompt-popover,
+.chat-shell .model-picker-popover,
+.chat-shell .resolution-picker-popover,
+.chat-shell .image-preview-panel {
+    background:color-mix(in srgb,var(--chat-panel) 94%,transparent) !important;
+    border-color:var(--chat-line) !important;
+    color:var(--chat-text) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+.chat-shell .composer-body,
+.chat-shell .model-picker-button,
+.chat-shell .resolution-picker-button,
+.chat-shell .thread-item,
+.chat-shell .action-btn,
+.chat-shell .upload-btn,
+.chat-shell .system-prompt-textarea,
+.chat-shell .system-prompt-actions button {
+    background:var(--chat-panel-2) !important;
+    border-color:var(--chat-line) !important;
+    color:var(--chat-text) !important;
+}
+
+.chat-shell .action-btn:hover,
+.chat-shell .upload-btn:hover,
+.chat-shell .thread-item:hover,
+.chat-shell .model-picker-button:hover,
+.chat-shell .resolution-picker-button:hover,
+.chat-shell .system-prompt-actions button:hover {
+    background:var(--chat-soft) !important;
+    border-color:var(--chat-line-2) !important;
+    color:var(--chat-text) !important;
+}
+
+.chat-shell .send-btn,
+.chat-shell .system-prompt-actions .primary,
+.chat-shell .model-picker-option.active,
+.chat-shell .model-picker-scope button.active,
+.chat-shell .resolution-picker-scope button.active {
+    background:var(--chat-strong) !important;
+    border-color:var(--chat-strong) !important;
+    color:var(--chat-strong-text) !important;
+}
+
+.chat-shell .thread-item.active,
+.chat-shell .bubble.assistant {
+    background:var(--chat-panel) !important;
+    border-color:var(--chat-line) !important;
+    color:var(--chat-text) !important;
+}
+
+.chat-shell .bubble.user {
+    background:var(--chat-user-bg) !important;
+    color:var(--chat-user-text) !important;
+}
+
+.chat-shell .bubble.assistant.streaming::after {
+    background:var(--chat-text) !important;
+}
+
+/* Shared workspace pages */
+.asset-panel,
+.content-head,
+.block,
+.sidebar,
+.picker-modal,
+.rh-workflow-editor-modal,
+.ws-sidebar,
+.ws-topbar,
+.ws-card,
+.ws-trash-panel,
+.ws-trash-head,
+.ws-trash-card,
+.ws-create-card,
+.ws-card-pop,
+.works-tabs,
+.works-search,
+.works-filters select,
+.works-card,
+.works-compare-dialog,
+.works-rename-dialog,
+.app-settings-card {
+    border-color:var(--studio-border) !important;
+    background:color-mix(in srgb,var(--studio-panel) 94%,transparent) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+.asset-tabs,
+.asset-status,
+.asset-btn,
+.asset-icon-btn,
+.nav-row,
+.tree-row,
+.asset-card,
+.prompt-row,
+.ws-icon-btn,
+.ws-side-add,
+.ws-mini-btn,
+.ws-trash-entry,
+.ws-project-row,
+.ws-project-confirm,
+.ws-card-meta,
+.works-card-actions button,
+.works-card-actions a,
+.works-icon-button,
+.works-dialog-actions button,
+.works-compare-controls select,
+.works-compare-controls button,
+.works-compare-shell footer button,
+.app-settings-option,
+.app-settings-output-row input,
+.app-settings-output-row button.secondary,
+.field-frame,
+.model-row,
+.lora-row,
+.key-btn,
+.action-btn.primary-btn,
+.ghost-btn,
+.api-link-btn,
+.provider-card,
+.recommend-card {
+    border-color:var(--studio-border) !important;
+    background:var(--studio-control) !important;
+    color:var(--studio-text) !important;
+}
+
+.asset-tabs button.active,
+.asset-btn.primary,
+.nav-row.active,
+.tree-row.active,
+.smart-class-pill.active,
+.ws-primary-btn,
+.ws-mini-btn.primary,
+.ws-project-row.active,
+.works-tabs button.active,
+.works-compare-now,
+.works-card-actions .primary,
+.works-rename-dialog footer button[type="submit"],
+.app-settings-output-row button,
+.api-page-save-btn,
+.action-btn.save-btn,
+.action-btn.primary-btn:hover,
+.recommend-register {
+    border-color:var(--studio-accent) !important;
+    background:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+.asset-page,
+.asset-manager-root,
+.workspace,
+.ws-main,
+.works-page,
+.app-settings-page,
+.page,
+.wrap {
+    color:var(--studio-text) !important;
+}
+
+.ws-board,
+.board,
+.shell,
+.works-empty,
+.asset-page,
+.works-page,
+.app-settings-page,
+.page {
+    background-color:var(--studio-bg) !important;
+}
+
+.ws-board,
+.board,
+.shell {
+    background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important;
+    background-size:24px 24px !important;
+}
+
+.asset-sub,
+.panel-title span,
+.nav-group-title,
+.tree-row-count,
+.ws-board-count,
+.ws-card-time,
+.works-title > span,
+.works-card-body p,
+.works-card-meta,
+.app-settings-header p,
+.app-settings-note,
+.block-desc,
+.label,
+.hint,
+.provider-meta {
+    color:var(--studio-muted) !important;
+}
+
+/* Canvas editors */
+.panel,
+.tool-btn,
+.create-menu,
+.menu-btn,
+.node,
+.node::before,
+.node-head,
+.canvas-asset-panel,
+.canvas-asset-card,
+.smart-back,
+.smart-log-toggle,
+.smart-shortcut-toggle,
+.composer-card,
+.image-node.empty-node,
+.image-node.prompt-smart-node,
+.image-node.loop-smart-node,
+.prompt-node-text,
+.loop-smart-panel,
+.prompt-node-pill,
+.loop-smart-count,
+.loop-smart-toggle,
+.loop-smart-seg,
+.create-card {
+    border-color:var(--studio-border) !important;
+    background:color-mix(in srgb,var(--studio-panel-raised) 92%,transparent) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+.tool-btn:hover,
+.menu-btn:hover,
+.create-card:hover,
+.smart-back:hover,
+.smart-log-toggle:hover,
+.smart-shortcut-toggle:hover,
+.prompt-node-pill:hover,
+.loop-smart-toggle:hover,
+.loop-smart-seg button:hover {
+    border-color:var(--studio-border-strong) !important;
+    background:var(--studio-control-hover) !important;
+    color:var(--studio-text) !important;
+}
+
+.tool-btn.active,
+.theme-toggle.active,
+.smart-log-toggle.active,
+.smart-shortcut-toggle.active,
+.prompt-node-pill.active,
+.loop-smart-seg button.active,
+.run-btn,
+.gen-btn,
+.llm-run,
+.primary-btn,
+.create-confirm,
+.workflow-transfer-btn.primary {
+    border-color:var(--studio-accent) !important;
+    background:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+.link.link-active,
+.link.temp {
+    stroke:var(--studio-accent) !important;
+}
+
+.node.selected,
+.image-node.empty-node.selected,
+.image-node.prompt-smart-node.selected,
+.image-node.loop-smart-node.selected {
+    outline-color:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+}
+
+.output-preview,
+.studio-preview-frame,
+.image-edit-stage.preview-mode,
+.panorama-stage {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+.output-preview img,
+.output-preview video,
+.output-compare,
+.studio-preview-img,
+.preview-stage img,
+.preview-stage video {
+    background:var(--studio-bg) !important;
+}
+
+/* Final pass: make this file the last visual contract for non-ecommerce pages. */
+html.studio-theme-dark,
+html.theme-dark,
+body.studio-theme-dark,
+body.theme-dark {
+    --bg:var(--studio-bg) !important;
+    --bg-base:var(--studio-bg) !important;
+    --page:var(--studio-bg) !important;
+    --panel:color-mix(in srgb,var(--studio-panel) 94%,transparent) !important;
+    --panel-solid:var(--studio-panel) !important;
+    --card:color-mix(in srgb,var(--studio-panel-raised) 96%,transparent) !important;
+    --card-solid:var(--studio-panel-raised) !important;
+    --soft:var(--studio-control) !important;
+    --soft-2:var(--studio-control-hover) !important;
+    --text:var(--studio-text) !important;
+    --text-main:var(--studio-text) !important;
+    --muted:var(--studio-muted) !important;
+    --faint:var(--studio-faint) !important;
+    --accent:var(--studio-accent) !important;
+    --line:var(--studio-border) !important;
+    --line-2:var(--studio-border-strong) !important;
+    --line-strong:var(--studio-border-strong) !important;
+    --shadow:var(--studio-shadow-color) !important;
+    --shadow-strong:rgba(0,0,0,.42) !important;
+    --api-blue:var(--studio-text) !important;
+    --api-dark-primary:var(--studio-accent) !important;
+    --api-dark-primary-hover:var(--studio-control-hover) !important;
+    --api-light-primary:var(--studio-accent) !important;
+    --api-light-primary-hover:var(--studio-control-hover) !important;
+    --api-dark-bg:var(--studio-bg) !important;
+    --api-dark-panel:var(--studio-panel) !important;
+    --api-dark-soft:var(--studio-control) !important;
+    --api-dark-line:var(--studio-border) !important;
+    --api-dark-text:var(--studio-text) !important;
+    --api-dark-muted:var(--studio-muted) !important;
+}
+
+html.studio-theme-dark body .chat-shell,
+body.studio-theme-dark .chat-shell,
+html.studio-theme-dark body .messages,
+body.studio-theme-dark .messages,
+html.studio-theme-dark body .asset-page,
+body.studio-theme-dark .asset-page,
+html.studio-theme-dark body .asset-manager-root,
+body.studio-theme-dark .asset-manager-root,
+html.studio-theme-dark body .workspace,
+body.studio-theme-dark .workspace,
+html.studio-theme-dark body .ws-main,
+body.studio-theme-dark .ws-main,
+html.studio-theme-dark body .works-page,
+body.studio-theme-dark .works-page,
+html.studio-theme-dark body .app-settings-page,
+body.studio-theme-dark .app-settings-page,
+html.studio-theme-dark body .page,
+body.studio-theme-dark .page,
+html.studio-theme-dark body .wrap,
+body.studio-theme-dark .wrap,
+html.studio-theme-dark body .shell,
+body.studio-theme-dark .shell,
+html.studio-theme-dark body .board,
+body.studio-theme-dark .board {
+    background:var(--studio-bg) !important;
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+body.studio-theme-dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html.studio-theme-dark body textarea,
+body.studio-theme-dark textarea,
+html.studio-theme-dark body select,
+body.studio-theme-dark select {
+    background-color:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+body.studio-theme-dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+html.studio-theme-dark body textarea:focus,
+body.studio-theme-dark textarea:focus,
+html.studio-theme-dark body select:focus,
+body.studio-theme-dark select:focus {
+    border-color:var(--studio-border-strong) !important;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--studio-text) 7%,transparent) !important;
+    outline:0 !important;
+}
+
+html.studio-theme-dark body input[type="range"],
+body.studio-theme-dark input[type="range"] {
+    accent-color:var(--studio-accent-contrast) !important;
+}
+
+html.studio-theme-dark body input[type="range"]::-webkit-slider-runnable-track,
+body.studio-theme-dark input[type="range"]::-webkit-slider-runnable-track {
+    background:var(--studio-control-hover) !important;
+}
+
+html.studio-theme-dark body input[type="range"]::-webkit-slider-thumb,
+body.studio-theme-dark input[type="range"]::-webkit-slider-thumb {
+    background:var(--studio-accent-contrast) !important;
+    border-color:var(--studio-bg) !important;
+}
+
+html.studio-theme-dark body .chat-shell #messageInput,
+body.studio-theme-dark .chat-shell #messageInput {
+    background:transparent !important;
+    border-color:transparent !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .chat-shell .topbar,
+body.studio-theme-dark .chat-shell .topbar {
+    background:color-mix(in srgb,var(--studio-bg) 90%,transparent) !important;
+    border-color:transparent !important;
+}
+
+html.studio-theme-dark body .chat-shell .composer-wrap,
+body.studio-theme-dark .chat-shell .composer-wrap {
+    background:linear-gradient(to top,var(--studio-bg) 82%,color-mix(in srgb,var(--studio-bg) 0%,transparent)) !important;
+}
+
+html.studio-theme-dark body .chat-shell .composer,
+body.studio-theme-dark .chat-shell .composer,
+html.studio-theme-dark body .chat-shell .chat-rail,
+body.studio-theme-dark .chat-shell .chat-rail,
+html.studio-theme-dark body .chat-shell .history-popover,
+body.studio-theme-dark .chat-shell .history-popover,
+html.studio-theme-dark body .chat-shell .system-prompt-popover,
+body.studio-theme-dark .chat-shell .system-prompt-popover,
+html.studio-theme-dark body .chat-shell .model-picker-popover,
+body.studio-theme-dark .chat-shell .model-picker-popover,
+html.studio-theme-dark body .chat-shell .resolution-picker-popover,
+body.studio-theme-dark .chat-shell .resolution-picker-popover,
+html.studio-theme-dark body .chat-shell .image-preview-panel,
+body.studio-theme-dark .chat-shell .image-preview-panel {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+html.studio-theme-dark body .chat-shell .composer-body,
+body.studio-theme-dark .chat-shell .composer-body,
+html.studio-theme-dark body .chat-shell .model-picker-button,
+body.studio-theme-dark .chat-shell .model-picker-button,
+html.studio-theme-dark body .chat-shell .resolution-picker-button,
+body.studio-theme-dark .chat-shell .resolution-picker-button,
+html.studio-theme-dark body .chat-shell .upload-btn,
+body.studio-theme-dark .chat-shell .upload-btn,
+html.studio-theme-dark body .chat-shell .thread-item,
+body.studio-theme-dark .chat-shell .thread-item,
+html.studio-theme-dark body .chat-shell .action-btn,
+body.studio-theme-dark .chat-shell .action-btn {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .chat-shell .model-picker-button:hover,
+body.studio-theme-dark .chat-shell .model-picker-button:hover,
+html.studio-theme-dark body .chat-shell .resolution-picker-button:hover,
+body.studio-theme-dark .chat-shell .resolution-picker-button:hover,
+html.studio-theme-dark body .chat-shell .upload-btn:hover,
+body.studio-theme-dark .chat-shell .upload-btn:hover,
+html.studio-theme-dark body .chat-shell .thread-item:hover,
+body.studio-theme-dark .chat-shell .thread-item:hover,
+html.studio-theme-dark body .chat-shell .action-btn:hover,
+body.studio-theme-dark .chat-shell .action-btn:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .chat-shell .send-btn,
+body.studio-theme-dark .chat-shell .send-btn,
+html.studio-theme-dark body .chat-shell .system-prompt-actions .primary,
+body.studio-theme-dark .chat-shell .system-prompt-actions .primary,
+html.studio-theme-dark body .chat-shell .model-picker-option.active,
+body.studio-theme-dark .chat-shell .model-picker-option.active,
+html.studio-theme-dark body .chat-shell .model-picker-scope button.active,
+body.studio-theme-dark .chat-shell .model-picker-scope button.active,
+html.studio-theme-dark body .chat-shell .resolution-picker-scope button.active,
+body.studio-theme-dark .chat-shell .resolution-picker-scope button.active {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+html.studio-theme-dark body .chat-shell .bubble.user,
+body.studio-theme-dark .chat-shell .bubble.user {
+    background:var(--studio-accent) !important;
+    border:1px solid var(--studio-border-strong) !important;
+    color:var(--studio-accent-contrast) !important;
+    box-shadow:0 10px 24px rgba(0,0,0,.18) !important;
+}
+
+html.studio-theme-dark body .chat-shell .bubble.assistant,
+body.studio-theme-dark .chat-shell .bubble.assistant {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:0 8px 20px rgba(0,0,0,.14) !important;
+}
+
+html.studio-theme-dark body .asset-panel,
+body.studio-theme-dark .asset-panel,
+html.studio-theme-dark body .content-head,
+body.studio-theme-dark .content-head,
+html.studio-theme-dark body .block,
+body.studio-theme-dark .block,
+html.studio-theme-dark body .sidebar,
+body.studio-theme-dark .sidebar,
+html.studio-theme-dark body .provider-onboarding-card,
+body.studio-theme-dark .provider-onboarding-card,
+html.studio-theme-dark body .recommend-inline-card,
+body.studio-theme-dark .recommend-inline-card,
+html.studio-theme-dark body .ws-sidebar,
+body.studio-theme-dark .ws-sidebar,
+html.studio-theme-dark body .ws-topbar,
+body.studio-theme-dark .ws-topbar,
+html.studio-theme-dark body .ws-trash-panel,
+body.studio-theme-dark .ws-trash-panel,
+html.studio-theme-dark body .ws-trash-head,
+body.studio-theme-dark .ws-trash-head,
+html.studio-theme-dark body .works-card,
+body.studio-theme-dark .works-card,
+html.studio-theme-dark body .works-compare-dialog,
+body.studio-theme-dark .works-compare-dialog,
+html.studio-theme-dark body .works-rename-dialog,
+body.studio-theme-dark .works-rename-dialog,
+html.studio-theme-dark body .app-settings-card,
+body.studio-theme-dark .app-settings-card {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+html.studio-theme-dark body .asset-tabs,
+body.studio-theme-dark .asset-tabs,
+html.studio-theme-dark body .asset-status,
+body.studio-theme-dark .asset-status,
+html.studio-theme-dark body .asset-btn,
+body.studio-theme-dark .asset-btn,
+html.studio-theme-dark body .asset-icon-btn,
+body.studio-theme-dark .asset-icon-btn,
+html.studio-theme-dark body .asset-search-wrap,
+body.studio-theme-dark .asset-search-wrap,
+html.studio-theme-dark body .nav-row,
+body.studio-theme-dark .nav-row,
+html.studio-theme-dark body .tree-row,
+body.studio-theme-dark .tree-row,
+html.studio-theme-dark body .asset-card,
+body.studio-theme-dark .asset-card,
+html.studio-theme-dark body .prompt-row,
+body.studio-theme-dark .prompt-row,
+html.studio-theme-dark body .ws-card,
+body.studio-theme-dark .ws-card,
+html.studio-theme-dark body .ws-card-meta,
+body.studio-theme-dark .ws-card-meta,
+html.studio-theme-dark body .ws-icon-btn,
+body.studio-theme-dark .ws-icon-btn,
+html.studio-theme-dark body .ws-side-add,
+body.studio-theme-dark .ws-side-add,
+html.studio-theme-dark body .ws-mini-btn,
+body.studio-theme-dark .ws-mini-btn,
+html.studio-theme-dark body .ws-trash-entry,
+body.studio-theme-dark .ws-trash-entry,
+html.studio-theme-dark body .ws-create-card,
+body.studio-theme-dark .ws-create-card,
+html.studio-theme-dark body .works-tabs,
+body.studio-theme-dark .works-tabs,
+html.studio-theme-dark body .works-search,
+body.studio-theme-dark .works-search,
+html.studio-theme-dark body .works-filters select,
+body.studio-theme-dark .works-filters select,
+html.studio-theme-dark body .works-card-actions button,
+body.studio-theme-dark .works-card-actions button,
+html.studio-theme-dark body .works-card-actions a,
+body.studio-theme-dark .works-card-actions a,
+html.studio-theme-dark body .works-icon-button,
+body.studio-theme-dark .works-icon-button,
+html.studio-theme-dark body .app-settings-option,
+body.studio-theme-dark .app-settings-option {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .asset-tabs button.active,
+body.studio-theme-dark .asset-tabs button.active,
+html.studio-theme-dark body .asset-btn.primary,
+body.studio-theme-dark .asset-btn.primary,
+html.studio-theme-dark body .nav-row.active,
+body.studio-theme-dark .nav-row.active,
+html.studio-theme-dark body .tree-row.active,
+body.studio-theme-dark .tree-row.active,
+html.studio-theme-dark body .smart-class-pill.active,
+body.studio-theme-dark .smart-class-pill.active,
+html.studio-theme-dark body .ws-project-row.active,
+body.studio-theme-dark .ws-project-row.active,
+html.studio-theme-dark body .ws-primary-btn,
+body.studio-theme-dark .ws-primary-btn,
+html.studio-theme-dark body .ws-mini-btn.primary,
+body.studio-theme-dark .ws-mini-btn.primary,
+html.studio-theme-dark body .ws-create-confirm,
+body.studio-theme-dark .ws-create-confirm,
+html.studio-theme-dark body .ws-create-toggle-btn.active,
+body.studio-theme-dark .ws-create-toggle-btn.active,
+html.studio-theme-dark body .works-tabs button.active,
+body.studio-theme-dark .works-tabs button.active,
+html.studio-theme-dark body .works-compare-now,
+body.studio-theme-dark .works-compare-now,
+html.studio-theme-dark body .works-card-actions .primary,
+body.studio-theme-dark .works-card-actions .primary,
+html.studio-theme-dark body .app-settings-output-row button,
+body.studio-theme-dark .app-settings-output-row button {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-accent-contrast) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .ws-project-row.active .ws-project-name,
+body.studio-theme-dark .ws-project-row.active .ws-project-name,
+html.studio-theme-dark body .ws-project-row.active .ws-project-icon,
+body.studio-theme-dark .ws-project-row.active .ws-project-icon,
+html.studio-theme-dark body .ws-project-row.active .ws-project-count,
+body.studio-theme-dark .ws-project-row.active .ws-project-count,
+html.studio-theme-dark body .ws-project-row.active .ws-proj-act,
+body.studio-theme-dark .ws-project-row.active .ws-proj-act {
+    color:var(--studio-accent-contrast) !important;
+}
+
+html.studio-theme-dark body .ws-card-kind.smart,
+body.studio-theme-dark .ws-card-kind.smart,
+html.studio-theme-dark body .ws-paste-btn,
+body.studio-theme-dark .ws-paste-btn {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .selection-marquee,
+body.studio-theme-dark .selection-marquee {
+    background:color-mix(in srgb,var(--studio-text) 10%,transparent) !important;
+    border-color:color-mix(in srgb,var(--studio-text) 34%,transparent) !important;
+}
+
+html.studio-theme-dark body .ws-board,
+body.studio-theme-dark .ws-board,
+html.studio-theme-dark body .board,
+body.studio-theme-dark .board,
+html.studio-theme-dark body .shell,
+body.studio-theme-dark .shell {
+    background-color:var(--studio-bg) !important;
+    background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important;
+    background-size:24px 24px !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .provider-onboarding-card,
+html:not(.studio-theme-dark) body:not(.theme-dark) .provider-onboarding-card,
+body.studio-theme-dark .provider-onboarding-card,
+html.studio-theme-dark body .provider-onboarding-card,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-inline-card,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-inline-card,
+body.studio-theme-dark .recommend-inline-card,
+html.studio-theme-dark body .recommend-inline-card,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-platform-card,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-platform-card,
+body.studio-theme-dark .recommend-platform-card,
+html.studio-theme-dark body .recommend-platform-card,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-account-invite,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-account-invite,
+body.studio-theme-dark .recommend-account-invite,
+html.studio-theme-dark body .recommend-account-invite {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-step-panel,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-step-panel,
+body.studio-theme-dark .onboarding-step-panel,
+html.studio-theme-dark body .onboarding-step-panel,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-platform-setup,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-platform-setup,
+body.studio-theme-dark .recommend-platform-setup,
+html.studio-theme-dark body .recommend-platform-setup,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-guide-save,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-guide-save,
+body.studio-theme-dark .recommend-guide-save,
+html.studio-theme-dark body .recommend-guide-save,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-rh-row-field,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-rh-row-field,
+body.studio-theme-dark .onboarding-rh-row-field,
+html.studio-theme-dark body .onboarding-rh-row-field,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-rh-source-group,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-rh-source-group,
+body.studio-theme-dark .onboarding-rh-source-group,
+html.studio-theme-dark body .onboarding-rh-source-group,
+body:not(.studio-theme-dark):not(.theme-dark) .key-panel,
+html:not(.studio-theme-dark) body:not(.theme-dark) .key-panel,
+body.studio-theme-dark .key-panel,
+html.studio-theme-dark body .key-panel,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-key-item,
+html:not(.studio-theme-dark) body:not(.theme-dark) .rh-key-item,
+body.studio-theme-dark .rh-key-item,
+html.studio-theme-dark body .rh-key-item,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-config-card,
+html:not(.studio-theme-dark) body:not(.theme-dark) .rh-config-card,
+body.studio-theme-dark .rh-config-card,
+html.studio-theme-dark body .rh-config-card {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .api-link-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .api-link-btn,
+body.studio-theme-dark .api-link-btn,
+body.studio-theme-dark .api-link-btn:hover,
+body.studio-theme-dark.show-recommend-mode .api-link-btn,
+html.studio-theme-dark body .api-link-btn,
+html.studio-theme-dark body .api-link-btn:hover,
+html.studio-theme-dark body.show-recommend-mode .api-link-btn {
+    overflow:hidden !important;
+    background:var(--studio-control) !important;
+    border:1px solid var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+    transform:none !important;
+}
+
+body.show-recommend-mode .api-link-btn,
+html.studio-theme-dark body.show-recommend-mode .api-link-btn,
+body.studio-theme-dark.show-recommend-mode .api-link-btn {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+.api-link-btn::after,
+body.studio-theme-dark .api-link-btn::after,
+html.studio-theme-dark body .api-link-btn::after {
+    display:none !important;
+    animation:none !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .add-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .add-btn,
+body.studio-theme-dark .add-btn,
+html.studio-theme-dark body .add-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .provider-card,
+html:not(.studio-theme-dark) body:not(.theme-dark) .provider-card,
+body.studio-theme-dark .provider-card,
+html.studio-theme-dark body .provider-card,
+body:not(.studio-theme-dark):not(.theme-dark) .field-frame,
+html:not(.studio-theme-dark) body:not(.theme-dark) .field-frame,
+body.studio-theme-dark .field-frame,
+html.studio-theme-dark body .field-frame,
+body:not(.studio-theme-dark):not(.theme-dark) .key-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .key-btn,
+body.studio-theme-dark .key-btn,
+html.studio-theme-dark body .key-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .action-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .action-btn,
+body.studio-theme-dark .action-btn,
+html.studio-theme-dark body .action-btn {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .provider-card:hover,
+html:not(.studio-theme-dark) body:not(.theme-dark) .provider-card:hover,
+body.studio-theme-dark .provider-card:hover,
+html.studio-theme-dark body .provider-card:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .provider-card.active,
+html:not(.studio-theme-dark) body:not(.theme-dark) .provider-card.active,
+body.studio-theme-dark .provider-card.active,
+html.studio-theme-dark body .provider-card.active,
+body:not(.studio-theme-dark):not(.theme-dark) .field-frame:focus-within,
+html:not(.studio-theme-dark) body:not(.theme-dark) .field-frame:focus-within,
+body.studio-theme-dark .field-frame:focus-within,
+html.studio-theme-dark body .field-frame:focus-within {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .api-page-save-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .api-page-save-btn,
+body.studio-theme-dark .api-page-save-btn,
+html.studio-theme-dark body .api-page-save-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .action-btn.save-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .action-btn.save-btn,
+body.studio-theme-dark .action-btn.save-btn,
+html.studio-theme-dark body .action-btn.save-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-register,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-register,
+body.studio-theme-dark .recommend-register,
+html.studio-theme-dark body .recommend-register,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-save-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-save-btn,
+body.studio-theme-dark .onboarding-save-btn,
+html.studio-theme-dark body .onboarding-save-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-guide-save-btn,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-guide-save-btn,
+body.studio-theme-dark .recommend-guide-save-btn,
+html.studio-theme-dark body .recommend-guide-save-btn {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-accent-contrast) !important;
+    box-shadow:none !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-guide-arrow,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-guide-arrow,
+body.studio-theme-dark .recommend-guide-arrow,
+html.studio-theme-dark body .recommend-guide-arrow,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-flow-arrow,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-flow-arrow,
+body.studio-theme-dark .recommend-flow-arrow,
+html.studio-theme-dark body .recommend-flow-arrow,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-rh-row-arrow,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-rh-row-arrow,
+body.studio-theme-dark .onboarding-rh-row-arrow,
+html.studio-theme-dark body .onboarding-rh-row-arrow {
+    color:var(--studio-muted) !important;
+}
+
+.recommend-guide-arrow span,
+.recommend-flow-arrow span,
+.onboarding-rh-row-arrow span {
+    animation:none !important;
+    background-image:repeating-linear-gradient(90deg,currentColor 0 5px,transparent 5px 9px) !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-tag,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-tag,
+body.studio-theme-dark .recommend-tag,
+html.studio-theme-dark body .recommend-tag,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-badge,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-badge,
+body.studio-theme-dark .recommend-badge,
+html.studio-theme-dark body .recommend-badge,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-cap-icons span,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-cap-icons span,
+body.studio-theme-dark .recommend-cap-icons span,
+html.studio-theme-dark body .recommend-cap-icons span,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-badge,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-badge,
+body.studio-theme-dark .onboarding-badge,
+html.studio-theme-dark body .onboarding-badge,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-step-label,
+html:not(.studio-theme-dark) body:not(.theme-dark) .onboarding-step-label,
+body.studio-theme-dark .onboarding-step-label,
+html.studio-theme-dark body .onboarding-step-label {
+    background:color-mix(in srgb,var(--studio-muted) 12%,transparent) !important;
+    border-color:color-mix(in srgb,var(--studio-muted) 20%,transparent) !important;
+    color:var(--studio-muted) !important;
+    box-shadow:none !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-tag.recommend-free-tag,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-tag.recommend-free-tag,
+body.studio-theme-dark .recommend-tag.recommend-free-tag,
+html.studio-theme-dark body .recommend-tag.recommend-free-tag {
+    background:color-mix(in srgb,var(--studio-success) 12%,transparent) !important;
+    border-color:color-mix(in srgb,var(--studio-success) 42%,transparent) !important;
+    color:var(--studio-success) !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-tag.recommend-free-tag *,
+body.studio-theme-dark .recommend-tag.recommend-free-tag *,
+html.studio-theme-dark body .recommend-tag.recommend-free-tag * {
+    color:var(--studio-success) !important;
+    stroke:var(--studio-success) !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-tag.recommend-perk-tag,
+html:not(.studio-theme-dark) body:not(.theme-dark) .recommend-tag.recommend-perk-tag,
+body.studio-theme-dark .recommend-tag.recommend-perk-tag,
+html.studio-theme-dark body .recommend-tag.recommend-perk-tag {
+    background:color-mix(in srgb,var(--studio-muted) 12%,transparent) !important;
+    border-color:color-mix(in srgb,var(--studio-muted) 22%,transparent) !important;
+    color:var(--studio-muted) !important;
+}
+
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-tag.recommend-perk-tag *,
+body.studio-theme-dark .recommend-tag.recommend-perk-tag *,
+html.studio-theme-dark body .recommend-tag.recommend-perk-tag * {
+    color:var(--studio-muted) !important;
+    stroke:var(--studio-muted) !important;
+}
+
+body.studio-theme-dark .provider-onboarding-card .onboarding-save-btn,
+html.studio-theme-dark body .provider-onboarding-card .onboarding-save-btn,
+body.studio-theme-dark .recommend-inline-card .onboarding-save-btn,
+html.studio-theme-dark body .recommend-inline-card .onboarding-save-btn,
+body.studio-theme-dark .recommend-inline-card .recommend-guide-save-btn,
+html.studio-theme-dark body .recommend-inline-card .recommend-guide-save-btn {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-accent-contrast) !important;
+    box-shadow:none !important;
+}
+
+body.studio-theme-dark .provider-onboarding-card .onboarding-save-btn:disabled,
+html.studio-theme-dark body .provider-onboarding-card .onboarding-save-btn:disabled,
+body.studio-theme-dark .recommend-inline-card .onboarding-save-btn:disabled,
+html.studio-theme-dark body .recommend-inline-card .onboarding-save-btn:disabled,
+body.studio-theme-dark .recommend-inline-card .recommend-guide-save-btn:disabled,
+html.studio-theme-dark body .recommend-inline-card .recommend-guide-save-btn:disabled {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-muted) !important;
+    opacity:1 !important;
+}
+
+html.studio-theme-dark body .output-preview,
+body.studio-theme-dark .output-preview,
+html.studio-theme-dark body .studio-preview-frame,
+body.studio-theme-dark .studio-preview-frame,
+html.studio-theme-dark body .image-edit-stage.preview-mode,
+body.studio-theme-dark .image-edit-stage.preview-mode,
+html.studio-theme-dark body .panorama-stage,
+body.studio-theme-dark .panorama-stage {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+html.studio-theme-dark body .output-preview img,
+body.studio-theme-dark .output-preview img,
+html.studio-theme-dark body .shell .output-preview img,
+body.studio-theme-dark .shell .output-preview img,
+html.studio-theme-dark body .output-preview video,
+body.studio-theme-dark .output-preview video,
+html.studio-theme-dark body .output-compare,
+body.studio-theme-dark .output-compare,
+html.studio-theme-dark body .studio-preview-img,
+body.studio-theme-dark .studio-preview-img,
+html.studio-theme-dark body .preview-stage img,
+body.studio-theme-dark .preview-stage img,
+html.studio-theme-dark body .preview-stage video,
+body.studio-theme-dark .preview-stage video {
+    background:var(--studio-bg) !important;
+}
+
+/* Light final pass: keep light mode on the warm SHIYIN theme instead of pure white islands. */
+html:not(.studio-theme-dark):not(.theme-dark),
+html:not(.studio-theme-dark):not(.theme-dark) body,
+body:not(.studio-theme-dark):not(.theme-dark) {
+    color-scheme:light;
+    --bg:var(--studio-bg) !important;
+    --bg-base:var(--studio-bg) !important;
+    --page:var(--studio-bg) !important;
+    --panel:color-mix(in srgb,var(--studio-panel) 94%,transparent) !important;
+    --panel-solid:var(--studio-panel) !important;
+    --card:color-mix(in srgb,var(--studio-panel-raised) 96%,transparent) !important;
+    --card-solid:var(--studio-panel-raised) !important;
+    --soft:var(--studio-control) !important;
+    --soft-2:var(--studio-control-hover) !important;
+    --text:var(--studio-text) !important;
+    --text-main:var(--studio-text) !important;
+    --muted:var(--studio-muted) !important;
+    --faint:var(--studio-faint) !important;
+    --accent:var(--studio-accent) !important;
+    --line:var(--studio-border) !important;
+    --line-2:var(--studio-border-strong) !important;
+    --line-strong:var(--studio-border-strong) !important;
+    --shadow:var(--studio-shadow-color) !important;
+    --shadow-strong:rgba(104,80,52,.18) !important;
+    --api-page-bg:var(--studio-bg) !important;
+    --api-panel-bg:color-mix(in srgb,var(--studio-panel) 94%,transparent) !important;
+    --api-surface-bg:var(--studio-panel-raised) !important;
+    --api-soft-bg:var(--studio-control) !important;
+    --api-line:var(--studio-border) !important;
+    --api-line-strong:var(--studio-border-strong) !important;
+    --api-blue:var(--studio-accent) !important;
+    --api-light-page:var(--studio-bg) !important;
+    --api-light-panel:var(--studio-panel) !important;
+    --api-light-soft:var(--studio-control) !important;
+    --api-light-raised:var(--studio-panel-raised) !important;
+    --api-light-hover:var(--studio-control-hover) !important;
+    --api-light-line:var(--studio-border) !important;
+    --api-light-line-strong:var(--studio-border-strong) !important;
+    --api-light-text:var(--studio-text) !important;
+    --api-light-muted:var(--studio-muted) !important;
+    --api-light-faint:var(--studio-faint) !important;
+    --api-light-primary:var(--studio-accent) !important;
+    --api-light-primary-hover:#80532d !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body,
+body:not(.studio-theme-dark):not(.theme-dark),
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell,
+html:not(.studio-theme-dark):not(.theme-dark) body .messages,
+body:not(.studio-theme-dark):not(.theme-dark) .messages,
+html:not(.studio-theme-dark):not(.theme-dark) body .asset-page,
+body:not(.studio-theme-dark):not(.theme-dark) .asset-page,
+html:not(.studio-theme-dark):not(.theme-dark) body .workspace,
+body:not(.studio-theme-dark):not(.theme-dark) .workspace,
+html:not(.studio-theme-dark):not(.theme-dark) body .ws-main,
+body:not(.studio-theme-dark):not(.theme-dark) .ws-main,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-page,
+body:not(.studio-theme-dark):not(.theme-dark) .works-page,
+html:not(.studio-theme-dark):not(.theme-dark) body .app-settings-page,
+body:not(.studio-theme-dark):not(.theme-dark) .app-settings-page,
+html:not(.studio-theme-dark):not(.theme-dark) body .page,
+body:not(.studio-theme-dark):not(.theme-dark) .page,
+html:not(.studio-theme-dark):not(.theme-dark) body .wrap,
+body:not(.studio-theme-dark):not(.theme-dark) .wrap,
+html:not(.studio-theme-dark):not(.theme-dark) body .shell,
+body:not(.studio-theme-dark):not(.theme-dark) .shell,
+html:not(.studio-theme-dark):not(.theme-dark) body .board,
+body:not(.studio-theme-dark):not(.theme-dark) .board {
+    background-color:var(--studio-bg) !important;
+    color:var(--studio-text) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-white,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-white\/90,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-white\/95,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-gray-50,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-gray-50\/50,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-gray-100,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-slate-50,
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-\[\#f8f8f9\],
+html:not(.studio-theme-dark):not(.theme-dark) body .bg-\[\#fafafa\],
+body:not(.studio-theme-dark):not(.theme-dark) .bg-white,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-white\/90,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-white\/95,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-gray-50,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-gray-50\/50,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-gray-100,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-slate-50,
+body:not(.studio-theme-dark):not(.theme-dark) .bg-\[\#f8f8f9\],
+body:not(.studio-theme-dark):not(.theme-dark) .bg-\[\#fafafa\] {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+body:not(.studio-theme-dark):not(.theme-dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+html:not(.studio-theme-dark):not(.theme-dark) body textarea,
+body:not(.studio-theme-dark):not(.theme-dark) textarea,
+html:not(.studio-theme-dark):not(.theme-dark) body select,
+body:not(.studio-theme-dark):not(.theme-dark) select {
+    background-color:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+body:not(.studio-theme-dark):not(.theme-dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+html:not(.studio-theme-dark):not(.theme-dark) body textarea:focus,
+body:not(.studio-theme-dark):not(.theme-dark) textarea:focus,
+html:not(.studio-theme-dark):not(.theme-dark) body select:focus,
+body:not(.studio-theme-dark):not(.theme-dark) select:focus {
+    border-color:var(--studio-border-strong) !important;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--studio-accent) 12%,transparent) !important;
+    outline:0 !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell #messageInput,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell #messageInput {
+    background:transparent !important;
+    border-color:transparent !important;
+    box-shadow:none !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .topbar,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .topbar {
+    background:color-mix(in srgb,var(--studio-bg) 90%,transparent) !important;
+    border-color:transparent !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .composer,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .composer,
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .chat-rail,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .chat-rail,
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .history-popover,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .history-popover,
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .system-prompt-popover,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .system-prompt-popover,
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .model-picker-popover,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .model-picker-popover,
+html:not(.studio-theme-dark):not(.theme-dark) body .chat-shell .resolution-picker-popover,
+body:not(.studio-theme-dark):not(.theme-dark) .chat-shell .resolution-picker-popover,
+html:not(.studio-theme-dark):not(.theme-dark) body .asset-panel,
+body:not(.studio-theme-dark):not(.theme-dark) .asset-panel,
+html:not(.studio-theme-dark):not(.theme-dark) body .content-head,
+body:not(.studio-theme-dark):not(.theme-dark) .content-head,
+html:not(.studio-theme-dark):not(.theme-dark) body .block,
+body:not(.studio-theme-dark):not(.theme-dark) .block,
+html:not(.studio-theme-dark):not(.theme-dark) body .sidebar,
+body:not(.studio-theme-dark):not(.theme-dark) .sidebar,
+html:not(.studio-theme-dark):not(.theme-dark) body .picker-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .picker-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-workflow-editor-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-workflow-editor-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .ws-sidebar,
+body:not(.studio-theme-dark):not(.theme-dark) .ws-sidebar,
+html:not(.studio-theme-dark):not(.theme-dark) body .ws-topbar,
+body:not(.studio-theme-dark):not(.theme-dark) .ws-topbar,
+html:not(.studio-theme-dark):not(.theme-dark) body .ws-card,
+body:not(.studio-theme-dark):not(.theme-dark) .ws-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-tabs,
+body:not(.studio-theme-dark):not(.theme-dark) .works-tabs,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-search,
+body:not(.studio-theme-dark):not(.theme-dark) .works-search,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-card,
+body:not(.studio-theme-dark):not(.theme-dark) .works-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-compare-dialog,
+body:not(.studio-theme-dark):not(.theme-dark) .works-compare-dialog,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-rename-dialog,
+body:not(.studio-theme-dark):not(.theme-dark) .works-rename-dialog,
+html:not(.studio-theme-dark):not(.theme-dark) body .app-settings-card,
+body:not(.studio-theme-dark):not(.theme-dark) .app-settings-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .panel,
+body:not(.studio-theme-dark):not(.theme-dark) .panel,
+html:not(.studio-theme-dark):not(.theme-dark) body .node,
+body:not(.studio-theme-dark):not(.theme-dark) .node,
+html:not(.studio-theme-dark):not(.theme-dark) body .node::before,
+body:not(.studio-theme-dark):not(.theme-dark) .node::before,
+html:not(.studio-theme-dark):not(.theme-dark) body .node-head,
+body:not(.studio-theme-dark):not(.theme-dark) .node-head,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-item,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-item,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-meta-pop,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-meta-pop,
+html:not(.studio-theme-dark):not(.theme-dark) body .group-node,
+body:not(.studio-theme-dark):not(.theme-dark) .group-node,
+html:not(.studio-theme-dark):not(.theme-dark) body .promptGroup-node,
+body:not(.studio-theme-dark):not(.theme-dark) .promptGroup-node,
+html:not(.studio-theme-dark):not(.theme-dark) body .llm-bubble.assistant,
+body:not(.studio-theme-dark):not(.theme-dark) .llm-bubble.assistant,
+html:not(.studio-theme-dark):not(.theme-dark) body .selection-hub,
+body:not(.studio-theme-dark):not(.theme-dark) .selection-hub,
+html:not(.studio-theme-dark):not(.theme-dark) body .gate-panel,
+body:not(.studio-theme-dark):not(.theme-dark) .gate-panel,
+html:not(.studio-theme-dark):not(.theme-dark) body .create-menu,
+body:not(.studio-theme-dark):not(.theme-dark) .create-menu,
+html:not(.studio-theme-dark):not(.theme-dark) body .prompt-node-text,
+body:not(.studio-theme-dark):not(.theme-dark) .prompt-node-text,
+html:not(.studio-theme-dark):not(.theme-dark) body .prompt-node-split-control,
+body:not(.studio-theme-dark):not(.theme-dark) .prompt-node-split-control,
+html:not(.studio-theme-dark):not(.theme-dark) body .prompt-node-llm select,
+body:not(.studio-theme-dark):not(.theme-dark) .prompt-node-llm select,
+html:not(.studio-theme-dark):not(.theme-dark) body .prompt-node-llm textarea,
+body:not(.studio-theme-dark):not(.theme-dark) .prompt-node-llm textarea,
+html:not(.studio-theme-dark):not(.theme-dark) body .smart-node-input-thumb,
+body:not(.studio-theme-dark):not(.theme-dark) .smart-node-input-thumb,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-panel,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-panel,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-upstream,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-upstream,
+html:not(.studio-theme-dark):not(.theme-dark) body .grid-join-canvas,
+body:not(.studio-theme-dark):not(.theme-dark) .grid-join-canvas,
+html:not(.studio-theme-dark):not(.theme-dark) body .runninghub-config-block,
+body:not(.studio-theme-dark):not(.theme-dark) .runninghub-config-block,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-paste-row,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-paste-row,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-card-group,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-card-group,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-config-card,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-config-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-empty,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-empty {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-card-edit,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-card-edit,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-delete,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-delete,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-pin-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-pin-btn,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-preview-mark,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-preview-mark,
+html:not(.studio-theme-dark):not(.theme-dark) body .gate-sort,
+body:not(.studio-theme-dark):not(.theme-dark) .gate-sort,
+html:not(.studio-theme-dark):not(.theme-dark) body .gate-sort-btn.active,
+body:not(.studio-theme-dark):not(.theme-dark) .gate-sort-btn.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .link-delete,
+body:not(.studio-theme-dark):not(.theme-dark) .link-delete,
+html:not(.studio-theme-dark):not(.theme-dark) body .resize-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .resize-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-del,
+body:not(.studio-theme-dark):not(.theme-dark) .output-del,
+html:not(.studio-theme-dark):not(.theme-dark) body .llm-output-copy,
+body:not(.studio-theme-dark):not(.theme-dark) .llm-output-copy,
+html:not(.studio-theme-dark):not(.theme-dark) body .input-label,
+body:not(.studio-theme-dark):not(.theme-dark) .input-label,
+html:not(.studio-theme-dark):not(.theme-dark) body .prompt-node-pill,
+body:not(.studio-theme-dark):not(.theme-dark) .prompt-node-pill,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-count,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-count,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-toggle,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-toggle,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-mini > input,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-mini > input,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-token,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-token,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-number-trigger,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-number-trigger,
+html:not(.studio-theme-dark):not(.theme-dark) body .mini-x,
+body:not(.studio-theme-dark):not(.theme-dark) .mini-x,
+html:not(.studio-theme-dark):not(.theme-dark) body .smart-video-play,
+body:not(.studio-theme-dark):not(.theme-dark) .smart-video-play,
+html:not(.studio-theme-dark):not(.theme-dark) body .image-resolution-badge,
+body:not(.studio-theme-dark):not(.theme-dark) .image-resolution-badge,
+html:not(.studio-theme-dark):not(.theme-dark) body .node-resize-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .node-resize-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .compare-toggle,
+body:not(.studio-theme-dark):not(.theme-dark) .compare-toggle,
+html:not(.studio-theme-dark):not(.theme-dark) body .preview-nav-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .preview-nav-btn,
+html:not(.studio-theme-dark):not(.theme-dark) body .edit-text-inline,
+body:not(.studio-theme-dark):not(.theme-dark) .edit-text-inline,
+html:not(.studio-theme-dark):not(.theme-dark) body .secondary-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .secondary-btn,
+html:not(.studio-theme-dark):not(.theme-dark) body .create-cancel,
+body:not(.studio-theme-dark):not(.theme-dark) .create-cancel,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-group-count,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-group-count,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-card-action,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-card-action {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-card-edit:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-card-edit:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-delete:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-delete:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-pin-btn:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-pin-btn:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-preview-mark:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-preview-mark:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .link-delete.hover,
+body:not(.studio-theme-dark):not(.theme-dark) .link-delete.hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .resize-handle:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .resize-handle:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-del:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .output-del:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .mini-x:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .mini-x:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .node-resize-handle:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .node-resize-handle:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .preview-nav-btn:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .preview-nav-btn:hover,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-card-action:hover,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-card-action:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-item.active,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-item.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .ws-project-row.active,
+body:not(.studio-theme-dark):not(.theme-dark) .ws-project-row.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .tool-btn.active,
+body:not(.studio-theme-dark):not(.theme-dark) .tool-btn.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .theme-toggle.active,
+body:not(.studio-theme-dark):not(.theme-dark) .theme-toggle.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .smart-log-toggle.active,
+body:not(.studio-theme-dark):not(.theme-dark) .smart-log-toggle.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .smart-shortcut-toggle.active,
+body:not(.studio-theme-dark):not(.theme-dark) .smart-shortcut-toggle.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .prompt-node-pill.active,
+body:not(.studio-theme-dark):not(.theme-dark) .prompt-node-pill.active,
+html:not(.studio-theme-dark):not(.theme-dark) body .loop-smart-seg button.active,
+body:not(.studio-theme-dark):not(.theme-dark) .loop-smart-seg button.active {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .canvas-item.active *,
+body:not(.studio-theme-dark):not(.theme-dark) .canvas-item.active *,
+html:not(.studio-theme-dark):not(.theme-dark) body .ws-project-row.active *,
+body:not(.studio-theme-dark):not(.theme-dark) .ws-project-row.active * {
+    color:var(--studio-accent-contrast) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .output-preview,
+body:not(.studio-theme-dark):not(.theme-dark) .output-preview,
+html:not(.studio-theme-dark):not(.theme-dark) body .studio-preview-frame,
+body:not(.studio-theme-dark):not(.theme-dark) .studio-preview-frame,
+html:not(.studio-theme-dark):not(.theme-dark) body .image-edit-stage.preview-mode,
+body:not(.studio-theme-dark):not(.theme-dark) .image-edit-stage.preview-mode,
+html:not(.studio-theme-dark):not(.theme-dark) body .panorama-stage,
+body:not(.studio-theme-dark):not(.theme-dark) .panorama-stage,
+html:not(.studio-theme-dark):not(.theme-dark) body .log-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .log-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .image-edit-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .image-edit-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .asset-manager-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .asset-manager-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .model-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .model-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .error-modal,
+body:not(.studio-theme-dark):not(.theme-dark) .error-modal,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-lightbox,
+body:not(.studio-theme-dark):not(.theme-dark) .output-lightbox {
+    background:color-mix(in srgb,var(--studio-panel) 84%,transparent) !important;
+    border-color:var(--studio-border) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .output-preview img,
+body:not(.studio-theme-dark):not(.theme-dark) .output-preview img,
+html:not(.studio-theme-dark):not(.theme-dark) body .shell .output-preview img,
+body:not(.studio-theme-dark):not(.theme-dark) .shell .output-preview img,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-preview video,
+body:not(.studio-theme-dark):not(.theme-dark) .output-preview video,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-compare,
+body:not(.studio-theme-dark):not(.theme-dark) .output-compare,
+html:not(.studio-theme-dark):not(.theme-dark) body .studio-preview-img,
+body:not(.studio-theme-dark):not(.theme-dark) .studio-preview-img,
+html:not(.studio-theme-dark):not(.theme-dark) body .preview-stage img,
+body:not(.studio-theme-dark):not(.theme-dark) .preview-stage img,
+html:not(.studio-theme-dark):not(.theme-dark) body .preview-stage video,
+body:not(.studio-theme-dark):not(.theme-dark) .preview-stage video {
+    background:var(--studio-bg) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .output-compare-slider,
+body:not(.studio-theme-dark):not(.theme-dark) .output-compare-slider,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-compare-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .output-compare-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-compare-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .works-compare-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .works-compare-handle::before,
+body:not(.studio-theme-dark):not(.theme-dark) .works-compare-handle::before {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}

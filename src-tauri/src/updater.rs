@@ -652,6 +652,7 @@ pub fn run_update_helper_from_args() -> bool {
     {
         return false;
     }
+    let data_for_log = value(&arguments, "--data=").map(PathBuf::from);
     let result = (|| {
         let root = PathBuf::from(
             value(&arguments, "--root=").ok_or_else(|| "缺少更新目标目录。".to_string())?,
@@ -670,6 +671,9 @@ pub fn run_update_helper_from_args() -> bool {
         apply_session(&root, &data, &zip, &version, &hash, old_pid)
     })();
     if let Err(error) = result {
+        if let Some(data) = data_for_log.as_deref() {
+            log(data, &format!("更新失败：{error}"));
+        }
         MessageDialog::new()
             .set_level(MessageLevel::Error)
             .set_title("SHIYIN AI 更新失败")

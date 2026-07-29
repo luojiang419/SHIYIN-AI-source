@@ -14,10 +14,12 @@ APP_SETTINGS = ROOT / "static" / "app-settings.html"
 BUILD_SCRIPT = ROOT / "tools" / "build-portable.ps1"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
 PORTABLE_SMOKE = ROOT / "tools" / "smoke-portable.ps1"
+UPDATER_SMOKE = ROOT / "tools" / "smoke-updater.ps1"
 BACKEND_SPEC = ROOT / "canvas-backend.spec"
 REQUIREMENTS = ROOT / "requirements.txt"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_VERSION_RESOLVER = ROOT / "tools" / "resolve-release-version.py"
+PORTABLE_RELEASE = ROOT / "tools" / "release-portable.ps1"
 GITIGNORE = ROOT / ".gitignore"
 
 
@@ -117,7 +119,17 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("fn replace_app_directory", updater)
         self.assertIn("fs::rename(&source, &target)", updater)
         self.assertIn("replace_app_directory(&staged, root)?", updater)
-        self.assertIn("cargo test --manifest-path src-tauri/Cargo.toml updater::tests --locked", workflow)
+        self.assertIn("./tools/smoke-updater.ps1", workflow)
+        self.assertIn("smoke-updater.ps1", PORTABLE_RELEASE.read_text(encoding="utf-8"))
+        smoke = UPDATER_SMOKE.read_text(encoding="utf-8")
+        self.assertIn("--apply-update", smoke)
+        self.assertIn("data_preserved", smoke)
+        self.assertIn("app_replaced", smoke)
+        self.assertIn("Updater did not clear pending update state.", smoke)
+
+    def test_updater_logs_helper_failures_for_diagnosis(self):
+        source = UPDATER.read_text(encoding="utf-8")
+        self.assertIn('log(data, &format!("更新失败：{error}"));', source)
 
     def test_ci_keeps_tauri_frontend_placeholder_in_public_source(self):
         self.assertTrue((ROOT / "desktop-placeholder" / "index.html").is_file())

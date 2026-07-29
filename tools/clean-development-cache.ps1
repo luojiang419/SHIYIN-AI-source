@@ -13,6 +13,7 @@ $targets = @(
     (Join-Path $projectRoot ".build\feature-browser-smoke"),
     (Join-Path $projectRoot ".build\close-behavior-smoke"),
     (Join-Path $projectRoot ".build\portable\backend-work"),
+    (Join-Path $projectRoot "src-tauri\target\debug"),
     (Join-Path $projectRoot "__pycache__"),
     (Join-Path $projectRoot "canvas_core\__pycache__"),
     (Join-Path $projectRoot "tests\__pycache__"),

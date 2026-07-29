@@ -109,6 +109,22 @@ jobs:
         shell: pwsh
         run: ./tools/verify-release-artifact.ps1 -Version '${{ steps.version.outputs.version }}'
 
+      - name: Verify real previous-version update
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{ Accept = 'application/vnd.github+json'; Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'SHIYIN-AI-Updater-E2E' }
+          $latest = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:RELEASE_REPO/releases/latest"
+          $fromAsset = @($latest.assets | Where-Object { $_.name -eq "SHIYIN-AI-$($latest.tag_name)-windows-x64.zip" })
+          if ($latest.draft -or $latest.prerelease -or $fromAsset.Count -ne 1) { throw 'Latest release cannot be used as the updater E2E source.' }
+          $fromDir = Join-Path $env:RUNNER_TEMP 'shiyin-updater-from'
+          New-Item -ItemType Directory -Force -Path $fromDir | Out-Null
+          Invoke-WebRequest -Headers $headers -Uri $fromAsset[0].browser_download_url -OutFile (Join-Path $fromDir $fromAsset[0].name)
+          ./tools/smoke-updater.ps1 -FromZip (Join-Path $fromDir $fromAsset[0].name) -ToZip '${{ steps.artifact.outputs.asset_path }}' -ToVersion '${{ steps.version.outputs.version }}'
+
       - name: Create draft, upload, verify, and publish
         if: steps.version.outputs.skip != 'true'
         id: publish

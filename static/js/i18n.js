@@ -1,5 +1,5 @@
 (function(){
-    const VERSION = '2026.07.26.ecommerce-prompts.1';
+    const VERSION = '2026.07.29.free-creation.1';
     const scripts = [
         '/static/js/i18n-core.js',
         '/static/js/i18n/common.js',

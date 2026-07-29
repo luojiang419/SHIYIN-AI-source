@@ -4,6 +4,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $targets = @(
     (Join-Path $projectRoot ".npm-cache"),
+    (Join-Path $projectRoot ".pytest_cache"),
     (Join-Path $projectRoot ".build\sidecar-smoke-data"),
     (Join-Path $projectRoot ".build\desktop-smoke"),
     (Join-Path $projectRoot ".build\ecommerce-params-browser"),

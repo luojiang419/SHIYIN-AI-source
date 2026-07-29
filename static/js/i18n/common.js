@@ -46,6 +46,7 @@
         "nav.imageEdit": { zh: "图片编辑", en: "Image Edit" },
         "nav.angle": { zh: "角度控制", en: "Angle Control" },
         "nav.ecommerce": { zh: "电商专用", en: "E-commerce Studio" },
+        "nav.freeCreation": { zh: "自由创作", en: "Free Creation" },
         "nav.gpt": { zh: "GPT 对话", en: "GPT Chat" },
         "nav.canvas": { zh: "无限画布", en: "Infinite Canvas" },
         "nav.assetManager": { zh: "素材库", en: "Assets" },

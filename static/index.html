@@ -1770,6 +1770,13 @@
                     </svg>
                     <span class="nav-text" data-i18n="nav.ecommerce">电商专用</span>
                 </div>
+                <div class="nav-item" onclick="switchUI(this, 'free-creation')">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3Z"></path>
+                        <path d="M18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"></path>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.freeCreation">自由创作</span>
+                </div>
                 <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -1886,6 +1893,7 @@
 
         <main class="stage">
             <iframe id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.07.26.light-theme.3" class="active" scrolling="yes" allowfullscreen></iframe>
+            <iframe id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.07.29.free-creation.1" scrolling="yes" allowfullscreen></iframe>
             <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.07.26.light-theme.3" scrolling="yes"></iframe>
             <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.07.26.light-theme.3" scrolling="yes"></iframe>
             <iframe id="frame-works" data-src="/static/works.html?v=2026.07.26.light-theme.3.download-fix.1" scrolling="yes" allowfullscreen></iframe>
@@ -2021,7 +2029,7 @@
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const SIDEBAR_MANUAL_MODE_KEY = 'studio_sidebar_manual_mode_v1';
         const DEFAULT_PAGE_ID = 'ecommerce';
-        const PAGE_IDS = ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings'];
+        const PAGE_IDS = ['ecommerce','free-creation','gpt-chat','canvas','asset-manager','works','api-settings','app-settings'];
         const PROJECT_URL = 'https://github.com/luojiang419/SHIYIN-AI-source';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION' };
         let updateConnectivityResult = null;

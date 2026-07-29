@@ -1,8 +1,11 @@
 (function(){
     'use strict';
 
-    const SETTINGS_KEY = 'studio_ecommerce_settings_v2';
-    const LEGACY_SETTINGS_KEY = 'studio_ecommerce_settings_v1';
+    const WORKSPACE_VARIANT = new URLSearchParams(window.location.search).get('workspace') || 'ecommerce';
+    const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation';
+    const SETTINGS_KEY = IS_FREE_CREATION ? 'studio_free_creation_settings_v1' : 'studio_ecommerce_settings_v2';
+    const LEGACY_SETTINGS_KEY = IS_FREE_CREATION ? '' : 'studio_ecommerce_settings_v1';
+    const CURRENT_TASK_KEY = IS_FREE_CREATION ? 'free_creation_current_task' : 'ecommerce_current_task';
     const SETTINGS_SCHEMA_VERSION = 4;
     const DEFAULT_OPERATION = 'universal';
     const ASPECT_RATIOS = ['source','1:1','2:3','3:2','3:4','4:3','4:5','9:16','16:9'];
@@ -179,6 +182,17 @@
         ].forEach(id => { el[id] = byId(id); });
     }
 
+    function configureWorkspaceVariant(){
+        if(!IS_FREE_CREATION) return;
+        document.title = t('freeCreation.title');
+        el.ecommercePage?.classList.add('is-free-creation');
+        el.operationTabs?.setAttribute('aria-label', t('freeCreation.title'));
+        el.operationTabs?.querySelectorAll('[data-operation]').forEach(button => {
+            if(button.dataset.operation !== 'universal') button.remove();
+        });
+        el.universalDock?.setAttribute('aria-label', t('freeCreation.referenceAssets'));
+    }
+
     function cleanCropHistory(values){
         if(!Array.isArray(values)) return [];
         return values.filter(value => value && typeof value === 'object' && value.url).map(value => ({
@@ -301,7 +315,8 @@
             const saved = JSON.parse(raw);
             const schemaVersion = Number(saved.schema_version || 0);
             state.settingsNeedsMigration = schemaVersion !== SETTINGS_SCHEMA_VERSION;
-            if(schemaVersion === SETTINGS_SCHEMA_VERSION && OPERATION_CONFIG[saved.operation]) state.operation = saved.operation;
+            if(IS_FREE_CREATION) state.operation = DEFAULT_OPERATION;
+            else if(schemaVersion === SETTINGS_SCHEMA_VERSION && OPERATION_CONFIG[saved.operation]) state.operation = saved.operation;
             else state.operation = DEFAULT_OPERATION;
             state.mode = 'standard';
             if(saved.options && typeof saved.options === 'object') {
@@ -417,6 +432,7 @@
     }
 
     function syncPreferenceSnapshot(serialized, attempt=0){
+        if(IS_FREE_CREATION) return;
         let runtime = window.RuntimeSync || null;
         if(!runtime) {
             try { runtime = window.top?.RuntimeSync || null; } catch(e) { runtime = null; }
@@ -432,6 +448,7 @@
     }
 
     async function waitForPreferenceBootstrap(timeout=1800){
+        if(IS_FREE_CREATION) return;
         const deadline = Date.now() + timeout;
         let runtime = null;
         while(Date.now() < deadline && !runtime) {
@@ -460,6 +477,7 @@
     }
 
     function applyIncomingSettings(serialized){
+        if(IS_FREE_CREATION) return;
         if(!serialized || serialized === state.settingsSerialized) return;
         clearTimeout(state.settingsPersistTimer);
         state.settingsPersistTimer = null;
@@ -491,9 +509,16 @@
         });
         const generateLabel = el.generateButton?.querySelector('span');
         if(generateLabel) generateLabel.textContent = t('ecommerce.generate');
+        const universalLabel = el.operationTabs?.querySelector('[data-operation="universal"] b');
+        if(universalLabel) universalLabel.textContent = t(IS_FREE_CREATION ? 'freeCreation.title' : 'ecommerce.universal');
+        if(IS_FREE_CREATION) {
+            document.title = t('freeCreation.title');
+            el.operationTabs?.setAttribute('aria-label', t('freeCreation.title'));
+            el.universalDock?.setAttribute('aria-label', t('freeCreation.referenceAssets'));
+        }
         syncUniversalLayout();
         const inputHeading = el.inputModule?.querySelector('.ec-section-head h2');
-        if(inputHeading) inputHeading.textContent = t(currentConfig()?.universal ? 'ecommerce.referenceAssets' : 'ecommerce.inputs');
+        if(inputHeading) inputHeading.textContent = t(IS_FREE_CREATION ? 'freeCreation.referenceAssets' : (currentConfig()?.universal ? 'ecommerce.referenceAssets' : 'ecommerce.inputs'));
     }
 
     function syncUniversalLayout(){
@@ -846,8 +871,10 @@
         const manyReferences = entries.length > 6;
         el.ecommercePage?.classList.toggle('has-many-universal-references', manyReferences);
         el.universalDock?.classList.toggle('has-many-references', manyReferences);
-        el.inputSlots?.classList.add('has-studio-reference');
-        el.inputSlots.innerHTML = `<div class="ec-universal-guide"><strong>${escapeHtml(t('ecommerce.universalGuideTitle'))}</strong><p>${escapeHtml(t('ecommerce.universalGuideHint'))}</p></div>` + entries.map(([key,item],index) => {
+        el.inputSlots?.classList.toggle('has-studio-reference', !IS_FREE_CREATION);
+        const guideTitleKey = IS_FREE_CREATION ? 'freeCreation.guideTitle' : 'ecommerce.universalGuideTitle';
+        const guideHintKey = IS_FREE_CREATION ? 'freeCreation.guideHint' : 'ecommerce.universalGuideHint';
+        el.inputSlots.innerHTML = `<div class="ec-universal-guide"><strong>${escapeHtml(t(guideTitleKey))}</strong><p>${escapeHtml(t(guideHintKey))}</p></div>` + entries.map(([key,item],index) => {
             const selected = selectedSlotTypeId(item, index === 0 ? 'subject' : 'prop');
             const selectedType = referenceSlotTypeById(selected) || roles[0] || {};
             const role = selectedType.role || item.reference_type || item.role || (index === 0 ? 'subject':'prop');
@@ -861,12 +888,12 @@
                 <label class="ec-reference-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected, context:'universal', fallbackRole:role, item, dataAttr:'data-reference-type', dataValue:key})}</label>
                 <div class="ec-reference-fields"><label><span>${escapeHtml(t('ecommerce.referenceLabel'))}</span><input data-reference-field="label" data-reference-key="${escapeHtml(key)}" maxlength="160" value="${escapeHtml(item.label || '')}" placeholder="${escapeHtml(t('ecommerce.referenceLabelHint'))}"></label><label><span>${escapeHtml(t('ecommerce.referenceInstruction'))}</span><input data-reference-field="instruction" data-reference-key="${escapeHtml(key)}" maxlength="300" value="${escapeHtml(item.instruction || '')}" placeholder="${escapeHtml(t('ecommerce.referenceInstructionHint'))}"></label></div>
             </article>`;
-        }).join('') + studioReferenceCardHtml('universal');
+        }).join('') + (IS_FREE_CREATION ? '' : studioReferenceCardHtml('universal'));
         el.inputProgress.textContent = `${uploadedEntries.length}/${limit}`;
         updateUniversalAddButton(entries.length, limit);
         bindInputSlots();
         bindUniversalControls(limit);
-        bindStudioReferenceControls();
+        if(!IS_FREE_CREATION) bindStudioReferenceControls();
         if(state.capabilities) {
             populateModelSelectors();
             updateRouteSummary();
@@ -1717,7 +1744,9 @@
             </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPreset'))}</span><div id="backgroundPresetGrid" class="ec-chip-grid">${presetButtons('background_presets', options.background_preset)}</div></div>
             <label class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPrompt'))}</span><textarea data-option="background_prompt" maxlength="1000" placeholder="${escapeHtml(t('ecommerce.backgroundPromptHint'))}">${escapeHtml(options.background_prompt)}</textarea></label>${instructionHtml(options.instruction)}`;
         } else if(state.operation === 'universal') {
-            html = `<label class="ec-field"><span>${escapeHtml(t('ecommerce.finalInstruction'))}</span><textarea class="ec-universal-instruction" data-option="instruction" maxlength="2000" placeholder="${escapeHtml(t('ecommerce.finalInstructionHint'))}">${escapeHtml(options.instruction || '')}</textarea></label>`;
+            const promptLabelKey = IS_FREE_CREATION ? 'freeCreation.prompt' : 'ecommerce.finalInstruction';
+            const promptHintKey = IS_FREE_CREATION ? 'freeCreation.promptHint' : 'ecommerce.finalInstructionHint';
+            html = `<label class="ec-field"><span>${escapeHtml(t(promptLabelKey))}</span><textarea class="ec-universal-instruction" data-option="instruction" maxlength="2000" placeholder="${escapeHtml(t(promptHintKey))}">${escapeHtml(options.instruction || '')}</textarea></label>`;
         }
         el.operationControls.innerHTML = html;
         syncUniversalLayout();
@@ -1888,6 +1917,7 @@
     }
 
     function switchOperation(operation){
+        if(IS_FREE_CREATION && operation !== DEFAULT_OPERATION) return;
         if(!OPERATION_CONFIG[operation] || operation === state.operation) return;
         captureWorkspace();
         state.operation = operation;
@@ -2651,7 +2681,11 @@
         if(config.universal) {
             const references = universalEntries().map(([,item]) => item).filter(item => item.url);
             if(!references.length) {
-                if(show) showFormError(t('ecommerce.universalReferenceRequired'));
+                if(show) showFormError(t(IS_FREE_CREATION ? 'freeCreation.referenceRequired' : 'ecommerce.universalReferenceRequired'));
+                return false;
+            }
+            if(IS_FREE_CREATION && !String(currentOptions().instruction || '').trim()) {
+                if(show) showFormError(t('freeCreation.promptRequired'));
                 return false;
             }
             if(!compatibleModels().length) {
@@ -2785,7 +2819,7 @@
     }
 
     function ecommerceTaskPayload(parentTaskId=''){
-        return {
+        const payload = {
             operation:state.operation,
             mode:'standard',
             inputs:taskInputsForRequest(),
@@ -2798,6 +2832,8 @@
             count:state.count,
             parent_task_id:parentTaskId || '',
         };
+        if(IS_FREE_CREATION) payload.options.prompt_policy = 'free';
+        return payload;
     }
 
     function taskReferences(task){
@@ -2946,12 +2982,17 @@
         return ['queued','running'].includes(String(task?.status || ''));
     }
 
+    function taskMatchesWorkspace(task){
+        const promptPolicy = String(task?.options?.prompt_policy || task?.request?.options?.prompt_policy || '');
+        return IS_FREE_CREATION ? promptPolicy === 'free' : promptPolicy !== 'free';
+    }
+
     function pruneTaskMemory(){
         if(state.tasks.length <= ECOMMERCE_TASK_MEMORY_LIMIT) return;
         const protectedIds = new Set(state.activeTaskIds);
         const currentId = taskIdOf(state.currentTask);
         if(currentId) protectedIds.add(currentId);
-        const savedTaskId = String(sessionStorage.getItem('ecommerce_current_task') || '');
+        const savedTaskId = String(sessionStorage.getItem(CURRENT_TASK_KEY) || '');
         if(savedTaskId) protectedIds.add(savedTaskId);
         Object.values(state.workspaces).forEach(workspace => {
             const taskId = String(workspace.taskId || taskIdOf(workspace.currentTask) || '');
@@ -3033,11 +3074,11 @@
         setZoom(state.zoom);
         requestAnimationFrame(syncCompareGeometry);
         renderCandidateRail();
-        sessionStorage.setItem('ecommerce_current_task', taskIdOf(task));
+        sessionStorage.setItem(CURRENT_TASK_KEY, taskIdOf(task));
     }
 
     function candidateRailItems(){
-        const tasks = state.tasks.filter(task => task.operation === state.operation).slice(0,100);
+        const tasks = state.tasks.filter(task => task.operation === state.operation && taskMatchesWorkspace(task)).slice(0,100);
         let completedOrder = 0;
         return tasks.flatMap(task => {
             const id = taskIdOf(task);
@@ -3321,10 +3362,10 @@
             const workspace = activeWorkspace();
             workspace.currentTask = null;
             workspace.taskId = '';
-            const fallback = state.tasks.find(task => task.operation === state.operation && task.status === 'succeeded' && (task.result?.images || []).length);
+            const fallback = state.tasks.find(task => task.operation === state.operation && taskMatchesWorkspace(task) && task.status === 'succeeded' && (task.result?.images || []).length);
             if(fallback) renderTaskResult(fallback);
             else {
-                sessionStorage.removeItem('ecommerce_current_task');
+                sessionStorage.removeItem(CURRENT_TASK_KEY);
                 hideResult();
                 renderCandidateRail();
             }
@@ -3352,7 +3393,7 @@
     async function loadTasks(){
         try {
             const response = await fetchJson('/api/ecommerce/tasks?limit=500');
-            (response.tasks || []).forEach(storeTask);
+            (response.tasks || []).filter(taskMatchesWorkspace).forEach(storeTask);
             renderTaskList();
             renderCandidateRail();
             scheduleTaskPolling(100);
@@ -3364,18 +3405,19 @@
     }
 
     function renderTaskList(){
-        if(!state.tasks.length) {
-            el.taskList.innerHTML = `<div class="ec-task-empty">${escapeHtml(t('ecommerce.noTasks'))}</div>`;
+        const visibleTasks = state.tasks.filter(taskMatchesWorkspace);
+        if(!visibleTasks.length) {
+            el.taskList.innerHTML = `<div class="ec-task-empty">${escapeHtml(t(IS_FREE_CREATION ? 'freeCreation.noTasks' : 'ecommerce.noTasks'))}</div>`;
             return;
         }
-        el.taskList.innerHTML = state.tasks.slice(0,200).map(task => {
+        el.taskList.innerHTML = visibleTasks.slice(0,200).map(task => {
             const image = task.result?.images?.[0] || sourceUrlForTask(task);
             const operation = OPERATION_CONFIG[task.operation];
             const canRetry = !['queued','running'].includes(task.status);
             const clearable = ['failed','interrupted'].includes(String(task.status || ''));
             return `<article class="ec-task-item" data-task-id="${escapeHtml(task.id)}" tabindex="0">
                 ${image ? `<img src="${escapeHtml(image)}" alt="">` : '<div class="ec-task-placeholder"></div>'}
-                <div class="ec-task-info"><b>${escapeHtml(t(operation?.titleKey || 'ecommerce.title'))}</b>
+                <div class="ec-task-info"><b>${escapeHtml(t(IS_FREE_CREATION ? 'freeCreation.title' : (operation?.titleKey || 'ecommerce.title')))}</b>
                     <span>${escapeHtml(new Date(Number(task.created_at || 0) * 1000).toLocaleString())} · ${escapeHtml(t('ecommerce.standard'))}</span>
                     <span class="ec-task-status ${escapeHtml(task.status || '')}">${escapeHtml(t(`ecommerce.${task.status || 'queued'}`))}</span>
                     <div class="ec-task-actions"><button type="button" data-open-task="${escapeHtml(task.id)}">${escapeHtml(t('ecommerce.loadTask'))}</button>${canRetry ? `<button type="button" data-retry-task="${escapeHtml(task.id)}">${escapeHtml(t('ecommerce.retry'))}</button>` : ''}${clearable ? `<button type="button" data-clear-task="${escapeHtml(task.id)}">${escapeHtml(t('ecommerce.clearFailedTask'))}</button>` : ''}</div>
@@ -3758,7 +3800,7 @@
             if(event.data?.type === 'studio-route-active') setEcommerceRouteActive(event.data.active);
             if(event.data?.type === 'studio-language') window.StudioI18n?.set?.(event.data.lang,{sync:false});
             if(event.data?.type === 'providers-changed') loadCapabilities();
-            const incomingSettings = event.data?.type === 'canvas.preferences' ? event.data?.values?.ecommerce_settings : '';
+            const incomingSettings = !IS_FREE_CREATION && event.data?.type === 'canvas.preferences' ? event.data?.values?.ecommerce_settings : '';
             if(incomingSettings && incomingSettings !== state.settingsSerialized) {
                 if(shouldIgnoreIncomingSettings()) return;
                 applyIncomingSettings(String(incomingSettings));
@@ -3791,6 +3833,7 @@
 
     async function init(){
         cacheElements();
+        configureWorkspaceVariant();
         await waitForPreferenceBootstrap();
         loadSettings();
         restoreWorkspace(state.operation);
@@ -3805,7 +3848,7 @@
         bindComparison();
         await loadCapabilities();
         await loadTasks();
-        const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem('ecommerce_current_task');
+        const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem(CURRENT_TASK_KEY);
         if(savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
         state.initializing = false;
     }

@@ -349,6 +349,21 @@ class EcommerceContractTests(unittest.TestCase):
                 prompt = build_prompt(operation, references, options)
                 self.assertEqual(prompt, options["instruction"])
 
+    def test_free_creation_requires_and_preserves_verbatim_prompt(self):
+        references = [
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
+            {"reference_id": "style", "reference_type": "style", "role": "style", "url": "/assets/input/style.png"},
+        ]
+        instruction = "  图1作为主体，完全按照图2的笔触自由创作。\n不要添加文字。  "
+        prompt = build_prompt("universal", references, {"prompt_policy": "free", "instruction": instruction})
+        self.assertEqual(prompt, instruction)
+        self.assertNotIn("ORDERED REFERENCE MAP", prompt)
+        self.assertNotIn("MATERIAL EVIDENCE LOCK", prompt)
+        with self.assertRaisesRegex(ValueError, "必须填写提示词"):
+            build_prompt("universal", references, {"prompt_policy": "free", "instruction": "   "})
+        with self.assertRaisesRegex(ValueError, "仅支持全能模式"):
+            build_prompt("pose_transfer", [{"role": "source", "url": "/assets/input/model.png"}], {"prompt_policy": "free", "instruction": "自由生成"})
+
     def test_universal_model_identity_has_exclusive_ownership(self):
         references = [
             {"reference_id": "body", "reference_type": "subject", "role": "subject", "url": "/assets/input/body.png"},
@@ -673,6 +688,16 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertIn("material_evidence", self.main.ASSET_CLASSIFICATION_PROMPT)
         self.assertIn("brand_text", self.main.ASSET_CLASSIFICATION_PROMPT)
         self.assertIn("reference_role_suggestion", self.main.ASSET_CLASSIFICATION_PROMPT)
+
+    def test_static_cache_versioning_preserves_workspace_query_parameters(self):
+        source = '<iframe data-src="/static/ecommerce.html?workspace=free-creation&amp;v=old"></iframe>'
+        with (
+            patch.object(self.main, "current_app_version", return_value="9.9.9"),
+            patch.object(self.main.os.path, "isfile", return_value=False),
+        ):
+            rendered = self.main.versioned_static_html(source)
+        self.assertIn('/static/ecommerce.html?workspace=free-creation&amp;v=9.9.9', rendered)
+        self.assertNotIn('?v=9.9.9?workspace=', rendered)
 
     def test_builtin_local_vision_key_is_seeded_only_once(self):
         class FakeDatabase:
@@ -1044,6 +1069,25 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertIn("upper-body garment", enriched["prompt"])
         self.assertIn("短袖 T 恤", enriched["prompt"])
 
+    def test_free_creation_skips_universal_reference_analysis(self):
+        prompt = "图1作为主体，图2只提供色彩风格"
+        snapshot = {
+            "operation": "universal",
+            "inputs": [
+                {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/source.png"},
+                {"reference_id": "style", "reference_type": "style", "role": "style", "url": "/assets/input/style.png"},
+            ],
+            "options": {"prompt_policy": "free", "instruction": prompt},
+            "prompt": prompt,
+        }
+        analyzer = AsyncMock()
+        with patch.object(self.main, "analyze_ecommerce_universal_references", new=analyzer):
+            enriched, returned = asyncio.run(self.main.enrich_ecommerce_snapshot_with_universal_analysis(snapshot))
+        analyzer.assert_not_awaited()
+        self.assertIsNone(returned)
+        self.assertEqual(enriched["prompt"], prompt)
+        self.assertNotIn("reference_analysis", enriched["options"])
+
     def test_approval_requires_every_quality_check(self):
         task_id = "ecommerce_test_approval"
         self.main.ECOMMERCE_TASKS[task_id] = {
@@ -1267,6 +1311,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         cls.app_settings_javascript = (root / "static" / "js" / "app-settings.js").read_text(encoding="utf-8")
         cls.common_i18n = (root / "static" / "js" / "i18n" / "common.js").read_text(encoding="utf-8")
         cls.ecommerce_i18n = (root / "static" / "js" / "i18n" / "ecommerce.js").read_text(encoding="utf-8")
+        cls.i18n_loader = (root / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
 
     def test_model_panel_contains_generation_parameter_dropdowns(self):
         panel = re.search(r'<section id="advancedSettings".*?</section>', self.html, re.S)
@@ -1357,6 +1402,31 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("const editingControl = isTextEditingElement() ? document.activeElement : null;", self.javascript)
         self.assertIn("[0, 80, 260].forEach", self.javascript)
         self.assertIn("applyIncomingSettings(String(incomingSettings))", self.javascript)
+
+    def test_free_creation_reuses_universal_workspace_with_isolated_raw_prompt_mode(self):
+        self.assertIn("switchUI(this, 'free-creation')", self.index_html)
+        self.assertRegex(self.index_html, r'id="frame-free-creation"[^>]+workspace=free-creation')
+        self.assertIn("'free-creation'", self.index_html)
+        self.assertIn('"nav.freeCreation"', self.common_i18n)
+        for marker in (
+            "const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation'",
+            "studio_free_creation_settings_v1",
+            "free_creation_current_task",
+            "payload.options.prompt_policy = 'free'",
+            "function taskMatchesWorkspace(task)",
+            "configureWorkspaceVariant()",
+            "freeCreation.promptRequired",
+        ):
+            self.assertIn(marker, self.javascript)
+        for key in (
+            "freeCreation.title",
+            "freeCreation.guideHint",
+            "freeCreation.prompt",
+            "freeCreation.promptRequired",
+        ):
+            self.assertIn(key, self.ecommerce_i18n)
+        self.assertIn("2026.07.29.free-creation.1", self.i18n_loader)
+        self.assertIn(".ec-page.is-universal.is-free-creation .ec-operation-controls { order:1; }", self.css)
 
     def test_universal_tab_supports_ordered_role_aware_references(self):
         self.assertIn('data-operation="universal"', self.html)

@@ -20,6 +20,7 @@ LEGACY_MODES = {"preview", "publish"}
 ASPECT_RATIOS = ("source", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "9:16", "16:9")
 RESOLUTIONS = ("auto", "1k", "2k", "4k")
 QUALITIES = ("auto", "low", "medium", "high")
+FREE_CREATION_PROMPT_POLICY = "free"
 
 SIZE_PRESETS: dict[str, dict[str, str]] = {
     "1:1": {"1k": "1024x1024", "2k": "2048x2048", "4k": "2880x2880"},
@@ -1280,7 +1281,15 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     normalized = validate_input_roles(operation, inputs, options)
     options = options if isinstance(options, dict) else {}
     reference_map = build_ordered_reference_map(normalized)
-    instruction = str(options.get("instruction") or "").strip()
+    raw_instruction = str(options.get("instruction") or "")
+    instruction = raw_instruction.strip()
+    prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
+    if prompt_policy == FREE_CREATION_PROMPT_POLICY:
+        if operation != "universal":
+            raise ValueError("自由创作提示词策略仅支持全能模式工作区")
+        if not instruction:
+            raise ValueError("自由创作必须填写提示词")
+        return raw_instruction
     if instruction:
         return build_user_directed_ecommerce_prompt(instruction)
     lower_garment_lock = build_lower_garment_structure_lock(normalized)

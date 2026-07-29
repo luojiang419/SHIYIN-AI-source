@@ -99,14 +99,18 @@ try {
         $tagCreated = $true
     } elseif ($tagRef.object.sha -ne $targetSha) { throw "Tag $tag already points to $($tagRef.object.sha)." }
 
-    $runUrl = if ($env:GITHUB_RUN_ID) { "https://github.com/$SourceRepo/actions/runs/$env:GITHUB_RUN_ID" } else { 'local-release-run' }
+    $buildReference = if ($env:GITHUB_RUN_ID) {
+        "- 云端构建：https://github.com/$SourceRepo/actions/runs/$env:GITHUB_RUN_ID"
+    } else {
+        "- 构建来源：本地编译并校验（未使用 GitHub Actions 云端编译）"
+    }
     $body = @"
 $(Get-Content -Raw -LiteralPath $notesPath)
 
 ---
 
 - 源提交：$SourceSha
-- 云端构建：$runUrl
+$buildReference
 - SHA-256：$sha256
 - 签名状态：$SignatureStatus
 

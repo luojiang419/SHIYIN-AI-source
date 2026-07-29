@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.92"
+APP_VERSION = "1.0.93"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -1728,7 +1728,7 @@ def versioned_static_html(html: str) -> str:
     if not version:
         return html
     safe_version = urllib.parse.quote(version, safe="._-")
-    pattern = re.compile(r'(?P<prefix>(?:src|href)=["\']|@import\s+url\(["\'])(?P<url>/static/[^"\')?#]+(?:\.(?:js|css|html)))(?:\?v=[^"\')#]*)?', re.I)
+    pattern = re.compile(r'(?P<prefix>(?:src|href)=["\']|@import\s+url\(["\'])(?P<url>/static/[^"\')?#]+(?:\.(?:js|css|html)))(?P<query>\?[^"\')#]*)?', re.I)
     def replace(match):
         url = match.group("url")
         cache_version = safe_version
@@ -1740,7 +1740,15 @@ def versioned_static_html(html: str) -> str:
                 cache_version = f"{safe_version}.{int(os.path.getmtime(path))}"
         except Exception:
             pass
-        return f"{match.group('prefix')}{url}?v={cache_version}"
+        raw_query = str(match.group("query") or "").lstrip("?")
+        separator = "&amp;" if "&amp;" in raw_query else "&"
+        query_parts = [
+            part
+            for part in re.split(r"&(?:amp;)?", raw_query)
+            if part and not re.match(r"^v=", part, re.I)
+        ]
+        query_parts.append(f"v={cache_version}")
+        return f"{match.group('prefix')}{url}?{separator.join(query_parts)}"
     return pattern.sub(replace, html)
 
 def sync_static_html_versions():
@@ -12518,6 +12526,8 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
         "options": dict(snapshot.get("options") or {}),
     }
     if working.get("operation") != "universal":
+        return working, None
+    if str(working["options"].get("prompt_policy") or "").strip().lower() == "free":
         return working, None
     analysis = await analyze_ecommerce_universal_references(working["inputs"])
     items = analysis.get("items") if isinstance(analysis, dict) else {}

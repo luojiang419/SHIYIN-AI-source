@@ -660,6 +660,8 @@ body {
     background:color-mix(in srgb,var(--ec-panel-raised) 92%,transparent);
     box-shadow:var(--ec-shadow);
 }
+.ec-page.is-universal.is-free-creation .ec-operation-controls { order:1; }
+.ec-page.is-universal.is-free-creation .ec-model-panel { order:2; }
 .ec-page.is-universal .ec-result-panel {
     padding:18px 16px 14px;
     border-color:var(--ec-border);

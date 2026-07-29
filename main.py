@@ -235,11 +235,11 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.88"
-GITHUB_REPO_URL = "https://github.com/hero8152/Infinite-Canvas"
-GITHUB_VERSION_URL = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION"
-GITHUB_TREE_URL = "https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1"
-GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main"
+APP_VERSION = "1.0.89"
+GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
+GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
+GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
+GITHUB_RAW_ROOT = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main"
 GITHUB_UPDATE_NOTES_URL = GITHUB_RAW_ROOT + "/static/update-notes.json"
 MODELSCOPE_REPO_URL = "https://modelscope.ai/studios/daniel8152/Infinite-Canvas"
 MODELSCOPE_RAW_ROOT = "https://www.modelscope.ai/studios/daniel8152/Infinite-Canvas/raw/main"

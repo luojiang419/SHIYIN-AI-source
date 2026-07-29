@@ -2022,8 +2022,8 @@
         const SIDEBAR_MANUAL_MODE_KEY = 'studio_sidebar_manual_mode_v1';
         const DEFAULT_PAGE_ID = 'ecommerce';
         const PAGE_IDS = ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings'];
-        const PROJECT_URL = 'https://github.com/hero8152/Infinite-Canvas';
-        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION' };
+        const PROJECT_URL = 'https://github.com/luojiang419/SHIYIN-AI-source';
+        let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
         let projectUpdateAbort = null;  // 当前更新请求的 AbortController，便于用户中途取消
@@ -2647,8 +2647,8 @@
             const github = sources.github || {};
             const ms = sources.modelscope || {};
             return [
-                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/hero8152/Infinite-Canvas/git/trees/main?recursive=1', source:'github', required:true },
-                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION', source:'github', required:true },
+                { name:'GitHub 更新列表', url:github.tree_url || appInfo.tree_url || 'https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1', source:'github', required:true },
+                { name:'GitHub 版本文件', url:github.version_url || appInfo.version_url || 'https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION', source:'github', required:true },
                 { name:'GitHub 主页', url:'https://github.com/', source:'github' },
                 { name:'ModelScope 版本文件', url:ms.version_url || 'https://www.modelscope.cn/api/v1/studio/Daniel8152/Infinite-Canvas/repo?Revision=master&FilePath=VERSION', source:'modelscope', required:true },
                 { name:'ModelScope 空间页面', url:ms.repo_url || 'https://modelscope.cn/studios/Daniel8152/Infinite-Canvas', source:'modelscope' },

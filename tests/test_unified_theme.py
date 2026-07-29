@@ -37,14 +37,30 @@ class UnifiedThemeTests(unittest.TestCase):
             "frame-works",
             "frame-api-settings",
             "frame-app-settings",
-            "frame-canvas",
         ):
             self.assertRegex(
                 source,
                 rf'id="{frame_id}"[^>]+light-theme\.3',
                 frame_id,
             )
+        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-neutral-dark\.1')
         self.assertRegex(source, r'id="frame-ecommerce"[^>]+light-theme\.3')
+
+    def test_infinite_canvas_dark_surface_is_neutral_and_cache_busted(self):
+        source = UNIFIED_CSS.read_text(encoding="utf-8")
+        for marker in (
+            "Infinite canvas dark final pass",
+            "html.studio-theme-dark body #shell.shell",
+            "body.theme-dark #shell.shell > .board",
+            "--page:var(--studio-bg)",
+            "--grid:var(--studio-grid)",
+            "background-color:var(--studio-bg) !important",
+            "background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important",
+        ):
+            self.assertIn(marker, source)
+        for page in ("canvas-list.html", "canvas.html", "smart-canvas.html"):
+            page_source = (STATIC / page).read_text(encoding="utf-8")
+            self.assertIn("studio-unified.css?v=2026.07.29.canvas-neutral-dark.1", page_source, page)
 
     def test_gpt_chat_no_longer_declares_legacy_blue_dark_theme(self):
         source = (STATIC / "gpt-chat.html").read_text(encoding="utf-8").lower()

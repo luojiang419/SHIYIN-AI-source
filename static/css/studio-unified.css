@@ -1572,3 +1572,20 @@ body:not(.studio-theme-dark):not(.theme-dark) .works-compare-handle::before {
     border-color:var(--studio-border-strong) !important;
     color:var(--studio-text) !important;
 }
+
+/* Infinite canvas dark final pass: keep the surface neutral instead of inheriting
+   the legacy blue-gray theme. The page entrypoints cache-bust this stylesheet. */
+html.studio-theme-dark body #shell.shell,
+html.theme-dark body #shell.shell,
+body.studio-theme-dark #shell.shell,
+body.theme-dark #shell.shell,
+html.studio-theme-dark body #shell.shell > .board,
+html.theme-dark body #shell.shell > .board,
+body.studio-theme-dark #shell.shell > .board,
+body.theme-dark #shell.shell > .board {
+    --page:var(--studio-bg);
+    --grid:var(--studio-grid);
+    background-color:var(--studio-bg) !important;
+    background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important;
+    background-size:24px 24px !important;
+}

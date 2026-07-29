@@ -31,6 +31,8 @@ def main() -> int:
     parser.add_argument("--case-dir", required=True)
     parser.add_argument("--provider", default="shiying")
     parser.add_argument("--model", default="gemini-3-pro-image-preview")
+    parser.add_argument("--studio-reference", default="studio_black")
+    parser.add_argument("--operation", choices=("try_on", "background_change"), default="try_on")
     parser.add_argument("--timeout", type=float, default=1200)
     args = parser.parse_args()
 
@@ -51,6 +53,7 @@ def main() -> int:
         "status": "running",
         "provider": args.provider,
         "model": args.model,
+        "operation": args.operation,
         "source": str(source_path),
         "garment": str(garment_path),
     }
@@ -71,21 +74,27 @@ def main() -> int:
             if len(uploaded) != 2:
                 raise RuntimeError(f"案例图上传数量异常：{len(uploaded)}")
 
+            task_inputs = [{**uploaded[0], "role": "source"}]
+            options = {"studio_reference": args.studio_reference}
+            if args.operation == "try_on":
+                task_inputs.append({**uploaded[1], "role": "garment"})
+                options["garment_category"] = "auto"
+            else:
+                options.update({"background_mode": "preset", "background_preset": "studio_white"})
             response = client.post("/api/ecommerce/tasks", json={
-                "operation": "try_on",
+                "operation": args.operation,
                 "mode": "preview",
                 "provider_id": args.provider,
                 "model": args.model,
-                "inputs": [
-                    {**uploaded[0], "role": "source"},
-                    {**uploaded[1], "role": "garment"},
-                ],
-                "options": {"garment_category": "auto"},
+                "inputs": task_inputs,
+                "options": options,
             })
             response.raise_for_status()
             task_id = response.json()["id"]
             report["task_id"] = task_id
             task = wait_for_task(client, task_id, args.timeout)
+            if "FINAL STUDIO BACKGROUND OVERRIDE" not in str(task.get("prompt") or ""):
+                raise RuntimeError("真实任务未写入摄影棚背景最终覆盖指令")
             report.update({
                 "task_status": task.get("status"),
                 "garment_analysis": task.get("garment_analysis"),
@@ -111,7 +120,7 @@ def main() -> int:
             capabilities = client.get("/api/ecommerce/capabilities").json()
             checks = {
                 item["id"]: True
-                for item in capabilities.get("quality_checks", {}).get("try_on", [])
+                for item in capabilities.get("quality_checks", {}).get(args.operation, [])
             }
             approval = client.post(
                 f"/api/ecommerce/tasks/{task_id}/approve",
@@ -126,7 +135,7 @@ def main() -> int:
                 "library_id": "default",
                 "category_id": "characters",
                 "url": export_data.get("url") or image_urls[0],
-                "name": f"shiying-电商换衣案例-{task_id[-8:]}.png",
+                "name": f"shiying-电商-{args.operation}-{task_id[-8:]}.png",
             })
             asset_saved.raise_for_status()
 

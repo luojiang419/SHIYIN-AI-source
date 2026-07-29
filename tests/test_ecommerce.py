@@ -175,6 +175,17 @@ class EcommerceContractTests(unittest.TestCase):
                 self.assertIn("White studio", prompt)
                 self.assertIn("backdrop color family", prompt)
                 self.assertIn("must not override reference-owned", prompt)
+                self.assertIn("FINAL STUDIO BACKGROUND OVERRIDE", prompt)
+                self.assertTrue(prompt.rstrip().endswith("selected studio."))
+                if operation != "universal":
+                    self.assertIn("selected studio replaces", prompt)
+
+        pose_prompt = build_prompt(
+            "pose_transfer",
+            [{"role": "source", "url": "/assets/input/person.png"}],
+            {"pose_source": "preset", "studio_reference": "studio_black"},
+        )
+        self.assertNotIn("skin texture, and background from the source image", pose_prompt)
         presets = public_capabilities(self.providers)["studio_reference_presets"]
         self.assertIn("studio_white", [item["id"] for item in presets])
         self.assertIn("studio_black", [item["id"] for item in presets])

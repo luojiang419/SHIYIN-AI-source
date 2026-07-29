@@ -703,6 +703,22 @@ def build_studio_reference_lock(options: dict[str, Any] | None = None) -> str:
     )
 
 
+def build_final_studio_background_override(options: dict[str, Any] | None = None) -> str:
+    studio_id = str((options or {}).get("studio_reference") or "").strip()
+    if not studio_id:
+        return ""
+    selected = next((item for item in STUDIO_REFERENCE_PRESETS if item.get("id") == studio_id), None)
+    if not selected:
+        return ""
+    label = selected.get("label", {}).get("en") or selected.get("label", {}).get("zh") or selected.get("id")
+    prompt = str(selected.get("prompt") or "").strip()
+    return (
+        f"FINAL STUDIO BACKGROUND OVERRIDE: render the final background exclusively as the selected {label}: {prompt}. "
+        "This final instruction supersedes every earlier instruction to preserve, continue, reproject, match, infer, or reuse any source/reference background, scenery, environmental palette, environmental lighting, floor, wall, or set. "
+        "Keep the foreground subject or product intact, but replace its environment and adapt only contact shadows, reflections, and light integration needed for the selected studio."
+    )
+
+
 def _global_preservation() -> str:
     return (
         "Change only the requested dimension. Preserve identity, silhouette, proportions, colors, materials, "
@@ -1227,6 +1243,11 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     no_model_product_lock = build_no_model_product_subject_lock(normalized, options) if operation == "universal" else ""
     studio_reference_lock = build_studio_reference_lock(options)
     studio_background_selected = bool(studio_reference_lock)
+    selected_studio = next(
+        (item for item in STUDIO_REFERENCE_PRESETS if item.get("id") == str(options.get("studio_reference") or "").strip()),
+        None,
+    )
+    selected_studio_prompt = str((selected_studio or {}).get("prompt") or "").strip()
 
     if operation == "universal":
         composition_mode = universal_composition_mode(normalized, options)
@@ -1357,8 +1378,12 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         garment_type = re.sub(r"\s+", " ", str(options.get("garment_type") or "").strip())[:120]
         detected_note = f" If a generic garment reference is used, it was visually identified as {garment_type}." if garment_type else ""
         source_instruction = (
-            f"Preserve the source person's body shape, limb proportions, source lighting, camera, and background. Use Image {identity_index} only as model identity: transfer face, hairstyle, skin tone, makeup, age cues, and recognizable appearance without copying its body pose, clothing, accessories, background, or framing."
+            f"Preserve the source person's body shape, limb proportions, source lighting, and camera; the selected studio replaces the source background. Use Image {identity_index} only as model identity: transfer face, hairstyle, skin tone, makeup, age cues, and recognizable appearance without copying its body pose, clothing, accessories, background, or framing."
+            if studio_background_selected and identity_index
+            else f"Preserve the source person's body shape, limb proportions, source lighting, camera, and background. Use Image {identity_index} only as model identity: transfer face, hairstyle, skin tone, makeup, age cues, and recognizable appearance without copying its body pose, clothing, accessories, background, or framing."
             if identity_index
+            else "Preserve the source person's face, hair, body shape, identity, skin tone, lighting, and use the selected studio instead of the source background."
+            if studio_background_selected
             else "Preserve the source person's face, hair, body shape, identity, skin tone, lighting, and background."
         )
         pose_instruction = (
@@ -1366,6 +1391,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             + _pose_orientation_lock(pose_index) + " "
             "Do not copy the pose reference person's identity, clothing, accessories, or background."
             if pose_index
+            else " Preserve the source person's pose, hands, framing, and lighting; the selected studio replaces the source background."
+            if studio_background_selected
             else " Preserve the source person's pose, hands, framing, lighting, and background."
         )
         task = (
@@ -1393,9 +1420,11 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                 "Do not copy the pose reference person's identity, clothes, accessories, or background content."
             )
             task = (
-                target + " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, lighting, and background appearance. "
+                target + " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, and lighting; the selected studio replaces the source background. "
+                if studio_background_selected
+                else target + " Preserve the source person's identity, facial features, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, lighting, and background appearance. "
                 "Let the pose reference override the source image only for pose and spatial composition. Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
-                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, hairstyle, skin texture, and background from the source image through the new pose; do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
+                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; do not preserve the source background when a studio is selected, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
                 "Keep product graphics and garment text non-mirrored and readable after the pose change. "
                 + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
                 + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
@@ -1403,9 +1432,11 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         else:
             target = "Apply this target pose: " + _preset_prompt(POSE_PRESETS, str(options.get("pose_preset") or "standing_front"), "standing_front") + "."
             task = (
-                target + " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, lighting, and background. "
+                target + " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, and lighting; the selected studio replaces the source background. "
+                if studio_background_selected
+                else target + " Preserve the source person's identity, facial expression, body proportions, outfit, accessories, SKU-level product details, logos, labels, readable text, camera framing, lighting, and background. "
                 "Keep anatomy, balance, hands, feet, fabric tension, folds, clean garment edges, and occlusions realistic. "
-                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, hairstyle, skin texture, and background from the source image through the new pose; do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
+                "POSE TRANSFER SOURCE LOCK: reproject source clothing textures, product details, logos, labels, jewelry, and hairstyle through the new pose; do not preserve the source background when a studio is selected, and do not redesign, denoise, simplify, recolor, or replace the outfit while changing posture. "
                 "Keep product graphics and garment text non-mirrored and readable after the pose change. "
                 + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
                 + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
@@ -1416,7 +1447,9 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"Replace only {target_description} in the source image with the exact prop or product from the prop reference for a marketplace-ready listing image. "
             "The new prop owns SKU-level product fidelity: exact silhouette, dimensions, material micro-texture, colors, packaging seams, hardware, logo, label, and readable text. "
             "Match believable scale, perspective, grip or contact, lighting, shadow, reflection, occlusion, and clean edges. "
-            "Remove every remnant of the old prop while leaving all pixels outside the target region semantically unchanged. "
+            "Remove every remnant of the old prop while leaving all non-environment pixels outside the target region semantically unchanged; the selected studio replaces the source background. "
+            if studio_background_selected
+            else "Remove every remnant of the old prop while leaving all pixels outside the target region semantically unchanged. "
             "PROP REPLACEMENT MATERIAL LOCK: the prop reference is the pixel-grounded material and branding source; preserve its surface finish, grain, stitching, packaging folds, metal/plastic/leather/glass response, printed text, and edge geometry. Do not leave old prop shadows, handles, straps, reflections, masks, halos, or ghost fragments. "
             + REFERENCE_GROUNDED_MATERIAL_DIRECTIVE + " "
             + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
@@ -1430,14 +1463,18 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"Move the camera to azimuth {azimuth} degrees and elevation {elevation} degrees, using a {distance}, as a clean e-commerce viewpoint regeneration. "
             "Rotate the viewpoint around the subject; do not rotate, redesign, mirror, recolor, or replace the subject. "
             "Infer newly visible surfaces consistently with the same SKU structure, dimensions, material micro-texture, colors, seams, hardware, logos, labels, and readable text. "
-            "Keep geometry, perspective, product edges, contact shadows, reflections, and background continuity believable. "
+            "Keep geometry, perspective, product edges, contact shadows, and reflections believable; render the selected studio instead of the source background. "
+            if studio_background_selected
+            else "Keep geometry, perspective, product edges, contact shadows, reflections, and background continuity believable. "
             "ANGLE REGENERATION SKU LOCK: preserve the same product identity while changing only camera viewpoint; never mirror or garble logos/text, invent unseen decorations, change material scale, flatten curved surfaces, distort symmetry, or alter package/product proportions. Newly visible surfaces must follow the source material grain, construction logic, and lighting response. "
             + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
             + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
         )
     else:
         background_mode = str(options.get("background_mode") or "preset")
-        if background_mode == "reference":
+        if studio_background_selected:
+            target = selected_studio_prompt
+        elif background_mode == "reference":
             target = "Use the background reference for environment, composition, palette, and lighting, without copying any foreground subject from it."
         elif background_mode == "prompt":
             target = str(options.get("background_prompt") or "clean professional e-commerce studio background").strip()
@@ -1454,11 +1491,15 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
 
     if operation == "pose_transfer" and str(options.get("pose_source") or "preset") == "reference":
         preservation = (
-            "Preserve source identity, clothing, products, lighting, and background content. The pose reference replaces the source pose and spatial composition, including camera viewpoint, shot scale, framing, crop, subject placement, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. "
+            "Preserve source identity, clothing, products, and lighting; the selected studio replaces background content. The pose reference replaces the source pose and spatial composition, including camera viewpoint, shot scale, framing, crop, subject placement, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. "
+            if studio_background_selected
+            else "Preserve source identity, clothing, products, lighting, and background content. The pose reference replaces the source pose and spatial composition, including camera viewpoint, shot scale, framing, crop, subject placement, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. "
             "Only an explicit additional user instruction may override the pose reference's spatial constraints. Do not add people, products, text, watermarks, duplicate objects, or extra limbs."
         )
     else:
         preservation = (
+        "Preserve every non-environment reference-owned attribute; the selected studio replaces every reference background and environmental lighting. "
+        if studio_background_selected and operation != "universal" else
         "Preserve every reference-owned attribute unless the final composition explicitly changes it. "
         "Add only the mapped subjects and products. Do not add unrelated people, products, text, watermarks, duplicate objects, or extra limbs."
         if operation == "universal" else _global_preservation() + mask_note
@@ -1476,7 +1517,12 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         NANO_BANANA_PRO_PHOTO_DIRECTIVE,
         NANO_BANANA_PRO_ECOMMERCE_DIRECTIVE,
     ]
-    parts = ([] if operation == "universal" else [reference_map]) + [task, *[lock for lock in operation_locks if lock], preservation]
+    parts = ([] if operation == "universal" else [reference_map]) + [
+        task,
+        *[lock for lock in operation_locks if lock],
+        preservation,
+        build_final_studio_background_override(options),
+    ]
     return " ".join(part for part in parts if part).strip()
 
 

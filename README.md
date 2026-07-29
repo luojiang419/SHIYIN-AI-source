@@ -3,7 +3,7 @@
 
 ## Windows x64 便携版
 
-解压发布 ZIP 后运行 `SHIYIN AI.exe`。程序资源位于 `app`，所有设置、数据库、媒体、缓存和日志只写入同级 `data`。桌面版会从公开 GitHub Release 检查更新，校验 ZIP 的 SHA-256 后由独立更新器替换程序资源并保留 `data`；可在“设置 → 软件设置”选择自动、手动或关闭更新，以及自动代理、手动代理或直连。发布者执行 `npm run release:publish` 即可构建、递增版本并发布标准更新资产。默认监听 3000 端口并允许可信局域网访问，新设备须通过托盘“配对设备”生成的一次性配对码授权。请勿将端口直接映射到公网。
+解压发布 ZIP 后运行 `SHIYIN AI.exe`。程序资源位于 `app`，所有设置、数据库、媒体、缓存和日志只写入同级 `data`。桌面版会从公开 GitHub Release 检查更新，校验 ZIP 的 SHA-256 后由独立更新器替换程序资源并保留 `data`；可在“设置 → 软件设置”选择自动、手动或关闭更新，以及自动代理、手动代理或直连。发布者执行 `npm run release:publish` 即可构建、递增版本并发布标准更新资产；发布前必须按[自动更新发布验收](自动更新发布验收.md)完成真实旧版升级验证。默认监听 3000 端口并允许可信局域网访问，新设备须通过托盘“配对设备”生成的一次性配对码授权。请勿将端口直接映射到公网。
 
 配套的chrome采集插件已经上线：https://chromewebstore.google.com/detail/infinite-canvas-%E5%9B%BE%E5%83%8F%E8%A7%86%E9%A2%91%E6%96%87%E5%AD%97%E6%8A%93%E5%8F%96%E5%B7%A5/ajfhnbklbmpfaaookhfakohabnpmlcic?authuser=0&hl=en
 

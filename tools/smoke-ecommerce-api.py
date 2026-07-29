@@ -52,11 +52,12 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="canvas-ecommerce-smoke-") as data_dir:
         os.environ.update(
             CANVAS_DATA_DIR=data_dir,
+            CANVAS_PORTABLE_ROOT=data_dir,
             CANVAS_DESKTOP_TOKEN="ecommerce-smoke-token",
             CANVAS_HOST="127.0.0.1",
             CANVAS_PORT="3998",
             CANVAS_RUNTIME_MODE="desktop",
-            GRSAI_API_KEY="ecommerce-smoke-configured-key",
+            API_PROVIDER_SHIYING_KEY="ecommerce-smoke-configured-key",
         )
         from fastapi.testclient import TestClient
         import main as canvas_main
@@ -118,12 +119,12 @@ def main() -> int:
             source = {**files["source"], "role": "source"}
 
             payloads = {
-                "try_on": {"inputs": [source, {**files["garment"], "role": "garment"}], "options": {"garment_category": "auto"}},
-                "pose_transfer": {"inputs": [source], "options": {"pose_source": "preset", "pose_preset": "walking"}},
-                "prop_replace": {"inputs": [source, {**files["prop"], "role": "prop"}], "options": {"target_description": "left-hand bag"}},
+                "try_on": {"inputs": [source, {**files["garment"], "role": "garment"}], "options": {"garment_category": "auto", "studio_reference": "studio_black"}},
+                "pose_transfer": {"inputs": [source], "options": {"pose_source": "preset", "pose_preset": "walking", "studio_reference": "studio_black"}},
+                "prop_replace": {"inputs": [source, {**files["prop"], "role": "prop"}], "options": {"target_description": "left-hand bag", "studio_reference": "studio_black"}},
                 "angle_change": {
                     "inputs": [source],
-                    "options": {"azimuth": 45, "elevation": 0, "distance": "medium"},
+                    "options": {"azimuth": 45, "elevation": 0, "distance": "medium", "studio_reference": "studio_black"},
                     "aspect_ratio": "4:5",
                     "resolution": "2k",
                     "quality": "high",
@@ -140,8 +141,8 @@ def main() -> int:
                         {**files["background"], "role": "scene", "reference_type": "scene", "reference_id": "scene", "label": "简洁棚拍场景"},
                     ],
                     "options": {},
-                    "provider_id": "grsai",
-                    "model": "gpt-image-2-vip",
+                    "provider_id": "shiying",
+                    "model": "gemini-3-pro-image-preview",
                 },
             }
 
@@ -184,9 +185,21 @@ def main() -> int:
             if exported.status_code != 200 or not exported.json().get("export", {}).get("url"):
                 raise AssertionError(exported.text)
             export_url = exported.json()["export"]["url"]
+            asset_library = client.get("/api/asset-library").json()["library"]
+            active_library_id = asset_library.get("active_library_id")
+            active_library = next(
+                (item for item in asset_library.get("libraries", []) if item.get("id") == active_library_id),
+                None,
+            )
+            asset_category = next(
+                (item for item in (active_library or {}).get("categories", []) if item.get("type") == "image"),
+                None,
+            )
+            if not active_library or not asset_category:
+                raise AssertionError("资产库缺少可保存生成图的图片分类")
             saved = client.post("/api/asset-library/items", json={
-                "library_id": "default",
-                "category_id": "characters",
+                "library_id": active_library["id"],
+                "category_id": asset_category["id"],
                 "url": export_url,
                 "name": "ecommerce-smoke.png",
             })

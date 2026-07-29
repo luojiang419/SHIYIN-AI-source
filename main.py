@@ -12668,6 +12668,42 @@ async def run_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     async with ECOMMERCE_TASK_SEMAPHORE:
         await execute_ecommerce_task(task_id, snapshot)
 
+async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Dict[str, Any]:
+    studio_reference = str((snapshot.get("options") or {}).get("studio_reference") or "").strip()
+    if not studio_reference or snapshot.get("operation") == "background_change":
+        return batch
+    images = list(batch.get("images") or [])
+    if not images:
+        raise HTTPException(status_code=502, detail="原始电商生成没有可用于摄影棚背景替换的图片")
+    studio_prompt = build_ecommerce_prompt(
+        "background_change",
+        [{"role": "source", "url": image} for image in images],
+        {"background_mode": "preset", "background_preset": "studio_white", "studio_reference": studio_reference},
+    )
+    refined_images: List[str] = []
+    refined_items: List[Dict[str, Any]] = []
+    elapsed = float(batch.get("generation_elapsed_seconds") or 0)
+    for image in images:
+        refined = await execute_ai_image_batch(
+            prompt=studio_prompt,
+            provider_id=route["provider_id"],
+            model=route["model"],
+            size=snapshot["size"],
+            quality=snapshot["quality"],
+            references=[{"role": "source", "url": image}],
+            count=1,
+            prefix="ecommerce_studio_",
+            allow_edit_endpoint_fallback=False,
+            semantic_mask=True,
+        )
+        output = (refined.get("images") or [""])[0]
+        if not output:
+            raise HTTPException(status_code=502, detail="摄影棚背景替换没有返回图片")
+        refined_images.append(output)
+        refined_items.append((refined.get("image_items") or [{"url": output}])[0])
+        elapsed += float(refined.get("generation_elapsed_seconds") or 0)
+    return {**batch, "images": refined_images, "image_items": refined_items, "generation_elapsed_seconds": elapsed}
+
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
     snapshot, garment_analysis = await enrich_ecommerce_snapshot_with_garment_analysis(snapshot)
@@ -12701,6 +12737,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     allow_edit_endpoint_fallback=False,
                     semantic_mask=True,
                 )
+                batch = await apply_selected_studio_background(batch, snapshot, route)
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",

@@ -1451,6 +1451,16 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for marker in ("ecommerce.presetModel", "ecommerce.presetGarment", "ecommerce.presetDetail", "ecommerce.presetPose", "ecommerce.presetScene"):
             self.assertIn(marker, self.javascript)
 
+    def test_regular_operation_generate_action_stays_in_the_control_panel(self):
+        selector = ".ec-page:not(.is-universal):not(.is-try-on) .ec-generate-actions"
+        matches = list(re.finditer(rf"{re.escape(selector)}\s*\{{([^}}]+)\}}", self.css, re.S))
+        self.assertTrue(matches, selector)
+        rule = matches[-1].group(1)
+        self.assertIn("position:sticky", rule)
+        self.assertIn("bottom:0", rule)
+        self.assertIn("left:auto", rule)
+        self.assertIn("width:auto", rule)
+
     def test_try_on_uses_dedicated_atelier_layout(self):
         self.assertIn("function renderTryOnInputs()", self.javascript)
         self.assertIn("state.operation === 'try_on'", self.javascript)

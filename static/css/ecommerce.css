@@ -2657,3 +2657,17 @@ html:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handle::before {
     color:var(--ec-text) !important;
     box-shadow:0 8px 22px rgba(104,80,52,.18) !important;
 }
+
+/* 常规电商操作：生成按钮随左栏布局，紧贴模型设置并在侧栏内保持可见。 */
+.ec-page:not(.is-universal):not(.is-try-on) .ec-control-panel {
+    padding-bottom:22px;
+}
+.ec-page:not(.is-universal):not(.is-try-on) .ec-generate-actions {
+    position:sticky;
+    left:auto;
+    right:auto;
+    bottom:0;
+    z-index:2;
+    width:auto;
+    margin-top:16px;
+}

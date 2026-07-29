@@ -49,6 +49,9 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "VERSION") -Destination (Join-Pat
 
 $token = "browser-smoke-token"
 $python = Join-Path $projectRoot "python\python.exe"
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    $python = (Get-Command python -ErrorAction Stop).Source
+}
 $entry = Join-Path $projectRoot "backend_entry.py"
 $previousShiyingKey = $env:API_PROVIDER_SHIYING_KEY
 if (-not $previousShiyingKey) { $env:API_PROVIDER_SHIYING_KEY = "browser-smoke-configured-key" }

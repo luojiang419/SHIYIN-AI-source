@@ -15,6 +15,7 @@ BUILD_SCRIPT = ROOT / "tools" / "build-portable.ps1"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
 PORTABLE_SMOKE = ROOT / "tools" / "smoke-portable.ps1"
 UPDATER_SMOKE = ROOT / "tools" / "smoke-updater.ps1"
+BROWSER_SMOKE_SERVER = ROOT / "tools" / "browser-smoke-server.ps1"
 BACKEND_SPEC = ROOT / "canvas-backend.spec"
 REQUIREMENTS = ROOT / "requirements.txt"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
@@ -97,6 +98,11 @@ class DesktopUpdaterContractTests(unittest.TestCase):
     def test_portable_backend_collects_websocket_runtime_modules(self):
         self.assertIn("websockets", REQUIREMENTS.read_text(encoding="utf-8").splitlines())
         self.assertIn('collect_submodules("websockets")', BACKEND_SPEC.read_text(encoding="utf-8"))
+
+    def test_browser_smoke_server_falls_back_to_system_python(self):
+        source = BROWSER_SMOKE_SERVER.read_text(encoding="utf-8")
+        self.assertIn('Test-Path -LiteralPath $python -PathType Leaf', source)
+        self.assertIn('(Get-Command python -ErrorAction Stop).Source', source)
 
     def test_version_sources_are_three_part_and_synchronized(self):
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()

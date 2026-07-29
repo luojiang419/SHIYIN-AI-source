@@ -604,7 +604,8 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         if len(values) > UNIVERSAL_REFERENCE_LIMIT:
             raise ValueError(f"全能模式最多上传 {UNIVERSAL_REFERENCE_LIMIT} 张参考图")
         normalized = normalize_universal_inputs(values)
-        if not normalized:
+        prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
+        if not normalized and prompt_policy != FREE_CREATION_PROMPT_POLICY:
             raise ValueError("全能模式至少需要一张已上传的参考图")
         return normalized
     normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
@@ -1278,9 +1279,8 @@ def build_subject_native_styling_lock(inputs: Iterable[dict[str, Any]], options:
 
 def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
     operation = validate_operation(operation)
-    normalized = validate_input_roles(operation, inputs, options)
     options = options if isinstance(options, dict) else {}
-    reference_map = build_ordered_reference_map(normalized)
+    normalized = validate_input_roles(operation, inputs, options)
     raw_instruction = str(options.get("instruction") or "")
     instruction = raw_instruction.strip()
     prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
@@ -1290,6 +1290,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         if not instruction:
             raise ValueError("自由创作必须填写提示词")
         return raw_instruction
+    reference_map = build_ordered_reference_map(normalized)
     if instruction:
         return build_user_directed_ecommerce_prompt(instruction)
     lower_garment_lock = build_lower_garment_structure_lock(normalized)

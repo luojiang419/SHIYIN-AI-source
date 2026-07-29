@@ -191,6 +191,15 @@
             if(button.dataset.operation !== 'universal') button.remove();
         });
         el.universalDock?.setAttribute('aria-label', t('freeCreation.referenceAssets'));
+        const emptyTitle = el.emptyResult?.querySelector('h3');
+        const emptyHint = el.emptyResult?.querySelector('h3 + p');
+        emptyTitle?.setAttribute('data-i18n', 'freeCreation.emptyTitle');
+        emptyHint?.setAttribute('data-i18n', 'freeCreation.emptyHint');
+        if(emptyTitle) emptyTitle.textContent = t('freeCreation.emptyTitle');
+        if(emptyHint) emptyHint.textContent = t('freeCreation.emptyHint');
+        const sourceRatioOption = el.ratioSelect?.querySelector('option[value="source"]');
+        sourceRatioOption?.setAttribute('data-i18n', 'freeCreation.sourceRatio');
+        if(sourceRatioOption) sourceRatioOption.textContent = t('freeCreation.sourceRatio');
     }
 
     function cleanCropHistory(values){
@@ -867,7 +876,7 @@
         const roles = universalReferenceRoles();
         const uploadedEntries = entries.filter(([,item]) => item.url);
         const hasSubject = uploadedEntries.some(([,item]) => item.reference_type === 'subject');
-        const baseReferenceKey = hasSubject ? '' : (uploadedEntries[0]?.[0] || '');
+        const baseReferenceKey = IS_FREE_CREATION ? '' : (hasSubject ? '' : (uploadedEntries[0]?.[0] || ''));
         const manyReferences = entries.length > 6;
         el.ecommercePage?.classList.toggle('has-many-universal-references', manyReferences);
         el.universalDock?.classList.toggle('has-many-references', manyReferences);
@@ -884,7 +893,7 @@
             return `<article class="ec-universal-reference ${key === baseReferenceKey ? 'is-base-reference':''}" data-reference-key="${escapeHtml(key)}" data-reference-role="${escapeHtml(role)}" data-reference-index="${index + 1}">
                 ${baseBadge}
                 <header><span class="ec-drag-handle" draggable="true" data-reference-drag-handle="${escapeHtml(key)}" title="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</span><b>${escapeHtml(t('ecommerce.imageNumber',{count:index + 1}))}</b><button type="button" data-remove-reference="${escapeHtml(key)}" aria-label="${escapeHtml(t('ecommerce.remove'))}">×</button></header>
-                <div class="ec-upload-slot ${role==='subject'?'required':''}" data-role="${escapeHtml(key)}">${universalUploadHtml(key,item,uploadLabel)}</div>
+                <div class="ec-upload-slot ${role==='subject' && !IS_FREE_CREATION?'required':''}" data-role="${escapeHtml(key)}">${universalUploadHtml(key,item,uploadLabel)}</div>
                 <label class="ec-reference-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected, context:'universal', fallbackRole:role, item, dataAttr:'data-reference-type', dataValue:key})}</label>
                 <div class="ec-reference-fields"><label><span>${escapeHtml(t('ecommerce.referenceLabel'))}</span><input data-reference-field="label" data-reference-key="${escapeHtml(key)}" maxlength="160" value="${escapeHtml(item.label || '')}" placeholder="${escapeHtml(t('ecommerce.referenceLabelHint'))}"></label><label><span>${escapeHtml(t('ecommerce.referenceInstruction'))}</span><input data-reference-field="instruction" data-reference-key="${escapeHtml(key)}" maxlength="300" value="${escapeHtml(item.instruction || '')}" placeholder="${escapeHtml(t('ecommerce.referenceInstructionHint'))}"></label></div>
             </article>`;
@@ -2680,8 +2689,8 @@
         const config = currentConfig();
         if(config.universal) {
             const references = universalEntries().map(([,item]) => item).filter(item => item.url);
-            if(!references.length) {
-                if(show) showFormError(t(IS_FREE_CREATION ? 'freeCreation.referenceRequired' : 'ecommerce.universalReferenceRequired'));
+            if(!IS_FREE_CREATION && !references.length) {
+                if(show) showFormError(t('ecommerce.universalReferenceRequired'));
                 return false;
             }
             if(IS_FREE_CREATION && !String(currentOptions().instruction || '').trim()) {

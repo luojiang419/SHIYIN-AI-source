@@ -359,6 +359,9 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual(prompt, instruction)
         self.assertNotIn("ORDERED REFERENCE MAP", prompt)
         self.assertNotIn("MATERIAL EVIDENCE LOCK", prompt)
+        text_only_prompt = build_prompt("universal", [], {"prompt_policy": "free", "instruction": instruction})
+        self.assertEqual(text_only_prompt, instruction)
+        self.assertEqual(validate_input_roles("universal", [], {"prompt_policy": "free"}), [])
         with self.assertRaisesRegex(ValueError, "必须填写提示词"):
             build_prompt("universal", references, {"prompt_policy": "free", "instruction": "   "})
         with self.assertRaisesRegex(ValueError, "仅支持全能模式"):
@@ -1088,6 +1091,33 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(enriched["prompt"], prompt)
         self.assertNotIn("reference_analysis", enriched["options"])
 
+    def test_free_creation_request_allows_zero_reference_images(self):
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        prompt = "一座漂浮在云海上的玻璃城市，清晨柔光，电影感广角构图"
+        payload = self.main.EcommerceTaskRequest(
+            operation="universal",
+            inputs=[],
+            options={"prompt_policy": "free", "instruction": prompt},
+            provider_id="shiying",
+            model="gemini-3-pro-image-preview",
+            aspect_ratio="16:9",
+            resolution="2k",
+        )
+        self.assertEqual(
+            self.main.validate_ecommerce_local_inputs([], "universal", allow_empty=True),
+            ([], (1024, 1024)),
+        )
+        with patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]):
+            snapshot = self.main.prepare_ecommerce_request(payload)
+        self.assertEqual(snapshot["inputs"], [])
+        self.assertEqual(snapshot["source_dimensions"], {"width": 1024, "height": 1024})
+        self.assertEqual(snapshot["composition_mode"], "")
+        self.assertEqual(snapshot["base_reference_url"], "")
+        self.assertEqual(snapshot["comparison_reference_url"], "")
+        self.assertEqual(snapshot["prompt"], prompt)
+        self.assertEqual(snapshot["aspect_ratio"], "16:9")
+        self.assertTrue(snapshot["route_candidates"])
+
     def test_approval_requires_every_quality_check(self):
         task_id = "ecommerce_test_approval"
         self.main.ECOMMERCE_TASKS[task_id] = {
@@ -1423,9 +1453,18 @@ class EcommerceFrontendContractTests(unittest.TestCase):
             "freeCreation.guideHint",
             "freeCreation.prompt",
             "freeCreation.promptRequired",
+            "freeCreation.emptyTitle",
+            "freeCreation.emptyHint",
+            "freeCreation.sourceRatio",
         ):
             self.assertIn(key, self.ecommerce_i18n)
-        self.assertIn("2026.07.29.free-creation.1", self.i18n_loader)
+        self.assertIn("可不上传任何图片", self.ecommerce_i18n)
+        self.assertIn("创作素材（可选）", self.ecommerce_i18n)
+        self.assertIn("跟随参考图（无图时 1:1）", self.ecommerce_i18n)
+        self.assertNotIn("freeCreation.referenceRequired", self.ecommerce_i18n)
+        self.assertIn("querySelector('h3 + p')", self.javascript)
+        self.assertIn("querySelector('option[value=\"source\"]')", self.javascript)
+        self.assertIn("2026.07.29.free-creation-optional-reference.1", self.i18n_loader)
         self.assertIn(".ec-page.is-universal.is-free-creation .ec-operation-controls { order:1; }", self.css)
 
     def test_universal_tab_supports_ordered_role_aware_references(self):
@@ -1468,13 +1507,14 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("['detail','detail','ecommerce.refDetail']", self.javascript)
         self.assertIn("model_identity:'ecommerce.presetModelIdentity'", self.javascript)
         self.assertIn("detail:'ecommerce.presetDetail'", self.javascript)
-        self.assertIn("const baseReferenceKey = hasSubject ? '' : (uploadedEntries[0]?.[0] || '')", self.javascript)
+        self.assertIn("const baseReferenceKey = IS_FREE_CREATION ? '' : (hasSubject ? '' : (uploadedEntries[0]?.[0] || ''))", self.javascript)
         self.assertIn("ec-base-reference-badge", self.javascript)
         self.assertIn(".ec-universal-reference.is-base-reference", self.css)
         validation = re.search(r"function validateForm\(show=true\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(validation)
-        self.assertIn("if(!references.length)", validation.group(1))
+        self.assertIn("if(!IS_FREE_CREATION && !references.length)", validation.group(1))
         self.assertIn("ecommerce.universalReferenceRequired", validation.group(1))
+        self.assertNotIn("freeCreation.referenceRequired", validation.group(1))
         self.assertNotIn("reference_type === 'subject'", validation.group(1))
         comparison = re.search(r"function comparisonReferenceForTask\(task\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(comparison)

@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.93"
+APP_VERSION = "1.0.94"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -12545,7 +12545,11 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
     working["prompt"] = build_ecommerce_prompt(working["operation"], working["inputs"], working["options"])
     return working, analysis
 
-def validate_ecommerce_local_inputs(inputs: List[Dict[str, Any]], operation: str = "") -> Tuple[List[Dict[str, Any]], Tuple[int, int]]:
+def validate_ecommerce_local_inputs(
+    inputs: List[Dict[str, Any]],
+    operation: str = "",
+    allow_empty: bool = False,
+) -> Tuple[List[Dict[str, Any]], Tuple[int, int]]:
     checked = []
     dimensions = {}
     first_dimensions = None
@@ -12592,6 +12596,8 @@ def validate_ecommerce_local_inputs(inputs: List[Dict[str, Any]], operation: str
             if item.get(key):
                 normalized[key] = item.get(key)
         checked.append(normalized)
+    if not checked and allow_empty and operation == "universal":
+        return [], (1024, 1024)
     base_transfer = operation == "universal" and ecommerce_universal_composition_mode(checked) == "base_transfer"
     source_dimensions = first_dimensions if base_transfer else dimensions.get("source")
     if not source_dimensions:
@@ -12613,8 +12619,12 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation)
-    composition_mode = ecommerce_universal_composition_mode(inputs) if operation == "universal" else ""
+    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() == "free"
+    if free_creation and not normalized:
+        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True)
+    else:
+        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation)
+    composition_mode = "" if free_creation and not inputs else (ecommerce_universal_composition_mode(inputs) if operation == "universal" else "")
     base_reference = inputs[0] if composition_mode == "base_transfer" and inputs else {}
     pose_reference = ecommerce_primary_pose_reference(inputs)
     compare_reference = ecommerce_comparison_reference(inputs)

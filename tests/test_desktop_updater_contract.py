@@ -126,6 +126,8 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("data_preserved", smoke)
         self.assertIn("app_replaced", smoke)
         self.assertIn("Updater did not clear pending update state.", smoke)
+        self.assertIn("Unable to remove updater test stage", smoke)
+        self.assertIn("Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop", smoke)
 
     def test_updater_logs_helper_failures_for_diagnosis(self):
         source = UPDATER.read_text(encoding="utf-8")

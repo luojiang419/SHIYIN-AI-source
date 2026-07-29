@@ -98,5 +98,17 @@ try {
     [pscustomobject]@{ from_zip = [IO.Path]::GetFileName($fromZip); to_zip = [IO.Path]::GetFileName($toZip); target_version = $ToVersion; data_preserved = $true; app_replaced = $true } | ConvertTo-Json -Compress
 } finally {
     Stop-TestProcesses $installRoot
-    if ($success -and (Test-Path -LiteralPath $stage)) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    if ($success -and (Test-Path -LiteralPath $stage)) {
+        $removed = $false
+        foreach ($attempt in 1..5) {
+            try {
+                Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
+                $removed = $true
+                break
+            } catch {
+                if ($attempt -lt 5) { Start-Sleep -Milliseconds 250 }
+            }
+        }
+        if (-not $removed) { Write-Warning "Unable to remove updater test stage: $stage" }
+    }
 }

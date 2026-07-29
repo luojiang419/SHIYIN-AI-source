@@ -164,6 +164,8 @@ struct WindowPlacement {
     width: u32,
     height: u32,
     maximized: bool,
+    #[serde(default)]
+    scale_factor: f64,
 }
 
 struct DesktopState {
@@ -453,12 +455,16 @@ fn save_window_placement(app: &AppHandle) {
     let Ok(size) = window.outer_size() else {
         return;
     };
+    // Tauri 读取的是物理像素，创建窗口时要求的是逻辑像素。保存逻辑像素，
+    // 才能在 Windows 的 125%/150% 缩放与高分屏之间正确恢复窗口。
+    let scale_factor = window.scale_factor().unwrap_or(1.0).clamp(0.5, 4.0);
     let placement = WindowPlacement {
-        x: position.x,
-        y: position.y,
-        width: size.width,
-        height: size.height,
+        x: (position.x as f64 / scale_factor).round() as i32,
+        y: (position.y as f64 / scale_factor).round() as i32,
+        width: (size.width as f64 / scale_factor).round().max(1.0) as u32,
+        height: (size.height as f64 / scale_factor).round().max(1.0) as u32,
         maximized: window.is_maximized().unwrap_or(false),
+        scale_factor,
     };
     let state = app.state::<DesktopState>();
     let path = state.data_root.join("config").join("window.json");
@@ -604,7 +610,17 @@ pub fn run() {
                 .data_directory(webview_data_root)
                 .disable_drag_drop_handler()
                 .on_download(native_download_handler);
-            if placement.width >= 960 && placement.height >= 640 { window = window.inner_size(placement.width as f64, placement.height as f64).position(placement.x as f64, placement.y as f64); }
+            // 旧版 window.json 记录的是物理像素，不能再直接恢复；否则高 DPI
+            // 环境会把已保存尺寸再次按系统缩放放大，导致窗口和界面被裁切。
+            let placement_uses_logical_pixels = placement.scale_factor.is_finite()
+                && (0.5..=4.0).contains(&placement.scale_factor);
+            if placement_uses_logical_pixels && placement.width >= 960 && placement.height >= 640 {
+                window = window.inner_size(placement.width as f64, placement.height as f64);
+                let primary_scale = app.primary_monitor().ok().flatten().map(|monitor| monitor.scale_factor()).unwrap_or(placement.scale_factor);
+                if (primary_scale - placement.scale_factor).abs() < 0.01 {
+                    window = window.position(placement.x as f64, placement.y as f64);
+                }
+            }
             match window.build() {
                 Ok(view) => { if placement.maximized { let _ = view.maximize(); } }
                 Err(error) => {

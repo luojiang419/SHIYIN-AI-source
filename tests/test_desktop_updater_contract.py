@@ -32,6 +32,11 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("tauri::async_runtime::spawn_blocking", source)
         self.assertIn("无法连接更新服务器。请检查网络或代理设置后重试。", source)
         self.assertIn("agents.push(build_update_agent(None)?)", source)
+        self.assertIn("const DOWNLOAD_ATTEMPTS: usize = 3", source)
+        self.assertIn("已重试 {DOWNLOAD_ATTEMPTS} 次", source)
+        self.assertIn("fs::remove_file(&part)", source)
+        self.assertIn('"SHIYIN_UPDATE_ZIP", zip', source)
+        self.assertIn('"SHIYIN_UPDATE_DESTINATION", destination', source)
 
     def test_updater_keeps_data_and_uses_independent_helper(self):
         source = UPDATER.read_text(encoding="utf-8")

@@ -257,7 +257,7 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("Use detail references only to refine corresponding garment or product fidelity", prompt)
         self.assertIn("without changing body identity, pose, framing, or unrelated garment regions", prompt)
 
-    def test_try_on_generation_request_preserves_input_order_and_skips_auto_rules(self):
+    def test_try_on_manual_prompt_is_used_verbatim(self):
         references = [
             {"role": "source", "reference_id": "slot_1", "url": "/assets/input/model.png", "label": "图1模特"},
             {"role": "detail", "reference_id": "slot_2", "url": "/assets/input/waist.png", "label": "图2腰头细节"},
@@ -270,15 +270,7 @@ class EcommerceContractTests(unittest.TestCase):
 
         instruction = "按图1的模特，图2、图3保留局部细节，图4作为裤子生成"
         prompt = build_prompt("try_on", references, {"instruction": instruction})
-        self.assertIn("USER GENERATION REQUIREMENT: " + instruction, prompt)
-        self.assertIn("Image 1, Image 2, Image 3, Image 4", prompt)
-        self.assertIn("DIRECT USER PROMPT MODE", prompt)
-        self.assertIn("REFERENCE-GROUNDED MATERIAL FIDELITY", prompt)
-        self.assertIn("ECOMMERCE COLOR FIDELITY LOCK", prompt)
-        self.assertNotIn("ORDERED REFERENCE MAP", prompt)
-        self.assertNotIn("Create a marketplace-ready virtual try-on outfit", prompt)
-        self.assertNotIn("NANO BANANA PRO", prompt)
-        self.assertNotIn("Additional user instruction", prompt)
+        self.assertEqual(prompt, instruction)
 
     def test_user_prompt_mode_bypasses_all_automatic_operation_rules(self):
         cases = {
@@ -307,24 +299,10 @@ class EcommerceContractTests(unittest.TestCase):
                 {"studio_reference": "studio_black", "instruction": "图1穿图2的同款风格服装"},
             ),
         }
-        forbidden = (
-            "ORDERED REFERENCE MAP",
-            "FINAL COMPOSITION",
-            "REFERENCE OWNERSHIP RULES",
-            "STUDIO REFERENCE LOCK",
-            "NANO BANANA PRO",
-            "Additional user instruction",
-        )
         for operation, (references, options) in cases.items():
             with self.subTest(operation=operation):
                 prompt = build_prompt(operation, references, options)
-                self.assertIn("USER GENERATION REQUIREMENT: " + options["instruction"], prompt)
-                self.assertIn("REFERENCE IMAGE ORDER", prompt)
-                self.assertIn("DIRECT USER PROMPT MODE", prompt)
-                self.assertIn("REFERENCE-GROUNDED MATERIAL FIDELITY", prompt)
-                self.assertIn("ECOMMERCE COLOR FIDELITY LOCK", prompt)
-                for phrase in forbidden:
-                    self.assertNotIn(phrase, prompt)
+                self.assertEqual(prompt, options["instruction"])
 
     def test_universal_model_identity_has_exclusive_ownership(self):
         references = [
@@ -398,12 +376,9 @@ class EcommerceContractTests(unittest.TestCase):
             {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/2.png", "label": "红色连衣裙"},
             {"reference_id": "heels", "reference_type": "shoes", "role": "shoes", "url": "/assets/input/3.png", "label": "银色高跟鞋"},
         ]
-        prompt = build_prompt("universal", references, {"instruction": "使用图3的银色高跟鞋，其他配饰仍保持主体图"})
-        self.assertIn("USER GENERATION REQUIREMENT: 使用图3的银色高跟鞋，其他配饰仍保持主体图", prompt)
-        self.assertIn("Image 1, Image 2, Image 3", prompt)
-        self.assertIn("REFERENCE-GROUNDED MATERIAL FIDELITY", prompt)
-        self.assertNotIn("Put the exact shoes from Image 3", prompt)
-        self.assertNotIn("SUBJECT-NATIVE STYLING LOCK", prompt)
+        instruction = "使用图3的银色高跟鞋，其他配饰仍保持主体图"
+        prompt = build_prompt("universal", references, {"instruction": instruction})
+        self.assertEqual(prompt, instruction)
 
     def test_universal_prompt_anchors_texture_to_reference_pixels(self):
         references = [
@@ -457,22 +432,18 @@ class EcommerceContractTests(unittest.TestCase):
         ]
         self.assertEqual(primary_pose_reference(references)["url"], "/assets/input/pose-a.png")
         self.assertEqual(comparison_reference(references)["url"], "/assets/input/pose-a.png")
-        prompt = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
-        self.assertIn("USER GENERATION REQUIREMENT: 保持横向 4:3 输出", prompt)
-        self.assertIn("Image 1, Image 2, Image 3, Image 4", prompt)
-        self.assertNotIn("PRIMARY SPATIAL / POSE TEMPLATE", prompt)
-        self.assertNotIn("highest-priority spatial authority", prompt)
+        instruction = "保持横向 4:3 输出"
+        prompt = build_prompt("universal", references, {"instruction": instruction})
+        self.assertEqual(prompt, instruction)
 
     def test_pose_transfer_reference_owns_framing_unless_user_overrides_it(self):
         references = [
             {"role": "source", "url": "/assets/input/model.png"},
             {"role": "pose", "url": "/assets/input/pose.png"},
         ]
-        prompt = build_prompt("pose_transfer", references, {"pose_source": "reference", "instruction": "改成近景"})
-        self.assertIn("USER GENERATION REQUIREMENT: 改成近景", prompt)
-        self.assertIn("Image 1, Image 2", prompt)
-        self.assertNotIn("exact spatial template", prompt)
-        self.assertNotIn("shot scale", prompt)
+        instruction = "改成近景"
+        prompt = build_prompt("pose_transfer", references, {"pose_source": "reference", "instruction": instruction})
+        self.assertEqual(prompt, instruction)
         self.assertNotIn("Additional user instruction", prompt)
 
     def test_universal_auto_instruction_chooses_prop_interactions(self):
@@ -579,9 +550,7 @@ class EcommerceContractTests(unittest.TestCase):
         ]
         instruction = "参考产品图腰头红线标识，把前中下凹处补高到与左右两侧同一水平高度"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertIn("USER GENERATION REQUIREMENT: " + instruction, prompt)
-        self.assertIn("REFERENCE-GROUNDED MATERIAL FIDELITY", prompt)
-        self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", prompt)
+        self.assertEqual(prompt, instruction)
 
         ordinary = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
         self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", ordinary)
@@ -790,7 +759,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["count"], 3)
         self.assertEqual(snapshot["parameters"], {"aspect_ratio": "4:5", "resolution": "2k", "quality": "high", "count": 3})
 
-    def test_user_prompt_request_preserves_universal_panel_reference_order(self):
+    def test_user_prompt_request_preserves_universal_panel_reference_order_without_prompt_injection(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         inputs = [
             {"role": "subject", "reference_type": "subject", "reference_id": "panel_1", "url": "/assets/input/1.png"},
@@ -820,7 +789,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(observed["operation"], "universal")
         self.assertEqual(observed["reference_ids"], ["panel_1", "panel_2", "panel_3"])
         self.assertEqual([item["reference_id"] for item in snapshot["inputs"]], ["panel_1", "panel_2", "panel_3"])
-        self.assertIn("Image 1, Image 2, Image 3", snapshot["prompt"])
+        self.assertEqual(snapshot["prompt"], "图1使用图2材质，图3作为背景")
 
     def test_pose_reference_controls_source_ratio_and_comparison_metadata(self):
         with tempfile.TemporaryDirectory() as root:

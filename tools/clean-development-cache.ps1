@@ -9,6 +9,7 @@ $targets = @(
     (Join-Path $projectRoot ".build\ecommerce-params-browser"),
     (Join-Path $projectRoot ".build\vision-live-smoke-data"),
     (Join-Path $projectRoot ".build\works-layout-profile"),
+    (Join-Path $projectRoot ".build\compact-layout-chrome-profile"),
     (Join-Path $projectRoot ".build\feature-browser-smoke"),
     (Join-Path $projectRoot ".build\close-behavior-smoke"),
     (Join-Path $projectRoot ".build\portable\backend-work"),

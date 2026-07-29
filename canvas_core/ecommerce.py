@@ -825,22 +825,9 @@ def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
     )
 
 
-def build_user_directed_ecommerce_prompt(inputs: Iterable[dict[str, Any]], instruction: str) -> str:
-    reference_count = len([item for item in inputs or [] if isinstance(item, dict) and str(item.get("url") or "").strip()])
-    image_indexes = ", ".join(f"Image {index}" for index in range(1, reference_count + 1))
-    ordered_note = (
-        "REFERENCE IMAGE ORDER: upload the reference images to the API in this exact current panel order: "
-        + image_indexes
-        + ". If the user names 图1, 图2, 图3, Image 1, Image 2, or similar, use that exact uploaded image index."
-    )
-    parts = [
-        "USER GENERATION REQUIREMENT: " + str(instruction or "").strip(),
-        ordered_note,
-        "DIRECT USER PROMPT MODE: do not add, infer, or apply automatic action, pose, background, camera, composition, scene, style, or reference-role instructions. The user's generation requirement is the only creative instruction.",
-        REFERENCE_GROUNDED_MATERIAL_DIRECTIVE,
-        ECOMMERCE_COLOR_FIDELITY_DIRECTIVE,
-    ]
-    return " ".join(part for part in parts if part).strip()
+def build_user_directed_ecommerce_prompt(instruction: str) -> str:
+    # 手动提示词具有完全优先级：不追加参考图顺序、保真锁或任何内置规则。
+    return str(instruction or "").strip()
 
 
 def _pose_spatial_detail(analysis: dict[str, Any] | None = None) -> str:
@@ -1232,7 +1219,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     mask_note = " A final mask reference marks red pixels to replace and green pixels to preserve." if any(item["role"] == "mask" for item in normalized) else ""
     instruction = str(options.get("instruction") or "").strip()
     if instruction:
-        return build_user_directed_ecommerce_prompt(normalized, instruction)
+        return build_user_directed_ecommerce_prompt(instruction)
     lower_garment_lock = build_lower_garment_structure_lock(normalized)
     named_detail_lock = build_named_detail_region_lock(normalized)
     user_waistband_geometry_lock = build_user_waistband_geometry_lock(instruction)

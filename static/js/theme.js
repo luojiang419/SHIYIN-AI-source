@@ -93,14 +93,8 @@
     }
 
     function autoScale(){
-        const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
-        const screenLong = Math.max(window.screen?.width || 0, window.screen?.height || 0);
-        const viewportLong = Math.max(window.innerWidth || 0, window.innerHeight || 0);
-        const longEdge = Math.max(screenLong, viewportLong);
-        if(dpr >= 1.35) return 1;
-        if(longEdge >= 3600) return 1.22;
-        if(longEdge >= 3000) return 1.16;
-        if(longEdge >= 2500 && dpr <= 1.15) return 1.1;
+        // 浏览器的 screen 尺寸在 WebView2 高 DPI 环境下并不稳定；自动放大
+        // 会使固定视窗页面超出可视区域。自动模式保持 100%，需要放大时由用户手动选择。
         return 1;
     }
 

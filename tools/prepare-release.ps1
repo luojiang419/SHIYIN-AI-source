@@ -12,6 +12,7 @@ if (-not $?) { throw 'Version source injection failed.' }
 
 $notesPath = Join-Path $projectRoot 'release-notes\current.md'
 $notes = [IO.File]::ReadAllText($notesPath)
-$updated = [regex]::Replace($notes, '(?m)^# SHIYIN AI v\d+\.\d+\.\d+\s*$', "# SHIYIN AI v$Version")
-if ($updated -eq $notes) { throw "Release note title was not found: $notesPath" }
-[IO.File]::WriteAllText($notesPath, $updated, [Text.UTF8Encoding]::new($false))
+$titlePattern = '(?m)^# SHIYIN AI v\d+\.\d+\.\d+\s*$'
+if (-not [regex]::IsMatch($notes, $titlePattern)) { throw "Release note title was not found: $notesPath" }
+$updated = [regex]::Replace($notes, $titlePattern, "# SHIYIN AI v$Version")
+if ($updated -ne $notes) { [IO.File]::WriteAllText($notesPath, $updated, [Text.UTF8Encoding]::new($false)) }

@@ -25,6 +25,7 @@ const DISABLED: &str = "disabled";
 const AUTOMATIC_PROXY: &str = "automaticProxy";
 const MANUAL_PROXY: &str = "manualProxy";
 const DIRECT: &str = "direct";
+const DOWNLOAD_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -417,22 +418,43 @@ fn download_release(data: &Path, release: &ResolvedRelease) -> Result<(), String
         && sha256(&destination)? == expected_hash)
     {
         let part = destination.with_extension("zip.part");
-        let mut response = release
-            .agent
-            .get(&release.asset.browser_download_url)
-            .header("Accept", "application/octet-stream")
-            .header("User-Agent", "SHIYIN-AI-Updater")
-            .call()
-            .map_err(|e| format!("下载更新包失败：{e}"))?;
-        let mut file = File::create(&part).map_err(|e| e.to_string())?;
-        let written = io::copy(&mut response.body_mut().as_reader(), &mut file)
-            .map_err(|e| format!("写入更新包失败：{e}"))?;
-        file.flush().map_err(|e| e.to_string())?;
-        if written != release.asset.size || sha256(&part)? != expected_hash {
+        let _ = fs::remove_file(&destination);
+        let mut last_error = String::new();
+        for attempt in 1..=DOWNLOAD_ATTEMPTS {
             let _ = fs::remove_file(&part);
-            return Err("更新包大小或 SHA-256 校验失败，已拒绝安装。".into());
+            let result = (|| -> Result<(), String> {
+                let mut response = release
+                    .agent
+                    .get(&release.asset.browser_download_url)
+                    .header("Accept", "application/octet-stream")
+                    .header("User-Agent", "SHIYIN-AI-Updater")
+                    .call()
+                    .map_err(|e| format!("下载更新包失败：{e}"))?;
+                let mut file = File::create(&part).map_err(|e| e.to_string())?;
+                let written = io::copy(&mut response.body_mut().as_reader(), &mut file)
+                    .map_err(|e| format!("写入更新包失败：{e}"))?;
+                file.flush().map_err(|e| e.to_string())?;
+                file.sync_all().map_err(|e| e.to_string())?;
+                if written != release.asset.size || sha256(&part)? != expected_hash {
+                    return Err("更新包大小或 SHA-256 校验失败。".into());
+                }
+                Ok(())
+            })();
+            if result.is_ok() {
+                fs::rename(&part, &destination).map_err(|e| e.to_string())?;
+                break;
+            }
+            last_error = result.unwrap_err();
+            let _ = fs::remove_file(&part);
+            if attempt < DOWNLOAD_ATTEMPTS {
+                thread::sleep(Duration::from_millis(300 * attempt as u64));
+            }
         }
-        fs::rename(part, &destination).map_err(|e| e.to_string())?;
+        if !destination.is_file() {
+            return Err(format!(
+                "下载更新包失败，已重试 {DOWNLOAD_ATTEMPTS} 次：{last_error}"
+            ));
+        }
     }
     save_pending(
         data,
@@ -713,11 +735,35 @@ fn archive_is_safe(zip: &Path, root_name: &str) -> Result<(), String> {
 }
 
 fn extract(zip: &Path, destination: &Path) -> Result<(), String> {
-    let status = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "param($zipPath,$destinationPath) Expand-Archive -LiteralPath $zipPath -DestinationPath $destinationPath -Force", &zip.display().to_string(), &destination.display().to_string()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_err(|e| format!("无法启动系统解压工具：{e}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "解压更新包失败。".into())
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "$zipPath = $env:SHIYIN_UPDATE_ZIP; $destinationPath = $env:SHIYIN_UPDATE_DESTINATION; if ([string]::IsNullOrWhiteSpace($zipPath) -or [string]::IsNullOrWhiteSpace($destinationPath)) { exit 2 }; Expand-Archive -LiteralPath $zipPath -DestinationPath $destinationPath -Force",
+        ])
+        .env("SHIYIN_UPDATE_ZIP", zip)
+        .env("SHIYIN_UPDATE_DESTINATION", destination)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .output()
+        .map_err(|e| format!("无法启动系统解压工具：{e}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if detail.is_empty() {
+        Err("解压更新包失败。".into())
+    } else {
+        Err(format!("解压更新包失败：{detail}"))
+    }
 }
 
 fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {

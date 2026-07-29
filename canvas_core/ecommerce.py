@@ -217,15 +217,6 @@ NO_HUMAN_SUBJECT_PRESENCE_VALUES = {
 HUMAN_SUBJECT_PRESENCE_VALUES = {"person", "human", "model", "partial_person", "body_only", "visible_person"}
 NO_FACE_PRESENCE_VALUES = {"none", "no_face", "not_visible", "hidden", "covered"}
 
-EDIT_MODEL_HINTS = (
-    "qwen-image-edit",
-    "flux.2-klein",
-    "flux2-klein",
-    "nano-banana",
-    "gpt-image",
-    "gemini-3-pro-image",
-    "gemini-3.1-flash-image",
-)
 STANDARD_PRIORITIES = ("gemini-3-pro-image-preview", "gpt-image-2-vip", "nano-banana-pro-4k-vip", "qwen-image-edit-2511")
 
 GARMENT_CATEGORY_ALIASES = {
@@ -373,11 +364,6 @@ def parse_universal_reference_analysis(text: str) -> dict[str, Any]:
     return normalize_universal_reference_analysis(data)
 
 
-def is_compatible_edit_model(model: str) -> bool:
-    value = str(model or "").strip().lower()
-    return bool(value and any(hint in value for hint in EDIT_MODEL_HINTS))
-
-
 def build_model_catalog(providers: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     catalog: list[dict[str, Any]] = []
     for provider_index, provider in enumerate(providers or []):
@@ -388,7 +374,7 @@ def build_model_catalog(providers: Iterable[dict[str, Any]]) -> list[dict[str, A
             continue
         for model_index, model in enumerate(provider.get("image_models") or []):
             model_name = str(model or "").strip()
-            if not is_compatible_edit_model(model_name):
+            if not model_name:
                 continue
             low = model_name.lower()
             if "gemini-3" in low or "nano-banana-pro" in low or "nano-banana-2" in low:

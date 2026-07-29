@@ -44,7 +44,12 @@ class UnifiedThemeTests(unittest.TestCase):
                 frame_id,
             )
         self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-neutral-dark\.1')
-        self.assertRegex(source, r'id="frame-ecommerce"[^>]+light-theme\.3')
+        for frame_id in ("frame-ecommerce", "frame-free-creation"):
+            self.assertRegex(
+                source,
+                rf'id="{frame_id}"[^>]+api-provider-unification\.1',
+                frame_id,
+            )
 
     def test_infinite_canvas_dark_surface_is_neutral_and_cache_busted(self):
         source = UNIFIED_CSS.read_text(encoding="utf-8")

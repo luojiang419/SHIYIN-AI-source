@@ -56,7 +56,7 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual(route_candidates(catalog, "standard")[0]["model"], "gpt-image-2-vip")
         self.assertEqual(route_candidates(catalog, "preview")[0]["model"], "gpt-image-2-vip")
         self.assertEqual(route_candidates(catalog, "publish")[0]["model"], "gpt-image-2-vip")
-        self.assertNotIn("text-only-model", [item["model"] for item in catalog])
+        self.assertIn("text-only-model", [item["model"] for item in catalog])
         self.assertNotIn("disabled", [item["provider_id"] for item in catalog])
 
     def test_same_model_prefers_primary_provider(self):
@@ -652,7 +652,7 @@ class EcommerceBackendTests(unittest.TestCase):
     def make_image(self, path: Path, size=(100, 80), image_format="PNG"):
         Image.new("RGB", size, "white").save(path, image_format)
 
-    def test_provider_list_removes_grsai_and_keeps_shiying_and_vision_presets(self):
+    def test_provider_list_keeps_user_added_platform_ids_and_default_presets(self):
         class FakeDatabase:
             def load_providers(self):
                 return [
@@ -663,11 +663,14 @@ class EcommerceBackendTests(unittest.TestCase):
 
         with patch.object(self.main, "DATABASE", FakeDatabase()):
             providers = self.main.load_api_providers()
-        self.assertEqual([item["id"] for item in providers], ["shiying", "local-vision"])
-        self.assertEqual(providers[0]["base_url"], "https://www.shiying-api.com")
-        self.assertEqual(providers[0]["model_protocols"]["gemini-3-pro-image-preview"], "gemini")
-        self.assertEqual(providers[1]["chat_models"], ["qwen3.5-9b-vlm"])
-        self.assertEqual(providers[1]["image_models"], [])
+        self.assertEqual(
+            [item["id"] for item in providers],
+            ["modelscope", "grsai", "lingjing", "shiying", "local-vision"],
+        )
+        self.assertEqual(providers[3]["base_url"], "https://www.shiying-api.com")
+        self.assertEqual(providers[3]["model_protocols"]["gemini-3-pro-image-preview"], "gemini")
+        self.assertEqual(providers[4]["chat_models"], ["qwen3.5-9b-vlm"])
+        self.assertEqual(providers[4]["image_models"], [])
 
     def test_local_vision_url_auto_completion(self):
         cases = {
@@ -747,6 +750,25 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(capabilities["providers"], [{"id": "grsai", "name": "Grsai"}])
         self.assertTrue(capabilities["models"])
         self.assertEqual({item["provider_id"] for item in capabilities["models"]}, {"grsai"})
+
+    def test_ecommerce_capabilities_include_arbitrary_configured_image_models(self):
+        providers = [
+            {"id": "custom-a", "name": "Custom A", "enabled": True, "image_models": ["future-image-v9"]},
+            {"id": "custom-b", "name": "Custom B", "enabled": True, "image_models": ["vendor-render-alpha"]},
+        ]
+        with (
+            patch.object(self.main, "load_api_providers", return_value=providers),
+            patch.object(self.main, "provider_env_key_value", return_value="configured"),
+        ):
+            capabilities = asyncio.run(self.main.get_ecommerce_capabilities())
+        self.assertEqual(
+            capabilities["providers"],
+            [{"id": "custom-a", "name": "Custom A"}, {"id": "custom-b", "name": "Custom B"}],
+        )
+        self.assertEqual(
+            {(item["provider_id"], item["model"]) for item in capabilities["models"]},
+            {("custom-a", "future-image-v9"), ("custom-b", "vendor-render-alpha")},
+        )
 
     def test_reference_slot_types_are_normalized_and_saved_globally(self):
         class FakeDatabase:
@@ -1342,6 +1364,10 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         cls.common_i18n = (root / "static" / "js" / "i18n" / "common.js").read_text(encoding="utf-8")
         cls.ecommerce_i18n = (root / "static" / "js" / "i18n" / "ecommerce.js").read_text(encoding="utf-8")
         cls.i18n_loader = (root / "static" / "js" / "i18n.js").read_text(encoding="utf-8")
+        cls.canvas_javascript = (root / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        cls.canvas_list_javascript = (root / "static" / "js" / "canvas-list.js").read_text(encoding="utf-8")
+        cls.smart_canvas_javascript = (root / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        cls.gpt_chat_html = (root / "static" / "gpt-chat.html").read_text(encoding="utf-8")
 
     def test_model_panel_contains_generation_parameter_dropdowns(self):
         panel = re.search(r'<section id="advancedSettings".*?</section>', self.html, re.S)
@@ -1377,6 +1403,14 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("keyInput?.addEventListener('change'", self.api_javascript)
         self.assertIn("settingsContent?.addEventListener('input'", self.api_javascript)
         self.assertIn("saveProviders({render:false, auto:true})", self.api_javascript)
+
+    def test_all_generation_pages_use_enabled_provider_model_lists_without_id_blacklists(self):
+        self.assertIn("p.enabled !== false && (p.image_models || []).length", self.canvas_javascript)
+        self.assertIn("p.enabled !== false && (p.image_models || []).length", self.smart_canvas_javascript)
+        self.assertIn("p.enabled !== false && (p.image_models || []).length", self.gpt_chat_html)
+        for source in (self.canvas_javascript, self.smart_canvas_javascript):
+            self.assertNotRegex(source, r"p\.id\s*!==\s*'(?:modelscope|volcengine)'.*image_models")
+        self.assertEqual(self.canvas_list_javascript.count("api-provider-unification.1"), 2)
 
     def test_shell_prompts_for_missing_shiying_api_key_on_first_run(self):
         self.assertIn('id="shiying-api-key-modal"', self.index_html)

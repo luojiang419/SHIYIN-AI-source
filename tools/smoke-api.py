@@ -17,7 +17,9 @@ def concrete_path(template: str) -> str:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="canvas-api-smoke-") as data_dir:
+    smoke_temp_root = PROJECT_ROOT / ".build"
+    smoke_temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="canvas-api-smoke-", dir=smoke_temp_root) as data_dir:
         os.environ.update(
             CANVAS_DATA_DIR=data_dir,
             CANVAS_DESKTOP_TOKEN="api-smoke-desktop-token",
@@ -79,6 +81,40 @@ def main() -> int:
             if response.status_code >= 400:
                 raise AssertionError(f"Authenticated GET {path} returned {response.status_code}: {response.text[:200]}")
 
+        custom_provider_id = "smoke-custom"
+        custom_model = "future-image-v9"
+        custom_key = "smoke-custom-secret"
+        saved = client.put(
+            "/api/providers",
+            json=[{
+                "id": custom_provider_id,
+                "name": "Smoke Custom",
+                "base_url": "https://api.smoke.invalid",
+                "protocol": "openai",
+                "enabled": True,
+                "image_models": [custom_model],
+                "chat_models": [],
+                "video_models": [],
+                "api_key": custom_key,
+            }],
+        )
+        if saved.status_code != 200:
+            raise AssertionError(f"Custom provider save returned {saved.status_code}: {saved.text[:200]}")
+        providers_after_save = client.get("/api/providers").json().get("providers") or []
+        config_after_save = client.get("/api/config").json().get("api_providers") or []
+        capabilities_after_save = client.get("/api/ecommerce/capabilities").json()
+        if not any(item.get("id") == custom_provider_id for item in providers_after_save):
+            raise AssertionError("Custom provider did not persist after save")
+        if not any(item.get("id") == custom_provider_id for item in config_after_save):
+            raise AssertionError("Custom provider did not reach the shared page configuration")
+        if not any(
+            item.get("provider_id") == custom_provider_id and item.get("model") == custom_model
+            for item in capabilities_after_save.get("models") or []
+        ):
+            raise AssertionError("Custom image model did not reach Free Creation capabilities")
+        if custom_key in saved.text or custom_key in json.dumps(providers_after_save):
+            raise AssertionError("Provider API exposed a complete credential")
+
         page_count = 0
         for page in canvas_main.APP_PATHS.web_root.rglob("*.html"):
             relative = page.relative_to(canvas_main.APP_PATHS.web_root).as_posix()
@@ -105,6 +141,7 @@ def main() -> int:
             "static_pages": page_count,
             "openapi_paths": len(canvas_main.app.openapi().get("paths", {})),
             "desktop_source_updater_disabled": True,
+            "custom_provider_shared_across_pages": True,
             "status": "ok",
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))

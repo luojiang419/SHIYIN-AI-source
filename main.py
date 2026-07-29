@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.95"
+APP_VERSION = "1.0.96"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -793,7 +793,7 @@ PROVIDER_PRESET_CLEANUP_SETTING = "provider_preset_cleanup_grsai_v2"
 
 
 def api_provider_templates():
-    # 保留完整模板供协议兼容代码参考；默认平台列表只启用当前实际使用的 Grsai。
+    # 保留完整模板供协议兼容代码参考；默认平台列表只启用当前实际使用的 shiying 和本地视觉模型。
     return [
         {
             "id": "modelscope",
@@ -943,9 +943,7 @@ def merge_default_api_providers(providers):
     rh_default = load_static_runninghub_provider() or next((d for d in default_api_providers() if d["id"] == "runninghub"), None)
     if rh_default:
         current = next((item for item in merged if item.get("id") == "runninghub"), None)
-        if not current:
-            merged.append(rh_default)
-        else:
+        if current:
             if not current.get("base_url"):
                 current["base_url"] = rh_default["base_url"]
             if not current.get("protocol") or current.get("protocol") == "openai":
@@ -1046,10 +1044,7 @@ def merge_default_api_providers(providers):
             *[item for item in (current.get("video_models") or []) if str(item or "").strip() not in JIMENG_LEGACY_VIDEO_MODELS],
             *JIMENG_DEFAULT_VIDEO_MODELS,
         ])
-    return [
-        item for item in merged
-        if str(item.get("id") or "").strip().lower() not in REMOVED_PROVIDER_PRESET_IDS
-    ]
+    return merged
 
 def normalize_model_list(values):
     return model_list_from_values(values)
@@ -1430,7 +1425,6 @@ def load_api_providers():
             normalize_provider(item)
             for item in raw
             if isinstance(item, dict)
-            and str(item.get("id") or "").strip().lower() not in REMOVED_PROVIDER_PRESET_IDS
         ]
         return merge_default_api_providers(providers or defaults)
     except Exception as e:

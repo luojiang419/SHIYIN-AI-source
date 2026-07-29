@@ -100,19 +100,19 @@ try {
     } elseif ($tagRef.object.sha -ne $targetSha) { throw "Tag $tag already points to $($tagRef.object.sha)." }
 
     $buildReference = if ($env:GITHUB_RUN_ID) {
-        "- 云端构建：https://github.com/$SourceRepo/actions/runs/$env:GITHUB_RUN_ID"
+        "- Cloud build: https://github.com/$SourceRepo/actions/runs/$env:GITHUB_RUN_ID"
     } else {
-        "- 构建来源：本地编译并校验（未使用 GitHub Actions 云端编译）"
+        "- Build source: Local compile and verification (GitHub Actions cloud build was not used)"
     }
     $body = @"
-$(Get-Content -Raw -LiteralPath $notesPath)
+$(Get-Content -Raw -Encoding UTF8 -LiteralPath $notesPath)
 
 ---
 
-- 源提交：$SourceSha
+- Source commit: $SourceSha
 $buildReference
-- SHA-256：$sha256
-- 签名状态：$SignatureStatus
+- SHA-256: $sha256
+- Signature status: $SignatureStatus
 
 <!-- source-sha:$SourceSha -->
 "@

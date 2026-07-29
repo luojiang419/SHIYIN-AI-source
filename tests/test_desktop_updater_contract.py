@@ -88,7 +88,8 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertNotIn('Get-FileHash', publish)
         self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($assetName))"', publish)
         self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($checksumName))"', publish)
-        self.assertIn("本地编译并校验（未使用 GitHub Actions 云端编译）", publish)
+        self.assertIn("Local compile and verification (GitHub Actions cloud build was not used)", publish)
+        self.assertIn("Get-Content -Raw -Encoding UTF8 -LiteralPath $notesPath", publish)
         self.assertIn('SHIYIN-AI-v$version-windows-x64', PORTABLE_SMOKE.read_text(encoding="utf-8"))
 
     def test_portable_backend_collects_websocket_runtime_modules(self):

@@ -90,6 +90,8 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('"${uploadBase}?name=$([Uri]::EscapeDataString($checksumName))"', publish)
         self.assertIn("Local compile and verification (GitHub Actions cloud build was not used)", publish)
         self.assertIn("Get-Content -Raw -Encoding UTF8 -LiteralPath $notesPath", publish)
+        self.assertIn("[Text.Encoding]::UTF8.GetBytes($json)", publish)
+        self.assertIn('$parameters.ContentType = "$ContentType; charset=utf-8"', publish)
         self.assertIn('SHIYIN-AI-v$version-windows-x64', PORTABLE_SMOKE.read_text(encoding="utf-8"))
 
     def test_portable_backend_collects_websocket_runtime_modules(self):

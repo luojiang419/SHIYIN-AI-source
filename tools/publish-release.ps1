@@ -56,7 +56,11 @@ $published = $false
 function Invoke-GitHubApi {
     param([string]$Method, [string]$Uri, [object]$Body, [string]$InFile, [string]$ContentType = 'application/json')
     $parameters = @{ Method = $Method; Uri = $Uri; Headers = $headers }
-    if ($null -ne $Body) { $parameters.Body = ($Body | ConvertTo-Json -Depth 10 -Compress); $parameters.ContentType = $ContentType }
+    if ($null -ne $Body) {
+        $json = $Body | ConvertTo-Json -Depth 10 -Compress
+        $parameters.Body = [Text.Encoding]::UTF8.GetBytes($json)
+        $parameters.ContentType = "$ContentType; charset=utf-8"
+    }
     if ($InFile) { $parameters.InFile = $InFile; $parameters.ContentType = $ContentType }
     Invoke-RestMethod @parameters
 }

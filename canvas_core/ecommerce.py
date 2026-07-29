@@ -719,6 +719,29 @@ def build_final_studio_background_override(options: dict[str, Any] | None = None
     )
 
 
+def build_immutable_foreground_composition_lock(operation: str, inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
+    """Lock a source-only background edit to its original visible foreground and composition."""
+    normalized = list(inputs or [])
+    options = options or {}
+    source_only_background_edit = operation == "background_change" and options.get("preserve_source_composition", True) is not False
+    single_subject_studio_edit = (
+        operation == "universal"
+        and bool(str(options.get("studio_reference") or "").strip())
+        and len(normalized) == 1
+        and str(normalized[0].get("reference_type") or normalized[0].get("role") or "").strip().lower() in {"source", "subject"}
+    )
+    if not (source_only_background_edit or single_subject_studio_edit):
+        return ""
+    return (
+        "IMMUTABLE FOREGROUND AND COMPOSITION LOCK: Image 1 is an immutable foreground plate. Preserve the exact output canvas and source aspect ratio, "
+        "camera viewpoint, crop, visible body extent, subject count, subject size, subject placement, pose, action, joint arrangement, hand and leg positions, "
+        "face/gaze direction, screen-side orientation, clothing, accessories, and every visible foreground detail. "
+        "Do not zoom out, zoom in, reframe, recrop, outpaint, reveal hidden body parts, extend a half-body or close-up into a full-body image, move subjects, "
+        "change their pose, redraw their identity, or replace any foreground pixel. Only the environment outside the foreground silhouette may change. "
+        "Studio lighting may affect only the background, contact shadow, reflection, and a subtle non-structural light integration; it must never alter foreground geometry, skin, hair, clothing, or product pixels."
+    )
+
+
 def _global_preservation() -> str:
     return (
         "Change only the requested dimension. Preserve identity, silhouette, proportions, colors, materials, "
@@ -1248,6 +1271,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         None,
     )
     selected_studio_prompt = str((selected_studio or {}).get("prompt") or "").strip()
+    immutable_foreground_composition_lock = build_immutable_foreground_composition_lock(operation, normalized, options)
 
     if operation == "universal":
         composition_mode = universal_composition_mode(normalized, options)
@@ -1481,7 +1505,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         else:
             target = _preset_prompt(BACKGROUND_PRESETS, str(options.get("background_preset") or "studio_white"), "studio_white")
         task = (
-            f"Replace only the background with: {target} Create a marketplace-ready e-commerce scene while preserving the foreground person or product exactly, including silhouette, hair, transparent materials, colors, material micro-texture, logos, labels, and readable text. "
+            f"Replace only the background with: {target} Render only a replacement environment while preserving the foreground person or product exactly, including silhouette, hair, transparent materials, colors, material micro-texture, logos, labels, and readable text. "
             "Keep cutout boundaries and product edges clean, with no halo, spill, clipping, smearing, or lost detail. "
             "Create natural contact shadows, reflections, depth of field, and coherent light direction without adding unrelated props, people, text, or watermark. "
             "BACKGROUND REPLACEMENT FOREGROUND LOCK: change only the environment and its contact lighting; do not retouch, denoise, redraw foreground, change outfit/product texture, alter face/body/product proportions, soften hair, erase transparent edges, or damage logos and readable text. Match new shadows and reflections to the preserved foreground without bleeding background color into product edges. "
@@ -1511,6 +1535,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         named_detail_lock,
         user_waistband_geometry_lock,
         subject_spatial_lock,
+        immutable_foreground_composition_lock,
         no_model_product_lock,
         TEXT_AND_BRAND_FIDELITY_DIRECTIVE,
         NANO_BANANA_PRO_REFERENCE_DIRECTIVE,

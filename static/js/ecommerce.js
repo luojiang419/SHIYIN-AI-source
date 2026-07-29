@@ -90,7 +90,7 @@
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
         prop_replace:{target_description:'', instruction:'', studio_reference:''},
         angle_change:{azimuth:45, elevation:0, distance:'medium', instruction:'', studio_reference:''},
-        background_change:{background_mode:'preset', background_preset:'studio_white', background_prompt:'', instruction:'', studio_reference:''},
+        background_change:{background_mode:'preset', background_preset:'studio_white', background_prompt:'', instruction:'', studio_reference:'', preserve_source_composition:true},
     };
 
     const createWorkspace = () => ({
@@ -1727,7 +1727,7 @@
                 <button type="button" data-option-button="background_mode" data-value="preset" class="${options.background_mode === 'preset' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundPreset'))}</button>
                 <button type="button" data-option-button="background_mode" data-value="prompt" class="${options.background_mode === 'prompt' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundPrompt'))}</button>
                 <button type="button" data-option-button="background_mode" data-value="reference" class="${options.background_mode === 'reference' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundReference'))}</button>
-            </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPreset'))}</span><div id="backgroundPresetGrid" class="ec-chip-grid">${presetButtons('background_presets', options.background_preset)}</div></div>
+            </div></div><label class="ec-field ec-composition-lock"><span><input data-option="preserve_source_composition" type="checkbox" ${options.preserve_source_composition !== false ? 'checked':''}> ${escapeHtml(t('ecommerce.preserveSourceComposition'))}</span><small>${escapeHtml(t('ecommerce.preserveSourceCompositionHint'))}</small></label><div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPreset'))}</span><div id="backgroundPresetGrid" class="ec-chip-grid">${presetButtons('background_presets', options.background_preset)}</div></div>
             <label class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPrompt'))}</span><textarea data-option="background_prompt" maxlength="1000" placeholder="${escapeHtml(t('ecommerce.backgroundPromptHint'))}">${escapeHtml(options.background_prompt)}</textarea></label>${instructionHtml(options.instruction)}`;
         } else if(state.operation === 'universal') {
             html = `<label class="ec-field"><span>${escapeHtml(t('ecommerce.finalInstruction'))}</span><textarea class="ec-universal-instruction" data-option="instruction" maxlength="2000" placeholder="${escapeHtml(t('ecommerce.finalInstructionHint'))}">${escapeHtml(options.instruction || '')}</textarea></label>`;
@@ -1861,13 +1861,14 @@
         el.operationControls.querySelectorAll('[data-option]').forEach(input => {
             const update = (deferSync=false) => {
                 const key = input.dataset.option;
-                currentOptions()[key] = input.type === 'range' ? Number(input.value) : input.value;
+                currentOptions()[key] = input.type === 'checkbox' ? input.checked : (input.type === 'range' ? Number(input.value) : input.value);
                 const target = el.operationControls.querySelector(`[data-value-for="${key}"]`);
                 if(target) target.textContent = `${input.value}°`;
                 persistSettings(deferSync ? {sync:false} : undefined);
                 validateForm(false);
             };
             if(input.tagName === 'SELECT') input.addEventListener('change', () => update(false));
+            else if(input.type === 'checkbox') input.addEventListener('change', () => { update(false); syncGenerationParameterControls(); });
             else if(input.type === 'range') input.addEventListener('input', () => update(false));
             else bindComposingInput(input, () => update(true));
         });
@@ -3765,7 +3766,11 @@
     }
 
     function syncGenerationParameterControls(){
-        if(el.ratioSelect) el.ratioSelect.value = ASPECT_RATIOS.includes(state.aspectRatio) ? state.aspectRatio : 'source';
+        const sourceCompositionLocked = state.operation === 'background_change' && currentOptions().preserve_source_composition !== false;
+        if(el.ratioSelect) {
+            el.ratioSelect.value = sourceCompositionLocked ? 'source' : (ASPECT_RATIOS.includes(state.aspectRatio) ? state.aspectRatio : 'source');
+            el.ratioSelect.disabled = sourceCompositionLocked;
+        }
         if(el.resolutionSelect) el.resolutionSelect.value = RESOLUTIONS.includes(state.resolution) ? state.resolution : 'auto';
         if(el.qualitySelect) el.qualitySelect.value = QUALITIES.includes(state.quality) ? state.quality : 'auto';
         if(el.countSelect) el.countSelect.value = String([0,1,2,3,4].includes(Number(state.count)) ? Number(state.count) : 0);

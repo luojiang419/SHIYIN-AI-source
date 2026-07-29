@@ -257,6 +257,8 @@
         "ecommerce.medium": { zh:"中景", en:"Medium" },
         "ecommerce.wide": { zh:"全景", en:"Wide" },
         "ecommerce.backgroundMode": { zh:"背景来源", en:"Background source" },
+        "ecommerce.preserveSourceComposition": { zh:"严格保留主体与构图", en:"Strictly preserve subject and composition" },
+        "ecommerce.preserveSourceCompositionHint": { zh:"锁定原图比例、裁切、人物数量、姿势和画面占比；仅替换背景及其自然光影融合。", en:"Locks source ratio, crop, subject count, pose, and framing; only the background and natural light integration may change." },
         "ecommerce.backgroundPrompt": { zh:"场景描述", en:"Scene description" },
         "ecommerce.backgroundPromptHint": { zh:"描述商品所在环境、台面材质、光线方向、阴影、反射和上架氛围", en:"Describe the setting, surface material, light direction, shadows, reflections, and listing mood" },
         "ecommerce.backgroundReference": { zh:"参考图", en:"Reference image" },

@@ -251,6 +251,35 @@ class EcommerceContractTests(unittest.TestCase):
                 for phrase in phrases:
                     self.assertIn(phrase, prompt)
 
+    def test_background_change_locks_source_framing_and_foreground_as_an_immutable_plate(self):
+        prompt = build_prompt(
+            "background_change",
+            [{"role": "source", "url": "/assets/input/couple-half-body.png"}],
+            {"background_mode": "preset", "background_preset": "studio_white"},
+        )
+        for phrase in (
+            "IMMUTABLE FOREGROUND AND COMPOSITION LOCK",
+            "exact output canvas and source aspect ratio",
+            "subject count, subject size, subject placement",
+            "hand and leg positions, face/gaze direction",
+            "extend a half-body or close-up into a full-body image",
+            "Only the environment outside the foreground silhouette may change",
+        ):
+            self.assertIn(phrase, prompt)
+
+    def test_single_subject_universal_studio_uses_background_only_composition_lock(self):
+        source = [{
+            "reference_id": "couple",
+            "reference_type": "subject",
+            "role": "subject",
+            "url": "/assets/input/couple-half-body.png",
+        }]
+        studio_prompt = build_prompt("universal", source, {"studio_reference": "studio_gray"})
+        plain_prompt = build_prompt("universal", source, {})
+        self.assertIn("IMMUTABLE FOREGROUND AND COMPOSITION LOCK", studio_prompt)
+        self.assertIn("Do not zoom out, zoom in, reframe, recrop, outpaint", studio_prompt)
+        self.assertNotIn("IMMUTABLE FOREGROUND AND COMPOSITION LOCK", plain_prompt)
+
     def test_try_on_accepts_separate_body_identity_pose_and_detail_references(self):
         references = [
             {"role": "source", "url": "/assets/input/body.png", "label": "A 身体模特"},
@@ -769,6 +798,28 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["quality"], "high")
         self.assertEqual(snapshot["count"], 3)
         self.assertEqual(snapshot["parameters"], {"aspect_ratio": "4:5", "resolution": "2k", "quality": "high", "count": 3})
+
+    def test_strict_background_replacement_forces_source_ratio_unless_opted_out(self):
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        base = {
+            "operation": "background_change",
+            "mode": "standard",
+            "inputs": [self.main.AIReference(role="source", url="/assets/input/source.png")],
+            "provider_id": "shiying",
+            "model": "gemini-3-pro-image-preview",
+            "aspect_ratio": "4:5",
+            "resolution": "2k",
+        }
+        with (
+            patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([{"role": "source", "url": "/assets/input/source.png"}], (900, 1600))),
+        ):
+            locked = self.main.prepare_ecommerce_request(self.main.EcommerceTaskRequest(**base))
+            unlocked = self.main.prepare_ecommerce_request(self.main.EcommerceTaskRequest(**{**base, "options": {"preserve_source_composition": False}}))
+        self.assertTrue(locked["source_composition_locked"])
+        self.assertEqual((locked["aspect_ratio"], locked["size"]), ("source", "1152x2048"))
+        self.assertFalse(unlocked["source_composition_locked"])
+        self.assertEqual((unlocked["aspect_ratio"], unlocked["size"]), ("4:5", "1632x2040"))
 
     def test_user_prompt_request_preserves_universal_panel_reference_order_without_prompt_injection(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}

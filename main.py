@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.90"
+APP_VERSION = "1.0.91"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -12633,11 +12633,19 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         if parent.get("operation") != operation:
             raise HTTPException(status_code=400, detail="新版本必须与父任务使用相同功能")
     try:
+        preserve_source_composition = operation == "background_change" and options.get("preserve_source_composition", True) is not False
+        single_subject_studio_edit = (
+            operation == "universal"
+            and bool(str(options.get("studio_reference") or "").strip())
+            and len(inputs) == 1
+            and str(inputs[0].get("reference_type") or inputs[0].get("role") or "").strip().lower() in {"source", "subject"}
+        )
+        source_composition_locked = preserve_source_composition or single_subject_studio_edit
         generation = resolve_ecommerce_generation_settings(
             source_dimensions[0],
             source_dimensions[1],
             mode,
-            payload.aspect_ratio,
+            "source" if source_composition_locked else payload.aspect_ratio,
             payload.resolution,
             payload.quality,
             payload.count,
@@ -12659,6 +12667,7 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         "pose_reference_url": str(pose_reference.get("url") or ""),
         "comparison_reference_url": str(compare_reference.get("url") or ""),
         "source_dimensions": {"width": source_dimensions[0], "height": source_dimensions[1]},
+        "source_composition_locked": source_composition_locked,
         **generation,
         "prompt": prompt,
         "route_candidates": [public_ecommerce_route(route) for route in candidates],

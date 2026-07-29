@@ -56,6 +56,7 @@ try {
     Move-Item -LiteralPath $roots[0].FullName -Destination $installRoot
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $helper) | Out-Null
     New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pending) | Out-Null
     [IO.File]::WriteAllText((Join-Path $dataRoot 'e2e-user-data.txt'), 'keep')
     [IO.File]::WriteAllText($pending, '{"test":true}')
     [IO.File]::WriteAllText((Join-Path $installRoot 'app\obsolete-runtime-file.txt'), 'replace-me')
@@ -66,7 +67,7 @@ try {
     $processInfo = [Diagnostics.ProcessStartInfo]::new($helper)
     $processInfo.UseShellExecute = $false
     $processInfo.CreateNoWindow = $true
-    foreach ($argument in @(
+    $arguments = @(
         '--apply-update',
         "--root=$installRoot",
         "--data=$dataRoot",
@@ -74,7 +75,8 @@ try {
         "--version=$ToVersion",
         "--sha256=$(Get-Sha256 $toZip)",
         "--old-pid=$oldPid"
-    )) { [void]$processInfo.ArgumentList.Add($argument) }
+    )
+    $processInfo.Arguments = ($arguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
     $process = [Diagnostics.Process]::Start($processInfo)
     if (-not $process.WaitForExit(120000)) {
         $process.Kill()

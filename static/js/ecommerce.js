@@ -51,7 +51,6 @@
                 {role:'source', labelKey:'ecommerce.sourceImage', required:true},
                 {role:'prop', labelKey:'ecommerce.propImage', required:true},
             ],
-            mask:true,
         },
         angle_change: {
             titleKey:'ecommerce.angleChange',
@@ -65,7 +64,6 @@
                 {role:'source', labelKey:'ecommerce.sourceImage', required:true},
                 {role:'background', labelKey:'ecommerce.backgroundImage', required:false},
             ],
-            mask:true,
         },
     };
 
@@ -90,7 +88,7 @@
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
         prop_replace:{target_description:'', instruction:'', studio_reference:''},
         angle_change:{azimuth:45, elevation:0, distance:'medium', instruction:'', studio_reference:''},
-        background_change:{background_mode:'preset', background_preset:'studio_white', background_prompt:'', instruction:'', studio_reference:'', preserve_source_composition:true},
+        background_change:{background_mode:'preset', background_preset:'studio_white', background_prompt:'', instruction:'', studio_reference:''},
     };
 
     const createWorkspace = () => ({
@@ -126,13 +124,11 @@
         taskPollTimer:null,
         taskPollInflight:false,
         routeActive:window.top === window,
-        maskUploadPromise:null,
         submissionsInFlight:0,
         generationTimer:null,
         assetLibrary:null,
         assetDialogMode:'select',
         referenceSlotTypes:[],
-        mask:{dirty:false, tool:'replace', brushSize:36, drawing:false},
         referencePreview:{key:'', versions:[], selectedIndex:0, mode:'preview', ratio:'free', cropRect:{x:.05,y:.05,w:.9,h:.9}, drag:null},
         tryOnSwitches:{},
         compareViewer:null,
@@ -166,7 +162,7 @@
             'ecommercePage','ecommerceWorkspace','controlPanel','controlInputMount','controlActionMount',
             'inputModule','universalDock','universalDockInputs','universalDockActions','generateActions',
             'operationTabs','modeToggle','capabilityStatus','routeSummary','inputSlots','inputProgress',
-            'operationControls','maskToggle','maskEditor','advancedSettings','modelPanelToggle','modelPanelBody',
+            'operationControls','advancedSettings','modelPanelToggle','modelPanelBody',
             'modelPanelSelection','providerSelect','modelSelect','ratioSelect','resolutionSelect','qualitySelect','countSelect',
             'addUniversalReference','formError','generateButton','emptyResult','emptyResultNotice','emptyResultNoticeTitle','emptyResultNoticeMessage',
             'resultWorkspace','compareReset','historyToggle',
@@ -322,8 +318,6 @@
             state.quality = QUALITIES.includes(saved.quality) ? saved.quality : 'auto';
             state.count = [0,1,2,3,4].includes(Number(saved.count)) ? Number(saved.count) : 0;
             state.modelPanelCollapsed = saved.model_panel_collapsed === true;
-            state.mask.tool = ['replace','keep'].includes(saved.mask_tool) ? saved.mask_tool : 'replace';
-            state.mask.brushSize = Math.max(8, Math.min(96, Number(saved.mask_brush_size || 36)));
             if(saved.workspaces && typeof saved.workspaces === 'object') {
                 Object.keys(OPERATION_CONFIG).forEach(operation => {
                     const value = saved.workspaces[operation];
@@ -397,8 +391,6 @@
             quality:state.quality,
             count:state.count,
             model_panel_collapsed:state.modelPanelCollapsed,
-            mask_tool:state.mask.tool,
-            mask_brush_size:state.mask.brushSize,
             workspaces:serializableWorkspaces(),
         };
         const serialized = JSON.stringify(snapshot);
@@ -478,7 +470,6 @@
         renderInputs();
         renderOperationControls();
         syncGenerationParameterControls();
-        syncMaskControls();
         if(state.capabilities) {
             populateModelSelectors();
             updateRouteSummary();
@@ -541,7 +532,6 @@
         el.inputProgress.textContent = `${completed}/${required.length}`;
         bindInputSlots();
         bindStudioReferenceControls();
-        syncMaskAvailability();
         if(editingControl) restoreEditingFocus(editingControl);
     }
 
@@ -877,7 +867,6 @@
         bindInputSlots();
         bindUniversalControls(limit);
         bindStudioReferenceControls();
-        syncMaskAvailability();
         if(state.capabilities) {
             populateModelSelectors();
             updateRouteSummary();
@@ -1093,7 +1082,6 @@
         if(nextIndex === currentIndex) return false;
         state.tryOnSwitches[role] = tryOnSwitchMeta(direction || (nextIndex > currentIndex ? 1 : -1), candidates[currentIndex] || existing);
         state.inputs[role] = buildTryOnInput(role, existing, candidates, nextIndex);
-        if(role === 'source') resetMask();
         renderInputs();
         validateForm(false);
         persistSettings();
@@ -1273,7 +1261,6 @@
         bindInputSlots();
         bindTryOnSlotControls();
         bindStudioReferenceControls();
-        syncMaskAvailability();
         syncTryOnLookPreview();
     }
 
@@ -1727,7 +1714,7 @@
                 <button type="button" data-option-button="background_mode" data-value="preset" class="${options.background_mode === 'preset' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundPreset'))}</button>
                 <button type="button" data-option-button="background_mode" data-value="prompt" class="${options.background_mode === 'prompt' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundPrompt'))}</button>
                 <button type="button" data-option-button="background_mode" data-value="reference" class="${options.background_mode === 'reference' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundReference'))}</button>
-            </div></div><label class="ec-field ec-composition-lock"><span><input data-option="preserve_source_composition" type="checkbox" ${options.preserve_source_composition !== false ? 'checked':''}> ${escapeHtml(t('ecommerce.preserveSourceComposition'))}</span><small>${escapeHtml(t('ecommerce.preserveSourceCompositionHint'))}</small></label><div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPreset'))}</span><div id="backgroundPresetGrid" class="ec-chip-grid">${presetButtons('background_presets', options.background_preset)}</div></div>
+            </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPreset'))}</span><div id="backgroundPresetGrid" class="ec-chip-grid">${presetButtons('background_presets', options.background_preset)}</div></div>
             <label class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPrompt'))}</span><textarea data-option="background_prompt" maxlength="1000" placeholder="${escapeHtml(t('ecommerce.backgroundPromptHint'))}">${escapeHtml(options.background_prompt)}</textarea></label>${instructionHtml(options.instruction)}`;
         } else if(state.operation === 'universal') {
             html = `<label class="ec-field"><span>${escapeHtml(t('ecommerce.finalInstruction'))}</span><textarea class="ec-universal-instruction" data-option="instruction" maxlength="2000" placeholder="${escapeHtml(t('ecommerce.finalInstructionHint'))}">${escapeHtml(options.instruction || '')}</textarea></label>`;
@@ -1905,7 +1892,6 @@
         captureWorkspace();
         state.operation = operation;
         const workspace = restoreWorkspace(operation);
-        resetMask();
         updateTabs();
         renderInputs();
         renderOperationControls();
@@ -1956,7 +1942,6 @@
             revokeInputPreviewUrls(existing);
             delete state.inputs[role];
         }
-        if(role === 'source') resetMask();
         renderInputs();
         validateForm(false);
         persistSettings();
@@ -2111,7 +2096,6 @@
             revokeInputPreviewUrls(state.inputs[pair.role]);
             state.inputs[pair.role] = previewInput;
         }
-        if(pair.role === 'source') resetMask();
         return activePair;
     }
 
@@ -2137,7 +2121,7 @@
             const candidateIndex = candidates.findIndex(candidate => candidate.upload_token === token);
             if(candidateIndex < 0) {
                 if(isLocalPreviewUrl(previewUrl)) URL.revokeObjectURL(previewUrl);
-                return {resetMask:false};
+                return;
             }
             revokeReferencePreviewUrl(candidates[candidateIndex]);
             const uploadedCandidate = await uploadedInputFor(file, role, uploaded, {...existing, ...candidates[candidateIndex]});
@@ -2150,12 +2134,12 @@
             const existing = state.inputs[role] || {};
             if(existing.upload_token !== token) {
                 if(isLocalPreviewUrl(previewUrl)) URL.revokeObjectURL(previewUrl);
-                return {resetMask:false};
+                return;
             }
             revokeReferencePreviewUrl(existing);
             state.inputs[role] = await uploadedInputFor(file, role, uploaded, existing);
         }
-        return {resetMask:role === 'source'};
+        return;
     }
 
     async function uploadInputPairs(pairs){
@@ -2177,12 +2161,9 @@
         validateForm(false);
         try {
             const uploadedFiles = await uploadReferenceFilesInParallel(activePairs);
-            let shouldResetMask = false;
             for(let index=0; index<activePairs.length; index += 1) {
-                const effect = await applyUploadedInput(activePairs[index], uploadedFiles[index]);
-                shouldResetMask = shouldResetMask || effect.resetMask;
+                await applyUploadedInput(activePairs[index], uploadedFiles[index]);
             }
-            if(shouldResetMask) resetMask();
             renderInputs();
             validateForm(false);
             persistSettings();
@@ -2476,7 +2457,6 @@
             item.original_height = Number(item.original_height || selected.height || image.naturalHeight);
             item.crop_history = history;
             syncTryOnCurrentCandidate(preview.key);
-            if(preview.key === 'source') resetMask();
             renderInputs();
             persistSettings();
             preview.versions = referenceVersions(item);
@@ -2501,7 +2481,6 @@
         item.width = Number(selected.width || item.width || 0);
         item.height = Number(selected.height || item.height || 0);
         syncTryOnCurrentCandidate(preview.key);
-        if(preview.key === 'source') resetMask();
         renderInputs();
         persistSettings();
         renderReferenceVersions();
@@ -2626,7 +2605,6 @@
                     }
                     if(state.operation === 'try_on' && isTryOnReferenceRole(state.activeUploadRole)) setTryOnInputCandidate(state.activeUploadRole, nextInput);
                     else state.inputs[state.activeUploadRole] = nextInput;
-                    if(state.activeUploadRole === 'source') resetMask();
                     el.assetDialog.close();
                     renderInputs();
                     validateForm(false);
@@ -2665,158 +2643,6 @@
             el.assetDialog.showModal();
         } catch(error) {
             showToast(error.message, true);
-        }
-    }
-
-    function syncMaskAvailability(){
-        const enabled = !!currentConfig().mask && !!state.inputs.source?.url;
-        el.maskToggle.classList.toggle('hidden', !enabled);
-        if(!enabled) el.maskEditor.classList.add('hidden');
-    }
-
-    function resetMask(){
-        state.mask.dirty = false;
-        delete state.inputs.mask;
-        const canvas = byId('maskCanvas');
-        canvas?.getContext('2d')?.clearRect(0,0,canvas.width,canvas.height);
-        el.maskEditor?.classList.add('hidden');
-    }
-
-    async function initializeMaskCanvas(){
-        const source = state.inputs.source;
-        if(!source?.url) return;
-        const dimensions = source.width && source.height ? source : await imageDimensions(source.url);
-        source.width = dimensions.width;
-        source.height = dimensions.height;
-        const canvas = byId('maskCanvas');
-        const baseImage = byId('maskBaseImage');
-        const wrap = byId('maskCanvasWrap');
-        if(canvas.dataset.source !== source.url || canvas.width !== source.width || canvas.height !== source.height) {
-            canvas.width = source.width;
-            canvas.height = source.height;
-            canvas.dataset.source = source.url;
-            canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
-            state.mask.dirty = false;
-        }
-        baseImage.src = source.url;
-        wrap.style.aspectRatio = `${source.width} / ${source.height}`;
-        wrap.style.minHeight = '0';
-    }
-
-    function bindMaskEditor(){
-        const canvas = byId('maskCanvas');
-        const brush = byId('maskBrushSize');
-        let lastPoint = null;
-        const pointFromEvent = event => {
-            const rect = canvas.getBoundingClientRect();
-            return {
-                x:(event.clientX - rect.left) * canvas.width / Math.max(1, rect.width),
-                y:(event.clientY - rect.top) * canvas.height / Math.max(1, rect.height),
-            };
-        };
-        const draw = (from, to) => {
-            const ctx = canvas.getContext('2d');
-            const rect = canvas.getBoundingClientRect();
-            const displayScale = canvas.width / Math.max(1, rect.width);
-            ctx.save();
-            ctx.strokeStyle = state.mask.tool === 'keep' ? '#00c853' : '#ff1744';
-            ctx.fillStyle = ctx.strokeStyle;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.lineWidth = Number(brush.value || 36) * displayScale;
-            if(from) {
-                ctx.beginPath();
-                ctx.moveTo(from.x, from.y);
-                ctx.lineTo(to.x, to.y);
-                ctx.stroke();
-            } else {
-                ctx.beginPath();
-                ctx.arc(to.x, to.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            ctx.restore();
-            state.mask.dirty = true;
-            delete state.inputs.mask;
-        };
-        canvas.addEventListener('pointerdown', event => {
-            if(!canvas.width) return;
-            event.preventDefault();
-            canvas.setPointerCapture(event.pointerId);
-            state.mask.drawing = true;
-            lastPoint = pointFromEvent(event);
-            draw(null, lastPoint);
-        });
-        canvas.addEventListener('pointermove', event => {
-            if(!state.mask.drawing) return;
-            const point = pointFromEvent(event);
-            draw(lastPoint, point);
-            lastPoint = point;
-        });
-        const end = () => { state.mask.drawing = false; lastPoint = null; };
-        canvas.addEventListener('pointerup', end);
-        canvas.addEventListener('pointercancel', end);
-        el.maskToggle.addEventListener('click', async () => {
-            const opening = el.maskEditor.classList.contains('hidden');
-            el.maskEditor.classList.toggle('hidden', !opening);
-            if(opening) {
-                try { await initializeMaskCanvas(); } catch(error) { showToast(error.message, true); }
-            }
-        });
-        el.maskEditor.querySelectorAll('[data-mask-tool]').forEach(button => {
-            button.addEventListener('click', () => {
-                state.mask.tool = button.dataset.maskTool;
-                el.maskEditor.querySelectorAll('[data-mask-tool]').forEach(item => item.classList.toggle('active', item === button));
-                persistSettings();
-            });
-        });
-        brush.addEventListener('input', () => {
-            state.mask.brushSize = Math.max(8, Math.min(96, Number(brush.value || 36)));
-            scheduleSettingsPersistence();
-        });
-        brush.addEventListener('change', persistSettings);
-        byId('maskReset').addEventListener('click', () => {
-            canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
-            state.mask.dirty = false;
-            delete state.inputs.mask;
-        });
-        syncMaskControls();
-    }
-
-    function syncMaskControls(){
-        const brush = byId('maskBrushSize');
-        if(brush) brush.value = String(Math.max(8, Math.min(96, Number(state.mask.brushSize || 36))));
-        el.maskEditor?.querySelectorAll('[data-mask-tool]').forEach(button => {
-            button.classList.toggle('active', button.dataset.maskTool === state.mask.tool);
-        });
-    }
-
-    async function uploadMaskIfNeeded(){
-        if(!currentConfig().mask || !state.mask.dirty) return;
-        if(state.maskUploadPromise) return state.maskUploadPromise;
-        state.maskUploadPromise = (async () => {
-            const canvas = byId('maskCanvas');
-            if(!canvas.width || !canvas.height) return;
-            const output = document.createElement('canvas');
-            output.width = canvas.width;
-            output.height = canvas.height;
-            const ctx = output.getContext('2d');
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0,0,output.width,output.height);
-            ctx.drawImage(canvas,0,0);
-            const blob = await new Promise((resolve,reject) => output.toBlob(value => value ? resolve(value) : reject(new Error(t('ecommerce.uploadFailed'))), 'image/png'));
-            if(blob.size > 50 * 1024 * 1024) throw new Error(t('ecommerce.fileTooLarge'));
-            const formData = new FormData();
-            formData.append('files', blob, 'ecommerce_region_mask.png');
-            const response = await fetchJson('/api/ai/upload', {method:'POST', body:formData});
-            const uploaded = (response.files || [])[0];
-            if(!uploaded?.url) throw new Error(t('ecommerce.uploadFailed'));
-            state.inputs.mask = {...uploaded, role:'mask', width:canvas.width, height:canvas.height};
-            state.mask.dirty = false;
-        })();
-        try {
-            return await state.maskUploadPromise;
-        } finally {
-            state.maskUploadPromise = null;
         }
     }
 
@@ -3345,7 +3171,6 @@
         state.submissionsInFlight += 1;
         el.generateButton.classList.add('submitting');
         try {
-            await uploadMaskIfNeeded();
             const payload = JSON.parse(JSON.stringify(ecommerceTaskPayload(parentTaskId)));
             const task = await fetchJson('/api/ecommerce/tasks', {
                 method:'POST',
@@ -3766,7 +3591,7 @@
     }
 
     function syncGenerationParameterControls(){
-        const sourceCompositionLocked = state.operation === 'background_change' && currentOptions().preserve_source_composition !== false;
+        const sourceCompositionLocked = state.operation === 'background_change';
         if(el.ratioSelect) {
             el.ratioSelect.value = sourceCompositionLocked ? 'source' : (ASPECT_RATIOS.includes(state.aspectRatio) ? state.aspectRatio : 'source');
             el.ratioSelect.disabled = sourceCompositionLocked;
@@ -3978,7 +3803,6 @@
         bindUniversalDockDrop();
         bindReferencePreview();
         bindComparison();
-        bindMaskEditor();
         await loadCapabilities();
         await loadTasks();
         const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem('ecommerce_current_task');

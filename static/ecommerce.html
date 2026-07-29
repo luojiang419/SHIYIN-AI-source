@@ -51,24 +51,6 @@
 
                 <div id="operationControls" class="ec-operation-controls"></div>
 
-                <button id="maskToggle" class="ec-secondary-button hidden" type="button">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 9-9 4 4-9 9H4v-4ZM14 6l2-2 4 4-2 2"/></svg>
-                    <span data-i18n="ecommerce.refineMask">画笔修正区域</span>
-                </button>
-                <section id="maskEditor" class="ec-mask-editor hidden" aria-label="蒙版编辑器">
-                    <div class="ec-mask-toolbar">
-                        <button class="active" type="button" data-mask-tool="replace" data-i18n="ecommerce.markReplace">替换区域</button>
-                        <button type="button" data-mask-tool="keep" data-i18n="ecommerce.markKeep">保留区域</button>
-                        <label><span data-i18n="ecommerce.brushSize">画笔</span><input id="maskBrushSize" type="range" min="8" max="96" value="36"></label>
-                        <button id="maskReset" type="button" data-i18n="ecommerce.clear">清空</button>
-                    </div>
-                    <div id="maskCanvasWrap" class="ec-mask-canvas-wrap">
-                        <img id="maskBaseImage" alt="">
-                        <canvas id="maskCanvas"></canvas>
-                        <p data-i18n="ecommerce.maskHint">红色表示替换，绿色表示保留</p>
-                    </div>
-                </section>
-
                 <section id="advancedSettings" class="ec-model-panel">
                     <button id="modelPanelToggle" class="ec-model-panel-toggle" type="button" aria-expanded="true" aria-controls="modelPanelBody">
                         <span class="ec-model-panel-heading">

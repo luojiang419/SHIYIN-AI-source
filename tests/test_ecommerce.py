@@ -264,6 +264,10 @@ class EcommerceContractTests(unittest.TestCase):
             "hand and leg positions, face/gaze direction",
             "extend a half-body or close-up into a full-body image",
             "Only the environment outside the foreground silhouette may change",
+            "SOURCE PHOTOGRAPHIC CHARACTER LOCK",
+            "Preserve the exact hairstyle",
+            "analog film grain or ISO noise",
+            "Do not denoise, beauty-retouch, face-smooth, plasticize",
         ):
             self.assertIn(phrase, prompt)
 
@@ -278,6 +282,7 @@ class EcommerceContractTests(unittest.TestCase):
         plain_prompt = build_prompt("universal", source, {})
         self.assertIn("IMMUTABLE FOREGROUND AND COMPOSITION LOCK", studio_prompt)
         self.assertIn("Do not zoom out, zoom in, reframe, recrop, outpaint", studio_prompt)
+        self.assertIn("SOURCE PHOTOGRAPHIC CHARACTER LOCK", studio_prompt)
         self.assertNotIn("IMMUTABLE FOREGROUND AND COMPOSITION LOCK", plain_prompt)
 
     def test_try_on_accepts_separate_body_identity_pose_and_detail_references(self):
@@ -799,7 +804,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["count"], 3)
         self.assertEqual(snapshot["parameters"], {"aspect_ratio": "4:5", "resolution": "2k", "quality": "high", "count": 3})
 
-    def test_strict_background_replacement_forces_source_ratio_unless_opted_out(self):
+    def test_background_replacement_always_forces_source_ratio(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         base = {
             "operation": "background_change",
@@ -815,11 +820,11 @@ class EcommerceBackendTests(unittest.TestCase):
             patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([{"role": "source", "url": "/assets/input/source.png"}], (900, 1600))),
         ):
             locked = self.main.prepare_ecommerce_request(self.main.EcommerceTaskRequest(**base))
-            unlocked = self.main.prepare_ecommerce_request(self.main.EcommerceTaskRequest(**{**base, "options": {"preserve_source_composition": False}}))
+            attempted_override = self.main.prepare_ecommerce_request(self.main.EcommerceTaskRequest(**{**base, "options": {"preserve_source_composition": False}}))
         self.assertTrue(locked["source_composition_locked"])
         self.assertEqual((locked["aspect_ratio"], locked["size"]), ("source", "1152x2048"))
-        self.assertFalse(unlocked["source_composition_locked"])
-        self.assertEqual((unlocked["aspect_ratio"], unlocked["size"]), ("4:5", "1632x2040"))
+        self.assertTrue(attempted_override["source_composition_locked"])
+        self.assertEqual((attempted_override["aspect_ratio"], attempted_override["size"]), ("source", "1152x2048"))
 
     def test_user_prompt_request_preserves_universal_panel_reference_order_without_prompt_injection(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
@@ -949,22 +954,13 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in fake.saved], ["custom-provider"])
         self.assertTrue(fake.marker[1]["done"])
 
-    def test_local_inputs_reject_mismatched_mask_dimensions(self):
-        with tempfile.TemporaryDirectory() as root:
-            source = Path(root) / "source.png"
-            mask = Path(root) / "mask.png"
-            self.make_image(source, (100, 80))
-            self.make_image(mask, (99, 80))
-            lookup = {"/assets/input/source.png": str(source), "/assets/input/mask.png": str(mask)}
-            inputs = [
+    def test_prompt_only_background_replacement_rejects_mask_input(self):
+        with self.assertRaises(ValueError) as error:
+            validate_input_roles("background_change", [
                 {"role": "source", "url": "/assets/input/source.png"},
                 {"role": "mask", "url": "/assets/input/mask.png"},
-            ]
-            with patch.object(self.main, "output_file_from_url", side_effect=lambda url: lookup.get(url)):
-                with self.assertRaises(self.main.HTTPException) as error:
-                    self.main.validate_ecommerce_local_inputs(inputs)
-            self.assertEqual(error.exception.status_code, 400)
-            self.assertIn("蒙版尺寸", error.exception.detail)
+            ])
+        self.assertIn("已移除蒙版", str(error.exception))
 
     def test_local_inputs_accept_mpo_as_jpeg(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1329,14 +1325,13 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("normalize_image_orientation(content)", backend)
         self.assertIn('"orientation_normalized"', backend)
 
-    def test_mask_controls_and_compare_view_are_persisted_and_resynchronized(self):
-        for field in ("mask_tool:state.mask.tool", "mask_brush_size:state.mask.brushSize"):
-            self.assertIn(field, self.javascript)
-        self.assertIn("brush.addEventListener('input'", self.javascript)
-        self.assertIn("scheduleSettingsPersistence()", self.javascript)
+    def test_prompt_only_background_controls_remove_mask_and_manual_composition_switch(self):
+        for marker in ("maskToggle", "maskEditor", "maskCanvas", "bindMaskEditor", "uploadMaskIfNeeded", "preserve_source_composition"):
+            self.assertNotIn(marker, self.html + self.javascript + self.css)
+        self.assertIn("const sourceCompositionLocked = state.operation === 'background_change';", self.javascript)
         incoming = re.search(r"function applyIncomingSettings\(serialized\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(incoming)
-        for marker in ("syncGenerationParameterControls()", "syncMaskControls()", "populateModelSelectors()"):
+        for marker in ("syncGenerationParameterControls()", "populateModelSelectors()"):
             self.assertIn(marker, incoming.group(1))
 
     def test_each_operation_has_an_independent_persistent_workspace(self):

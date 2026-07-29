@@ -56,7 +56,7 @@ UNIVERSAL_REFERENCE_ROLES = [
     {"id": "style", "label": {"zh": "风格/光影", "en": "Style / lighting"}},
 ]
 UNIVERSAL_REFERENCE_ROLE_IDS = {item["id"] for item in UNIVERSAL_REFERENCE_ROLES}
-ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", "mask", *UNIVERSAL_REFERENCE_ROLE_IDS}
+ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", *UNIVERSAL_REFERENCE_ROLE_IDS}
 TRY_ON_OUTFIT_ROLES = {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}
 TRY_ON_REFERENCE_ROLES = {"source", "model_identity", *TRY_ON_OUTFIT_ROLES, "detail", "pose"}
 UNIVERSAL_INTERACTIONS = {"wear", "put_on", "hold", "carry", "place", "use", "pose", "scene", "style", "identity"}
@@ -404,7 +404,6 @@ def build_model_catalog(providers: Iterable[dict[str, Any]]) -> list[dict[str, A
                 "provider_order": provider_index,
                 "model_order": model_index,
                 "supports_multi_reference": True,
-                "supports_mask": "gpt-image" in low or "qwen-image-edit" in low or "flux.2" in low,
                 "max_reference_images": max_reference_images,
             })
     return catalog
@@ -593,15 +592,21 @@ def universal_composition_mode(inputs: Iterable[dict[str, Any]], options: dict[s
 def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     operation = validate_operation(operation)
     options = options if isinstance(options, dict) else {}
+    values = list(inputs or [])
+    if any(
+        isinstance(item, dict)
+        and str(item.get("role") or item.get("reference_type") or "").strip().lower() == "mask"
+        for item in values
+    ):
+        raise ValueError("电商专用已移除蒙版编辑，请使用提示词描述需要替换的内容")
     if operation == "universal":
-        values = list(inputs or [])
         if len(values) > UNIVERSAL_REFERENCE_LIMIT:
             raise ValueError(f"全能模式最多上传 {UNIVERSAL_REFERENCE_LIMIT} 张参考图")
         normalized = normalize_universal_inputs(values)
         if not normalized:
             raise ValueError("全能模式至少需要一张已上传的参考图")
         return normalized
-    normalized = normalize_try_on_inputs(inputs) if operation == "try_on" else normalize_inputs(inputs)
+    normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
     roles = {item["role"] for item in normalized}
     required = set(OPERATION_INPUTS[operation])
     if operation == "pose_transfer" and str(options.get("pose_source") or "preset") == "reference":
@@ -723,7 +728,7 @@ def build_immutable_foreground_composition_lock(operation: str, inputs: Iterable
     """Lock a source-only background edit to its original visible foreground and composition."""
     normalized = list(inputs or [])
     options = options or {}
-    source_only_background_edit = operation == "background_change" and options.get("preserve_source_composition", True) is not False
+    source_only_background_edit = operation == "background_change"
     single_subject_studio_edit = (
         operation == "universal"
         and bool(str(options.get("studio_reference") or "").strip())
@@ -739,6 +744,28 @@ def build_immutable_foreground_composition_lock(operation: str, inputs: Iterable
         "Do not zoom out, zoom in, reframe, recrop, outpaint, reveal hidden body parts, extend a half-body or close-up into a full-body image, move subjects, "
         "change their pose, redraw their identity, or replace any foreground pixel. Only the environment outside the foreground silhouette may change. "
         "Studio lighting may affect only the background, contact shadow, reflection, and a subtle non-structural light integration; it must never alter foreground geometry, skin, hair, clothing, or product pixels."
+    )
+
+
+def build_source_photographic_character_lock(operation: str, inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
+    """Preserve hair and source capture character for prompt-only background edits."""
+    normalized = list(inputs or [])
+    options = options or {}
+    source_only_background_edit = operation == "background_change"
+    single_subject_studio_edit = (
+        operation == "universal"
+        and bool(str(options.get("studio_reference") or "").strip())
+        and len(normalized) == 1
+        and str(normalized[0].get("reference_type") or normalized[0].get("role") or "").strip().lower() in {"source", "subject"}
+    )
+    if not (source_only_background_edit or single_subject_studio_edit):
+        return ""
+    return (
+        "SOURCE PHOTOGRAPHIC CHARACTER LOCK: treat Image 1 as the sole authority for the visible foreground's photographic character, not merely identity. "
+        "Preserve the exact hairstyle: hairline, parting, length, silhouette, volume, strand direction, curl or wave pattern, flyaways, frizz, loose strands, color, and hair-edge transparency. "
+        "Never restyle, recolor, tidy, smooth, thicken, thin, or replace hair. Preserve all visible source capture characteristics whenever present: analog film grain or ISO noise, grain scale and chroma, scan texture, focus softness, local sharpness, halation or bloom, tonal curve, contrast, dynamic range, white balance, lens character, natural pores, fabric texture, and realistic imperfections. "
+        "Do not denoise, beauty-retouch, face-smooth, plasticize, sharpen, HDR-tone-map, or turn an editorial or film photograph into a sterile e-commerce render. "
+        "If the source has visible film grain or noise, reproduce the same grain scale, density, color behavior, and distribution on the new background so the whole frame remains one photograph; if it has no grain, do not invent it."
     )
 
 
@@ -850,8 +877,6 @@ def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
     lines = []
     for index, item in enumerate(inputs or [], 1):
         role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-        if role == "mask":
-            continue
         detail = _reference_detail(item)
         note = f"; specific instruction: {item['instruction']}" if item.get("instruction") else ""
         lines.append(f"Image {index} = [{role_names.get(role, role.upper() or 'REFERENCE')}] {detail}{note}")
@@ -1255,7 +1280,6 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     normalized = validate_input_roles(operation, inputs, options)
     options = options if isinstance(options, dict) else {}
     reference_map = build_ordered_reference_map(normalized)
-    mask_note = " A final mask reference marks red pixels to replace and green pixels to preserve." if any(item["role"] == "mask" for item in normalized) else ""
     instruction = str(options.get("instruction") or "").strip()
     if instruction:
         return build_user_directed_ecommerce_prompt(instruction)
@@ -1272,6 +1296,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     )
     selected_studio_prompt = str((selected_studio or {}).get("prompt") or "").strip()
     immutable_foreground_composition_lock = build_immutable_foreground_composition_lock(operation, normalized, options)
+    source_photographic_character_lock = build_source_photographic_character_lock(operation, normalized, options)
 
     if operation == "universal":
         composition_mode = universal_composition_mode(normalized, options)
@@ -1508,7 +1533,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"Replace only the background with: {target} Render only a replacement environment while preserving the foreground person or product exactly, including silhouette, hair, transparent materials, colors, material micro-texture, logos, labels, and readable text. "
             "Keep cutout boundaries and product edges clean, with no halo, spill, clipping, smearing, or lost detail. "
             "Create natural contact shadows, reflections, depth of field, and coherent light direction without adding unrelated props, people, text, or watermark. "
-            "BACKGROUND REPLACEMENT FOREGROUND LOCK: change only the environment and its contact lighting; do not retouch, denoise, redraw foreground, change outfit/product texture, alter face/body/product proportions, soften hair, erase transparent edges, or damage logos and readable text. Match new shadows and reflections to the preserved foreground without bleeding background color into product edges. "
+            "BACKGROUND REPLACEMENT FOREGROUND LOCK: change only the environment and its contact lighting; do not retouch, denoise, redraw foreground, change outfit/product texture, alter face/body/product proportions, restyle hairstyle, change hairline/parting/curl pattern/flyaways, soften hair, erase transparent edges, or damage logos and readable text. Preserve the source's native photographic character, including any visible film grain, scan texture, tonal curve, focus softness, and natural imperfections; render the new background with that same character instead of a sterile e-commerce finish. Match new shadows and reflections to the preserved foreground without bleeding background color into product edges. "
             + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE + " "
             + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
         )
@@ -1526,7 +1551,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         if studio_background_selected and operation != "universal" else
         "Preserve every reference-owned attribute unless the final composition explicitly changes it. "
         "Add only the mapped subjects and products. Do not add unrelated people, products, text, watermarks, duplicate objects, or extra limbs."
-        if operation == "universal" else _global_preservation() + mask_note
+        if operation == "universal" else _global_preservation()
         )
     operation_locks = [
         studio_reference_lock,
@@ -1541,6 +1566,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         NANO_BANANA_PRO_REFERENCE_DIRECTIVE,
         NANO_BANANA_PRO_PHOTO_DIRECTIVE,
         NANO_BANANA_PRO_ECOMMERCE_DIRECTIVE,
+        source_photographic_character_lock,
     ]
     parts = ([] if operation == "universal" else [reference_map]) + [
         task,

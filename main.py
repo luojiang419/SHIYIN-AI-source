@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.91"
+APP_VERSION = "1.0.92"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -12285,7 +12285,7 @@ interaction 选择规则：衣服/首饰/帽子/眼镜/腰带通常 wear；鞋�
 def public_ecommerce_route(route: Dict[str, Any]) -> Dict[str, Any]:
     return {
         key: route.get(key)
-        for key in ("provider_id", "provider_name", "model", "supports_multi_reference", "supports_mask", "max_reference_images")
+        for key in ("provider_id", "provider_name", "model", "supports_multi_reference", "max_reference_images")
         if key in route
     }
 
@@ -12586,8 +12586,6 @@ def validate_ecommerce_local_inputs(inputs: List[Dict[str, Any]], operation: str
     source_dimensions = first_dimensions if base_transfer else dimensions.get("source")
     if not source_dimensions:
         raise HTTPException(status_code=400, detail="缺少源图尺寸信息")
-    if dimensions.get("mask") and dimensions["mask"] != source_dimensions:
-        raise HTTPException(status_code=400, detail="蒙版尺寸必须与原图完全一致")
     return checked, source_dimensions if base_transfer else (dimensions.get("pose") or source_dimensions)
 
 def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
@@ -12633,14 +12631,13 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         if parent.get("operation") != operation:
             raise HTTPException(status_code=400, detail="新版本必须与父任务使用相同功能")
     try:
-        preserve_source_composition = operation == "background_change" and options.get("preserve_source_composition", True) is not False
         single_subject_studio_edit = (
             operation == "universal"
             and bool(str(options.get("studio_reference") or "").strip())
             and len(inputs) == 1
             and str(inputs[0].get("reference_type") or inputs[0].get("role") or "").strip().lower() in {"source", "subject"}
         )
-        source_composition_locked = preserve_source_composition or single_subject_studio_edit
+        source_composition_locked = operation == "background_change" or single_subject_studio_edit
         generation = resolve_ecommerce_generation_settings(
             source_dimensions[0],
             source_dimensions[1],

@@ -88,6 +88,17 @@ class ShellDefaultsTests(unittest.TestCase):
             re.compile(r"html\.theme-dark \.side-pill:hover[^{}]*\{[^}]*background\s*:", re.S),
         )
 
+    def test_collapsed_sidebar_hides_nav_labels_without_requiring_hover(self):
+        self.assertRegex(
+            self.source,
+            re.compile(
+                r"\.sidebar:not\(\.is-pinned\) \.nav-text\s*\{"
+                r"[^}]*display\s*:\s*none"
+                r"[^}]*opacity\s*:\s*0",
+                re.S,
+            ),
+        )
+
     def test_formal_product_name_contains_runtime_version(self):
         tauri_config = TAURI_CONFIG.read_text(encoding="utf-8")
         tauri_host = TAURI_HOST.read_text(encoding="utf-8")

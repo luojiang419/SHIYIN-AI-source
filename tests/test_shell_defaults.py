@@ -44,6 +44,50 @@ class ShellDefaultsTests(unittest.TestCase):
         self.assertIn("content: \"SHIYIN AI\";", self.source)
         self.assertIn("--accent: #3a3a39;", self.source)
 
+    def test_collapsed_sidebar_controls_fit_and_dark_hover_is_item_scoped(self):
+        rules = re.findall(r"([^{}]+)\{([^{}]*)\}", self.source)
+
+        def declared_widths(selector):
+            widths = []
+            for selectors, declarations in rules:
+                if selector not in selectors:
+                    continue
+                widths.extend(
+                    int(value)
+                    for value in re.findall(r"(?:^|;)\s*width\s*:\s*(\d+)px", declarations)
+                )
+            return widths
+
+        for selector in (
+            ".sidebar:not(.is-pinned):hover .nav-item",
+            ".sidebar:not(.is-pinned):hover .side-pill",
+            ".sidebar:not(.is-pinned):hover .project-version-badge",
+        ):
+            widths = declared_widths(selector)
+            self.assertTrue(widths, selector)
+            self.assertLessEqual(max(widths), 80, f"{selector} exceeds the collapsed sidebar")
+
+        collapsed_side_pill_rules = [
+            declarations
+            for selectors, declarations in rules
+            if ".sidebar:not(.is-pinned):hover .side-pill" in selectors
+        ]
+        self.assertTrue(collapsed_side_pill_rules)
+        for declarations in collapsed_side_pill_rules:
+            self.assertNotRegex(
+                declarations,
+                r"(?:^|;)\s*background(?:-color)?\s*:",
+                "ancestor hover must not repaint every collapsed settings button",
+            )
+        self.assertRegex(
+            self.source,
+            re.compile(r"\.side-pill:hover\s*\{[^}]*background\s*:", re.S),
+        )
+        self.assertRegex(
+            self.source,
+            re.compile(r"html\.theme-dark \.side-pill:hover[^{}]*\{[^}]*background\s*:", re.S),
+        )
+
     def test_formal_product_name_contains_runtime_version(self):
         tauri_config = TAURI_CONFIG.read_text(encoding="utf-8")
         tauri_host = TAURI_HOST.read_text(encoding="utf-8")

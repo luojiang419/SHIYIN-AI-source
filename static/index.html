@@ -1471,7 +1471,7 @@
         }
         .nav-item,
         .sidebar:not(.is-pinned):hover .nav-item {
-            width: 102px;
+            width: 56px;
             height: 76px;
             flex: 0 0 76px;
             justify-content: center;
@@ -1525,9 +1525,8 @@
         .side-actions .settings-fold-group:not(.is-collapsed) {
             max-height: 220px;
         }
-        .side-pill,
-        .sidebar:not(.is-pinned):hover .side-pill {
-            width: 92px;
+        .side-pill {
+            width: 56px;
             height: 46px;
             gap: 0;
             padding: 0;
@@ -1536,6 +1535,10 @@
             border-radius: 14px;
             background: rgba(255,250,244,.52);
             box-shadow: 0 9px 22px rgba(92,72,48,.07), inset 0 1px 0 rgba(255,255,255,.76);
+        }
+        .sidebar:not(.is-pinned):hover .side-pill {
+            width: 56px;
+            gap: 0;
         }
         .sidebar.is-pinned .side-pill {
             width: 150px;
@@ -1573,7 +1576,7 @@
         }
         .project-version-badge,
         .sidebar:not(.is-pinned):hover .project-version-badge {
-            width: 92px;
+            width: 56px;
             min-height: 46px;
             border-color: rgba(91,74,54,.10);
             border-radius: 14px;
@@ -1713,6 +1716,12 @@
             background: rgba(39,39,38,.76);
             color: var(--muted);
             box-shadow: 0 12px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.045);
+        }
+        html.theme-dark .side-pill:hover,
+        body.theme-dark .side-pill:hover {
+            border-color: var(--stage-border);
+            background: var(--nav-hover-bg);
+            color: var(--text);
         }
         html.theme-dark .stage,
         body.theme-dark .stage {

@@ -15,7 +15,8 @@ permissions:
 
 env:
   RELEASE_REPO: luojiang419/SHIYIN-AI
-  MINIMUM_VERSION: v1.0.79
+  BRIDGE_VERSION: v1.0.101
+  MINIMUM_VERSION: v1.0.101
 
 jobs:
   release:
@@ -62,9 +63,11 @@ jobs:
           catch { if ($_.Exception.Response.StatusCode -eq 404) { $latestTag = '' } else { throw } }
           $next = python tools/resolve-release-version.py --latest $latestTag --minimum $env:MINIMUM_VERSION
           if ($LASTEXITCODE -ne 0 -or $next -notmatch '^\d+\.\d+\.\d+$') { throw "Version resolver returned invalid output: $next" }
+          $assetType = if ($next -eq ($env:BRIDGE_VERSION -replace '^v', '')) { 'legacyZip' } else { 'installer' }
           'skip=false' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "version=$next" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "tag=v$next" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "asset_type=$assetType" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Set up Node.js
         if: steps.version.outputs.skip != 'true'
@@ -82,6 +85,11 @@ jobs:
           npm ci
           rustup default stable
 
+      - name: Install Inno Setup
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.asset_type == 'installer'
+        shell: pwsh
+        run: choco install innosetup --version=6.7.1 --no-progress --yes
+
       - name: Verify scripts and inject one release version
         if: steps.version.outputs.skip != 'true'
         shell: pwsh
@@ -98,16 +106,26 @@ jobs:
           python -m pytest -q tests/test_desktop_updater_contract.py
           cargo test --manifest-path src-tauri/Cargo.toml updater::tests --locked
 
-      - name: Build portable Windows release
-        if: steps.version.outputs.skip != 'true'
+      - name: Build compatibility portable ZIP
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.asset_type == 'legacyZip'
         shell: pwsh
         run: ./tools/build-portable.ps1
+
+      - name: Build Windows installer EXE
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.asset_type == 'installer'
+        shell: pwsh
+        run: ./tools/build-installer.ps1
 
       - name: Verify release artifact
         if: steps.version.outputs.skip != 'true'
         id: artifact
         shell: pwsh
-        run: ./tools/verify-release-artifact.ps1 -Version '${{ steps.version.outputs.version }}'
+        run: |
+          if ('${{ steps.version.outputs.asset_type }}' -eq 'legacyZip') {
+            ./tools/verify-release-artifact.ps1 -Version '${{ steps.version.outputs.version }}'
+          } else {
+            ./tools/verify-installer-artifact.ps1 -Version '${{ steps.version.outputs.version }}'
+          }
 
       - name: Verify real previous-version update
         if: steps.version.outputs.skip != 'true'
@@ -118,12 +136,29 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $headers = @{ Accept = 'application/vnd.github+json'; Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'SHIYIN-AI-Updater-E2E' }
           $latest = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:RELEASE_REPO/releases/latest"
-          $fromAsset = @($latest.assets | Where-Object { $_.name -eq "SHIYIN-AI-$($latest.tag_name)-windows-x64.zip" })
-          if ($latest.draft -or $latest.prerelease -or $fromAsset.Count -ne 1) { throw 'Latest release cannot be used as the updater E2E source.' }
+          $fromZip = @($latest.assets | Where-Object { $_.name -eq "SHIYIN-AI-$($latest.tag_name)-windows-x64.zip" })
+          $fromInstaller = @($latest.assets | Where-Object { $_.name -eq "SHIYIN-AI-Setup-$($latest.tag_name -replace '^v', '').exe" })
+          if ($latest.draft -or $latest.prerelease) { throw 'Latest release cannot be used as the updater E2E source.' }
           $fromDir = Join-Path $env:RUNNER_TEMP 'shiyin-updater-from'
           New-Item -ItemType Directory -Force -Path $fromDir | Out-Null
-          Invoke-WebRequest -Headers $headers -Uri $fromAsset[0].browser_download_url -OutFile (Join-Path $fromDir $fromAsset[0].name)
-          ./tools/smoke-updater.ps1 -FromZip (Join-Path $fromDir $fromAsset[0].name) -ToZip '${{ steps.artifact.outputs.asset_path }}' -ToVersion '${{ steps.version.outputs.version }}'
+          if ('${{ steps.version.outputs.asset_type }}' -eq 'legacyZip') {
+            if ($fromZip.Count -ne 1) { throw 'Latest release does not expose the legacy ZIP required by the bridge smoke test.' }
+            $fromPath = Join-Path $fromDir $fromZip[0].name
+            Invoke-WebRequest -Headers $headers -Uri $fromZip[0].browser_download_url -OutFile $fromPath
+            ./tools/smoke-updater.ps1 -FromZip $fromPath -ToZip '${{ steps.artifact.outputs.asset_path }}' -ToVersion '${{ steps.version.outputs.version }}'
+          } else {
+            if ($fromInstaller.Count -eq 1) {
+              $fromPath = Join-Path $fromDir $fromInstaller[0].name
+              Invoke-WebRequest -Headers $headers -Uri $fromInstaller[0].browser_download_url -OutFile $fromPath
+              ./tools/smoke-installer-updater.ps1 -FromInstaller $fromPath -ToInstaller '${{ steps.artifact.outputs.asset_path }}' -ToVersion '${{ steps.version.outputs.version }}'
+            } elseif ($fromZip.Count -eq 1) {
+              $fromPath = Join-Path $fromDir $fromZip[0].name
+              Invoke-WebRequest -Headers $headers -Uri $fromZip[0].browser_download_url -OutFile $fromPath
+              ./tools/smoke-installer-updater.ps1 -FromZip $fromPath -ToInstaller '${{ steps.artifact.outputs.asset_path }}' -ToVersion '${{ steps.version.outputs.version }}'
+            } else {
+              throw 'Latest release does not expose an installer or legacy ZIP required by the installer smoke test.'
+            }
+          }
 
       - name: Create draft, upload, verify, and publish
         if: steps.version.outputs.skip != 'true'
@@ -136,6 +171,7 @@ jobs:
           -Version '${{ steps.version.outputs.version }}'
           -SourceRepo '${{ github.repository }}'
           -SourceSha '${{ github.sha }}'
+          -AssetType '${{ steps.version.outputs.asset_type }}'
           -AssetPath '${{ steps.artifact.outputs.asset_path }}'
           -ChecksumPath '${{ steps.artifact.outputs.checksum_path }}'
           -ReleaseNotesPath './release-notes/current.md'

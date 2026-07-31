@@ -69,7 +69,7 @@ body.studio-theme-dark .action-btn.danger-btn:hover { background:rgba(127,29,29,
 body.studio-theme-dark .gbadge { fill:#fbbf24; }
 /* 节点分类色（极淡，仅作分组提示） */
 .gnode.cat-prompt    rect { fill:#fef9e7; stroke:#eab308; }
-.gnode.cat-loader    rect { fill:#eff6ff; stroke:#3b82f6; }
+.gnode.cat-loader    rect { fill:var(--soft); stroke:var(--line-2); }
 .gnode.cat-lora      rect { fill:#fef3c7; stroke:#f59e0b; }
 .gnode.cat-sampler   rect { fill:#f5f3ff; stroke:#8b5cf6; }
 .gnode.cat-image     rect { fill:#ecfdf5; stroke:#10b981; }
@@ -77,7 +77,7 @@ body.studio-theme-dark .gbadge { fill:#fbbf24; }
 .gnode.cat-latent    rect { fill:#fdf2f8; stroke:#ec4899; }
 .gnode.cat-controlnet rect { fill:#fff7ed; stroke:#f97316; }
 body.studio-theme-dark .gnode.cat-prompt    rect { fill:#3a3315; stroke:#eab308; }
-body.studio-theme-dark .gnode.cat-loader    rect { fill:#1a2845; stroke:#60a5fa; }
+body.studio-theme-dark .gnode.cat-loader    rect { fill:var(--soft); stroke:var(--line-2); }
 body.studio-theme-dark .gnode.cat-lora      rect { fill:#3a2a10; stroke:#fbbf24; }
 body.studio-theme-dark .gnode.cat-sampler   rect { fill:#2a1e44; stroke:#a78bfa; }
 body.studio-theme-dark .gnode.cat-image     rect { fill:#0f3825; stroke:#34d399; }
@@ -142,8 +142,8 @@ body.studio-theme-dark .dropdown-opt-row { background:var(--soft); border-color:
 .dropdown-opt-row .opt-index { width:18px; text-align:center; font-size:10.5px; color:var(--faint); font-weight:800; font-variant-numeric:tabular-nums; flex:0 0 auto; }
 .dropdown-opt-row .small-input { flex:1; }
 .opt-type-tag { font-size:9.5px; font-weight:800; padding:2px 6px; border-radius:5px; background:var(--line); color:var(--muted); letter-spacing:.04em; flex:0 0 auto; }
-.opt-type-tag.is-num { background:rgba(59,130,246,.15); color:#1d4ed8; }
-body.studio-theme-dark .opt-type-tag.is-num { background:rgba(96,165,250,.2); color:#60a5fa; }
+.opt-type-tag.is-num { background:var(--soft); color:var(--text); }
+body.studio-theme-dark .opt-type-tag.is-num { background:var(--soft); color:var(--text); }
 .opt-del { width:24px; height:24px; border-radius:6px; display:flex; align-items:center; justify-content:center; color:var(--faint); background:transparent; flex:0 0 auto; cursor:pointer; }
 .opt-del:hover { color:#dc2626; background:rgba(239,68,68,.08); }
 body.studio-theme-dark .extras-row textarea { background:var(--soft); border-color:var(--line-strong); }

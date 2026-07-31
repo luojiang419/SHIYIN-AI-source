@@ -3155,7 +3155,6 @@ function linkCreateOptions(state){
         if(['image','prompt','loop','group','promptGroup','llm','output'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
-                {type:'rh', label:tr('canvas.rhGenerate'), icon:'workflow'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'LLM', icon:'message-square-text'}])
             ];

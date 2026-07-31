@@ -1638,3 +1638,316 @@ body.theme-dark #shell.shell > .board {
     border-color:var(--studio-border-strong) !important;
     color:var(--studio-text) !important;
 }
+
+/* 普通画布菜单与返回按钮：统一使用当前主题的中性表面，避免旧版蓝灰色残留。 */
+#createMenu.create-menu,
+#linkCreateMenu.create-menu,
+#nodeInputMenu.create-menu,
+#nodeOutputMenu.create-menu,
+#imageNodeMenu.create-menu {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border-strong) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+#createMenu.create-menu .menu-btn,
+#linkCreateMenu.create-menu .menu-btn,
+#nodeInputMenu.create-menu .menu-btn,
+#nodeOutputMenu.create-menu .menu-btn,
+#imageNodeMenu.create-menu .menu-btn {
+    background:var(--studio-control) !important;
+    border:1px solid var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+#createMenu.create-menu .menu-btn:hover,
+#linkCreateMenu.create-menu .menu-btn:hover,
+#nodeInputMenu.create-menu .menu-btn:hover,
+#nodeOutputMenu.create-menu .menu-btn:hover,
+#imageNodeMenu.create-menu .menu-btn:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+#backToManagerBtn.tool-btn {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-muted) !important;
+    box-shadow:none !important;
+}
+
+#backToManagerBtn.tool-btn:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+/* 普通画布导航地图与空状态：彻底移除旧版蓝灰背景，三种主题统一从变量取色。 */
+#minimap,
+#minimapContent,
+#canvasArrangeBtn,
+.canvas-gate,
+.canvas-gate .gate-list,
+.canvas-gate .gate-icon-btn,
+.canvas-gate .gate-back-link,
+.canvas-gate .gate-create-row,
+.canvas-gate .secondary-btn,
+.canvas-gate .create-cancel,
+.canvas-gate .canvas-card-meta,
+.canvas-gate .canvas-preview-mark,
+.canvas-gate .canvas-card-edit,
+.canvas-gate .canvas-delete {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+#minimapContent,
+.canvas-gate .gate-list {
+    background:var(--studio-control) !important;
+    box-shadow:none !important;
+}
+
+#minimap .minimap-node {
+    background:color-mix(in srgb,var(--studio-text) 64%,transparent) !important;
+    border-color:var(--studio-border-strong) !important;
+}
+
+#minimap .minimap-node.selected {
+    background:var(--studio-accent) !important;
+    box-shadow:0 0 0 1px var(--studio-accent-contrast) !important;
+}
+
+#minimap .minimap-viewport {
+    border-color:var(--studio-accent) !important;
+    background:color-mix(in srgb,var(--studio-accent) 8%,transparent) !important;
+    box-shadow:0 0 0 1px var(--studio-accent-contrast) !important;
+}
+
+#canvasArrangeBtn:hover,
+.canvas-gate .gate-icon-btn:hover,
+.canvas-gate .gate-back-link:hover,
+.canvas-gate .canvas-preview-mark:hover,
+.canvas-gate .canvas-card-edit:hover,
+.canvas-gate .canvas-delete:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+/* 全局蓝色背景收口：条件状态、媒体占位和功能编辑器也必须遵循三种中性主题。 */
+.ws-paste-btn,
+.picker-other-tag.cat-chat,
+.recommend-cap-icons span,
+.recommend-tag,
+.onboarding-badge,
+.onboarding-step-label,
+.opt-type-tag.is-num,
+.avatar-card.processing,
+.selection-marquee,
+.workflow-transfer-meta.busy,
+.workflow-transfer-btn.busy,
+.node-run-status.running,
+.output-time-pill.running,
+.run-time-pill,
+.input-thumb-audio,
+.video-input-audio {
+    background:var(--studio-control) !important;
+    background-image:none !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+.ws-paste-btn:hover,
+.api-link-btn:hover,
+.action-btn.primary-btn:hover,
+.action-btn.save-btn:hover,
+.onboarding-key-btn:hover,
+.onboarding-fill-btn:hover,
+.onboarding-save-btn:hover {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+.api-link-btn,
+.action-btn.primary-btn {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+.provider-card.active,
+.recommend-inline-card .recommend-card,
+.recommend-platform-setup,
+.onboarding-key-entry,
+.onboarding-step-panel {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+.recommend-advantages span::before {
+    background:var(--studio-accent) !important;
+}
+
+.gnode.cat-loader rect,
+.rh-editor-gnode.cat-audio rect {
+    fill:var(--studio-control) !important;
+    stroke:var(--studio-border-strong) !important;
+}
+
+.asset-manager-modal,
+.output-lightbox,
+.image-edit-modal,
+.log-modal,
+.error-modal,
+.model-modal,
+.popup-backdrop,
+.image-lightbox,
+.smart-log-lightbox,
+.asset-dialog-backdrop,
+.rh-workflow-editor-overlay,
+.picker-overlay {
+    background:color-mix(in srgb,var(--studio-bg) 72%,transparent) !important;
+}
+
+.image-node video,
+.media-card video,
+.media-card img[data-preview-kind="video"],
+.audio-card audio,
+.rh-input-item video,
+.rh-param-thumb video,
+.output-grid video,
+.output-preview video,
+.canvas-asset-thumb,
+.canvas-asset-thumb-wrap img,
+.canvas-asset-thumb-wrap video,
+.log-thumbs img,
+.log-thumbs video,
+.smart-node-input-thumb img,
+.smart-node-input-thumb video,
+.media-video-card video,
+.thumb-item video,
+.media-thumb.video-thumb video,
+.video.node-img,
+.input-thumb img,
+.input-thumb video,
+.mention-image-token img,
+.mention-image-token video {
+    background:var(--studio-control) !important;
+}
+
+.canvas-video-play,
+.output-video-badge,
+.canvas-asset-video-badge,
+.asset-video-badge,
+.smart-log-lightbox-close,
+.preview-compare-handle::after {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+.canvas-item.active,
+.canvas-delete-box,
+.emoji-picker,
+.loop-counter-token-btn,
+.loop-token-chip,
+.llm-bubble.user,
+.llm-run,
+.gen-btn,
+.comfy-run,
+.model-btn.primary,
+.primary-btn,
+.create-confirm,
+.preview-text-btn,
+.loop-smart-counter-token,
+.loop-smart-token-chip,
+.hbm-btn.hbm-primary {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+.theme-dark .canvas-meta-pop,
+.theme-dark .canvas-owner-input,
+.theme-dark .canvas-meta-pop .emoji-option,
+.theme-dark .model-input,
+.theme-dark .llm-input-area[readonly],
+.theme-dark .provider-field select,
+.theme-dark .image-edit-tools input[type="color"],
+.theme-dark .model-btn.secondary,
+.theme-dark .select-lite option,
+.theme-dark .select-lite option:disabled,
+.theme-dark .grid-preset-btn,
+.theme-dark .crop-ratio-btn,
+.theme-dark .edit-text-inline,
+.theme-dark .llm-output-copy,
+.theme-dark .preview-icon-btn,
+.theme-dark .output-img-wrap.loading-wrap,
+.theme-dark .canvas-item.active .canvas-delete,
+.theme-dark .grid-join-canvas,
+.theme-dark .video-frame-tools,
+.theme-dark .preview-nav-btn,
+.theme-dark .prompt-preset-panel-head button,
+.theme-dark .image-resolution-badge,
+.theme-dark .node-resize-handle,
+.theme-dark .compare-toggle,
+.theme-dark .smart-node-input-thumb,
+.theme-dark .prompt-node-text,
+.theme-dark .prompt-node-split-control,
+.theme-dark .prompt-node-pill,
+.theme-dark .prompt-node-llm select,
+.theme-dark .prompt-node-llm textarea,
+.theme-dark .loop-smart-count,
+.theme-dark .loop-smart-seg,
+.theme-dark .loop-smart-toggle,
+.theme-dark .loop-smart-panel,
+.theme-dark .loop-smart-mini > input,
+.theme-dark .loop-smart-upstream,
+.theme-dark .loop-smart-text,
+.theme-dark .loop-smart-token,
+.theme-dark .loop-number-trigger,
+.theme-dark .image-wrap .mini-x,
+.theme-dark .thumb-item .mini-x {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+.theme-dark .input-thumb-label,
+.theme-dark .smart-node-input-badge,
+.theme-dark .loop-smart-icon-btn,
+.theme-dark .loop-smart-add-prompt,
+.theme-dark .loop-smart-token-chip button,
+.theme-dark .asset-video-badge {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+}
+
+.theme-dark .image-edit-modal,
+.theme-dark .log-modal,
+.theme-dark .error-modal,
+.theme-dark .model-modal,
+.theme-dark .asset-manager-modal,
+.theme-dark .smart-log-lightbox,
+.theme-dark .panorama-loading {
+    background:color-mix(in srgb,var(--studio-bg) 72%,transparent) !important;
+}
+
+.theme-dark .outpaint-resolution,
+.theme-dark .resize-resolution-overlay,
+.theme-dark .smart-log-lightbox-close {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}

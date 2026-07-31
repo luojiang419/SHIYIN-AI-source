@@ -7,6 +7,7 @@ fn main() {
             "download_update",
             "defer_downloaded_update",
             "apply_downloaded_update",
+            "run_update_session",
         ]),
     ))
     .expect("failed to generate desktop update command permissions");

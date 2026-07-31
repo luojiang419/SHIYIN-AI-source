@@ -132,6 +132,22 @@ class UnifiedThemeTests(unittest.TestCase):
         ):
             self.assertIn(marker, source)
 
+    def test_no_explicit_blue_backgrounds_remain_in_static_surfaces(self):
+        sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in STATIC.rglob("*")
+            if path.suffix.lower() in {".css", ".html", ".js"}
+        )
+        blue_background = re.compile(
+            r"background(?:-color)?\s*:[^;]*(?:"
+            r"#2563eb|#3b82f6|#60a5fa|#bfdbfe|#dbeafe|#eff6ff|"
+            r"rgba\(\s*(?:37\s*,\s*99\s*,\s*235|"
+            r"59\s*,\s*130\s*,\s*246|96\s*,\s*165\s*,\s*250|"
+            r"147\s*,\s*197\s*,\s*253))",
+            re.IGNORECASE,
+        )
+        self.assertIsNone(blue_background.search(sources))
+
     def test_light_theme_has_final_pass_over_pure_white_surfaces(self):
         source = UNIFIED_CSS.read_text(encoding="utf-8")
         for marker in (

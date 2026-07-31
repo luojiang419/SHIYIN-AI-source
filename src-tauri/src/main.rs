@@ -4,5 +4,8 @@ fn main() {
     if canvas_desktop_lib::run_update_helper_from_args() {
         return;
     }
+    if canvas_desktop_lib::run_update_session_window_from_args() {
+        return;
+    }
     canvas_desktop_lib::run();
 }

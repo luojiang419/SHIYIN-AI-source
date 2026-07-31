@@ -6,6 +6,8 @@ $targets = @(
     (Join-Path $projectRoot ".npm-cache"),
     (Join-Path $projectRoot ".pytest_cache"),
     (Join-Path $projectRoot ".build\sidecar-smoke-data"),
+    (Join-Path $projectRoot ".build\installer"),
+    (Join-Path $projectRoot "dist\installer-stage"),
     (Join-Path $projectRoot ".build\desktop-smoke"),
     (Join-Path $projectRoot ".build\ecommerce-params-browser"),
     (Join-Path $projectRoot ".build\vision-live-smoke-data"),

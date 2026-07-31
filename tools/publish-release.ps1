@@ -5,6 +5,8 @@ param(
     [string]$SourceRepo,
     [Parameter(Mandatory = $true)]
     [string]$SourceSha,
+    [ValidateSet('installer', 'legacyZip')]
+    [string]$AssetType = 'legacyZip',
     [string]$ReleaseRepo = 'luojiang419/SHIYIN-AI',
     [string]$AssetPath,
     [string]$ChecksumPath,
@@ -18,8 +20,15 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version: $Version" }
 if ($SourceSha -notmatch '^[0-9a-fA-F]{40}$') { throw "Invalid source commit SHA: $SourceSha" }
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$assetName = "SHIYIN-AI-v$Version-windows-x64.zip"
-if (-not $AssetPath) { $AssetPath = Join-Path $projectRoot "dist\$assetName" }
+$assetName = if ($AssetType -eq 'installer') {
+    "SHIYIN-AI-Setup-$Version.exe"
+} else {
+    "SHIYIN-AI-v$Version-windows-x64.zip"
+}
+if (-not $AssetPath) {
+    $assetDirectory = if ($AssetType -eq 'installer') { 'dist\installer' } else { 'dist' }
+    $AssetPath = Join-Path $projectRoot "$assetDirectory\$assetName"
+}
 $assetPath = (Resolve-Path -LiteralPath $AssetPath).Path
 if ([IO.Path]::GetFileName($assetPath) -ne $assetName) { throw "Unexpected release asset name: $([IO.Path]::GetFileName($assetPath))" }
 if (-not $ChecksumPath) { $ChecksumPath = "$assetPath.sha256" }

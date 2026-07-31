@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/windows-schema.json",
   "identifier": "desktop-update",
   "description": "允许主窗口的本地服务页面调用桌面更新命令。",
-  "windows": ["main"],
+  "windows": ["main", "update"],
   "remote": {
     "urls": ["http://127.0.0.1:*"]
   },
@@ -12,6 +12,7 @@
     "allow-check-for-update",
     "allow-download-update",
     "allow-defer-downloaded-update",
-    "allow-apply-downloaded-update"
+    "allow-apply-downloaded-update",
+    "allow-run-update-session"
   ]
 }

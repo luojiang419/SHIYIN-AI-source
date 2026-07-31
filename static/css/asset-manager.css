@@ -295,7 +295,7 @@ body.theme-dark .asset-card.active { border-color:rgba(248,250,252,.86); box-sha
 .canvas-asset-card .asset-card-meta { line-height:1.25; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .canvas-asset-tree .tree-parent { grid-template-columns:18px minmax(0,1fr) auto; }
 .canvas-asset-tree .tree-child { grid-template-columns:14px 16px minmax(0,1fr) auto; }
-.selection-marquee { position:absolute; z-index:20; border:1px solid rgba(59,130,246,.65); background:rgba(59,130,246,.12); border-radius:6px; pointer-events:none; }
+.selection-marquee { position:absolute; z-index:20; border:1px solid var(--line-2); background:color-mix(in srgb,var(--strong) 12%,transparent); border-radius:6px; pointer-events:none; }
 .inline-edit-form { display:flex; flex-direction:column; gap:10px; }
 .inline-edit-field { display:flex; flex-direction:column; gap:6px; }
 .inline-edit-field span { color:var(--faint); font-size:10px; font-weight:900; }
@@ -358,13 +358,13 @@ body.theme-dark .asset-card.active { border-color:rgba(248,250,252,.86); box-sha
 .avatar-section { margin-top:12px; border:1px solid var(--line); border-radius:13px; background:var(--card); padding:12px; display:flex; flex-direction:column; gap:9px; }
 .avatar-card { border:1px solid var(--line); border-radius:11px; background:var(--bg); padding:10px; display:flex; flex-direction:column; gap:8px; }
 .avatar-card.registered { border-color:rgba(34,197,94,.45); background:rgba(34,197,94,.08); }
-.avatar-card.processing { border-color:rgba(59,130,246,.45); background:rgba(59,130,246,.08); }
+.avatar-card.processing { border-color:var(--line-2); background:var(--soft); }
 .avatar-card.failed { border-color:rgba(239,68,68,.45); background:rgba(239,68,68,.08); }
 .avatar-head { display:flex; align-items:center; gap:7px; color:var(--text); font-size:12px; font-weight:900; }
 .avatar-head i { width:15px; height:15px; }
 .avatar-platform-tag { margin-left:auto; font-size:10px; font-weight:800; padding:2px 8px; border-radius:999px; background:var(--line); color:var(--text); }
 .avatar-card.registered .avatar-head { color:#16a34a; }
-.avatar-card.processing .avatar-head { color:#2563eb; }
+.avatar-card.processing .avatar-head { color:var(--strong); }
 .avatar-card.processing .avatar-head i { animation:avatar-spin 1.1s linear infinite; }
 .avatar-card.failed .avatar-head { color:#dc2626; }
 @keyframes avatar-spin { to { transform:rotate(360deg); } }

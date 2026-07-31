@@ -1008,7 +1008,7 @@
             align-items:center;
             justify-content:center;
             padding:24px;
-            background:rgba(15,23,42,.38);
+            background:color-mix(in srgb, var(--bg) 42%, transparent);
             backdrop-filter:blur(10px);
         }
 
@@ -1284,18 +1284,18 @@
         }
 
         #connectivity-test-btn {
-            border-color:rgba(37,99,235,.24);
-            background:#eff6ff;
-            color:#1d4ed8;
+            border-color:var(--stage-border);
+            background:var(--nav-hover-bg);
+            color:var(--text);
             transition:transform .16s ease, background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
         }
 
         #connectivity-test-btn:hover {
             transform:translateY(-1px);
-            border-color:#2563eb;
-            background:#2563eb;
-            color:#fff;
-            box-shadow:0 10px 22px rgba(37,99,235,.20);
+            border-color:var(--text);
+            background:var(--text);
+            color:var(--bg);
+            box-shadow:0 10px 22px rgba(23,23,23,.16);
         }
 
         #connectivity-test-btn:hover svg {
@@ -1312,14 +1312,14 @@
         }
 
         .studio-modal-btn.primary {
-            background:#111827;
-            border-color:#111827;
-            color:#fff;
+            background:var(--text);
+            border-color:var(--text);
+            color:var(--bg);
         }
 
         .studio-modal-btn.primary:hover {
-            background:#16a34a;
-            border-color:#16a34a;
+            background:var(--text);
+            border-color:var(--text);
         }
 
         .studio-modal-btn[disabled] {
@@ -1329,7 +1329,7 @@
 
         html.theme-dark .studio-modal,
         body.theme-dark .studio-modal {
-            background:rgba(2,6,23,.56);
+            background:rgba(0,0,0,.56);
         }
 
         html.theme-dark .studio-modal-panel,
@@ -1422,17 +1422,17 @@
 
         html.theme-dark #connectivity-test-btn,
         body.theme-dark #connectivity-test-btn {
-            background:rgba(96,165,250,.12);
-            border-color:rgba(96,165,250,.34);
-            color:#93c5fd;
+            background:var(--nav-hover-bg);
+            border-color:var(--stage-border);
+            color:var(--text);
         }
 
         html.theme-dark #connectivity-test-btn:hover,
         body.theme-dark #connectivity-test-btn:hover {
-            background:#60a5fa;
-            border-color:#60a5fa;
-            color:#07111f;
-            box-shadow:0 10px 24px rgba(96,165,250,.18);
+            background:var(--text);
+            border-color:var(--text);
+            color:var(--bg);
+            box-shadow:0 10px 24px rgba(0,0,0,.24);
         }
 
         html.theme-dark .studio-modal-btn.primary:hover,
@@ -1895,6 +1895,7 @@
             background: #20201f;
             border-color: rgba(255,255,255,.09);
             color: #f0eee9;
+            box-shadow: 0 24px 70px rgba(0,0,0,.42);
         }
         html.theme-dark .studio-modal-btn.primary,
         body.theme-dark .studio-modal-btn.primary {
@@ -2018,7 +2019,7 @@
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                     </svg>
-                    <span class="nav-text" data-i18n="nav.gpt">GPT 对话</span>
+                    <span class="nav-text" data-i18n="nav.gpt">AI助手</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'canvas')">
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

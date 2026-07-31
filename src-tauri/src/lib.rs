@@ -28,6 +28,10 @@ pub fn run_update_helper_from_args() -> bool {
     updater::run_update_helper_from_args()
 }
 
+pub fn run_update_session_window_from_args() -> bool {
+    updater::run_update_session_window_from_args()
+}
+
 const APP_DISPLAY_NAME: &str = concat!("SHIYIN AI V", env!("CARGO_PKG_VERSION"));
 const CLOSE_BEHAVIOR_ASK: &str = "ask_on_close";
 const CLOSE_BEHAVIOR_TRAY: &str = "minimize_to_tray";

@@ -183,6 +183,35 @@ body.theme-dark {
     --as-accent:var(--studio-accent);
 }
 
+html.studio-theme-pure-white,
+html.theme-pure-white,
+body.studio-theme-pure-white,
+body.theme-pure-white {
+    color-scheme:light;
+    --studio-bg:#ffffff;
+    --studio-panel:#ffffff;
+    --studio-panel-raised:#ffffff;
+    --studio-panel-soft:#fafafa;
+    --studio-control:#fafafa;
+    --studio-control-hover:#f5f5f5;
+    --studio-text:#171717;
+    --studio-text-soft:#404040;
+    --studio-muted:#737373;
+    --studio-faint:#a3a3a3;
+    --studio-border:rgba(23,23,23,.12);
+    --studio-border-strong:rgba(23,23,23,.24);
+    --studio-accent:#171717;
+    --studio-accent-contrast:#ffffff;
+    --studio-accent-soft:#f5f5f5;
+    --studio-success:#26734d;
+    --studio-danger:#b42318;
+    --studio-danger-soft:#fceae8;
+    --studio-grid:rgba(23,23,23,.14);
+    --studio-shadow-color:rgba(23,23,23,.12);
+    --studio-shadow:0 16px 34px rgba(23,23,23,.10),0 2px 7px rgba(23,23,23,.06),inset 0 1px 0 rgba(255,255,255,.94);
+    --studio-shadow-raised:0 28px 80px rgba(23,23,23,.14),0 3px 10px rgba(23,23,23,.07),inset 0 1px 0 rgba(255,255,255,.96);
+}
+
 html,
 body {
     background:var(--studio-bg);

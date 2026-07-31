@@ -20,12 +20,16 @@
                     document.documentElement.classList.add('studio-theme-dark');
                     document.documentElement.classList.add('theme-dark');
                 }
+                if(theme === 'pure-white') {
+                    document.documentElement.classList.add('studio-theme-pure-white');
+                    document.documentElement.classList.add('theme-pure-white');
+                }
                 document.documentElement.classList.add('studio-route-booting');
             } catch(e) {}
         })();
     </script>
     <link rel="stylesheet" href="/static/vendor/css/tailwind.generated.css?v=2026.07.26.performance.1">
-    <script src="/static/js/theme.js?v=2026.07.23.no-native-context-menu.1"></script>
+    <script src="/static/js/theme.js?v=2026.07.31.theme-picker.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <style>
         @import url('/static/vendor/css/fonts.css?v=2026.06.30.1782781876');
@@ -80,6 +84,27 @@
             --divider: rgba(255, 255, 255, 0.10);
             --scrollbar: #494947;
             --scrollbar-hover: #5c5c59;
+        }
+
+        html.studio-theme-pure-white,
+        html.theme-pure-white,
+        body.studio-theme-pure-white,
+        body.theme-pure-white {
+            --accent: #171717;
+            --bg: #ffffff;
+            --sidebar-bg: #fafafa;
+            --stage-bg: #fafafa;
+            --border: rgba(23, 23, 23, 0.12);
+            --stage-border: rgba(23, 23, 23, 0.14);
+            --text: #171717;
+            --muted: #737373;
+            --nav-hover-bg: rgba(23, 23, 23, 0.06);
+            --monitor-bg: rgba(255, 255, 255, 0.88);
+            --monitor-border: rgba(23, 23, 23, 0.12);
+            --monitor-shadow: rgba(23, 23, 23, 0.12);
+            --divider: rgba(23, 23, 23, 0.12);
+            --scrollbar: #d4d4d4;
+            --scrollbar-hover: #a3a3a3;
         }
 
         /* 极简滚动条 */
@@ -562,6 +587,142 @@
             background: var(--text);
             color: var(--bg);
             border-color: var(--text);
+        }
+
+        .theme-picker-panel {
+            width: min(480px, 100%);
+        }
+
+        .theme-picker-intro {
+            margin: 0 0 16px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.55;
+        }
+
+        .theme-picker-options {
+            display: grid;
+            gap: 10px;
+        }
+
+        .theme-option {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 46px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: color-mix(in srgb, var(--sidebar-bg) 94%, transparent);
+            color: var(--text);
+            text-align: left;
+            cursor: pointer;
+            transition: transform .18s var(--fluid-ease), background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
+        }
+
+        .theme-option:hover,
+        .theme-option:focus-visible {
+            transform: translateY(-1px);
+            border-color: var(--stage-border);
+            background: var(--nav-hover-bg);
+            outline: none;
+        }
+
+        .theme-option.active {
+            border-color: var(--text);
+            background: color-mix(in srgb, var(--sidebar-bg) 82%, var(--nav-hover-bg));
+            box-shadow: 0 10px 24px rgba(23, 23, 23, .10), inset 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+        }
+
+        .theme-option-swatch {
+            width: 46px;
+            height: 46px;
+            display: block;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.72);
+        }
+
+        .theme-option-swatch.ivory {
+            background: linear-gradient(145deg, #faf2e7, #f1e5d7);
+        }
+
+        .theme-option-swatch.night {
+            background: linear-gradient(145deg, #30302f, #171717);
+            border-color: rgba(255,255,255,.16);
+        }
+
+        .theme-option-swatch.pure {
+            background: linear-gradient(145deg, #ffffff, #f5f5f5);
+            border-color: rgba(23,23,23,.18);
+        }
+
+        .theme-option-copy {
+            min-width: 0;
+        }
+
+        .theme-option-title,
+        .theme-option-desc {
+            display: block;
+        }
+
+        .theme-option-title {
+            font-size: 13px;
+            font-weight: 900;
+        }
+
+        .theme-option-desc {
+            margin-top: 3px;
+            overflow: hidden;
+            color: var(--muted);
+            font-size: 10px;
+            line-height: 1.45;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .theme-option-check {
+            width: 22px;
+            height: 22px;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            color: transparent;
+        }
+
+        .theme-option.active .theme-option-check {
+            border-color: var(--text);
+            background: var(--text);
+            color: var(--bg);
+        }
+
+        .theme-option-check svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        html.studio-theme-pure-white .theme-picker-panel,
+        body.studio-theme-pure-white .theme-picker-panel,
+        html.theme-pure-white .theme-picker-panel,
+        body.theme-pure-white .theme-picker-panel {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.12);
+            color: #171717;
+            box-shadow: 0 24px 70px rgba(23,23,23,.16);
+        }
+
+        html.studio-theme-pure-white .theme-picker-panel .studio-modal-head,
+        body.studio-theme-pure-white .theme-picker-panel .studio-modal-head,
+        html.theme-pure-white .theme-picker-panel .studio-modal-head,
+        body.theme-pure-white .theme-picker-panel .studio-modal-head,
+        html.studio-theme-pure-white .theme-picker-panel .studio-modal-actions,
+        body.studio-theme-pure-white .theme-picker-panel .studio-modal-actions,
+        html.theme-pure-white .theme-picker-panel .studio-modal-actions,
+        body.theme-pure-white .theme-picker-panel .studio-modal-actions {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.10);
         }
 
         .side-pill.update-available {
@@ -1756,6 +1917,73 @@
             color: #fff;
             box-shadow: 0 10px 24px rgba(0,0,0,.28);
         }
+
+        html.studio-theme-pure-white .sidebar,
+        body.studio-theme-pure-white .sidebar,
+        html.theme-pure-white .sidebar,
+        body.theme-pure-white .sidebar {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.10);
+            box-shadow: 14px 0 38px rgba(23,23,23,.07), inset -1px 0 rgba(23,23,23,.05);
+        }
+
+        html.studio-theme-pure-white .stage,
+        body.studio-theme-pure-white .stage,
+        html.theme-pure-white .stage,
+        body.theme-pure-white .stage {
+            background: linear-gradient(135deg, #fafafa 0%, #ffffff 100%);
+            border-color: rgba(23,23,23,.12);
+            box-shadow: 0 28px 80px rgba(23,23,23,.12), 0 3px 10px rgba(23,23,23,.06), inset 0 1px 0 rgba(255,255,255,.96);
+        }
+
+        html.studio-theme-pure-white .studio-modal-panel,
+        body.studio-theme-pure-white .studio-modal-panel,
+        html.theme-pure-white .studio-modal-panel,
+        body.theme-pure-white .studio-modal-panel {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.12);
+            color: #171717;
+            box-shadow: 0 24px 70px rgba(23,23,23,.16);
+        }
+
+        html.studio-theme-pure-white .studio-modal-head,
+        body.studio-theme-pure-white .studio-modal-head,
+        html.theme-pure-white .studio-modal-head,
+        body.theme-pure-white .studio-modal-head,
+        html.studio-theme-pure-white .studio-modal-actions,
+        body.studio-theme-pure-white .studio-modal-actions,
+        html.theme-pure-white .studio-modal-actions,
+        body.theme-pure-white .studio-modal-actions {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.10);
+        }
+
+        html.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-panel,
+        body.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-panel,
+        html.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-panel,
+        body.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-panel {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.12);
+            color: #171717;
+            box-shadow: 0 24px 70px rgba(23,23,23,.16);
+        }
+
+        html.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-head,
+        body.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-head,
+        html.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-head,
+        body.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-head,
+        html.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-actions,
+        body.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-actions,
+        html.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-actions,
+        body.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) .studio-modal-actions {
+            background: #ffffff;
+            border-color: rgba(23,23,23,.10);
+        }
+
+        html.studio-theme-pure-white:not(.theme-dark):not(.studio-theme-dark) #theme-picker-modal,
+        html.theme-pure-white:not(.theme-dark):not(.studio-theme-dark) #theme-picker-modal {
+            background: rgba(23,23,23,.22);
+        }
     </style>
 </head>
 
@@ -1854,7 +2082,7 @@
                         </svg>
                         <span class="side-pill-text" data-i18n="common.softwareSettings">软件设置</span>
                     </button>
-                    <button class="side-pill" onclick="toggleTheme()" id="theme-toggle-btn" type="button" title="切换夜间模式">
+                    <button class="side-pill" onclick="toggleTheme()" id="theme-toggle-btn" type="button" title="主题" aria-label="主题" aria-haspopup="dialog" aria-expanded="false">
                         <svg id="icon-moon" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                         </svg>
@@ -1869,7 +2097,11 @@
                             <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                             <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
                         </svg>
-                        <span class="side-pill-text" data-i18n="common.darkMode">黑夜模式</span>
+                        <svg id="icon-pure" style="display:none" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="8"></circle>
+                            <path d="M8.5 12h7M12 8.5v7"></path>
+                        </svg>
+                        <span class="side-pill-text" data-i18n="common.theme">主题</span>
                     </button>
                     <button class="side-pill" onclick="toggleLanguage()" id="lang-toggle-btn" type="button" title="Language">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1911,6 +2143,47 @@
             <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.07.29.canvas-neutral-dark.1.api-provider-unification.1" scrolling="yes"></iframe>
 
         </main>
+    </div>
+
+    <div id="theme-picker-modal" class="studio-modal" hidden role="dialog" aria-modal="true" aria-labelledby="theme-picker-title" onclick="closeThemePicker()">
+        <div class="studio-modal-panel theme-picker-panel" onclick="event.stopPropagation()">
+            <div class="studio-modal-head">
+                <div>
+                    <div class="studio-modal-kicker" data-i18n="common.theme">主题</div>
+                    <div id="theme-picker-title" class="studio-modal-title" data-i18n="common.chooseTheme">选择主题</div>
+                </div>
+                <button class="studio-modal-close" type="button" onclick="closeThemePicker()" title="关闭" aria-label="关闭" data-i18n-title="common.close">×</button>
+            </div>
+            <div class="studio-modal-body">
+                <p class="theme-picker-intro" data-i18n="common.chooseThemeHint">选择一个适合当前创作状态的工作空间主题。</p>
+                <div class="theme-picker-options" role="radiogroup" aria-label="主题选择">
+                    <button class="theme-option" type="button" data-theme-choice="light" role="radio" aria-checked="false">
+                        <span class="theme-option-swatch ivory" aria-hidden="true"></span>
+                        <span class="theme-option-copy">
+                            <span class="theme-option-title" data-i18n="common.ivoryTheme">象牙白</span>
+                            <span class="theme-option-desc" data-i18n="common.ivoryThemeDesc">温润米白，适合长时间浏览与创作</span>
+                        </span>
+                        <span class="theme-option-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span>
+                    </button>
+                    <button class="theme-option" type="button" data-theme-choice="dark" role="radio" aria-checked="false">
+                        <span class="theme-option-swatch night" aria-hidden="true"></span>
+                        <span class="theme-option-copy">
+                            <span class="theme-option-title" data-i18n="common.nightTheme">星夜黑</span>
+                            <span class="theme-option-desc" data-i18n="common.nightThemeDesc">深色中性灰，降低夜间创作的视觉干扰</span>
+                        </span>
+                        <span class="theme-option-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span>
+                    </button>
+                    <button class="theme-option" type="button" data-theme-choice="pure-white" role="radio" aria-checked="false">
+                        <span class="theme-option-swatch pure" aria-hidden="true"></span>
+                        <span class="theme-option-copy">
+                            <span class="theme-option-title" data-i18n="common.pureWhiteTheme">醇白</span>
+                            <span class="theme-option-desc" data-i18n="common.pureWhiteThemeDesc">纯净白底与黑灰控件，来自 Infinite Canvas 的中性视觉</span>
+                        </span>
+                        <span class="theme-option-check" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></svg></span>
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="project-update-modal" class="studio-modal" hidden role="dialog" aria-modal="true" aria-labelledby="project-update-title">
@@ -2353,33 +2626,70 @@
             if (window.StudioTheme) {
                 window.StudioTheme.set(theme);
             }
+            const activeTheme = window.StudioTheme ? window.StudioTheme.get() : theme;
             document.querySelectorAll('iframe').forEach(f => syncThemeToFrame(f));
-            updateThemeIcon(theme);
+            updateThemeIcon(activeTheme);
         }
 
         function updateThemeIcon(theme) {
             const moon = document.getElementById('icon-moon');
             const sun = document.getElementById('icon-sun');
+            const pure = document.getElementById('icon-pure');
             const dark = theme === 'dark';
-            if (dark) {
-                moon.style.display = 'none';
-                sun.style.display = 'block';
-            } else {
-                moon.style.display = 'block';
-                sun.style.display = 'none';
-            }
-            // 标签随当前主题切换：暗色时提示切到白天，亮色时提示切到黑夜
+            if (moon) moon.style.display = !dark && theme !== 'pure-white' ? 'block' : 'none';
+            if (sun) sun.style.display = dark ? 'block' : 'none';
+            if (pure) pure.style.display = theme === 'pure-white' ? 'block' : 'none';
             const label = document.querySelector('#theme-toggle-btn .side-pill-text');
             if (label) {
-                const key = dark ? 'common.lightMode' : 'common.darkMode';
-                label.dataset.i18n = key;
-                if (window.StudioI18n) label.textContent = window.StudioI18n.t(key);
+                label.dataset.i18n = 'common.theme';
+                if (window.StudioI18n) label.textContent = window.StudioI18n.t('common.theme');
             }
+            const button = document.getElementById('theme-toggle-btn');
+            if (button) {
+                button.dataset.theme = theme;
+                button.title = window.StudioI18n?.t?.('common.chooseTheme') || '选择主题';
+                button.setAttribute('aria-label', button.title);
+            }
+            updateThemePickerState(theme);
         }
 
         function toggleTheme() {
-            const current = window.StudioTheme ? window.StudioTheme.get() : 'light';
-            broadcastTheme(current === 'dark' ? 'light' : 'dark');
+            openThemePicker();
+        }
+
+        function updateThemePickerState(theme) {
+            document.querySelectorAll('[data-theme-choice]').forEach(option => {
+                const selected = option.dataset.themeChoice === theme;
+                option.classList.toggle('active', selected);
+                option.setAttribute('aria-checked', selected ? 'true' : 'false');
+            });
+        }
+
+        function openThemePicker() {
+            const modal = document.getElementById('theme-picker-modal');
+            const trigger = document.getElementById('theme-toggle-btn');
+            if (!modal) return;
+            updateThemePickerState(window.StudioTheme ? window.StudioTheme.get() : 'light');
+            modal.hidden = false;
+            trigger?.setAttribute('aria-expanded', 'true');
+            document.body.classList.add('theme-picker-open');
+            const selected = modal.querySelector('[data-theme-choice].active') || modal.querySelector('[data-theme-choice]');
+            selected?.focus({preventScroll:true});
+        }
+
+        function closeThemePicker() {
+            const modal = document.getElementById('theme-picker-modal');
+            const trigger = document.getElementById('theme-toggle-btn');
+            if (!modal || modal.hidden) return;
+            modal.hidden = true;
+            trigger?.setAttribute('aria-expanded', 'false');
+            document.body.classList.remove('theme-picker-open');
+            trigger?.focus({preventScroll:true});
+        }
+
+        function chooseTheme(theme) {
+            broadcastTheme(theme);
+            closeThemePicker();
         }
 
         function toggleLanguage() {
@@ -2409,6 +2719,13 @@
         // listen for theme changes triggered by theme.js
         window.addEventListener('studio-theme-change', (e) => {
             updateThemeIcon(e.detail.theme);
+        });
+
+        document.querySelectorAll('[data-theme-choice]').forEach(option => {
+            option.addEventListener('click', () => chooseTheme(option.dataset.themeChoice));
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') closeThemePicker();
         });
 
         // init icon state on load

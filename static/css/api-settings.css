@@ -3433,6 +3433,10 @@ body.show-provider-onboarding .content-actions .danger-btn {
     display:none !important;
 }
 
+#settingsContent[hidden] {
+    display:none !important;
+}
+
 .recommend-content {
     min-width:0;
 }

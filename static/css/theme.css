@@ -6,6 +6,17 @@ body.studio-theme-dark {
     color: #e8e8ea !important;
 }
 
+html.studio-theme-pure-white,
+html.studio-theme-pure-white body,
+html.theme-pure-white,
+html.theme-pure-white body,
+body.studio-theme-pure-white,
+body.theme-pure-white {
+    color-scheme: light;
+    background: #ffffff !important;
+    color: #171717 !important;
+}
+
 html,
 body {
     overscroll-behavior: auto;

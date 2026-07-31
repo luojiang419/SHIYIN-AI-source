@@ -65,7 +65,11 @@ class UnifiedThemeTests(unittest.TestCase):
             self.assertIn(marker, source)
         for page in ("canvas-list.html", "canvas.html", "smart-canvas.html"):
             page_source = (STATIC / page).read_text(encoding="utf-8")
-            self.assertIn("studio-unified.css?v=2026.07.29.canvas-neutral-dark.1", page_source, page)
+            self.assertRegex(
+                page_source,
+                r"studio-unified\.css\?v=2026\.07\.(?:29\.canvas-neutral-dark\.1|31\.canvas-toolbar-theme\.1)",
+                page,
+            )
 
     def test_gpt_chat_no_longer_declares_legacy_blue_dark_theme(self):
         source = (STATIC / "gpt-chat.html").read_text(encoding="utf-8").lower()

@@ -1,19 +1,25 @@
 (function(){
     const KEY = 'studio_theme';
     const LEGACY_KEY = 'canvas_theme';
+    const THEME_MODES = ['light', 'dark', 'pure-white', 'system'];
     const SCALE_KEY = 'studio_ui_scale_mode';
     const SCALE_OPTIONS = ['auto', '100', '115', '125', '140'];
 
     const systemPreference = window.matchMedia?.('(prefers-color-scheme: dark)');
 
+    function normalizeThemeMode(theme){
+        return THEME_MODES.includes(theme) ? theme : 'system';
+    }
+
     function currentThemeMode(){
         const saved = localStorage.getItem(KEY) || localStorage.getItem(LEGACY_KEY) || 'system';
-        return ['light','dark','system'].includes(saved) ? saved : 'system';
+        return normalizeThemeMode(saved);
     }
 
     function resolvedTheme(theme=currentThemeMode()){
-        if(theme === 'system') return systemPreference?.matches ? 'dark' : 'light';
-        return theme === 'dark' ? 'dark' : 'light';
+        const mode = normalizeThemeMode(theme);
+        if(mode === 'system') return systemPreference?.matches ? 'dark' : 'light';
+        return mode;
     }
 
     function currentTheme(){
@@ -21,14 +27,20 @@
     }
 
     function applyTheme(theme){
-        const mode = ['light','dark','system'].includes(theme) ? theme : currentThemeMode();
+        const mode = normalizeThemeMode(theme || currentThemeMode());
         const next = resolvedTheme(mode);
         const dark = next === 'dark';
+        const pureWhite = next === 'pure-white';
         document.documentElement.classList.toggle('studio-theme-dark', dark);
         document.documentElement.classList.toggle('theme-dark', dark);
+        document.documentElement.classList.toggle('studio-theme-pure-white', pureWhite);
+        document.documentElement.classList.toggle('theme-pure-white', pureWhite);
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
         if(document.body){
             document.body.classList.toggle('studio-theme-dark', dark);
             document.body.classList.toggle('theme-dark', dark);
+            document.body.classList.toggle('studio-theme-pure-white', pureWhite);
+            document.body.classList.toggle('theme-pure-white', pureWhite);
         }
         window.dispatchEvent(new CustomEvent('studio-theme-change', { detail: { theme: next, mode } }));
     }
@@ -176,11 +188,12 @@
 
     window.StudioTheme = {
         key: KEY,
+        modes: THEME_MODES.slice(),
         get: currentTheme,
         getMode: currentThemeMode,
         apply: applyTheme,
         set(theme){
-            const mode = ['light','dark','system'].includes(theme) ? theme : 'system';
+            const mode = normalizeThemeMode(theme);
             localStorage.setItem(KEY, mode);
             localStorage.setItem(LEGACY_KEY, mode);
             applyTheme(mode);

@@ -2,6 +2,15 @@
     if(!window.StudioI18n) return;
     window.StudioI18n.register({
         "common.apiSettings": { zh: "API 设置", en: "API Settings" },
+        "common.theme": { zh: "主题", en: "Theme" },
+        "common.chooseTheme": { zh: "选择主题", en: "Choose a theme" },
+        "common.chooseThemeHint": { zh: "选择一个适合当前创作状态的工作空间主题。", en: "Choose a workspace theme for your current creative flow." },
+        "common.ivoryTheme": { zh: "象牙白", en: "Ivory" },
+        "common.ivoryThemeDesc": { zh: "温润米白，适合长时间浏览与创作", en: "Warm ivory for long creative sessions" },
+        "common.nightTheme": { zh: "星夜黑", en: "Midnight" },
+        "common.nightThemeDesc": { zh: "深色中性灰，降低夜间创作的视觉干扰", en: "Neutral dark gray for low-light focus" },
+        "common.pureWhiteTheme": { zh: "醇白", en: "Pure White" },
+        "common.pureWhiteThemeDesc": { zh: "纯净白底与黑灰控件，来自 Infinite Canvas 的中性视觉", en: "Clean white surfaces and graphite controls from Infinite Canvas" },
         "common.darkMode": { zh: "黑夜模式", en: "Dark Mode" },
         "common.lightMode": { zh: "白天模式", en: "Light Mode" },
         "common.language": { zh: "中文", en: "English" },

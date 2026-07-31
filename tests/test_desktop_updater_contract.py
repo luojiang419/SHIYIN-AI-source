@@ -11,13 +11,10 @@ CAPABILITY = ROOT / "src-tauri" / "capabilities" / "desktop-update.json"
 DESKTOP_UPDATER = ROOT / "static" / "js" / "desktop-updater.js"
 INDEX = ROOT / "static" / "index.html"
 APP_SETTINGS = ROOT / "static" / "app-settings.html"
-BUILD_SCRIPT = ROOT / "tools" / "build-portable.ps1"
 INSTALLER_BUILD_SCRIPT = ROOT / "tools" / "build-installer.ps1"
 INSTALLER_VERIFY_SCRIPT = ROOT / "tools" / "verify-installer-artifact.ps1"
 INSTALLER_SCRIPT = ROOT / "installer" / "shiyin_ai.iss"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
-PORTABLE_SMOKE = ROOT / "tools" / "smoke-portable.ps1"
-UPDATER_SMOKE = ROOT / "tools" / "smoke-updater.ps1"
 INSTALLER_SMOKE = ROOT / "tools" / "smoke-installer-updater.ps1"
 UPDATER_PAGE = ROOT / "desktop-placeholder" / "updater.html"
 BROWSER_SMOKE_SERVER = ROOT / "tools" / "browser-smoke-server.ps1"
@@ -25,7 +22,6 @@ BACKEND_SPEC = ROOT / "canvas-backend.spec"
 REQUIREMENTS = ROOT / "requirements.txt"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_VERSION_RESOLVER = ROOT / "tools" / "resolve-release-version.py"
-PORTABLE_RELEASE = ROOT / "tools" / "release-portable.ps1"
 GITIGNORE = ROOT / ".gitignore"
 
 
@@ -34,10 +30,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         source = UPDATER.read_text(encoding="utf-8")
         self.assertIn("luojiang419/SHIYIN-AI/releases/latest", source)
         self.assertIn('INSTALLER_PREFIX: &str = "SHIYIN-AI-Setup-"', source)
-        self.assertIn('LEGACY_ZIP_PREFIX: &str = "SHIYIN-AI-v"', source)
-        self.assertIn('LEGACY_ZIP_SUFFIX: &str = "-windows-x64.zip"', source)
         self.assertIn('installer_asset_name', source)
-        self.assertIn('legacy_zip_asset_name', source)
         self.assertIn("Release 校验文件格式或资产名不正确", source)
         self.assertIn("GitHub 资产摘要与校验文件不一致", source)
         self.assertIn("tauri::async_runtime::spawn_blocking", source)
@@ -46,10 +39,11 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("const DOWNLOAD_ATTEMPTS: usize = 3", source)
         self.assertIn("已重试 {DOWNLOAD_ATTEMPTS} 次", source)
         self.assertIn("fs::remove_file(&part)", source)
-        self.assertIn('"SHIYIN_UPDATE_ZIP", zip', source)
-        self.assertIn('"SHIYIN_UPDATE_DESTINATION", destination', source)
         self.assertIn('"SHIYIN_UPDATE_INSTALLER", installer', source)
         self.assertIn("/VERYSILENT", source)
+        self.assertNotIn("legacyZip", source)
+        self.assertNotIn("--apply-update", source)
+        self.assertNotIn("Expand-Archive", source)
 
     def test_updater_keeps_data_and_uses_independent_helper(self):
         source = UPDATER.read_text(encoding="utf-8")
@@ -57,8 +51,15 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("--run-update-session", source)
         self.assertIn("UpdateInstallSession", source)
         self.assertIn("wait_for_exit", source)
-        self.assertIn('root.join("app")', source)
-        self.assertNotIn('remove_dir_all(root)', source)
+        self.assertNotIn("apply_session", source)
+
+    def test_updater_hides_console_windows_for_installer_helpers(self):
+        source = UPDATER.read_text(encoding="utf-8")
+        self.assertIn("const CREATE_NO_WINDOW: u32 = 0x0800_0000;", source)
+        self.assertIn("fn command_without_console", source)
+        self.assertIn('command_without_console("powershell.exe")', source)
+        self.assertIn('command_without_console("tasklist")', source)
+        self.assertIn("let mut command = command_without_console(&helper);", source)
 
     def test_sidebar_replaces_api_slot_with_update_and_groups_api_under_settings(self):
         source = INDEX.read_text(encoding="utf-8")
@@ -93,7 +94,6 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("setTimeout(() => checkAndDownload().catch(() => {}), 1200)", source)
 
     def test_build_and_publish_scripts_share_release_asset_contract(self):
-        self.assertIn('SHIYIN-AI-v$version-windows-x64.zip', BUILD_SCRIPT.read_text(encoding="utf-8"))
         installer_build = INSTALLER_BUILD_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('SHIYIN-AI-Setup-$version.exe', installer_build)
         self.assertIn('Get-Command ISCC.exe', installer_build)
@@ -106,9 +106,9 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('Name: "{app}\\data"; Permissions: users-modify', installer)
         self.assertIn('Name: "{app}\\app"', installer)
         publish = PUBLISH_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("ValidateSet('installer', 'legacyZip')", publish)
         self.assertIn('SHIYIN-AI-Setup-$Version.exe', publish)
-        self.assertIn('SHIYIN-AI-v$Version-windows-x64.zip', publish)
+        self.assertNotIn('legacyZip', publish)
+        self.assertNotIn('SHIYIN-AI-v$Version-windows-x64.zip', publish)
         self.assertIn('luojiang419/SHIYIN-AI', publish)
         self.assertIn('function Get-Sha256', publish)
         self.assertNotIn('Get-FileHash', publish)
@@ -118,10 +118,9 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("Get-Content -Raw -Encoding UTF8 -LiteralPath $notesPath", publish)
         self.assertIn("[Text.Encoding]::UTF8.GetBytes($json)", publish)
         self.assertIn('$parameters.ContentType = "$ContentType; charset=utf-8"', publish)
-        self.assertIn('SHIYIN-AI-v$version-windows-x64', PORTABLE_SMOKE.read_text(encoding="utf-8"))
-        self.assertIn('$assetType = if', RELEASE_WORKFLOW.read_text(encoding="utf-8"))
-        self.assertIn("Legacy ZIP bridge must start from v1.0.100", PORTABLE_RELEASE.read_text(encoding="utf-8"))
-        self.assertIn("Legacy ZIP bridge is limited to v1.0.101", PORTABLE_RELEASE.read_text(encoding="utf-8"))
+        installer_smoke = INSTALLER_SMOKE.read_text(encoding="utf-8")
+        self.assertIn("$FromInstaller", installer_smoke)
+        self.assertNotIn("FromZip", installer_smoke)
 
     def test_portable_backend_collects_websocket_runtime_modules(self):
         self.assertIn("websockets", REQUIREMENTS.read_text(encoding="utf-8").splitlines())
@@ -148,25 +147,16 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("draft = $true", publish)
         self.assertIn("make_latest = 'true'", publish)
         self.assertIn("source-sha:$SourceSha", publish)
-        self.assertIn("SHIYIN-AI-v$Version-windows-x64.zip", publish)
+        self.assertIn("SHIYIN-AI-Setup-$Version.exe", publish)
+        self.assertNotIn("legacyZip", workflow)
+        self.assertNotIn("windows-x64.zip", workflow)
         self.assertIn("VERSION_PATTERN", resolver)
 
-    def test_updater_replaces_the_app_directory_and_ci_runs_its_regression_test(self):
+    def test_ci_runs_the_installer_updater_regression_test(self):
         updater = UPDATER.read_text(encoding="utf-8")
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("fn replace_app_directory", updater)
-        self.assertIn("fs::rename(&source, &target)", updater)
-        self.assertIn("replace_app_directory(&staged, root)?", updater)
-        self.assertIn("./tools/smoke-updater.ps1", workflow)
         self.assertIn("./tools/smoke-installer-updater.ps1", workflow)
-        self.assertIn("smoke-updater.ps1", PORTABLE_RELEASE.read_text(encoding="utf-8"))
-        smoke = UPDATER_SMOKE.read_text(encoding="utf-8")
-        self.assertIn("--apply-update", smoke)
-        self.assertIn("data_preserved", smoke)
-        self.assertIn("app_replaced", smoke)
-        self.assertIn("Updater did not clear pending update state.", smoke)
-        self.assertIn("Unable to remove updater test stage", smoke)
-        self.assertIn("Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop", smoke)
+        self.assertNotIn("apply_session", updater)
 
     def test_installer_updater_session_has_visible_progress_page(self):
         page = UPDATER_PAGE.read_text(encoding="utf-8")
@@ -177,10 +167,12 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("--run-update-session", smoke)
         self.assertIn("installer_installed", smoke)
         self.assertIn("data_preserved", smoke)
+        self.assertNotIn("FromZip", smoke)
+        self.assertNotIn("Expand-Archive", smoke)
 
     def test_updater_logs_helper_failures_for_diagnosis(self):
         source = UPDATER.read_text(encoding="utf-8")
-        self.assertIn('log(data, &format!("更新失败：{error}"));', source)
+        self.assertIn('log(&log_data, &format!("更新失败：{error}"));', source)
 
     def test_ci_keeps_tauri_frontend_placeholder_in_public_source(self):
         self.assertTrue((ROOT / "desktop-placeholder" / "index.html").is_file())

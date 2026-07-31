@@ -52,7 +52,7 @@ class LocalGenerationRemovalTests(unittest.TestCase):
         self.assertIn('/api/runninghub/workflows', source)
 
     def test_build_does_not_package_local_workflows(self):
-        for relative in ("tools/build-portable.ps1", "tools/browser-smoke-server.ps1"):
+        for relative in ("tools/build-installer.ps1", "tools/browser-smoke-server.ps1"):
             source = (ROOT / relative).read_text(encoding="utf-8")
             self.assertNotIn('Join-Path $projectRoot "workflows"', source)
 

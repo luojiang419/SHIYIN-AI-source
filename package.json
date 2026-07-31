@@ -1,15 +1,13 @@
 {
   "name": "shiyin-ai-windows-desktop",
   "private": true,
-  "version": "1.0.104",
+  "version": "1.0.105",
   "scripts": {
     "css:build": "node ./node_modules/tailwindcss/lib/cli.js -c tailwind.config.cjs -i ./static/css/tailwind-input.css -o ./static/vendor/css/tailwind.generated.css --minify",
     "desktop:dev": "npm run css:build && tauri dev",
     "desktop:build": "npm run css:build && tauri build --no-bundle",
     "installer:build": "powershell -ExecutionPolicy Bypass -File tools/build-installer.ps1",
     "installer:release": "powershell -ExecutionPolicy Bypass -File tools/release-installer.ps1",
-    "portable:build": "powershell -ExecutionPolicy Bypass -File tools/build-portable.ps1",
-    "release:bridge": "powershell -ExecutionPolicy Bypass -File tools/release-portable.ps1",
     "release:publish": "powershell -ExecutionPolicy Bypass -File tools/release-installer.ps1",
     "version:patch": "powershell -ExecutionPolicy Bypass -File tools/increment-version.ps1"
   },

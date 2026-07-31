@@ -24,10 +24,6 @@ use uuid::Uuid;
 
 mod updater;
 
-pub fn run_update_helper_from_args() -> bool {
-    updater::run_update_helper_from_args()
-}
-
 pub fn run_update_session_window_from_args() -> bool {
     updater::run_update_session_window_from_args()
 }

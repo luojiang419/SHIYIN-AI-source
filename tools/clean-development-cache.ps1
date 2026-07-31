@@ -15,7 +15,6 @@ $targets = @(
     (Join-Path $projectRoot ".build\compact-layout-chrome-profile"),
     (Join-Path $projectRoot ".build\feature-browser-smoke"),
     (Join-Path $projectRoot ".build\close-behavior-smoke"),
-    (Join-Path $projectRoot ".build\portable\backend-work"),
     (Join-Path $projectRoot "src-tauri\target\debug"),
     (Join-Path $projectRoot "__pycache__"),
     (Join-Path $projectRoot "canvas_core\__pycache__"),
@@ -62,8 +61,6 @@ $poseBackdropSmokeDirs = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".
 $targets += $poseBackdropSmokeDirs
 $poseBackdropSmokeResults = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -File -Filter "pose-backdrop-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
 $targets += $poseBackdropSmokeResults
-$portableBuildLogs = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -File -Filter "portable-*.log" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
-$targets += $portableBuildLogs
 $releaseSourceStages = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -Directory -Filter "release-source-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
 $targets += $releaseSourceStages
 $prefix = $projectRoot.TrimEnd('\') + '\'

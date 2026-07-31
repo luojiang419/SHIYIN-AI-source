@@ -1,8 +1,5 @@
-[CmdletBinding(DefaultParameterSetName = 'Zip')]
 param(
-    [Parameter(Mandatory = $true, ParameterSetName = 'Zip')]
-    [string]$FromZip,
-    [Parameter(Mandatory = $true, ParameterSetName = 'Installer')]
+    [Parameter(Mandatory = $true)]
     [string]$FromInstaller,
     [Parameter(Mandatory = $true)]
     [string]$ToInstaller,
@@ -50,25 +47,14 @@ $pending = Join-Path $dataRoot 'update\pending.json'
 $success = $false
 
 try {
-    if ($PSCmdlet.ParameterSetName -eq 'Zip') {
-        $fromZipPath = (Resolve-Path -LiteralPath $FromZip).Path
-        New-Item -ItemType Directory -Force -Path $source | Out-Null
-        Expand-Archive -LiteralPath $fromZipPath -DestinationPath $source -Force
-        $roots = @(Get-ChildItem -LiteralPath $source -Directory)
-        if ($roots.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $roots[0].FullName 'app\VERSION'))) {
-            throw 'Source release ZIP does not contain one portable application root.'
-        }
-        Move-Item -LiteralPath $roots[0].FullName -Destination $installRoot
-    } else {
-        $fromInstallerPath = (Resolve-Path -LiteralPath $FromInstaller).Path
-        New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
-        $logPath = Join-Path $stage 'source-install.log'
-        $sourceInstall = Start-Process -FilePath $fromInstallerPath -ArgumentList @(
-            '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL',
-            "/DIR=$installRoot", "/LOG=$logPath"
-        ) -Wait -PassThru
-        if ($sourceInstall.ExitCode -ne 0) { throw "Source installer failed with exit code $($sourceInstall.ExitCode)." }
-    }
+    $fromInstallerPath = (Resolve-Path -LiteralPath $FromInstaller).Path
+    New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+    $logPath = Join-Path $stage 'source-install.log'
+    $sourceInstall = Start-Process -FilePath $fromInstallerPath -ArgumentList @(
+        '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL',
+        "/DIR=$installRoot", "/LOG=$logPath"
+    ) -Wait -PassThru
+    if ($sourceInstall.ExitCode -ne 0) { throw "Source installer failed with exit code $($sourceInstall.ExitCode)." }
 
     if (-not (Test-Path -LiteralPath $desktopExe -PathType Leaf)) { throw 'Installed source executable was not found.' }
     if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'app\VERSION') -PathType Leaf)) { throw 'Installed source runtime was not found.' }
@@ -115,7 +101,7 @@ try {
     if (Test-Path -LiteralPath (Join-Path $installRoot 'app\obsolete-runtime-file.txt')) { throw 'Installer did not replace the app directory.' }
     $success = $true
     [pscustomobject]@{
-        source_kind = $PSCmdlet.ParameterSetName
+        source_kind = 'Installer'
         to_installer = [IO.Path]::GetFileName($toInstallerPath)
         target_version = $ToVersion
         installer_installed = $true

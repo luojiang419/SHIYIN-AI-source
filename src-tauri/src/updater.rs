@@ -3,9 +3,11 @@ use rfd::{MessageButtons, MessageDialog, MessageLevel};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    ffi::OsStr,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     net::{SocketAddr, TcpStream},
+    os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex, MutexGuard},
@@ -17,8 +19,6 @@ use uuid::Uuid;
 
 const RELEASE_API_URL: &str = "https://api.github.com/repos/luojiang419/SHIYIN-AI/releases/latest";
 const INSTALLER_PREFIX: &str = "SHIYIN-AI-Setup-";
-const LEGACY_ZIP_PREFIX: &str = "SHIYIN-AI-v";
-const LEGACY_ZIP_SUFFIX: &str = "-windows-x64.zip";
 const AUTOMATIC: &str = "automatic";
 const MANUAL: &str = "manual";
 const DISABLED: &str = "disabled";
@@ -26,6 +26,7 @@ const AUTOMATIC_PROXY: &str = "automaticProxy";
 const MANUAL_PROXY: &str = "manualProxy";
 const DIRECT: &str = "direct";
 const DOWNLOAD_ATTEMPTS: usize = 3;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,7 +77,6 @@ pub struct UpdateInfo {
     pub downloaded: bool,
     pub asset_name: String,
     pub asset_size: u64,
-    pub asset_kind: String,
     pub release_notes: String,
     pub message: String,
 }
@@ -86,13 +86,10 @@ pub struct UpdateInfo {
 struct PendingUpdate {
     version: String,
     asset_name: String,
-    #[serde(alias = "zip_path")]
     asset_path: String,
     sha256: String,
     size: u64,
     deferred: bool,
-    #[serde(default)]
-    asset_kind: Option<String>,
 }
 
 struct ResolvedRelease {
@@ -101,7 +98,6 @@ struct ResolvedRelease {
     checksum: GitHubAsset,
     notes: String,
     agent: ureq::Agent,
-    asset_kind: String,
 }
 
 fn update_dir(data: &Path) -> PathBuf {
@@ -221,27 +217,6 @@ fn installer_asset_name(version: &str) -> String {
     format!("{INSTALLER_PREFIX}{version}.exe")
 }
 
-fn legacy_zip_asset_name(version: &str) -> String {
-    format!("{LEGACY_ZIP_PREFIX}{version}{LEGACY_ZIP_SUFFIX}")
-}
-
-fn asset_candidates(version: &str) -> [(String, &'static str); 2] {
-    [
-        (installer_asset_name(version), "installer"),
-        (legacy_zip_asset_name(version), "legacyZip"),
-    ]
-}
-
-fn asset_kind(pending: &PendingUpdate) -> &str {
-    pending.asset_kind.as_deref().unwrap_or_else(|| {
-        if pending.asset_name.to_ascii_lowercase().ends_with(".exe") {
-            "installer"
-        } else {
-            "legacyZip"
-        }
-    })
-}
-
 fn local_proxy() -> Option<String> {
     let address: SocketAddr = "127.0.0.1:7890".parse().ok()?;
     TcpStream::connect_timeout(&address, Duration::from_millis(180))
@@ -329,29 +304,18 @@ fn resolve_release(data: &Path, settings: &UpdateSettings) -> Result<ResolvedRel
         }
         let version = normalize_version(&release.tag_name)
             .ok_or_else(|| "Release 标签必须为 vX.Y.Z。".to_string())?;
-        let mut selected = None;
-        for (expected, kind) in asset_candidates(&version) {
-            let mut assets = release
-                .assets
-                .iter()
-                .filter(|asset| asset.name == expected)
-                .cloned();
-            let Some(asset) = assets.next() else {
-                continue;
-            };
-            if assets.next().is_some() || asset.size == 0 || asset.browser_download_url.is_empty() {
-                return Err(format!("Release 的更新资产无效或重复：{expected}"));
-            }
-            selected = Some((asset, expected, kind));
-            break;
+        let expected = installer_asset_name(&version);
+        let mut assets = release
+            .assets
+            .iter()
+            .filter(|asset| asset.name == expected)
+            .cloned();
+        let asset = assets
+            .next()
+            .ok_or_else(|| format!("Release 缺少唯一的 EXE 更新包：{expected}"))?;
+        if assets.next().is_some() || asset.size == 0 || asset.browser_download_url.is_empty() {
+            return Err(format!("Release 的 EXE 更新资产无效或重复：{expected}"));
         }
-        let (asset, expected, asset_kind) = selected.ok_or_else(|| {
-            format!(
-                "Release 缺少唯一的更新包：{} 或 {}",
-                installer_asset_name(&version),
-                legacy_zip_asset_name(&version)
-            )
-        })?;
         let checksum_name = format!("{expected}.sha256");
         let mut checksums = release
             .assets
@@ -372,7 +336,6 @@ fn resolve_release(data: &Path, settings: &UpdateSettings) -> Result<ResolvedRel
             checksum,
             notes: release.body,
             agent,
-            asset_kind: asset_kind.to_string(),
         });
     }
     if let Some(error) = last_error {
@@ -411,7 +374,8 @@ fn pending_valid(data: &Path, pending: &PendingUpdate) -> bool {
     let path = Path::new(&pending.asset_path);
     path.is_file()
         && path.file_name().and_then(|name| name.to_str()) == Some(pending.asset_name.as_str())
-        && matches!(asset_kind(pending), "installer" | "legacyZip")
+        && pending.asset_name == installer_asset_name(&pending.version)
+        && pending.asset_name.to_ascii_lowercase().ends_with(".exe")
         && path
             .metadata()
             .map(|meta| meta.len() == pending.size)
@@ -431,7 +395,6 @@ fn info(release: &ResolvedRelease, downloaded: bool) -> UpdateInfo {
         downloaded,
         asset_name: release.asset.name.clone(),
         asset_size: release.asset.size,
-        asset_kind: release.asset_kind.clone(),
         release_notes: release.notes.clone(),
         message: String::new(),
     }
@@ -505,7 +468,6 @@ fn download_release(data: &Path, release: &ResolvedRelease) -> Result<(), String
             sha256: expected_hash,
             size: release.asset.size,
             deferred: false,
-            asset_kind: Some(release.asset_kind.clone()),
         },
     )
 }
@@ -643,21 +605,13 @@ fn launch_helper(
     let helper = helper_dir.join(format!("SHIYIN-AI-updater-{}.exe", Uuid::new_v4()));
     fs::copy(current, &helper).map_err(|e| format!("无法准备独立更新器：{e}"))?;
     let session_id = format!("update_{}", Uuid::new_v4());
-    let (mode, package_arg) = if asset_kind(pending) == "installer" {
-        (
-            "--run-update-session",
-            format!("--update-installer={}", pending.asset_path),
-        )
-    } else {
-        ("--apply-update", format!("--zip={}", pending.asset_path))
-    };
-    let mut command = Command::new(&helper);
+    let mut command = command_without_console(&helper);
     command.args([
-        mode,
+        "--run-update-session",
         &format!("--session-id={session_id}"),
         &format!("--root={}", root.display()),
         &format!("--data={}", data.display()),
-        &package_arg,
+        &format!("--update-installer={}", pending.asset_path),
         &format!("--version={}", pending.version),
         &format!("--sha256={}", pending.sha256),
         &format!("--old-pid={old_pid}"),
@@ -670,6 +624,12 @@ fn launch_helper(
         .spawn()
         .map_err(|e| format!("无法启动独立更新器：{e}"))?;
     Ok(())
+}
+
+fn command_without_console(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
 }
 
 pub fn apply_pending_update_on_startup() -> bool {
@@ -694,46 +654,6 @@ fn value(arguments: &[String], name: &str) -> Option<String> {
     arguments
         .iter()
         .find_map(|argument| argument.strip_prefix(name).map(str::to_string))
-}
-
-pub fn run_update_helper_from_args() -> bool {
-    let arguments: Vec<String> = std::env::args().collect();
-    if !arguments
-        .iter()
-        .any(|argument| argument == "--apply-update")
-    {
-        return false;
-    }
-    let data_for_log = value(&arguments, "--data=").map(PathBuf::from);
-    let result = (|| {
-        let root = PathBuf::from(
-            value(&arguments, "--root=").ok_or_else(|| "缺少更新目标目录。".to_string())?,
-        );
-        let data = PathBuf::from(
-            value(&arguments, "--data=").ok_or_else(|| "缺少数据目录。".to_string())?,
-        );
-        let zip =
-            PathBuf::from(value(&arguments, "--zip=").ok_or_else(|| "缺少更新包。".to_string())?);
-        let version =
-            value(&arguments, "--version=").ok_or_else(|| "缺少更新版本。".to_string())?;
-        let hash = value(&arguments, "--sha256=").ok_or_else(|| "缺少更新校验值。".to_string())?;
-        let old_pid = value(&arguments, "--old-pid=")
-            .and_then(|text| text.parse().ok())
-            .ok_or_else(|| "缺少旧进程编号。".to_string())?;
-        apply_session(&root, &data, &zip, &version, &hash, old_pid)
-    })();
-    if let Err(error) = result {
-        if let Some(data) = data_for_log.as_deref() {
-            log(data, &format!("更新失败：{error}"));
-        }
-        MessageDialog::new()
-            .set_level(MessageLevel::Error)
-            .set_title("SHIYIN AI 更新失败")
-            .set_description(&error)
-            .set_buttons(MessageButtons::Ok)
-            .show();
-    }
-    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -942,7 +862,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     if let Some(parent) = installer_log.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let exit_code = Command::new("powershell.exe")
+    let exit_code = command_without_console("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -1027,14 +947,10 @@ fn log(data: &Path, message: &str) {
     }
 }
 
-fn wait_for_exit(pid: u32) -> Result<(), String> {
-    wait_for_exit_with_timeout(pid, Duration::from_secs(45))
-}
-
 fn wait_for_exit_with_timeout(pid: u32, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     loop {
-        let output = Command::new("tasklist")
+        let output = command_without_console("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -1053,156 +969,6 @@ fn wait_for_exit_with_timeout(pid: u32, timeout: Duration) -> Result<(), String>
     }
 }
 
-fn archive_is_safe(zip: &Path, root_name: &str) -> Result<(), String> {
-    let output = Command::new("tar")
-        .args(["-tf", &zip.display().to_string()])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|e| format!("无法检查更新包：{e}"))?;
-    if !output.status.success() {
-        return Err("更新包无法读取。".into());
-    }
-    let prefix = format!("{root_name}/");
-    for entry in String::from_utf8_lossy(&output.stdout).lines() {
-        let entry = entry.replace('\\', "/");
-        if entry.is_empty()
-            || entry.starts_with('/')
-            || entry.split('/').any(|part| part == "..")
-            || !entry.starts_with(&prefix)
-        {
-            return Err("更新包包含不安全或不符合契约的文件路径。".into());
-        }
-    }
-    Ok(())
-}
-
-fn extract(zip: &Path, destination: &Path) -> Result<(), String> {
-    let output = Command::new("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "$zipPath = $env:SHIYIN_UPDATE_ZIP; $destinationPath = $env:SHIYIN_UPDATE_DESTINATION; if ([string]::IsNullOrWhiteSpace($zipPath) -or [string]::IsNullOrWhiteSpace($destinationPath)) { exit 2 }; Expand-Archive -LiteralPath $zipPath -DestinationPath $destinationPath -Force",
-        ])
-        .env("SHIYIN_UPDATE_ZIP", zip)
-        .env("SHIYIN_UPDATE_DESTINATION", destination)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .output()
-        .map_err(|e| format!("无法启动系统解压工具：{e}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-    let detail = String::from_utf8_lossy(&output.stderr)
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    if detail.is_empty() {
-        Err("解压更新包失败。".into())
-    } else {
-        Err(format!("解压更新包失败：{detail}"))
-    }
-}
-
-fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
-    fs::create_dir_all(destination).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(source).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let from = entry.path();
-        let to = destination.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_directory(&from, &to)?;
-        } else {
-            fs::copy(&from, &to).map_err(|e| format!("无法替换 {}：{e}", to.display()))?;
-        }
-    }
-    Ok(())
-}
-
-fn replace_app_directory(staged: &Path, root: &Path) -> Result<(), String> {
-    let source = staged.join("app");
-    let target = root.join("app");
-    if !source.is_dir() {
-        return Err("更新包缺少 app 目录。".into());
-    }
-    let backup = root.join(format!(".app-backup-{}", Uuid::new_v4()));
-    if target.exists() {
-        fs::rename(&target, &backup).map_err(|e| format!("无法备份旧 app 目录：{e}"))?;
-    }
-    if let Err(error) = fs::rename(&source, &target) {
-        if backup.exists() {
-            let _ = fs::rename(&backup, &target);
-        }
-        return Err(format!("无法替换 app 目录：{error}"));
-    }
-    if backup.exists() {
-        fs::remove_dir_all(backup).map_err(|e| format!("无法清理旧 app 目录：{e}"))?;
-    }
-    Ok(())
-}
-
-fn copy_release_root_files(staged: &Path, root: &Path) -> Result<(), String> {
-    for entry in fs::read_dir(staged).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.file_name() == "app" {
-            continue;
-        }
-        let from = entry.path();
-        let to = root.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            copy_directory(&from, &to)?;
-        } else {
-            fs::copy(&from, &to).map_err(|e| format!("无法替换 {}：{e}", to.display()))?;
-        }
-    }
-    Ok(())
-}
-
-fn apply_session(
-    root: &Path,
-    data: &Path,
-    zip: &Path,
-    version: &str,
-    expected_sha: &str,
-    old_pid: u32,
-) -> Result<(), String> {
-    log(data, &format!("准备安装 v{version}"));
-    if !root.join("app").is_dir()
-        || !zip.is_file()
-        || !version_is_newer(version, env!("CARGO_PKG_VERSION"))
-        || sha256(zip)? != expected_sha.to_ascii_lowercase()
-    {
-        return Err("更新会话校验失败，未修改当前软件。".into());
-    }
-    wait_for_exit(old_pid)?;
-    let root_name = format!("SHIYIN-AI-v{version}-windows-x64");
-    archive_is_safe(zip, &root_name)?;
-    let extraction = update_dir(data).join(format!("extract-{}", Uuid::new_v4()));
-    let _ = fs::remove_dir_all(&extraction);
-    fs::create_dir_all(&extraction).map_err(|e| e.to_string())?;
-    extract(zip, &extraction)?;
-    let staged = extraction.join(&root_name);
-    if !staged.join("app").is_dir() || !staged.join("SHIYIN AI.exe").is_file() {
-        let _ = fs::remove_dir_all(&extraction);
-        return Err("更新包缺少 SHIYIN AI 主程序或 app 目录。".into());
-    }
-    replace_app_directory(&staged, root)?;
-    copy_release_root_files(&staged, root)?;
-    clear_pending(data);
-    let _ = fs::remove_dir_all(&extraction);
-    log(data, &format!("v{version} 安装完成，正在重启"));
-    Command::new(root.join("SHIYIN AI.exe"))
-        .current_dir(root)
-        .spawn()
-        .map_err(|e| format!("更新完成但无法重启新版：{e}"))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1216,16 +982,12 @@ mod tests {
     #[test]
     fn asset_name_is_exact_and_versioned() {
         assert_eq!(installer_asset_name("1.2.3"), "SHIYIN-AI-Setup-1.2.3.exe");
-        assert_eq!(
-            legacy_zip_asset_name("1.2.3"),
-            "SHIYIN-AI-v1.2.3-windows-x64.zip"
-        );
     }
     #[test]
     fn checksum_rejects_wrong_asset_name() {
         assert!(checksum_value(
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  other.zip",
-            "expected.zip"
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  other.exe",
+            "expected.exe"
         )
         .is_err());
     }
@@ -1241,43 +1003,5 @@ mod tests {
                 .is_ok());
             }
         }
-    }
-
-    #[test]
-    fn replacing_app_directory_removes_stale_runtime_files_and_keeps_data() {
-        let install_root =
-            std::env::temp_dir().join(format!("shiyin-updater-test-{}", Uuid::new_v4()));
-        let staged = install_root.join("staged");
-        fs::create_dir_all(install_root.join("app").join("backend")).unwrap();
-        fs::create_dir_all(staged.join("app").join("backend")).unwrap();
-        fs::create_dir_all(install_root.join("data")).unwrap();
-        fs::write(
-            install_root.join("app").join("backend").join("stale.pyd"),
-            b"old",
-        )
-        .unwrap();
-        fs::write(
-            staged.join("app").join("backend").join("current.pyd"),
-            b"new",
-        )
-        .unwrap();
-        fs::write(install_root.join("data").join("keep.txt"), b"user data").unwrap();
-
-        replace_app_directory(&staged, &install_root).unwrap();
-
-        assert!(!install_root
-            .join("app")
-            .join("backend")
-            .join("stale.pyd")
-            .exists());
-        assert_eq!(
-            fs::read(install_root.join("app").join("backend").join("current.pyd")).unwrap(),
-            b"new"
-        );
-        assert_eq!(
-            fs::read(install_root.join("data").join("keep.txt")).unwrap(),
-            b"user data"
-        );
-        fs::remove_dir_all(install_root).unwrap();
     }
 }

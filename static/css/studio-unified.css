@@ -1589,3 +1589,23 @@ body.theme-dark #shell.shell > .board {
     background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important;
     background-size:24px 24px !important;
 }
+
+/* 普通画布快捷工具栏：覆盖旧版蓝灰色规则，跟随统一浅色/暗黑主题变量。 */
+#quickToolbar.toolbar {
+    background:color-mix(in srgb,var(--studio-panel) 94%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+#quickToolbar.toolbar .tool-btn {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-muted) !important;
+    box-shadow:none !important;
+}
+
+#quickToolbar.toolbar .tool-btn:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}

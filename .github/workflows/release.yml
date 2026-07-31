@@ -49,7 +49,15 @@ jobs:
             'User-Agent' = 'SHIYIN-AI-Release-Workflow'
           }
           $api = "https://api.github.com/repos/$env:RELEASE_REPO"
-          $releases = @(Invoke-RestMethod -Headers $headers -Uri "$api/releases?per_page=100")
+          $commitMessage = (git log -1 --format=%B).Trim()
+          if ($commitMessage -match '\[skip release\]') {
+            'skip=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+            'existing_tag=maintenance' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+            "existing_url=https://github.com/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+            exit 0
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri "$api/releases?per_page=100"
+          if ($null -eq $releases) { $releases = @() }
           $marker = "source-sha:$env:GITHUB_SHA"
           $existing = @($releases | Where-Object { -not $_.draft -and $_.body -like "*$marker*" })
           if ($existing.Count -gt 0) {

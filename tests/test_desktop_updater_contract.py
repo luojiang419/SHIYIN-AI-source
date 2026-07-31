@@ -148,6 +148,8 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("make_latest = 'true'", publish)
         self.assertIn("source-sha:$SourceSha", publish)
         self.assertIn("SHIYIN-AI-Setup-$Version.exe", publish)
+        self.assertIn("$releases = Invoke-RestMethod", workflow)
+        self.assertNotIn("$releases = @(Invoke-RestMethod", workflow)
         self.assertNotIn("legacyZip", workflow)
         self.assertNotIn("windows-x64.zip", workflow)
         self.assertIn("VERSION_PATTERN", resolver)

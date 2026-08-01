@@ -1,6 +1,6 @@
 {
-  "version": "1.0.108",
-  "updated_at": "2026-07-31T12:40:01+08:00",
+  "version": "1.0.109",
+  "updated_at": "2026-08-01T18:37:50+08:00",
   "items": [
     {
       "type": "feature",
@@ -9,6 +9,10 @@
     {
       "type": "fix",
       "text": "修复 Grsai 验证、异步结果查询和默认服务商清理问题"
+    },
+    {
+      "type": "fix",
+      "text": "修复 API 设置页 Grsai 平台卡片名称为空的问题"
     },
     {
       "type": "fix",

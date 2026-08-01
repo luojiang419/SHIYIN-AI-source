@@ -2319,18 +2319,6 @@ function renderProviderList(){
                 </button>
             `;
         }
-        if(item.id === 'grsai'){
-            return `
-                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
-                    <span class="provider-banner-inner">
-                        <span class="provider-logo-wrap">
-                            <span class="provider-logo-fallback provider-logo-fallback-visible">Grsai API</span>
-                        </span>
-                        <span class="provider-protocol-pill">OpenAI</span>
-                    </span>
-                </button>
-            `;
-        }
         return `
             <button class="provider-card provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
                 <span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span>

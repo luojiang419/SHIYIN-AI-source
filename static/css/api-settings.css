@@ -1602,10 +1602,6 @@ html.studio-theme-dark body .provider-card:not(.active) {
     white-space:nowrap;
 }
 
-.provider-logo-fallback.provider-logo-fallback-visible {
-    display:block;
-}
-
 .provider-logo-wrap img[src=""],
 .provider-logo-wrap img:not([src]) {
     display:none;

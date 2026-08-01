@@ -1,7 +1,15 @@
 {
-  "version": "1.0.107",
+  "version": "1.0.108",
   "updated_at": "2026-07-31T12:40:01+08:00",
   "items": [
+    {
+      "type": "feature",
+      "text": "新增 Grsai API 服务商，支持 nano-banana-2 与 gpt-image-2 图片生成"
+    },
+    {
+      "type": "fix",
+      "text": "修复 Grsai 验证、异步结果查询和默认服务商清理问题"
+    },
     {
       "type": "fix",
       "text": "修复普通画布顶部快捷工具栏使用旧蓝灰色"

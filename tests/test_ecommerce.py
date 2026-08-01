@@ -672,6 +672,101 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(providers[4]["chat_models"], ["qwen3.5-9b-vlm"])
         self.assertEqual(providers[4]["image_models"], [])
 
+    def test_grsai_builtin_provider_uses_documented_root_and_models(self):
+        provider = self.main.normalize_provider({
+            "id": "grsai",
+            "name": "Grsai API",
+            "base_url": "https://grsaiapi.com/v1/api",
+            "protocol": "gemini",
+            "image_request_mode": "openai-json",
+        })
+        self.assertEqual(provider["base_url"], "https://grsaiapi.com")
+        self.assertEqual(provider["protocol"], "openai")
+        self.assertEqual(provider["image_request_mode"], "openai")
+        self.assertEqual(provider["image_models"], [])
+        defaults = {item["id"]: item for item in self.main.default_api_providers()}
+        self.assertEqual(defaults["grsai"]["base_url"], "https://grsaiapi.com")
+        self.assertEqual(defaults["grsai"]["image_models"], ["nano-banana-2", "gpt-image-2"])
+
+    def test_grsai_probe_accepts_nonexistent_healthcheck_task_without_generation(self):
+        class FakeResponse:
+            status_code = 404
+            text = '{"error":"result not exist, valid for 2 hours"}'
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            async def get(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return FakeResponse()
+
+        client = FakeClient()
+        ok, probe = asyncio.run(self.main.probe_grsai_endpoint(client, "https://grsaiapi.com/v1", "test-key"))
+        self.assertTrue(ok)
+        self.assertEqual(probe["status"], 404)
+        self.assertEqual(client.calls[0][0], "https://grsaiapi.com/v1/api/result")
+        self.assertEqual(client.calls[0][1]["params"]["id"], "healthcheck_probe_do_not_submit")
+
+    def test_grsai_task_id_accepts_documented_id_without_task_prefix(self):
+        self.assertEqual(
+            self.main.grsai_task_id({"id": "12-2d8f8afe-98b8-4779-abf1-433cc557e002", "status": "processing"}),
+            "12-2d8f8afe-98b8-4779-abf1-433cc557e002",
+        )
+
+    def test_grsai_nano_request_uses_documented_body_and_response(self):
+        class FakeResponse:
+            status_code = 200
+            text = '{"id":"12-abc","status":"succeeded","results":[{"url":"https://files.example/image.png"}]}'
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "id": "12-abc",
+                    "status": "succeeded",
+                    "results": [{"url": "https://files.example/image.png"}],
+                }
+
+        class FakeClient:
+            def __init__(self):
+                self.post_call = None
+
+            async def post(self, url, **kwargs):
+                self.post_call = (url, kwargs)
+                return FakeResponse()
+
+        fake_client = FakeClient()
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs):
+                return None
+
+            async def __aenter__(self):
+                return fake_client
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        provider = {"id": "grsai", "base_url": "https://grsaiapi.com"}
+        with (
+            patch.object(self.main.httpx, "AsyncClient", FakeAsyncClient),
+            patch.object(self.main, "provider_env_key_value", return_value="test-key"),
+        ):
+            image, raw = asyncio.run(self.main.generate_grsai_nano_provider_image(
+                "a test prompt", "1024x1024", "nano-banana-2", provider=provider
+            ))
+        self.assertEqual(image, {"type": "url", "value": "https://files.example/image.png"})
+        self.assertEqual(raw["status"], "succeeded")
+        self.assertEqual(fake_client.post_call[0], "https://grsaiapi.com/v1/api/generate")
+        request_body = fake_client.post_call[1]["json"]
+        self.assertEqual(request_body["model"], "nano-banana-2")
+        self.assertEqual(request_body["images"], [])
+        self.assertEqual(request_body["aspectRatio"], "1:1")
+        self.assertEqual(request_body["imageSize"], "1K")
+        self.assertEqual(request_body["replyType"], "json")
+
     def test_local_vision_url_auto_completion(self):
         cases = {
             "115.231.35.105:12345": "http://115.231.35.105:12345/v1",
@@ -1000,8 +1095,8 @@ class EcommerceBackendTests(unittest.TestCase):
         fake = FakeDatabase()
         with patch.object(self.main, "DATABASE", fake):
             report = self.main.prune_removed_provider_presets_once()
-        self.assertEqual(report["removed"], ["modelscope", "grsai", "lingjing"])
-        self.assertEqual([item["id"] for item in fake.saved], ["custom-provider"])
+        self.assertEqual(report["removed"], ["modelscope", "lingjing"])
+        self.assertEqual([item["id"] for item in fake.saved], ["grsai", "custom-provider"])
         self.assertTrue(fake.marker[1]["done"])
 
     def test_prompt_only_background_replacement_rejects_mask_input(self):
@@ -1936,10 +2031,10 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("preferenceWriteChain:Promise.resolve()", self.javascript)
         self.assertIn("state.preferenceWriteChain = state.preferenceWriteChain.then(write, write)", self.javascript)
 
-    def test_api_settings_has_no_builtin_grsai_contract(self):
-        self.assertNotIn("GRSAI_DEFAULT_BASE_URL", self.api_javascript)
-        self.assertNotIn("GRSAI_DEFAULT_IMAGE_MODELS", self.api_javascript)
-        self.assertNotIn("'grsai'", self.api_javascript)
+    def test_api_settings_has_builtin_grsai_contract(self):
+        self.assertIn("GRSAI_DEFAULT_BASE_URL", self.api_javascript)
+        self.assertIn("GRSAI_DEFAULT_IMAGE_MODELS", self.api_javascript)
+        self.assertIn("'grsai'", self.api_javascript)
 
     def test_universal_result_uses_wide_fitted_frame_with_blurred_image_backdrops(self):
         self.assertIn('class="ec-result-frame"', self.html)

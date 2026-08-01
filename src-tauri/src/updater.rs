@@ -951,6 +951,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
         return Err(message);
     }
 
+    repair_start_menu_shortcuts(root, data);
     emit_progress(
         app,
         3,
@@ -1022,6 +1023,90 @@ fn emit_installer_progress(
         );
     }
     Some(percent)
+}
+
+fn repair_start_menu_shortcuts(root: &Path, data: &Path) {
+    const SHORTCUT_SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$root = $env:SHIYIN_UPDATE_ROOT
+$target = Join-Path $root 'SHIYIN AI.exe'
+if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { exit 2 }
+
+$shell = New-Object -ComObject WScript.Shell
+function Set-Shortcut([string]$Path) {
+    $shortcut = $shell.CreateShortcut($Path)
+    $shortcut.TargetPath = $target
+    $shortcut.WorkingDirectory = $root
+    $shortcut.IconLocation = "$target,0"
+    $shortcut.Description = 'SHIYIN AI'
+    $shortcut.Save()
+}
+function Try-Set-Shortcut([string]$Path) {
+    try {
+        Set-Shortcut $Path
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+$commonPrograms = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
+if ([string]::IsNullOrWhiteSpace($commonPrograms)) { exit 3 }
+$canonicalPath = Join-Path $commonPrograms 'SHIYIN AI.lnk'
+[void](Try-Set-Shortcut $canonicalPath)
+
+$programRoots = @(
+    $commonPrograms,
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+foreach ($programRoot in $programRoots) {
+    if (-not (Test-Path -LiteralPath $programRoot -PathType Container)) { continue }
+    Get-ChildItem -LiteralPath $programRoot -Filter '*.lnk' -File -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.BaseName -in @('SHIYIN AI', 'SHIYIN-AI') -and $_.FullName -ne $canonicalPath } |
+        ForEach-Object { [void](Try-Set-Shortcut $_.FullName) }
+}
+
+if (-not (Test-Path -LiteralPath $canonicalPath -PathType Leaf)) { exit 4 }
+$canonicalShortcut = $shell.CreateShortcut($canonicalPath)
+if ($canonicalShortcut.TargetPath -ne $target) { exit 5 }
+exit 0
+"#;
+
+    let output = command_without_console("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            SHORTCUT_SCRIPT,
+        ])
+        .env("SHIYIN_UPDATE_ROOT", root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    match output {
+        Ok(result) if result.status.success() => {
+            log(data, "开始菜单快捷方式已注册并校正目标路径。");
+        }
+        Ok(result) => {
+            let detail = String::from_utf8_lossy(&result.stderr);
+            log(
+                data,
+                &format!(
+                    "开始菜单快捷方式修复失败，退出码 {:?}：{}",
+                    result.status.code(),
+                    detail.trim()
+                ),
+            );
+        }
+        Err(error) => {
+            log(data, &format!("开始菜单快捷方式修复进程启动失败：{error}"));
+        }
+    }
 }
 
 fn progress_percent(current: u64, total: u64) -> u8 {

@@ -76,6 +76,8 @@ const RH_DEFAULT_BASE_URL = 'https://www.runninghub.cn';
 const LOCAL_VISION_DEFAULT_BASE_URL = 'http://115.231.35.105:12345/v1';
 const LOCAL_VISION_DEFAULT_MODEL = 'qwen3.5-9b-vlm';
 const LINGJING_DEFAULT_BASE_URL = 'https://apistudio.vip';
+const GRSAI_DEFAULT_BASE_URL = 'https://grsaiapi.com';
+const GRSAI_DEFAULT_IMAGE_MODELS = ['nano-banana-2', 'gpt-image-2'];
 const LINGJING_REGISTER_URL = 'https://apistudio.vip/register?aff=g1CT';
 const EXAMPLE_BASE_URL = 'https://api.example.com/v1';
 const JIMENG_DEFAULT_IMAGE_MODELS = ['5.0', '4.6', '4.5', '4.1', '4.0', '3.1', '3.0'];
@@ -276,7 +278,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -297,7 +299,7 @@ function visibleProviders(){
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     // 即梦 CLI 不再是固定平台：可删除、可排序，未添加则不存在。
-    return id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'lingjing' || id === 'codex' || id === 'local-vision';
+    return id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || id === 'local-vision';
 }
 function unique(values){
     const seen = new Set();
@@ -728,24 +730,24 @@ function syncEditor(){
     const item = provider();
     if(!item) return;
     const oldId = item.id;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
     // 内置和自定义平台的 ID 都保持稳定；新建时若没有 ID 才生成一次。
     const nextId = isBuiltin ? item.id : deriveIdFromName(nameInput.value, item.id);
     item.id = nextId;
     if(oldId !== item.id) selectedId = item.id;
     item.name = nameInput.value.trim() || item.id;
-    const selectedProtocol = item.id === 'modelscope' || item.id === 'local-vision' ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (protocolInput?.value || 'openai');
+    const selectedProtocol = item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (protocolInput?.value || 'openai');
     item.base_url = ['jimeng', 'codex'].includes(selectedProtocol) ? '' : (item.id === 'local-vision' ? normalizeOpenAiCompatibleBaseUrl(baseInput.value || LOCAL_VISION_DEFAULT_BASE_URL) : baseInput.value.trim());
     if(item.id === 'local-vision') baseInput.value = item.base_url;
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
     item.image_request_mode = normalizeImageRequestMode(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
             ? 'openai'
             : (imageRequestModeInput?.value || item.image_request_mode)
     );
     item.image_edit_route = normalizeImageEditRoute(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
             ? 'general'
             : (imageEditRouteInput?.value || item.image_edit_route)
     );
@@ -777,7 +779,7 @@ function ensureRunningHubLists(item){
 }
 function updateProtocolFromInput(){
     const item = provider();
-    if(!item || !protocolInput || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex') return;
+    if(!item || !protocolInput || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex') return;
     const value = String(protocolInput.value || 'openai').toLowerCase();
     item.protocol = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(value) ? value : 'openai';
     if(['jimeng', 'codex'].includes(item.protocol)) item.base_url = '';
@@ -2241,7 +2243,7 @@ async function saveRecommendedApi(index){
     if(ok) setStatus(trf('api.recommendSaved', {name:api.name}));
 }
 function sortedProviders(){
-    const order = ['local-vision', 'shiying', 'modelscope', 'runninghub', 'volcengine', 'lingjing', 'codex'];
+    const order = ['local-vision', 'shiying', 'grsai', 'modelscope', 'runninghub', 'volcengine', 'lingjing', 'codex'];
     return visibleProviders().sort((a, b) => {
         const ai = order.indexOf(a.id);
         const bi = order.indexOf(b.id);
@@ -2317,6 +2319,18 @@ function renderProviderList(){
                 </button>
             `;
         }
+        if(item.id === 'grsai'){
+            return `
+                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
+                    <span class="provider-banner-inner">
+                        <span class="provider-logo-wrap">
+                            <span class="provider-logo-fallback">Grsai API</span>
+                        </span>
+                        <span class="provider-protocol-pill">OpenAI</span>
+                    </span>
+                </button>
+            `;
+        }
         return `
             <button class="provider-card provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
                 <span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span>
@@ -2384,17 +2398,17 @@ function renderEditor(){
     baseInput.placeholder = EXAMPLE_BASE_URL;
     baseInput.value = item.base_url || '';
     if(protocolInput){
-        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'local-vision' ? 'openai' : (item.protocol || 'openai');
+        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : (item.protocol || 'openai');
         protocolInput.disabled = FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
         protocolInput.title = protocolInput.disabled ? '内置平台使用固定协议' : '';
     }
     if(imageRequestModeInput){
         imageRequestModeInput.value = normalizeImageRequestMode(item.image_request_mode);
-        imageRequestModeInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+        imageRequestModeInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
     }
     if(imageEditRouteInput){
         imageEditRouteInput.value = normalizeImageEditRoute(item.image_edit_route);
-        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
     }
     keyInput.value = '';
     keyInput.placeholder = item.has_key ? `${tr('api.keepCurrentKey')} ${item.key_preview || ''}` : tr('api.enterKey');
@@ -2405,6 +2419,7 @@ function renderEditor(){
     const isStandaloneVolcengine = item.id === 'volcengine';
     const isJimeng = item.id === 'jimeng' || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'jimeng';
     const isCodex = item.id === 'codex' || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'codex';
+    const isGrsai = item.id === 'grsai';
     const isLocalVision = item.id === 'local-vision';
     if(isRunningHub){
         ensureRunningHubLists(item);
@@ -2456,6 +2471,16 @@ function renderEditor(){
         item.video_models = [];
         keyInput.placeholder = 'OpenAI CLI 使用本机 codex login，无需 API Key';
         keyHint.textContent = '请先安装 OpenAI Codex CLI，并执行 codex login';
+    }
+    if(isGrsai){
+        item.base_url = item.base_url || GRSAI_DEFAULT_BASE_URL;
+        item.protocol = 'openai';
+        item.image_request_mode = 'openai';
+        item.image_models = unique([...(item.image_models || []), ...GRSAI_DEFAULT_IMAGE_MODELS]);
+        item.chat_models = unique(item.chat_models || []);
+        item.video_models = [];
+        baseInput.value = item.base_url;
+        keyHint.textContent = item.has_key ? `${tr('api.keySaved')}${item.key_env || 'API/.env'}` : tr('api.noKey');
     }
     if(isLocalVision){
         item.base_url = normalizeOpenAiCompatibleBaseUrl(item.base_url || LOCAL_VISION_DEFAULT_BASE_URL);
@@ -3438,6 +3463,8 @@ async function persistProviders(options={}){
             ? 'runninghub'
             : item.id === 'volcengine'
             ? 'volcengine'
+            : item.id === 'grsai'
+            ? 'openai'
             : item.id === 'local-vision'
             ? 'openai'
             : item.id === 'jimeng'
@@ -3446,12 +3473,12 @@ async function persistProviders(options={}){
             ? 'codex'
             : ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
         item.image_request_mode = normalizeImageRequestMode(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
                 ? 'openai'
                 : item.image_request_mode
         );
         item.image_edit_route = normalizeImageEditRoute(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
                 ? 'general'
                 : item.image_edit_route
         );
@@ -3461,6 +3488,14 @@ async function persistProviders(options={}){
             item.base_url = '';
             item.image_models = unique([...(item.image_models || []), ...CODEX_DEFAULT_IMAGE_MODELS]);
             item.chat_models = unique([...(item.chat_models || []), ...CODEX_DEFAULT_CHAT_MODELS]);
+            item.video_models = [];
+        }
+        if(item.id === 'grsai'){
+            item.base_url = item.base_url || GRSAI_DEFAULT_BASE_URL;
+            item.protocol = 'openai';
+            item.image_request_mode = 'openai';
+            item.image_models = unique([...(item.image_models || []), ...GRSAI_DEFAULT_IMAGE_MODELS]);
+            item.chat_models = unique(item.chat_models || []);
             item.video_models = [];
         }
         if(item.id === 'runninghub'){
@@ -3507,7 +3542,7 @@ async function persistProviders(options={}){
                 id:item.id,
                 name:item.name,
                 base_url:item.base_url,
-                protocol:(item.id === 'modelscope' || item.id === 'local-vision') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (item.protocol || 'openai'),
+                protocol:(item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (item.protocol || 'openai'),
                 image_request_mode:item.image_request_mode || 'openai',
                 image_edit_route:item.image_edit_route || 'general',
                 image_generation_endpoint:item.image_generation_endpoint || '',

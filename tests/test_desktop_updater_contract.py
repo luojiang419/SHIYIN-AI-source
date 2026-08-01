@@ -61,6 +61,18 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('command_without_console("tasklist")', source)
         self.assertIn("let mut command = command_without_console(&helper);", source)
 
+    def test_updater_repairs_start_menu_shortcuts_after_install(self):
+        source = UPDATER.read_text(encoding="utf-8")
+        self.assertIn("fn repair_start_menu_shortcuts", source)
+        self.assertIn("CommonPrograms", source)
+        self.assertIn("SHIYIN AI.lnk", source)
+        self.assertIn("'SHIYIN-AI'", source)
+        self.assertIn("SHIYIN_UPDATE_ROOT", source)
+        self.assertLess(
+            source.index("repair_start_menu_shortcuts(root, data);"),
+            source.index("Command::new(&app_exe)"),
+        )
+
     def test_sidebar_replaces_api_slot_with_update_and_groups_api_under_settings(self):
         source = INDEX.read_text(encoding="utf-8")
         self.assertIn('onclick="openDesktopUpdater()"', source)
@@ -105,6 +117,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('DefaultDirName=D:\\Program Files\\SHIYIN AI', installer)
         self.assertIn('Name: "{app}\\data"; Permissions: users-modify', installer)
         self.assertIn('Name: "{app}\\app"', installer)
+        self.assertIn('Name: "{commonprograms}\\{#MyAppName}"', installer)
         publish = PUBLISH_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('SHIYIN-AI-Setup-$Version.exe', publish)
         self.assertNotIn('legacyZip', publish)
@@ -182,10 +195,16 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("UPDATEPROGRESS", installer_script)
         self.assertIn("realtime_progress", progress_smoke)
         self.assertIn("installer-progress.txt", progress_smoke)
+        self.assertIn("$process.WaitForExit()", progress_smoke)
+        self.assertIn("CommonPrograms", progress_smoke)
+        self.assertIn("Remove-Item -LiteralPath $shortcutPath", progress_smoke)
+        self.assertIn("start_menu_shortcut", progress_smoke)
         self.assertIn("installer-progress.txt", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("--run-update-session", smoke)
         self.assertIn("installer_installed", smoke)
         self.assertIn("data_preserved", smoke)
+        self.assertIn("start_menu_shortcut", smoke)
+        self.assertIn("CommonPrograms", smoke)
         self.assertNotIn("FromZip", smoke)
         self.assertNotIn("Expand-Archive", smoke)
 

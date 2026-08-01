@@ -22,6 +22,12 @@ $installRoot = Join-Path $stage 'installed'
 $logPath = Join-Path $stage 'installer.log'
 $progressPath = Join-Path $stage 'installer-progress.txt'
 $success = $false
+$smokeShortcutPaths = @(
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)) 'SHIYIN AI.lnk'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)) 'SHIYIN AI.lnk'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)) 'SHIYIN AI.lnk'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) 'SHIYIN AI.lnk')
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
 try {
     $arguments = @(
@@ -49,6 +55,12 @@ try {
     }
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)." }
+    if (Test-Path -LiteralPath $progressPath) {
+        $finalRaw = (Get-Content -Raw -LiteralPath $progressPath).Trim()
+        if ($finalRaw -match '^\d+\|\d+$' -and ($samples.Count -eq 0 -or $samples[$samples.Count - 1] -ne $finalRaw)) {
+            $samples.Add($finalRaw)
+        }
+    }
 
     $pairs = @($samples | ForEach-Object {
         $parts = $_ -split '\|'
@@ -69,6 +81,16 @@ try {
     if ((Get-Content -Raw -LiteralPath $installedVersionPath).Trim() -ne $Version) {
         throw 'Installed VERSION does not match the requested version.'
     }
+    $installedExe = Join-Path $installRoot 'SHIYIN AI.exe'
+    $commonPrograms = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
+    $commonShortcutPath = Join-Path $commonPrograms 'SHIYIN AI.lnk'
+    if (-not (Test-Path -LiteralPath $commonShortcutPath -PathType Leaf)) {
+        throw 'Common Start Menu shortcut was not created.'
+    }
+    $commonShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($commonShortcutPath)
+    if ($commonShortcut.TargetPath -ne $installedExe) {
+        throw "Common Start Menu shortcut target mismatch: $($commonShortcut.TargetPath)"
+    }
     $success = $true
     [pscustomobject]@{
         installer = [IO.Path]::GetFileName($installer)
@@ -78,9 +100,23 @@ try {
         first_sample = $samples[0]
         last_sample = $samples[$samples.Count - 1]
         realtime_progress = $true
+        start_menu_shortcut = $true
     } | ConvertTo-Json -Compress
 }
 finally {
+    $installedExe = Join-Path $installRoot 'SHIYIN AI.exe'
+    foreach ($shortcutPath in $smokeShortcutPaths) {
+        if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { continue }
+        try {
+            $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+            if ($shortcut.TargetPath -eq $installedExe) {
+                Remove-Item -LiteralPath $shortcutPath -Force
+            }
+        }
+        catch {
+            # Keep the smoke-test artifact for diagnosis when shortcut inspection fails.
+        }
+    }
     if ($success -and (Test-Path -LiteralPath $stage)) {
         Remove-Item -LiteralPath $stage -Recurse -Force
     }

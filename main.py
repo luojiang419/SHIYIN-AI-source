@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.107"
+APP_VERSION = "1.0.108"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -386,6 +386,8 @@ RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub
 RUNNINGHUB_LLM_BASE_URL = "https://llm.runninghub.cn/v1"
 SHIYING_DEFAULT_BASE_URL = "https://www.shiying-api.com"
 SHIYING_DEFAULT_IMAGE_MODELS = ["gemini-3-pro-image-preview"]
+GRSAI_DEFAULT_BASE_URL = "https://grsaiapi.com"
+GRSAI_DEFAULT_IMAGE_MODELS = ["nano-banana-2", "gpt-image-2"]
 LOCAL_VISION_DEFAULT_BASE_URL = "http://115.231.35.105:12345/v1"
 LOCAL_VISION_DEFAULT_MODEL = "qwen3.5-9b-vlm"
 LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
@@ -788,7 +790,7 @@ def bearer_auth_value(value):
     token = strip_auth_scheme(value, "Bearer")
     return f"Bearer {token}" if token else ""
 
-REMOVED_PROVIDER_PRESET_IDS = {"modelscope", "runninghub", "volcengine", "grsai", "lingjing", "codex"}
+REMOVED_PROVIDER_PRESET_IDS = {"modelscope", "runninghub", "volcengine", "lingjing", "codex"}
 PROVIDER_PRESET_CLEANUP_SETTING = "provider_preset_cleanup_grsai_v2"
 
 
@@ -846,6 +848,22 @@ def api_provider_templates():
             "ms_defaults_version": 0,
             "volcengine_project_name": VOLCENGINE_DEFAULT_PROJECT_NAME,
             "volcengine_region": VOLCENGINE_DEFAULT_REGION,
+        },
+        {
+            "id": "grsai",
+            "name": "Grsai API",
+            "base_url": GRSAI_DEFAULT_BASE_URL,
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": GRSAI_DEFAULT_IMAGE_MODELS,
+            "chat_models": [],
+            "video_models": [],
+            "ms_loras": [],
+            "ms_defaults_version": 0,
         },
         {
             "id": "shiying",
@@ -918,7 +936,7 @@ def api_provider_templates():
 
 
 def default_api_providers():
-    return [dict(item) for item in api_provider_templates() if item.get("id") in {"shiying", "local-vision"}]
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision"}]
 
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
@@ -989,6 +1007,18 @@ def merge_default_api_providers(providers):
             protocols = normalize_model_protocols(current.get("model_protocols"))
             protocols.update(shiying_default["model_protocols"])
             current["model_protocols"] = protocols
+    grsai_default = next((d for d in default_api_providers() if d["id"] == "grsai"), None)
+    if grsai_default:
+        current = next((item for item in merged if item.get("id") == "grsai"), None)
+        if not current:
+            merged.append(grsai_default)
+        else:
+            current["base_url"] = normalize_grsai_base_url(current.get("base_url") or grsai_default["base_url"])
+            current["protocol"] = "openai"
+            current["image_request_mode"] = "openai"
+            current["image_models"] = model_list_from_values([*(current.get("image_models") or []), *GRSAI_DEFAULT_IMAGE_MODELS])
+            current["chat_models"] = model_list_from_values(current.get("chat_models") or [])
+            current["video_models"] = model_list_from_values(current.get("video_models") or [])
     local_vision_default = next((d for d in default_api_providers() if d["id"] == "local-vision"), None)
     if local_vision_default:
         current = next((item for item in merged if item.get("id") == "local-vision"), None)
@@ -1306,6 +1336,16 @@ def provider_endpoint_url(provider, key, default_path):
             return f"{base_url}{default_path[len(prefix):]}"
     return f"{base_url}{default_path}"
 
+def normalize_grsai_base_url(value):
+    base_url = str(value or "").strip().rstrip("/")
+    if not base_url:
+        return GRSAI_DEFAULT_BASE_URL
+    for suffix in ("/v1/api", "/v1"):
+        if base_url.lower().endswith(suffix):
+            base_url = base_url[:-len(suffix)].rstrip("/")
+            break
+    return base_url or GRSAI_DEFAULT_BASE_URL
+
 def runninghub_endpoint_url(provider, path):
     base_url = str((provider or {}).get("base_url") or RUNNINGHUB_DEFAULT_BASE_URL).strip().rstrip("/")
     return f"{base_url}{path}"
@@ -1390,6 +1430,10 @@ def normalize_provider(item):
     if provider_id == "runninghub":
         protocol = "runninghub"
         base_url = base_url or RUNNINGHUB_DEFAULT_BASE_URL
+    if provider_id == "grsai":
+        protocol = "openai"
+        base_url = normalize_grsai_base_url(base_url or GRSAI_DEFAULT_BASE_URL)
+        image_request_mode = "openai"
     if provider_id == "local-vision":
         protocol = "openai"
         image_request_mode = "openai"
@@ -8149,12 +8193,19 @@ def grsai_image_size(size, fallback="1K"):
     return raw if raw in {"1K", "2K", "4K"} else fallback
 
 def grsai_endpoint_url(provider, path):
-    return provider_endpoint_url(provider, "", path)
+    source = dict(provider or {})
+    source["base_url"] = normalize_grsai_base_url(source.get("base_url") or GRSAI_DEFAULT_BASE_URL)
+    return provider_endpoint_url(source, "", path)
 
 def grsai_status(raw):
     if not isinstance(raw, dict):
         return ""
     return str(raw.get("status") or "").strip().lower()
+
+def grsai_task_id(raw):
+    if not isinstance(raw, dict):
+        return ""
+    return str(raw.get("task_id") or raw.get("id") or "").strip()
 
 async def wait_for_grsai_image_task(client, provider, task_id):
     query_url = grsai_endpoint_url(provider, "/v1/api/result")
@@ -8173,7 +8224,7 @@ async def wait_for_grsai_image_task(client, provider, task_id):
         status = grsai_status(raw)
         if status == "succeeded":
             return raw
-        if status in {"failed", "violation"}:
+        if status in {"failed", "violation", "error", "cancelled", "canceled"}:
             raise HTTPException(status_code=502, detail=f"Grsai 任务失败：{raw.get('error') or raw}")
         try:
             extract_image(raw)
@@ -8201,12 +8252,12 @@ async def generate_grsai_nano_provider_image(prompt, size, model, reference_imag
         response.raise_for_status()
         raw = response.json()
         status = grsai_status(raw)
-        if status in {"failed", "violation"}:
+        if status in {"failed", "violation", "error", "cancelled", "canceled"}:
             raise HTTPException(status_code=502, detail=f"Grsai 生成失败：{raw.get('error') or raw}")
         try:
             return extract_image(raw), raw
         except HTTPException:
-            task_id = extract_task_id(raw)
+            task_id = grsai_task_id(raw)
             if not task_id:
                 raise
         task_result = await wait_for_grsai_image_task(client, provider, task_id)
@@ -11416,6 +11467,40 @@ def upstream_model_headers(api_key: str, protocol: str):
         return {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
     return {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
 
+def is_grsai_target(base_url: str = "", provider_id: str = ""):
+    return is_grsai_provider({"id": provider_id, "base_url": base_url})
+
+def grsai_models_payload(message="", raw=None):
+    models = list(GRSAI_DEFAULT_IMAGE_MODELS)
+    return {
+        "total": len(models),
+        "model_count": len(models),
+        "protocol": "openai",
+        "image_models": models,
+        "chat_models": [],
+        "video_models": [],
+        "all": models,
+        "image_request_mode": "openai",
+        "message": message or "Grsai 未提供标准 /v1/models，已验证 /v1/api/result，使用文档预设模型。",
+        "raw": raw,
+    }
+
+async def probe_grsai_endpoint(client, base_url: str, api_key: str):
+    probe_url = f"{normalize_grsai_base_url(base_url)}/v1/api/result"
+    response = await client.get(
+        probe_url,
+        headers=upstream_model_headers(api_key, "openai"),
+        params={"id": "healthcheck_probe_do_not_submit"},
+    )
+    body = response.text[:500]
+    if response.status_code in (401, 403):
+        return False, {"status": response.status_code, "message": "Grsai API Key 无效或无权限", "raw": body}
+    if looks_like_html_response(response.text):
+        return False, {"status": response.status_code, "message": "Grsai 结果接口返回网页 HTML，请检查 Base URL", "raw": body}
+    if response.status_code < 500:
+        return True, {"status": response.status_code, "message": "Grsai API 结果查询端点可达（该平台不提供 /v1/models）", "raw": body}
+    return False, {"status": response.status_code, "message": f"Grsai 结果接口服务端错误 {response.status_code}", "raw": body}
+
 def volcengine_default_model_payload(status=200, message="", raw=None):
     return {
         "ok": True,
@@ -11637,6 +11722,16 @@ async def test_provider_connection(payload: TestConnectionPayload):
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
+    if is_grsai_target(base_url, payload.provider_id):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                detected, probe = await probe_grsai_endpoint(client, base_url, api_key)
+            if not detected:
+                return {"ok": False, "status": probe.get("status") or 0, "message": probe.get("message") or "Grsai API 验证失败", "raw": probe.get("raw")}
+            models = grsai_models_payload(raw={"probe": probe.get("raw")})
+            return {"ok": True, "status": probe.get("status") or 200, **models}
+        except httpx.HTTPError as e:
+            return {"ok": False, "status": 0, "message": f"Grsai API 验证失败：{str(e)[:300]}"}
     url = upstream_models_url(base_url, protocol)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -11710,6 +11805,19 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
     api_key = api_key_from_payload(payload, protocol)
     if not api_key:
         raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    if is_grsai_target(base_url, payload.provider_id):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                detected, probe = await probe_grsai_endpoint(client, base_url, api_key)
+            return {
+                "ok": detected,
+                "protocol": "openai",
+                "status_code": probe.get("status") or 0,
+                "message": probe.get("message") or "Grsai API 协议验证失败",
+                "raw": probe.get("raw"),
+            }
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Grsai API 协议验证失败：{str(e)[:300]}") from e
     if protocol == "volcengine":
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -11855,6 +11963,15 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
+    if is_grsai_target(base_url):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                detected, probe = await probe_grsai_endpoint(client, base_url, api_key)
+            if not detected:
+                raise HTTPException(status_code=probe.get("status") or 502, detail=probe.get("message") or "Grsai API 验证失败")
+            return grsai_models_payload(raw={"probe": probe.get("raw")})
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"请求 Grsai API 失败：{str(e)[:300]}") from e
     url = upstream_models_url(base_url, protocol)
     try:
         async with httpx.AsyncClient(timeout=30) as client:

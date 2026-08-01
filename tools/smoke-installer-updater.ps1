@@ -44,6 +44,12 @@ $helper = Join-Path $installRoot 'data\update\helper\SHIYIN-AI-updater-installer
 $desktopExe = Join-Path $installRoot 'SHIYIN AI.exe'
 $dataRoot = Join-Path $installRoot 'data'
 $pending = Join-Path $dataRoot 'update\pending.json'
+$smokeShortcutPaths = @(
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)) 'SHIYIN AI.lnk'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)) 'SHIYIN AI.lnk'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)) 'SHIYIN AI.lnk'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) 'SHIYIN AI.lnk')
+) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 $success = $false
 
 try {
@@ -99,6 +105,10 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $dataRoot 'e2e-user-data.txt'))) { throw 'Installer updater removed user data.' }
     if (Test-Path -LiteralPath $pending) { throw 'Installer updater did not clear pending update state.' }
     if (Test-Path -LiteralPath (Join-Path $installRoot 'app\obsolete-runtime-file.txt')) { throw 'Installer did not replace the app directory.' }
+    $commonShortcutPath = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)) 'SHIYIN AI.lnk'
+    if (-not (Test-Path -LiteralPath $commonShortcutPath -PathType Leaf)) { throw 'Installer updater did not register the common Start Menu shortcut.' }
+    $commonShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($commonShortcutPath)
+    if ($commonShortcut.TargetPath -ne $desktopExe) { throw "Updated Start Menu shortcut target mismatch: $($commonShortcut.TargetPath)" }
     $success = $true
     [pscustomobject]@{
         source_kind = 'Installer'
@@ -107,9 +117,22 @@ try {
         installer_installed = $true
         data_preserved = $true
         app_replaced = $true
+        start_menu_shortcut = $true
     } | ConvertTo-Json -Compress
 } finally {
     Stop-TestProcesses $installRoot
+    foreach ($shortcutPath in $smokeShortcutPaths) {
+        if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { continue }
+        try {
+            $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+            if ($shortcut.TargetPath -eq $desktopExe) {
+                Remove-Item -LiteralPath $shortcutPath -Force
+            }
+        }
+        catch {
+            # Keep the smoke-test artifact for diagnosis when shortcut inspection fails.
+        }
+    }
     if ($success -and (Test-Path -LiteralPath $stage)) {
         $removed = $false
         foreach ($attempt in 1..5) {

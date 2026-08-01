@@ -27,6 +27,15 @@ class ApiRecommendationTests(unittest.TestCase):
     def test_settings_content_is_hidden_when_recommendations_are_open(self):
         self.assertRegex(self.styles, r"#settingsContent\[hidden\]\s*\{[^}]*display:\s*none\s*!important", re.S)
 
+    def test_grsai_banner_shows_text_when_no_logo_asset_exists(self):
+        self.assertIn("if(item.id === 'grsai')", self.source)
+        self.assertIn('provider-logo-fallback provider-logo-fallback-visible">Grsai API', self.source)
+        self.assertRegex(
+            self.styles,
+            r"\.provider-logo-fallback\.provider-logo-fallback-visible\s*\{[^}]*display:\s*block",
+            re.S,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

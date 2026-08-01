@@ -2324,7 +2324,7 @@ function renderProviderList(){
                 <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
                     <span class="provider-banner-inner">
                         <span class="provider-logo-wrap">
-                            <span class="provider-logo-fallback">Grsai API</span>
+                            <span class="provider-logo-fallback provider-logo-fallback-visible">Grsai API</span>
                         </span>
                         <span class="provider-protocol-pill">OpenAI</span>
                     </span>

@@ -672,6 +672,7 @@ pub struct UpdateInstallSession {
 #[serde(rename_all = "camelCase")]
 struct UpdateProgress {
     step_index: u8,
+    progress_percent: u8,
     step_label: String,
     message: String,
     substep: String,
@@ -745,6 +746,7 @@ pub fn run_update_session_window_from_args() -> bool {
                     emit_progress(
                         &handle,
                         2,
+                        0,
                         "更新失败",
                         &error,
                         "请重新打开软件后重试。",
@@ -789,6 +791,7 @@ pub async fn run_update_session(
 fn emit_progress(
     app: &AppHandle,
     step_index: u8,
+    progress_percent: u8,
     step_label: &str,
     message: &str,
     substep: &str,
@@ -799,6 +802,7 @@ fn emit_progress(
         "update-progress",
         UpdateProgress {
             step_index,
+            progress_percent,
             step_label: step_label.to_string(),
             message: message.to_string(),
             substep: substep.to_string(),
@@ -814,6 +818,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     let root = Path::new(&session.install_root);
     emit_progress(
         app,
+        0,
         0,
         "准备安装",
         "正在准备独立更新器会话…",
@@ -834,10 +839,21 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     {
         return Err("更新会话校验失败，未修改当前软件。".into());
     }
+    emit_progress(
+        app,
+        0,
+        0,
+        "准备安装",
+        "安装包校验完成，正在准备更新环境…",
+        "已确认版本、文件名和 SHA-256 校验值。",
+        false,
+        false,
+    );
 
     emit_progress(
         app,
         1,
+        0,
         "关闭旧版本",
         "正在等待旧版本退出…",
         "主程序即将关闭，更新窗口会继续完成安装。",
@@ -845,48 +861,87 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
         false,
     );
     wait_for_exit_with_timeout(session.old_pid, Duration::from_secs(120))?;
-
     emit_progress(
         app,
-        2,
-        "安装新版本",
-        "正在启动静默安装程序…",
-        "系统可能会请求管理员权限确认。",
+        1,
+        0,
+        "关闭旧版本",
+        "旧版本已退出，正在交接安装任务…",
+        "更新窗口会保持打开，请不要手动关闭。",
         false,
         false,
     );
+
     let installer_log = update_dir(data)
         .join("sessions")
         .join(&session.session_id)
         .join("installer.log");
+    let installer_progress = update_dir(data)
+        .join("sessions")
+        .join(&session.session_id)
+        .join("installer-progress.txt");
     if let Some(parent) = installer_log.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let exit_code = command_without_console("powershell.exe")
+    let _ = fs::remove_file(&installer_progress);
+    emit_progress(
+        app,
+        2,
+        0,
+        "安装新版本",
+        "正在启动安装程序…",
+        "安装器启动后将显示实时处理进度。",
+        false,
+        false,
+    );
+    let installer_command = r#"$installer = $env:SHIYIN_UPDATE_INSTALLER; $root = $env:SHIYIN_UPDATE_ROOT; $log = $env:SHIYIN_UPDATE_INSTALLER_LOG; $progress = $env:SHIYIN_UPDATE_PROGRESS; $arguments = @('/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL', '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS', ('/DIR="' + $root + '"'), ('/LOG="' + $log + '"'), ('/UPDATEPROGRESS="' + $progress + '"')); $p = Start-Process -FilePath $installer -ArgumentList $arguments -Verb RunAs -Wait -PassThru; exit $p.ExitCode"#;
+    let mut installer_process = command_without_console("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            "$installer = $env:SHIYIN_UPDATE_INSTALLER; $root = $env:SHIYIN_UPDATE_ROOT; $log = $env:SHIYIN_UPDATE_INSTALLER_LOG; $p = Start-Process -FilePath $installer -ArgumentList @('/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL', '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS', ('/DIR=' + $root), ('/LOG=' + $log)) -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
+            installer_command,
         ])
         .env("SHIYIN_UPDATE_INSTALLER", installer)
         .env("SHIYIN_UPDATE_ROOT", root)
         .env("SHIYIN_UPDATE_INSTALLER_LOG", &installer_log)
+        .env("SHIYIN_UPDATE_PROGRESS", &installer_progress)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
-        .map_err(|error| format!("无法启动安装程序：{error}"))?
-        .code()
-        .unwrap_or(1);
+        .spawn()
+        .map_err(|error| format!("无法启动安装程序：{error}"))?;
+    let mut last_progress = None;
+    let mut latest_percent = 0;
+    let exit_code = loop {
+        if let Some(percent) = emit_installer_progress(app, &installer_progress, &mut last_progress)
+        {
+            latest_percent = percent;
+        }
+        match installer_process
+            .try_wait()
+            .map_err(|error| format!("无法读取安装程序状态：{error}"))?
+        {
+            Some(status) => {
+                if let Some(percent) =
+                    emit_installer_progress(app, &installer_progress, &mut last_progress)
+                {
+                    latest_percent = percent;
+                }
+                break status.code().unwrap_or(1);
+            }
+            None => thread::sleep(Duration::from_millis(120)),
+        }
+    };
     if exit_code != 0 {
         let message = format!("安装程序退出码：{exit_code}");
         log(data, &message);
         emit_progress(
             app,
             2,
+            latest_percent,
             "安装新版本",
             &message,
             "请重新打开软件后重试。",
@@ -899,6 +954,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         3,
+        100,
         "启动新版本",
         "安装完成，正在启动新版本…",
         "正在等待新版主程序可用。",
@@ -925,6 +981,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         4,
+        100,
         "完成",
         &format!("已启动 v{}", session.version),
         "更新完成。",
@@ -934,6 +991,45 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     thread::sleep(Duration::from_millis(900));
     app.exit(0);
     Ok(())
+}
+
+fn read_installer_progress(path: &Path) -> Option<(u64, u64)> {
+    let raw = fs::read_to_string(path).ok()?;
+    let mut fields = raw.trim().split('|');
+    let current = fields.next()?.parse::<u64>().ok()?;
+    let total = fields.next()?.parse::<u64>().ok()?;
+    (total > 0 && current <= total).then_some((current, total))
+}
+
+fn emit_installer_progress(
+    app: &AppHandle,
+    path: &Path,
+    last_progress: &mut Option<(u64, u64)>,
+) -> Option<u8> {
+    let (current, total) = read_installer_progress(path)?;
+    let percent = progress_percent(current, total);
+    if *last_progress != Some((current, total)) {
+        *last_progress = Some((current, total));
+        emit_progress(
+            app,
+            2,
+            percent,
+            "安装新版本",
+            &format!("正在安装新版本… {percent}%"),
+            &format!("安装器实时处理进度：{current} / {total}"),
+            false,
+            false,
+        );
+    }
+    Some(percent)
+}
+
+fn progress_percent(current: u64, total: u64) -> u8 {
+    current
+        .saturating_mul(100)
+        .checked_div(total)
+        .unwrap_or(0)
+        .min(99) as u8
 }
 
 fn log(data: &Path, message: &str) {
@@ -990,6 +1086,13 @@ mod tests {
             "expected.exe"
         )
         .is_err());
+    }
+    #[test]
+    fn installer_progress_percentage_is_real_and_bounded() {
+        assert_eq!(progress_percent(0, 100), 0);
+        assert_eq!(progress_percent(25, 100), 25);
+        assert_eq!(progress_percent(999, 1000), 99);
+        assert_eq!(progress_percent(1000, 1000), 99);
     }
     #[test]
     fn every_update_policy_and_network_mode_is_valid() {

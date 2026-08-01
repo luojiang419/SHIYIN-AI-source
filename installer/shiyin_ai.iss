@@ -51,3 +51,27 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+var
+  UpdateProgressFile: String;
+
+procedure WriteUpdateProgress(CurProgress, MaxProgress: Integer);
+begin
+  if UpdateProgressFile <> '' then
+    SaveStringToFile(
+      UpdateProgressFile,
+      IntToStr(CurProgress) + '|' + IntToStr(MaxProgress),
+      False);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  UpdateProgressFile := ExpandConstant('{param:UPDATEPROGRESS|}');
+  Result := True;
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+begin
+  WriteUpdateProgress(CurProgress, MaxProgress);
+end;

@@ -43,7 +43,7 @@ class UnifiedThemeTests(unittest.TestCase):
                 rf'id="{frame_id}"[^>]+ivory-surfaces\.1',
                 frame_id,
             )
-        self.assertRegex(source, r'id="frame-canvas"[^>]+ivory-surfaces\.1')
+        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-dark-neutral\.2')
         for frame_id in ("frame-ecommerce", "frame-free-creation"):
             self.assertRegex(
                 source,
@@ -63,11 +63,18 @@ class UnifiedThemeTests(unittest.TestCase):
             "background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important",
         ):
             self.assertIn(marker, source)
-        for page in ("canvas-list.html", "canvas.html", "smart-canvas.html"):
+        for page in ("smart-canvas.html",):
             page_source = (STATIC / page).read_text(encoding="utf-8")
             self.assertRegex(
                 page_source,
                 r"studio-unified\.css\?v=2026\.08\.02\.ivory-surfaces\.1",
+                page,
+            )
+        for page in ("canvas-list.html", "canvas.html"):
+            page_source = (STATIC / page).read_text(encoding="utf-8")
+            self.assertRegex(
+                page_source,
+                r"studio-unified\.css\?v=2026\.08\.02\.canvas-dark-neutral\.2",
                 page,
             )
 
@@ -83,6 +90,24 @@ class UnifiedThemeTests(unittest.TestCase):
             "#shell .gen-btn",
             "background:var(--studio-control) !important",
             "background:var(--studio-accent) !important",
+        ):
+            self.assertIn(marker, source)
+
+    def test_infinite_canvas_dark_nodes_and_log_panel_have_final_neutral_pass(self):
+        source = UNIFIED_CSS.read_text(encoding="utf-8")
+        for marker in (
+            "星夜黑无限画布蓝灰残留收口",
+            "#shell .gen-settings",
+            "#shell .loop-count-row",
+            "#shell .setting-input",
+            "#shell .mode-tabs button.active",
+            ".log-panel",
+            ".log-list",
+            ".log-item",
+            "background-image:none !important",
+            "background:var(--studio-panel) !important",
+            "background:var(--studio-control) !important",
+            "background:var(--studio-panel-raised) !important",
         ):
             self.assertIn(marker, source)
 

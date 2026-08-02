@@ -2151,3 +2151,152 @@ body.theme-dark #shell.shell > .board {
     border-color:var(--studio-border-strong) !important;
     color:var(--studio-text) !important;
 }
+
+/* 星夜黑无限画布蓝灰残留收口：覆盖新增节点配置区和日志面板的旧 slate 色块。 */
+html.studio-theme-dark body #shell .gen-settings,
+body.studio-theme-dark #shell .gen-settings,
+html.theme-dark body #shell .gen-settings,
+body.theme-dark #shell .gen-settings,
+html.studio-theme-dark body #shell .loop-count-row,
+body.studio-theme-dark #shell .loop-count-row,
+html.theme-dark body #shell .loop-count-row,
+body.theme-dark #shell .loop-count-row,
+html.studio-theme-dark body #shell .loop-image-panel,
+body.studio-theme-dark #shell .loop-image-panel,
+html.theme-dark body #shell .loop-image-panel,
+body.theme-dark #shell .loop-image-panel,
+html.studio-theme-dark body #shell .loop-preview,
+body.studio-theme-dark #shell .loop-preview,
+html.theme-dark body #shell .loop-preview,
+body.theme-dark #shell .loop-preview,
+html.studio-theme-dark body #shell .mode-tabs,
+body.studio-theme-dark #shell .mode-tabs,
+html.theme-dark body #shell .mode-tabs,
+body.theme-dark #shell .mode-tabs,
+html.studio-theme-dark body #shell .ms-model-tabs,
+body.studio-theme-dark #shell .ms-model-tabs,
+html.theme-dark body #shell .ms-model-tabs,
+body.theme-dark #shell .ms-model-tabs,
+html.studio-theme-dark body #shell .seg,
+body.studio-theme-dark #shell .seg,
+html.theme-dark body #shell .seg,
+body.theme-dark #shell .seg,
+html.studio-theme-dark body #shell .gen-count-row,
+body.studio-theme-dark #shell .gen-count-row,
+html.theme-dark body #shell .gen-count-row,
+body.theme-dark #shell .gen-count-row,
+html.studio-theme-dark body #shell .setting-check,
+body.studio-theme-dark #shell .setting-check,
+html.theme-dark body #shell .setting-check,
+body.theme-dark #shell .setting-check,
+html.studio-theme-dark body #shell .video-frame-label,
+body.studio-theme-dark #shell .video-frame-label,
+html.theme-dark body #shell .video-frame-label,
+body.theme-dark #shell .video-frame-label {
+    background:var(--studio-control) !important;
+    background-image:none !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body #shell .setting-input,
+body.studio-theme-dark #shell .setting-input,
+html.theme-dark body #shell .setting-input,
+body.theme-dark #shell .setting-input,
+html.studio-theme-dark body #shell .gen-count-input,
+body.studio-theme-dark #shell .gen-count-input,
+html.theme-dark body #shell .gen-count-input,
+body.theme-dark #shell .gen-count-input,
+html.studio-theme-dark body #shell .loop-field textarea,
+body.studio-theme-dark #shell .loop-field textarea,
+html.theme-dark body #shell .loop-field textarea,
+body.theme-dark #shell .loop-field textarea,
+html.studio-theme-dark body #shell .loop-variable-editor,
+body.studio-theme-dark #shell .loop-variable-editor,
+html.theme-dark body #shell .loop-variable-editor,
+body.theme-dark #shell .loop-variable-editor {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body #shell .setting-check.active,
+body.studio-theme-dark #shell .setting-check.active,
+html.theme-dark body #shell .setting-check.active,
+body.theme-dark #shell .setting-check.active,
+html.studio-theme-dark body #shell .mode-tabs button.active,
+body.studio-theme-dark #shell .mode-tabs button.active,
+html.theme-dark body #shell .mode-tabs button.active,
+body.theme-dark #shell .mode-tabs button.active,
+html.studio-theme-dark body #shell .ms-model-tabs button.active,
+body.studio-theme-dark #shell .ms-model-tabs button.active,
+html.theme-dark body #shell .ms-model-tabs button.active,
+body.theme-dark #shell .ms-model-tabs button.active,
+html.studio-theme-dark body #shell .seg button.active,
+body.studio-theme-dark #shell .seg button.active,
+html.theme-dark body #shell .seg button.active,
+body.theme-dark #shell .seg button.active,
+html.studio-theme-dark body #shell .loop-toggle.active,
+body.studio-theme-dark #shell .loop-toggle.active,
+html.theme-dark body #shell .loop-toggle.active,
+body.theme-dark #shell .loop-toggle.active {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .log-panel,
+body.studio-theme-dark .log-panel,
+html.theme-dark body .log-panel,
+body.theme-dark .log-panel,
+html.studio-theme-dark body .log-head,
+body.studio-theme-dark .log-head,
+html.theme-dark body .log-head,
+body.theme-dark .log-head,
+html.studio-theme-dark body .log-list,
+body.studio-theme-dark .log-list,
+html.theme-dark body .log-list,
+body.theme-dark .log-list {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+html.studio-theme-dark body .log-list,
+body.studio-theme-dark .log-list,
+html.theme-dark body .log-list,
+body.theme-dark .log-list,
+html.studio-theme-dark body .log-head,
+body.studio-theme-dark .log-head,
+html.theme-dark body .log-head,
+body.theme-dark .log-head,
+html.studio-theme-dark body .log-empty,
+body.studio-theme-dark .log-empty,
+html.theme-dark body .log-empty,
+body.theme-dark .log-empty {
+    background:var(--studio-panel) !important;
+    color:var(--studio-muted) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .log-item,
+body.studio-theme-dark .log-item,
+html.theme-dark body .log-item,
+body.theme-dark .log-item,
+html.studio-theme-dark body .log-field,
+body.studio-theme-dark .log-field,
+html.theme-dark body .log-field,
+body.theme-dark .log-field,
+html.studio-theme-dark body .log-chip,
+body.studio-theme-dark .log-chip,
+html.theme-dark body .log-chip,
+body.theme-dark .log-chip {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}

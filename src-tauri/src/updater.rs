@@ -764,6 +764,7 @@ pub fn run_update_session(
         .take()
         .ok_or_else(|| "更新会话已经启动。".to_string())?;
     let log_data = PathBuf::from(&session.data_root);
+    log(&log_data, "页面已请求启动更新会话，安装任务即将进入后台。");
     tauri::async_runtime::spawn_blocking(move || {
         if let Err(error) = run_installer_session(&app, &session) {
             emit_progress(
@@ -1030,8 +1031,8 @@ fn emit_installer_progress(
             2,
             overall_percent,
             "安装新版本",
-            &format!("正在安装新版本… {overall_percent}%"),
-            &format!("安装器实时处理进度：{current} / {total}，安装阶段 {percent}%"),
+            "正在安装新版本…",
+            &format!("安装器正在处理文件：{current} / {total}"),
             false,
             false,
         );

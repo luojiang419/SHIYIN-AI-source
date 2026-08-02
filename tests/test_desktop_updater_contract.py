@@ -180,15 +180,24 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         progress_smoke = (ROOT / "tools" / "smoke-installer-progress.ps1").read_text(encoding="utf-8")
         installer_script = (ROOT / "installer" / "shiyin_ai.iss").read_text(encoding="utf-8")
         self.assertIn("update-progress", page)
-        self.assertIn("progress-percent", page)
+        self.assertIn("progress-spinner", page)
+        self.assertIn("@keyframes update-spin", page)
         self.assertIn("progress-fill", page)
         self.assertIn("progressPercent", page)
         self.assertIn("持续显示处理进度", page)
         self.assertIn("安装阶段按安装器实时回调推进", page)
+        self.assertIn("async function prepareProgressListener()", page)
+        self.assertIn("Promise.race([listenerTask, delay(800)])", page)
+        self.assertIn("进度监听仍在准备，更新会话将继续执行", page)
+        self.assertIn("更新会话已启动", page)
+        self.assertIn("receivedBackendProgress", page)
+        self.assertIn("if (!receivedBackendProgress)", page)
+        self.assertNotIn("progressPercent.textContent", page)
+        self.assertNotIn("textContent = `${value}%`", page)
         self.assertIn("await invoke('run_update_session')", page)
         self.assertIn("进度监听未就绪，更新会话将继续执行", page)
         self.assertLess(
-            page.index("await listen('update-progress', render)"),
+            page.index("listen('update-progress', render)"),
             page.index("await invoke('run_update_session')"),
         )
         self.assertNotIn("阶段估算", page)
@@ -202,6 +211,8 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("installer_overall_percent", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("installer-progress.txt", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("emit_installer_progress", UPDATER.read_text(encoding="utf-8"))
+        self.assertNotIn("&format!(\"正在安装新版本… {overall_percent}%\")", UPDATER.read_text(encoding="utf-8"))
+        self.assertNotIn("安装阶段 {percent}%", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("CurInstallProgressChanged", installer_script)
         self.assertIn("UPDATEPROGRESS", installer_script)
         self.assertIn("realtime_progress", progress_smoke)
@@ -221,6 +232,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
 
     def test_updater_logs_helper_failures_for_diagnosis(self):
         source = UPDATER.read_text(encoding="utf-8")
+        self.assertIn("页面已请求启动更新会话，安装任务即将进入后台。", source)
         self.assertIn('log(&log_data, &format!("更新失败：{error}"));', source)
 
     def test_ci_keeps_tauri_frontend_placeholder_in_public_source(self):

@@ -43,7 +43,7 @@ class UnifiedThemeTests(unittest.TestCase):
                 rf'id="{frame_id}"[^>]+ivory-surfaces\.1',
                 frame_id,
             )
-        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-dark-neutral\.2')
+        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-dark-neutral\.3')
         for frame_id in ("frame-ecommerce", "frame-free-creation"):
             self.assertRegex(
                 source,
@@ -63,18 +63,11 @@ class UnifiedThemeTests(unittest.TestCase):
             "background-image:radial-gradient(var(--studio-grid) 1px, transparent 1px) !important",
         ):
             self.assertIn(marker, source)
-        for page in ("smart-canvas.html",):
+        for page in ("smart-canvas.html", "canvas-list.html", "canvas.html"):
             page_source = (STATIC / page).read_text(encoding="utf-8")
             self.assertRegex(
                 page_source,
-                r"studio-unified\.css\?v=2026\.08\.02\.ivory-surfaces\.1",
-                page,
-            )
-        for page in ("canvas-list.html", "canvas.html"):
-            page_source = (STATIC / page).read_text(encoding="utf-8")
-            self.assertRegex(
-                page_source,
-                r"studio-unified\.css\?v=2026\.08\.02\.canvas-dark-neutral\.2",
+                r"studio-unified\.css\?v=2026\.08\.02\.canvas-dark-neutral\.3",
                 page,
             )
 
@@ -110,6 +103,37 @@ class UnifiedThemeTests(unittest.TestCase):
             "background:var(--studio-panel-raised) !important",
         ):
             self.assertIn(marker, source)
+
+    def test_dark_canvas_pages_have_full_neutral_closure_layer(self):
+        source = UNIFIED_CSS.read_text(encoding="utf-8")
+        for marker in (
+            "星夜黑暗色画布全量收口",
+            "html.studio-theme-dark body .canvas-item",
+            "html.studio-theme-dark body .canvas-meta-pop",
+            "html.studio-theme-dark body .canvas-owner-input",
+            "html.studio-theme-dark body .selection-hub",
+            "html.studio-theme-dark body .hub-port",
+            "html.studio-theme-dark body .comfy-settings",
+            "html.studio-theme-dark body .llm-chat-pane",
+            "html.studio-theme-dark body .image-edit-stage",
+            "html.studio-theme-dark body .loop-smart-prompt-index",
+            "html.studio-theme-dark body .composer-template-btn",
+            "html.studio-theme-dark body .jimeng-pending-spinner i",
+            ".canvas-owner-chip",
+            ".canvas-kind-chip",
+            ".ws-card-kind.smart",
+            "background:var(--studio-control) !important",
+            "background:var(--studio-panel-raised) !important",
+        ):
+            self.assertIn(marker, source)
+        # 暗色画布页面必须引用最新收口版本号，不能回退到旧缓存
+        for page in ("canvas.html", "canvas-list.html", "smart-canvas.html"):
+            page_source = (STATIC / page).read_text(encoding="utf-8")
+            self.assertRegex(
+                page_source,
+                r"studio-unified\.css\?v=2026\.08\.02\.canvas-dark-neutral\.3",
+                page,
+            )
 
     def test_gpt_chat_no_longer_declares_legacy_blue_dark_theme(self):
         source = (STATIC / "gpt-chat.html").read_text(encoding="utf-8").lower()

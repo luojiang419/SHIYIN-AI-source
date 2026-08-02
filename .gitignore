@@ -20,6 +20,7 @@ backup/
 # 本地凭据与覆盖配置
 .env
 .env.*
+CLAUDE.local.md
 !.env.example
 canvas_core/secrets.local.py
 api文档/

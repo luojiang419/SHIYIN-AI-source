@@ -2300,3 +2300,439 @@ body.theme-dark .log-chip {
     color:var(--studio-text-soft) !important;
     box-shadow:none !important;
 }
+
+/* 星夜黑暗色画布全量收口：canvas.html / canvas-list.html / smart-canvas.html
+   中未被旧覆盖层处理的蓝灰残留（theme.css 暗色旧蓝灰值、canvas.css 亮色 slate 块、
+   indigo/紫色徽章），统一映射到 --studio-* 中性主题变量。 */
+
+/* 1. 顶栏面板、浮层与通用控件（编辑器 + 工作台共用） */
+html.studio-theme-dark body .panel,
+body.studio-theme-dark .panel,
+html.theme-dark body .panel,
+body.theme-dark .panel,
+html.studio-theme-dark body .selection-hub,
+body.studio-theme-dark .selection-hub,
+html.theme-dark body .selection-hub,
+body.theme-dark .selection-hub,
+html.studio-theme-dark body .link-delete,
+body.studio-theme-dark .link-delete,
+html.theme-dark body .link-delete,
+body.theme-dark .link-delete,
+html.studio-theme-dark body .output-drag-preview,
+body.studio-theme-dark .output-drag-preview,
+html.theme-dark body .output-drag-preview,
+body.theme-dark .output-drag-preview,
+html.studio-theme-dark body .output-drag-preview img,
+body.studio-theme-dark .output-drag-preview img {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+html.studio-theme-dark body .hub-port,
+body.studio-theme-dark .hub-port,
+html.theme-dark body .hub-port,
+body.theme-dark .hub-port,
+html.studio-theme-dark body .resize-handle,
+body.studio-theme-dark .resize-handle,
+html.theme-dark body .resize-handle,
+body.theme-dark .resize-handle,
+html.studio-theme-dark body .node-resize-handle,
+body.studio-theme-dark .node-resize-handle {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-muted) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .resize-handle:hover,
+body.studio-theme-dark .resize-handle:hover,
+html.studio-theme-dark body .node-resize-handle:hover,
+body.studio-theme-dark .node-resize-handle:hover,
+html.studio-theme-dark body .hub-port:hover,
+body.studio-theme-dark .hub-port:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .hub-dot,
+body.studio-theme-dark .hub-dot {
+    background:var(--studio-text) !important;
+    box-shadow:0 0 0 2px var(--studio-panel-raised), 0 0 0 3px var(--studio-border-strong) !important;
+}
+
+html.studio-theme-dark body .drop-overlay,
+body.studio-theme-dark .drop-overlay {
+    background:color-mix(in srgb,var(--studio-bg) 55%,transparent) !important;
+    color:var(--studio-muted) !important;
+}
+
+html.studio-theme-dark body .input-index,
+body.studio-theme-dark .input-index,
+html.theme-dark body .input-index,
+body.theme-dark .input-index {
+    background:var(--studio-control) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .port::after,
+body.studio-theme-dark .port::after,
+html.theme-dark body .port::after,
+body.theme-dark .port::after {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-panel-raised) !important;
+    box-shadow:0 0 0 1px var(--studio-border-strong) !important;
+}
+
+/* 2. 画布工作台（canvas-list.html）：卡片、操作按钮与门页控件 */
+html.studio-theme-dark body .canvas-item,
+body.studio-theme-dark .canvas-item,
+html.theme-dark body .canvas-item,
+body.theme-dark .canvas-item,
+html.studio-theme-dark body .canvas-open,
+body.studio-theme-dark .canvas-open,
+html.theme-dark body .canvas-open,
+body.theme-dark .canvas-open,
+html.studio-theme-dark body .canvas-card-meta,
+body.studio-theme-dark .canvas-card-meta,
+html.studio-theme-dark body .canvas-card-title-input,
+body.studio-theme-dark .canvas-card-title-input,
+html.studio-theme-dark body .canvas-preview-mark,
+body.studio-theme-dark .canvas-preview-mark,
+html.studio-theme-dark body .gate-sort,
+body.studio-theme-dark .gate-sort,
+html.studio-theme-dark body .trash-note,
+body.studio-theme-dark .trash-note,
+html.studio-theme-dark body .gate-trash-badge,
+body.studio-theme-dark .gate-trash-badge,
+html.studio-theme-dark body .canvas-color-swatch.cc-none,
+body.studio-theme-dark .canvas-color-swatch.cc-none,
+html.studio-theme-dark body .emoji-option,
+body.studio-theme-dark .emoji-option {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .canvas-item:hover,
+body.studio-theme-dark .canvas-item:hover,
+html.studio-theme-dark body .canvas-preview-mark:hover,
+body.studio-theme-dark .canvas-preview-mark:hover,
+html.studio-theme-dark body .canvas-card-edit:hover,
+body.studio-theme-dark .canvas-card-edit:hover,
+html.studio-theme-dark body .canvas-delete:hover,
+body.studio-theme-dark .canvas-delete:hover,
+html.studio-theme-dark body .canvas-pin-btn:hover,
+body.studio-theme-dark .canvas-pin-btn:hover,
+html.studio-theme-dark body .gate-sort-btn:hover,
+body.studio-theme-dark .gate-sort-btn:hover {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .canvas-card-edit,
+body.studio-theme-dark .canvas-card-edit,
+html.studio-theme-dark body .canvas-delete,
+body.studio-theme-dark .canvas-delete,
+html.studio-theme-dark body .canvas-pin-btn,
+body.studio-theme-dark .canvas-pin-btn {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-muted) !important;
+}
+
+html.studio-theme-dark body .canvas-card-title,
+body.studio-theme-dark .canvas-card-title,
+html.studio-theme-dark body .canvas-card-time,
+body.studio-theme-dark .canvas-card-time,
+html.studio-theme-dark body .gate-sort-btn,
+body.studio-theme-dark .gate-sort-btn {
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .canvas-card-time,
+body.studio-theme-dark .canvas-card-time {
+    color:var(--studio-faint) !important;
+}
+
+html.studio-theme-dark body .gate-sort-btn.active,
+body.studio-theme-dark .gate-sort-btn.active {
+    background:var(--studio-panel-raised) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .canvas-item.active,
+body.studio-theme-dark .canvas-item.active,
+html.theme-dark body .canvas-item.active,
+body.theme-dark .canvas-item.active {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+html.studio-theme-dark body .canvas-item.active .canvas-card-title,
+body.studio-theme-dark .canvas-item.active .canvas-card-title,
+html.studio-theme-dark body .canvas-item.active .canvas-card-time,
+body.studio-theme-dark .canvas-item.active .canvas-card-time,
+html.studio-theme-dark body .canvas-item.active .canvas-card-meta,
+body.studio-theme-dark .canvas-item.active .canvas-card-meta,
+html.studio-theme-dark body .canvas-item.active .canvas-owner-chip,
+body.studio-theme-dark .canvas-item.active .canvas-owner-chip,
+html.studio-theme-dark body .canvas-item.active .canvas-kind-chip,
+body.studio-theme-dark .canvas-item.active .canvas-kind-chip,
+html.studio-theme-dark body .canvas-item.active .canvas-preview-mark,
+body.studio-theme-dark .canvas-item.active .canvas-preview-mark,
+html.studio-theme-dark body .canvas-item.active .canvas-card-edit,
+body.studio-theme-dark .canvas-item.active .canvas-card-edit,
+html.studio-theme-dark body .canvas-item.active .canvas-delete,
+body.studio-theme-dark .canvas-item.active .canvas-delete,
+html.studio-theme-dark body .canvas-item.active .canvas-pin-btn,
+body.studio-theme-dark .canvas-item.active .canvas-pin-btn {
+    background:color-mix(in srgb,var(--studio-accent-contrast) 12%,transparent) !important;
+    border-color:color-mix(in srgb,var(--studio-accent-contrast) 22%,transparent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+html.studio-theme-dark body .canvas-delete-confirm,
+body.studio-theme-dark .canvas-delete-confirm {
+    background:color-mix(in srgb,var(--studio-bg) 62%,transparent) !important;
+    backdrop-filter:blur(4px) !important;
+}
+
+html.studio-theme-dark body .canvas-delete-box,
+body.studio-theme-dark .canvas-delete-box {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border-strong) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+html.studio-theme-dark body .canvas-delete-title,
+body.studio-theme-dark .canvas-delete-title {
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .canvas-confirm-btn,
+body.studio-theme-dark .canvas-confirm-btn {
+    background:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+    border-color:var(--studio-accent) !important;
+}
+
+html.studio-theme-dark body .canvas-cancel-btn,
+body.studio-theme-dark .canvas-cancel-btn {
+    background:var(--studio-control) !important;
+    color:var(--studio-text-soft) !important;
+    border-color:var(--studio-border-strong) !important;
+}
+
+html.studio-theme-dark body .canvas-meta-pop,
+body.studio-theme-dark .canvas-meta-pop {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+html.studio-theme-dark body .canvas-meta-label,
+body.studio-theme-dark .canvas-meta-label {
+    color:var(--studio-faint) !important;
+}
+
+html.studio-theme-dark body .canvas-owner-input,
+body.studio-theme-dark .canvas-owner-input {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .canvas-owner-input:focus,
+body.studio-theme-dark .canvas-owner-input:focus {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+}
+
+html.studio-theme-dark body .canvas-meta-pop .emoji-option,
+body.studio-theme-dark .canvas-meta-pop .emoji-option {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-muted) !important;
+}
+
+html.studio-theme-dark body .canvas-meta-pop .emoji-option:hover,
+body.studio-theme-dark .canvas-meta-pop .emoji-option:hover {
+    background:var(--studio-control-hover) !important;
+    color:var(--studio-text) !important;
+}
+
+/* indigo 负责人徽章 / 紫色类型徽章：三种主题统一中性化，移除蓝紫色块 */
+.canvas-owner-chip,
+.canvas-owner-chip:hover {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-muted) !important;
+}
+
+.canvas-kind-chip,
+.ws-card-kind.smart {
+    background:var(--studio-accent-soft) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-accent) !important;
+}
+
+/* 3. 编辑器节点内部遗漏（canvas.html）：设置区、模型面板、Provider 编辑区 */
+html.studio-theme-dark body .setting-row,
+body.studio-theme-dark .setting-row,
+html.theme-dark body .setting-row,
+body.theme-dark .setting-row,
+html.studio-theme-dark body .comfy-settings,
+body.studio-theme-dark .comfy-settings,
+html.theme-dark body .comfy-settings,
+body.theme-dark .comfy-settings,
+html.studio-theme-dark body .llm-chat-pane,
+body.studio-theme-dark .llm-chat-pane,
+html.theme-dark body .llm-chat-pane,
+body.theme-dark .llm-chat-pane,
+html.studio-theme-dark body .model-row,
+body.studio-theme-dark .model-row,
+html.theme-dark body .model-row,
+body.theme-dark .model-row,
+html.studio-theme-dark body .model-empty,
+body.studio-theme-dark .model-empty,
+html.theme-dark body .model-empty,
+body.theme-dark .model-empty,
+html.studio-theme-dark body .provider-editor,
+body.studio-theme-dark .provider-editor,
+html.theme-dark body .provider-editor,
+body.theme-dark .provider-editor,
+html.studio-theme-dark body .model-panel,
+body.studio-theme-dark .model-panel {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .gen-step-btn,
+body.studio-theme-dark .gen-step-btn {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-muted) !important;
+}
+
+html.studio-theme-dark body .gen-step-btn:hover,
+body.studio-theme-dark .gen-step-btn:hover {
+    background:var(--studio-control-hover) !important;
+    color:var(--studio-text) !important;
+}
+
+html.studio-theme-dark body .output-preview img,
+body.studio-theme-dark .output-preview img,
+html.theme-dark body .output-preview img,
+body.theme-dark .output-preview img,
+html.studio-theme-dark body .output-preview video,
+body.studio-theme-dark .output-preview video {
+    background:var(--studio-control) !important;
+}
+
+html.studio-theme-dark body .provider-field input,
+body.studio-theme-dark .provider-field input,
+html.studio-theme-dark body .provider-field select,
+body.studio-theme-dark .provider-field select {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+}
+
+/* 4. 图片编辑器（canvas.html image-edit-*）：旧 slate 亮块与蓝黑舞台统一收口 */
+html.studio-theme-dark body .image-edit-mode,
+body.studio-theme-dark .image-edit-mode,
+html.theme-dark body .image-edit-mode,
+body.theme-dark .image-edit-mode,
+html.studio-theme-dark body .image-edit-tools,
+body.studio-theme-dark .image-edit-tools,
+html.theme-dark body .image-edit-tools,
+body.theme-dark .image-edit-tools,
+html.studio-theme-dark body .image-edit-btn.secondary,
+body.studio-theme-dark .image-edit-btn.secondary,
+html.theme-dark body .image-edit-btn.secondary,
+body.theme-dark .image-edit-btn.secondary,
+html.studio-theme-dark body .crop-ratio-btn,
+body.studio-theme-dark .crop-ratio-btn,
+html.studio-theme-dark body .grid-preset-btn,
+body.studio-theme-dark .grid-preset-btn {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .image-edit-btn.primary,
+body.studio-theme-dark .image-edit-btn.primary,
+html.studio-theme-dark body .crop-ratio-btn.active,
+body.studio-theme-dark .crop-ratio-btn.active,
+html.studio-theme-dark body .crop-ratio-btn:hover,
+body.studio-theme-dark .crop-ratio-btn:hover,
+html.studio-theme-dark body .grid-preset-btn:hover,
+body.studio-theme-dark .grid-preset-btn:hover {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+}
+
+html.studio-theme-dark body .image-edit-stage,
+body.studio-theme-dark .image-edit-stage,
+html.studio-theme-dark body .crop-canvas,
+body.studio-theme-dark .crop-canvas,
+html.studio-theme-dark body .crop-canvas img,
+body.studio-theme-dark .crop-canvas img,
+html.studio-theme-dark body #cropImage,
+body.studio-theme-dark #cropImage {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+}
+
+html.studio-theme-dark body .grid-gap-value,
+body.studio-theme-dark .grid-gap-value {
+    background:var(--studio-control) !important;
+    color:var(--studio-text) !important;
+}
+
+/* 5. 智能画布（smart-canvas.html）：遗漏的蓝黑半透明块与 indigo spinner */
+html.studio-theme-dark body .loop-smart-prompt-index,
+body.studio-theme-dark .loop-smart-prompt-index,
+html.theme-dark body .loop-smart-prompt-index,
+body.theme-dark .loop-smart-prompt-index,
+html.studio-theme-dark body .composer-template-btn,
+body.studio-theme-dark .composer-template-btn,
+html.theme-dark body .composer-template-btn,
+body.theme-dark .composer-template-btn {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html.studio-theme-dark body .image-node.history-group-node,
+body.studio-theme-dark .image-node.history-group-node,
+html.studio-theme-dark body .image-node.group-node,
+body.studio-theme-dark .image-node.group-node {
+    background:color-mix(in srgb,var(--studio-panel) 72%,transparent) !important;
+    border-color:var(--studio-border) !important;
+}
+
+html.studio-theme-dark body .jimeng-pending-spinner i,
+body.studio-theme-dark .jimeng-pending-spinner i {
+    color:var(--studio-muted) !important;
+}
+
+html.studio-theme-dark body .smart-group-member-grab,
+body.studio-theme-dark .smart-group-member-grab {
+    background:color-mix(in srgb,var(--studio-text) 10%,transparent) !important;
+    border-bottom-color:var(--studio-border) !important;
+}

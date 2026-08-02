@@ -5833,6 +5833,11 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
 }
 
 function render(){
+    if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(nodesEl)) {
+        window.StudioFocusGuard.deferDomUpdate('canvas-render', render);
+        return;
+    }
+    const focusSnapshot = window.StudioFocusGuard?.capture?.();
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
     const reusableMediaNodes = new Map();
@@ -5867,11 +5872,17 @@ function render(){
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
+    if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshOutputTimer();
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
     if(!uniqueIds.length) return;
+    if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(nodesEl)) {
+        window.StudioFocusGuard.deferDomUpdate(`canvas-refresh-${uniqueIds.join(',')}`, () => refreshNodes(uniqueIds));
+        return;
+    }
+    const focusSnapshot = window.StudioFocusGuard?.capture?.();
     const outputScrolls = captureOutputScrolls();
     applyViewport();
     for(const id of uniqueIds){
@@ -5898,6 +5909,7 @@ function refreshNodes(ids=[]){
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
+    if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshOutputTimer();
 }
 function refreshRunNodes(node, out=null){
@@ -10169,8 +10181,17 @@ async function runGenerator(genId, opts={}){
     };
     const quality = normalizedImageQuality(gen.quality);
     if(quality) payload.quality = quality;
-    let pendingIds = [];
+    let pendingIds = out ? Array.from({length:count}, () => uid('p')) : [];
     const startedAt = nowMs();
+    if(out) out._pending = [
+        ...(out._pending || []),
+        ...pendingIds.map(id => makePendingForRun(id, run, gen, {refs, requestSize:payload.size, cascadeTargetId}, {
+            canvasTaskType:'online-image',
+            providerId:payload.provider_id,
+            model:payload.model,
+            appendGenerated:Boolean(opts.cascade)
+        }))
+    ];
     if(!opts.cascade){
         gen.running = true;
         refreshRunNodes(gen, out);
@@ -10196,17 +10217,10 @@ async function runGenerator(genId, opts={}){
             scheduleSave();
             return;
         }
-        pendingIds = taskInfos.map(() => uid('p'));
-        if(out) out._pending = [
-            ...(out._pending || []),
-            ...taskInfos.map((task, index) => makePendingForRun(pendingIds[index], run, gen, {refs, requestSize:payload.size, cascadeTargetId}, {
-                canvasTaskId:task.task_id,
-                canvasTaskType:'online-image',
-                providerId:payload.provider_id,
-                model:payload.model,
-                appendGenerated:Boolean(opts.cascade)
-            }))
-        ];
+        taskInfos.forEach((task, index) => {
+            const pending = pendingById(out, pendingIds[index]);
+            if(pending) pending.canvasTaskId = task.task_id;
+        });
         refreshRunNodes(gen, out);
         scheduleSave();
         await saveCanvas();

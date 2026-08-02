@@ -1480,6 +1480,19 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for control_id in ("ratioSelect", "resolutionSelect", "qualitySelect", "countSelect"):
             self.assertRegex(self.javascript, rf"el\.{control_id}\.addEventListener\('change'")
 
+    def test_ecommerce_pending_candidates_match_requested_count(self):
+        self.assertIn("function requestedOutputCountForTask(task)", self.javascript)
+        self.assertIn("const placeholderCount = requestedOutputCountForTask(task)", self.javascript)
+        self.assertIn("return Array.from({length:placeholderCount}", self.javascript)
+        self.assertIn("parameters.count ?? task?.count ?? task?.request?.count", self.javascript)
+        self.assertIn("data-task-candidate-time", self.javascript)
+        self.assertIn("syncCandidateTimer()", self.javascript)
+        self.assertIn("const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation'", self.javascript)
+        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.02.count-pending.1"', self.index_html)
+        self.assertIn('id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.08.02.count-pending.1"', self.index_html)
+        self.assertIn('/static/js/ecommerce.js?v=2026.08.02.count-pending.1', self.html)
+        self.assertIn('/static/css/ecommerce.css?v=2026.08.02.count-pending.1', self.html)
+
     def test_generation_parameters_wait_for_server_preferences_before_initial_defaults(self):
         self.assertIn("initializing:true", self.javascript)
         self.assertIn("async function waitForPreferenceBootstrap", self.javascript)
@@ -1506,6 +1519,15 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for source in (self.canvas_javascript, self.smart_canvas_javascript):
             self.assertNotRegex(source, r"p\.id\s*!==\s*'(?:modelscope|volcengine)'.*image_models")
         self.assertEqual(self.canvas_list_javascript.count("api-provider-unification.1"), 2)
+
+    def test_canvas_api_generation_creates_count_pending_outputs_before_task_submit(self):
+        run_generator = re.search(r"async function runGenerator\(genId, opts=\{\}\)\{(.*?)\n\}", self.canvas_javascript, re.S)
+        self.assertIsNotNone(run_generator)
+        body = run_generator.group(1)
+        self.assertIn("let pendingIds = out ? Array.from({length:count}, () => uid('p')) : []", body)
+        self.assertIn("...pendingIds.map(id => makePendingForRun", body)
+        self.assertLess(body.index("...pendingIds.map(id => makePendingForRun"), body.index("createCanvasImageTask(payload"))
+        self.assertIn("pending.canvasTaskId = task.task_id", body)
 
     def test_shell_prompts_for_missing_shiying_api_key_on_first_run(self):
         self.assertIn('id="shiying-api-key-modal"', self.index_html)

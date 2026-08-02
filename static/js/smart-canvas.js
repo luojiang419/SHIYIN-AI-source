@@ -7422,6 +7422,11 @@ function rememberInlineVideoActivations(nodeIndex=new Map(nodes.map(node => [nod
     });
 }
 function render(){
+    if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(world)) {
+        window.StudioFocusGuard.deferDomUpdate('smart-canvas-render', render);
+        return;
+    }
+    const focusSnapshot = window.StudioFocusGuard?.capture?.();
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
     const nodeIndex = new Map(nodes.map(node => [node.id, node]));
     rememberInlineVideoActivations(nodeIndex);
@@ -7510,6 +7515,7 @@ function render(){
     bindSmartPreviewImageFallbacks(world);
     syncSmartSelectedImageResolution(world);
     measureSmartNodeImages(nodeIndex);
+    if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshRunTimerPills();
     return;
     world.innerHTML = '';

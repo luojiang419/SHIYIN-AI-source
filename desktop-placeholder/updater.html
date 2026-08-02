@@ -45,7 +45,7 @@
     <div class="progress-track" role="progressbar" aria-label="更新进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div id="progress-fill"></div>
     </div>
-    <p id="progress-note">安装器启动后显示实时处理进度。</p>
+    <p id="progress-note">更新器启动后会持续显示处理进度。</p>
     <p id="message">正在准备独立更新器…</p>
     <p id="substep"></p>
     <ol id="steps">
@@ -94,8 +94,8 @@
           : data.isError
             ? '更新没有完成，当前软件未被修改。'
             : index === 2
-              ? '百分比来自安装器实时回调。'
-              : '更新器正在执行当前步骤，安装器启动后会显示实时处理进度。';
+              ? '安装阶段按安装器实时回调推进。'
+              : '更新器正在执行当前步骤。';
         progressFill.classList.toggle('success', Boolean(data.isSuccess));
         progressFill.classList.toggle('error', Boolean(data.isError));
         if (data.isError) {
@@ -105,13 +105,17 @@
       }
       async function start() {
         if (!invoke) {
-          render({stepIndex: 2, progressPercent: 0, stepLabel: '更新失败', message: '更新器运行环境不可用。', substep: '请重新打开软件后重试。', isError: true});
+          render({stepIndex: 2, progressPercent: 30, stepLabel: '更新失败', message: '更新器运行环境不可用。', substep: '请重新打开软件后重试。', isError: true});
           return;
         }
+        render({stepIndex: 0, progressPercent: 1, stepLabel: '准备安装', message: '更新器正在启动…', substep: '正在连接更新会话。'});
         if (listen) {
           await listen('update-progress', render);
-        } else {
-          render({stepIndex: 0, progressPercent: 0, stepLabel: '准备安装', message: '更新器正在启动…', substep: '正在连接更新会话。'});
+        }
+        try {
+          await invoke('run_update_session');
+        } catch (err) {
+          render({stepIndex: 2, progressPercent: 30, stepLabel: '更新失败', message: String(err || '更新器启动失败。'), substep: '请重新打开软件后重试。', isError: true});
         }
       }
       start();

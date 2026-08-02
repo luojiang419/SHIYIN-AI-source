@@ -47,7 +47,7 @@ class UnifiedThemeTests(unittest.TestCase):
         for frame_id in ("frame-ecommerce", "frame-free-creation"):
             self.assertRegex(
                 source,
-                rf'id="{frame_id}"[^>]+api-provider-unification\.1',
+                rf'id="{frame_id}"[^>]+count-pending\.1',
                 frame_id,
             )
 

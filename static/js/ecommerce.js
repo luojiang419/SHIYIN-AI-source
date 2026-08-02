@@ -129,6 +129,7 @@
         routeActive:window.top === window,
         submissionsInFlight:0,
         generationTimer:null,
+        candidateTimer:null,
         assetLibrary:null,
         assetDialogMode:'select',
         referenceSlotTypes:[],
@@ -548,15 +549,22 @@
     }
 
     function renderInputs(){
+        if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(el.inputSlots)) {
+            window.StudioFocusGuard.deferDomUpdate('ecommerce-render-inputs', renderInputs);
+            return;
+        }
+        const focusSnapshot = window.StudioFocusGuard?.capture?.();
         const editingControl = isTextEditingElement() ? document.activeElement : null;
         const config = currentConfig();
         if(config.universal) {
             renderUniversalInputs();
+            if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
             if(editingControl) restoreEditingFocus(editingControl);
             return;
         }
         if(state.operation === 'try_on') {
             renderTryOnInputs();
+            if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
             if(editingControl) restoreEditingFocus(editingControl);
             return;
         }
@@ -566,6 +574,7 @@
         el.inputProgress.textContent = `${completed}/${required.length}`;
         bindInputSlots();
         bindStudioReferenceControls();
+        if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
         if(editingControl) restoreEditingFocus(editingControl);
     }
 
@@ -1721,6 +1730,11 @@
     }
 
     function renderOperationControls(){
+        if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(el.operationControls)) {
+            window.StudioFocusGuard.deferDomUpdate('ecommerce-render-operation-controls', renderOperationControls);
+            return;
+        }
+        const focusSnapshot = window.StudioFocusGuard?.capture?.();
         const editingControl = isTextEditingElement() ? document.activeElement : null;
         const options = currentOptions();
         let html = '';
@@ -1760,6 +1774,7 @@
         el.operationControls.innerHTML = html;
         syncUniversalLayout();
         bindOperationControls();
+        if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
         if(editingControl) restoreEditingFocus(editingControl);
     }
 
@@ -2949,6 +2964,29 @@
         state.generationTimer = setInterval(update, 1000);
     }
 
+    function formatTaskElapsed(task){
+        const started = Number(task?.created_at || Date.now() / 1000);
+        const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - started));
+        const minutes = String(Math.floor(elapsed / 60)).padStart(2,'0');
+        const seconds = String(elapsed % 60).padStart(2,'0');
+        return `${minutes}:${seconds}`;
+    }
+
+    function updateCandidateTimers(){
+        el.candidateList?.querySelectorAll('[data-task-candidate-time]').forEach(label => {
+            const task = state.tasksById.get(String(label.dataset.taskCandidateTime || ''));
+            if(task) label.textContent = formatTaskElapsed(task);
+        });
+    }
+
+    function syncCandidateTimer(){
+        clearInterval(state.candidateTimer);
+        state.candidateTimer = null;
+        if(!state.routeActive || document.hidden || !el.candidateList?.querySelector('[data-task-candidate-time]')) return;
+        updateCandidateTimers();
+        state.candidateTimer = setInterval(updateCandidateTimers, 1000);
+    }
+
     function pauseEcommerceRouteMedia(){
         document.querySelectorAll('video,audio').forEach(media => {
             if(media.paused) return;
@@ -2973,6 +3011,8 @@
             state.taskPollTimer = null;
             clearInterval(state.generationTimer);
             state.generationTimer = null;
+            clearInterval(state.candidateTimer);
+            state.candidateTimer = null;
             pauseEcommerceRouteMedia();
             return;
         }
@@ -2980,6 +3020,7 @@
         if(!el.generationOverlay.classList.contains('hidden')){
             setGenerationVisible(true, el.generationMessage.textContent);
         }
+        syncCandidateTimer();
         scheduleTaskPolling(50);
     }
 
@@ -3093,8 +3134,15 @@
             const id = taskIdOf(task);
             const images = task?.result?.images || [];
             if(images.length) return images.map((url,index) => ({id,index,url,status:task.status,task,display_index:++completedOrder}));
-            return [{id,index:-1,url:'',status:task.status || 'queued',task}];
+            const placeholderCount = requestedOutputCountForTask(task);
+            return Array.from({length:placeholderCount}, (_,index) => ({id,index,url:'',status:task.status || 'queued',task}));
         }).slice(0,160);
+    }
+
+    function requestedOutputCountForTask(task){
+        const parameters = task?.parameters || task?.request?.parameters || {};
+        const count = Number(parameters.count ?? task?.count ?? task?.request?.count ?? 0);
+        return [1,2,3,4].includes(count) ? count : 1;
     }
 
     function completedCandidateItems(){
@@ -3153,15 +3201,17 @@
             const selected = item.id === taskIdOf(state.currentTask) && (item.index < 0 || item.index === state.selectedOutput);
             const status = String(item.status || 'queued');
             const clearable = ['failed','interrupted'].includes(status);
+            const running = ['queued','running'].includes(status);
             const sequence = Number(item.display_index || item.index + 1);
             const content = item.url
                 ? `<img src="${escapeHtml(item.url)}" alt=""><span>${sequence}</span>`
-                : `<span class="ec-candidate-state"><i></i><b>${escapeHtml(t(`ecommerce.${status}`))}</b></span>`;
+                : `<span class="ec-candidate-state"><i></i><b>${escapeHtml(t(`ecommerce.${status}`))}</b>${running ? `<em class="ec-candidate-time" data-task-candidate-time="${escapeHtml(item.id)}">${escapeHtml(formatTaskElapsed(item.task))}</em>` : ''}</span>`;
             return `<div class="ec-candidate-shell">
                 <button type="button" class="ec-candidate ${selected ? 'active':''} ${item.url ? '' : `status-${escapeHtml(status)}`}" data-task-candidate="${escapeHtml(item.id)}" data-candidate-index="${item.index}" data-candidate-sequence="${sequence}" aria-label="${escapeHtml(item.url ? t('ecommerce.generatedSequence',{count:sequence}) : t(`ecommerce.${status}`))}">${content}</button>
                 ${clearable ? `<button type="button" class="ec-candidate-clear" data-clear-task="${escapeHtml(item.id)}" title="${escapeHtml(t('ecommerce.clearFailedTask'))}" aria-label="${escapeHtml(t('ecommerce.clearFailedTask'))}">×</button>` : ''}
             </div>`;
         }).join('');
+        syncCandidateTimer();
         el.candidateList.querySelectorAll('[data-task-candidate]').forEach(button => {
             button.addEventListener('click', () => {
                 const task = state.tasksById.get(String(button.dataset.taskCandidate || ''));
@@ -3175,7 +3225,7 @@
                     });
                     return;
                 }
-                state.selectedOutput = 0;
+                state.selectedOutput = Math.max(0, Number(button.dataset.candidateIndex || 0));
                 activeWorkspace().selectedOutput = state.selectedOutput;
                 renderTaskResult(task);
                 persistSettings();
@@ -3227,7 +3277,17 @@
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify(payload),
             });
-            const stored = storeTask(task);
+            const stored = storeTask({
+                ...task,
+                count:task.count ?? payload.count,
+                parameters:{
+                    aspect_ratio:payload.aspect_ratio,
+                    resolution:payload.resolution,
+                    quality:payload.quality,
+                    count:payload.count,
+                    ...(task.parameters || task.request?.parameters || {}),
+                },
+            });
             state.selectedOutput = 0;
             renderTaskResult(stored);
             renderTaskList();

@@ -14,7 +14,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
 
 const RELEASE_API_URL: &str = "https://api.github.com/repos/luojiang419/SHIYIN-AI/releases/latest";
@@ -27,6 +27,16 @@ const MANUAL_PROXY: &str = "manualProxy";
 const DIRECT: &str = "direct";
 const DOWNLOAD_ATTEMPTS: usize = 3;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PROGRESS_PREPARE_START: u8 = 2;
+const PROGRESS_PREPARE_VERIFIED: u8 = 8;
+const PROGRESS_WAITING_OLD_PROCESS: u8 = 16;
+const PROGRESS_OLD_PROCESS_EXITED: u8 = 24;
+const PROGRESS_INSTALLER_STARTING: u8 = 30;
+const PROGRESS_INSTALLER_WAITING_LIMIT: u8 = 44;
+const PROGRESS_INSTALLER_BASE: u8 = 30;
+const PROGRESS_INSTALLER_SPAN: u8 = 64;
+const PROGRESS_STARTING_NEW_APP: u8 = 96;
+const PROGRESS_DONE: u8 = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -722,40 +732,10 @@ pub fn run_update_session_window_from_args() -> bool {
                 .map_err(|error| {
                     Box::new(std::io::Error::other(error.to_string())) as Box<dyn std::error::Error>
                 })?;
-            let session = app
-                .state::<UpdateSessionState>()
-                .session
-                .lock()
-                .map_err(|_| std::io::Error::other("更新会话状态异常。"))?
-                .take()
-                .ok_or_else(|| std::io::Error::other("更新会话已经启动。"))?;
-            let handle = app.handle().clone();
-            let log_data = data_for_log_setup.clone();
-            tauri::async_runtime::spawn(async move {
-                // 等待页面先注册 update-progress 监听器，避免首个状态被错过。
-                let _ = tauri::async_runtime::spawn_blocking(|| {
-                    thread::sleep(Duration::from_millis(350));
-                })
-                .await;
-                let update_handle = handle.clone();
-                let result = tauri::async_runtime::spawn_blocking(move || {
-                    run_installer_session(&update_handle, &session)
-                })
-                .await;
-                if let Ok(Err(error)) = result {
-                    emit_progress(
-                        &handle,
-                        2,
-                        0,
-                        "更新失败",
-                        &error,
-                        "请重新打开软件后重试。",
-                        true,
-                        false,
-                    );
-                    log(&log_data, &format!("更新失败：{error}"));
-                }
-            });
+            log(
+                &data_for_log_setup,
+                "更新窗口已打开，等待页面注册进度监听器。",
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![run_update_session])
@@ -773,7 +753,7 @@ pub fn run_update_session_window_from_args() -> bool {
 }
 
 #[tauri::command]
-pub async fn run_update_session(
+pub fn run_update_session(
     app: AppHandle,
     state: State<'_, UpdateSessionState>,
 ) -> Result<(), String> {
@@ -783,9 +763,23 @@ pub async fn run_update_session(
         .map_err(|_| "更新会话状态异常。".to_string())?
         .take()
         .ok_or_else(|| "更新会话已经启动。".to_string())?;
-    tauri::async_runtime::spawn_blocking(move || run_installer_session(&app, &session))
-        .await
-        .map_err(|error| format!("更新后台任务异常：{error}"))?
+    let log_data = PathBuf::from(&session.data_root);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = run_installer_session(&app, &session) {
+            emit_progress(
+                &app,
+                2,
+                PROGRESS_INSTALLER_STARTING,
+                "更新失败",
+                &error,
+                "请重新打开软件后重试。",
+                true,
+                false,
+            );
+            log(&log_data, &format!("更新失败：{error}"));
+        }
+    });
+    Ok(())
 }
 
 fn emit_progress(
@@ -819,7 +813,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         0,
-        0,
+        PROGRESS_PREPARE_START,
         "准备安装",
         "正在准备独立更新器会话…",
         "",
@@ -842,7 +836,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         0,
-        0,
+        PROGRESS_PREPARE_VERIFIED,
         "准备安装",
         "安装包校验完成，正在准备更新环境…",
         "已确认版本、文件名和 SHA-256 校验值。",
@@ -853,7 +847,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         1,
-        0,
+        PROGRESS_WAITING_OLD_PROCESS,
         "关闭旧版本",
         "正在等待旧版本退出…",
         "主程序即将关闭，更新窗口会继续完成安装。",
@@ -864,7 +858,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         1,
-        0,
+        PROGRESS_OLD_PROCESS_EXITED,
         "关闭旧版本",
         "旧版本已退出，正在交接安装任务…",
         "更新窗口会保持打开，请不要手动关闭。",
@@ -887,10 +881,10 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         2,
-        0,
+        PROGRESS_INSTALLER_STARTING,
         "安装新版本",
         "正在启动安装程序…",
-        "安装器启动后将显示实时处理进度。",
+        "正在等待安装器回传实时处理进度。",
         false,
         false,
     );
@@ -914,11 +908,30 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
         .spawn()
         .map_err(|error| format!("无法启动安装程序：{error}"))?;
     let mut last_progress = None;
-    let mut latest_percent = 0;
+    let mut latest_percent = PROGRESS_INSTALLER_STARTING;
+    let mut waiting_percent = PROGRESS_INSTALLER_STARTING;
+    let mut next_waiting_progress = Instant::now() + Duration::from_millis(900);
     let exit_code = loop {
         if let Some(percent) = emit_installer_progress(app, &installer_progress, &mut last_progress)
         {
             latest_percent = percent;
+        } else if last_progress.is_none()
+            && waiting_percent < PROGRESS_INSTALLER_WAITING_LIMIT
+            && Instant::now() >= next_waiting_progress
+        {
+            waiting_percent = waiting_percent.saturating_add(1);
+            latest_percent = waiting_percent;
+            emit_progress(
+                app,
+                2,
+                waiting_percent,
+                "安装新版本",
+                "安装程序正在接管更新…",
+                "正在等待安装器回传实时处理进度。",
+                false,
+                false,
+            );
+            next_waiting_progress = Instant::now() + Duration::from_millis(900);
         }
         match installer_process
             .try_wait()
@@ -955,7 +968,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         3,
-        100,
+        PROGRESS_STARTING_NEW_APP,
         "启动新版本",
         "安装完成，正在启动新版本…",
         "正在等待新版主程序可用。",
@@ -982,7 +995,7 @@ fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Res
     emit_progress(
         app,
         4,
-        100,
+        PROGRESS_DONE,
         "完成",
         &format!("已启动 v{}", session.version),
         "更新完成。",
@@ -1009,20 +1022,21 @@ fn emit_installer_progress(
 ) -> Option<u8> {
     let (current, total) = read_installer_progress(path)?;
     let percent = progress_percent(current, total);
+    let overall_percent = installer_overall_percent(percent);
     if *last_progress != Some((current, total)) {
         *last_progress = Some((current, total));
         emit_progress(
             app,
             2,
-            percent,
+            overall_percent,
             "安装新版本",
-            &format!("正在安装新版本… {percent}%"),
-            &format!("安装器实时处理进度：{current} / {total}"),
+            &format!("正在安装新版本… {overall_percent}%"),
+            &format!("安装器实时处理进度：{current} / {total}，安装阶段 {percent}%"),
             false,
             false,
         );
     }
-    Some(percent)
+    Some(overall_percent)
 }
 
 fn repair_start_menu_shortcuts(root: &Path, data: &Path) {
@@ -1115,6 +1129,17 @@ fn progress_percent(current: u64, total: u64) -> u8 {
         .checked_div(total)
         .unwrap_or(0)
         .min(99) as u8
+}
+
+fn installer_overall_percent(installer_percent: u8) -> u8 {
+    PROGRESS_INSTALLER_BASE
+        .saturating_add(
+            installer_percent
+                .min(99)
+                .saturating_mul(PROGRESS_INSTALLER_SPAN)
+                / 100,
+        )
+        .min(PROGRESS_STARTING_NEW_APP.saturating_sub(1))
 }
 
 fn log(data: &Path, message: &str) {

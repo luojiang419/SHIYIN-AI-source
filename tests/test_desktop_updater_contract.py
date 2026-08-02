@@ -182,13 +182,22 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("progress-percent", page)
         self.assertIn("progress-fill", page)
         self.assertIn("progressPercent", page)
-        self.assertIn("实时处理进度", page)
+        self.assertIn("持续显示处理进度", page)
+        self.assertIn("安装阶段按安装器实时回调推进", page)
+        self.assertIn("await invoke('run_update_session')", page)
+        self.assertLess(
+            page.index("await listen('update-progress', render)"),
+            page.index("await invoke('run_update_session')"),
+        )
         self.assertNotIn("阶段估算", page)
         self.assertNotIn("setInstallPhasePulse", page)
         self.assertNotIn("Math.round(index / 4 * 100)", page)
         self.assertIn("window.__TAURI__", page)
         self.assertIn("run_installer_session", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("progress_percent: u8", UPDATER.read_text(encoding="utf-8"))
+        self.assertIn("PROGRESS_PREPARE_START: u8 = 2", UPDATER.read_text(encoding="utf-8"))
+        self.assertIn("PROGRESS_INSTALLER_STARTING: u8 = 30", UPDATER.read_text(encoding="utf-8"))
+        self.assertIn("installer_overall_percent", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("installer-progress.txt", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("emit_installer_progress", UPDATER.read_text(encoding="utf-8"))
         self.assertIn("CurInstallProgressChanged", installer_script)

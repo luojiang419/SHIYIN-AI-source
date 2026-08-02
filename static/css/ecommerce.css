@@ -293,6 +293,7 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-candidate .ec-candidate-state { position:absolute; inset:0; width:auto; height:auto; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:7px; padding:8px; border-radius:0; background:var(--ec-result-soft-bg); color:var(--ec-muted); }
 .ec-candidate-state i { width:18px; height:18px; border:2px solid color-mix(in srgb,var(--ec-muted) 25%,transparent); border-top-color:var(--ec-accent); border-radius:50%; animation:ec-spin .8s linear infinite; }
 .ec-candidate-state b { max-width:100%; overflow:hidden; font-size:8px; white-space:nowrap; text-overflow:ellipsis; }
+.ec-candidate-state em { font-family:"JetBrains Mono",monospace; font-size:9px; font-style:normal; font-weight:700; color:var(--ec-text); }
 .ec-candidate.status-failed .ec-candidate-state, .ec-candidate.status-interrupted .ec-candidate-state { background:var(--ec-danger-soft); color:var(--ec-danger); }
 .ec-candidate.status-failed .ec-candidate-state i, .ec-candidate.status-interrupted .ec-candidate-state i { border:0; animation:none; }
 .ec-candidate.status-failed .ec-candidate-state i::before, .ec-candidate.status-interrupted .ec-candidate-state i::before { content:"×"; display:block; font-size:18px; font-style:normal; line-height:18px; }

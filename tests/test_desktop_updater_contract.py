@@ -94,6 +94,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('"check_for_update"', build_source)
         self.assertEqual(capability["windows"], ["main", "update"])
         self.assertEqual(capability["remote"]["urls"], ["http://127.0.0.1:*"])
+        self.assertIn("core:event:allow-listen", capability["permissions"])
         self.assertIn("allow-check-for-update", capability["permissions"])
 
     def test_manual_update_result_uses_centered_app_modal(self):
@@ -185,6 +186,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("持续显示处理进度", page)
         self.assertIn("安装阶段按安装器实时回调推进", page)
         self.assertIn("await invoke('run_update_session')", page)
+        self.assertIn("进度监听未就绪，更新会话将继续执行", page)
         self.assertLess(
             page.index("await listen('update-progress', render)"),
             page.index("await invoke('run_update_session')"),

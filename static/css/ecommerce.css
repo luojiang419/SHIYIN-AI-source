@@ -2677,6 +2677,20 @@ html:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handle::before {
     box-shadow:0 8px 22px rgba(104,80,52,.18) !important;
 }
 
+/* 象牙白纯白色块收口：电商页独立加载样式，需在本文件内兜住遗留白色区域。 */
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-studio-reference-option,
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-quality-check,
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-task-item,
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-result-meta span,
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-universal-reference > header select,
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-compare-handle,
+html:not(.studio-theme-dark):not(.theme-dark):not(.studio-theme-pure-white):not(.theme-pure-white) .ec-compare-handle::before {
+    background:linear-gradient(180deg,var(--ec-control),color-mix(in srgb,var(--ec-control-hover) 58%,var(--ec-control))) !important;
+    border-color:var(--ec-border) !important;
+    color:var(--ec-text-soft) !important;
+    box-shadow:none !important;
+}
+
 /* 常规电商操作：生成按钮随左栏布局，紧贴模型设置并在侧栏内保持可见。 */
 .ec-page:not(.is-universal):not(.is-try-on) .ec-control-panel {
     padding-bottom:22px;

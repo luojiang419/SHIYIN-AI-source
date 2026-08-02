@@ -1488,10 +1488,10 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("data-task-candidate-time", self.javascript)
         self.assertIn("syncCandidateTimer()", self.javascript)
         self.assertIn("const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation'", self.javascript)
-        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.02.count-pending.1"', self.index_html)
-        self.assertIn('id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.08.02.count-pending.1"', self.index_html)
+        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.02.ivory-surfaces.1"', self.index_html)
+        self.assertIn('id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.08.02.ivory-surfaces.1"', self.index_html)
         self.assertIn('/static/js/ecommerce.js?v=2026.08.02.count-pending.1', self.html)
-        self.assertIn('/static/css/ecommerce.css?v=2026.08.02.count-pending.1', self.html)
+        self.assertIn('/static/css/ecommerce.css?v=2026.08.02.ivory-surfaces.1', self.html)
 
     def test_generation_parameters_wait_for_server_preferences_before_initial_defaults(self):
         self.assertIn("initializing:true", self.javascript)

@@ -40,14 +40,14 @@ class UnifiedThemeTests(unittest.TestCase):
         ):
             self.assertRegex(
                 source,
-                rf'id="{frame_id}"[^>]+light-theme\.3',
+                rf'id="{frame_id}"[^>]+ivory-surfaces\.1',
                 frame_id,
             )
-        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-neutral-dark\.1')
+        self.assertRegex(source, r'id="frame-canvas"[^>]+ivory-surfaces\.1')
         for frame_id in ("frame-ecommerce", "frame-free-creation"):
             self.assertRegex(
                 source,
-                rf'id="{frame_id}"[^>]+count-pending\.1',
+                rf'id="{frame_id}"[^>]+ivory-surfaces\.1',
                 frame_id,
             )
 
@@ -67,9 +67,24 @@ class UnifiedThemeTests(unittest.TestCase):
             page_source = (STATIC / page).read_text(encoding="utf-8")
             self.assertRegex(
                 page_source,
-                r"studio-unified\.css\?v=2026\.07\.(?:29\.canvas-neutral-dark\.1|31\.canvas-toolbar-theme\.1)",
+                r"studio-unified\.css\?v=2026\.08\.02\.ivory-surfaces\.1",
                 page,
             )
+
+    def test_infinite_canvas_nodes_use_theme_tokens_for_inner_surfaces(self):
+        source = UNIFIED_CSS.read_text(encoding="utf-8")
+        for marker in (
+            "无限画布节点内部区域",
+            "#shell .prompt-node textarea",
+            "#shell .llm-input-area",
+            "#shell .llm-output",
+            "#shell .blank-image",
+            "#shell .output-grid img",
+            "#shell .gen-btn",
+            "background:var(--studio-control) !important",
+            "background:var(--studio-accent) !important",
+        ):
+            self.assertIn(marker, source)
 
     def test_gpt_chat_no_longer_declares_legacy_blue_dark_theme(self):
         source = (STATIC / "gpt-chat.html").read_text(encoding="utf-8").lower()
@@ -152,14 +167,30 @@ class UnifiedThemeTests(unittest.TestCase):
         source = UNIFIED_CSS.read_text(encoding="utf-8")
         for marker in (
             "Light final pass: keep light mode on the warm SHIYIN theme",
+            "象牙白主题全站纯白色块收口",
             "body:not(.studio-theme-dark):not(.theme-dark) .bg-white",
             "--api-light-panel:var(--studio-panel)",
             ".canvas-item",
             ".prompt-node-text",
             ".rh-config-card",
             ".works-compare-handle::before",
+            ".provider-onboarding-card",
+            ".asset-kind-badge",
+            ".ref-chip button",
+            ".crop-canvas.outpaint-mode",
             "background:var(--studio-panel) !important",
             "background:var(--studio-control) !important",
+        ):
+            self.assertIn(marker, source)
+
+    def test_shell_ivory_theme_overrides_inline_white_modal_surfaces(self):
+        source = (STATIC / "index.html").read_text(encoding="utf-8")
+        for marker in (
+            "not(.studio-theme-pure-white):not(.theme-pure-white) .shiying-key-input",
+            "not(.studio-theme-pure-white):not(.theme-pure-white) .theme-picker-panel",
+            "not(.studio-theme-pure-white):not(.theme-pure-white) .update-source-badge",
+            "background:#f7efe5",
+            "background:#faf2e7",
         ):
             self.assertIn(marker, source)
 
@@ -167,10 +198,13 @@ class UnifiedThemeTests(unittest.TestCase):
         source = ECOMMERCE_CSS.read_text(encoding="utf-8")
         for marker in (
             "浅色品牌收口：电商页不加载 studio-unified.css",
+            "象牙白纯白色块收口",
             "html:not(.studio-theme-dark):not(.theme-dark) .ec-page.is-universal .ec-control-panel",
             "background:transparent !important",
             "html:not(.studio-theme-dark):not(.theme-dark) .ec-result-panel",
             "html:not(.studio-theme-dark):not(.theme-dark) .ec-universal-dock .ec-universal-reference",
+            "not(.studio-theme-pure-white):not(.theme-pure-white) .ec-studio-reference-option",
+            "not(.studio-theme-pure-white):not(.theme-pure-white) .ec-compare-handle::before",
             "background:linear-gradient(180deg,var(--ec-control),color-mix(in srgb,var(--ec-control-hover) 58%,var(--ec-control))) !important",
         ):
             self.assertIn(marker, source)

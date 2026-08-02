@@ -110,7 +110,11 @@
         }
         render({stepIndex: 0, progressPercent: 1, stepLabel: '准备安装', message: '更新器正在启动…', substep: '正在连接更新会话。'});
         if (listen) {
-          await listen('update-progress', render);
+          try {
+            await listen('update-progress', render);
+          } catch (err) {
+            render({stepIndex: 0, progressPercent: 1, stepLabel: '准备安装', message: '更新器正在启动…', substep: '进度监听未就绪，更新会话将继续执行。'});
+          }
         }
         try {
           await invoke('run_update_session');

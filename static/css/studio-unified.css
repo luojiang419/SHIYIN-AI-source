@@ -1431,6 +1431,78 @@ body:not(.studio-theme-dark):not(.theme-dark) .rh-empty {
     box-shadow:var(--studio-shadow) !important;
 }
 
+/* 象牙白主题全站纯白色块收口：补齐各 iframe 页面的遗留白色卡片、弹窗和浮层控件。 */
+html:not(.studio-theme-dark):not(.theme-dark) body .provider-card,
+body:not(.studio-theme-dark):not(.theme-dark) .provider-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .provider-onboarding-card,
+body:not(.studio-theme-dark):not(.theme-dark) .provider-onboarding-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .onboarding-key-entry,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-key-entry,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-inline-card .recommend-card,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-inline-card .recommend-card,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-platform-setup,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-platform-setup,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-note,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-note,
+html:not(.studio-theme-dark):not(.theme-dark) body .runninghub-config-block,
+body:not(.studio-theme-dark):not(.theme-dark) .runninghub-config-block,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-paste-input,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-paste-input,
+html:not(.studio-theme-dark):not(.theme-dark) body .rh-card-title-field input,
+body:not(.studio-theme-dark):not(.theme-dark) .rh-card-title-field input,
+html:not(.studio-theme-dark):not(.theme-dark) body .onboarding-key-field input,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-key-field input,
+html:not(.studio-theme-dark):not(.theme-dark) body .provider-protocol-hint code,
+body:not(.studio-theme-dark):not(.theme-dark) .provider-protocol-hint code {
+    background:var(--studio-panel) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .ref-chip button,
+body:not(.studio-theme-dark):not(.theme-dark) .ref-chip button,
+html:not(.studio-theme-dark):not(.theme-dark) body .asset-kind-badge,
+body:not(.studio-theme-dark):not(.theme-dark) .asset-kind-badge,
+html:not(.studio-theme-dark):not(.theme-dark) body .asset-card-quick,
+body:not(.studio-theme-dark):not(.theme-dark) .asset-card-quick,
+html:not(.studio-theme-dark):not(.theme-dark) body .page-head .status,
+body:not(.studio-theme-dark):not(.theme-dark) .page-head .status,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-badge,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-badge,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-register,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-register,
+html:not(.studio-theme-dark):not(.theme-dark) body .onboarding-save-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .onboarding-save-btn,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-guide-key-btn,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-guide-key-btn,
+html:not(.studio-theme-dark):not(.theme-dark) body .recommend-guide-save,
+body:not(.studio-theme-dark):not(.theme-dark) .recommend-guide-save {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+html:not(.studio-theme-dark):not(.theme-dark) body .crop-canvas.outpaint-mode,
+body:not(.studio-theme-dark):not(.theme-dark) .crop-canvas.outpaint-mode,
+html:not(.studio-theme-dark):not(.theme-dark) body .crop-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .crop-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .outpaint-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .outpaint-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .preview-compare-handle::before,
+body:not(.studio-theme-dark):not(.theme-dark) .preview-compare-handle::before,
+html:not(.studio-theme-dark):not(.theme-dark) body .output-compare-slider,
+body:not(.studio-theme-dark):not(.theme-dark) .output-compare-slider,
+html:not(.studio-theme-dark):not(.theme-dark) body .ec-compare-handle,
+body:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handle,
+html:not(.studio-theme-dark):not(.theme-dark) body .ec-compare-handle::before,
+body:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handle::before {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
 html:not(.studio-theme-dark):not(.theme-dark) body .canvas-card-edit,
 body:not(.studio-theme-dark):not(.theme-dark) .canvas-card-edit,
 html:not(.studio-theme-dark):not(.theme-dark) body .canvas-delete,
@@ -1736,6 +1808,134 @@ body.theme-dark #shell.shell > .board {
     background:var(--studio-control-hover) !important;
     border-color:var(--studio-border-strong) !important;
     color:var(--studio-text) !important;
+}
+
+/* 无限画布节点内部区域：所有主题都从统一 token 取色，避免暗黑蓝灰块和象牙白纯白块残留。 */
+#shell .node,
+#shell .node::before,
+#shell .node-head,
+#shell .group-node,
+#shell .promptGroup-node,
+#shell .group-node .node-head,
+#shell .promptGroup-node .node-head {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:var(--studio-shadow) !important;
+}
+
+#shell .prompt-node textarea,
+#shell .llm-system,
+#shell .llm-chat-input,
+#shell .llm-input-area,
+#shell .rh-prompt-field textarea,
+#shell .provider-field input,
+#shell .provider-field select,
+#shell .model-input {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+#shell .llm-input-area[readonly],
+#shell .llm-chat-log,
+#shell .llm-output,
+#shell .blank-image,
+#shell .media-card,
+#shell .input-item,
+#shell .output-img-wrap.loading-wrap,
+#shell .output-grid img,
+#shell .output-grid video,
+#shell .image-node img,
+#shell .image-node video,
+#shell .rh-param-thumb,
+#shell .output-audio-card,
+#shell .output-file-card,
+#shell .missing-asset {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+#shell .media-card video,
+#shell .media-card img[data-preview-kind="video"],
+#shell .rh-input-item video,
+#shell .rh-param-thumb video {
+    background:var(--studio-control-hover) !important;
+}
+
+#shell .llm-mode,
+#shell .llm-provider,
+#shell .select-lite,
+#shell .llm-sys-toggle,
+#shell .prompt-template-btn,
+#shell .output-del,
+#shell .llm-output-copy,
+#shell .input-label {
+    background:var(--studio-control) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-text-soft) !important;
+    box-shadow:none !important;
+}
+
+#shell .llm-mode button,
+#shell .llm-provider button {
+    color:var(--studio-muted) !important;
+}
+
+#shell .llm-mode button.active,
+#shell .llm-provider button.active,
+#shell .llm-sys-toggle.active,
+#shell .prompt-template-btn.active {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+    box-shadow:none !important;
+}
+
+#shell .llm-bubble.user,
+#shell .gen-btn,
+#shell .comfy-run,
+#shell .llm-run {
+    background:var(--studio-accent) !important;
+    border-color:var(--studio-accent) !important;
+    color:var(--studio-accent-contrast) !important;
+    box-shadow:none !important;
+}
+
+#shell .gen-btn:disabled,
+#shell .comfy-run:disabled,
+#shell .llm-run:disabled {
+    background:var(--studio-control-hover) !important;
+    border-color:var(--studio-border) !important;
+    color:var(--studio-faint) !important;
+}
+
+#shell .llm-bubble.assistant,
+#shell .llm-copy-btn:hover,
+#shell .llm-bubble-copy:hover,
+#shell .image-preview-wrap.drag-over img,
+#shell .image-preview-wrap.drag-over .media-card,
+#shell .blank-image:hover,
+#shell .blank-image.drag-over {
+    background:var(--studio-panel-raised) !important;
+    border-color:var(--studio-border-strong) !important;
+    color:var(--studio-text) !important;
+}
+
+#shell .llm-pane-resizer::before,
+#shell .output-spinner {
+    border-color:var(--studio-border) !important;
+}
+
+#shell .llm-pane-resizer::before {
+    background:var(--studio-border-strong) !important;
+}
+
+#shell .output-spinner {
+    border-top-color:var(--studio-muted) !important;
 }
 
 /* 全局蓝色背景收口：条件状态、媒体占位和功能编辑器也必须遵循三种中性主题。 */

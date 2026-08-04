@@ -550,10 +550,21 @@ def primary_pose_reference(inputs: Iterable[dict[str, Any]]) -> dict[str, Any]:
     return {}
 
 
+def _primary_pose_reference_index(inputs: Iterable[dict[str, Any]]) -> int:
+    for index, value in enumerate(inputs or [], 1):
+        if not isinstance(value, dict) or not str(value.get("url") or "").strip():
+            continue
+        role = str(value.get("reference_type") or value.get("role") or "").strip().lower()
+        if role == "pose":
+            return index
+    return 0
+
+
 def comparison_reference(inputs: Iterable[dict[str, Any]]) -> dict[str, Any]:
     values = [dict(value) for value in inputs or [] if isinstance(value, dict) and str(value.get("url") or "").strip()]
     if universal_composition_mode(values) == "base_transfer":
-        return values[0] if values else {}
+        pose = primary_pose_reference(values)
+        return pose or (values[0] if values else {})
     pose = primary_pose_reference(values)
     if pose:
         return pose
@@ -690,8 +701,8 @@ def build_studio_reference_lock(options: dict[str, Any] | None = None) -> str:
     prompt = str(selected.get("prompt") or "").strip()
     return (
         f"STUDIO REFERENCE LOCK: use the selected {label} as the final commercial photography studio direction: {prompt}. "
-        "STUDIO BACKGROUND AUTHORITY: this selected studio is the mandatory final background. It controls backdrop color family, studio lighting, floor or cyclorama treatment, contact shadows, and listing polish. "
-        "It overrides every source, base, scene, style, and background-reference environment. Do not use, preserve, blend, or infer any reference-image background, scenery, set, environmental palette, or environmental lighting in the final image. "
+        "STUDIO BACKGROUND AUTHORITY: this selected studio is the mandatory final background unless the USER SUPPLEMENT explicitly requests a conflicting final background or environment. It controls backdrop color family, studio lighting, floor or cyclorama treatment, contact shadows, and listing polish. "
+        "It overrides every source, base, scene, style, and background-reference environment unless the USER SUPPLEMENT explicitly says otherwise. Do not use, preserve, blend, or infer any reference-image background, scenery, set, environmental palette, or environmental lighting in the final image unless requested by the USER SUPPLEMENT. "
         "This studio lock must not override reference-owned body identity, pose, product geometry, material, SKU color, logo, readable text, or local detail evidence."
     )
 
@@ -707,7 +718,7 @@ def build_final_studio_background_override(options: dict[str, Any] | None = None
     prompt = str(selected.get("prompt") or "").strip()
     return (
         f"FINAL STUDIO BACKGROUND OVERRIDE: render the final background exclusively as the selected {label}: {prompt}. "
-        "This final instruction supersedes every earlier instruction to preserve, continue, reproject, match, infer, or reuse any source/reference background, scenery, environmental palette, environmental lighting, floor, wall, or set. "
+        "This final instruction supersedes every earlier instruction to preserve, continue, reproject, match, infer, or reuse any source/reference background, scenery, environmental palette, environmental lighting, floor, wall, or set, unless the USER SUPPLEMENT explicitly requests a conflicting final background or environment. "
         "Keep the foreground subject or product intact, but replace its environment and adapt only contact shadows, reflections, and light integration needed for the selected studio."
     )
 
@@ -882,6 +893,17 @@ def build_user_directed_ecommerce_prompt(instruction: str) -> str:
     return str(instruction or "").strip()
 
 
+def build_user_supplement_override_rule(instruction: str) -> str:
+    text = re.sub(r"\s+", " ", str(instruction or "").strip())
+    if not text:
+        return ""
+    return (
+        "USER SUPPLEMENT OVERRIDE RULE: treat the USER SUPPLEMENT as the highest-priority instruction whenever it conflicts with any automatic final composition, inferred reference analysis, generated role interaction, preset/studio/scene/style default, or automatic spatial, styling, color, material, or local-edit lock. "
+        "Obey explicit user requests for final framing, shot scale, aspect ratio, crop, camera viewpoint, subject placement, pose adjustment, background, styling, local edits, color/material changes, and named reference usage. "
+        "For attributes the USER SUPPLEMENT does not explicitly mention, continue following the ordered reference map and reference ownership rules."
+    )
+
+
 def _pose_spatial_detail(analysis: dict[str, Any] | None = None) -> str:
     analysis = analysis or {}
     values = [
@@ -920,7 +942,7 @@ def build_subject_spatial_lock(inputs: Iterable[dict[str, Any]]) -> str:
         detail = _reference_detail(item)
         return (
             f"BASE SUBJECT SPATIAL LOCK: because no separate pose reference is provided, Image {index} ({detail}) owns the final pose, leg position, hand position, body posture, camera angle, shot scale, framing, crop, subject placement, and composition. "
-            "Strictly preserve the base image's pose/action, legs, hands, gaze/body direction, perspective, and layout while changing only the mapped garment/product/detail regions. "
+            "Strictly preserve the base image's pose/action, legs, hands, gaze/body direction, perspective, and layout while changing only the mapped garment/product/detail regions, unless the USER SUPPLEMENT explicitly requests a conflicting pose, framing, camera, crop, placement, or composition change. "
             + _pose_orientation_lock(index)
         )
     return ""
@@ -942,7 +964,7 @@ def build_no_model_product_subject_lock(inputs: Iterable[dict[str, Any]], option
     return (
         "NO-MODEL PRODUCT BASE LOCK: "
         + prefix
-        + " Do not invent a real person, face, hands, feet, shoes, jewelry, bag, or styling accessory. Treat Image 1 as A款 base/template and fit only the explicitly mapped B款 product onto that A base silhouette, layout, camera, crop, and lighting. "
+        + " Do not invent a real person, face, hands, feet, shoes, jewelry, bag, or styling accessory unless the USER SUPPLEMENT explicitly requests adding or changing a human/model/styling element. Treat Image 1 as A款 base/template and fit only the explicitly mapped B款 product onto that A base silhouette, layout, camera, crop, and lighting unless the USER SUPPLEMENT explicitly changes those output attributes. "
         "Later garment/product/detail references provide B款 product identity and local detail evidence only; incidental shoes, bags, jewelry, hats, props, people, backgrounds, or styling accessories inside those B references must be ignored unless uploaded and labeled as their own mapped reference."
     )
 
@@ -1156,8 +1178,10 @@ def _base_transfer_source_phrase(
         return f"Apply only the palette, lighting, contrast, and finish from Image {index}; do not copy its subjects, products, or layout."
     if role == "pose":
         return (
-            f"Use Image {index} only for the requested pose or spatial cue while retaining Image 1 as the visual base; "
-            "do not copy identity, clothing, products, or background content from the pose source."
+            f"Use Image {index} as the PRIMARY SPATIAL / POSE TEMPLATE for this base-transfer result. Match its exact body pose/action, joint arrangement, gesture, balance, camera viewpoint, shot scale, framing, crop, subject size and position, and foreground composition. "
+            + _pose_orientation_lock(index) + " "
+            "It overrides Image 1 and every garment/product reference for pose/action, body posture, joints, camera viewpoint, shot scale, framing, crop, subject size, subject placement, and foreground composition. "
+            "Use Image 1 only for non-spatial base/product attributes that do not conflict with this pose. Do not copy identity, clothing, products, accessories, or background content from the pose source."
         )
     return f"Apply the exact requested content from Image {index} ({detail}) to the corresponding region of Image 1."
 
@@ -1167,23 +1191,41 @@ def build_universal_base_transfer_instruction(inputs: Iterable[dict[str, Any]], 
     if not normalized:
         return ""
     base = normalized[0]
+    pose_index = _primary_pose_reference_index(normalized)
     base_analysis = _reference_analysis(base, options)
     base_detail = _reference_detail(base, base_analysis)
     spatial = _pose_spatial_detail(base_analysis)
     spatial_note = f" Detected base layout cues: {spatial}." if spatial else ""
     if _subject_reference_is_product_template(base, base_analysis):
-        base_line = (
-            f"Use Image 1 ({base_detail}) as the A-style product/body template and editable BASE IMAGE, not as a real human model. "
-            "Preserve its product silhouette, support shape, hanger/mannequin/flat-lay form if present, shot type, camera angle, perspective, crop, composition, background, lighting, shadows, scale, placement, and negative space except where the mapped B replacement product requires a local change. "
-            "Do not invent a face, head, hands, feet, full human body, shoes, jewelry, bag, or accessory just because later product references contain them."
-            + spatial_note
-        )
+        if pose_index and pose_index != 1:
+            base_line = (
+                f"Use Image 1 ({base_detail}) as the A-style product/body template and editable BASE IMAGE for non-pose product/base attributes, not as a real human model and not as the action source. "
+                f"Preserve its product silhouette, support shape, hanger/mannequin/flat-lay form if present, background, lighting, shadows, and negative space only where compatible with Image {pose_index}'s pose/spatial template. "
+                f"Do not let Image 1 override Image {pose_index}'s pose/action, body posture, joint arrangement, camera viewpoint, shot scale, framing, crop, subject size, subject placement, or foreground composition. "
+                "Do not invent a face, head, hands, feet, full human body, shoes, jewelry, bag, or accessory just because later product references contain them."
+                + spatial_note
+            )
+        else:
+            base_line = (
+                f"Use Image 1 ({base_detail}) as the A-style product/body template and editable BASE IMAGE, not as a real human model. "
+                "Preserve its product silhouette, support shape, hanger/mannequin/flat-lay form if present, shot type, camera angle, perspective, crop, composition, background, lighting, shadows, scale, placement, and negative space except where the mapped B replacement product requires a local change. "
+                "Do not invent a face, head, hands, feet, full human body, shoes, jewelry, bag, or accessory just because later product references contain them."
+                + spatial_note
+            )
     else:
-        base_line = (
-            f"Use Image 1 ({base_detail}) as the editable BASE IMAGE and final visual template. Preserve its shot type, camera angle, "
-            "perspective, crop, composition, background, lighting, shadows, scale, placement, and negative space except where a mapped replacement requires a local change."
-            + spatial_note
-        )
+        if pose_index and pose_index != 1:
+            base_line = (
+                f"Use Image 1 ({base_detail}) as the editable BASE IMAGE for non-pose visual/product attributes, not as the action source. "
+                f"Preserve its background, lighting, shadows, and negative space only where compatible with Image {pose_index}'s pose/spatial template. "
+                f"Do not let Image 1 override Image {pose_index}'s pose/action, body posture, joint arrangement, camera viewpoint, shot scale, framing, crop, subject size, subject placement, or foreground composition."
+                + spatial_note
+            )
+        else:
+            base_line = (
+                f"Use Image 1 ({base_detail}) as the editable BASE IMAGE and final visual template. Preserve its shot type, camera angle, "
+                "perspective, crop, composition, background, lighting, shadows, scale, placement, and negative space except where a mapped replacement requires a local change."
+                + spatial_note
+            )
     lines = [base_line]
     seen_source_roles: set[str] = set()
     primary_product_seen = False
@@ -1277,8 +1319,10 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             raise ValueError("自由创作必须填写提示词")
         return raw_instruction
     reference_map = build_ordered_reference_map(normalized)
-    if instruction:
+    if instruction and operation != "universal":
         return build_user_directed_ecommerce_prompt(instruction)
+    user_supplement = f"USER SUPPLEMENT: {instruction}" if instruction else ""
+    user_supplement_override_rule = build_user_supplement_override_rule(instruction) if operation == "universal" else ""
     lower_garment_lock = build_lower_garment_structure_lock(normalized)
     named_detail_lock = build_named_detail_region_lock(normalized)
     user_waistband_geometry_lock = build_user_waistband_geometry_lock(instruction)
@@ -1296,6 +1340,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
 
     if operation == "universal":
         composition_mode = universal_composition_mode(normalized, options)
+        pose_index = _primary_pose_reference_index(normalized)
         if composition_mode == "subject_composite":
             subject_spatial_lock = build_subject_spatial_lock(normalized)
         subject_native_styling_lock = build_subject_native_styling_lock(normalized, options)
@@ -1327,22 +1372,40 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         auto_instruction = build_universal_auto_instruction(normalized, options)
         final_instruction = auto_instruction
         if composition_mode == "base_transfer":
-            base_image_ownership = (
-                "Image 1 owns the final layout, shot type, camera, perspective, crop, shadows, scale, placement, and negative space, but the selected studio exclusively owns the final background, backdrop, and environmental lighting. Do not preserve or reuse Image 1's background. "
-                if studio_background_selected else
-                "Image 1 owns the final layout, shot type, camera, perspective, crop, background, lighting, shadows, scale, placement, and negative space. "
-            )
-            conflict_priority = (
-                "CONFLICT PRIORITY: The selected studio is highest priority for the final background. For all non-background attributes: an explicit USER SUPPLEMENT is highest. Otherwise: (1) Image 1 visual template, (2) the first replacement source of each reference type, "
-                "(3) later same-type sources as supplemental evidence, (4) scene content, (5) style. "
-                if studio_background_selected else
-                "CONFLICT PRIORITY: An explicit USER SUPPLEMENT is highest. Otherwise: (1) Image 1 visual template, (2) the first replacement source of each reference type, "
-                "(3) later same-type sources as supplemental evidence, (4) scene content, (5) style. "
-            )
+            if pose_index:
+                base_image_ownership = (
+                    f"Image 1 owns non-pose base/product identity, background-independent layout cues, shadows, and negative space only where they do not conflict with Image {pose_index}. "
+                    f"Image {pose_index} owns the final pose/action, body posture, joint arrangement, gesture, balance, camera viewpoint, shot scale, framing, crop, subject size and position, non-mirrored screen-side orientation, and foreground composition. "
+                    "The selected studio exclusively owns the final background, backdrop, and environmental lighting. Do not preserve or reuse Image 1's background. "
+                    if studio_background_selected else
+                    f"Image 1 owns non-pose base/product identity, background, lighting, shadows, and negative space only where they do not conflict with Image {pose_index}. "
+                    f"Image {pose_index} owns the final pose/action, body posture, joint arrangement, gesture, balance, camera viewpoint, shot scale, framing, crop, subject size and position, non-mirrored screen-side orientation, and foreground composition. "
+                )
+                conflict_priority = (
+                    f"CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. The selected studio is highest priority for the final background only when the USER SUPPLEMENT does not explicitly request a different background. For all remaining non-background attributes: (1) Image {pose_index} for all spatial/pose attributes, (2) Image 1 for non-spatial visual base attributes, (3) the first replacement source of each reference type, "
+                    "(4) later same-type sources as supplemental evidence, (5) scene content, (6) style. "
+                    if studio_background_selected else
+                    f"CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. Otherwise: (1) Image {pose_index} for all spatial/pose attributes, (2) Image 1 for non-spatial visual base attributes, (3) the first replacement source of each reference type, "
+                    "(4) later same-type sources as supplemental evidence, (5) scene content, (6) style. "
+                )
+            else:
+                base_image_ownership = (
+                    "Image 1 owns the final layout, shot type, camera, perspective, crop, shadows, scale, placement, and negative space, but the selected studio exclusively owns the final background, backdrop, and environmental lighting. Do not preserve or reuse Image 1's background. "
+                    if studio_background_selected else
+                    "Image 1 owns the final layout, shot type, camera, perspective, crop, background, lighting, shadows, scale, placement, and negative space. "
+                )
+                conflict_priority = (
+                    "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. The selected studio is highest priority for the final background only when the USER SUPPLEMENT does not explicitly request a different background. For all remaining non-background attributes: (1) Image 1 visual template, (2) the first replacement source of each reference type, "
+                    "(3) later same-type sources as supplemental evidence, (4) scene content, (5) style. "
+                    if studio_background_selected else
+                    "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. Otherwise: (1) Image 1 visual template, (2) the first replacement source of each reference type, "
+                    "(3) later same-type sources as supplemental evidence, (4) scene content, (5) style. "
+                )
             task = (
                 "Edit the first reference into one coherent, marketplace-ready photorealistic e-commerce image by following this exact ordered reference map:\n"
                 + "\n".join(reference_map)
                 + "\nFINAL COMPOSITION: " + final_instruction
+                + ("\n" + user_supplement if user_supplement else "")
                 + "\n" + build_universal_material_evidence_lock(normalized, options)
                 + ("\n" + subject_native_styling_lock if subject_native_styling_lock else "")
                 + "\n" + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE
@@ -1362,14 +1425,15 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                 "Scene references own environment appearance, environmental perspective, and lighting, but must fit the pose reference's camera and framing; never copy foreground people or products. "
             )
             conflict_priority = (
-                "CONFLICT PRIORITY: The selected studio is highest priority for the final background. For all non-background attributes, an explicit USER SUPPLEMENT may override framing or shot scale. Otherwise: (1) model identity for face/hair/skin when present, (2) subject/body reference, (3) the primary pose reference as highest-priority spatial authority, (4) exact product fidelity, (5) scene content and lighting, (6) style. "
+                "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. The selected studio is highest priority for the final background only when the USER SUPPLEMENT does not explicitly request a different background. For all remaining non-background attributes: (1) model identity for face/hair/skin when present, (2) subject/body reference, (3) the primary pose reference as highest-priority spatial authority, (4) exact product fidelity, (5) scene content and lighting, (6) style. "
                 if studio_background_selected else
-                "CONFLICT PRIORITY: An explicit USER SUPPLEMENT may override framing or shot scale. Otherwise: (1) model identity for face/hair/skin when present, (2) subject/body reference, (3) the primary pose reference as highest-priority spatial authority, (4) exact product fidelity, (5) scene content and lighting, (6) style. "
+                "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. Otherwise: (1) model identity for face/hair/skin when present, (2) subject/body reference, (3) the primary pose reference as highest-priority spatial authority, (4) exact product fidelity, (5) scene content and lighting, (6) style. "
             )
             task = (
                 "Create one coherent, marketplace-ready photorealistic e-commerce image by following this exact ordered reference map:\n"
                 + "\n".join(reference_map)
                 + "\nFINAL COMPOSITION: " + final_instruction
+                + ("\n" + user_supplement if user_supplement else "")
                 + "\n" + build_universal_material_evidence_lock(normalized, options)
                 + ("\n" + subject_native_styling_lock if subject_native_styling_lock else "")
                 + "\n" + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE
@@ -1569,6 +1633,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         *[lock for lock in operation_locks if lock],
         preservation,
         build_final_studio_background_override(options),
+        user_supplement_override_rule,
     ]
     return " ".join(part for part in parts if part).strip()
 

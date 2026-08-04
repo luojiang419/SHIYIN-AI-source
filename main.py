@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.117"
+APP_VERSION = "1.0.119"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -12710,10 +12710,11 @@ def validate_ecommerce_local_inputs(
     if not checked and allow_empty and operation == "universal":
         return [], (1024, 1024)
     base_transfer = operation == "universal" and ecommerce_universal_composition_mode(checked) == "base_transfer"
+    pose_dimensions = dimensions.get("pose")
     source_dimensions = first_dimensions if base_transfer else dimensions.get("source")
     if not source_dimensions:
         raise HTTPException(status_code=400, detail="缺少源图尺寸信息")
-    return checked, source_dimensions if base_transfer else (dimensions.get("pose") or source_dimensions)
+    return checked, pose_dimensions or source_dimensions
 
 def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
     try:

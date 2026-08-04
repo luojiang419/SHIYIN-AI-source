@@ -10,7 +10,7 @@ Set-Location $projectRoot
 
 if ($IncrementVersion) {
     & (Join-Path $PSScriptRoot 'increment-version.ps1')
-    if ($LASTEXITCODE -ne 0) { throw 'Version increment failed.' }
+    if (-not $?) { throw 'Version increment failed.' }
 }
 
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()

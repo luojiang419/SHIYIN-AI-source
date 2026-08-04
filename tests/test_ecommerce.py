@@ -317,7 +317,7 @@ class EcommerceContractTests(unittest.TestCase):
         prompt = build_prompt("try_on", references, {"instruction": instruction})
         self.assertEqual(prompt, instruction)
 
-    def test_user_prompt_mode_bypasses_all_automatic_operation_rules(self):
+    def test_non_universal_user_prompt_mode_bypasses_automatic_operation_rules(self):
         cases = {
             "try_on": (
                 [{"role": "source", "url": "/assets/input/model.png"}, {"role": "garment", "url": "/assets/input/top.png"}],
@@ -339,15 +339,44 @@ class EcommerceContractTests(unittest.TestCase):
                 [{"role": "source", "url": "/assets/input/model.png"}],
                 {"background_preset": "outdoor_daylight", "instruction": "图1置于红色摄影棚"},
             ),
-            "universal": (
-                [{"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"}, {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"}],
-                {"studio_reference": "studio_black", "instruction": "图1穿图2的同款风格服装"},
-            ),
         }
         for operation, (references, options) in cases.items():
             with self.subTest(operation=operation):
                 prompt = build_prompt(operation, references, options)
                 self.assertEqual(prompt, options["instruction"])
+
+    def test_universal_user_instruction_is_a_supplement_not_a_prompt_replacement(self):
+        references = [
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
+            {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
+        ]
+        instruction = "图1穿图2的同款风格服装"
+        prompt = build_prompt("universal", references, {"studio_reference": "studio_black", "instruction": instruction})
+        self.assertNotEqual(prompt, instruction)
+        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
+        self.assertIn("USER SUPPLEMENT OVERRIDE RULE", prompt)
+        self.assertIn("highest-priority instruction whenever it conflicts", prompt)
+        self.assertIn("For attributes the USER SUPPLEMENT does not explicitly mention", prompt)
+        self.assertIn("Create one coherent, marketplace-ready photorealistic e-commerce image", prompt)
+        self.assertIn("REFERENCE OWNERSHIP RULES", prompt)
+
+    def test_universal_user_supplement_overrides_conflicting_auto_spatial_and_studio_rules(self):
+        references = [
+            {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
+            {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
+            {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
+        ]
+        instruction = "最终改为半身近景，横向 4:3，背景用红色户外街景，不要沿用动作图全身裁切"
+        prompt = build_prompt("universal", references, {"studio_reference": "studio_white", "instruction": instruction})
+        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
+        self.assertIn("USER SUPPLEMENT OVERRIDE RULE", prompt)
+        self.assertIn("Obey explicit user requests for final framing, shot scale, aspect ratio, crop, camera viewpoint, subject placement", prompt)
+        self.assertIn("color/material changes, and named reference usage", prompt)
+        self.assertIn("unless the USER SUPPLEMENT explicitly requests a conflicting final background or environment", prompt)
+        self.assertIn("The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute", prompt)
+        self.assertLess(prompt.index("FINAL STUDIO BACKGROUND OVERRIDE"), prompt.index("USER SUPPLEMENT OVERRIDE RULE"))
+        self.assertLess(prompt.index("Do not silently zoom"), prompt.index("USER SUPPLEMENT OVERRIDE RULE"))
 
     def test_free_creation_requires_and_preserves_verbatim_prompt(self):
         references = [
@@ -441,7 +470,10 @@ class EcommerceContractTests(unittest.TestCase):
         ]
         instruction = "使用图3的银色高跟鞋，其他配饰仍保持主体图"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertEqual(prompt, instruction)
+        self.assertNotEqual(prompt, instruction)
+        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
+        self.assertIn("Put the exact shoes from Image 3", prompt)
+        self.assertIn("Subject references own the primary body", prompt)
 
     def test_universal_prompt_anchors_texture_to_reference_pixels(self):
         references = [
@@ -497,7 +529,27 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual(comparison_reference(references)["url"], "/assets/input/pose-a.png")
         instruction = "保持横向 4:3 输出"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertEqual(prompt, instruction)
+        self.assertNotEqual(prompt, instruction)
+        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
+        self.assertIn("Image 3 = [PRIMARY SPATIAL / POSE TEMPLATE]", prompt)
+        self.assertIn("The first pose reference is the highest-priority spatial authority", prompt)
+
+    def test_base_transfer_pose_reference_overrides_garment_spatial_template(self):
+        references = [
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
+            {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
+        ]
+        self.assertEqual(universal_composition_mode(references), "base_transfer")
+        self.assertEqual(primary_pose_reference(references)["url"], "/assets/input/pose.png")
+        self.assertEqual(comparison_reference(references)["url"], "/assets/input/pose.png")
+        prompt = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
+        self.assertIn("Image 1 = [BASE IMAGE / DRESS OR FULL OUTFIT]", prompt)
+        self.assertIn("Image 2 = [PRIMARY SPATIAL / POSE TEMPLATE]", prompt)
+        self.assertIn("not as the action source", prompt)
+        self.assertIn("Use Image 2 as the PRIMARY SPATIAL / POSE TEMPLATE for this base-transfer result", prompt)
+        self.assertIn("Image 2 owns the final pose/action", prompt)
+        self.assertIn("Image 1 for non-spatial visual base attributes", prompt)
+        self.assertIn("USER SUPPLEMENT: 保持横向 4:3 输出", prompt)
 
     def test_pose_transfer_reference_owns_framing_unless_user_overrides_it(self):
         references = [
@@ -613,9 +665,12 @@ class EcommerceContractTests(unittest.TestCase):
         ]
         instruction = "参考产品图腰头红线标识，把前中下凹处补高到与左右两侧同一水平高度"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertEqual(prompt, instruction)
+        self.assertNotEqual(prompt, instruction)
+        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
+        self.assertIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", prompt)
 
         ordinary = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
+        self.assertIn("USER SUPPLEMENT: 保持横向 4:3 输出", ordinary)
         self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", ordinary)
 
     def test_capabilities_do_not_expose_provider_secrets(self):
@@ -971,7 +1026,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertTrue(attempted_override["source_composition_locked"])
         self.assertEqual((attempted_override["aspect_ratio"], attempted_override["size"]), ("source", "1152x2048"))
 
-    def test_user_prompt_request_preserves_universal_panel_reference_order_without_prompt_injection(self):
+    def test_user_prompt_request_preserves_universal_panel_reference_order_and_supplements_auto_prompt(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         inputs = [
             {"role": "subject", "reference_type": "subject", "reference_id": "panel_1", "url": "/assets/input/1.png"},
@@ -1001,7 +1056,11 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(observed["operation"], "universal")
         self.assertEqual(observed["reference_ids"], ["panel_1", "panel_2", "panel_3"])
         self.assertEqual([item["reference_id"] for item in snapshot["inputs"]], ["panel_1", "panel_2", "panel_3"])
-        self.assertEqual(snapshot["prompt"], "图1使用图2材质，图3作为背景")
+        self.assertIn("USER SUPPLEMENT: 图1使用图2材质，图3作为背景", snapshot["prompt"])
+        self.assertIn("Image 1 = [PRIMARY SUBJECT / BODY MODEL / NATIVE STYLING]", snapshot["prompt"])
+        self.assertIn("Image 2 = [PRODUCT DETAIL]", snapshot["prompt"])
+        self.assertIn("Image 3 = [SCENE / BACKGROUND ONLY]", snapshot["prompt"])
+        self.assertIn("REFERENCE OWNERSHIP RULES", snapshot["prompt"])
 
     def test_pose_reference_controls_source_ratio_and_comparison_metadata(self):
         with tempfile.TemporaryDirectory() as root:
@@ -1031,6 +1090,41 @@ class EcommerceBackendTests(unittest.TestCase):
             patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(checked, (60, 120))),
         ):
             snapshot = self.main.prepare_ecommerce_request(payload)
+        self.assertEqual(snapshot["pose_reference_url"], "/assets/input/pose.png")
+        self.assertEqual(snapshot["comparison_reference_url"], "/assets/input/pose.png")
+        self.assertEqual(snapshot["size"], "1024x2048")
+
+    def test_base_transfer_pose_reference_controls_source_ratio_and_comparison_metadata(self):
+        with tempfile.TemporaryDirectory() as root:
+            dress = Path(root) / "dress.png"
+            pose = Path(root) / "pose.png"
+            self.make_image(dress, (120, 80))
+            self.make_image(pose, (60, 120))
+            lookup = {"/assets/input/dress.png": str(dress), "/assets/input/pose.png": str(pose)}
+            inputs = [
+                {"role": "full_garment", "reference_type": "full_garment", "reference_id": "dress", "url": "/assets/input/dress.png"},
+                {"role": "pose", "reference_type": "pose", "reference_id": "pose", "url": "/assets/input/pose.png"},
+            ]
+            with patch.object(self.main, "output_file_from_url", side_effect=lambda url: lookup.get(url)):
+                checked, source_dimensions = self.main.validate_ecommerce_local_inputs(inputs, "universal")
+            self.assertEqual(source_dimensions, (60, 120))
+
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        payload = self.main.EcommerceTaskRequest(
+            operation="universal",
+            inputs=[self.main.AIReference(**item) for item in inputs],
+            provider_id="shiying",
+            model="gemini-3-pro-image-preview",
+            aspect_ratio="source",
+        )
+        with (
+            patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(checked, (60, 120))),
+        ):
+            snapshot = self.main.prepare_ecommerce_request(payload)
+        self.assertEqual(snapshot["composition_mode"], "base_transfer")
+        self.assertEqual(snapshot["base_reference_id"], "dress")
+        self.assertEqual(snapshot["base_reference_url"], "/assets/input/dress.png")
         self.assertEqual(snapshot["pose_reference_url"], "/assets/input/pose.png")
         self.assertEqual(snapshot["comparison_reference_url"], "/assets/input/pose.png")
         self.assertEqual(snapshot["size"], "1024x2048")

@@ -38,6 +38,22 @@ button, input { font:inherit; }
 .app-settings-update-grid button:disabled { opacity:.55; cursor:wait; }
 #updateSaveStatus { min-height:20px; color:var(--as-success); font-size:11px; }
 #updateSaveStatus.error { color:var(--as-danger); }
+.app-settings-storage-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:18px; }
+.app-settings-storage-meter { min-width:0; display:grid; gap:6px; padding:14px; border:1px solid var(--as-line); border-radius:12px; background:var(--as-control); }
+.app-settings-storage-meter span { color:var(--as-soft); font-size:10px; font-weight:800; }
+.app-settings-storage-meter b { font-size:24px; line-height:1; }
+.app-settings-storage-meter small { min-width:0; overflow:hidden; color:var(--as-muted); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.app-settings-storage-actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
+.app-settings-storage-actions button { height:40px; padding:0 14px; border:1px solid var(--as-accent); border-radius:12px; background:var(--as-accent); color:var(--as-bg); cursor:pointer; font-size:11px; font-weight:800; }
+.app-settings-storage-actions button.secondary { border-color:var(--as-line); background:var(--as-control); color:var(--as-text); }
+.app-settings-storage-actions button.danger { border-color:var(--as-danger); background:var(--as-danger); color:#fff; }
+.app-settings-storage-actions button:disabled { opacity:.55; cursor:wait; }
+.app-settings-storage-list { display:grid; gap:7px; margin-top:14px; }
+.app-settings-storage-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; padding:9px 11px; border:1px solid var(--as-line); border-radius:10px; background:color-mix(in srgb,var(--as-control) 82%,transparent); }
+.app-settings-storage-row span { min-width:0; overflow:hidden; font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.app-settings-storage-row small { color:var(--as-muted); font-size:10px; }
+#storageStatus { min-height:20px; color:var(--as-success); font-size:11px; }
+#storageStatus.error { color:var(--as-danger); }
 fieldset:disabled .app-settings-option { cursor:wait; opacity:.58; transform:none; }
 html.studio-theme-dark { color-scheme:dark; --as-bg:#1a1a1a; --as-panel:#1e1e1e; --as-text:#f0eee9; --as-soft:#d2d0cb; --as-muted:#a7a6a2; --as-line:rgba(255,255,255,.08); --as-control:#292928; --as-accent:#3a3a39; --as-success:#72d6a0; --as-danger:#ff8d86; }
-@media (max-width:640px) { .app-settings-page { width:calc(100% - 24px); padding:28px 0 50px; } .app-settings-card { padding:16px; border-radius:18px; } .app-settings-option { grid-template-columns:20px minmax(0,1fr); padding:14px; } .app-settings-option i { display:none; } .app-settings-output-row { grid-template-columns:1fr 1fr; } .app-settings-output-row input { grid-column:1 / -1; } }
+@media (max-width:640px) { .app-settings-page { width:calc(100% - 24px); padding:28px 0 50px; } .app-settings-card { padding:16px; border-radius:18px; } .app-settings-option { grid-template-columns:20px minmax(0,1fr); padding:14px; } .app-settings-option i { display:none; } .app-settings-output-row { grid-template-columns:1fr 1fr; } .app-settings-output-row input { grid-column:1 / -1; } .app-settings-storage-grid { grid-template-columns:1fr; } }

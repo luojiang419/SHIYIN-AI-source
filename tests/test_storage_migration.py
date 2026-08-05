@@ -91,6 +91,63 @@ class StorageMigrationTests(unittest.TestCase):
             self.assertFalse(database.delete_task("ecommerce", "task-5"))
             self.assertNotIn("task-5", [item["id"] for item in database.load_tasks("ecommerce")])
 
+    def test_local_asset_and_media_indexes_are_queryable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            media = root / "media" / "generated" / "a.png"
+            media.parent.mkdir(parents=True)
+            media.write_bytes(b"image")
+            database = CanvasDatabase(root / "canvas.db")
+            database.initialize()
+            database.replace_local_asset_index([
+                {"id": "tops/a.png", "file": "tops/a.png", "folder": "tops", "name": "A", "url": "/assets/uploads/tops/a.png", "kind": "image", "size": 5, "created_at": 2},
+                {"id": "tops/b.png", "file": "tops/b.png", "folder": "tops", "name": "B", "url": "/assets/uploads/tops/b.png", "kind": "image", "size": 5, "created_at": 1},
+            ])
+            page = database.list_local_asset_items(folder="tops", limit=1)
+            self.assertEqual(page["total"], 2)
+            self.assertEqual(page["items"][0]["id"], "tops/a.png")
+            self.assertTrue(page["next_cursor"])
+            database.upsert_media_object(url="/assets/output/a.png", path=str(media), category="output", kind="image", source="test")
+            summary = database.media_storage_summary()
+            self.assertEqual(summary["categories"]["output"]["count"], 1)
+            self.assertEqual(summary["categories"]["output"]["bytes"], 5)
+
+    def test_work_items_fts_search_is_queryable_and_synced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            database = CanvasDatabase(Path(tmp) / "canvas.db")
+            database.initialize()
+            database.prepend_history({
+                "id": "history-red",
+                "type": "ecommerce",
+                "timestamp": 20,
+                "prompt": "red coat campaign",
+                "images": ["/output/red.png"],
+            })
+            database.prepend_history({
+                "id": "history-blue",
+                "type": "ecommerce",
+                "timestamp": 10,
+                "prompt": "blue shoes campaign",
+                "images": ["/output/blue.png"],
+            })
+            with database.connect() as connection:
+                self.assertIsNotNone(connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items_fts'"
+                ).fetchone())
+            red = database.list_work_items(search="red campaign", limit=10)
+            self.assertEqual(red["total"], 1)
+            self.assertEqual(red["items"][0]["history_id"], "history-red")
+
+            work_id = red["items"][0]["id"]
+            database.update_work_item_metadata(work_id, {"name": "midnight archive", "updated_at": 30})
+            renamed = database.list_work_items(search="midnight archive", limit=10)
+            self.assertEqual(renamed["total"], 1)
+            self.assertEqual(renamed["items"][0]["id"], work_id)
+
+            database.delete_history_ids(["history-red"])
+            removed = database.list_work_items(search="midnight archive", limit=10)
+            self.assertEqual(removed["total"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

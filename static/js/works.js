@@ -1,6 +1,25 @@
 (function(){
     'use strict';
-    const state = {works:[],tab:'all',search:'',kind:'',compareWork:null,compareViewer:null,localBaseUrl:'',localTargetUrl:''};
+    const PAGE_LIMIT = 120;
+    const OVERSCAN_ROWS = 3;
+    const CARD_MIN_WIDTH = 210;
+    const CARD_HEIGHT = 334;
+    const GRID_GAP = 13;
+    const state = {
+        works:[],
+        total:0,
+        nextCursor:'',
+        loading:false,
+        tab:'all',
+        search:'',
+        kind:'',
+        compareWork:null,
+        compareViewer:null,
+        localBaseUrl:'',
+        localTargetUrl:'',
+        renderStart:-1,
+        renderEnd:-1,
+    };
     const el = {};
     const byId = id => document.getElementById(id);
     const t = key => window.StudioI18n?.t?.(key) || key;
@@ -21,17 +40,6 @@
         clearTimeout(toast.timer);
         toast.timer=setTimeout(()=>el.worksToast.classList.remove('show'),2200);
     }
-    function visibleWorks(){
-        const search=state.search.trim().toLowerCase();
-        return state.works.filter(item => {
-            if(state.tab==='trash') return item.trashed && (!search || `${item.name} ${item.prompt} ${item.model} ${item.operation}`.toLowerCase().includes(search)) && (!state.kind || item.kind===state.kind);
-            if(item.trashed) return false;
-            if(state.tab==='favorite' && !item.favorite) return false;
-            if(state.kind && item.kind!==state.kind) return false;
-            if(search && !`${item.name} ${item.prompt} ${item.model} ${item.operation}`.toLowerCase().includes(search)) return false;
-            return true;
-        });
-    }
     function kindLabel(item){
         const operations={try_on:'works.tryOn',pose_transfer:'works.poseTransfer',prop_replace:'works.propReplace',angle_change:'works.angleChange',background_change:'works.backgroundChange',universal:'works.universal'};
         if(item.kind==='ecommerce') return operations[item.operation] ? t(operations[item.operation]) : t('works.ecommerce');
@@ -40,45 +48,110 @@
     }
     function dateText(timestamp){
         const value=Number(timestamp || 0);
-        return value ? new Date(value*1000).toLocaleString() : '—';
+        return value ? new Date(value*1000).toLocaleString() : '-';
+    }
+    function queryParams(cursor=''){
+        const params = new URLSearchParams({limit:String(PAGE_LIMIT),include_trashed:'true'});
+        if(cursor) params.set('cursor', cursor);
+        if(state.tab === 'favorite') params.set('favorite','true');
+        if(state.tab === 'trash') params.set('include_trashed','true');
+        if(state.kind) params.set('kind', state.kind);
+        if(state.search.trim()) params.set('search', state.search.trim());
+        return params;
+    }
+    function serverVisible(item){
+        if(state.tab === 'trash') return item.trashed;
+        if(item.trashed) return false;
+        if(state.tab === 'favorite' && !item.favorite) return false;
+        return true;
     }
     function renderKinds(){
         const current=state.kind;
-        const kinds=[...new Set(state.works.filter(item=>state.tab==='trash'?item.trashed:!item.trashed).map(item=>item.kind).filter(Boolean))].sort();
+        const kinds=[...new Set(state.works.filter(serverVisible).map(item=>item.kind).filter(Boolean))].sort();
         el.worksKind.innerHTML=`<option value="">${escapeHtml(t('works.allTypes'))}</option>`+kinds.map(kind=>`<option value="${escapeHtml(kind)}">${escapeHtml(kind==='ecommerce'?t('works.ecommerce'):kind==='online'?t('works.online'):kind)}</option>`).join('');
         state.kind=kinds.includes(current)?current:'';
         el.worksKind.value=state.kind;
     }
-    function render(){
-        const works=visibleWorks();
-        el.worksCount.textContent=String(works.length);
-        el.worksGrid.classList.toggle('hidden',works.length===0);
-        el.worksEmpty.classList.toggle('hidden',works.length!==0);
-        if(el.worksDownloadAll) el.worksDownloadAll.disabled = !downloadableWorks().length;
-        if(el.worksClearAll) el.worksClearAll.disabled = !state.works.length;
-        el.worksTabs.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===state.tab));
-        el.worksGrid.innerHTML=works.map(item=>`<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}">
+    function gridMetrics(){
+        const width = Math.max(1, el.worksGrid.clientWidth || 1);
+        const columns = Math.max(1, Math.floor((width + GRID_GAP) / (CARD_MIN_WIDTH + GRID_GAP)));
+        const cardWidth = Math.floor((width - GRID_GAP * (columns - 1)) / columns);
+        return {columns,cardWidth,rowHeight:CARD_HEIGHT + GRID_GAP};
+    }
+    function renderCard(item,index,metrics){
+        const col = index % metrics.columns;
+        const row = Math.floor(index / metrics.columns);
+        const left = col * (metrics.cardWidth + GRID_GAP);
+        const top = row * metrics.rowHeight;
+        return `<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
             <button class="works-card-media" type="button" data-compare-work="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy"><span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
-                <div class="works-card-meta"><span>${escapeHtml(item.model || '—')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
+                <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
                 <div class="works-card-actions"><button class="primary" type="button" data-compare-work="${escapeHtml(item.id)}">${escapeHtml(t('works.compare'))}</button><button type="button" data-download-work="${escapeHtml(item.id)}">${escapeHtml(t('works.download'))}</button><button type="button" data-reveal-work="${escapeHtml(item.id)}">${escapeHtml(t('works.openDirectory'))}</button><button type="button" data-trash-work="${escapeHtml(item.id)}" data-trash-value="${item.trashed?'false':'true'}">${escapeHtml(t(item.trashed?'works.restore':'works.moveToTrash'))}</button></div>
-            </div></article>`).join('');
+            </div></article>`;
+    }
+    function bindGridActions(){
         el.worksGrid.querySelectorAll('[data-compare-work]').forEach(button=>button.addEventListener('click',()=>openCompare(button.dataset.compareWork)));
         el.worksGrid.querySelectorAll('[data-favorite-work]').forEach(button=>button.addEventListener('click',()=>toggleFavorite(button.dataset.favoriteWork)));
         el.worksGrid.querySelectorAll('[data-download-work]').forEach(button=>button.addEventListener('click',()=>downloadWork(state.works.find(item=>item.id===button.dataset.downloadWork))));
         el.worksGrid.querySelectorAll('[data-reveal-work]').forEach(button=>button.addEventListener('click',()=>revealWork(button.dataset.revealWork)));
         el.worksGrid.querySelectorAll('[data-trash-work]').forEach(button=>button.addEventListener('click',()=>setTrashed(button.dataset.trashWork,button.dataset.trashValue==='true')));
     }
-    async function loadWorks(){
+    function renderVirtual(force=false){
+        const metrics = gridMetrics();
+        const totalRows = Math.ceil(Math.max(state.total,state.works.length) / metrics.columns);
+        const scrollTop = el.worksGrid.scrollTop || 0;
+        const visibleRows = Math.ceil((el.worksGrid.clientHeight || 600) / metrics.rowHeight);
+        const startRow = Math.max(0, Math.floor(scrollTop / metrics.rowHeight) - OVERSCAN_ROWS);
+        const endRow = Math.min(totalRows, startRow + visibleRows + OVERSCAN_ROWS * 2);
+        const start = startRow * metrics.columns;
+        const end = Math.min(state.works.length, endRow * metrics.columns);
+        el.worksCount.textContent=String(state.total || state.works.length);
+        el.worksGrid.classList.toggle('hidden',state.total===0 && !state.loading);
+        el.worksEmpty.classList.toggle('hidden',state.total!==0 || state.loading);
+        if(el.worksDownloadAll) el.worksDownloadAll.disabled = !(state.total || state.works.length);
+        if(el.worksClearAll) el.worksClearAll.disabled = !(state.total || state.works.length);
+        el.worksTabs.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===state.tab));
+        if(!force && state.renderStart === start && state.renderEnd === end) return;
+        state.renderStart = start;
+        state.renderEnd = end;
+        const spacerHeight = Math.max(0, totalRows * metrics.rowHeight - GRID_GAP);
+        const cards = state.works.slice(start,end).map((item,i)=>renderCard(item,start+i,metrics)).join('');
+        const loading = state.loading ? '<div class="works-loading">加载中...</div>' : '';
+        el.worksGrid.innerHTML = `<div class="works-virtual-spacer" style="position:relative;height:${spacerHeight}px">${cards}${loading}</div>`;
+        bindGridActions();
+    }
+    async function loadWorks({reset=false}={}){
+        if(state.loading) return;
+        if(!reset && !state.nextCursor) return;
+        state.loading = true;
         el.worksRefresh.disabled=true;
         try {
-            const data=await fetchJson('/api/works?limit=1000&include_trashed=true',{cache:'no-store'});
-            state.works=data.works || [];
+            if(reset){
+                state.works=[];
+                state.total=0;
+                state.nextCursor='';
+                state.renderStart=-1;
+                state.renderEnd=-1;
+                el.worksGrid.scrollTop=0;
+            }
+            renderVirtual(true);
+            const data=await fetchJson(`/api/works?${queryParams(reset?'':state.nextCursor)}`,{cache:'no-store'});
+            state.works = reset ? (data.works || []) : [...state.works, ...(data.works || [])];
+            state.total = Number(data.total || state.works.length);
+            state.nextCursor = data.next_cursor || '';
             renderKinds();
-            render();
         } catch(error){ toast(error.message); }
-        finally { el.worksRefresh.disabled=false; }
+        finally {
+            state.loading=false;
+            el.worksRefresh.disabled=false;
+            renderVirtual(true);
+        }
+    }
+    function scheduleReload(){
+        clearTimeout(scheduleReload.timer);
+        scheduleReload.timer=setTimeout(()=>loadWorks({reset:true}),220);
     }
     async function toggleFavorite(workId){
         const work=state.works.find(item=>item.id===workId);
@@ -87,29 +160,27 @@
             const data=await fetchJson(`/api/works/${encodeURIComponent(work.id)}/favorite`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({favorite:!work.favorite})});
             Object.assign(work,data.work || {favorite:!work.favorite});
             if(state.compareWork?.id===work.id) state.compareWork=work;
-            render();
+            renderVirtual(true);
             syncCompareFavorite();
         } catch(error){ toast(error.message); }
     }
-
     async function updateMetadata(workId,changes){
         const data=await fetchJson(`/api/works/${encodeURIComponent(workId)}/metadata`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(changes)});
         const index=state.works.findIndex(item=>item.id===workId);
         if(index>=0) state.works[index]=data.work;
         if(state.compareWork?.id===workId) state.compareWork=data.work;
-        renderKinds();render();syncCompareFavorite();
+        renderKinds();renderVirtual(true);syncCompareFavorite();
         return data.work;
     }
-
     async function setTrashed(workId,trashed){
         if(trashed && !window.confirm(t('works.trashConfirm'))) return;
         try {
             await updateMetadata(workId,{trashed});
             if(state.compareWork?.id===workId && trashed) closeCompare();
             toast(t(trashed?'works.trashedDone':'works.restoredDone'));
+            if(state.tab !== 'trash') scheduleReload();
         } catch(error){ toast(error.message); }
     }
-
     async function revealWork(workId){
         const work=state.works.find(item=>item.id===workId);if(!work)return;
         try {
@@ -126,7 +197,7 @@
         return options;
     }
     function renderCompareMeta(work){
-        const values=work?[work.model,work.width&&work.height?`${work.width}×${work.height}`:'',dateText(work.created_at)].filter(Boolean):[];
+        const values=work?[work.model,work.width&&work.height?`${work.width}x${work.height}`:'',dateText(work.created_at)].filter(Boolean):[];
         el.compareMeta.innerHTML=values.map(value=>`<span>${escapeHtml(value)}</span>`).join('');
     }
     function syncCompareFavorite(){
@@ -134,7 +205,6 @@
         el.compareFavorite.textContent=state.compareWork?.favorite?'★':'☆';
         el.compareFavorite.title=state.compareWork?t(state.compareWork.favorite?'works.unfavorite':'works.favorite'):t('works.localWork');
     }
-
     function renderTargetOptions(preferred=''){
         const targets=availableWorks().slice(0,500);
         const selectedTrash=state.works.find(item=>item.id===preferred && item.trashed);
@@ -145,12 +215,10 @@
         el.compareTargetSelect.innerHTML=options.join('');
         if(preferred && [...el.compareTargetSelect.options].some(item=>item.value===preferred)) el.compareTargetSelect.value=preferred;
     }
-
     function selectedTarget(){
         if(el.compareTargetSelect.value==='local' && state.localTargetUrl) return {id:'',name:t('works.localWork'),url:state.localTargetUrl,local:true};
         return state.works.find(item=>item.id===el.compareTargetSelect.value) || null;
     }
-
     function renderBaseOptions(work){
         const previous=el.compareBaseSelect.value;
         const options=comparisonOptions(work);
@@ -158,7 +226,6 @@
         el.compareBaseSelect.innerHTML=options.length?options.map(item=>`<option value="${escapeHtml(item.value)}" data-url="${escapeHtml(item.url)}">${escapeHtml(item.label)}</option>`).join(''):`<option value="">${escapeHtml(t('works.chooseBasePrompt'))}</option>`;
         if(previous && [...el.compareBaseSelect.options].some(item=>item.value===previous)) el.compareBaseSelect.value=previous;
     }
-
     function applyComparison(reset=true){
         const target=selectedTarget();
         state.compareWork=target && !target.local ? target : null;
@@ -173,152 +240,95 @@
         el.compareDownload.disabled=!targetUrl;
         el.compareDownload.onclick=()=>target&&downloadWork(target);
     }
-
     function syncCompareTarget(){
         const target=selectedTarget();
         renderBaseOptions(target);
         applyComparison();
     }
-
     function openCompare(workId=''){
-        const preferred=state.works.some(item=>item.id===workId)?workId:(availableWorks()[0]?.id || (state.localTargetUrl?'local':''));
-        renderTargetOptions(preferred);
-        if(preferred) el.compareTargetSelect.value=preferred;
+        const work=state.works.find(item=>item.id===workId) || state.works.find(item=>!item.trashed);
+        if(!state.compareViewer) state.compareViewer=window.createCompareViewer({stage:el.worksCompareStage,before:el.worksBeforeImage,after:el.worksAfterImage,afterClip:el.worksAfterClip,handle:el.worksCompareHandle,zoomOut:el.worksZoomOut,zoomReset:el.worksZoomReset,zoomIn:el.worksZoomIn,fullscreen:el.worksFullscreen});
+        renderTargetOptions(work?.id || '');
+        if(work) el.compareTargetSelect.value=work.id;
         syncCompareTarget();
         el.worksCompareDialog.showModal();
-        requestAnimationFrame(()=>state.compareViewer.refresh());
     }
-    function padSequence(value){
-        return String(Math.max(1, Number(value) || 1)).padStart(6,'0');
+    function closeCompare(){el.worksCompareDialog.close();}
+    function extensionFromWork(work){
+        const source=String(work?.original_name || work?.url || '').split('?')[0].split('#')[0];
+        const match=source.match(/\.[a-z0-9]{1,8}$/i);
+        return match?match[0].toLowerCase():'.png';
     }
     function workDatePart(work){
-        const date = Number(work?.created_at || 0) ? new Date(Number(work.created_at) * 1000) : new Date();
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2,'0');
-        const day = String(date.getDate()).padStart(2,'0');
-        return `${year}${month}${day}`;
+        const value=Number(work?.created_at || 0);
+        const date=value?new Date(value*1000):new Date();
+        const pad=n=>String(n).padStart(2,'0');
+        return `${date.getFullYear()}${pad(date.getMonth()+1)}${pad(date.getDate())}`;
     }
-    function extensionFromWork(work){
-        const source=String(work?.original_name || work?.url || '').split(/[?#]/)[0];
-        const slash=Math.max(source.lastIndexOf('/'),source.lastIndexOf('\\'));
-        const dot=source.lastIndexOf('.');
-        return dot>slash ? source.slice(dot).toLowerCase() : '.png';
-    }
+    function padSequence(value){return String(Math.max(1,Number(value)||1)).padStart(6,'0');}
     function workDownloadName(work){
-        if(work?.download_name) return String(work.download_name);
-        const sequence = work?.download_sequence || (Number(work?.output_index || 0) + 1);
-        return `SHIYIN-${padSequence(sequence)}-${workDatePart(work)}${extensionFromWork(work)}`;
+        return work?.download_name || `SHIYIN-${padSequence(work?.download_sequence || 1)}-${workDatePart(work)}${extensionFromWork(work)}`;
     }
     function downloadWork(work){
-        if(!work?.url) return;
+        if(!work?.url)return;
         const name=workDownloadName(work);
-        const direct=/^(blob:|data:)/i.test(work.url);
         const link=document.createElement('a');
-        link.href=direct?work.url:`/api/download-output?url=${encodeURIComponent(work.url)}&name=${encodeURIComponent(name)}`;
+        link.href=`/api/download-output?url=${encodeURIComponent(work.url)}&name=${encodeURIComponent(name)}`;
         link.download=name;
         document.body.appendChild(link);
         link.click();
         link.remove();
+        toast(t('desktop.download.finished'));
     }
-    async function downloadAllWorks(){
-        const works=downloadableWorks();
-        if(!works.length){toast(t('works.noDownloadableWorks'));return;}
-        const date = workDatePart({});
-        const name = `SHIYIN-全部作品-${date}.zip`;
+    async function downloadAll(){
+        const name=`SHIYIN-全部作品-${workDatePart({created_at:Date.now()/1000})}.zip`;
         const url=`/api/works/download-all?name=${encodeURIComponent(name)}`;
         if(window.showSaveFilePicker){
-            try{
-                const handle=await window.showSaveFilePicker({
-                    suggestedName:name,
-                    types:[{description:'ZIP',accept:{'application/zip':['.zip']}}],
-                });
+            try {
+                const handle=await window.showSaveFilePicker({suggestedName:name,types:[{description:'ZIP',accept:{'application/zip':['.zip']}}]});
                 const response=await fetch(url);
-                if(!response.ok) throw new Error(await response.text() || t('works.downloadFailed'));
+                if(!response.ok) throw new Error(`HTTP ${response.status}`);
                 const writable=await handle.createWritable();
                 await writable.write(await response.blob());
                 await writable.close();
-                toast(t('works.downloadSaved'));
-            }catch(error){
-                if(error?.name === 'AbortError') return;
-                toast(error.message || t('works.downloadFailed'));
-            }
-            return;
+                toast(t('desktop.download.finished'));
+                return;
+            } catch(error){ if(error?.name==='AbortError') return; toast(error.message || t('desktop.download.failed')); return; }
         }
-        const link=document.createElement('a');
-        link.href=url;
-        link.download=name;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
+        window.location.href=url;
     }
     async function clearAllWorks(){
-        const count = state.works.length;
-        if(!count){toast(t('works.noWorksToClear'));return;}
-        if(!window.confirm(t('works.clearAllConfirm').replace('{count}', String(count)))) return;
-        el.worksClearAll.disabled=true;
-        try{
+        if(!window.confirm(t('works.clearAllConfirm'))) return;
+        try {
             const result=await fetchJson('/api/works',{method:'DELETE'});
-            state.works=[];
-            state.kind='';
-            if(el.worksCompareDialog.open) closeCompare();
-            renderKinds();
-            render();
-            toast(t('works.clearAllDone').replace('{count}', String(result.deleted_files ?? 0)));
-        }catch(error){
-            toast(error.message || t('works.clearAllFailed'));
-        }finally{
-            el.worksClearAll.disabled=!state.works.length;
-        }
+            state.works=[]; state.total=0; state.nextCursor='';
+            renderKinds(); renderVirtual(true);
+            toast(`${t('works.clearAllDone')} ${result.deleted_files || 0}`);
+        } catch(error){ toast(error.message || t('works.clearAllFailed')); }
     }
-    function closeCompare(){
-        if(state.localBaseUrl){ URL.revokeObjectURL(state.localBaseUrl); state.localBaseUrl=''; }
-        if(state.localTargetUrl){ URL.revokeObjectURL(state.localTargetUrl); state.localTargetUrl=''; }
-        state.compareWork=null;
-        state.compareViewer.exitFullscreen();
-        el.worksCompareDialog.close();
+    function handleScroll(){
+        renderVirtual();
+        const remaining = el.worksGrid.scrollHeight - el.worksGrid.scrollTop - el.worksGrid.clientHeight;
+        if(remaining < 1200 && state.nextCursor && !state.loading) loadWorks();
     }
-    function validImageFile(file){return !!file && (String(file.type||'').startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name||''));}
     function bind(){
-        el.worksTabs.addEventListener('click',event=>{const button=event.target.closest('[data-tab]');if(button){state.tab=button.dataset.tab;renderKinds();render();}});
-        el.worksSearch.addEventListener('input',()=>{state.search=el.worksSearch.value;render();});
-        el.worksKind.addEventListener('change',()=>{state.kind=el.worksKind.value;render();});
-        el.worksRefresh.addEventListener('click',loadWorks);
+        el.worksRefresh.addEventListener('click',()=>loadWorks({reset:true}));
+        el.worksTabs.addEventListener('click',event=>{const btn=event.target.closest('[data-tab]');if(!btn)return;state.tab=btn.dataset.tab;loadWorks({reset:true});});
+        el.worksSearch.addEventListener('input',event=>{state.search=event.target.value;scheduleReload();});
+        el.worksKind.addEventListener('change',event=>{state.kind=event.target.value;loadWorks({reset:true});});
         el.worksQuickCompare.addEventListener('click',()=>openCompare());
-        el.worksDownloadAll?.addEventListener('click',downloadAllWorks);
-        el.worksClearAll?.addEventListener('click',clearAllWorks);
         el.closeWorksCompare.addEventListener('click',closeCompare);
-        el.worksCompareDialog.addEventListener('cancel',event=>{event.preventDefault();closeCompare();});
         el.compareTargetSelect.addEventListener('change',syncCompareTarget);
         el.compareBaseSelect.addEventListener('change',()=>applyComparison());
         el.compareFavorite.addEventListener('click',()=>state.compareWork&&toggleFavorite(state.compareWork.id));
-        el.compareTargetFileButton.addEventListener('click',()=>el.compareTargetFile.click());
-        el.compareTargetFile.addEventListener('change',event=>{
-            const file=event.target.files?.[0];if(!validImageFile(file))return;
-            if(state.localTargetUrl)URL.revokeObjectURL(state.localTargetUrl);
-            state.localTargetUrl=URL.createObjectURL(file);renderTargetOptions('local');el.compareTargetSelect.value='local';syncCompareTarget();event.target.value='';
-        });
         el.compareBaseFileButton.addEventListener('click',()=>el.compareBaseFile.click());
-        el.compareBaseFile.addEventListener('change',event=>{
-            const file=event.target.files?.[0]; if(!validImageFile(file)) return;
-            if(state.localBaseUrl) URL.revokeObjectURL(state.localBaseUrl);
-            state.localBaseUrl=URL.createObjectURL(file);
-            renderBaseOptions(selectedTarget());el.compareBaseSelect.value='local';applyComparison();event.target.value='';
-        });
-        window.addEventListener('message',event=>{
-            if(event.data?.type==='entity.changed'&&event.data.topic==='history')loadWorks();
-            if(event.data?.type==='desktop.download.finished'){
-                const path=String(event.data.path || '').trim();
-                toast(event.data.success?`${t('works.downloadSaved')}${path?`：${path}`:''}`:t('works.downloadFailed'));
-            }
-        });
-        window.addEventListener('studio-lang-change',()=>{renderKinds();render();if(el.worksCompareDialog.open){renderTargetOptions(state.compareWork?.id || (state.localTargetUrl?'local':''));syncCompareTarget();}});
+        el.compareTargetFileButton.addEventListener('click',()=>el.compareTargetFile.click());
+        el.compareBaseFile.addEventListener('change',event=>{const file=event.target.files?.[0];if(!file)return;state.localBaseUrl=URL.createObjectURL(file);renderBaseOptions(selectedTarget());applyComparison();});
+        el.compareTargetFile.addEventListener('change',event=>{const file=event.target.files?.[0];if(!file)return;state.localTargetUrl=URL.createObjectURL(file);renderTargetOptions('local');syncCompareTarget();});
+        el.worksGrid.addEventListener('scroll',handleScroll,{passive:true});
+        window.addEventListener('resize',()=>renderVirtual(true));
+        el.worksDownloadAll.addEventListener('click',downloadAll);
+        el.worksClearAll.addEventListener('click',clearAllWorks);
     }
-    async function init(){
-        cache();
-        state.compareViewer=new window.CompareViewer({root:el.worksCompareStage,before:el.worksBeforeImage,after:el.worksAfterImage,afterClip:el.worksAfterClip,handle:el.worksCompareHandle,zoomLabel:el.worksZoomReset,zoomInButton:el.worksZoomIn,zoomOutButton:el.worksZoomOut,fullscreenButton:el.worksFullscreen});
-        bind();
-        await loadWorks();
-    }
-    window.WorksManager={state,loadWorks,openCompare};
-    document.addEventListener('DOMContentLoaded',init,{once:true});
+    document.addEventListener('DOMContentLoaded',()=>{cache();bind();loadWorks({reset:true});});
 })();

@@ -21,7 +21,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.07.23.app-settings.2">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.08.05.storage-maintenance.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -80,6 +80,36 @@
             <p class="app-settings-note" data-i18n="appSettings.generatedOutputNaming">生成成功后自动保存副本，文件名格式为 SHIYIN-000001-YYYYMMDD。</p>
         </section>
 
+        <section class="app-settings-card" aria-labelledby="storageMaintenanceTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>STORAGE</span>
+                    <h2 id="storageMaintenanceTitle">存储维护</h2>
+                </div>
+                <strong id="storageStatus" role="status"></strong>
+            </div>
+            <div class="app-settings-storage-grid">
+                <div class="app-settings-storage-meter">
+                    <span>媒体索引</span>
+                    <b id="storageMediaTotal">--</b>
+                    <small id="storageMediaDetail">等待加载</small>
+                </div>
+                <div class="app-settings-storage-meter">
+                    <span>孤立内部文件</span>
+                    <b id="storageOrphanTotal">--</b>
+                    <small id="storageOrphanDetail">先预览再清理</small>
+                </div>
+            </div>
+            <div class="app-settings-storage-actions">
+                <button id="refreshStorageSummary" type="button">刷新汇总</button>
+                <button id="reconcileMediaStorage" type="button" class="secondary">扫描引用</button>
+                <button id="previewOrphanMedia" type="button" class="secondary">预览孤立文件</button>
+                <button id="cleanupOrphanMedia" type="button" class="danger" disabled>清理孤立文件</button>
+            </div>
+            <div id="storageOrphanList" class="app-settings-storage-list" hidden></div>
+            <p class="app-settings-note">清理默认只处理内部 input/output 文件，用户上传素材不会自动删除；建议先预览候选项。</p>
+        </section>
+
         <section class="app-settings-card" aria-labelledby="updateSettingsTitle">
             <div class="app-settings-card-heading">
                 <div>
@@ -111,6 +141,6 @@
             <p class="app-settings-note">更新源固定为公开 GitHub Release；下载完成后可选择立即更新或下次启动更新。</p>
         </section>
     </main>
-    <script src="/static/js/app-settings.js?v=2026.07.26.close-prompt.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.08.05.storage-maintenance.1"></script>
 </body>
 </html>

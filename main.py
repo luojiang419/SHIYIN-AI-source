@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.119"
+APP_VERSION = "1.0.124"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -288,6 +288,18 @@ async def startup_event():
         await asyncio.to_thread(load_ecommerce_tasks_from_disk)
     except Exception as exc:
         print(f"电商专用任务恢复失败: {exc}")
+    try:
+        indexed = await asyncio.to_thread(DATABASE.ensure_work_items_indexed, work_metadata())
+        if indexed:
+            print(f"作品索引就绪：{indexed} 条")
+    except Exception as exc:
+        print(f"作品索引补偿失败: {exc}")
+    try:
+        indexed = await asyncio.to_thread(ensure_local_upload_indexed)
+        if indexed:
+            print(f"本地素材索引就绪：{indexed} 条")
+    except Exception as exc:
+        print(f"本地素材索引补偿失败: {exc}")
 
 @app.websocket("/ws/events")
 @app.websocket("/ws/stats")
@@ -2211,6 +2223,37 @@ def runtime_info():
     }
 
 
+def directory_size_summary(path: Path) -> Dict[str, int]:
+    total = 0
+    count = 0
+    root = Path(path)
+    if not root.exists():
+        return {"bytes": 0, "count": 0}
+    for item in root.rglob("*"):
+        if not item.is_file():
+            continue
+        try:
+            total += int(item.stat().st_size)
+            count += 1
+        except OSError:
+            continue
+    return {"bytes": total, "count": count}
+
+
+@app.get("/api/storage/summary")
+async def storage_summary_api():
+    cache, temp = await asyncio.gather(
+        asyncio.to_thread(directory_size_summary, DATA_LAYOUT.cache),
+        asyncio.to_thread(directory_size_summary, DATA_LAYOUT.temp),
+    )
+    return {
+        "media": DATABASE.media_storage_summary(),
+        "cache": cache,
+        "temp": temp,
+        "uploads_indexed": DATABASE.local_asset_count(),
+    }
+
+
 @app.post("/api/runtime/shutdown")
 def runtime_shutdown(request: Request):
     supplied = request.headers.get("x-desktop-token", "")
@@ -2960,6 +3003,11 @@ class WorkMetadataRequest(BaseModel):
     favorite: Optional[bool] = None
     trashed: Optional[bool] = None
 
+class MediaCleanupRequest(BaseModel):
+    grace_seconds: int = Field(default=7 * 24 * 60 * 60, ge=0, le=90 * 24 * 60 * 60)
+    dry_run: bool = True
+    limit: int = Field(default=500, ge=1, le=5000)
+
 class ImageTaskQueryRequest(BaseModel):
     provider_id: str = "comfly"
     task_id: str = Field(min_length=1, max_length=240)
@@ -3516,10 +3564,7 @@ def new_project(name="新项目"):
 
 def list_projects():
     projects = ensure_default_project()
-    counts = {}
-    for rec in iter_canvas_records(include_deleted=False):
-        pid = rec.get("project") or DEFAULT_PROJECT_ID
-        counts[pid] = counts.get(pid, 0) + 1
+    counts = DATABASE.canvas_project_counts()
     out = []
     for p in sorted(projects, key=lambda x: (int(x.get("order") or 0), x.get("created_at") or 0)):
         rec = project_record(p)
@@ -3575,6 +3620,10 @@ def normalize_canvas_color(value):
     return color if color in CANVAS_COLORS else ""
 
 def canvas_record(data):
+    if "node_count" in data:
+        node_count = int(data.get("node_count") or 0)
+    else:
+        node_count = len(data.get("nodes", []))
     return {
         "id": data.get("id"),
         "title": data.get("title", "未命名画布"),
@@ -3589,23 +3638,20 @@ def canvas_record(data):
         "created_at": data.get("created_at", 0),
         "updated_at": data.get("updated_at", 0),
         "deleted_at": data.get("deleted_at", 0),
-        "node_count": len(data.get("nodes", [])),
+        "node_count": node_count,
     }
 
 def cleanup_expired_canvas_trash():
     cutoff = now_ms() - CANVAS_TRASH_RETENTION_MS
     with CANVAS_LOCK:
-        for data in DATABASE.list_canvases(include_deleted=True):
+        for data in DATABASE.list_canvas_records(include_deleted=True):
             deleted_at = int(data.get("deleted_at") or 0)
             if deleted_at and deleted_at < cutoff:
                 DATABASE.purge_canvas(str(data.get("id") or ""))
 
 def iter_canvas_records(include_deleted=False):
     cleanup_expired_canvas_trash()
-    records = []
-    for data in DATABASE.list_canvases(include_deleted=bool(include_deleted)):
-        records.append(canvas_record(data))
-    return records
+    return [canvas_record(data) for data in DATABASE.list_canvas_records(include_deleted=bool(include_deleted))]
 
 def list_canvases():
     records = iter_canvas_records(include_deleted=False)
@@ -3725,23 +3771,38 @@ def extract_canvas_assets(canvas):
             items.append(item)
     return items
 
+CANVAS_ASSETS_INDEX_LOCK = Lock()
+CANVAS_ASSETS_INDEX_CACHE = {"items_by_canvas": {}}
+
 def canvas_assets_index():
     canvases = []
     items = []
     canvas_counts = {"all": 0, "smart": 0, "classic": 0}
     item_counts = {"all": 0, "smart": 0, "classic": 0}
     cleanup_expired_canvas_trash()
-    for canvas in DATABASE.list_canvases(include_deleted=False):
-        record = canvas_record(canvas)
-        canvas_items = extract_canvas_assets(canvas)
-        record["asset_count"] = len(canvas_items)
-        canvases.append(record)
-        items.extend(canvas_items)
-        kind = record.get("kind") or "classic"
-        canvas_counts["all"] += 1
-        canvas_counts[kind] = canvas_counts.get(kind, 0) + 1
-        item_counts["all"] += len(canvas_items)
-        item_counts[kind] = item_counts.get(kind, 0) + len(canvas_items)
+    records = DATABASE.list_canvas_records(include_deleted=False)
+    with CANVAS_ASSETS_INDEX_LOCK:
+        previous = dict(CANVAS_ASSETS_INDEX_CACHE.get("items_by_canvas") or {})
+        current = {}
+        for record in records:
+            canvas_id = str(record.get("id") or "")
+            revision = int(record.get("revision") or 0)
+            cache_key = f"{canvas_id}:{revision}"
+            canvas_items = previous.get(cache_key)
+            if canvas_items is None:
+                canvas = DATABASE.get_canvas(canvas_id) or {}
+                canvas_items = extract_canvas_assets(canvas)
+            current[cache_key] = canvas_items
+            record = dict(record)
+            record["asset_count"] = len(canvas_items)
+            canvases.append(record)
+            items.extend(canvas_items)
+            kind = record.get("kind") or "classic"
+            canvas_counts["all"] += 1
+            canvas_counts[kind] = canvas_counts.get(kind, 0) + 1
+            item_counts["all"] += len(canvas_items)
+            item_counts[kind] = item_counts.get(kind, 0) + len(canvas_items)
+        CANVAS_ASSETS_INDEX_CACHE["items_by_canvas"] = current
     canvases.sort(key=lambda item: (0 if item.get("pinned") else 1, -int(item.get("updated_at") or item.get("created_at") or 0)))
     items.sort(key=lambda item: int(item.get("canvas_updated_at") or item.get("created_at") or 0), reverse=True)
     categories = [
@@ -5332,6 +5393,15 @@ def output_path_for(filename, category="output"):
     folder, _ = output_storage(category)
     return os.path.join(folder, filename)
 
+def register_internal_media_object(url: str, category: str = "output", kind: str = "image", source: str = "") -> None:
+    path = output_file_from_url(url)
+    if not path:
+        return
+    try:
+        DATABASE.upsert_media_object(url=url, path=path, category=category, kind=kind, source=source, ref_count=0)
+    except Exception as exc:
+        print(f"登记内部媒体失败: {exc}")
+
 def output_file_from_url(url):
     if isinstance(url, dict):
         url = url.get("url", "")
@@ -5379,6 +5449,207 @@ def media_url_from_path(path: str):
         rel = os.path.relpath(absolute, root_abs).replace("\\", "/")
         return f"{prefix}/{urllib.parse.quote(rel, safe='/')}"
     return None
+
+MEDIA_REFERENCE_URL_RE = re.compile(r"(?P<url>/(?:assets/(?:input|output|uploads)|output)/[^\s\"'<>),;]+)")
+MEDIA_FILE_KIND_EXTS = {
+    "image": {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"},
+    "video": {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv", ".flv"},
+    "audio": {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"},
+}
+
+
+def media_kind_from_path(path: str) -> str:
+    ext = os.path.splitext(str(path or "").split("?", 1)[0])[1].lower()
+    for kind, values in MEDIA_FILE_KIND_EXTS.items():
+        if ext in values:
+            return kind
+    return "file"
+
+
+def normalize_internal_media_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed_path = urllib.parse.urlparse(text).path if "://" in text else text.split("?", 1)[0].split("#", 1)[0]
+    if not parsed_path.startswith(("/assets/input/", "/assets/output/", "/assets/uploads/", "/output/")):
+        return ""
+    path = output_file_from_url(parsed_path)
+    if path:
+        return media_url_from_path(path) or ""
+    clean = urllib.parse.unquote(parsed_path).replace("\\", "/")
+    if clean.startswith(("/assets/input/", "/assets/output/", "/assets/uploads/", "/output/")):
+        return clean
+    return ""
+
+
+def collect_internal_media_urls(value: Any, refs: Dict[str, int], depth: int = 0) -> None:
+    if depth > 10 or value is None:
+        return
+    if isinstance(value, str):
+        direct = normalize_internal_media_url(value)
+        if direct:
+            refs[direct] = refs.get(direct, 0) + 1
+            return
+        for match in MEDIA_REFERENCE_URL_RE.finditer(value):
+            url = normalize_internal_media_url(match.group("url"))
+            if url:
+                refs[url] = refs.get(url, 0) + 1
+        return
+    if isinstance(value, list):
+        for item in value:
+            collect_internal_media_urls(item, refs, depth + 1)
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            collect_internal_media_urls(item, refs, depth + 1)
+
+
+def iter_indexed_local_asset_items(limit: int = 1000):
+    cursor = ""
+    while True:
+        page = DATABASE.list_local_asset_items(limit=limit, cursor=cursor)
+        for item in page.get("items") or []:
+            yield item
+        cursor = str(page.get("next_cursor") or "")
+        if not cursor:
+            break
+
+
+def collect_persistent_media_references() -> Dict[str, int]:
+    refs: Dict[str, int] = {}
+    for record in DATABASE.list_history():
+        collect_internal_media_urls(record, refs)
+    for canvas in DATABASE.list_canvases(include_deleted=True):
+        collect_internal_media_urls(canvas, refs)
+    for item in iter_indexed_local_asset_items():
+        collect_internal_media_urls(item, refs)
+    return refs
+
+
+def iter_internal_media_files():
+    roots = (
+        (OUTPUT_INPUT_DIR, "input"),
+        (OUTPUT_OUTPUT_DIR, "output"),
+        (LOCAL_UPLOAD_DIR, "uploads"),
+    )
+    for root, category in roots:
+        root_abs = os.path.abspath(root)
+        if not os.path.isdir(root_abs):
+            continue
+        for current, _dirs, files in os.walk(root_abs):
+            for name in files:
+                path = os.path.abspath(os.path.join(current, name))
+                try:
+                    if os.path.commonpath([root_abs, path]) != root_abs:
+                        continue
+                except ValueError:
+                    continue
+                url = media_url_from_path(path)
+                if not url:
+                    continue
+                yield {"url": url, "path": path, "category": category, "kind": media_kind_from_path(path)}
+
+
+def reconcile_internal_media_index() -> Dict[str, Any]:
+    refs = collect_persistent_media_references()
+    objects: Dict[str, Dict[str, Any]] = {}
+    for item in iter_internal_media_files():
+        url = str(item.get("url") or "")
+        item["ref_count"] = int(refs.get(url, 0))
+        item["source"] = "filesystem-scan"
+        objects[url] = item
+    missing_references = 0
+    for url, ref_count in refs.items():
+        if url in objects:
+            continue
+        path = output_file_from_url(url)
+        if not path:
+            missing_references += 1
+            continue
+        objects[url] = {
+            "url": url,
+            "path": path,
+            "category": "uploads" if url.startswith("/assets/uploads/") else ("input" if url.startswith("/assets/input/") else "output"),
+            "kind": media_kind_from_path(path),
+            "ref_count": int(ref_count),
+            "source": "reference-scan",
+        }
+    summary = DATABASE.replace_media_object_index(objects.values())
+    return {
+        "summary": summary,
+        "tracked": len(objects),
+        "referenced": len(refs),
+        "missing_references": missing_references,
+    }
+
+
+def path_is_under_any(path: str, roots: Tuple[str, ...]) -> bool:
+    absolute = os.path.abspath(path)
+    for root in roots:
+        root_abs = os.path.abspath(root)
+        try:
+            if os.path.commonpath([root_abs, absolute]) == root_abs:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def cleanup_orphan_internal_media(*, grace_seconds: int = 7 * 24 * 60 * 60, dry_run: bool = True, limit: int = 500) -> Dict[str, Any]:
+    reconcile = reconcile_internal_media_index()
+    candidates = DATABASE.list_orphan_media_objects(
+        categories=("input", "output"),
+        grace_seconds=grace_seconds,
+        limit=limit,
+    )
+    allowed_roots = (OUTPUT_INPUT_DIR, OUTPUT_OUTPUT_DIR)
+    deleted = []
+    missing = []
+    errors = []
+    for item in candidates:
+        path = str(item.get("path") or "")
+        if not path or not path_is_under_any(path, allowed_roots):
+            continue
+        if dry_run:
+            continue
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                deleted.append(item)
+            else:
+                missing.append(item)
+        except OSError as exc:
+            errors.append({"url": item.get("url"), "path": path, "error": str(exc)[:240]})
+    removed_urls = [str(item.get("url") or "") for item in [*deleted, *missing] if str(item.get("url") or "")]
+    removed_index = DATABASE.delete_media_objects(removed_urls) if removed_urls and not dry_run else 0
+    return {
+        "dry_run": dry_run,
+        "grace_seconds": int(grace_seconds),
+        "candidates": candidates,
+        "candidate_count": len(candidates),
+        "deleted_files": len(deleted),
+        "missing_files": len(missing),
+        "deleted_index_records": removed_index,
+        "errors": errors,
+        "reconcile": reconcile,
+        "summary": DATABASE.media_storage_summary(),
+    }
+
+
+@app.post("/api/storage/media/reconcile")
+async def reconcile_media_storage_api():
+    return await asyncio.to_thread(reconcile_internal_media_index)
+
+
+@app.post("/api/storage/media/cleanup-orphans")
+async def cleanup_orphan_media_api(payload: MediaCleanupRequest):
+    return await asyncio.to_thread(
+        cleanup_orphan_internal_media,
+        grace_seconds=payload.grace_seconds,
+        dry_run=payload.dry_run,
+        limit=payload.limit,
+    )
+
 
 def image_has_alpha(img: Image.Image) -> bool:
     if img.mode in ("RGBA", "LA"):
@@ -7902,12 +8173,16 @@ def write_image_bytes_to_output(raw: bytes, extension: str, *, prefix: str, cate
             filename, path = next_work_output_target(extension, category)
             with open(path, "wb") as f:
                 f.write(raw)
-        return output_url_for(filename, category)
+        url = output_url_for(filename, category)
+        register_internal_media_object(url, category, "image", "generated")
+        return url
     filename = f"{prefix}{uuid.uuid4().hex[:10]}{normalized_image_extension(extension)}"
     path = output_path_for(filename, category)
     with open(path, "wb") as f:
         f.write(raw)
-    return output_url_for(filename, category)
+    url = output_url_for(filename, category)
+    register_internal_media_object(url, category, "image", "generated")
+    return url
 
 
 def copy_image_to_enterprise_output(source_path: str, category: str = "output") -> str:
@@ -7915,7 +8190,9 @@ def copy_image_to_enterprise_output(source_path: str, category: str = "output") 
     with WORK_OUTPUT_FILENAME_LOCK:
         filename, destination = next_work_output_target(extension, category)
         shutil.copy2(source_path, destination)
-    return output_url_for(filename, category)
+    url = output_url_for(filename, category)
+    register_internal_media_object(url, category, "image", "generated-copy")
+    return url
 
 
 async def save_ai_image_to_output(image_data, prefix="online_", category="output", enterprise_filename: bool = False):
@@ -8025,7 +8302,9 @@ async def save_remote_video_to_output(url, prefix="video_", category="output"):
                 f.write(response.content)
             if os.path.getsize(path) <= 0:
                 raise RuntimeError("empty video response")
-            return output_url_for(filename, category)
+            saved_url = output_url_for(filename, category)
+            register_internal_media_object(saved_url, category, "video", "generated-video")
+            return saved_url
     except Exception as e:
         print(f"保存上游视频失败: {e}")
         try:
@@ -10132,7 +10411,9 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
         path = output_path_for(filename, "input")
         with open(path, "wb") as f:
             f.write(content)
-        item = {"url": output_url_for(filename, "input"), "name": file.filename or filename, "kind": kind, "mime": content_type}
+        url = output_url_for(filename, "input")
+        register_internal_media_object(url, "input", kind, "ai-upload")
+        item = {"url": url, "name": file.filename or filename, "kind": kind, "mime": content_type}
         if kind == "image":
             item.update({"width": image_width, "height": image_height, "orientation_normalized": orientation_normalized})
         uploaded.append(item)
@@ -10168,7 +10449,9 @@ async def upload_ai_base64(payload: Base64UploadRequest):
     path = output_path_for(filename, "input")
     with open(path, "wb") as f:
         f.write(content)
-    return {"files": [{"url": output_url_for(filename, "input"), "name": payload.name or filename, "kind": kind}]}
+    url = output_url_for(filename, "input")
+    register_internal_media_object(url, "input", kind, "ai-upload-base64")
+    return {"files": [{"url": url, "name": payload.name or filename, "kind": kind}]}
 
 
 def _local_upload_kind_ext(filename, content_type):
@@ -10346,6 +10629,55 @@ def _local_upload_tree_and_items():
     items.sort(key=lambda it: it.get("created_at") or 0, reverse=True)
     return root_node, items
 
+def _local_upload_tree_from_index():
+    root_node = _local_upload_folder_node("", "全部上传")
+    folder_map = {"": root_node}
+    for entry in DATABASE.local_asset_folders():
+        folder = _local_upload_rel_path(entry.get("folder") or "")
+        parts = [part for part in folder.split("/") if part]
+        current = ""
+        parent = root_node
+        for part in parts:
+            current = f"{current}/{part}".lstrip("/")
+            node = folder_map.get(current)
+            if node is None:
+                node = _local_upload_folder_node(current)
+                folder_map[current] = node
+                parent.setdefault("children", []).append(node)
+            parent = node
+        parent["count"] = int(parent.get("count") or 0) + int(entry.get("count") or 0)
+    def fill_counts(node):
+        own = int(node.get("count") or 0)
+        child_total = 0
+        node["children"] = sorted(node.get("children") or [], key=lambda child: str(child.get("name") or "").lower())
+        for child in node["children"]:
+            child_total += fill_counts(child)
+        node["count"] = own + child_total
+        return node["count"]
+    fill_counts(root_node)
+    return root_node
+
+def rebuild_local_upload_index():
+    tree, items = _local_upload_tree_and_items()
+    DATABASE.replace_local_asset_index(items)
+    return {"tree": tree, "items": items, "total": len(items)}
+
+def ensure_local_upload_indexed():
+    if DATABASE.local_asset_count() <= 0:
+        return rebuild_local_upload_index()["total"]
+    return DATABASE.local_asset_count()
+
+def indexed_local_upload_response(folder="", search="", limit=500, cursor=""):
+    ensure_local_upload_indexed()
+    page = DATABASE.list_local_asset_items(folder=folder, search=search, limit=limit, cursor=cursor)
+    return {
+        "items": page.get("items") or [],
+        "tree": _local_upload_tree_from_index(),
+        "total": int(page.get("total") or 0),
+        "next_cursor": page.get("next_cursor") or "",
+        "indexed": True,
+    }
+
 _DOUBLE_EXT_RE = re.compile(r'(\.[A-Za-z0-9]{1,5})\1$', re.IGNORECASE)
 _DOUBLE_EXT_MEDIA = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif",
                      ".mp4", ".webm", ".mov", ".m4v", ".flv"}
@@ -10469,7 +10801,9 @@ async def upload_local_assets(files: List[UploadFile] = File(...), folder: str =
             classification = await classify_asset_image_best_effort(path)
             if classification:
                 _write_local_upload_classification(rel_name, classification)
-        uploaded.append(_local_upload_item(rel_name))
+        item = _local_upload_item(rel_name)
+        DATABASE.upsert_local_asset_item(item)
+        uploaded.append(item)
     return {"files": uploaded}
 
 @app.post("/api/local-assets/import-urls")
@@ -10538,6 +10872,7 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                     if classification:
                         _write_local_upload_classification(rel_name, classification)
                 item = _local_upload_item(rel_name)
+                DATABASE.upsert_local_asset_item(item)
                 uploaded.append(item)
                 result.update({"ok": True, "file": rel_name, "item": item})
             except HTTPException as exc:
@@ -10548,9 +10883,11 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
     return {"ok": True, "count": len(uploaded), "files": uploaded, "items": results}
 
 @app.get("/api/local-assets")
-async def list_local_assets():
-    tree, items = _local_upload_tree_and_items()
-    return {"items": items, "tree": tree}
+async def list_local_assets(folder: str = "", search: str = "", limit: int = 500, cursor: str = "", rebuild: bool = False):
+    if rebuild:
+        rebuilt = await asyncio.to_thread(rebuild_local_upload_index)
+        return {"items": rebuilt["items"][:max(1, min(1000, int(limit or 500)))], "tree": rebuilt["tree"], "total": rebuilt["total"], "next_cursor": "", "indexed": True}
+    return await asyncio.to_thread(indexed_local_upload_response, folder, search, limit, cursor)
 
 @app.post("/api/local-assets/folders")
 async def create_local_asset_folder(payload: LocalAssetFolderRequest, request: Request):
@@ -10564,8 +10901,8 @@ async def create_local_asset_folder(payload: LocalAssetFolderRequest, request: R
     if os.path.exists(abs_path):
         raise HTTPException(status_code=400, detail="同名文件夹已存在")
     os.makedirs(abs_path, exist_ok=False)
-    tree, items = _local_upload_tree_and_items()
-    return {"ok": True, "folder": {"path": rel, "name": name}, "tree": tree, "items": items}
+    tree = _local_upload_tree_from_index()
+    return {"ok": True, "folder": {"path": rel, "name": name}, "tree": tree, "items": []}
 
 @app.patch("/api/local-assets/folders")
 async def rename_local_asset_folder(payload: LocalAssetFolderRequest, request: Request):
@@ -10582,8 +10919,8 @@ async def rename_local_asset_folder(payload: LocalAssetFolderRequest, request: R
     if os.path.exists(new_abs):
         raise HTTPException(status_code=400, detail="同名文件夹已存在")
     os.rename(abs_path, new_abs)
-    tree, items = _local_upload_tree_and_items()
-    return {"ok": True, "folder": {"path": new_rel, "name": name}, "tree": tree, "items": items}
+    rebuilt = await asyncio.to_thread(rebuild_local_upload_index)
+    return {"ok": True, "folder": {"path": new_rel, "name": name}, "tree": rebuilt["tree"], "items": rebuilt["items"][:500], "total": rebuilt["total"]}
 
 @app.patch("/api/local-assets/items")
 async def rename_local_asset_item(payload: LocalAssetRenameRequest, request: Request):
@@ -10599,8 +10936,9 @@ async def rename_local_asset_item(payload: LocalAssetRenameRequest, request: Req
     parent = os.path.dirname(rel).replace("\\", "/")
     new_rel = f"{parent}/{new_stem}{old_ext}".lstrip("/")
     if new_rel == rel:
-        tree, items = _local_upload_tree_and_items()
-        return {"ok": True, "item": _local_upload_item(rel), "tree": tree, "items": items}
+        item = _local_upload_item(rel)
+        DATABASE.upsert_local_asset_item(item)
+        return {"ok": True, "item": item, "tree": _local_upload_tree_from_index(), "items": []}
     _, new_abs = _local_upload_abs(new_rel)
     if os.path.exists(new_abs):
         raise HTTPException(status_code=400, detail="同名素材已存在")
@@ -10613,8 +10951,10 @@ async def rename_local_asset_item(payload: LocalAssetRenameRequest, request: Req
     new_classification = _local_upload_classification_path(new_rel)
     if os.path.isfile(old_classification) and not os.path.exists(new_classification):
         os.rename(old_classification, new_classification)
-    tree, items = _local_upload_tree_and_items()
-    return {"ok": True, "item": _local_upload_item(new_rel), "old_path": rel, "tree": tree, "items": items}
+    DATABASE.delete_local_asset_items([rel])
+    item = _local_upload_item(new_rel)
+    DATABASE.upsert_local_asset_item(item)
+    return {"ok": True, "item": item, "old_path": rel, "tree": _local_upload_tree_from_index(), "items": []}
 
 @app.post("/api/local-assets/delete")
 async def delete_local_assets(payload: dict, request: Request):
@@ -10638,6 +10978,7 @@ async def delete_local_assets(payload: dict, request: Request):
                 if os.path.isfile(cls_path):
                     os.remove(cls_path)
                 deleted.append(rel)
+                DATABASE.delete_local_asset_items([rel])
             except OSError:
                 pass
     return {"deleted": deleted}
@@ -10681,11 +11022,12 @@ async def move_local_assets(payload: dict, request: Request):
             ):
                 if os.path.isfile(src_sib) and not os.path.exists(dst_sib):
                     os.rename(src_sib, dst_sib)
+            DATABASE.delete_local_asset_items([rel])
+            DATABASE.upsert_local_asset_item(_local_upload_item(new_rel))
             moved += 1
         except OSError:
             continue
-    tree, items = _local_upload_tree_and_items()
-    return {"ok": True, "moved": moved, "items": items, "tree": tree}
+    return {"ok": True, "moved": moved, "items": [], "tree": _local_upload_tree_from_index()}
 
 @app.post("/api/local-assets/caption")
 async def caption_local_assets(payload: LocalAssetCaptionRequest):
@@ -10718,6 +11060,7 @@ async def caption_local_assets(payload: LocalAssetCaptionRequest):
                 "caption_file": os.path.basename(txt_path),
                 "model": resolved_model,
             })
+            DATABASE.upsert_local_asset_item(_local_upload_item(filename))
             ok_count += 1
         except HTTPException as exc:
             item["error"] = str(exc.detail or "反推失败")
@@ -10754,6 +11097,7 @@ async def classify_local_assets(payload: LocalAssetClassifyRequest):
                 "classification_file": os.path.basename(_local_upload_classification_path(filename)),
                 "model": classification.get("model") or "",
             })
+            DATABASE.upsert_local_asset_item(_local_upload_item(filename))
             ok_count += 1
         except HTTPException as exc:
             item["error"] = str(exc.detail or "智能分类失败")
@@ -16042,7 +16386,11 @@ def enrich_online_history_generation_meta(items):
     return enriched
 
 @app.get("/api/history")
-async def get_history_api(type: str = None):
+async def get_history_api(type: str = None, limit: int = 0, cursor: str = ""):
+    if limit:
+        page = DATABASE.list_history_page(type or "", limit, cursor)
+        data = [item for item in page.get("items") or [] if item.get("images") and len(item["images"]) > 0]
+        return {"history": enrich_online_history_generation_meta(data), "next_cursor": page.get("next_cursor") or ""}
     data = DATABASE.list_history(type or "")
     data = [item for item in data if item.get("images") and len(item["images"]) > 0]
     return enrich_online_history_generation_meta(data)
@@ -16189,34 +16537,71 @@ def generated_work_items(records: List[Dict[str, Any]], metadata: Optional[Dict[
     return works
 
 
+def finalize_work_items(works: List[Dict[str, Any]], offset: int = 0) -> List[Dict[str, Any]]:
+    finalized = []
+    for index, item in enumerate(works, offset + 1):
+        value = dict(item)
+        value["download_sequence"] = index
+        value["download_name"] = work_download_name(value, index)
+        custom_name = str(value.get("name") or "").strip()
+        original_name = str(value.get("original_name") or "").strip()
+        if (not custom_name or custom_name == original_name) and not work_output_filename_is_enterprise(original_name):
+            value["name"] = value["download_name"]
+        finalized.append(value)
+    return finalized
+
+
 def all_generated_works() -> List[Dict[str, Any]]:
-    records = DATABASE.list_history("")
-    return generated_work_items(records, work_metadata())
+    DATABASE.ensure_work_items_indexed(work_metadata())
+    page = DATABASE.list_work_items(limit=1000, include_trashed=True)
+    works = list(page.get("items") or [])
+    cursor = str(page.get("next_cursor") or "")
+    while cursor:
+        page = DATABASE.list_work_items(limit=1000, include_trashed=True, cursor=cursor)
+        works.extend(page.get("items") or [])
+        cursor = str(page.get("next_cursor") or "")
+    return finalize_work_items(works)
 
 
 @app.get("/api/works")
-async def list_generated_works(favorite: Optional[bool] = None, kind: str = "", search: str = "", limit: int = 500, include_trashed: bool = False):
-    works = all_generated_works()
-    if not include_trashed:
-        works = [item for item in works if not item.get("trashed")]
-    normalized_kind = str(kind or "").strip().lower()
-    normalized_search = str(search or "").strip().lower()
-    if favorite is not None:
-        works = [item for item in works if bool(item.get("favorite")) is bool(favorite)]
-    if normalized_kind:
-        works = [item for item in works if str(item.get("kind") or "").lower() == normalized_kind]
-    if normalized_search:
-        works = [item for item in works if normalized_search in " ".join((
-            str(item.get("name") or ""), str(item.get("prompt") or ""),
-            str(item.get("model") or ""), str(item.get("operation") or ""),
-        )).lower()]
-    safe_limit = max(1, min(1000, int(limit or 500)))
-    return {"works": works[:safe_limit], "total": len(works)}
+async def list_generated_works(
+    favorite: Optional[bool] = None,
+    kind: str = "",
+    search: str = "",
+    limit: int = 500,
+    cursor: str = "",
+    include_trashed: bool = False,
+):
+    DATABASE.ensure_work_items_indexed(work_metadata())
+    page = DATABASE.list_work_items(
+        favorite=favorite,
+        kind=kind,
+        search=search,
+        limit=limit,
+        cursor=cursor,
+        include_trashed=include_trashed,
+    )
+    offset = 0
+    if cursor:
+        try:
+            offset = int(str(cursor).rsplit("#", 1)[1])
+        except (IndexError, ValueError):
+            offset = 0
+    works = finalize_work_items(page.get("items") or [], offset)
+    next_cursor = str(page.get("next_cursor") or "")
+    if next_cursor:
+        next_cursor = f"{next_cursor}#{offset + len(works)}"
+    return {"works": works, "total": int(page.get("total") or 0), "next_cursor": next_cursor}
 
 
 def update_work_metadata(work_id: str, *, name: Optional[str] = None, favorite: Optional[bool] = None, trashed: Optional[bool] = None) -> Tuple[Dict[str, Any], int]:
     work_id = str(work_id or "").strip()
-    target = next((item for item in all_generated_works() if item.get("id") == work_id), None)
+    DATABASE.ensure_work_items_indexed(work_metadata())
+    target = DATABASE.get_work_item(work_id)
+    if target:
+        target = finalize_work_items([target])[0]
+    if not target:
+        target = next((item for item in all_generated_works() if item.get("id") == work_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="作品不存在或对应文件记录已被移除")
     now = time.time()
@@ -16250,8 +16635,9 @@ def update_work_metadata(work_id: str, *, name: Optional[str] = None, favorite: 
         else:
             metadata.pop(work_id, None)
         revision = DATABASE.put_document("works", "metadata", metadata)
+        indexed = DATABASE.update_work_item_metadata(work_id, entry if work_id in metadata else {})
     publish_entity_changed("history", "works", revision)
-    refreshed = next((item for item in all_generated_works() if item.get("id") == work_id), target)
+    refreshed = finalize_work_items([indexed])[0] if indexed else next((item for item in all_generated_works() if item.get("id") == work_id), target)
     return refreshed, revision
 
 
@@ -16277,7 +16663,12 @@ async def set_work_favorite(work_id: str, payload: WorkFavoriteRequest):
 @app.post("/api/works/{work_id}/reveal")
 async def reveal_generated_work(work_id: str):
     work_id = str(work_id or "").strip()
-    work = next((item for item in all_generated_works() if item.get("id") == work_id), None)
+    DATABASE.ensure_work_items_indexed(work_metadata())
+    work = DATABASE.get_work_item(work_id)
+    if work:
+        work = finalize_work_items([work])[0]
+    if not work:
+        work = next((item for item in all_generated_works() if item.get("id") == work_id), None)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在或对应文件记录已被移除")
     path = work_local_file_path(work)

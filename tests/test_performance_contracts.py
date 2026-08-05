@@ -9,6 +9,7 @@ SMART_CANVAS_JS = ROOT / "static" / "js" / "smart-canvas.js"
 CANVAS_JS = ROOT / "static" / "js" / "canvas.js"
 ECOMMERCE_JS = ROOT / "static" / "js" / "ecommerce.js"
 API_SETTINGS_JS = ROOT / "static" / "js" / "api-settings.js"
+ASSET_MANAGER_JS = ROOT / "static" / "js" / "asset-manager.js"
 INDEX_HTML = ROOT / "static" / "index.html"
 SMART_CANVAS_CSS = ROOT / "static" / "css" / "smart-canvas.css"
 CANVAS_CSS = ROOT / "static" / "css" / "canvas.css"
@@ -31,6 +32,7 @@ class RuntimeGrowthContractTests(unittest.TestCase):
         cls.canvas_source = CANVAS_JS.read_text(encoding="utf-8")
         cls.ecommerce_source = ECOMMERCE_JS.read_text(encoding="utf-8")
         cls.api_settings_source = API_SETTINGS_JS.read_text(encoding="utf-8")
+        cls.asset_manager_source = ASSET_MANAGER_JS.read_text(encoding="utf-8")
         cls.index_source = INDEX_HTML.read_text(encoding="utf-8")
         cls.smart_css = SMART_CANVAS_CSS.read_text(encoding="utf-8")
         cls.canvas_css = CANVAS_CSS.read_text(encoding="utf-8")
@@ -72,6 +74,12 @@ class RuntimeGrowthContractTests(unittest.TestCase):
         self.assertIn("broadcastRouteState();", self.index_source)
         self.assertIn("syncRouteStateToFrame(f);", self.index_source)
 
+    def test_shell_can_unload_idle_iframes(self):
+        self.assertIn("IFRAME_IDLE_UNLOAD_MS = 15 * 60 * 1000", self.index_source)
+        self.assertIn("function maybeUnloadIdleFrames()", self.index_source)
+        self.assertIn("item.frame.removeAttribute('src')", self.index_source)
+        self.assertIn("studio-dirty-state", self.index_source)
+
     def test_background_pages_pause_recoverable_work(self):
         self.assertIn("function setSmartRouteActive(active)", self.smart_source)
         self.assertIn("stopCanvasMetaPoll();", self.smart_source)
@@ -94,6 +102,14 @@ class RuntimeGrowthContractTests(unittest.TestCase):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         self.assertEqual(package["devDependencies"]["tailwindcss"], "3.4.17")
         self.assertIn("tailwindcss/lib/cli.js", package["scripts"]["css:build"])
+
+    def test_asset_manager_defers_heavy_tabs_until_selected(self):
+        load_all = re.search(r"async function loadAll\(\)\{(?P<body>.*?)\n\}", self.asset_manager_source, re.S)
+        self.assertIsNotNone(load_all)
+        self.assertNotIn("loadLocalAssets()", load_all.group("body"))
+        self.assertNotIn("/api/canvas-assets", load_all.group("body"))
+        self.assertIn("async function ensureTabData(tab=activeTab)", self.asset_manager_source)
+        self.assertIn("await Promise.all([loadSharedFolders(), loadLocalAssets()])", self.asset_manager_source)
 
     def test_persistent_full_size_layers_avoid_blur_compositing(self):
         iframe_rule = re.search(r"iframe\s*\{(?P<body>.*?)\}", self.index_source, re.S)

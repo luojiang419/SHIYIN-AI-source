@@ -2551,6 +2551,36 @@
             document.querySelectorAll('iframe').forEach(syncRouteStateToFrame);
         }
 
+        const IFRAME_IDLE_UNLOAD_MS = 15 * 60 * 1000;
+        const IFRAME_KEEP_RECENT = 2;
+        const IFRAME_PROTECTED_PAGES = new Set(['ecommerce','free-creation','canvas']);
+
+        function touchFrameUsage(id) {
+            const frame = document.getElementById('frame-' + id);
+            if(frame) frame.dataset.lastActiveAt = String(Date.now());
+        }
+
+        function maybeUnloadIdleFrames() {
+            const now = Date.now();
+            const frames = [...document.querySelectorAll('iframe')]
+                .filter(frame => frame.src && !frame.classList.contains('active'))
+                .map(frame => ({
+                    frame,
+                    pageId:String(frame.id || '').replace(/^frame-/, ''),
+                    last:Number(frame.dataset.lastActiveAt || 0),
+                    dirty:frame.dataset.studioDirty === '1',
+                }))
+                .filter(item => !item.dirty && !IFRAME_PROTECTED_PAGES.has(item.pageId))
+                .sort((a,b) => b.last - a.last);
+            frames.slice(IFRAME_KEEP_RECENT).forEach(item => {
+                if(now - item.last < IFRAME_IDLE_UNLOAD_MS) return;
+                try {
+                    item.frame.removeAttribute('src');
+                    item.frame.dataset.routeActive = '0';
+                } catch(e) {}
+            });
+        }
+
         function switchUI(el, id, options = {}) {
             resetStudioRootScroll();
             if(!PAGE_IDS.includes(id)) id = DEFAULT_PAGE_ID;
@@ -2560,7 +2590,9 @@
             const target = document.getElementById('frame-' + id);
             target.classList.add('active');
             if (!target.src) target.src = target.dataset.src;
+            touchFrameUsage(id);
             broadcastRouteState();
+            maybeUnloadIdleFrames();
             if(!options.skipRemember) localStorage.setItem(ACTIVE_PAGE_KEY, id);
             // sync theme to newly activated iframe
             syncThemeToFrame(target);
@@ -2592,6 +2624,11 @@
 
         window.addEventListener('message', event => {
             if (event.origin && event.origin !== location.origin) return;
+            if(event.data && event.data.type === 'studio-dirty-state') {
+                const pageId = String(event.data.pageId || '').replace(/^frame-/, '');
+                const frame = document.getElementById('frame-' + pageId);
+                if(frame) frame.dataset.studioDirty = event.data.dirty ? '1' : '0';
+            }
             forwardStudioApiChange(event.data);
         });
 

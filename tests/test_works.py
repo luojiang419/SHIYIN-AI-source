@@ -1,7 +1,9 @@
 import asyncio
 import base64
 import io
+import os
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -32,9 +34,13 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn('data-tab="all"', self.works)
         self.assertIn('data-tab="favorite"', self.works)
         self.assertIn('data-tab="trash"', self.works)
-        self.assertIn("/api/works?limit=1000&include_trashed=true", self.works_js)
+        self.assertIn("const PAGE_LIMIT = 120", self.works_js)
+        self.assertIn("new URLSearchParams({limit:String(PAGE_LIMIT),include_trashed:'true'})", self.works_js)
+        self.assertIn("params.set('cursor', cursor)", self.works_js)
+        self.assertIn("state.nextCursor = data.next_cursor || ''", self.works_js)
         self.assertIn("/favorite`,{method:'PUT'", self.works_js)
         self.assertIn("/metadata`,{method:'PUT'", self.works_js)
+        self.assertIn("function renderVirtual(force=false)", self.works_js)
         self.assertIn('id="worksQuickCompare"', self.works)
         self.assertIn('id="worksDownloadAll"', self.works)
         self.assertIn('id="worksClearAll"', self.works)
@@ -52,7 +58,7 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn('data-download-work="${escapeHtml(item.id)}"', self.works_js)
         self.assertIn("/api/download-output?url=${encodeURIComponent(work.url)}&name=${encodeURIComponent(name)}", self.works_js)
         self.assertIn("function workDownloadName(work)", self.works_js)
-        self.assertIn("SHIYIN-${padSequence(sequence)}-${workDatePart(work)}${extensionFromWork(work)}", self.works_js)
+        self.assertIn("SHIYIN-${padSequence(work?.download_sequence || 1)}-${workDatePart(work)}${extensionFromWork(work)}", self.works_js)
         self.assertIn("work?.download_name", self.works_js)
         self.assertIn("desktop.download.finished", self.works_js)
         self.assertNotIn('<a href="${escapeHtml(item.url)}" download=', self.works_js)
@@ -70,8 +76,9 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn("works-danger-button", self.works_css)
 
     def test_work_card_actions_remain_visible_in_dense_grids(self):
-        self.assertIn("grid-auto-rows:max-content", self.works_css)
-        self.assertIn("align-items:start", self.works_css)
+        self.assertIn("display:block", self.works_css)
+        self.assertIn(".works-virtual-spacer", self.works_css)
+        self.assertIn("position:absolute;width:${metrics.cardWidth}px", self.works_js)
         self.assertIn("padding:1px 4px 84px 1px", self.works_css)
         self.assertIn(".works-card { position:relative; min-width:0; min-height:334px; display:grid; grid-template-rows:auto minmax(164px,auto)", self.works_css)
         self.assertIn(".works-card-media { position:relative; width:100%; aspect-ratio:4/3; display:block", self.works_css)
@@ -145,15 +152,39 @@ class WorksBackendTests(unittest.TestCase):
             self.assertTrue((output / Path(url).name).exists())
 
     def test_works_api_hides_trash_by_default_and_can_include_it(self):
-        items = [
-            {"id": "active", "name": "A", "kind": "ecommerce", "favorite": False, "trashed": False},
-            {"id": "trash", "name": "B", "kind": "ecommerce", "favorite": False, "trashed": True},
-        ]
-        with patch.object(self.main, "all_generated_works", return_value=items):
-            visible = asyncio.run(self.main.list_generated_works(limit=100))
-            complete = asyncio.run(self.main.list_generated_works(limit=100, include_trashed=True))
-        self.assertEqual([item["id"] for item in visible["works"]], ["active"])
-        self.assertEqual([item["id"] for item in complete["works"]], ["active", "trash"])
+        with tempfile.TemporaryDirectory() as root:
+            database = CanvasDatabase(Path(root) / "canvas.db")
+            database.initialize()
+            database.prepend_history({"id": "active-history", "type": "ecommerce", "timestamp": 20, "images": ["/output/active.png"]})
+            database.prepend_history({"id": "trash-history", "type": "ecommerce", "timestamp": 10, "images": ["/output/trash.png"]})
+            work_id = self.main.work_item_id("trash-history", 0, "/output/trash.png")
+            database.put_document("works", "metadata", {work_id: {"trashed": True, "updated_at": 30, "trashed_at": 30}})
+            database.rebuild_work_items({work_id: {"trashed": True, "updated_at": 30, "trashed_at": 30}})
+            with patch.object(self.main, "DATABASE", database):
+                visible = asyncio.run(self.main.list_generated_works(limit=100))
+                complete = asyncio.run(self.main.list_generated_works(limit=100, include_trashed=True))
+        self.assertEqual([item["history_id"] for item in visible["works"]], ["active-history"])
+        self.assertEqual([item["history_id"] for item in complete["works"]], ["active-history", "trash-history"])
+
+    def test_works_api_returns_cursor_pages_from_sqlite_index(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = CanvasDatabase(Path(root) / "canvas.db")
+            database.initialize()
+            for index in range(5):
+                database.prepend_history({
+                    "id": f"history-{index}",
+                    "type": "online",
+                    "timestamp": 100 + index,
+                    "prompt": f"prompt {index}",
+                    "images": [f"/output/{index}.png"],
+                }, limit=10)
+            with patch.object(self.main, "DATABASE", database):
+                first = asyncio.run(self.main.list_generated_works(limit=2))
+                second = asyncio.run(self.main.list_generated_works(limit=2, cursor=first["next_cursor"]))
+        self.assertEqual(first["total"], 5)
+        self.assertEqual([item["history_id"] for item in first["works"]], ["history-4", "history-3"])
+        self.assertTrue(first["next_cursor"])
+        self.assertEqual([item["history_id"] for item in second["works"]], ["history-2", "history-1"])
 
     def test_rename_trash_and_restore_are_persisted_in_sqlite_metadata(self):
         with tempfile.TemporaryDirectory() as root:
@@ -244,6 +275,57 @@ class WorksBackendTests(unittest.TestCase):
                 self.assertFalse(image.exists())
                 self.assertEqual(database.list_history(), [])
                 self.assertEqual(self.main.work_metadata(), {})
+
+    def test_media_reconcile_counts_references_and_cleans_orphans(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            output = root_path / "output"
+            input_dir = root_path / "input"
+            uploads = root_path / "uploads"
+            legacy_output = root_path / "legacy-output"
+            assets = root_path / "assets"
+            for folder in (output, input_dir, uploads, legacy_output, assets):
+                folder.mkdir(parents=True)
+            used = output / "used.png"
+            orphan = output / "orphan.png"
+            used.write_bytes(b"used")
+            orphan.write_bytes(b"orphan")
+            old = time.time() - 3 * 24 * 60 * 60
+            os.utime(orphan, (old, old))
+            database = CanvasDatabase(root_path / "canvas.db")
+            database.initialize()
+            database.prepend_history({
+                "id": "history-media",
+                "type": "ecommerce",
+                "timestamp": 20,
+                "images": ["/assets/output/used.png"],
+            })
+            database.save_canvas({
+                "id": "canvas-media",
+                "title": "媒体引用",
+                "project": "default",
+                "kind": "classic",
+                "updated_at": 30,
+                "nodes": [{"id": "node-used", "url": "/assets/output/used.png"}],
+            }, touch=False)
+            with (
+                patch.object(self.main, "DATABASE", database),
+                patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(output)),
+                patch.object(self.main, "OUTPUT_INPUT_DIR", str(input_dir)),
+                patch.object(self.main, "LOCAL_UPLOAD_DIR", str(uploads)),
+                patch.object(self.main, "OUTPUT_DIR", str(legacy_output)),
+                patch.object(self.main, "ASSETS_DIR", str(assets)),
+            ):
+                reconciled = self.main.reconcile_internal_media_index()
+                self.assertEqual(reconciled["summary"]["categories"]["output"]["count"], 2)
+                self.assertEqual(reconciled["summary"]["orphaned"]["output"]["count"], 1)
+                dry_run = self.main.cleanup_orphan_internal_media(grace_seconds=24 * 60 * 60, dry_run=True)
+                self.assertEqual(dry_run["candidate_count"], 1)
+                self.assertTrue(orphan.exists())
+                cleaned = self.main.cleanup_orphan_internal_media(grace_seconds=24 * 60 * 60, dry_run=False)
+                self.assertEqual(cleaned["deleted_files"], 1)
+                self.assertFalse(orphan.exists())
+                self.assertTrue(used.exists())
 
 
 if __name__ == "__main__":

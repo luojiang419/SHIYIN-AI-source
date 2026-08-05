@@ -13,10 +13,21 @@
     const updateManualProxy = document.getElementById('updateManualProxy');
     const updateSaveStatus = document.getElementById('updateSaveStatus');
     const checkDesktopUpdate = document.getElementById('checkDesktopUpdate');
+    const storageStatus = document.getElementById('storageStatus');
+    const storageMediaTotal = document.getElementById('storageMediaTotal');
+    const storageMediaDetail = document.getElementById('storageMediaDetail');
+    const storageOrphanTotal = document.getElementById('storageOrphanTotal');
+    const storageOrphanDetail = document.getElementById('storageOrphanDetail');
+    const refreshStorageSummary = document.getElementById('refreshStorageSummary');
+    const reconcileMediaStorage = document.getElementById('reconcileMediaStorage');
+    const previewOrphanMedia = document.getElementById('previewOrphanMedia');
+    const cleanupOrphanMedia = document.getElementById('cleanupOrphanMedia');
+    const storageOrphanList = document.getElementById('storageOrphanList');
     let currentBehavior = 'ask_on_close';
     let currentOutputDirectory = '';
     let statusTimer = null;
     let updateRequestSequence = 0;
+    let lastOrphanPreview = [];
 
     const t = key => window.StudioI18n?.t?.(key) || key;
 
@@ -31,6 +42,12 @@
         if(!updateSaveStatus) return;
         updateSaveStatus.textContent = message;
         updateSaveStatus.classList.toggle('error', isError);
+    }
+
+    function showStorageStatus(message, isError=false){
+        if(!storageStatus) return;
+        storageStatus.textContent = message;
+        storageStatus.classList.toggle('error', isError);
     }
 
     function desktopRequest(type, payload={}){
@@ -107,6 +124,119 @@
         const data = await response.json().catch(() => ({}));
         if(!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
         return data;
+    }
+
+    function formatBytes(value){
+        const bytes = Number(value || 0);
+        if(bytes < 1024) return `${bytes} B`;
+        const units = ['KB','MB','GB','TB'];
+        let current = bytes / 1024;
+        for(const unit of units){
+            if(current < 1024 || unit === 'TB') return `${current.toFixed(current >= 10 ? 1 : 2)} ${unit}`;
+            current /= 1024;
+        }
+        return `${bytes} B`;
+    }
+
+    function mediaCategoryDetail(summary){
+        const categories = summary?.media?.categories || summary?.categories || {};
+        return Object.entries(categories).map(([key,item]) => `${key} ${item.count || 0}`).join(' · ') || '暂无媒体索引';
+    }
+
+    function orphanSummary(summary){
+        const orphaned = summary?.media?.orphaned || summary?.orphaned || {};
+        return Object.values(orphaned).reduce((total,item) => total + Number(item.count || 0), 0);
+    }
+
+    function renderStorageSummary(data){
+        const media = data?.media || data?.summary?.media || (data?.categories || data?.total_count !== undefined ? data : data?.summary) || {};
+        storageMediaTotal.textContent = String(media.total_count ?? data?.tracked ?? 0);
+        storageMediaDetail.textContent = `${formatBytes(media.total_bytes || 0)} · ${mediaCategoryDetail(media)}`;
+        storageOrphanTotal.textContent = String(orphanSummary(media));
+        storageOrphanDetail.textContent = lastOrphanPreview.length ? `本次预览 ${lastOrphanPreview.length} 个候选` : '先预览再清理';
+    }
+
+    function setStorageBusy(busy){
+        [refreshStorageSummary, reconcileMediaStorage, previewOrphanMedia, cleanupOrphanMedia].forEach(button => {
+            if(button) button.disabled = busy || (button === cleanupOrphanMedia && !lastOrphanPreview.length);
+        });
+    }
+
+    function renderOrphanPreview(items){
+        lastOrphanPreview = Array.isArray(items) ? items : [];
+        cleanupOrphanMedia.disabled = !lastOrphanPreview.length;
+        if(!storageOrphanList) return;
+        storageOrphanList.hidden = !lastOrphanPreview.length;
+        storageOrphanList.innerHTML = lastOrphanPreview.slice(0, 8).map(item => `
+            <div class="app-settings-storage-row">
+                <span>${String(item.url || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}</span>
+                <small>${formatBytes(item.size || 0)}</small>
+            </div>
+        `).join('');
+    }
+
+    async function loadStorageSummary(){
+        setStorageBusy(true);
+        try {
+            const data = await requestSettings('/api/storage/summary', {cache:'no-store'});
+            renderStorageSummary(data);
+            showStorageStatus('已刷新');
+        } catch(error) {
+            showStorageStatus(`加载失败：${error.message}`, true);
+        } finally {
+            setStorageBusy(false);
+        }
+    }
+
+    async function reconcileStorage(){
+        setStorageBusy(true);
+        try {
+            const data = await requestSettings('/api/storage/media/reconcile', {method:'POST'});
+            renderStorageSummary(data);
+            showStorageStatus(`已扫描 ${data.tracked || 0} 个媒体文件`);
+        } catch(error) {
+            showStorageStatus(`扫描失败：${error.message}`, true);
+        } finally {
+            setStorageBusy(false);
+        }
+    }
+
+    async function previewOrphans(){
+        setStorageBusy(true);
+        try {
+            const data = await requestSettings('/api/storage/media/cleanup-orphans', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({dry_run:true, grace_seconds:7 * 24 * 60 * 60, limit:200}),
+            });
+            renderOrphanPreview(data.candidates || []);
+            renderStorageSummary(data.summary || {});
+            showStorageStatus(lastOrphanPreview.length ? `发现 ${lastOrphanPreview.length} 个候选` : '暂无可清理候选');
+        } catch(error) {
+            showStorageStatus(`预览失败：${error.message}`, true);
+        } finally {
+            setStorageBusy(false);
+        }
+    }
+
+    async function cleanupOrphans(){
+        if(!lastOrphanPreview.length) return;
+        if(!confirm(`确认清理 ${lastOrphanPreview.length} 个孤立内部文件？`)) return;
+        setStorageBusy(true);
+        try {
+            const data = await requestSettings('/api/storage/media/cleanup-orphans', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({dry_run:false, grace_seconds:7 * 24 * 60 * 60, limit:200}),
+            });
+            renderOrphanPreview([]);
+            renderStorageSummary(data.summary || {});
+            showStorageStatus(`已清理 ${data.deleted_files || 0} 个文件`);
+        } catch(error) {
+            showStorageStatus(`清理失败：${error.message}`, true);
+        } finally {
+            setStorageBusy(false);
+        }
     }
 
     async function loadSettings(){
@@ -190,11 +320,15 @@
         checkDesktopUpdate.disabled = true;
         try { await desktopRequest('desktop-update:check'); } catch(error) { showUpdateStatus(error.message, true); } finally { checkDesktopUpdate.disabled = false; }
     });
+    refreshStorageSummary?.addEventListener('click', loadStorageSummary);
+    reconcileMediaStorage?.addEventListener('click', reconcileStorage);
+    previewOrphanMedia?.addEventListener('click', previewOrphans);
+    cleanupOrphanMedia?.addEventListener('click', cleanupOrphans);
     chooseOutput.addEventListener('click', chooseOutputDirectory);
     resetOutput.addEventListener('click', resetOutputDirectory);
     window.addEventListener('message', event => {
         if(event.origin && event.origin !== location.origin) return;
         if(event.data?.type === 'studio-language') window.StudioI18n?.set?.(event.data.lang,{sync:false});
     });
-    document.addEventListener('DOMContentLoaded', () => { loadSettings(); loadUpdateSettings(); }, {once:true});
+    document.addEventListener('DOMContentLoaded', () => { loadSettings(); loadUpdateSettings(); loadStorageSummary(); }, {once:true});
 })();

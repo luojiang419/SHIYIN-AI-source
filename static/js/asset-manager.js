@@ -88,6 +88,7 @@ let localClassifyPrompt = savedLocalCaptionSettings.classifyPrompt || '';
 let localClassifyPromptOpen = false;
 let localAssets = [];
 let localAssetsLoaded = false;
+let canvasAssetsLoaded = false;
 let localUploadTree = null;
 let activeLocalUploadFolder = '';
 let activeLocalUploadClassFilter = '';
@@ -605,7 +606,7 @@ async function loadSharedFolders(){
 }
 async function loadLocalAssets(){
     try {
-        const data = await apiJson('/api/local-assets');
+        const data = await apiJson('/api/local-assets?limit=500');
         localAssets = Array.isArray(data.items) ? data.items : [];
         localUploadTree = data.tree || {id:'__root__', path:'', name:'全部上传', count:localAssets.length, items:[], children:[]};
     } catch(err) {
@@ -1068,6 +1069,7 @@ async function refreshCanvasAssets(){
             canvases:Array.isArray(data.canvases) ? data.canvases : [],
             items:Array.isArray(data.items) ? data.items : []
         };
+        canvasAssetsLoaded = true;
         normalizeCanvasAssetState();
         render();
         setStatus('画布资产已刷新');
@@ -1077,24 +1079,17 @@ async function refreshCanvasAssets(){
 }
 async function loadAll(){
     setStatus('加载中...');
-    const [assetData, promptData, referenceTypeData, providerData, canvasAssetData] = await Promise.all([
+    const [assetData, promptData, referenceTypeData, providerData] = await Promise.all([
         apiJson('/api/asset-library'),
         apiJson('/api/prompt-libraries'),
         apiJson('/api/reference-slot-types').catch(() => ({types:[]})),
-        apiJson('/api/providers').catch(() => ({providers:[]})),
-        apiJson('/api/canvas-assets').catch(() => ({categories:[], canvases:[], items:[]})),
-        loadSharedFolders(),
-        loadLocalAssets()
+        apiJson('/api/providers').catch(() => ({providers:[]}))
     ]);
     assetLibrary = assetData.library || {libraries:[], categories:[]};
     promptLibrary = promptData.library || {libraries:[]};
     referenceSlotTypes = normalizeReferenceSlotTypes(referenceTypeData.types);
     apiProviders = Array.isArray(providerData.providers) ? providerData.providers : [];
-    canvasAssetsData = {
-        categories:Array.isArray(canvasAssetData.categories) ? canvasAssetData.categories : [],
-        canvases:Array.isArray(canvasAssetData.canvases) ? canvasAssetData.canvases : [],
-        items:Array.isArray(canvasAssetData.items) ? canvasAssetData.items : []
-    };
+    canvasAssetsData = canvasAssetsLoaded ? canvasAssetsData : {categories:[], canvases:[], items:[]};
     // 刷新时默认回到「服装电商素材库」
     const libs = assetLibraries();
     activeAssetLibraryId = (libs.find(lib => lib.id === 'default') || libs[0])?.id || '';
@@ -1109,6 +1104,16 @@ async function loadAll(){
     selectedCanvasAssetIds.clear();
     render();
     setStatus('准备就绪');
+}
+async function ensureTabData(tab=activeTab){
+    if(tab === 'local' && !localAssetsLoaded){
+        setStatus('正在加载本地素材...');
+        await Promise.all([loadSharedFolders(), loadLocalAssets()]);
+        render();
+        setStatus('本地素材已加载');
+    } else if(tab === 'canvas-assets' && !canvasAssetsLoaded){
+        await refreshCanvasAssets();
+    }
 }
 function render(){
     if(activeTab === 'workflows') activeTab = 'assets';
@@ -3176,6 +3181,7 @@ async function handleClick(event){
         selectedLocalUploadIds.clear();
         selectedCanvasAssetIds.clear();
         render();
+        await ensureTabData(activeTab);
         return;
     }
     if(target.closest?.('#refreshBtn')){ await loadAll(); return; }

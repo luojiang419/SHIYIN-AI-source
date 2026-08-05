@@ -28,7 +28,7 @@ import html
 import ipaddress
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 from threading import Lock, Thread
 import httpx
 from PIL import Image, ImageOps
@@ -235,7 +235,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.124"
+APP_VERSION = "1.0.125"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -12443,6 +12443,7 @@ async def execute_ai_image_batch(
     prefix: str,
     allow_edit_endpoint_fallback: bool = True,
     semantic_mask: bool = False,
+    progress_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
 ) -> Dict[str, Any]:
     provider = get_api_provider(provider_id)
     default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
@@ -12452,7 +12453,14 @@ async def execute_ai_image_batch(
     safe_count = max(1, min(8, int(count or 1)))
     generation_started_at = time.time()
 
-    async def generate_one():
+    async def notify_progress(payload: Dict[str, Any]) -> None:
+        if not progress_callback:
+            return
+        result = progress_callback(payload)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def generate_one(index: int):
         image_data, raw_item = await generate_ai_image(
             prompt,
             size,
@@ -12475,10 +12483,26 @@ async def execute_ai_image_batch(
             if local_url:
                 local_urls.append(local_url)
                 local_items.append(image_output_meta(local_url, item))
-        return local_urls, local_items, raw_item
+        return index, local_urls, local_items, raw_item
 
     try:
-        generated = await asyncio.gather(*(generate_one() for _ in range(safe_count)))
+        generated = []
+        tasks = [asyncio.create_task(generate_one(index)) for index in range(safe_count)]
+        for task in asyncio.as_completed(tasks):
+            item = await task
+            generated.append(item)
+            _index, done_urls, done_items, done_raw = item
+            if done_urls:
+                await notify_progress({
+                    "index": _index,
+                    "images": done_urls,
+                    "image_items": done_items,
+                    "raw": done_raw,
+                    "completed_count": sum(len(urls or []) for _idx, urls, _items, _raw in generated),
+                    "total_count": safe_count,
+                    "generation_started_at": generation_started_at,
+                    "generation_completed_at": time.time(),
+                })
     except httpx.HTTPStatusError as exc:
         log_net_error(f"生图 HTTP状态错误 provider={provider.get('id')} model={resolved_model} size={size}", exc)
         text = exc.response.text or ''
@@ -12489,9 +12513,10 @@ async def execute_ai_image_batch(
         log_net_error(f"生图 网络/TLS错误 provider={provider.get('id')} model={resolved_model}", exc)
         raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
 
-    local_urls = [url for urls, _items, _raw in generated for url in (urls or []) if url]
-    local_items = [item for _urls, items, _raw in generated for item in (items or []) if item.get("url")]
-    raw = generated[0][2] if generated else {}
+    generated.sort(key=lambda item: item[0])
+    local_urls = [url for _idx, urls, _items, _raw in generated for url in (urls or []) if url]
+    local_items = [item for _idx, _urls, items, _raw in generated for item in (items or []) if item.get("url")]
+    raw = generated[0][3] if generated else {}
     if not local_urls:
         provider_name = provider.get("name") or provider["id"]
         raw_text = json.dumps(raw, ensure_ascii=False)[:800] if isinstance(raw, (dict, list)) else str(raw)[:800]
@@ -13207,6 +13232,85 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     try:
         for index, route in enumerate(routes):
             try:
+                partial_images: List[str] = []
+                partial_items: List[Dict[str, Any]] = []
+
+                async def publish_ecommerce_partial(progress: Dict[str, Any]) -> None:
+                    nonlocal partial_images, partial_items
+                    progress_images = [url for url in (progress.get("images") or []) if url]
+                    if not progress_images:
+                        return
+                    existing = set(partial_images)
+                    for url in progress_images:
+                        if url not in existing:
+                            partial_images.append(url)
+                            existing.add(url)
+                    for item in (progress.get("image_items") or []):
+                        if isinstance(item, dict) and item.get("url") and item.get("url") in existing:
+                            if not any(existing_item.get("url") == item.get("url") for existing_item in partial_items):
+                                partial_items.append(item)
+                    completed_at = float(progress.get("generation_completed_at") or time.time())
+                    elapsed = round(max(0, completed_at - float(progress.get("generation_started_at") or completed_at)), 3)
+                    partial_result = {
+                        "type": "ecommerce",
+                        "operation": snapshot["operation"],
+                        "mode": snapshot["mode"],
+                        "ecommerce_task_id": task_id,
+                        "parent_task_id": snapshot.get("parent_task_id") or "",
+                        "prompt": snapshot["prompt"],
+                        "inputs": snapshot["inputs"],
+                        "composition_mode": snapshot.get("composition_mode") or "",
+                        "base_reference_id": snapshot.get("base_reference_id") or "",
+                        "base_reference_url": snapshot.get("base_reference_url") or "",
+                        "pose_reference_url": snapshot.get("pose_reference_url") or "",
+                        "comparison_reference_url": snapshot.get("comparison_reference_url") or "",
+                        "images": partial_images[:],
+                        "image_items": partial_items[:],
+                        "timestamp": completed_at,
+                        "provider_id": route["provider_id"],
+                        "provider_name": route.get("provider_name") or route["provider_id"],
+                        "model": route["model"],
+                        "size": snapshot["size"],
+                        "aspect_ratio": snapshot["aspect_ratio"],
+                        "resolution": snapshot["resolution"],
+                        "quality": snapshot["quality"],
+                        "candidate_count": len(partial_images),
+                        "candidate_total": snapshot["count"],
+                        "partial": True,
+                        "garment_analysis": garment_analysis,
+                        "universal_analysis": universal_analysis,
+                        "generation_started_at": progress.get("generation_started_at"),
+                        "generation_completed_at": completed_at,
+                        "generation_elapsed_seconds": elapsed,
+                        "params": {
+                            "operation": snapshot["operation"],
+                            "mode": snapshot["mode"],
+                            "options": snapshot["options"],
+                            "provider_id": route["provider_id"],
+                            "model": route["model"],
+                            "size": snapshot["size"],
+                            "aspect_ratio": snapshot["aspect_ratio"],
+                            "resolution": snapshot["resolution"],
+                            "quality": snapshot["quality"],
+                            "n": snapshot["count"],
+                            "parameters": snapshot["parameters"],
+                            "reference_images": snapshot["inputs"],
+                            "composition_mode": snapshot.get("composition_mode") or "",
+                            "base_reference_id": snapshot.get("base_reference_id") or "",
+                            "base_reference_url": snapshot.get("base_reference_url") or "",
+                            "pose_reference_url": snapshot.get("pose_reference_url") or "",
+                            "comparison_reference_url": snapshot.get("comparison_reference_url") or "",
+                        },
+                    }
+                    update_ecommerce_task(task_id, {
+                        "status": "running",
+                        "result": partial_result,
+                        "partial_result": partial_result,
+                        "provider_id": partial_result["provider_id"],
+                        "provider_name": partial_result["provider_name"],
+                        "model": partial_result["model"],
+                    })
+
                 batch = await execute_ai_image_batch(
                     prompt=snapshot["prompt"],
                     provider_id=route["provider_id"],
@@ -13218,6 +13322,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     prefix="ecommerce_",
                     allow_edit_endpoint_fallback=False,
                     semantic_mask=True,
+                    progress_callback=publish_ecommerce_partial,
                 )
                 batch = await apply_selected_studio_background(batch, snapshot, route)
                 raw = batch["raw"]
@@ -13279,6 +13384,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 update_ecommerce_task(task_id, {
                     "status": "succeeded",
                     "result": result,
+                    "partial_result": None,
                     "error": "",
                     "provider_id": result["provider_id"],
                     "provider_name": result["provider_name"],
@@ -13391,13 +13497,16 @@ async def ecommerce_task_status(payload: EcommerceTaskStatusRequest):
             if not task:
                 missing.append(task_id)
                 continue
-            tasks.append({
+            update = {
                 "id": task_id,
                 "task_id": task_id,
                 "status": str(task.get("status") or "queued"),
                 "updated_at": float(task.get("updated_at") or 0),
                 "error": str(task.get("error") or "")[:500],
-            })
+            }
+            if isinstance(task.get("result"), dict) and task.get("result", {}).get("partial"):
+                update["result"] = task.get("result")
+            tasks.append(update)
     return {"tasks": tasks, "missing": missing}
 
 @app.get("/api/ecommerce/tasks/{task_id}")

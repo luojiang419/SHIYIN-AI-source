@@ -15,6 +15,7 @@
         kind:'',
         compareWork:null,
         compareViewer:null,
+        previewController:null,
         localBaseUrl:'',
         localTargetUrl:'',
         renderStart:-1,
@@ -26,7 +27,7 @@
     const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g,ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
 
     function cache(){
-        ['worksCount','worksTabs','worksSearch','worksKind','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksToast'].forEach(id => el[id]=byId(id));
+        ['worksCount','worksTabs','worksSearch','worksKind','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
     }
     async function fetchJson(url,options={}){
         const response = await fetch(url,options);
@@ -84,7 +85,7 @@
         const left = col * (metrics.cardWidth + GRID_GAP);
         const top = row * metrics.rowHeight;
         return `<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
-            <button class="works-card-media" type="button" data-compare-work="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy"><span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
+            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy"><span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
                 <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
@@ -92,6 +93,7 @@
             </div></article>`;
     }
     function bindGridActions(){
+        el.worksGrid.querySelectorAll('[data-preview-work]').forEach(button=>button.addEventListener('click',()=>openPreview(button.dataset.previewWork)));
         el.worksGrid.querySelectorAll('[data-compare-work]').forEach(button=>button.addEventListener('click',()=>openCompare(button.dataset.compareWork)));
         el.worksGrid.querySelectorAll('[data-favorite-work]').forEach(button=>button.addEventListener('click',()=>toggleFavorite(button.dataset.favoriteWork)));
         el.worksGrid.querySelectorAll('[data-download-work]').forEach(button=>button.addEventListener('click',()=>downloadWork(state.works.find(item=>item.id===button.dataset.downloadWork))));
@@ -245,9 +247,37 @@
         renderBaseOptions(target);
         applyComparison();
     }
+    function openPreview(workId=''){
+        const work=state.works.find(item=>item.id===workId && item.url);
+        if(!work) return;
+        el.worksPreviewImage.src=work.url;
+        el.worksPreviewImage.alt=work.name || t('works.work');
+        el.worksPreviewName.textContent=work.name || t('works.work');
+        el.worksPreviewMeta.innerHTML=[kindLabel(work),work.model || '',work.width&&work.height?`${work.width}x${work.height}`:'',dateText(work.created_at)].filter(Boolean).map(value=>`<span>${escapeHtml(value)}</span>`).join('');
+        el.worksPreviewDownload.onclick=()=>downloadWork(work);
+        el.worksPreviewDialog.showModal();
+        if(!state.previewController && window.StudioImagePreview?.attach){
+            state.previewController=window.StudioImagePreview.attach(el.worksPreviewFrame,{img:el.worksPreviewImage,maxZoom:8});
+        }
+        state.previewController?.reset?.();
+    }
+    function closePreview(){
+        if(document.fullscreenElement === el.worksPreviewFrame) document.exitFullscreen?.().catch?.(()=>{});
+        el.worksPreviewDialog.close();
+        el.worksPreviewImage.removeAttribute('src');
+        state.previewController?.reset?.();
+    }
+    async function togglePreviewFullscreen(){
+        if(document.fullscreenElement === el.worksPreviewFrame){
+            await document.exitFullscreen?.();
+            return;
+        }
+        try { await el.worksPreviewFrame.requestFullscreen?.({navigationUI:'hide'}); }
+        catch(error) { toast(error.message || t('works.preview')); }
+    }
     function openCompare(workId=''){
         const work=state.works.find(item=>item.id===workId) || state.works.find(item=>!item.trashed);
-        if(!state.compareViewer) state.compareViewer=window.createCompareViewer({stage:el.worksCompareStage,before:el.worksBeforeImage,after:el.worksAfterImage,afterClip:el.worksAfterClip,handle:el.worksCompareHandle,zoomOut:el.worksZoomOut,zoomReset:el.worksZoomReset,zoomIn:el.worksZoomIn,fullscreen:el.worksFullscreen});
+        if(!state.compareViewer) state.compareViewer=new window.CompareViewer({root:el.worksCompareStage,before:el.worksBeforeImage,after:el.worksAfterImage,afterClip:el.worksAfterClip,handle:el.worksCompareHandle,zoomOutButton:el.worksZoomOut,zoomLabel:el.worksZoomReset,zoomInButton:el.worksZoomIn,fullscreenButton:el.worksFullscreen});
         renderTargetOptions(work?.id || '');
         if(work) el.compareTargetSelect.value=work.id;
         syncCompareTarget();
@@ -325,6 +355,9 @@
         el.compareTargetFileButton.addEventListener('click',()=>el.compareTargetFile.click());
         el.compareBaseFile.addEventListener('change',event=>{const file=event.target.files?.[0];if(!file)return;state.localBaseUrl=URL.createObjectURL(file);renderBaseOptions(selectedTarget());applyComparison();});
         el.compareTargetFile.addEventListener('change',event=>{const file=event.target.files?.[0];if(!file)return;state.localTargetUrl=URL.createObjectURL(file);renderTargetOptions('local');syncCompareTarget();});
+        el.closeWorksPreview.addEventListener('click',closePreview);
+        el.worksPreviewDialog.addEventListener('click',event=>{if(event.target===el.worksPreviewDialog)closePreview();});
+        el.worksPreviewFullscreen.addEventListener('click',togglePreviewFullscreen);
         el.worksGrid.addEventListener('scroll',handleScroll,{passive:true});
         window.addEventListener('resize',()=>renderVirtual(true));
         el.worksDownloadAll.addEventListener('click',downloadAll);

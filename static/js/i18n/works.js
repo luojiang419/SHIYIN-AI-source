@@ -12,6 +12,7 @@
         "works.emptyTitle": {zh:"还没有作品",en:"No works yet"},
         "works.emptyHint": {zh:"生成完成的图片会自动出现在这里",en:"Generated images will appear here automatically"},
         "works.compare": {zh:"划像对比",en:"Compare"},
+        "works.preview": {zh:"作品预览",en:"Preview"},
         "works.download": {zh:"下载",en:"Download"},
         "works.downloadAll": {zh:"下载全部作品",en:"Download all works"},
         "works.clearAll": {zh:"一键清空",en:"Clear all"},

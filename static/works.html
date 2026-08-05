@@ -77,10 +77,24 @@
         </div>
     </dialog>
 
+    <dialog id="worksPreviewDialog" class="works-preview-dialog">
+        <div class="works-preview-shell">
+            <header>
+                <div><small data-i18n="works.preview">作品预览</small><h2 id="worksPreviewName">—</h2></div>
+                <div class="works-dialog-actions"><button id="worksPreviewFullscreen" type="button" aria-label="全屏">⛶</button><button id="closeWorksPreview" type="button" aria-label="关闭">×</button></div>
+            </header>
+            <div id="worksPreviewFrame" class="works-preview-frame">
+                <img id="worksPreviewImage" class="studio-preview-img" alt="作品预览" draggable="false">
+            </div>
+            <footer><div id="worksPreviewMeta" class="works-compare-meta"></div><button id="worksPreviewDownload" type="button" data-i18n="works.download">下载</button></footer>
+        </div>
+    </dialog>
+
     <input id="compareBaseFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
     <input id="compareTargetFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
     <div id="worksToast" class="works-toast" role="status"></div>
     <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
-    <script src="/static/js/works.js?v=2026.07.26.bulk-download.1"></script>
+    <script src="/static/js/image-preview.js?v=2026.08.05.works-preview.1"></script>
+    <script src="/static/js/works.js?v=2026.08.05.preview-entry.1"></script>
 </body>
 </html>

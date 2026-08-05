@@ -3133,9 +3133,15 @@
         return tasks.flatMap(task => {
             const id = taskIdOf(task);
             const images = task?.result?.images || [];
-            if(images.length) return images.map((url,index) => ({id,index,url,status:task.status,task,display_index:++completedOrder}));
             const placeholderCount = requestedOutputCountForTask(task);
-            return Array.from({length:placeholderCount}, (_,index) => ({id,index,url:'',status:task.status || 'queued',task}));
+            if(!images.length) return Array.from({length:placeholderCount}, (_,index) => ({id,index,url:'',status:task.status || 'queued',task}));
+            const completed = images.map((url,index) => ({id,index,url,status:task.status,task,display_index:++completedOrder}));
+            if(images.length && !isTaskActive(task)) return completed;
+            const pendingCount = Math.max(0, placeholderCount - images.length);
+            return [
+                ...completed,
+                ...Array.from({length:pendingCount}, (_,offset) => ({id,index:images.length + offset,url:'',status:task.status || 'queued',task})),
+            ];
         }).slice(0,160);
     }
 

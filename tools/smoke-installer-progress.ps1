@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallerPath,
     [Parameter(Mandatory = $true)]
-    [string]$Version
+    [string]$Version,
+    [int]$Port = 3119
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +23,7 @@ $installRoot = Join-Path $stage 'installed'
 $logPath = Join-Path $stage 'installer.log'
 $progressPath = Join-Path $stage 'installer-progress.txt'
 $success = $false
+$uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{5D7C3DA8-5D77-4C9A-BF1E-0F1A22D6A4A5}_is1'
 $smokeShortcutPaths = @(
     (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)) 'SHIYIN AI.lnk'),
     (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)) 'SHIYIN AI.lnk'),
@@ -30,6 +32,12 @@ $smokeShortcutPaths = @(
 ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
 try {
+    if (Test-Path -LiteralPath $uninstallKey) {
+        $existingInstall = [string](Get-ItemPropertyValue -LiteralPath $uninstallKey -Name InstallLocation -ErrorAction SilentlyContinue)
+        if ($existingInstall -and [IO.Path]::GetFullPath($existingInstall).TrimEnd('\') -ne [IO.Path]::GetFullPath($installRoot).TrimEnd('\')) {
+            throw "Installer smoke test refuses to overwrite an existing SHIYIN AI registration: $existingInstall"
+        }
+    }
     $arguments = @(
         '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL',
         '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS',
@@ -91,6 +99,13 @@ try {
     if ($commonShortcut.TargetPath -ne $installedExe) {
         throw "Common Start Menu shortcut target mismatch: $($commonShortcut.TargetPath)"
     }
+    $runtimeSmokeJson = & (Join-Path $PSScriptRoot 'smoke-desktop.ps1') -Stage $installRoot -Port $Port -IdleSeconds 1
+    $runtimeSmokeSucceeded = $?
+    if (-not $runtimeSmokeSucceeded) { throw 'Installed desktop runtime smoke test failed.' }
+    $runtimeSmoke = ($runtimeSmokeJson -join "`n") | ConvertFrom-Json
+    if ($runtimeSmoke.health -ne 'ok' -or -not $runtimeSmoke.data_created -or -not $runtimeSmoke.backend_stopped_after_parent_exit) {
+        throw 'Installed desktop runtime did not satisfy the startup contract.'
+    }
     $success = $true
     [pscustomobject]@{
         installer = [IO.Path]::GetFileName($installer)
@@ -101,6 +116,9 @@ try {
         last_sample = $samples[$samples.Count - 1]
         realtime_progress = $true
         start_menu_shortcut = $true
+        runtime_health = $runtimeSmoke.health
+        runtime_startup_ms = $runtimeSmoke.startup_ms
+        runtime_data_created = $runtimeSmoke.data_created
     } | ConvertTo-Json -Compress
 }
 finally {
@@ -115,6 +133,12 @@ finally {
         }
         catch {
             # Keep the smoke-test artifact for diagnosis when shortcut inspection fails.
+        }
+    }
+    if (Test-Path -LiteralPath $uninstallKey) {
+        $registeredInstall = [string](Get-ItemPropertyValue -LiteralPath $uninstallKey -Name InstallLocation -ErrorAction SilentlyContinue)
+        if ($registeredInstall -and [IO.Path]::GetFullPath($registeredInstall).TrimEnd('\') -eq [IO.Path]::GetFullPath($installRoot).TrimEnd('\')) {
+            Remove-Item -LiteralPath $uninstallKey -Recurse -Force
         }
     }
     if ($success -and (Test-Path -LiteralPath $stage)) {

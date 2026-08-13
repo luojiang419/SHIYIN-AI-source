@@ -47,7 +47,7 @@ class UnifiedThemeTests(unittest.TestCase):
         for frame_id in ("frame-ecommerce", "frame-free-creation"):
             self.assertRegex(
                 source,
-                rf'id="{frame_id}"[^>]+ivory-surfaces\.1',
+                rf'id="{frame_id}"[^>]+universal-plan-banner-removed\.1',
                 frame_id,
             )
 

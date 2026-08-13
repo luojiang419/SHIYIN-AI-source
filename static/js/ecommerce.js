@@ -70,7 +70,11 @@
         },
     };
 
-    const UNIVERSAL_PRESET_ROLES = ['subject','full_garment','detail','detail','pose','scene'];
+    const UNIVERSAL_PRESET_ROLES = ['subject','model_identity','full_garment','accessory'];
+    const LEGACY_UNIVERSAL_PRESET_ROLES = [...UNIVERSAL_PRESET_ROLES,'pose','scene'];
+    const UNIVERSAL_CANONICAL_ROLE_ORDER = ['subject','model_identity','upper_garment','lower_garment','full_garment','shoes','accessory','prop','scene_prop','detail','pose','scene','style'];
+    const UNIVERSAL_EXCLUSIVE_ROLES = new Set(['subject','model_identity','upper_garment','lower_garment','full_garment','shoes','pose','scene','style']);
+    const UNIVERSAL_PRODUCT_ROLES = new Set(['upper_garment','lower_garment','full_garment','shoes','accessory','prop','scene_prop']);
     const TRY_ON_OUTFIT_ROLES = [
         {role:'upper_garment', labelKey:'ecommerce.refUpper', stageKey:'ecommerce.tryOnUpperStage', number:'02'},
         {role:'lower_garment', labelKey:'ecommerce.refLower', stageKey:'ecommerce.tryOnLowerStage', number:'03'},
@@ -80,6 +84,7 @@
     ];
     const TRY_ON_POSE_ROLE = {role:'pose', labelKey:'ecommerce.poseImage', stageKey:'ecommerce.tryOnPoseStage', number:'07'};
     const TRY_ON_WARDROBE_ROLES = [...TRY_ON_OUTFIT_ROLES, TRY_ON_POSE_ROLE];
+    const TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT = 3;
     const TRY_ON_PREVIEW_LAYER_ORDER = ['full_garment','upper_garment','lower_garment','shoes','accessory','garment'];
     const TRY_ON_REQUEST_ROLES = ['model_identity', ...TRY_ON_PREVIEW_LAYER_ORDER, 'detail', 'pose'];
     const TRY_ON_MULTI_REFERENCE_ROLES = ['source', ...TRY_ON_REQUEST_ROLES];
@@ -87,7 +92,7 @@
 
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:''},
-        try_on:{garment_category:'auto', instruction:'', slot_order:[], studio_reference:''},
+        try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, studio_reference:''},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
         prop_replace:{target_description:'', instruction:'', studio_reference:''},
         angle_change:{azimuth:45, elevation:0, distance:'medium', instruction:'', studio_reference:''},
@@ -581,7 +586,7 @@
     const UNIVERSAL_FALLBACK_ROLES = [
         ['subject','subject','ecommerce.refSubject'],['model_identity','model_identity','ecommerce.refModelIdentity'],['upper_garment','upper_garment','ecommerce.refUpper'],['lower_garment','lower_garment','ecommerce.refLower'],
         ['full_garment','full_garment','ecommerce.refFullGarment'],['shoes','shoes','ecommerce.refShoes'],['accessory','accessory','ecommerce.refAccessory'],
-        ['prop','prop','ecommerce.refProp'],['detail','detail','ecommerce.refDetail'],['pose','pose','ecommerce.refPose'],['scene','scene','ecommerce.refScene'],['style','style','ecommerce.refStyle'],
+        ['prop','prop','ecommerce.refProp'],['scene_prop','scene_prop','ecommerce.refSceneProp'],['detail','detail','ecommerce.refDetail'],['pose','pose','ecommerce.refPose'],['scene','scene','ecommerce.refScene'],['style','style','ecommerce.refStyle'],
     ];
     const TRY_ON_SELECTABLE_REFERENCE_ROLES = new Set(['subject','model_identity','upper_garment','lower_garment','full_garment','shoes','accessory','prop','detail','pose']);
 
@@ -593,14 +598,161 @@
         return Object.entries(state.inputs).filter(([key,item]) => key.startsWith('ref_') && item && typeof item === 'object').sort((a,b) => Number(a[1].order || 0) - Number(b[1].order || 0));
     }
 
+    function universalTypedEntries(){
+        const roleOrder = new Map(UNIVERSAL_CANONICAL_ROLE_ORDER.map((role,index) => [role,index]));
+        return universalEntries().filter(([,item]) => item.url).sort((a,b) => {
+            const roleA = String(a[1].reference_type || a[1].role || 'prop');
+            const roleB = String(b[1].reference_type || b[1].role || 'prop');
+            return (roleOrder.get(roleA) ?? roleOrder.size) - (roleOrder.get(roleB) ?? roleOrder.size) || Number(a[1].order || 0) - Number(b[1].order || 0);
+        });
+    }
+
+    function universalHasManualPrompt(){
+        return !IS_FREE_CREATION && Boolean(String(currentOptions()?.instruction || '').trim());
+    }
+
+    function universalReferenceItemLabel(item, fallback=''){
+        return requestReferenceLabel(item, fallback || referenceTypeDisplayLabel(item, item?.reference_type || item?.role || 'prop'));
+    }
+
+    function resolveUniversalReferencePlan(){
+        const manualPrompt = universalHasManualPrompt();
+        const entries = manualPrompt ? universalEntries().filter(([,item]) => item.url) : universalTypedEntries();
+        const byRole = Object.fromEntries(UNIVERSAL_CANONICAL_ROLE_ORDER.map(role => [role,[]]));
+        entries.forEach(entry => {
+            const role = String(entry[1].reference_type || entry[1].role || 'prop');
+            if(!byRole[role]) byRole[role] = [];
+            byRole[role].push(entry);
+        });
+        const products = entries.filter(([,item]) => UNIVERSAL_PRODUCT_ROLES.has(String(item.reference_type || item.role || '')));
+        if(manualPrompt) {
+            return {
+                mode:'manual_prompt', manualPrompt:true, entries, byRole, products, conflicts:[],
+                summary:[
+                    [t('ecommerce.planGenerationMode'), t('ecommerce.planManualControl')],
+                    [t('ecommerce.planImageOrder'), t('ecommerce.planUploadOrder')],
+                ],
+            };
+        }
+        const conflicts = [];
+        UNIVERSAL_EXCLUSIVE_ROLES.forEach(role => {
+            if((byRole[role] || []).length > 1) {
+                const roleLabel = referenceSlotTypeById(role)?.label || role;
+                conflicts.push(t('ecommerce.referenceDuplicateConflict',{role:roleLabel}));
+            }
+        });
+        if(byRole.full_garment.length && (byRole.upper_garment.length || byRole.lower_garment.length)) conflicts.push(t('ecommerce.outfitTypeConflict'));
+        if(byRole.scene.length && String(currentOptions()?.studio_reference || '').trim()) conflicts.push(t('ecommerce.sceneStudioConflict'));
+        const productIds = new Set(products.map(([,item]) => item.reference_id));
+        byRole.detail.forEach(([,item]) => {
+            const targetId = String(item.detail_target_id || '').trim();
+            if(!products.length) conflicts.push(t('ecommerce.detailMissingProduct'));
+            else if(targetId && !productIds.has(targetId)) conflicts.push(t('ecommerce.detailTargetMissing'));
+            else if(!targetId && products.length > 1) conflicts.push(t('ecommerce.detailTargetRequired'));
+        });
+        const subject = byRole.subject[0]?.[1] || null;
+        const identity = byRole.model_identity[0]?.[1] || null;
+        const garmentItems = byRole.full_garment.length ? byRole.full_garment : [...byRole.upper_garment,...byRole.lower_garment];
+        const accessoryItems = [...byRole.shoes,...byRole.accessory,...byRole.prop,...byRole.scene_prop];
+        const scene = byRole.scene[0]?.[1] || null;
+        const pose = byRole.pose[0]?.[1] || null;
+        const studio = currentStudioReference();
+        let mode = '';
+        if(subject) mode = 'subject_edit';
+        else if(identity) mode = 'visible_model';
+        else if(garmentItems.length && pose) mode = 'invisible_outfit';
+        else if(products.length) mode = 'product_showcase';
+        else conflicts.push(t('ecommerce.automaticTargetRequired'));
+
+        let summary = [];
+        if(mode === 'subject_edit') {
+            summary = [
+                [t('ecommerce.planBody'), universalReferenceItemLabel(subject)],
+                [t('ecommerce.planIdentity'), identity ? universalReferenceItemLabel(identity) : t('ecommerce.planUseSubjectIdentity')],
+                [t('ecommerce.planGarment'), garmentItems.length ? garmentItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planKeepSubjectGarment')],
+                [t('ecommerce.planAccessory'), accessoryItems.length ? accessoryItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planKeepSubjectAccessory')],
+                [t('ecommerce.planScene'), scene ? universalReferenceItemLabel(scene) : (studio?.label || t('ecommerce.planKeepSubjectScene'))],
+                [t('ecommerce.planPose'), pose ? universalReferenceItemLabel(pose) : t('ecommerce.planUseSubjectPose')],
+            ];
+        } else if(mode === 'visible_model') {
+            summary = [
+                [t('ecommerce.planBody'), t('ecommerce.planSystemModel')],
+                [t('ecommerce.planIdentity'), universalReferenceItemLabel(identity)],
+                [t('ecommerce.planGarment'), garmentItems.length ? garmentItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planSystemGarment')],
+                [t('ecommerce.planAccessory'), accessoryItems.length ? accessoryItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planNoAccessory')],
+                [t('ecommerce.planScene'), scene ? universalReferenceItemLabel(scene) : (studio?.label || t('ecommerce.planSystemStudio'))],
+                [t('ecommerce.planPose'), pose ? universalReferenceItemLabel(pose) : t('ecommerce.planSystemPose')],
+            ];
+        } else if(mode === 'invisible_outfit') {
+            summary = [
+                [t('ecommerce.planBody'), t('ecommerce.planInvisibleBody')],
+                [t('ecommerce.planIdentity'), t('ecommerce.planNoIdentity')],
+                [t('ecommerce.planGarment'), garmentItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ')],
+                [t('ecommerce.planAccessory'), accessoryItems.length ? accessoryItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planNoAccessory')],
+                [t('ecommerce.planScene'), scene ? universalReferenceItemLabel(scene) : (studio?.label || t('ecommerce.planSystemStudio'))],
+                [t('ecommerce.planPose'), universalReferenceItemLabel(pose)],
+            ];
+        } else if(mode === 'product_showcase') {
+            summary = [
+                [t('ecommerce.planBody'), t('ecommerce.planProductOnly')],
+                [t('ecommerce.planIdentity'), t('ecommerce.planNoIdentity')],
+                [t('ecommerce.planGarment'), garmentItems.length ? garmentItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planNoGarment')],
+                [t('ecommerce.planAccessory'), accessoryItems.length ? accessoryItems.map(([,item]) => universalReferenceItemLabel(item)).join(' + ') : t('ecommerce.planNoAccessory')],
+                [t('ecommerce.planScene'), scene ? universalReferenceItemLabel(scene) : (studio?.label || t('ecommerce.planProductStudio'))],
+                [t('ecommerce.planPose'), t('ecommerce.planProductArrangement')],
+            ];
+        } else {
+            summary = [[t('ecommerce.planGenerationMode'), t('ecommerce.planMissingTarget')]];
+        }
+        return {
+            mode, manualPrompt:false, entries, byRole, products, conflicts, summary,
+        };
+    }
+
+    function syncUniversalPromptModeUi(){
+        if(state.operation !== 'universal' || IS_FREE_CREATION) return;
+        const plan = resolveUniversalReferencePlan();
+        el.inputSlots?.querySelectorAll('.ec-detail-target').forEach(node => node.classList.toggle('hidden', plan.manualPrompt));
+    }
+
+    function detailTargetIdForItem(item, plan){
+        const explicit = String(item?.detail_target_id || '').trim();
+        if(explicit) return explicit;
+        return plan.products.length === 1 ? String(plan.products[0][1].reference_id || '') : '';
+    }
+
+    function universalDetailTargetHtml(item, plan){
+        if(IS_FREE_CREATION || String(item?.reference_type || item?.role || '') !== 'detail') return '';
+        const selected = detailTargetIdForItem(item, plan);
+        if(!plan.products.length) return `<div class="ec-detail-target is-error"><b>${escapeHtml(t('ecommerce.detailTarget'))}</b><span>${escapeHtml(t('ecommerce.detailMissingProduct'))}</span></div>`;
+        const options = plan.products.map(([,product]) => `<option value="${escapeHtml(product.reference_id)}" ${product.reference_id === selected ? 'selected':''}>${escapeHtml(universalReferenceItemLabel(product))}</option>`).join('');
+        return `<label class="ec-detail-target"><b>${escapeHtml(t('ecommerce.detailTarget'))}</b><select data-detail-target="${escapeHtml(item.reference_id)}"><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
+    }
+
     function createUniversalReference(role, order){
         const key = newUniversalKey();
         state.inputs[key] = {url:'',name:'',role,reference_type:role,slot_type:defaultSlotTypeIdForRole(role),reference_id:key,custom_type_label:'',label:'',instruction:'',order};
         return key;
     }
 
+    function universalReferenceHasContent(item){
+        return Boolean(
+            item?.url || item?.preview_url || item?.name || item?.label || item?.instruction || item?.custom_type_label || item?.detail_target_id
+        );
+    }
+
     function seedUniversalPresetsIfEmpty(){
-        if(universalEntries().length) return;
+        const entries = universalEntries();
+        if(entries.length) {
+            const legacyPreset = entries.length === LEGACY_UNIVERSAL_PRESET_ROLES.length
+                && entries.every(([,item], index) => String(item.reference_type || item.role || '') === LEGACY_UNIVERSAL_PRESET_ROLES[index]);
+            if(legacyPreset) {
+                entries.slice(UNIVERSAL_PRESET_ROLES.length).forEach(([key,item]) => {
+                    if(!universalReferenceHasContent(item)) delete state.inputs[key];
+                });
+            }
+            return;
+        }
         UNIVERSAL_PRESET_ROLES.forEach((role, order) => createUniversalReference(role, order));
     }
 
@@ -614,7 +766,10 @@
         const configured = Array.isArray(state.referenceSlotTypes) && state.referenceSlotTypes.length
             ? state.referenceSlotTypes
             : (Array.isArray(state.capabilities?.reference_slot_types) ? state.capabilities.reference_slot_types : []);
-        const source = configured.length ? configured : fallbackReferenceSlotTypes();
+        const fallbacks = fallbackReferenceSlotTypes();
+        const source = configured.length
+            ? [...configured, ...fallbacks.filter(fallback => !configured.some(item => item && (item.id === fallback.id || item.role === fallback.role)))]
+            : fallbacks;
         return source.filter(item => item && item.enabled !== false).map((item,index) => ({
             id:String(item.id || item.role || '').trim(),
             role:String(item.role || item.id || '').trim(),
@@ -813,6 +968,7 @@
             shoes:'ecommerce.presetShoes',
             accessory:'ecommerce.presetAccessory',
             prop:'ecommerce.presetProp',
+            scene_prop:'ecommerce.presetSceneProp',
             detail:'ecommerce.presetDetail',
             pose:'ecommerce.presetPose',
             scene:'ecommerce.presetScene',
@@ -884,8 +1040,7 @@
         const limit = Number(state.capabilities?.universal_reference_limit || 14);
         const roles = universalReferenceRoles();
         const uploadedEntries = entries.filter(([,item]) => item.url);
-        const hasSubject = uploadedEntries.some(([,item]) => item.reference_type === 'subject');
-        const baseReferenceKey = IS_FREE_CREATION ? '' : (hasSubject ? '' : (uploadedEntries[0]?.[0] || ''));
+        const plan = resolveUniversalReferencePlan();
         const manyReferences = entries.length > 6;
         el.ecommercePage?.classList.toggle('has-many-universal-references', manyReferences);
         el.universalDock?.classList.toggle('has-many-references', manyReferences);
@@ -893,17 +1048,16 @@
         const guideTitleKey = IS_FREE_CREATION ? 'freeCreation.guideTitle' : 'ecommerce.universalGuideTitle';
         const guideHintKey = IS_FREE_CREATION ? 'freeCreation.guideHint' : 'ecommerce.universalGuideHint';
         el.inputSlots.innerHTML = `<div class="ec-universal-guide"><strong>${escapeHtml(t(guideTitleKey))}</strong><p>${escapeHtml(t(guideHintKey))}</p></div>` + entries.map(([key,item],index) => {
-            const selected = selectedSlotTypeId(item, index === 0 ? 'subject' : 'prop');
+            const selected = selectedSlotTypeId(item, item.reference_type || item.role || 'prop');
             const selectedType = referenceSlotTypeById(selected) || roles[0] || {};
-            const role = selectedType.role || item.reference_type || item.role || (index === 0 ? 'subject':'prop');
+            const role = selectedType.role || item.reference_type || item.role || 'prop';
             const roleLabel = selectedType.label || roles.find(item => item.role === role || item.id === role)?.label || role;
             const uploadLabel = universalUploadLabel(role, roleLabel);
-            const baseBadge = key === baseReferenceKey ? `<span class="ec-base-reference-badge">${escapeHtml(t('ecommerce.baseReferenceBadge'))}</span>` : '';
-            return `<article class="ec-universal-reference ${key === baseReferenceKey ? 'is-base-reference':''}" data-reference-key="${escapeHtml(key)}" data-reference-role="${escapeHtml(role)}" data-reference-index="${index + 1}">
-                ${baseBadge}
+            return `<article class="ec-universal-reference" data-reference-key="${escapeHtml(key)}" data-reference-role="${escapeHtml(role)}" data-reference-index="${index + 1}">
                 <header><span class="ec-drag-handle" draggable="true" data-reference-drag-handle="${escapeHtml(key)}" title="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</span><b>${escapeHtml(t('ecommerce.imageNumber',{count:index + 1}))}</b><button type="button" data-remove-reference="${escapeHtml(key)}" aria-label="${escapeHtml(t('ecommerce.remove'))}">×</button></header>
                 <div class="ec-upload-slot ${role==='subject' && !IS_FREE_CREATION?'required':''}" data-role="${escapeHtml(key)}">${universalUploadHtml(key,item,uploadLabel)}</div>
                 <label class="ec-reference-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected, context:'universal', fallbackRole:role, item, dataAttr:'data-reference-type', dataValue:key})}</label>
+                ${universalDetailTargetHtml(item, plan)}
                 <div class="ec-reference-fields"><label><span>${escapeHtml(t('ecommerce.referenceLabel'))}</span><input data-reference-field="label" data-reference-key="${escapeHtml(key)}" maxlength="160" value="${escapeHtml(item.label || '')}" placeholder="${escapeHtml(t('ecommerce.referenceLabelHint'))}"></label><label><span>${escapeHtml(t('ecommerce.referenceInstruction'))}</span><input data-reference-field="instruction" data-reference-key="${escapeHtml(key)}" maxlength="300" value="${escapeHtml(item.instruction || '')}" placeholder="${escapeHtml(t('ecommerce.referenceInstructionHint'))}"></label></div>
             </article>`;
         }).join('') + (IS_FREE_CREATION ? '' : studioReferenceCardHtml('universal'));
@@ -912,6 +1066,7 @@
         bindInputSlots();
         bindUniversalControls(limit);
         if(!IS_FREE_CREATION) bindStudioReferenceControls();
+        syncUniversalPromptModeUi();
         if(state.capabilities) {
             populateModelSelectors();
             updateRouteSummary();
@@ -952,6 +1107,41 @@
     function orderedTryOnWardrobeRoles(){
         const order = tryOnSlotOrder();
         return order.map(role => TRY_ON_WARDROBE_ROLES.find(item => item.role === role)).filter(Boolean);
+    }
+
+    function tryOnSlotHasUserContent(role){
+        const item = state.inputs[role];
+        if(!item) return false;
+        const alternates = Array.isArray(item.alternates) ? item.alternates : [];
+        return Boolean(
+            item.url || item.preview_url || alternates.some(candidate => candidate?.url || candidate?.preview_url)
+            || String(item.label || '').trim() || String(item.instruction || '').trim() || String(item.custom_type_label || '').trim()
+            || (item.slot_type && item.slot_type !== defaultSlotTypeIdForRole(role))
+        );
+    }
+
+    function visibleTryOnWardrobeRoles(){
+        const ordered = orderedTryOnWardrobeRoles();
+        const configured = Number(currentOptions().visible_slot_count);
+        const requested = Number.isFinite(configured) ? Math.trunc(configured) : TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT;
+        const visibleCount = Math.max(TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, Math.min(ordered.length, requested));
+        currentOptions().visible_slot_count = visibleCount;
+        const visible = ordered.slice(0, visibleCount);
+        ordered.slice(visibleCount).forEach(item => {
+            if(tryOnSlotHasUserContent(item.role)) visible.push(item);
+        });
+        return visible;
+    }
+
+    function addTryOnReferenceSlot(){
+        const ordered = orderedTryOnWardrobeRoles();
+        const visibleRoles = new Set(visibleTryOnWardrobeRoles().map(item => item.role));
+        const nextIndex = ordered.findIndex(item => !visibleRoles.has(item.role));
+        if(nextIndex < 0) return false;
+        currentOptions().visible_slot_count = Math.max(Number(currentOptions().visible_slot_count) || 0, nextIndex + 1);
+        renderInputs();
+        persistSettings();
+        return true;
     }
 
     function tryOnInputEntriesForRequest(){
@@ -1208,6 +1398,7 @@
     }
 
     function bindTryOnSlotControls(){
+        el.inputSlots.querySelector('[data-add-tryon-reference]')?.addEventListener('click', addTryOnReferenceSlot);
         el.inputSlots.querySelectorAll('[data-tryon-reference-type]').forEach(select => {
             const role = select.dataset.tryonReferenceType || '';
             bindReferenceTypeInlineControls(select, () => {
@@ -1281,6 +1472,11 @@
         const sourceReady = Boolean(state.inputs.source?.url);
         const outfitCount = tryOnOutfitCount();
         const ready = tryOnReady();
+        const visibleWardrobe = visibleTryOnWardrobeRoles();
+        const visibleReferenceCount = 1 + visibleWardrobe.length;
+        const referenceLimit = 1 + TRY_ON_WARDROBE_ROLES.length;
+        const canAddReference = visibleWardrobe.length < TRY_ON_WARDROBE_ROLES.length;
+        const completedVisibleReferences = Number(sourceReady) + visibleWardrobe.filter(item => state.inputs[item.role]?.url).length;
         const steps = [
             {number:'01', label:t('ecommerce.tryOnStepModel'), className:sourceReady ? 'complete' : 'active'},
             {number:'02', label:t('ecommerce.tryOnStepGarment'), className:outfitCount ? 'complete' : (sourceReady ? 'active' : '')},
@@ -1297,12 +1493,13 @@
                         ${inputSlotHtml(sourceInput)}
                         ${tryOnReferenceTypeRow('source')}
                     </div>
-                    ${orderedTryOnWardrobeRoles().map(tryOnWardrobeCard).join('')}
+                    ${visibleWardrobe.map(tryOnWardrobeCard).join('')}
                     ${studioReferenceCardHtml('try_on')}
                 </div>
+                ${canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
             </div>
         </section>`;
-        el.inputProgress.textContent = `${Number(sourceReady) + outfitCount + Number(Boolean(state.inputs.pose?.url))}/${1 + TRY_ON_WARDROBE_ROLES.length}`;
+        el.inputProgress.textContent = `${completedVisibleReferences}/${visibleReferenceCount}`;
         bindInputSlots();
         bindTryOnSlotControls();
         bindStudioReferenceControls();
@@ -1467,9 +1664,25 @@
             bindReferenceTypeInlineControls(select, () => state.inputs[key], item => item?.reference_type || item?.role || 'prop', afterCommit);
             select.addEventListener('change', () => {
                 const item = state.inputs[key];
-                if(item){ applySlotTypeToInput(item, select.value, item.reference_type || item.role || 'prop'); renderUniversalInputs(); persistSettings(); validateForm(false); }
+                if(item){
+                    applySlotTypeToInput(item, select.value, item.reference_type || item.role || 'prop');
+                    if(item.reference_type !== 'detail') delete item.detail_target_id;
+                    if(item.reference_type === 'scene' && currentOptions().studio_reference && !universalHasManualPrompt()) {
+                        currentOptions().studio_reference = '';
+                        showToast(t('ecommerce.sceneReplacedStudio'));
+                    }
+                    renderUniversalInputs(); persistSettings(); validateForm(false);
+                }
             });
         });
+        el.inputSlots.querySelectorAll('[data-detail-target]').forEach(select => select.addEventListener('change', () => {
+            const item = Object.values(state.inputs).find(value => value?.reference_id === select.dataset.detailTarget);
+            if(!item) return;
+            item.detail_target_id = select.value;
+            renderUniversalInputs();
+            persistSettings();
+            validateForm(false);
+        }));
         el.inputSlots.querySelectorAll('[data-reference-field]').forEach(input => bindComposingInput(input, () => {
             const item=state.inputs[input.dataset.referenceKey]; if(item){ item[input.dataset.referenceField]=input.value; persistSettings({sync:false}); validateForm(false); }
         }));
@@ -1549,12 +1762,7 @@
         });
         while(targets.length < images.length && universalEntries().length < limit) {
             const entries = universalEntries();
-            const hasSubject = entries.some(([,item]) => item.reference_type === 'subject');
-            targets.push(createUniversalReference(hasSubject ? 'prop' : 'subject', entries.length));
-        }
-        if(!universalEntries().some(([,item]) => item.reference_type === 'subject') && targets[0]) {
-            state.inputs[targets[0]].reference_type = 'subject';
-            state.inputs[targets[0]].role = 'subject';
+            targets.push(createUniversalReference('prop', entries.length));
         }
         renderUniversalInputs();
         const accepted = Math.min(images.length, targets.length);
@@ -1870,6 +2078,10 @@
     function selectStudioReference(id){
         const item = studioReferenceById(id);
         if(!item) return;
+        if(currentConfig()?.universal && !universalHasManualPrompt() && universalTypedEntries().some(([,reference]) => reference.reference_type === 'scene')) {
+            showToast(t('ecommerce.sceneStudioConflict'), true);
+            return;
+        }
         currentOptions().studio_reference = item.id;
         persistSettings();
         renderInputs();
@@ -1905,6 +2117,7 @@
                 const target = el.operationControls.querySelector(`[data-value-for="${key}"]`);
                 if(target) target.textContent = `${input.value}°`;
                 persistSettings(deferSync ? {sync:false} : undefined);
+                if(state.operation === 'universal' && key === 'instruction') syncUniversalPromptModeUi();
                 validateForm(false);
             };
             if(input.tagName === 'SELECT') input.addEventListener('change', () => update(false));
@@ -2712,6 +2925,13 @@
                 if(show) showFormError(t('freeCreation.promptRequired'));
                 return false;
             }
+            if(!IS_FREE_CREATION && !universalHasManualPrompt()) {
+                const plan = resolveUniversalReferencePlan();
+                if(plan.conflicts.length) {
+                    if(show) showFormError(plan.conflicts[0]);
+                    return false;
+                }
+            }
             if(!compatibleModels().length) {
                 if(show) {
                     clearFormError();
@@ -2813,9 +3033,13 @@
 
     function taskInputsForRequest(){
         if(currentConfig().universal) {
-            return universalEntries().map(([,item]) => item).filter(item => item.url).map(item => ({
+            const manualPrompt = universalHasManualPrompt();
+            const entries = IS_FREE_CREATION || manualPrompt ? universalEntries().filter(([,item]) => item.url) : universalTypedEntries();
+            const plan = IS_FREE_CREATION ? null : resolveUniversalReferencePlan();
+            return entries.map(([,item]) => ({
                 url:item.url,name:item.name || '',role:item.reference_type,reference_id:item.reference_id,
                 reference_type:item.reference_type,label:requestReferenceLabel(item),instruction:item.instruction || '',kind:'image',mime:item.mime || '',
+                detail_target_id:!IS_FREE_CREATION && !manualPrompt && item.reference_type === 'detail' ? detailTargetIdForItem(item, plan) : '',
             }));
         }
         if(state.operation === 'try_on') {
@@ -2878,18 +3102,11 @@
 
     function comparisonReferenceForTask(task){
         const explicitUrl = task?.comparison_reference_url || task?.request?.comparison_reference_url || task?.result?.comparison_reference_url || task?.result?.params?.comparison_reference_url || '';
-        const compositionMode = task?.composition_mode || task?.request?.composition_mode || task?.result?.composition_mode || task?.result?.params?.composition_mode || '';
-        if(compositionMode === 'base_transfer') {
-            const baseReferenceId = task?.base_reference_id || task?.request?.base_reference_id || task?.result?.base_reference_id || task?.result?.params?.base_reference_id || '';
-            const references = taskReferences(task);
-            const base = references.find(item => item?.url && item.reference_id === baseReferenceId) || references.find(item => item?.url) || null;
-            return base || explicitUrl ? {...(base || {}), url:explicitUrl || base?.url || '', isPose:false} : null;
-        }
         const pose = taskPoseReference(task);
         const source = sourceReferenceForTask(task);
         if(pose) return {...pose, url:explicitUrl || pose.url, isPose:true};
         if(source) return {...source, url:explicitUrl || source.url, isPose:false};
-        return explicitUrl ? {url:explicitUrl, isPose:Boolean(task?.pose_reference_url || task?.request?.pose_reference_url || task?.result?.pose_reference_url)} : null;
+        return null;
     }
 
     function sourceUrlForTask(task){

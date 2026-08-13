@@ -67,9 +67,11 @@ from canvas_core.ecommerce import (
     comparison_reference as ecommerce_comparison_reference,
     parse_garment_analysis as parse_ecommerce_garment_analysis,
     parse_universal_reference_analysis as parse_ecommerce_universal_reference_analysis,
+    restrict_universal_reference_analysis as restrict_ecommerce_universal_reference_analysis,
     primary_pose_reference as ecommerce_primary_pose_reference,
     public_capabilities as ecommerce_public_capabilities,
     resolve_generation_settings as resolve_ecommerce_generation_settings,
+    resolve_universal_reference_plan as resolve_ecommerce_universal_reference_plan,
     route_candidates as ecommerce_route_candidates,
     safe_fallback_error as ecommerce_safe_fallback_error,
     universal_composition_mode as ecommerce_universal_composition_mode,
@@ -235,7 +237,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.125"
+APP_VERSION = "1.0.135"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -2962,6 +2964,7 @@ class AIReference(BaseModel):
     reference_type: str = ""
     label: str = ""
     instruction: str = ""
+    detail_target_id: str = ""
     kind: str = ""
     mime: str = ""
 
@@ -6396,26 +6399,54 @@ def save_asset_library(lib):
 REFERENCE_SLOT_TYPES_SETTING_KEY = "reference_slot_types"
 REFERENCE_SLOT_CANONICAL_ROLES = {
     "source", "subject", "model_identity", "upper_garment", "lower_garment", "full_garment",
-    "garment", "shoes", "accessory", "prop", "detail", "pose", "scene", "style",
+    "garment", "shoes", "accessory", "prop", "scene_prop", "detail", "pose", "scene", "style",
 }
 REFERENCE_SLOT_DEFAULT_TYPES = [
-    {"id": "subject", "role": "subject", "label_zh": "主体/身体模特", "label_en": "Subject / body model", "enabled": True, "locked": True, "order": 0},
+    {"id": "subject", "role": "subject", "label_zh": "模特主体", "label_en": "Model subject", "enabled": True, "locked": True, "order": 0},
     {"id": "model_identity", "role": "model_identity", "label_zh": "模特形象", "label_en": "Model identity", "enabled": True, "locked": True, "order": 5},
     {"id": "upper_garment", "role": "upper_garment", "label_zh": "上装", "label_en": "Upper garment", "enabled": True, "locked": True, "order": 10},
     {"id": "lower_garment", "role": "lower_garment", "label_zh": "下装", "label_en": "Lower garment", "enabled": True, "locked": True, "order": 20},
     {"id": "full_garment", "role": "full_garment", "label_zh": "连衣裙/套装", "label_en": "Dress / full outfit", "enabled": True, "locked": True, "order": 30},
     {"id": "shoes", "role": "shoes", "label_zh": "鞋靴", "label_en": "Shoes", "enabled": True, "locked": True, "order": 40},
     {"id": "accessory", "role": "accessory", "label_zh": "首饰/配饰", "label_en": "Accessory", "enabled": True, "locked": True, "order": 50},
-    {"id": "prop", "role": "prop", "label_zh": "道具/商品", "label_en": "Prop / product", "enabled": True, "locked": True, "order": 60},
-    {"id": "detail", "role": "detail", "label_zh": "细节图", "label_en": "Detail image", "enabled": True, "locked": True, "order": 70},
-    {"id": "pose", "role": "pose", "label_zh": "动作参考", "label_en": "Pose reference", "enabled": True, "locked": True, "order": 80},
-    {"id": "scene", "role": "scene", "label_zh": "场景/背景", "label_en": "Scene / background", "enabled": True, "locked": True, "order": 90},
-    {"id": "style", "role": "style", "label_zh": "风格/光影", "label_en": "Style / lighting", "enabled": True, "locked": True, "order": 100},
+    {"id": "prop", "role": "prop", "label_zh": "手持/携带物", "label_en": "Held / carried item", "enabled": True, "locked": True, "order": 60},
+    {"id": "scene_prop", "role": "scene_prop", "label_zh": "场景道具", "label_en": "Scene prop", "enabled": True, "locked": True, "order": 70},
+    {"id": "detail", "role": "detail", "label_zh": "细节图", "label_en": "Detail image", "enabled": True, "locked": True, "order": 80},
+    {"id": "pose", "role": "pose", "label_zh": "动作参考", "label_en": "Pose reference", "enabled": True, "locked": True, "order": 90},
+    {"id": "scene", "role": "scene", "label_zh": "场景/背景", "label_en": "Scene / background", "enabled": True, "locked": True, "order": 100},
+    {"id": "style", "role": "style", "label_zh": "风格/光影", "label_en": "Style / lighting", "enabled": True, "locked": True, "order": 110},
 ]
+REFERENCE_SLOT_LEGACY_LABELS = {
+    "subject": {
+        "zh": {"主体/身体模特", "主体_身体模特"},
+        "en": {"Subject / body model", "Subject _ body model"},
+    },
+    "prop": {
+        "zh": {"道具/商品", "道具_商品"},
+        "en": {"Prop / product", "Prop _ product"},
+    },
+    "full_garment": {
+        "zh": {"连衣裙_套装"},
+        "en": {"Dress _ full outfit"},
+    },
+    "scene": {
+        "zh": {"场景_背景"},
+        "en": {"Scene _ background"},
+    },
+    "style": {
+        "zh": {"风格_光影"},
+        "en": {"Style _ lighting"},
+    },
+}
 
 def sanitize_reference_slot_id(value: str, fallback: str = "slot") -> str:
     clean = re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "").strip().lower()).strip("_")
     return (clean or fallback)[:48]
+
+def sanitize_reference_slot_label(value: Any, fallback: str, limit: int) -> str:
+    clean = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or fallback))
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return (clean or fallback)[:limit]
 
 def normalize_reference_slot_type(raw: Dict[str, Any], fallback: Dict[str, Any] | None = None, order: int = 0) -> Dict[str, Any]:
     raw = raw if isinstance(raw, dict) else {}
@@ -6428,8 +6459,15 @@ def normalize_reference_slot_type(raw: Dict[str, Any], fallback: Dict[str, Any] 
         role = "model_identity"
     if type_id == "detail":
         role = "detail"
-    label_zh = sanitize_asset_name(raw.get("label_zh") or raw.get("name") or fallback.get("label_zh") or type_id, type_id)
-    label_en = sanitize_asset_name(raw.get("label_en") or fallback.get("label_en") or label_zh, label_zh)
+    raw_label_zh = str(raw.get("label_zh") or raw.get("name") or "").strip()
+    raw_label_en = str(raw.get("label_en") or "").strip()
+    legacy_labels = REFERENCE_SLOT_LEGACY_LABELS.get(type_id, {})
+    if raw_label_zh in legacy_labels.get("zh", set()):
+        raw_label_zh = str(fallback.get("label_zh") or "")
+    if raw_label_en in legacy_labels.get("en", set()):
+        raw_label_en = str(fallback.get("label_en") or "")
+    label_zh = sanitize_reference_slot_label(raw_label_zh or fallback.get("label_zh") or type_id, type_id, 48)
+    label_en = sanitize_reference_slot_label(raw_label_en or fallback.get("label_en") or label_zh, label_zh, 64)
     locked_ids = {item["id"] for item in REFERENCE_SLOT_DEFAULT_TYPES}
     try:
         slot_order = int(raw.get("order") if raw.get("order") is not None else fallback.get("order", order))
@@ -12762,13 +12800,14 @@ ECOMMERCE_GARMENT_ANALYSIS_PROMPT = """请只分析图片中的服装产品，�
 category 只能是 upper（上装）、lower（下装）或 dress（连衣裙/连体衣）。如果图片中有模特，仍只判断需要试穿的主要服装。
 reason 要写可见证据，例如领口、袖长、腰头、裤腿、裙摆、连体结构、颜色和主要材质；不要根据背景、模特动作或风格猜测。"""
 ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT = """请分析这张电商全能模式参考图。参考角色：{role}。用户标签：{label}。用户单图要求：{instruction}。
-分析目标：为 Nano Banana Pro / Gemini 3 Pro Image 多参考图生成建立“角色归属 + 保真证据”，不是写创意文案。请把能被最终出图严格继承的事实提取出来，尤其是商品真实颜色、局部结构、材质纹理、Logo/文字、人物朝向、镜头和裁切。
+参考角色已经由用户明确指定，是不可更改的唯一类型事实。禁止根据图片内容重新分类、改变角色、决定合成模式或把首图识别为 A 基准图。
+分析目标：只为 Nano Banana Pro / Gemini 3 Pro Image 多参考图生成提取“角色内部的保真证据”，不是写创意文案。必须严格按参考角色隔离证据：商品角色只提取商品，动作角色只提取动作空间，场景角色只提取环境，主体角色提取身体、发型和主体场景，模特形象角色只提取脸部，禁止跨角色借用信息。
 输出严格 JSON，不要 Markdown、不要解释：
 {{"item_name":"具体主体/商品/细节/场景名称","category":"服装/鞋/项链/包/手机/商品细节/动作/场景等","subject_presence":"person|partial_person|body_only|product_only|object_only|garment_only|flat_lay|hanger|mannequin_only|no_person|unknown","face_presence":"visible|hidden|covered|no_face|none|unknown","interaction":"wear|put_on|hold|carry|place|use|pose|scene|style|identity","placement":"建议佩戴、手持、背挎、放置、替换或场景位置","visual_details":"需要保留的颜色、材质、结构、Logo、文字、走线和关键工艺特征","material_signature":"面料/材质证据：织纹或针织结构、纱线粗细、纹理方向、绒感/皮纹/颗粒、光泽、透明度、印花对位、格纹/条纹、刺绣凸起、线迹密度、褶皱和自然瑕疵","pose_description":"精确动作和关节关系","shot_type":"全身/七分身/半身/近景/局部特写等","camera_view":"正侧面、俯仰、透视和镜头方向","face_direction":"脸、鼻尖或视线朝向，以画面左/画面右/正面/背面描述","body_direction":"躯干或身体朝向，以画面左/画面右/正面/背面描述","left_right_semantics":"以画面左右为准描述左右手、左右脚、肩膀、髋部、前后脚和单侧持物关系","mirror_risk":"侧脸、回头、单手持物、交叉腿等容易被镜像反转的关键依据","subject_framing":"人物或商品在画面中的位置、占比和裁切边界","composition":"前景主体空间构图和留白","confidence":0.0,"reason":"简短依据"}}
 请不要只写“棉、真丝、皮革”等泛化材质名；能看到时要把真实参考图里的织纹尺度、纹理方向、光泽、线迹、印花/格纹对位和局部工艺写入 material_signature，作为后续生成的材质锚点。看不清时留空，不要虚构。
 Logo、吊牌、包装和衣服印字能看清时必须把原文写入 visual_details；看不清时只写“有不可辨识文字”，不要猜。商品颜色要描述成参考图自身颜色，不要受背景、滤镜或场景光影响而改写。
 subject_presence 判断规则：真人完整或可辨人物写 person，只有身体/局部真人写 partial_person 或 body_only；白底商品、平铺、挂拍、衣架、人台、假模特、无真人、无脸商品主体写 product_only/garment_only/flat_lay/hanger/mannequin_only/no_person。face_presence 只在真实人脸清晰可见时写 visible，无人脸商品图写 no_face 或 none。
-interaction 选择规则：衣服/首饰/帽子/眼镜/腰带通常 wear；鞋子 put_on；手机、杯子、相机和商品细节等 use；手提包/托特包/背包 carry；家具/摆件 place；动作图 pose；场景图 scene；风格图 style；主体图 identity。动作图和细节图需要完整填写 shot_type、camera_view、subject_framing、composition；动作图还要填写 pose_description、face_direction、body_direction、left_right_semantics 和 mirror_risk，严禁把画面左/右写成含混的左右；服装、商品和细节图需要优先填写 visual_details 与 material_signature；其他角色无法判断时可留空。"""
+interaction 必须服从用户类型：accessory 固定 wear，prop 固定 carry，scene_prop 固定 place，shoes 固定 put_on，pose 固定 pose，scene 固定 scene，style 固定 style，subject/model_identity 固定 identity；不得根据画面里的附带物体改成交互类型。model_identity（模特形象）的唯一权限是脸部：只在 visual_details 中提取五官结构、脸型、面部肤色、妆容、年龄特征和可识别脸部特征；不得提取或使用其头发、发型、发色、身体、服装、动作、镜头、构图、场景、背景或光线。姿势证据白名单只有 pose（动作参考）和 subject（模特主体）：这两类需要完整填写 pose_description、shot_type、camera_view、face_direction、body_direction、left_right_semantics、mirror_risk、subject_framing、composition，严禁把画面左/右写成含混的左右；当两类同时存在时，pose 是唯一且最高优先级姿势来源，subject 继续提供身体、发型和主体背景，若存在 model_identity 则主体原脸不保留。model_identity、服装、鞋靴、配饰、道具、细节、场景和风格参考中即使出现人物，也不得提取或使用其动作、姿势、关节、朝向或左右关系，并将 pose_description、face_direction、body_direction、left_right_semantics、mirror_risk 留空。对于服装、鞋靴、配饰、道具或商品细节角色，只提取被指定商品本身的 item_name、category、placement、visual_details 与 material_signature；不得提取或描述参考图人物的身份、身体、动作、姿势、镜头、构图、场景、背景和光线，并将 pose_description、shot_type、camera_view、face_direction、body_direction、left_right_semantics、mirror_risk、subject_framing、composition 留空。场景和风格角色仅可为各自环境/视觉职责填写 shot_type、camera_view、subject_framing、composition，不能把其中人物作为姿势证据。其他角色无法判断时可留空。subject_presence、face_presence 和 interaction 只用于角色内部质量说明，绝不能用于改变引用类型、所有者、顺延路径或最终组合模式。"""
 
 def public_ecommerce_route(route: Dict[str, Any]) -> Dict[str, Any]:
     return {
@@ -12952,7 +12991,11 @@ async def analyze_ecommerce_universal_reference(index: int, item: Dict[str, Any]
                 route["provider_id"],
                 route["model"],
             )
-        analysis = parse_ecommerce_universal_reference_analysis(text)
+        role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
+        analysis = restrict_ecommerce_universal_reference_analysis(
+            role,
+            parse_ecommerce_universal_reference_analysis(text),
+        )
         analysis.update({
             "status": "succeeded" if analysis.get("item_name") or analysis.get("category") else "unrecognized",
             "provider_id": route["provider_id"],
@@ -13007,28 +13050,43 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
     }
     if working.get("operation") != "universal":
         return working, None
-    if str(working["options"].get("prompt_policy") or "").strip().lower() == "free":
+    if (
+        str(working["options"].get("prompt_policy") or "").strip().lower() == "free"
+        or str(working["options"].get("instruction") or "").strip()
+    ):
         return working, None
     analysis = await analyze_ecommerce_universal_references(working["inputs"])
     items = analysis.get("items") if isinstance(analysis, dict) else {}
     if isinstance(items, dict) and any((value or {}).get("status") == "succeeded" for value in items.values() if isinstance(value, dict)):
         working["options"]["reference_analysis"] = items
     composition_mode = ecommerce_universal_composition_mode(working["inputs"], working["options"])
-    base_reference = working["inputs"][0] if composition_mode == "base_transfer" and working["inputs"] else {}
-    compare_reference = base_reference if base_reference else ecommerce_comparison_reference(working["inputs"])
+    resolved_plan = resolve_ecommerce_universal_reference_plan(working["inputs"], working["options"])
+    compare_reference = ecommerce_comparison_reference(working["inputs"], composition_mode)
     working.update({
         "composition_mode": composition_mode,
-        "base_reference_id": str(base_reference.get("reference_id") or ""),
-        "base_reference_url": str(base_reference.get("url") or ""),
+        "reference_plan": public_ecommerce_reference_plan(resolved_plan),
+        "base_reference_id": "",
+        "base_reference_url": "",
         "comparison_reference_url": str(compare_reference.get("url") or ""),
     })
     working["prompt"] = build_ecommerce_prompt(working["operation"], working["inputs"], working["options"])
     return working, analysis
 
+
+def public_ecommerce_reference_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "mode": str(plan.get("mode") or ""),
+        "ordered_reference_ids": [str(item.get("reference_id") or "") for item in (plan.get("inputs") or [])],
+        "owners": dict(plan.get("owners") or {}),
+        "fallbacks": dict(plan.get("fallbacks") or {}),
+        "conflicts": list(plan.get("conflicts") or []),
+    }
+
 def validate_ecommerce_local_inputs(
     inputs: List[Dict[str, Any]],
     operation: str = "",
     allow_empty: bool = False,
+    options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], Tuple[int, int]]:
     checked = []
     dimensions = {}
@@ -13072,17 +13130,22 @@ def validate_ecommerce_local_inputs(
             "kind": "image",
             "mime": ECOMMERCE_INPUT_FORMAT_MIMES[image_format],
         }
-        for key in ("reference_id", "reference_type", "label", "instruction"):
+        for key in ("reference_id", "reference_type", "label", "instruction", "detail_target_id"):
             if item.get(key):
                 normalized[key] = item.get(key)
         checked.append(normalized)
     if not checked and allow_empty and operation == "universal":
         return [], (1024, 1024)
-    base_transfer = operation == "universal" and ecommerce_universal_composition_mode(checked) == "base_transfer"
     pose_dimensions = dimensions.get("pose")
-    source_dimensions = first_dimensions if base_transfer else dimensions.get("source")
+    source_dimensions = dimensions.get("source") or first_dimensions
     if not source_dimensions:
         raise HTTPException(status_code=400, detail="缺少源图尺寸信息")
+    if operation == "universal":
+        composition_mode = ecommerce_universal_composition_mode(checked, options or {})
+        if composition_mode in {"manual_prompt", "product_showcase"}:
+            return checked, first_dimensions
+        if composition_mode == "subject_edit":
+            return checked, source_dimensions
     return checked, pose_dimensions or source_dimensions
 
 def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
@@ -13102,13 +13165,17 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() == "free"
     if free_creation and not normalized:
-        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True)
+        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True, options=options)
     else:
-        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation)
-    composition_mode = "" if free_creation and not inputs else (ecommerce_universal_composition_mode(inputs) if operation == "universal" else "")
-    base_reference = inputs[0] if composition_mode == "base_transfer" and inputs else {}
+        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, options=options)
+    composition_mode = "" if free_creation and not inputs else (ecommerce_universal_composition_mode(inputs, options) if operation == "universal" else "")
+    reference_plan = (
+        public_ecommerce_reference_plan(resolve_ecommerce_universal_reference_plan(inputs, options))
+        if operation == "universal" and not free_creation else {}
+    )
+    base_reference = {}
     pose_reference = ecommerce_primary_pose_reference(inputs)
-    compare_reference = ecommerce_comparison_reference(inputs)
+    compare_reference = ecommerce_comparison_reference(inputs, composition_mode)
     providers = configured_ecommerce_providers()
     catalog = build_ecommerce_model_catalog(providers)
     try:
@@ -13132,13 +13199,12 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         if parent.get("operation") != operation:
             raise HTTPException(status_code=400, detail="新版本必须与父任务使用相同功能")
     try:
-        single_subject_studio_edit = (
+        automatic_subject_edit = (
             operation == "universal"
-            and bool(str(options.get("studio_reference") or "").strip())
-            and len(inputs) == 1
-            and str(inputs[0].get("reference_type") or inputs[0].get("role") or "").strip().lower() in {"source", "subject"}
+            and composition_mode == "subject_edit"
+            and not str(options.get("instruction") or "").strip()
         )
-        source_composition_locked = operation == "background_change" or single_subject_studio_edit
+        source_composition_locked = operation == "background_change" or automatic_subject_edit
         generation = resolve_ecommerce_generation_settings(
             source_dimensions[0],
             source_dimensions[1],
@@ -13160,6 +13226,7 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         "model": str(payload.model or "").strip(),
         "parent_task_id": parent_task_id,
         "composition_mode": composition_mode,
+        "reference_plan": reference_plan,
         "base_reference_id": str(base_reference.get("reference_id") or ""),
         "base_reference_url": str(base_reference.get("url") or ""),
         "pose_reference_url": str(pose_reference.get("url") or ""),

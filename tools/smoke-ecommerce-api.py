@@ -161,8 +161,13 @@ def main() -> int:
                     raise AssertionError(f"{operation}: {task}")
                 if client.get(task["result"]["images"][0]).status_code != 200:
                     raise AssertionError(f"{operation}: generated preview is not downloadable")
-                if operation == "universal" and "AUTO FINAL COMPOSITION" not in task.get("prompt", ""):
-                    raise AssertionError(f"{operation}: auto prompt missing: {task.get('prompt')}")
+                if operation == "universal":
+                    prompt = task.get("prompt", "")
+                    plan = task.get("reference_plan") or {}
+                    if "SUBJECT-BASED LOCAL EDIT RECIPE" not in prompt or "AUTO BASE TRANSFER" in prompt:
+                        raise AssertionError(f"{operation}: subject-local edit prompt missing: {prompt}")
+                    if task.get("composition_mode") != "subject_edit" or plan.get("mode") != "subject_edit":
+                        raise AssertionError(f"{operation}: subject-local reference plan missing: {plan}")
                 tasks[operation] = task
 
             selected_parameters = next((call for call in calls if call.get("size") == "1632x2040"), None)

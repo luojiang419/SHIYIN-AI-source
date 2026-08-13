@@ -1,7 +1,9 @@
 param(
     [switch]$IncrementVersion,
     [switch]$SkipBackend,
-    [switch]$SkipDesktop
+    [switch]$SkipDesktop,
+    [switch]$SkipRuntimeSmoke,
+    [int]$SmokePort = 3118
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,7 +46,7 @@ if (-not $SkipBackend) {
 }
 
 if (-not $SkipDesktop) {
-    & npm run desktop:build
+    & npm run desktop:host-build
     if ($LASTEXITCODE -ne 0) { throw 'Tauri build failed.' }
 }
 
@@ -71,6 +73,12 @@ Get-ChildItem -LiteralPath (Join-Path $stageRoot 'app\web') -Recurse -File -Incl
     $content = [IO.File]::ReadAllText($_.FullName)
     $updated = [regex]::Replace($content, '\?v=[0-9A-Za-z._-]+', "?v=$version")
     if ($updated -ne $content) { [IO.File]::WriteAllText($_.FullName, $updated, $utf8) }
+}
+
+if (-not $SkipRuntimeSmoke) {
+    & (Join-Path $PSScriptRoot 'smoke-desktop.ps1') -Stage $stageRoot -Port $SmokePort -IdleSeconds 1 | Out-Host
+    $runtimeSmokeSucceeded = $?
+    if (-not $runtimeSmokeSucceeded) { throw 'Packaged desktop runtime smoke test failed.' }
 }
 
 New-Item -ItemType Directory -Force (Join-Path $projectRoot 'dist\installer') | Out-Null

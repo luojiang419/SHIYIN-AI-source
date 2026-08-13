@@ -50,28 +50,68 @@ UNIVERSAL_REFERENCE_ROLES = [
     {"id": "full_garment", "label": {"zh": "连衣裙/套装", "en": "Dress / full outfit"}},
     {"id": "shoes", "label": {"zh": "鞋靴", "en": "Shoes"}},
     {"id": "accessory", "label": {"zh": "首饰/配饰", "en": "Accessory"}},
-    {"id": "prop", "label": {"zh": "道具/商品", "en": "Prop / product"}},
+    {"id": "prop", "label": {"zh": "手持/携带物", "en": "Held / carried item"}},
+    {"id": "scene_prop", "label": {"zh": "场景道具", "en": "Scene prop"}},
     {"id": "detail", "label": {"zh": "细节图", "en": "Detail image"}},
     {"id": "pose", "label": {"zh": "动作参考", "en": "Pose reference"}},
     {"id": "scene", "label": {"zh": "场景/背景", "en": "Scene / background"}},
     {"id": "style", "label": {"zh": "风格/光影", "en": "Style / lighting"}},
 ]
 UNIVERSAL_REFERENCE_ROLE_IDS = {item["id"] for item in UNIVERSAL_REFERENCE_ROLES}
+UNIVERSAL_POSE_EVIDENCE_ROLES = {"source", "subject", "pose"}
+UNIVERSAL_HUMAN_POSE_ANALYSIS_FIELDS = (
+    "pose_description",
+    "face_direction",
+    "body_direction",
+    "left_right_semantics",
+    "mirror_risk",
+)
+UNIVERSAL_SPATIAL_POSE_ANALYSIS_FIELDS = (
+    "shot_type",
+    "camera_view",
+    "subject_framing",
+    "composition",
+)
+UNIVERSAL_CANONICAL_ROLE_ORDER = (
+    "subject",
+    "model_identity",
+    "upper_garment",
+    "lower_garment",
+    "full_garment",
+    "shoes",
+    "accessory",
+    "prop",
+    "scene_prop",
+    "detail",
+    "pose",
+    "scene",
+    "style",
+)
+UNIVERSAL_EXCLUSIVE_ROLES = {
+    "subject",
+    "model_identity",
+    "upper_garment",
+    "lower_garment",
+    "full_garment",
+    "shoes",
+    "pose",
+    "scene",
+    "style",
+}
+UNIVERSAL_PRODUCT_ROLES = {
+    "upper_garment",
+    "lower_garment",
+    "full_garment",
+    "shoes",
+    "accessory",
+    "prop",
+    "scene_prop",
+}
+UNIVERSAL_GARMENT_ROLES = {"upper_garment", "lower_garment", "full_garment"}
 ALLOWED_INPUT_ROLES = {"source", "garment", "pose", "prop", "background", *UNIVERSAL_REFERENCE_ROLE_IDS}
 TRY_ON_OUTFIT_ROLES = {"garment", "upper_garment", "lower_garment", "full_garment", "shoes", "accessory"}
 TRY_ON_REFERENCE_ROLES = {"source", "model_identity", *TRY_ON_OUTFIT_ROLES, "detail", "pose"}
 UNIVERSAL_INTERACTIONS = {"wear", "put_on", "hold", "carry", "place", "use", "pose", "scene", "style", "identity"}
-ACCESSORY_WEAR_KEYWORDS = (
-    "necklace", "项链", "earring", "耳环", "bracelet", "手链", "bangle", "手镯", "ring", "戒指",
-    "watch", "手表", "hat", "帽", "cap", "glasses", "眼镜", "sunglasses", "墨镜", "belt", "腰带",
-    "scarf", "围巾", "brooch", "胸针", "tie", "领带",
-)
-HANDHELD_KEYWORDS = (
-    "phone", "手机", "smartphone", "camera", "相机", "cup", "杯", "bottle", "瓶", "book", "书",
-    "umbrella", "伞", "flower", "花", "wallet", "钱包", "card", "卡", "cosmetic", "口红", "lipstick",
-)
-BAG_KEYWORDS = ("bag", "包", "handbag", "tote", "clutch", "purse", "satchel", "backpack", "shoulder bag", "手提包", "托特包", "双肩包", "挎包")
-PLACED_PROP_KEYWORDS = ("chair", "椅", "sofa", "沙发", "table", "桌", "vase", "花瓶", "lamp", "灯", "plant", "植物", "furniture", "家具", "decor", "摆件")
 
 POSE_PRESETS = [
     {"id": "standing_front", "label": {"zh": "正面站立", "en": "Front standing"}, "prompt": "standing upright, front view, arms relaxed naturally"},
@@ -108,7 +148,7 @@ STUDIO_REFERENCE_PRESETS = [
 
 QUALITY_CHECKS: dict[str, list[dict[str, Any]]] = {
     "try_on": [
-        {"id": "identity", "label": {"zh": "人物脸部、发型、体型和肤色符合源图或模特形象参考", "en": "Face, hair, body shape, and skin tone match the source or model identity reference"}},
+        {"id": "identity", "label": {"zh": "身体、发型和非脸部区域来自主体图；只有脸部来自模特形象参考", "en": "Body, hair, and non-face regions come from the subject; only the face comes from the model identity reference"}},
         {"id": "garment", "label": {"zh": "服装版型、颜色、面料、图案、Logo 和文字准确", "en": "Garment cut, color, fabric, pattern, logo, and text are accurate"}},
         {"id": "anatomy", "label": {"zh": "四肢、手指、衣褶和遮挡关系自然", "en": "Limbs, fingers, folds, and occlusions look natural"}},
         {"id": "background", "label": {"zh": "姿态、镜头、光线和背景未被意外修改", "en": "Pose, camera, lighting, and background were not changed unexpectedly"}},
@@ -143,7 +183,7 @@ QUALITY_CHECKS: dict[str, list[dict[str, Any]]] = {
         {"id": "artifacts", "label": {"zh": "无额外主体、文字、水印或明显生成瑕疵", "en": "No extra subjects, text, watermark, or visible generation defects"}},
     ],
     "universal": [
-        {"id": "identity", "label": {"zh": "主体身体来自主体图；主体图自带鞋子和配饰默认保留；脸部、发型、肤色可由模特形象图独立指定", "en": "Body comes from subject references; subject-native shoes and accessories are preserved by default; face, hair, and skin tone may be specified by model identity references"}},
+        {"id": "identity", "label": {"zh": "主体身体、发型、背景来自主体图；模特形象图只提供脸部；主体自带鞋子和配饰默认保留", "en": "The subject supplies body, hair, and background; the model identity reference supplies only the face; subject-native shoes and accessories are preserved by default"}},
         {"id": "products", "label": {"zh": "服装、鞋、配饰和道具的版型、材质、颜色、Logo 与文字准确", "en": "Garments, shoes, accessories, and props preserve shape, material, color, logos, and text"}},
         {"id": "pose", "label": {"zh": "动作、关节、机位、景别、裁切、人物位置和画面占比严格匹配主姿势参考", "en": "Pose, joints, camera, shot scale, crop, position, and subject framing strictly match the primary pose reference"}},
         {"id": "scene", "label": {"zh": "场景构图、光线、透视和接触阴影协调", "en": "Scene composition, lighting, perspective, and contact shadows are coherent"}},
@@ -200,8 +240,7 @@ LOWER_GARMENT_STRUCTURE_DIRECTIVE = (
     "For high-waist pants, keep the waistband high and flat and keep navel coverage if shown by the reference; do not curve the waistline unless the reference does. "
     "For wide-leg, straight-leg, flared, tapered, or skinny pants, preserve that exact pants type; keep trouser crease lines and side seams straight when the reference shows straight lines, and do not convert the pants shape to another cut."
 )
-TEXTURE_CRITICAL_REFERENCE_ROLES = {"upper_garment", "lower_garment", "full_garment", "shoes", "accessory", "prop", "detail"}
-PRIMARY_PRODUCT_REPLACEMENT_ROLES = {"upper_garment", "lower_garment", "full_garment", "garment", "prop"}
+TEXTURE_CRITICAL_REFERENCE_ROLES = {"upper_garment", "lower_garment", "full_garment", "shoes", "accessory", "prop", "scene_prop", "detail"}
 SUBJECT_NATIVE_STYLING_OVERRIDE_ROLES = {"shoes", "accessory", "prop"}
 NO_HUMAN_SUBJECT_PRESENCE_VALUES = {
     "none",
@@ -215,7 +254,6 @@ NO_HUMAN_SUBJECT_PRESENCE_VALUES = {
     "mannequin_only",
 }
 HUMAN_SUBJECT_PRESENCE_VALUES = {"person", "human", "model", "partial_person", "body_only", "visible_person"}
-NO_FACE_PRESENCE_VALUES = {"none", "no_face", "not_visible", "hidden", "covered"}
 
 STANDARD_PRIORITIES = ("gemini-3-pro-image-preview", "gpt-image-2-vip", "nano-banana-pro-4k-vip", "qwen-image-edit-2511")
 
@@ -350,6 +388,23 @@ def normalize_universal_reference_analysis(value: dict[str, Any] | None) -> dict
         "confidence": round(confidence, 4),
         "reason": reason,
     }
+
+
+def restrict_universal_reference_analysis(
+    reference_type: str,
+    value: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep pose evidence owned only by an explicit pose or model-subject reference."""
+    role = str(reference_type or "").strip().lower()
+    analysis = normalize_universal_reference_analysis(value)
+    if role in UNIVERSAL_POSE_EVIDENCE_ROLES:
+        return analysis
+    for field in UNIVERSAL_HUMAN_POSE_ANALYSIS_FIELDS:
+        analysis[field] = ""
+    if role not in {"scene", "style"}:
+        for field in UNIVERSAL_SPATIAL_POSE_ANALYSIS_FIELDS:
+            analysis[field] = ""
+    return analysis
 
 
 def parse_universal_reference_analysis(text: str) -> dict[str, Any]:
@@ -509,7 +564,7 @@ def normalize_try_on_inputs(inputs: Iterable[dict[str, Any]]) -> list[dict[str, 
     return normalized
 
 
-def normalize_universal_inputs(inputs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def normalize_universal_inputs(inputs: Iterable[dict[str, Any]], canonical_order: bool = True) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for index, value in enumerate(inputs or []):
@@ -524,7 +579,7 @@ def normalize_universal_inputs(inputs: Iterable[dict[str, Any]]) -> list[dict[st
         if reference_id in seen_ids:
             reference_id = f"{reference_id}_{index + 1}"
         seen_ids.add(reference_id)
-        normalized.append({
+        item = {
             "role": reference_type,
             "reference_type": reference_type,
             "reference_id": reference_id,
@@ -534,10 +589,177 @@ def normalize_universal_inputs(inputs: Iterable[dict[str, Any]]) -> list[dict[st
             "instruction": re.sub(r"\s+", " ", str(value.get("instruction") or "").strip())[:300],
             "kind": "image",
             "mime": str(value.get("mime") or "")[:120],
-        })
+        }
+        if value.get("detail_target_id"):
+            item["detail_target_id"] = re.sub(
+                r"[^a-zA-Z0-9_-]", "", str(value.get("detail_target_id") or "")
+            )[:80]
+        normalized.append(item)
         if len(normalized) >= UNIVERSAL_REFERENCE_LIMIT:
             break
-    return normalized
+    if not canonical_order:
+        return normalized
+    role_priority = {role: index for index, role in enumerate(UNIVERSAL_CANONICAL_ROLE_ORDER)}
+    return [
+        item
+        for _, item in sorted(
+            enumerate(normalized),
+            key=lambda pair: (role_priority.get(pair[1]["reference_type"], len(role_priority)), pair[0]),
+        )
+    ]
+
+
+def resolve_universal_reference_plan(
+    inputs: Iterable[dict[str, Any]],
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve one deterministic, type-owned e-commerce composition plan.
+
+    User-selected reference types are the only routing authority. Visual analysis may
+    enrich fidelity descriptions later, but it never changes owners, fallbacks, or
+    ordering in this plan.
+    """
+    options = options if isinstance(options, dict) else {}
+    manual_prompt = bool(str(options.get("instruction") or "").strip())
+    normalized = normalize_universal_inputs(inputs, canonical_order=not manual_prompt)
+    by_role: dict[str, list[dict[str, Any]]] = {role: [] for role in UNIVERSAL_CANONICAL_ROLE_ORDER}
+    for item in normalized:
+        by_role.setdefault(item["reference_type"], []).append(item)
+
+    if manual_prompt:
+        return {
+            "mode": "manual_prompt",
+            "inputs": normalized,
+            "by_role": by_role,
+            "conflicts": [],
+            "owners": {},
+            "fallbacks": {},
+        }
+
+    conflicts: list[str] = []
+    for role in UNIVERSAL_EXCLUSIVE_ROLES:
+        if len(by_role.get(role, [])) > 1:
+            label = next(
+                (entry["label"]["zh"] for entry in UNIVERSAL_REFERENCE_ROLES if entry["id"] == role),
+                role,
+            )
+            conflicts.append(f"{label}只能选择一张主参考图")
+    if by_role["full_garment"] and (by_role["upper_garment"] or by_role["lower_garment"]):
+        conflicts.append("连衣裙/套装不能与上装或下装同时作为主服装，请选择一种穿搭方案")
+    studio_reference = str(options.get("studio_reference") or "").strip()
+    if by_role["scene"] and studio_reference:
+        conflicts.append("场景参考图与摄影棚只能选择一个最终场景")
+
+    products = [item for item in normalized if item["reference_type"] in UNIVERSAL_PRODUCT_ROLES]
+    product_ids = {item["reference_id"] for item in products}
+    for detail in by_role["detail"]:
+        target_id = str(detail.get("detail_target_id") or "").strip()
+        if not products:
+            conflicts.append(f"细节图 {detail['reference_id']} 缺少可绑定的服装、鞋靴、配饰或道具")
+        elif target_id and target_id not in product_ids:
+            conflicts.append(f"细节图 {detail['reference_id']} 绑定的商品不存在")
+        elif not target_id and len(products) == 1:
+            detail["detail_target_id"] = products[0]["reference_id"]
+        elif not target_id:
+            conflicts.append(f"细节图 {detail['reference_id']} 必须明确绑定到一个商品参考图")
+
+    subject = by_role["subject"][0] if by_role["subject"] else None
+    identity = by_role["model_identity"][0] if by_role["model_identity"] else None
+    pose = by_role["pose"][0] if by_role["pose"] else None
+    scene = by_role["scene"][0] if by_role["scene"] else None
+    style = by_role["style"][0] if by_role["style"] else None
+    garment_refs = by_role["full_garment"] or (by_role["upper_garment"] + by_role["lower_garment"])
+    accessories = by_role["shoes"] + by_role["accessory"] + by_role["prop"] + by_role["scene_prop"]
+
+    if subject:
+        mode = "subject_edit"
+    elif identity:
+        mode = "visible_model"
+    elif garment_refs and pose:
+        mode = "invisible_outfit"
+    elif products:
+        mode = "product_showcase"
+    else:
+        mode = ""
+        conflicts.append("无提示词模式至少需要模特主体、模特形象或一张主商品参考图")
+
+    if mode == "subject_edit":
+        body_owner = subject["reference_id"]
+        identity_owner = identity["reference_id"] if identity else subject["reference_id"]
+        pose_owner = pose["reference_id"] if pose else subject["reference_id"]
+        scene_owner = scene["reference_id"] if scene else (f"studio:{studio_reference}" if studio_reference else subject["reference_id"])
+        style_owner = style["reference_id"] if style else (scene["reference_id"] if scene else subject["reference_id"])
+        fallbacks = {
+            "body": "subject",
+            "identity": "model_identity" if identity else "subject",
+            "garment": "reference" if garment_refs else "subject_native",
+            "accessory": "reference" if accessories else "subject_native",
+            "pose": "pose" if pose else "subject",
+            "scene": "scene" if scene else ("studio_reference" if studio_reference else "subject"),
+            "style": "style" if style else ("scene" if scene else "subject"),
+        }
+    elif mode == "visible_model":
+        body_owner = "system_model"
+        identity_owner = identity["reference_id"]
+        pose_owner = pose["reference_id"] if pose else "system_pose"
+        scene_owner = scene["reference_id"] if scene else (f"studio:{studio_reference}" if studio_reference else "system_studio")
+        style_owner = style["reference_id"] if style else (scene["reference_id"] if scene else "commercial_photo")
+        fallbacks = {
+            "body": "system_model",
+            "identity": "model_identity",
+            "garment": "reference" if garment_refs else "system_basic_outfit",
+            "accessory": "reference" if accessories else "none",
+            "pose": "pose" if pose else "system_pose",
+            "scene": "scene" if scene else ("studio_reference" if studio_reference else "system_studio"),
+            "style": "style" if style else ("scene" if scene else "commercial_photo"),
+        }
+    elif mode == "invisible_outfit":
+        body_owner = "invisible_volume"
+        identity_owner = "none"
+        pose_owner = pose["reference_id"]
+        scene_owner = scene["reference_id"] if scene else (f"studio:{studio_reference}" if studio_reference else "system_studio")
+        style_owner = style["reference_id"] if style else (scene["reference_id"] if scene else "commercial_photo")
+        fallbacks = {
+            "body": "invisible_volume",
+            "identity": "none",
+            "garment": "reference",
+            "accessory": "reference" if accessories else "none",
+            "pose": "pose",
+            "scene": "scene" if scene else ("studio_reference" if studio_reference else "system_studio"),
+            "style": "style" if style else ("scene" if scene else "commercial_photo"),
+        }
+    else:
+        body_owner = "none"
+        identity_owner = "none"
+        pose_owner = "none"
+        scene_owner = scene["reference_id"] if scene else (f"studio:{studio_reference}" if studio_reference else "system_product_studio")
+        style_owner = style["reference_id"] if style else (scene["reference_id"] if scene else "commercial_photo")
+        fallbacks = {
+            "body": "none",
+            "identity": "none",
+            "garment": "reference" if garment_refs else "none",
+            "accessory": "reference" if accessories else "none",
+            "pose": "none",
+            "scene": "scene" if scene else ("studio_reference" if studio_reference else "system_product_studio"),
+            "style": "style" if style else ("scene" if scene else "commercial_photo"),
+        }
+
+    return {
+        "mode": mode,
+        "inputs": normalized,
+        "by_role": by_role,
+        "conflicts": conflicts,
+        "owners": {
+            "body": body_owner,
+            "identity": identity_owner,
+            "garments": [item["reference_id"] for item in garment_refs],
+            "accessories": [item["reference_id"] for item in accessories],
+            "pose": pose_owner,
+            "scene": scene_owner,
+            "style": style_owner,
+        },
+        "fallbacks": fallbacks,
+    }
 
 
 def primary_pose_reference(inputs: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -560,31 +782,20 @@ def _primary_pose_reference_index(inputs: Iterable[dict[str, Any]]) -> int:
     return 0
 
 
-def comparison_reference(inputs: Iterable[dict[str, Any]]) -> dict[str, Any]:
+def comparison_reference(
+    inputs: Iterable[dict[str, Any]],
+    composition_mode: str = "",
+) -> dict[str, Any]:
     values = [dict(value) for value in inputs or [] if isinstance(value, dict) and str(value.get("url") or "").strip()]
-    if universal_composition_mode(values) == "base_transfer":
-        pose = primary_pose_reference(values)
-        return pose or (values[0] if values else {})
     pose = primary_pose_reference(values)
     if pose:
         return pose
     source = next((value for value in values if str(value.get("reference_type") or value.get("role") or "").strip().lower() in {"source", "subject"}), None)
-    return source or (values[0] if values else {})
+    return source or {}
 
 
 def universal_composition_mode(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
-    subject_like: list[dict[str, Any]] = []
-    for value in inputs or []:
-        if not isinstance(value, dict) or not str(value.get("url") or "").strip():
-            continue
-        role = str(value.get("reference_type") or value.get("role") or "").strip().lower()
-        if role in {"source", "subject"}:
-            subject_like.append(value)
-    if not subject_like:
-        return "base_transfer"
-    if all(_subject_reference_is_product_template(item, _reference_analysis(item, options)) for item in subject_like):
-        return "base_transfer"
-    return "subject_composite"
+    return str(resolve_universal_reference_plan(inputs, options).get("mode") or "")
 
 
 def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -600,11 +811,20 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
     if operation == "universal":
         if len(values) > UNIVERSAL_REFERENCE_LIMIT:
             raise ValueError(f"全能模式最多上传 {UNIVERSAL_REFERENCE_LIMIT} 张参考图")
-        normalized = normalize_universal_inputs(values)
         prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
+        manual_prompt = bool(str(options.get("instruction") or "").strip())
+        normalized = normalize_universal_inputs(
+            values,
+            canonical_order=prompt_policy != FREE_CREATION_PROMPT_POLICY and not manual_prompt,
+        )
         if not normalized and prompt_policy != FREE_CREATION_PROMPT_POLICY:
             raise ValueError("全能模式至少需要一张已上传的参考图")
-        return normalized
+        if prompt_policy == FREE_CREATION_PROMPT_POLICY or manual_prompt:
+            return normalized
+        plan = resolve_universal_reference_plan(normalized, options)
+        if plan["conflicts"]:
+            raise ValueError("；".join(plan["conflicts"]))
+        return plan["inputs"]
     normalized = normalize_try_on_inputs(values) if operation == "try_on" else normalize_inputs(values)
     roles = {item["role"] for item in normalized}
     required = set(OPERATION_INPUTS[operation])
@@ -797,47 +1017,9 @@ def _analysis_lookup(options: dict[str, Any] | None) -> dict[str, dict[str, Any]
 
 def _reference_analysis(item: dict[str, Any], options: dict[str, Any] | None) -> dict[str, Any]:
     analysis = _analysis_lookup(options)
-    return analysis.get(str(item.get("reference_id") or "")) or analysis.get(str(item.get("name") or "")) or {}
-
-
-def _presence_token(value: Any) -> str:
-    return re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
-
-
-def _subject_reference_is_product_template(item: dict[str, Any], analysis: dict[str, Any] | None = None) -> bool:
+    value = analysis.get(str(item.get("reference_id") or "")) or analysis.get(str(item.get("name") or "")) or {}
     role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-    if role not in {"source", "subject"}:
-        return False
-    analysis = analysis or {}
-    subject_presence = _presence_token(analysis.get("subject_presence"))
-    if subject_presence in HUMAN_SUBJECT_PRESENCE_VALUES:
-        return False
-    if subject_presence in NO_HUMAN_SUBJECT_PRESENCE_VALUES:
-        return True
-    face_presence = _presence_token(analysis.get("face_presence"))
-    text = _clean_prompt_text(
-        item.get("label"),
-        item.get("instruction"),
-        item.get("name"),
-        analysis.get("item_name"),
-        analysis.get("category"),
-        analysis.get("shot_type"),
-        analysis.get("visual_details"),
-        analysis.get("reason"),
-    )
-    product_only_keywords = (
-        "product only", "object only", "garment only", "flat lay", "flat-lay", "hanger", "mannequin",
-        "no model", "no person", "no human", "without face", "no face",
-        "商品图", "产品图", "商品主图", "白底图", "平铺", "挂拍", "衣架", "人台", "假模特",
-        "无模特", "无人", "没有人", "没有真人", "没有人脸", "无脸",
-    )
-    human_keywords = ("真人模特", "真人图", "模特图", "人物图", "人脸图", "脸部清晰", "model face", "visible face")
-    if any(keyword in text for keyword in product_only_keywords) and not any(keyword in text for keyword in human_keywords):
-        return True
-    return face_presence in NO_FACE_PRESENCE_VALUES and any(
-        keyword in text
-        for keyword in ("商品", "产品", "服装", "平铺", "挂拍", "衣架", "mannequin", "flat lay", "hanger")
-    )
+    return restrict_universal_reference_analysis(role, value)
 
 
 def _reference_detail(item: dict[str, Any], analysis: dict[str, Any] | None = None) -> str:
@@ -859,8 +1041,9 @@ def _reference_detail(item: dict[str, Any], analysis: dict[str, Any] | None = No
 def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
     role_names = {
         "source": "SOURCE / EDIT BASE",
+        "subject": "MODEL SUBJECT / BODY / FALLBACK POSE",
         "garment": "GARMENT PRODUCT SOURCE",
-        "model_identity": "MODEL IDENTITY ONLY",
+        "model_identity": "MODEL FACE IDENTITY ONLY",
         "upper_garment": "UPPER GARMENT SOURCE",
         "lower_garment": "LOWER GARMENT SOURCE",
         "full_garment": "DRESS OR FULL OUTFIT SOURCE",
@@ -869,6 +1052,7 @@ def build_ordered_reference_map(inputs: Iterable[dict[str, Any]]) -> str:
         "detail": "LOCAL PRODUCT DETAIL SOURCE",
         "pose": "POSE / SPATIAL TEMPLATE ONLY",
         "prop": "PROP OR PRODUCT SOURCE",
+        "scene_prop": "SCENE PROP SOURCE",
         "background": "BACKGROUND SOURCE ONLY",
         "scene": "SCENE SOURCE ONLY",
         "style": "STYLE SOURCE ONLY",
@@ -898,9 +1082,9 @@ def build_user_supplement_override_rule(instruction: str) -> str:
     if not text:
         return ""
     return (
-        "USER SUPPLEMENT OVERRIDE RULE: treat the USER SUPPLEMENT as the highest-priority instruction whenever it conflicts with any automatic final composition, inferred reference analysis, generated role interaction, preset/studio/scene/style default, or automatic spatial, styling, color, material, or local-edit lock. "
-        "Obey explicit user requests for final framing, shot scale, aspect ratio, crop, camera viewpoint, subject placement, pose adjustment, background, styling, local edits, color/material changes, and named reference usage. "
-        "For attributes the USER SUPPLEMENT does not explicitly mention, continue following the ordered reference map and reference ownership rules."
+        "USER SUPPLEMENT RULE: apply the USER SUPPLEMENT only as an additional output requirement for explicitly mentioned framing, crop, camera, placement, styling, local edits, or color/material changes. "
+        "It may refine an attribute inside its assigned reference type, but it must never reassign an image to another type, turn a scene into a product source, turn a pose into an identity source, or bypass the typed ownership map. "
+        "Reference types remain authoritative; for attributes the USER SUPPLEMENT does not explicitly mention, follow the typed recipe and its deterministic fallbacks."
     )
 
 
@@ -928,44 +1112,6 @@ def _pose_orientation_lock(index: int | None = None) -> str:
         "Match the face/gaze direction, nose/profile direction, torso yaw, visible body side, and the screen-side order of shoulders, arms, hands, hips, legs, and feet. "
         "If the reference face looks toward the viewer's right, the final person must also look toward the viewer's right; if it looks toward the viewer's left, keep it toward the viewer's left. "
         "Do not mirror, horizontally flip, reverse the profile, or swap left/right limbs."
-    )
-
-
-def build_subject_spatial_lock(inputs: Iterable[dict[str, Any]]) -> str:
-    normalized = list(inputs or [])
-    if any(str(item.get("reference_type") or item.get("role") or "").strip().lower() == "pose" for item in normalized):
-        return ""
-    for index, item in enumerate(normalized, 1):
-        role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-        if role not in {"source", "subject"}:
-            continue
-        detail = _reference_detail(item)
-        return (
-            f"BASE SUBJECT SPATIAL LOCK: because no separate pose reference is provided, Image {index} ({detail}) owns the final pose, leg position, hand position, body posture, camera angle, shot scale, framing, crop, subject placement, and composition. "
-            "Strictly preserve the base image's pose/action, legs, hands, gaze/body direction, perspective, and layout while changing only the mapped garment/product/detail regions, unless the USER SUPPLEMENT explicitly requests a conflicting pose, framing, camera, crop, placement, or composition change. "
-            + _pose_orientation_lock(index)
-        )
-    return ""
-
-
-def build_no_model_product_subject_lock(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
-    normalized = list(inputs or [])
-    if not normalized:
-        return ""
-    first = normalized[0]
-    role = str(first.get("reference_type") or first.get("role") or "").strip().lower()
-    if role not in {"source", "subject"}:
-        return ""
-    analysis = _reference_analysis(first, options)
-    if _subject_reference_is_product_template(first, analysis):
-        prefix = "Image 1 has been identified as a no-model product base."
-    else:
-        prefix = "If Image 1 is a no-model product-only, mannequin, hanger, flat-lay, ghost-mannequin, or face-less product reference,"
-    return (
-        "NO-MODEL PRODUCT BASE LOCK: "
-        + prefix
-        + " Do not invent a real person, face, hands, feet, shoes, jewelry, bag, or styling accessory unless the USER SUPPLEMENT explicitly requests adding or changing a human/model/styling element. Treat Image 1 as A款 base/template and fit only the explicitly mapped B款 product onto that A base silhouette, layout, camera, crop, and lighting unless the USER SUPPLEMENT explicitly changes those output attributes. "
-        "Later garment/product/detail references provide B款 product identity and local detail evidence only; incidental shoes, bags, jewelry, hats, props, people, backgrounds, or styling accessories inside those B references must be ignored unless uploaded and labeled as their own mapped reference."
     )
 
 
@@ -1038,225 +1184,193 @@ def build_user_waistband_geometry_lock(instruction: str) -> str:
     )
 
 
-def infer_universal_interaction(item: dict[str, Any], analysis: dict[str, Any] | None = None) -> str:
-    analysis = analysis or {}
-    role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-    suggested = str(analysis.get("interaction") or "").strip().lower()
-    text = _clean_prompt_text(
-        role,
-        item.get("label"),
-        item.get("instruction"),
-        item.get("name"),
-        analysis.get("item_name"),
-        analysis.get("category"),
-        analysis.get("visual_details"),
-    )
-    if role == "subject":
-        return "identity"
-    if role in {"upper_garment", "lower_garment", "full_garment"}:
-        return "wear"
-    if role == "shoes":
-        return "put_on"
-    if role == "pose":
-        return "pose"
-    if role == "scene":
-        return "scene"
-    if role == "style":
-        return "style"
-    if any(keyword in text for keyword in BAG_KEYWORDS):
-        return "carry"
-    if any(keyword in text for keyword in PLACED_PROP_KEYWORDS):
-        return "place"
-    if any(keyword in text for keyword in HANDHELD_KEYWORDS):
-        return "hold"
-    if any(keyword in text for keyword in ACCESSORY_WEAR_KEYWORDS):
-        return "wear"
-    if suggested in {"wear", "put_on", "hold", "carry", "place", "use"}:
-        return suggested
-    return "wear" if role == "accessory" else "hold"
-
-
-def _interaction_phrase(index: int, item: dict[str, Any], analysis: dict[str, Any] | None = None) -> str:
-    role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-    detail = _reference_detail(item, analysis)
-    interaction = infer_universal_interaction(item, analysis)
-    if role == "subject":
-        return (
-            f"Use Image {index} as the exact same primary model, preserving identity, face, hair, body proportions, skin tone, "
-            "and all visible native shoes, jewelry, bags, belts, watches, eyewear, hats, socks, and styling accessories unless an explicit mapped reference or user supplement replaces that exact item."
-        )
-    if role == "model_identity":
-        return (
-            f"Use Image {index} only as the MODEL IDENTITY reference, preserving the face, hairstyle, skin tone, makeup, age cues, and recognizable personal appearance. "
-            "Do not copy its body pose, clothing, accessories, background, camera framing, or scene content."
-        )
-    if role == "upper_garment":
-        return f"Dress the model in the exact upper garment from Image {index} ({detail})."
-    if role == "lower_garment":
-        return f"Dress the model in the exact lower garment from Image {index} ({detail})."
-    if role == "full_garment":
-        return f"Dress the model in the exact full outfit or dress from Image {index} ({detail})."
-    if role == "shoes":
-        return f"Put the exact shoes from Image {index} ({detail}) on the model's feet."
-    if role == "detail":
-        return f"Use the exact product detail from Image {index} ({detail}), preserving its construction, material, color, pattern, logo, text, and craftsmanship."
-    if role in {"accessory", "prop"}:
-        if interaction == "wear":
-            verb = "Have the model wear"
-        elif interaction == "put_on":
-            verb = "Put"
-        elif interaction == "carry":
-            verb = "Have the model naturally carry"
-        elif interaction == "place":
-            verb = "Place"
-        elif interaction == "use":
-            verb = "Have the model naturally use"
-        else:
-            verb = "Have the model naturally hold"
-        placement = f" {analysis.get('placement')}." if analysis and analysis.get("placement") else ""
-        return f"{verb} the exact item from Image {index} ({detail}).{placement}"
-    if role == "pose":
-        detected = _pose_spatial_detail(analysis)
-        detected_note = f" Detected spatial cues: {detected}." if detected else ""
-        return (
-            f"Use Image {index} as the PRIMARY SPATIAL / POSE TEMPLATE. Match its exact body pose/action, joint positions, gesture, balance, "
-            "camera viewpoint, shot scale, framing and crop, subject size and position, and foreground composition. "
-            + _pose_orientation_lock(index) + " "
-            "If it is full-body, keep full-body; if it is three-quarter, half-body, or close-up, keep that same shot. "
-            "Do not zoom, reframe, extend the body beyond the reference crop, or reposition the model by default. "
-            "Treat it only as spatial control: never copy their identity, clothing, accessories, or background content."
-            + detected_note
-        )
-    if role == "scene":
-        return f"Place the model and products inside the scene from Image {index}, matching environment layout, perspective, and natural lighting."
-    if role == "style":
-        return f"Apply only the color, lighting, contrast, and finish style from Image {index}; do not copy its subjects or layout."
-    return f"Use Image {index} as a reference for {detail}."
-
-
-def _base_transfer_source_phrase(
-    index: int,
-    item: dict[str, Any],
-    analysis: dict[str, Any] | None = None,
-    supplemental: bool = False,
-    detail_auxiliary: bool = False,
-) -> str:
-    analysis = analysis or {}
-    role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-    detail = _reference_detail(item, analysis)
-    if supplemental:
-        return (
-            f"Use Image {index} only as supplemental evidence for the same {role or 'reference'} replacement ({detail}); "
-            "it must not override the primary replacement source unless its per-image instruction explicitly says so."
-        )
-    if role == "detail":
-        if detail_auxiliary:
-            return (
-                f"Use Image {index} only as auxiliary local detail evidence for the primary B replacement product ({detail}). "
-                "Apply it only to the matching local region such as collar, cuff, waist, pocket, hem, label, zipper, hardware, logo, stitching, print, or fabric texture. "
-                "Do not treat this detail image as a standalone replacement item and do not copy its background, styling props, shoes, bags, jewelry, hangers, or unrelated accessories."
-            )
-        return (
-            f"Replace the product/detail content in Image 1 with the exact product detail from Image {index} ({detail}). "
-            "This source owns the replacement product's geometry, construction, material, color, pattern, logo, readable text, stitching, and craftsmanship. "
-            "Ignore incidental shoes, bags, jewelry, hats, props, people, hangers, backgrounds, or styling accessories inside this reference unless those items are explicitly uploaded as their own mapped reference."
-        )
-    if role == "model_identity":
-        return (
-            f"Transfer only the model identity from Image {index} ({detail}) onto the person in Image 1: face, hair, skin tone, makeup, age cues, and recognizable appearance. "
-            "Keep Image 1's body proportions, pose, camera, crop, clothing or product layout, background, lighting, and shadows unless another mapped reference explicitly owns that attribute."
-        )
-    if role in {"upper_garment", "lower_garment", "full_garment", "shoes", "accessory", "prop"}:
-        return (
-            f"Replace or integrate the corresponding {role.replace('_', ' ')} in Image 1 using the exact item from Image {index} ({detail}). "
-            "This source owns the replacement item's identity and product fidelity. "
-            "Extract only the explicitly mapped target item for this role; ignore incidental shoes, bags, jewelry, hats, styling props, people, mannequins, backgrounds, or other accessories visible in the same product photo unless they are uploaded and labeled as their own shoes/accessory/prop reference."
-        )
-    if role == "scene":
-        return f"Replace only the environment in Image 1 with the scene from Image {index}, while keeping Image 1's framing, camera, subject scale, and foreground layout."
-    if role == "style":
-        return f"Apply only the palette, lighting, contrast, and finish from Image {index}; do not copy its subjects, products, or layout."
-    if role == "pose":
-        return (
-            f"Use Image {index} as the PRIMARY SPATIAL / POSE TEMPLATE for this base-transfer result. Match its exact body pose/action, joint arrangement, gesture, balance, camera viewpoint, shot scale, framing, crop, subject size and position, and foreground composition. "
-            + _pose_orientation_lock(index) + " "
-            "It overrides Image 1 and every garment/product reference for pose/action, body posture, joints, camera viewpoint, shot scale, framing, crop, subject size, subject placement, and foreground composition. "
-            "Use Image 1 only for non-spatial base/product attributes that do not conflict with this pose. Do not copy identity, clothing, products, accessories, or background content from the pose source."
-        )
-    return f"Apply the exact requested content from Image {index} ({detail}) to the corresponding region of Image 1."
-
-
-def build_universal_base_transfer_instruction(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
-    normalized = list(inputs or [])
+def build_universal_auto_instruction(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
+    options = options if isinstance(options, dict) else {}
+    plan = resolve_universal_reference_plan(inputs, options)
+    if plan["conflicts"]:
+        raise ValueError("；".join(plan["conflicts"]))
+    normalized = plan["inputs"]
     if not normalized:
         return ""
-    base = normalized[0]
-    pose_index = _primary_pose_reference_index(normalized)
-    base_analysis = _reference_analysis(base, options)
-    base_detail = _reference_detail(base, base_analysis)
-    spatial = _pose_spatial_detail(base_analysis)
-    spatial_note = f" Detected base layout cues: {spatial}." if spatial else ""
-    if _subject_reference_is_product_template(base, base_analysis):
-        if pose_index and pose_index != 1:
+    indexed = [(index, item) for index, item in enumerate(normalized, 1)]
+    by_role: dict[str, list[tuple[int, dict[str, Any]]]] = {role: [] for role in UNIVERSAL_CANONICAL_ROLE_ORDER}
+    for index, item in indexed:
+        by_role.setdefault(item["reference_type"], []).append((index, item))
+
+    subject = by_role["subject"][0] if by_role["subject"] else None
+    identity = by_role["model_identity"][0] if by_role["model_identity"] else None
+    pose = by_role["pose"][0] if by_role["pose"] else None
+    scene = by_role["scene"][0] if by_role["scene"] else None
+    style = by_role["style"][0] if by_role["style"] else None
+    studio_id = str(options.get("studio_reference") or "").strip()
+    studio = next((item for item in STUDIO_REFERENCE_PRESETS if item.get("id") == studio_id), None)
+
+    product_index = {item["reference_id"]: index for index, item in indexed if item["reference_type"] in UNIVERSAL_PRODUCT_ROLES}
+    product_lines = []
+    for role in ("upper_garment", "lower_garment", "full_garment", "shoes", "accessory", "prop", "scene_prop"):
+        for index, item in by_role[role]:
+            detail = _reference_detail(item, _reference_analysis(item, options))
+            product_lines.append(
+                f"Image {index} owns the exact {role.replace('_', ' ')} product itself and nothing else ({detail}). "
+                "Treat everything outside that typed product's physical silhouette as excluded context, never as output evidence."
+            )
+    detail_lines = []
+    for index, item in by_role["detail"]:
+        target_index = product_index.get(str(item.get("detail_target_id") or ""))
+        detail_lines.append(
+            f"DETAIL EVIDENCE: Image {index} belongs only to product Image {target_index}; use it for matching construction, alternate view, flat-lay structure, material, weave, print, logo, text, stitching, hardware, and finish, never as another SKU."
+        )
+
+    style_line = (
+        f"STYLE OWNER: Image {style[0]} controls only palette, light quality, contrast, and photographic finish."
+        if style else
+        f"STYLE FALLBACK: use the commercial lighting treatment of scene Image {scene[0]}."
+        if scene else
+        "STYLE FALLBACK: use clean premium commercial photography with restrained retouching."
+    )
+    pose_detail = _pose_spatial_detail(_reference_analysis(pose[1], options)) if pose else ""
+    pose_evidence = f" Parsed pose evidence: {pose_detail}." if pose_detail else ""
+    subject_pose_detail = _pose_spatial_detail(_reference_analysis(subject[1], options)) if subject else ""
+    subject_pose_evidence = f" Parsed subject-pose evidence: {subject_pose_detail}." if subject_pose_detail else ""
+
+    if plan["mode"] == "subject_edit":
+        if identity:
             base_line = (
-                f"Use Image 1 ({base_detail}) as the A-style product/body template and editable BASE IMAGE for non-pose product/base attributes, not as a real human model and not as the action source. "
-                f"Preserve its product silhouette, support shape, hanger/mannequin/flat-lay form if present, background, lighting, shadows, and negative space only where compatible with Image {pose_index}'s pose/spatial template. "
-                f"Do not let Image 1 override Image {pose_index}'s pose/action, body posture, joint arrangement, camera viewpoint, shot scale, framing, crop, subject size, subject placement, or foreground composition. "
-                "Do not invent a face, head, hands, feet, full human body, shoes, jewelry, bag, or accessory just because later product references contain them."
-                + spatial_note
+                f"BODY AND BASE SCENE OWNER: Image {subject[0]} is the only final base image and editing canvas. "
+                "Preserve its body, anatomy, proportions, hands, feet, background, environment, lighting, shadows, reflections, camera, viewpoint, framing, crop, subject scale, placement, composition, and every region not explicitly replaced by another typed reference. "
+                f"Do not preserve Image {subject[0]}'s original face identity because the typed model-identity reference explicitly replaces only that local identity region. "
+                "Preserve its native pose and spatial composition when no typed pose reference is present."
             )
         else:
             base_line = (
-                f"Use Image 1 ({base_detail}) as the A-style product/body template and editable BASE IMAGE, not as a real human model. "
-                "Preserve its product silhouette, support shape, hanger/mannequin/flat-lay form if present, shot type, camera angle, perspective, crop, composition, background, lighting, shadows, scale, placement, and negative space except where the mapped B replacement product requires a local change. "
-                "Do not invent a face, head, hands, feet, full human body, shoes, jewelry, bag, or accessory just because later product references contain them."
-                + spatial_note
+                f"IMMUTABLE BASE: Image {subject[0]} is the final base image. Preserve its model, body, identity, skin, background, environment, lighting, shadows, reflections, and every region not explicitly replaced by another typed reference. "
+                "Preserve its native pose, camera, viewpoint, framing, crop, subject scale and placement only when no typed pose reference is present."
             )
+        parts = [
+            "SUBJECT-BASED LOCAL EDIT RECIPE: reference type is the only edit authority.",
+            base_line,
+            "POSE EVIDENCE ALLOWLIST: only the typed pose reference and the model subject may provide human pose, action, gesture, joint, facing, left/right, viewpoint, framing, or person-placement evidence. Ignore every person and every pose-like cue visible in model-identity, garment, shoes, accessory, prop, detail, scene, and style references.",
+        ]
+        if identity:
+            parts.append(
+                f"FACE-IDENTITY-ONLY EDIT: use Image {identity[0]} only for the final face identity, including facial structure and features, complexion, makeup, age cues, and recognizable facial appearance. "
+                f"Apply it strictly inside the facial region as a localized face swap onto the person and body from Image {subject[0]}; preserve Image {subject[0]}'s original hair, hairstyle, hair color, hairline outside the facial mask, body, neck and non-face skin, pose, camera, background, clothing unless separately replaced, and composition. "
+                f"Never use Image {identity[0]} as the final base image and never copy its hair, hairstyle, hair color, body, anatomy, proportions, clothing, products, pose, gesture, camera, lens, crop, framing, placement, composition, background, environment, lighting, shadows, reflections, or photographic style."
+            )
+        parts.extend(product_lines)
+        if product_lines:
+            parts.append(
+                f"PRODUCT LOCAL EDIT: replace only the regions explicitly owned by product references on base Image {subject[0]}. Remove the superseded item completely, fit the new product naturally, and keep all unassigned garments, shoes, accessories, carried items, scene props, and surroundings from the base unchanged."
+            )
+            parts.append(
+                "PRODUCT-REFERENCE EXCLUSION LOCK: product references are isolated SKU sources, not composition templates. "
+                "Never copy or imitate any product-reference wearer, face, hair, skin, identity, body shape, anatomy, pose, action, gesture, joint position, body direction, camera, lens, viewpoint, crop, framing, subject scale, placement, scene, background, floor, prop, lighting, shadow, reflection, color grade, or photographic style. "
+                f"All of those attributes remain owned by base Image {subject[0]}; a typed model-identity reference may replace only the facial region, while pose, scene, and style references may replace only their explicitly assigned attributes."
+            )
+        product_reference_count = sum(len(by_role[role]) for role in UNIVERSAL_PRODUCT_ROLES)
+        if by_role["lower_garment"] and product_reference_count == 1 and not pose:
+            lower_index = by_role["lower_garment"][0][0]
+            parts.append(
+                f"LOWER-GARMENT-ONLY LOCAL EDIT: make exactly one semantic change to Image {subject[0]}: replace its existing lower garment with the exact lower garment from Image {lower_index}. "
+                f"Image {lower_index} is evidence only for the lower garment itself; never use Image {lower_index} as evidence for its wearer, identity, body shape, anatomy, skin, pose, action, gesture, joint positions, body direction, camera, lens, viewpoint, crop, framing, subject scale or placement, scene, background, floor, props, lighting, shadows, reflections, color grade, or photographic style. "
+                f"Extract the lower garment from Image {lower_index} and adapt the lower garment to Image {subject[0]}'s existing hips, legs, and native pose; never conform Image {subject[0]} to Image {lower_index}'s wearer or pose. "
+                f"Preserve Image {subject[0]}'s upper garment, shoes, accessories, hands, exposed skin, hair, face, body proportions, posture, expression, background, camera, crop, composition, lighting, shadows, and every non-lower-garment pixel as strictly unchanged."
+            )
+        if pose:
+            if identity:
+                assigned_product_indexes = ", ".join(f"Image {index}" for index in sorted(product_index.values()))
+                product_clause = f"the assigned products including {assigned_product_indexes}" if assigned_product_indexes else "the subject's assigned clothing"
+                pose_subject_line = (
+                    f"Image {subject[0]} supplies the body, Image {identity[0]} supplies only the face identity, and Image {pose[0]} supplies only the pose; the original subject pose is not retained. "
+                    f"The final person uses the body from Image {subject[0]}, the face identity from Image {identity[0]}, {product_clause}, and only the pose from Image {pose[0]}. "
+                    f"Keep Image {subject[0]}'s background, environment, and lighting; change camera, framing, placement, or composition only when physically required by Image {pose[0]}'s pose, and never copy the pose reference's person, face, clothing, or background."
+                )
+                pose_preservation = f"Preserve the face identity from Image {identity[0]} and the background from Image {subject[0]}"
+            else:
+                pose_subject_line = (
+                    f"Image {subject[0]} supplies the model identity and body but its original pose is not retained; all assigned garments, shoes and accessories must conform to Image {pose[0]}'s pose, never the reverse. "
+                    f"The final person is the model from Image {subject[0]} wearing the assigned products while performing Image {pose[0]}'s pose."
+                )
+                pose_preservation = "Preserve base identity and background"
+            parts.append(
+                f"SOLE POSE OWNER: Image {pose[0]} is the exclusive and highest-priority source for the final pose, action, gesture, joint arrangement, balance, facing direction, screen-side orientation, viewpoint, framing and person placement. {pose_subject_line} "
+                f"POSE LOCAL EDIT: Image {pose[0]} replaces only the model's action and required garment deformation. {pose_preservation}; change framing or placement only when physically required by the pose. {_pose_orientation_lock(pose[0])}{pose_evidence}"
+            )
+        else:
+            parts.append(
+                f"SUBJECT POSE FALLBACK: Image {subject[0]} is the only pose source because no typed pose reference exists. Preserve its native action, joint arrangement, facing, camera, framing and placement; never borrow a pose from any other reference.{subject_pose_evidence}"
+            )
+            if identity and product_index:
+                assigned_product_indexes = ", ".join(f"Image {index}" for index in sorted(product_index.values()))
+                product_clause = f"the exact assigned product from {assigned_product_indexes}" if len(product_index) == 1 else f"the exact assigned products from {assigned_product_indexes}"
+                parts.append(
+                    f"SUBJECT-IDENTITY-PRODUCT ASSEMBLY LOCK: The final result remains Image {subject[0]}'s person, body, pose, camera, composition, lighting, and background, with only the face identity locally replaced from Image {identity[0]} and while wearing {product_clause}. "
+                    f"Edit Image {subject[0]} in place; never rebuild the image around Image {identity[0]} or any product reference."
+                )
+        if scene:
+            parts.append(f"SCENE LOCAL EDIT: replace only the base environment with scene Image {scene[0]}; preserve the edited model and products.")
+        elif studio:
+            parts.append(f"SCENE LOCAL EDIT: replace only the base environment with this selected studio: {studio['prompt']}.")
+        if style:
+            parts.append(f"STYLE LOCAL EDIT: apply only palette, light quality, contrast, and finish from Image {style[0]}; do not change layout or product identity.")
+        parts.extend(detail_lines)
+        parts.append("FINAL RESULT: a seamless local edit of the original subject image. Anything not explicitly assigned to another type must remain visually unchanged.")
+        return " ".join(parts)
+
+    if plan["mode"] == "visible_model":
+        parts = [
+            "VISIBLE-MODEL COMPOSITION RECIPE: reference type is the only ownership authority.",
+            "BODY AND HAIR FALLBACK: generate one natural adult e-commerce body with anatomically correct hands and feet plus a neutral coherent hairstyle independent of the face reference.",
+            f"FACE-IDENTITY-ONLY OWNER: Image {identity[0]} controls only the face inside the facial region: facial structure and features, complexion, makeup, age cues, and recognizable facial appearance. Never copy its hair, hairstyle, hair color, body, clothing, pose, camera, crop, composition, lighting, or background.",
+            *product_lines,
+        ]
+        if not any(by_role[role] for role in UNIVERSAL_GARMENT_ROLES):
+            parts.append("GARMENT FALLBACK: use plain, logo-free neutral basic clothing.")
+        if pose:
+            parts.append(f"SOLE POSE OWNER: Image {pose[0]} controls action, balance, gesture, joint arrangement, viewpoint, framing and placement exclusively; ignore pose-like evidence from every other reference. {_pose_orientation_lock(pose[0])}{pose_evidence}")
+        else:
+            parts.append("POSE FALLBACK: use a natural premium catalog standing pose.")
+        if scene:
+            parts.append(f"SCENE OWNER: place the visible model and products in scene Image {scene[0]} without copying its people or foreground products.")
+        elif studio:
+            parts.append(f"SCENE FALLBACK: use the selected studio: {studio['prompt']}.")
+        else:
+            parts.append("SCENE FALLBACK: use a neutral high-end e-commerce studio with soft grounded shadows.")
+        parts.extend([style_line, *detail_lines, "FINAL RESULT: one coherent photorealistic visible-model e-commerce image with natural fit, anatomy, contact and product fidelity."])
+        return " ".join(parts)
+
+    if plan["mode"] == "invisible_outfit":
+        parts = [
+            "MODEL-FREE THREE-DIMENSIONAL OUTFIT RECIPE: create the confirmed premium invisible-mannequin fashion result; reference type is the only ownership authority.",
+            "HUMAN ABSENCE LOCK: show absolutely no visible model, face, head, hair, skin, hands, feet, transparent body silhouette, plastic mannequin, stand, hanger, or horror/supernatural effect.",
+            *product_lines,
+            f"SOLE POSE OWNER: Image {pose[0]} is the exclusive pose source; ignore pose-like evidence from all garment, accessory, detail, scene and style references. POSE-DRIVEN GARMENT VOLUME: Image {pose[0]} controls only the three-dimensional wearing pose. Translate its shoulder turn, sleeve bends, waist and hip rotation, balance, step, trouser-leg or skirt movement, viewpoint, framing and screen-side orientation into the clothing itself. Never copy the pose person's identity, skin, body pixels, clothing, accessories, or background. {_pose_orientation_lock(pose[0])}{pose_evidence}",
+            "INVISIBLE WEARING STRUCTURE: preserve convincing human-worn volume through shoulders, chest, waist, hips, sleeves and legs; keep realistic hollow openings at collar, cuffs, hems and trouser legs, correct layering, gravity, occlusion, fabric tension, drape and motion. The outfit must not look flat, collapsed, pasted, cut off, weightless, or supported by a visible body.",
+            "ACCESSORY PLACEMENT: wearable accessories may occupy anatomically correct invisible wearing positions; shoes align to invisible foot positions; carried items may hang at the implied grip without generating hands; scene props remain in the environment.",
+        ]
+        if scene:
+            parts.append(f"SCENE OWNER: present the model-free three-dimensional outfit inside scene Image {scene[0]}, matching its perspective and environmental lighting without copying people or unrelated products.")
+        elif studio:
+            parts.append(f"SCENE FALLBACK: present the outfit in the selected studio: {studio['prompt']}.")
+        else:
+            parts.append("SCENE FALLBACK: use a refined neutral luxury e-commerce studio with clean negative space and a subtle grounded floor shadow.")
+        parts.extend([style_line, *detail_lines, "FINAL RESULT: a sophisticated model-free three-dimensional outfit image with premium fashion-editorial polish and exact SKU fidelity."])
+        return " ".join(parts)
+
+    parts = [
+        "PRODUCT-ONLY E-COMMERCE RECIPE: create a product showcase without inventing a person; reference type is the only ownership authority.",
+        "NO-MODEL LOCK: show no generated human, face, skin, hands, feet, invisible-body pose, or unrelated mannequin. If a product source contains a person, mannequin, hanger, background, or styling item, extract only the typed product.",
+        *product_lines,
+        "PRESENTATION: create a premium product hero, clean flat-lay, hanging presentation, coordinated product arrangement, or detail-focused catalog image according to the supplied product and bound supplemental/detail evidence. Keep the product complete, readable, physically plausible, and marketplace ready.",
+    ]
+    if scene:
+        parts.append(f"SCENE OWNER: display the product arrangement inside scene Image {scene[0]} without adding a model or copying unrelated foreground products.")
+    elif studio:
+        parts.append(f"SCENE FALLBACK: use the selected product studio: {studio['prompt']}.")
     else:
-        if pose_index and pose_index != 1:
-            base_line = (
-                f"Use Image 1 ({base_detail}) as the editable BASE IMAGE for non-pose visual/product attributes, not as the action source. "
-                f"Preserve its background, lighting, shadows, and negative space only where compatible with Image {pose_index}'s pose/spatial template. "
-                f"Do not let Image 1 override Image {pose_index}'s pose/action, body posture, joint arrangement, camera viewpoint, shot scale, framing, crop, subject size, subject placement, or foreground composition."
-                + spatial_note
-            )
-        else:
-            base_line = (
-                f"Use Image 1 ({base_detail}) as the editable BASE IMAGE and final visual template. Preserve its shot type, camera angle, "
-                "perspective, crop, composition, background, lighting, shadows, scale, placement, and negative space except where a mapped replacement requires a local change."
-                + spatial_note
-            )
-    lines = [base_line]
-    seen_source_roles: set[str] = set()
-    primary_product_seen = False
-    for index, item in enumerate(normalized[1:], 2):
-        role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
-        detail_auxiliary = role == "detail" and primary_product_seen
-        lines.append(_base_transfer_source_phrase(index, item, _reference_analysis(item, options), role in seen_source_roles, detail_auxiliary))
-        seen_source_roles.add(role)
-        if role in PRIMARY_PRODUCT_REPLACEMENT_ROLES:
-            primary_product_seen = True
-    lines.append(
-        "Remove the superseded content from Image 1 completely. Do not blend old and new product identities, retain ghost remnants, invent a model, "
-        "expand a close-up into a full-body scene, or copy unrelated people, products, backgrounds, text, or watermarks from replacement sources."
-    )
-    return "AUTO BASE TRANSFER: " + " ".join(lines)
-
-
-def build_universal_auto_instruction(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
-    normalized = list(inputs or [])
-    if universal_composition_mode(normalized) == "base_transfer":
-        return build_universal_base_transfer_instruction(normalized, options)
-    lines = []
-    for index, item in enumerate(normalized, 1):
-        lines.append(_interaction_phrase(index, item, _reference_analysis(item, options)))
-    if not lines:
-        return ""
-    return (
-        "AUTO FINAL COMPOSITION: "
-        + " ".join(lines)
-        + " Produce one coherent, marketplace-ready high-end e-commerce product image with a polished catalog/lifestyle look, clean composition, believable fit, contact, scale, shadows, and SKU-level product fidelity."
-    )
+        parts.append("SCENE FALLBACK: use a clean premium product-photography studio appropriate to the source presentation.")
+    parts.extend([style_line, *detail_lines, "FINAL RESULT: one coherent model-free product image with exact construction, material, color, branding and detail fidelity."])
+    return " ".join(parts)
 
 
 def build_universal_material_evidence_lock(inputs: Iterable[dict[str, Any]], options: dict[str, Any] | None = None) -> str:
@@ -1286,7 +1400,7 @@ def build_subject_native_styling_lock(inputs: Iterable[dict[str, Any]], options:
     for index, item in enumerate(normalized, 1):
         role = str(item.get("reference_type") or item.get("role") or "").strip().lower()
         analysis = _reference_analysis(item, options)
-        if role in {"subject", "source"} and not _subject_reference_is_product_template(item, analysis):
+        if role in {"subject", "source"}:
             subject_sources.append(f"Image {index}")
         if role in SUBJECT_NATIVE_STYLING_OVERRIDE_ROLES:
             detail = _reference_detail(item, analysis)
@@ -1318,6 +1432,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         if not instruction:
             raise ValueError("自由创作必须填写提示词")
         return raw_instruction
+    if operation == "universal" and instruction:
+        return raw_instruction
     reference_map = build_ordered_reference_map(normalized)
     if instruction and operation != "universal":
         return build_user_directed_ecommerce_prompt(instruction)
@@ -1327,7 +1443,6 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     named_detail_lock = build_named_detail_region_lock(normalized)
     user_waistband_geometry_lock = build_user_waistband_geometry_lock(instruction)
     subject_spatial_lock = ""
-    no_model_product_lock = build_no_model_product_subject_lock(normalized, options) if operation == "universal" else ""
     studio_reference_lock = build_studio_reference_lock(options)
     studio_background_selected = bool(studio_reference_lock)
     selected_studio = next(
@@ -1339,119 +1454,38 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     source_photographic_character_lock = build_source_photographic_character_lock(operation, normalized, options)
 
     if operation == "universal":
-        composition_mode = universal_composition_mode(normalized, options)
-        pose_index = _primary_pose_reference_index(normalized)
-        if composition_mode == "subject_composite":
-            subject_spatial_lock = build_subject_spatial_lock(normalized)
-        subject_native_styling_lock = build_subject_native_styling_lock(normalized, options)
-        role_names = {
-            "subject": "PRIMARY SUBJECT / BODY MODEL / NATIVE STYLING",
-            "model_identity": "MODEL IDENTITY",
-            "upper_garment": "UPPER GARMENT",
-            "lower_garment": "LOWER GARMENT",
-            "full_garment": "DRESS OR FULL OUTFIT",
-            "shoes": "SHOES",
-            "accessory": "JEWELRY OR ACCESSORY",
-            "prop": "PROP OR PRODUCT",
-            "detail": "PRODUCT DETAIL",
-            "pose": "PRIMARY SPATIAL / POSE TEMPLATE",
-            "scene": "SCENE / BACKGROUND ONLY",
-            "style": "STYLE / LIGHTING ONLY",
-        }
-        reference_map = []
-        for index, item in enumerate(normalized):
-            analysis = _reference_analysis(item, options)
-            detail = _reference_detail(item, analysis)
-            note = f"; specific instruction: {item['instruction']}" if item.get("instruction") else ""
-            role_name = role_names[item["reference_type"]]
-            if composition_mode == "base_transfer" and index == 0:
-                role_name = "BASE IMAGE / PRODUCT TEMPLATE" if _subject_reference_is_product_template(item, analysis) else f"BASE IMAGE / {role_name}"
-            elif composition_mode == "base_transfer" and item["reference_type"] == "detail":
-                role_name = "DETAIL REPLACEMENT SOURCE"
-            reference_map.append(f"Image {index + 1} = [{role_name}] {detail}{note}")
-        auto_instruction = build_universal_auto_instruction(normalized, options)
-        final_instruction = auto_instruction
-        if composition_mode == "base_transfer":
-            if pose_index:
-                base_image_ownership = (
-                    f"Image 1 owns non-pose base/product identity, background-independent layout cues, shadows, and negative space only where they do not conflict with Image {pose_index}. "
-                    f"Image {pose_index} owns the final pose/action, body posture, joint arrangement, gesture, balance, camera viewpoint, shot scale, framing, crop, subject size and position, non-mirrored screen-side orientation, and foreground composition. "
-                    "The selected studio exclusively owns the final background, backdrop, and environmental lighting. Do not preserve or reuse Image 1's background. "
-                    if studio_background_selected else
-                    f"Image 1 owns non-pose base/product identity, background, lighting, shadows, and negative space only where they do not conflict with Image {pose_index}. "
-                    f"Image {pose_index} owns the final pose/action, body posture, joint arrangement, gesture, balance, camera viewpoint, shot scale, framing, crop, subject size and position, non-mirrored screen-side orientation, and foreground composition. "
-                )
-                conflict_priority = (
-                    f"CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. The selected studio is highest priority for the final background only when the USER SUPPLEMENT does not explicitly request a different background. For all remaining non-background attributes: (1) Image {pose_index} for all spatial/pose attributes, (2) Image 1 for non-spatial visual base attributes, (3) the first replacement source of each reference type, "
-                    "(4) later same-type sources as supplemental evidence, (5) scene content, (6) style. "
-                    if studio_background_selected else
-                    f"CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. Otherwise: (1) Image {pose_index} for all spatial/pose attributes, (2) Image 1 for non-spatial visual base attributes, (3) the first replacement source of each reference type, "
-                    "(4) later same-type sources as supplemental evidence, (5) scene content, (6) style. "
-                )
-            else:
-                base_image_ownership = (
-                    "Image 1 owns the final layout, shot type, camera, perspective, crop, shadows, scale, placement, and negative space, but the selected studio exclusively owns the final background, backdrop, and environmental lighting. Do not preserve or reuse Image 1's background. "
-                    if studio_background_selected else
-                    "Image 1 owns the final layout, shot type, camera, perspective, crop, background, lighting, shadows, scale, placement, and negative space. "
-                )
-                conflict_priority = (
-                    "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. The selected studio is highest priority for the final background only when the USER SUPPLEMENT does not explicitly request a different background. For all remaining non-background attributes: (1) Image 1 visual template, (2) the first replacement source of each reference type, "
-                    "(3) later same-type sources as supplemental evidence, (4) scene content, (5) style. "
-                    if studio_background_selected else
-                    "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. Otherwise: (1) Image 1 visual template, (2) the first replacement source of each reference type, "
-                    "(3) later same-type sources as supplemental evidence, (4) scene content, (5) style. "
-                )
-            task = (
-                "Edit the first reference into one coherent, marketplace-ready photorealistic e-commerce image by following this exact ordered reference map:\n"
-                + "\n".join(reference_map)
-                + "\nFINAL COMPOSITION: " + final_instruction
-                + ("\n" + user_supplement if user_supplement else "")
-                + "\n" + build_universal_material_evidence_lock(normalized, options)
-                + ("\n" + subject_native_styling_lock if subject_native_styling_lock else "")
-                + "\n" + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE
-                + "\nREFERENCE OWNERSHIP RULES: " + base_image_ownership
-                + "Image 1 also owns any visible native shoes, accessories, bags, jewelry, belts, watches, eyewear, socks, and styling props unless an exact mapped shoe/accessory/prop override or explicit USER SUPPLEMENT replaces that item. "
-                + "Model identity references own only face, hair, skin tone, makeup, age cues, and recognizable personal appearance. "
-                + "Each later product or detail source owns only the exact replacement item's geometry, construction, material, color, pattern, logo, readable text, stitching, and craftsmanship. "
-                + "Scene references own only environment content; style references own only palette and finish. "
-                + conflict_priority
-                + "Keep all unaffected pixels and structures from Image 1 as stable as possible. Resolve boundaries, contact, scale, perspective, shadows, and reflections naturally. "
-                + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
-            )
-        else:
-            scene_ownership = (
-                "Scene references do not contribute background, scenery, environmental palette, or environmental lighting when a studio is selected; the selected studio exclusively owns those attributes. "
-                if studio_background_selected else
-                "Scene references own environment appearance, environmental perspective, and lighting, but must fit the pose reference's camera and framing; never copy foreground people or products. "
-            )
-            conflict_priority = (
-                "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. The selected studio is highest priority for the final background only when the USER SUPPLEMENT does not explicitly request a different background. For all remaining non-background attributes: (1) model identity for face/hair/skin when present, (2) subject/body reference, (3) the primary pose reference as highest-priority spatial authority, (4) exact product fidelity, (5) scene content and lighting, (6) style. "
-                if studio_background_selected else
-                "CONFLICT PRIORITY: The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute and overrides conflicting automatic rules. Otherwise: (1) model identity for face/hair/skin when present, (2) subject/body reference, (3) the primary pose reference as highest-priority spatial authority, (4) exact product fidelity, (5) scene content and lighting, (6) style. "
-            )
-            task = (
-                "Create one coherent, marketplace-ready photorealistic e-commerce image by following this exact ordered reference map:\n"
-                + "\n".join(reference_map)
-                + "\nFINAL COMPOSITION: " + final_instruction
-                + ("\n" + user_supplement if user_supplement else "")
-                + "\n" + build_universal_material_evidence_lock(normalized, options)
-                + ("\n" + subject_native_styling_lock if subject_native_styling_lock else "")
-                + "\n" + ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE
-                + "\nREFERENCE OWNERSHIP RULES: Subject references own the primary body, body proportions, base silhouette, identity, and visible native shoes/accessories/styling unless a model identity reference is provided for face/hair/skin only or an exact mapped shoe/accessory/prop override is provided. "
-                + "Model identity references own face, hair, skin tone, makeup, age cues, and recognizable personal appearance only; they do not own body proportions, pose, clothing, accessories, background, camera, or layout. "
-                + "Garment, shoe, accessory, prop, and detail references own their exact product geometry, construction, material, color, pattern, logo, and readable text only. "
-                + "The first pose reference is the highest-priority spatial authority and owns body posture, joint arrangement, balance, gesture, camera viewpoint, shot scale, framing and crop, subject size and position, foreground composition, non-mirrored screen-side orientation, face/gaze direction, torso yaw, and left/right limb order. Never copy its identity, clothing, accessories, or background content. "
-                + scene_ownership
-                + "Style references own only palette, finish, contrast, and lighting treatment; never copy subjects or layout. "
-                + conflict_priority
-                + "Resolve occlusion, fit, scale, perspective, grip, contact shadows, reflections, fabric folds, and anatomy physically. "
-                + "Do not blend identities or leak clothing, people, props, or backgrounds between references. Do not silently zoom, reframe, change shot scale, change crop, alter subject placement, mirror the pose, reverse the profile direction, or swap left/right limbs from the primary pose reference. "
-                + PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE
-            )
-    elif operation == "try_on":
+        typed_plan = resolve_universal_reference_plan(normalized, options)
+        auto_instruction = build_universal_auto_instruction(typed_plan["inputs"], options)
+        typed_reference_map = build_ordered_reference_map(typed_plan["inputs"])
+        typed_parts = [
+            typed_reference_map,
+            f"USER SUPPLEMENT: {instruction}" if instruction else "",
+            build_universal_material_evidence_lock(typed_plan["inputs"], options),
+            build_subject_native_styling_lock(typed_plan["inputs"], options),
+            studio_reference_lock,
+            ECOMMERCE_COLOR_FIDELITY_DIRECTIVE,
+            lower_garment_lock,
+            named_detail_lock,
+            user_waistband_geometry_lock,
+            immutable_foreground_composition_lock,
+            source_photographic_character_lock,
+            TEXT_AND_BRAND_FIDELITY_DIRECTIVE,
+            NANO_BANANA_PRO_REFERENCE_DIRECTIVE,
+            NANO_BANANA_PRO_PHOTO_DIRECTIVE,
+            NANO_BANANA_PRO_ECOMMERCE_DIRECTIVE,
+            ZOOM_READY_ECOMMERCE_GENERATION_DIRECTIVE,
+            PREMIUM_ECOMMERCE_TEXTURE_DIRECTIVE,
+            "Preserve every typed owner exactly. Add only the mapped model, garments, shoes, accessories, carried items, scene props, and environment; do not add unrelated people, products, text, watermarks, duplicate objects, or extra limbs.",
+            auto_instruction,
+            build_final_studio_background_override(options),
+            user_supplement_override_rule,
+        ]
+        return " ".join(part for part in typed_parts if part).strip()
+
+    if operation == "try_on":
         role_names = {
             "garment": "main garment",
-            "model_identity": "model identity",
+            "model_identity": "model face identity only",
             "upper_garment": "upper garment",
             "lower_garment": "lower garment",
             "full_garment": "dress or full outfit",
@@ -1487,9 +1521,9 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         garment_type = re.sub(r"\s+", " ", str(options.get("garment_type") or "").strip())[:120]
         detected_note = f" If a generic garment reference is used, it was visually identified as {garment_type}." if garment_type else ""
         source_instruction = (
-            f"Preserve the source person's body shape, limb proportions, source lighting, and camera; the selected studio replaces the source background. Use Image {identity_index} only as model identity: transfer face, hairstyle, skin tone, makeup, age cues, and recognizable appearance without copying its body pose, clothing, accessories, background, or framing."
+            f"Preserve the source person's body shape, limb proportions, original hair, hairstyle, hair color, non-face skin, source lighting, and camera; the selected studio replaces the source background. Use Image {identity_index} only as face identity: transfer facial structure and features, facial complexion, makeup, age cues, and recognizable facial appearance strictly inside the facial region without copying its hair, body pose, clothing, accessories, background, or framing."
             if studio_background_selected and identity_index
-            else f"Preserve the source person's body shape, limb proportions, source lighting, camera, and background. Use Image {identity_index} only as model identity: transfer face, hairstyle, skin tone, makeup, age cues, and recognizable appearance without copying its body pose, clothing, accessories, background, or framing."
+            else f"Preserve the source person's body shape, limb proportions, original hair, hairstyle, hair color, non-face skin, source lighting, camera, and background. Use Image {identity_index} only as face identity: transfer facial structure and features, facial complexion, makeup, age cues, and recognizable facial appearance strictly inside the facial region without copying its hair, body pose, clothing, accessories, background, or framing."
             if identity_index
             else "Preserve the source person's face, hair, body shape, identity, skin tone, lighting, and use the selected studio instead of the source background."
             if studio_background_selected
@@ -1621,7 +1655,6 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         user_waistband_geometry_lock,
         subject_spatial_lock,
         immutable_foreground_composition_lock,
-        no_model_product_lock,
         TEXT_AND_BRAND_FIDELITY_DIRECTIVE,
         NANO_BANANA_PRO_REFERENCE_DIRECTIVE,
         NANO_BANANA_PRO_PHOTO_DIRECTIVE,

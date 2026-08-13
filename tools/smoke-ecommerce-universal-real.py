@@ -280,10 +280,30 @@ def main() -> int:
                     "task_status": task.get("status"),
                     "route_attempts": task.get("route_attempts") or [],
                     "universal_analysis": task.get("universal_analysis"),
+                    "composition_mode": task.get("composition_mode"),
+                    "reference_plan": task.get("reference_plan"),
                     "prompt": task.get("prompt"),
                 })
                 if task.get("status") != "succeeded":
                     raise RuntimeError(task.get("error") or "真实全能模式任务失败")
+                reference_plan = task.get("reference_plan") or {}
+                owners = reference_plan.get("owners") or {}
+                if task.get("composition_mode") != "subject_edit" or reference_plan.get("mode") != "subject_edit":
+                    raise RuntimeError("全能模式未使用主体局部编辑配方")
+                expected_owners = {
+                    "body": "model",
+                    "identity": "model",
+                    "garments": ["dress"],
+                    "accessories": ["shoes", "necklace"],
+                    "pose": "pose",
+                    "scene": "scene",
+                }
+                for field, expected in expected_owners.items():
+                    if owners.get(field) != expected:
+                        raise RuntimeError(f"严格类型所有者异常：{field}={owners.get(field)!r}，期望 {expected!r}")
+                prompt = str(task.get("prompt") or "")
+                if "SUBJECT-BASED LOCAL EDIT RECIPE" not in prompt or "AUTO BASE TRANSFER" in prompt:
+                    raise RuntimeError("自动提示词未使用主体局部编辑配方或仍含旧 A 基准逻辑")
                 result = task.get("result") or {}
                 image_urls = result.get("images") or []
                 if not image_urls:

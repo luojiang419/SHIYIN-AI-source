@@ -15,10 +15,12 @@ from canvas_core.ecommerce import (
     build_prompt,
     parse_garment_analysis,
     parse_universal_reference_analysis,
+    restrict_universal_reference_analysis,
     primary_pose_reference,
     comparison_reference,
     public_capabilities,
     resolve_generation_settings,
+    resolve_universal_reference_plan,
     route_candidates,
     safe_fallback_error,
     target_size,
@@ -138,7 +140,7 @@ class EcommerceContractTests(unittest.TestCase):
                 {"background_mode": "prompt", "background_prompt": "premium marble counter with soft side light"},
             ),
             "universal": (
-                [{"reference_id": "detail", "reference_type": "detail", "role": "detail", "url": "/assets/input/detail.png"}],
+                [{"reference_id": "garment", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/garment.png"}],
                 {},
             ),
         }
@@ -166,7 +168,7 @@ class EcommerceContractTests(unittest.TestCase):
             "prop_replace": ([{"role": "source", "url": "/assets/input/model.png"}, {"role": "prop", "url": "/assets/input/bag.png"}], {"target_description": "the handbag"}),
             "angle_change": ([{"role": "source", "url": "/assets/input/product.png"}], {"azimuth": 45}),
             "background_change": ([{"role": "source", "url": "/assets/input/product.png"}], {"background_mode": "preset"}),
-            "universal": ([{"reference_id": "detail", "reference_type": "detail", "role": "detail", "url": "/assets/input/detail.png"}], {}),
+            "universal": ([{"reference_id": "garment", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/garment.png"}], {}),
         }
         for operation, (inputs, options) in cases.items():
             with self.subTest(operation=operation):
@@ -190,27 +192,21 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("studio_white", [item["id"] for item in presets])
         self.assertIn("studio_black", [item["id"] for item in presets])
 
-    def test_selected_studio_overrides_universal_reference_backgrounds(self):
+    def test_universal_scene_reference_and_studio_are_mutually_exclusive(self):
         references = [
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
             {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
         ]
-        prompt = build_prompt("universal", references, {"studio_reference": "studio_gray"})
-        self.assertIn("STUDIO BACKGROUND AUTHORITY", prompt)
-        self.assertIn("selected Gray studio", prompt)
-        self.assertIn("It overrides every source, base, scene, style, and background-reference environment", prompt)
-        self.assertIn("Do not use, preserve, blend, or infer any reference-image background", prompt)
-        self.assertIn("Scene references do not contribute background", prompt)
-        self.assertIn("The selected studio is highest priority for the final background", prompt)
-        self.assertNotIn("Scene references own environment appearance", prompt)
+        with self.assertRaisesRegex(ValueError, "场景参考图与摄影棚只能选择一个"):
+            build_prompt("universal", references, {"studio_reference": "studio_gray"})
 
-        base_transfer_prompt = build_prompt(
+        studio_prompt = build_prompt(
             "universal",
-            [{"reference_id": "product", "reference_type": "detail", "role": "detail", "url": "/assets/input/product.png"}],
+            [{"reference_id": "product", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/product.png"}],
             {"studio_reference": "studio_black"},
         )
-        self.assertIn("the selected studio exclusively owns the final background", base_transfer_prompt)
-        self.assertIn("Do not preserve or reuse Image 1's background", base_transfer_prompt)
+        self.assertIn("SCENE FALLBACK: use the selected product studio", studio_prompt)
+        self.assertIn("STUDIO REFERENCE LOCK", studio_prompt)
 
     def test_all_tabs_have_operation_specific_high_quality_locks(self):
         cases = {
@@ -240,7 +236,7 @@ class EcommerceContractTests(unittest.TestCase):
                 ("BACKGROUND REPLACEMENT FOREGROUND LOCK", "change only the environment", "do not retouch, denoise, redraw foreground"),
             ),
             "universal": (
-                [{"reference_id": "detail", "reference_type": "detail", "role": "detail", "url": "/assets/input/detail.png"}],
+                [{"reference_id": "garment", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/garment.png"}],
                 {},
                 ("MATERIAL EVIDENCE LOCK", "pixel-grounded material fidelity", "Scene, style, pose, and model identity references must never override product material"),
             ),
@@ -296,8 +292,9 @@ class EcommerceContractTests(unittest.TestCase):
         normalized = validate_input_roles("try_on", references, {})
         self.assertEqual([item["role"] for item in normalized], ["source", "model_identity", "upper_garment", "detail", "pose"])
         prompt = build_prompt("try_on", references, {})
-        self.assertIn("Use Image 2 only as model identity", prompt)
-        self.assertIn("face, hairstyle, skin tone, makeup", prompt)
+        self.assertIn("Use Image 2 only as face identity", prompt)
+        self.assertIn("Preserve the source person's body shape, limb proportions, original hair, hairstyle, hair color, non-face skin", prompt)
+        self.assertIn("without copying its hair, body pose, clothing, accessories, background, or framing", prompt)
         self.assertIn("Use Image 5 only as the spatial / pose template", prompt)
         self.assertIn("Use detail references only to refine corresponding garment or product fidelity", prompt)
         self.assertIn("without changing body identity, pose, framing, or unrelated garment regions", prompt)
@@ -345,22 +342,23 @@ class EcommerceContractTests(unittest.TestCase):
                 prompt = build_prompt(operation, references, options)
                 self.assertEqual(prompt, options["instruction"])
 
-    def test_universal_user_instruction_is_a_supplement_not_a_prompt_replacement(self):
+    def test_universal_manual_prompt_is_the_only_prompt_and_keeps_upload_order(self):
         references = [
             {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
             {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
         ]
         instruction = "图1穿图2的同款风格服装"
-        prompt = build_prompt("universal", references, {"studio_reference": "studio_black", "instruction": instruction})
-        self.assertNotEqual(prompt, instruction)
-        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
-        self.assertIn("USER SUPPLEMENT OVERRIDE RULE", prompt)
-        self.assertIn("highest-priority instruction whenever it conflicts", prompt)
-        self.assertIn("For attributes the USER SUPPLEMENT does not explicitly mention", prompt)
-        self.assertIn("Create one coherent, marketplace-ready photorealistic e-commerce image", prompt)
-        self.assertIn("REFERENCE OWNERSHIP RULES", prompt)
+        prompt = build_prompt("universal", references, {"instruction": instruction})
+        self.assertEqual(prompt, instruction)
+        self.assertNotIn("ORDERED REFERENCE MAP", prompt)
+        self.assertNotIn("MATERIAL EVIDENCE LOCK", prompt)
+        normalized = validate_input_roles("universal", references, {"instruction": instruction})
+        self.assertEqual([item["reference_id"] for item in normalized], ["subject", "scene"])
+        plan = resolve_universal_reference_plan(references, {"instruction": instruction})
+        self.assertEqual(plan["mode"], "manual_prompt")
+        self.assertEqual(plan["conflicts"], [])
 
-    def test_universal_user_supplement_overrides_conflicting_auto_spatial_and_studio_rules(self):
+    def test_universal_manual_prompt_bypasses_automatic_type_conflicts(self):
         references = [
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
             {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
@@ -368,15 +366,11 @@ class EcommerceContractTests(unittest.TestCase):
             {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
         ]
         instruction = "最终改为半身近景，横向 4:3，背景用红色户外街景，不要沿用动作图全身裁切"
-        prompt = build_prompt("universal", references, {"studio_reference": "studio_white", "instruction": instruction})
-        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
-        self.assertIn("USER SUPPLEMENT OVERRIDE RULE", prompt)
-        self.assertIn("Obey explicit user requests for final framing, shot scale, aspect ratio, crop, camera viewpoint, subject placement", prompt)
-        self.assertIn("color/material changes, and named reference usage", prompt)
-        self.assertIn("unless the USER SUPPLEMENT explicitly requests a conflicting final background or environment", prompt)
-        self.assertIn("The USER SUPPLEMENT is highest priority for every explicitly mentioned output attribute", prompt)
-        self.assertLess(prompt.index("FINAL STUDIO BACKGROUND OVERRIDE"), prompt.index("USER SUPPLEMENT OVERRIDE RULE"))
-        self.assertLess(prompt.index("Do not silently zoom"), prompt.index("USER SUPPLEMENT OVERRIDE RULE"))
+        options = {"instruction": instruction, "studio_reference": "studio_gray"}
+        prompt = build_prompt("universal", references, options)
+        self.assertEqual(prompt, instruction)
+        self.assertEqual(validate_input_roles("universal", references, options)[0]["reference_id"], "model")
+        self.assertEqual(resolve_universal_reference_plan(references, options)["mode"], "manual_prompt")
 
     def test_free_creation_requires_and_preserves_verbatim_prompt(self):
         references = [
@@ -403,11 +397,238 @@ class EcommerceContractTests(unittest.TestCase):
             {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
         ]
         prompt = build_prompt("universal", references, {})
-        self.assertIn("[MODEL IDENTITY]", prompt)
-        self.assertIn("Use Image 2 only as the MODEL IDENTITY reference", prompt)
-        self.assertIn("Model identity references own face, hair, skin tone", prompt)
-        self.assertIn("they do not own body proportions, pose, clothing", prompt)
-        self.assertIn("the primary pose reference as highest-priority spatial authority", prompt)
+        self.assertIn("SUBJECT-BASED LOCAL EDIT RECIPE", prompt)
+        self.assertIn("FACE-IDENTITY-ONLY EDIT: use Image 2 only for the final face identity", prompt)
+        self.assertIn("preserve Image 1's original hair, hairstyle, hair color", prompt)
+        self.assertIn("never copy its hair, hairstyle, hair color, body", prompt)
+        self.assertIn("preserve Image 1's original hair, hairstyle, hair color, hairline outside the facial mask, body, neck and non-face skin, pose, camera, background", prompt)
+        self.assertIn("POSE LOCAL EDIT: Image 3 replaces only the model's action", prompt)
+
+    def test_subject_identity_and_product_keep_subject_as_base_without_pose_reference(self):
+        references = [
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/subject-in-room.png"},
+            {"reference_id": "identity", "reference_type": "model_identity", "role": "model_identity", "url": "/assets/input/identity-in-studio.png"},
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress-on-another-model.png"},
+        ]
+
+        plan = resolve_universal_reference_plan(references, {})
+        prompt = build_prompt("universal", references, {})
+
+        self.assertEqual(plan["mode"], "subject_edit")
+        self.assertEqual(plan["owners"]["body"], "subject")
+        self.assertEqual(plan["owners"]["identity"], "identity")
+        self.assertEqual(plan["owners"]["pose"], "subject")
+        self.assertEqual(plan["owners"]["scene"], "subject")
+        self.assertIn("BODY AND BASE SCENE OWNER: Image 1", prompt)
+        self.assertIn("FACE-IDENTITY-ONLY EDIT: use Image 2 only for the final face identity", prompt)
+        self.assertIn("Never use Image 2 as the final base image", prompt)
+        self.assertIn("The final result remains Image 1's person, body, pose, camera, composition, lighting, and background", prompt)
+        self.assertIn("wearing the exact assigned product from Image 3", prompt)
+        self.assertIn("SUBJECT POSE FALLBACK: Image 1 is the only pose source", prompt)
+
+    def test_subject_identity_product_and_pose_keep_subject_body_face_owner_and_background_separate(self):
+        references = [
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/subject-in-room.png"},
+            {"reference_id": "identity", "reference_type": "model_identity", "role": "model_identity", "url": "/assets/input/identity-in-studio.png"},
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress-on-another-model.png"},
+            {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose-on-location.png"},
+        ]
+
+        prompt = build_prompt("universal", references, {})
+
+        self.assertIn("BODY AND BASE SCENE OWNER: Image 1", prompt)
+        self.assertIn("FACE-IDENTITY-ONLY EDIT: use Image 2 only for the final face identity", prompt)
+        self.assertIn("SOLE POSE OWNER: Image 4", prompt)
+        self.assertIn("The final person uses the body from Image 1, the face identity from Image 2, the assigned products including Image 3, and only the pose from Image 4", prompt)
+        self.assertIn("Keep Image 1's background, environment, and lighting", prompt)
+        self.assertIn("change camera, framing, placement, or composition only when physically required by Image 4's pose", prompt)
+        self.assertNotIn("Image 1 supplies the model identity and body", prompt)
+        self.assertNotIn("Preserve base identity and background", prompt)
+
+    def test_universal_reference_plan_is_type_driven_and_upload_order_independent(self):
+        references = [
+            {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
+            {"reference_id": "identity", "reference_type": "model_identity", "role": "model_identity", "url": "/assets/input/identity.png"},
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/subject.png"},
+            {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
+        ]
+        first = resolve_universal_reference_plan(references, {})
+        second = resolve_universal_reference_plan(list(reversed(references)), {})
+        self.assertEqual(first["owners"], second["owners"])
+        self.assertEqual(
+            [item["reference_type"] for item in first["inputs"]],
+            ["subject", "model_identity", "full_garment", "pose", "scene"],
+        )
+        self.assertEqual(
+            [item["reference_id"] for item in first["inputs"]],
+            [item["reference_id"] for item in second["inputs"]],
+        )
+
+    def test_universal_reference_analysis_cannot_change_subject_edit_route_or_owners(self):
+        references = [
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/product-looking-subject.png"},
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
+        ]
+        options = {"reference_analysis": {"subject": {"subject_presence": "product_only", "face_presence": "no_face"}}}
+        plan = resolve_universal_reference_plan(references, options)
+        self.assertEqual(plan["mode"], "subject_edit")
+        self.assertEqual(plan["owners"]["body"], "subject")
+        self.assertEqual(plan["owners"]["identity"], "subject")
+        prompt = build_prompt("universal", references, options)
+        self.assertIn("IMMUTABLE BASE: Image 1 is the final base image", prompt)
+        self.assertNotIn("A-style product/body template", prompt)
+
+    def test_subject_with_lower_garment_keeps_subject_pose_scene_and_all_non_lower_regions(self):
+        references = [
+            {
+                "reference_id": "subject",
+                "reference_type": "subject",
+                "role": "subject",
+                "url": "/assets/input/subject.png",
+                "label": "需要严格保持的模特主体",
+            },
+            {
+                "reference_id": "pants",
+                "reference_type": "lower_garment",
+                "role": "lower_garment",
+                "url": "/assets/input/pants-on-another-model-in-another-scene.png",
+                "label": "另一位模特在街景中穿着的黑色长裤",
+            },
+        ]
+        options = {
+            "reference_analysis": {
+                "pants": {
+                    "item_name": "黑色长裤",
+                    "subject_presence": "person",
+                    "visual_details": "黑色直筒裤，另一位模特正在街道行走",
+                    "material_signature": "细密斜纹，低光泽",
+                    "pose_description": "跨步行走",
+                    "camera_view": "低机位侧面",
+                    "composition": "城市街景全身构图",
+                }
+            }
+        }
+
+        prompt = build_prompt("universal", references, options)
+
+        self.assertIn("LOWER-GARMENT-ONLY LOCAL EDIT", prompt)
+        self.assertIn("Image 2 is evidence only for the lower garment itself", prompt)
+        self.assertIn("never use Image 2 as evidence for its wearer", prompt)
+        for forbidden_attribute in (
+            "identity", "body shape", "pose", "action", "camera", "crop", "scene", "background", "lighting",
+        ):
+            self.assertIn(forbidden_attribute, prompt)
+        self.assertIn("adapt the lower garment to Image 1's existing hips, legs, and native pose", prompt)
+        self.assertIn("upper garment, shoes, accessories, hands, exposed skin, hair, face", prompt)
+        self.assertGreater(prompt.rfind("LOWER-GARMENT-ONLY LOCAL EDIT"), prompt.index("NANO BANANA PRO EXECUTION"))
+
+    def test_universal_conflicts_are_explicit_instead_of_silently_mixed(self):
+        full_and_separates = [
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
+            {"reference_id": "top", "reference_type": "upper_garment", "role": "upper_garment", "url": "/assets/input/top.png"},
+        ]
+        with self.assertRaisesRegex(ValueError, "不能与上装或下装同时"):
+            validate_input_roles("universal", full_and_separates, {})
+        duplicate_pose = [
+            {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
+            {"reference_id": "pose-a", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose-a.png"},
+            {"reference_id": "pose-b", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose-b.png"},
+        ]
+        with self.assertRaisesRegex(ValueError, "动作参考只能选择一张"):
+            validate_input_roles("universal", duplicate_pose, {})
+
+    def test_universal_detail_binding_is_automatic_for_one_product_and_required_for_many(self):
+        one_product = [
+            {"reference_id": "top", "reference_type": "upper_garment", "role": "upper_garment", "url": "/assets/input/top.png"},
+            {"reference_id": "cuff", "reference_type": "detail", "role": "detail", "url": "/assets/input/cuff.png"},
+        ]
+        normalized = validate_input_roles("universal", one_product, {})
+        detail = next(item for item in normalized if item["reference_type"] == "detail")
+        self.assertEqual(detail["detail_target_id"], "top")
+        many_products = [
+            *one_product,
+            {"reference_id": "pants", "reference_type": "lower_garment", "role": "lower_garment", "url": "/assets/input/pants.png"},
+        ]
+        with self.assertRaisesRegex(ValueError, "必须明确绑定"):
+            validate_input_roles("universal", many_products, {})
+        many_products[1]["detail_target_id"] = "top"
+        normalized = validate_input_roles("universal", many_products, {})
+        self.assertEqual(next(item for item in normalized if item["reference_type"] == "detail")["detail_target_id"], "top")
+
+    def test_universal_missing_types_use_deterministic_fallbacks(self):
+        garment_only = [{"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"}]
+        plan = resolve_universal_reference_plan(garment_only, {})
+        self.assertEqual(plan["fallbacks"], {
+            "body": "none",
+            "identity": "none",
+            "garment": "reference",
+            "accessory": "none",
+            "pose": "none",
+            "scene": "system_product_studio",
+            "style": "commercial_photo",
+        })
+        self.assertEqual(plan["mode"], "product_showcase")
+        subject_only = [{"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"}]
+        plan = resolve_universal_reference_plan(subject_only, {})
+        self.assertEqual(plan["mode"], "subject_edit")
+        self.assertEqual(plan["fallbacks"]["identity"], "subject")
+        self.assertEqual(plan["fallbacks"]["garment"], "subject_native")
+        self.assertEqual(plan["fallbacks"]["pose"], "subject")
+        self.assertEqual(plan["fallbacks"]["scene"], "subject")
+
+    def test_universal_common_user_operation_matrix_resolves_deterministically(self):
+        def references(*roles):
+            return [
+                {
+                    "reference_id": role,
+                    "reference_type": role,
+                    "role": role,
+                    "url": f"/assets/input/{role}.png",
+                }
+                for role in roles
+            ]
+
+        cases = [
+            ("仅模特主体", references("subject"), {}, "subject_edit", {"body": "subject", "identity": "subject", "garment": "subject_native", "pose": "subject", "scene": "subject"}, "SUBJECT-BASED LOCAL EDIT RECIPE"),
+            ("主体加服装", references("subject", "full_garment"), {}, "subject_edit", {"body": "subject", "garment": "reference", "pose": "subject", "scene": "subject"}, "IMMUTABLE BASE"),
+            ("主体形象服装", references("subject", "model_identity", "full_garment"), {}, "subject_edit", {"body": "subject", "identity": "model_identity", "garment": "reference"}, "FACE-IDENTITY-ONLY EDIT"),
+            ("仅模特形象", references("model_identity"), {}, "visible_model", {"body": "system_model", "identity": "model_identity", "garment": "system_basic_outfit", "pose": "system_pose"}, "VISIBLE-MODEL COMPOSITION RECIPE"),
+            ("形象加服装", references("model_identity", "full_garment"), {}, "visible_model", {"body": "system_model", "identity": "model_identity", "garment": "reference"}, "VISIBLE-MODEL COMPOSITION RECIPE"),
+            ("服装加动作", references("full_garment", "pose"), {}, "invisible_outfit", {"body": "invisible_volume", "identity": "none", "garment": "reference", "pose": "pose"}, "MODEL-FREE THREE-DIMENSIONAL OUTFIT RECIPE"),
+            ("服装动作场景", references("full_garment", "pose", "scene"), {}, "invisible_outfit", {"body": "invisible_volume", "pose": "pose", "scene": "scene"}, "HUMAN ABSENCE LOCK"),
+            ("仅成套服装", references("full_garment"), {}, "product_showcase", {"body": "none", "identity": "none", "garment": "reference", "scene": "system_product_studio"}, "PRODUCT-ONLY E-COMMERCE RECIPE"),
+            ("商品加场景", references("accessory", "scene"), {}, "product_showcase", {"body": "none", "accessory": "reference", "scene": "scene"}, "NO-MODEL LOCK"),
+            ("商品影棚", references("full_garment"), {"studio_reference": "studio_white"}, "product_showcase", {"body": "none", "scene": "studio_reference"}, "selected product studio"),
+        ]
+        for name, inputs, options, expected_mode, expected_fallbacks, marker in cases:
+            with self.subTest(name=name):
+                plan = resolve_universal_reference_plan(inputs, options)
+                self.assertEqual(plan["conflicts"], [])
+                self.assertEqual(plan["mode"], expected_mode)
+                for field, value in expected_fallbacks.items():
+                    self.assertEqual(plan["fallbacks"][field], value)
+                prompt = build_prompt("universal", inputs, options)
+                self.assertIn(marker, prompt)
+                self.assertIn("FINAL RESULT", prompt)
+
+        identity_only_prompt = build_prompt("universal", references("model_identity"), {})
+        self.assertIn("BODY AND HAIR FALLBACK", identity_only_prompt)
+        self.assertIn("FACE-IDENTITY-ONLY OWNER", identity_only_prompt)
+        self.assertIn("Never copy its hair, hairstyle, hair color, body", identity_only_prompt)
+
+        with self.assertRaisesRegex(ValueError, "至少需要模特主体、模特形象或一张主商品"):
+            build_prompt("universal", references("pose", "scene", "style"), {})
+
+        detail_inputs = references("subject", "full_garment") + [{
+            "reference_id": "collar-detail",
+            "reference_type": "detail",
+            "role": "detail",
+            "url": "/assets/input/collar-detail.png",
+        }]
+        detail_plan = resolve_universal_reference_plan(detail_inputs, {})
+        detail = next(item for item in detail_plan["inputs"] if item["reference_type"] == "detail")
+        self.assertEqual(detail["detail_target_id"], "full_garment")
 
     def test_generation_parameter_defaults_and_overrides(self):
         standard = resolve_generation_settings(1600, 900, "standard")
@@ -432,14 +653,12 @@ class EcommerceContractTests(unittest.TestCase):
         prompt = build_prompt("universal", references, {})
         for index in range(1, 7):
             self.assertIn(f"Image {index} =", prompt)
-        self.assertIn("AUTO FINAL COMPOSITION", prompt)
-        self.assertIn("Dress the model in the exact full outfit or dress from Image 2", prompt)
-        self.assertIn("Put the exact shoes from Image 3", prompt)
-        self.assertIn("Have the model wear the exact item from Image 4", prompt)
-        self.assertIn("Place the model and products inside the scene from Image 6", prompt)
-        self.assertIn("REFERENCE OWNERSHIP RULES", prompt)
-        self.assertIn("never copy their identity", prompt)
-        self.assertIn("CONFLICT PRIORITY", prompt)
+        self.assertIn("SUBJECT-BASED LOCAL EDIT RECIPE", prompt)
+        self.assertIn("Image 2 owns the exact full garment product", prompt)
+        self.assertIn("Image 3 owns the exact shoes product", prompt)
+        self.assertIn("Image 4 owns the exact accessory product", prompt)
+        self.assertIn("SCENE LOCAL EDIT: replace only the base environment with scene Image 6", prompt)
+        self.assertIn("Anything not explicitly assigned to another type must remain visually unchanged", prompt)
         self.assertIn("premium commercial photography", prompt)
         self.assertIn("marketplace-ready", prompt)
         self.assertIn("SKU-level product fidelity", prompt)
@@ -453,14 +672,13 @@ class EcommerceContractTests(unittest.TestCase):
             {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/3.png"},
         ]
         prompt = build_prompt("universal", references, {})
-        self.assertIn("[PRIMARY SUBJECT / BODY MODEL / NATIVE STYLING]", prompt)
-        self.assertIn("all visible native shoes, jewelry, bags, belts, watches, eyewear, hats, socks, and styling accessories", prompt)
+        self.assertIn("IMMUTABLE BASE: Image 1 is the final base image", prompt)
+        self.assertIn("keep all unassigned garments, shoes, accessories", prompt)
         self.assertIn("SUBJECT-NATIVE STYLING LOCK", prompt)
         self.assertIn("Treat these as subject-owned unchanged styling by default", prompt)
         self.assertIn("Do not erase, simplify, replace, recolor, or borrow alternatives from garment", prompt)
         self.assertIn("Only replace a subject-native shoe, accessory, bag, jewelry item, or prop", prompt)
         self.assertIn("Explicit mapped styling overrides: none", prompt)
-        self.assertIn("Subject references own the primary body, body proportions, base silhouette, identity, and visible native shoes/accessories/styling", prompt)
 
     def test_universal_allows_explicit_mapped_shoe_or_accessory_override(self):
         references = [
@@ -468,12 +686,10 @@ class EcommerceContractTests(unittest.TestCase):
             {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/2.png", "label": "红色连衣裙"},
             {"reference_id": "heels", "reference_type": "shoes", "role": "shoes", "url": "/assets/input/3.png", "label": "银色高跟鞋"},
         ]
-        instruction = "使用图3的银色高跟鞋，其他配饰仍保持主体图"
-        prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertNotEqual(prompt, instruction)
-        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
-        self.assertIn("Put the exact shoes from Image 3", prompt)
-        self.assertIn("Subject references own the primary body", prompt)
+        prompt = build_prompt("universal", references, {})
+        self.assertIn("Image 3 owns the exact shoes product", prompt)
+        self.assertIn("IMMUTABLE BASE: Image 1 is the final base image", prompt)
+        self.assertIn("keep all unassigned garments, shoes, accessories", prompt)
 
     def test_universal_prompt_anchors_texture_to_reference_pixels(self):
         references = [
@@ -522,34 +738,91 @@ class EcommerceContractTests(unittest.TestCase):
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
             {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
             {"reference_id": "pose-a", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose-a.png"},
-            {"reference_id": "pose-b", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose-b.png"},
             {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
         ]
         self.assertEqual(primary_pose_reference(references)["url"], "/assets/input/pose-a.png")
         self.assertEqual(comparison_reference(references)["url"], "/assets/input/pose-a.png")
+        self.assertEqual(comparison_reference(references, "subject_edit")["url"], "/assets/input/pose-a.png")
+        plan = resolve_universal_reference_plan(references, {})
+        self.assertEqual(plan["owners"]["pose"], "pose-a")
+        self.assertEqual(plan["fallbacks"]["pose"], "pose")
         instruction = "保持横向 4:3 输出"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertNotEqual(prompt, instruction)
-        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
-        self.assertIn("Image 3 = [PRIMARY SPATIAL / POSE TEMPLATE]", prompt)
-        self.assertIn("The first pose reference is the highest-priority spatial authority", prompt)
+        self.assertEqual(prompt, instruction)
+        automatic = build_prompt("universal", references, {})
+        self.assertIn("Image 3 = [POSE / SPATIAL TEMPLATE ONLY]", automatic)
+        self.assertIn("POSE LOCAL EDIT: Image 3 replaces only the model's action", automatic)
+        self.assertIn("SOLE POSE OWNER: Image 3", automatic)
+        self.assertIn("The final person is the model from Image 1 wearing the assigned products while performing Image 3's pose", automatic)
 
-    def test_base_transfer_pose_reference_overrides_garment_spatial_template(self):
+    def test_only_pose_or_subject_references_can_supply_pose_evidence(self):
+        contaminated = {
+            "item_name": "黑色长裤",
+            "visual_details": "黑色直筒裤",
+            "pose_description": "跨步行走",
+            "shot_type": "全身",
+            "camera_view": "低机位侧面",
+            "face_direction": "看向画面右侧",
+            "body_direction": "身体朝向画面右侧",
+            "left_right_semantics": "右脚在前",
+            "mirror_risk": "容易镜像",
+            "subject_framing": "人物居中",
+            "composition": "街景全身构图",
+        }
+        product = restrict_universal_reference_analysis("lower_garment", contaminated)
+        identity = restrict_universal_reference_analysis("model_identity", contaminated)
+        subject = restrict_universal_reference_analysis("subject", contaminated)
+        pose = restrict_universal_reference_analysis("pose", contaminated)
+
+        for filtered in (product, identity):
+            for field in (
+                "pose_description", "shot_type", "camera_view", "face_direction", "body_direction",
+                "left_right_semantics", "mirror_risk", "subject_framing", "composition",
+            ):
+                self.assertEqual(filtered[field], "")
+        self.assertEqual(subject["pose_description"], "跨步行走")
+        self.assertEqual(pose["pose_description"], "跨步行走")
+
+    def test_subject_pose_is_used_only_when_no_pose_reference_exists(self):
+        subject = {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"}
+        garment = {"reference_id": "pants", "reference_type": "lower_garment", "role": "lower_garment", "url": "/assets/input/pants.png"}
+        prompt = build_prompt("universal", [subject, garment], {})
+
+        self.assertEqual(comparison_reference([subject, garment])["url"], "/assets/input/model.png")
+        self.assertIn("SUBJECT POSE FALLBACK: Image 1 is the only pose source", prompt)
+        self.assertNotIn("SOLE POSE OWNER", prompt)
+
+    def test_subject_lower_garment_and_pose_do_not_keep_subject_or_product_pose(self):
+        references = [
+            {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
+            {"reference_id": "pants", "reference_type": "lower_garment", "role": "lower_garment", "url": "/assets/input/pants-on-model.png"},
+            {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
+        ]
+        prompt = build_prompt("universal", references, {})
+
+        self.assertEqual(comparison_reference(references, "subject_edit")["url"], "/assets/input/pose.png")
+        self.assertIn("Image 1 supplies the model identity and body but its original pose is not retained", prompt)
+        self.assertIn("all assigned garments, shoes and accessories must conform to Image 3's pose, never the reverse", prompt)
+        self.assertIn("Never copy or imitate any product-reference wearer", prompt)
+        self.assertNotIn("LOWER-GARMENT-ONLY LOCAL EDIT", prompt)
+        self.assertNotIn("adapt the lower garment to Image 1's existing hips, legs, and native pose", prompt)
+
+    def test_garment_and_pose_without_person_generate_model_free_3d_outfit(self):
         references = [
             {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
             {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
         ]
-        self.assertEqual(universal_composition_mode(references), "base_transfer")
+        self.assertEqual(universal_composition_mode(references), "invisible_outfit")
         self.assertEqual(primary_pose_reference(references)["url"], "/assets/input/pose.png")
         self.assertEqual(comparison_reference(references)["url"], "/assets/input/pose.png")
-        prompt = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
-        self.assertIn("Image 1 = [BASE IMAGE / DRESS OR FULL OUTFIT]", prompt)
-        self.assertIn("Image 2 = [PRIMARY SPATIAL / POSE TEMPLATE]", prompt)
-        self.assertIn("not as the action source", prompt)
-        self.assertIn("Use Image 2 as the PRIMARY SPATIAL / POSE TEMPLATE for this base-transfer result", prompt)
-        self.assertIn("Image 2 owns the final pose/action", prompt)
-        self.assertIn("Image 1 for non-spatial visual base attributes", prompt)
-        self.assertIn("USER SUPPLEMENT: 保持横向 4:3 输出", prompt)
+        prompt = build_prompt("universal", references, {})
+        self.assertIn("Image 1 = [DRESS OR FULL OUTFIT SOURCE]", prompt)
+        self.assertIn("Image 2 = [POSE / SPATIAL TEMPLATE ONLY]", prompt)
+        self.assertIn("MODEL-FREE THREE-DIMENSIONAL OUTFIT RECIPE", prompt)
+        self.assertIn("HUMAN ABSENCE LOCK", prompt)
+        self.assertIn("POSE-DRIVEN GARMENT VOLUME: Image 2", prompt)
+        self.assertIn("INVISIBLE WEARING STRUCTURE", prompt)
+        self.assertNotIn("generate one natural adult", prompt)
 
     def test_pose_transfer_reference_owns_framing_unless_user_overrides_it(self):
         references = [
@@ -564,60 +837,49 @@ class EcommerceContractTests(unittest.TestCase):
     def test_universal_auto_instruction_chooses_prop_interactions(self):
         references = [
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/1.png", "label": "模特"},
-            {"reference_id": "bag", "reference_type": "accessory", "role": "accessory", "url": "/assets/input/2.png", "label": "黑色手提包"},
+            {"reference_id": "necklace", "reference_type": "accessory", "role": "accessory", "url": "/assets/input/2.png", "label": "银色项链"},
             {"reference_id": "phone", "reference_type": "prop", "role": "prop", "url": "/assets/input/3.png", "label": "手机"},
-            {"reference_id": "chair", "reference_type": "prop", "role": "prop", "url": "/assets/input/4.png", "label": "木椅"},
+            {"reference_id": "chair", "reference_type": "scene_prop", "role": "scene_prop", "url": "/assets/input/4.png", "label": "木椅"},
         ]
         auto = build_universal_auto_instruction(references, {})
-        self.assertIn("naturally carry the exact item from Image 2", auto)
-        self.assertIn("naturally hold the exact item from Image 3", auto)
-        self.assertIn("Place the exact item from Image 4", auto)
+        self.assertIn("Image 2 owns the exact accessory product", auto)
+        self.assertIn("Image 3 owns the exact prop product", auto)
+        self.assertIn("Image 4 owns the exact scene prop product", auto)
+        self.assertIn("PRODUCT LOCAL EDIT", auto)
         analysis = parse_universal_reference_analysis('{"item_name":"银色项链","category":"项链","interaction":"wear","visual_details":"细链条","confidence":0.91}')
         self.assertEqual(analysis["interaction"], "wear")
-        prompt = build_prompt("universal", references[:2], {"reference_analysis": {"bag": {"item_name": "亮面黑色手提包", "interaction": "carry"}}})
-        self.assertIn("亮面黑色手提包", prompt)
+        prompt = build_prompt("universal", references[:2], {"reference_analysis": {"necklace": {"item_name": "银色项链", "interaction": "carry"}}})
+        self.assertIn("Image 2 owns the exact accessory product", prompt)
 
-    def test_universal_accepts_detail_only_inputs_and_at_most_fourteen_images(self):
+    def test_universal_rejects_unbound_detail_and_at_most_fourteen_images(self):
         subject = {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/1.png"}
         self.assertEqual(validate_input_roles("universal", [subject], {})[0]["reference_type"], "subject")
         detail = {"reference_id": "detail-a", "reference_type": "detail", "role": "detail", "url": "/assets/input/2.png"}
-        self.assertEqual(validate_input_roles("universal", [detail], {})[0]["reference_type"], "detail")
-        self.assertEqual(universal_composition_mode([detail]), "base_transfer")
+        with self.assertRaisesRegex(ValueError, "缺少可绑定"):
+            validate_input_roles("universal", [detail], {})
+        self.assertEqual(universal_composition_mode([detail]), "")
         with self.assertRaisesRegex(ValueError, "至少需要一张"):
             validate_input_roles("universal", [], {})
         too_many = [dict(subject, reference_id=f"r{index}") for index in range(15)]
         with self.assertRaisesRegex(ValueError, "最多上传 14"):
             validate_input_roles("universal", too_many, {})
 
-    def test_detail_only_universal_prompt_uses_first_image_as_base(self):
+    def test_detail_only_universal_prompt_is_rejected(self):
         references = [
             {"reference_id": "detail-a", "reference_type": "detail", "role": "detail", "url": "/assets/input/a.png", "label": "A 款细节图"},
             {"reference_id": "detail-b", "reference_type": "detail", "role": "detail", "url": "/assets/input/b.png", "label": "B 款细节图"},
         ]
-        prompt = build_prompt("universal", references, {})
-        self.assertEqual(comparison_reference(references)["url"], "/assets/input/a.png")
-        self.assertIn("Image 1 = [BASE IMAGE / PRODUCT DETAIL]", prompt)
-        self.assertIn("Image 2 = [DETAIL REPLACEMENT SOURCE]", prompt)
-        self.assertIn("Image 1 owns the final layout", prompt)
-        self.assertIn("Replace the product/detail content in Image 1", prompt)
-        self.assertIn("Do not blend old and new product identities", prompt)
+        with self.assertRaisesRegex(ValueError, "缺少可绑定"):
+            build_prompt("universal", references, {})
 
-    def test_universal_no_model_product_base_uses_b_product_and_details_only(self):
+    def test_universal_no_subject_generates_product_showcase_with_bound_details(self):
         references = [
-            {"reference_id": "a-base", "reference_type": "subject", "role": "subject", "url": "/assets/input/a.png", "label": "A 款产品图，没有人脸"},
             {"reference_id": "b-main", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/b.png", "label": "B 款连衣裙产品图，画面里搭配了鞋子和包"},
-            {"reference_id": "b-collar", "reference_type": "detail", "role": "detail", "url": "/assets/input/b-collar.png", "label": "B 款领口细节图"},
-            {"reference_id": "b-fabric", "reference_type": "detail", "role": "detail", "url": "/assets/input/b-fabric.png", "label": "B 款面料细节图"},
+            {"reference_id": "b-collar", "reference_type": "detail", "role": "detail", "detail_target_id": "b-main", "url": "/assets/input/b-collar.png", "label": "B 款领口细节图"},
+            {"reference_id": "b-fabric", "reference_type": "detail", "role": "detail", "detail_target_id": "b-main", "url": "/assets/input/b-fabric.png", "label": "B 款面料细节图"},
         ]
         options = {
             "reference_analysis": {
-                "a-base": {
-                    "item_name": "A 款无脸商品主体",
-                    "category": "服装商品图",
-                    "subject_presence": "product_only",
-                    "face_presence": "no_face",
-                    "shot_type": "白底商品主图",
-                },
                 "b-main": {
                     "item_name": "B 款连衣裙",
                     "category": "连衣裙",
@@ -627,16 +889,12 @@ class EcommerceContractTests(unittest.TestCase):
             }
         }
         prompt = build_prompt("universal", references, options)
-        self.assertEqual(universal_composition_mode(references, options), "base_transfer")
-        self.assertIn("Image 1 = [BASE IMAGE / PRODUCT TEMPLATE]", prompt)
-        self.assertIn("A-style product/body template", prompt)
-        self.assertIn("not as a real human model", prompt)
-        self.assertIn("mapped B replacement product", prompt)
-        self.assertIn("auxiliary local detail evidence for the primary B replacement product", prompt)
-        self.assertIn("Extract only the explicitly mapped target item", prompt)
-        self.assertIn("ignore incidental shoes, bags, jewelry", prompt.lower())
-        self.assertIn("unless uploaded and labeled as their own mapped reference", prompt)
-        self.assertNotIn("BASE SUBJECT SPATIAL LOCK", prompt)
+        self.assertEqual(universal_composition_mode(references, options), "product_showcase")
+        self.assertIn("PRODUCT-ONLY E-COMMERCE RECIPE", prompt)
+        self.assertIn("NO-MODEL LOCK", prompt)
+        self.assertIn("DETAIL EVIDENCE: Image 2 belongs only to product Image 1", prompt)
+        self.assertIn("DETAIL EVIDENCE: Image 3 belongs only to product Image 1", prompt)
+        self.assertNotIn("A-style product/body template", prompt)
 
     def test_ecommerce_prompt_locks_color_pants_shape_and_named_detail_regions(self):
         references = [
@@ -655,22 +913,21 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("NAMED DETAIL REGION LOCK", prompt)
         self.assertIn("裤子腰头细节图", prompt)
         self.assertIn("侧边细节图", prompt)
-        self.assertIn("BASE SUBJECT SPATIAL LOCK", prompt)
-        self.assertIn("leg position, hand position", prompt)
+        self.assertIn("IMMUTABLE BASE: Image 1 is the final base image", prompt)
+        self.assertIn("Preserve its native pose, camera, viewpoint, framing", prompt)
 
-    def test_user_instruction_can_lock_waistband_redline_geometry(self):
+    def test_universal_manual_waistband_instruction_is_not_wrapped_by_hidden_rules(self):
         references = [
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png", "label": "图1模特姿势"},
             {"reference_id": "pants", "reference_type": "lower_garment", "role": "lower_garment", "url": "/assets/input/pants.png", "label": "橙色阔腿裤"},
         ]
         instruction = "参考产品图腰头红线标识，把前中下凹处补高到与左右两侧同一水平高度"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertNotEqual(prompt, instruction)
-        self.assertIn("USER SUPPLEMENT: " + instruction, prompt)
-        self.assertIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", prompt)
+        self.assertEqual(prompt, instruction)
+        self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", prompt)
 
         ordinary = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
-        self.assertIn("USER SUPPLEMENT: 保持横向 4:3 输出", ordinary)
+        self.assertEqual(ordinary, "保持横向 4:3 输出")
         self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", ordinary)
 
     def test_capabilities_do_not_expose_provider_secrets(self):
@@ -838,7 +1095,15 @@ class EcommerceBackendTests(unittest.TestCase):
 
     def test_ecommerce_auxiliary_prompts_extract_nano_banana_pro_evidence(self):
         self.assertIn("Nano Banana Pro", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
-        self.assertIn("角色归属 + 保真证据", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("参考角色已经由用户明确指定", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("禁止根据图片内容重新分类", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("绝不能用于改变引用类型、所有者、顺延路径或最终组合模式", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("服装、鞋靴、配饰、道具或商品细节角色", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("不得提取或描述参考图人物的身份、身体、动作、姿势、镜头、构图、场景、背景和光线", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("姿势证据白名单只有 pose（动作参考）和 subject（模特主体）", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("model_identity、服装、鞋靴、配饰、道具、细节、场景和风格", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("model_identity（模特形象）的唯一权限是脸部", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
+        self.assertIn("不得提取或使用其头发、发型、发色、身体", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
         self.assertIn("material_signature", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
         self.assertIn("Logo、吊牌、包装和衣服印字", self.main.ECOMMERCE_UNIVERSAL_REFERENCE_ANALYSIS_PROMPT)
         self.assertIn("material_evidence", self.main.ASSET_CLASSIFICATION_PROMPT)
@@ -958,9 +1223,24 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(detail["role"], "detail")
         self.assertTrue(detail["locked"])
         self.assertTrue(any(item["id"] == "upper_garment" for item in result["types"]))
+        self.assertTrue(any(item["id"] == "scene_prop" and item["role"] == "scene_prop" for item in result["types"]))
         self.assertEqual(loaded["revision"], 7)
         self.assertTrue(any(item["id"] == "bag_type" for item in loaded["types"]))
         publish.assert_called_once()
+
+    def test_reference_slot_legacy_labels_are_migrated_without_underscores(self):
+        normalized = self.main.normalize_reference_slot_types({"types": [
+            {"id": "subject", "role": "subject", "label_zh": "主体_身体模特", "label_en": "Subject _ body model"},
+            {"id": "prop", "role": "prop", "label_zh": "道具_商品", "label_en": "Prop _ product"},
+            {"id": "full_garment", "role": "full_garment", "label_zh": "连衣裙_套装", "label_en": "Dress _ full outfit"},
+            {"id": "scene", "role": "scene", "label_zh": "场景_背景", "label_en": "Scene _ background"},
+        ]})
+        by_id = {item["id"]: item for item in normalized}
+        self.assertEqual(by_id["subject"]["label_zh"], "模特主体")
+        self.assertEqual(by_id["prop"]["label_zh"], "手持/携带物")
+        self.assertEqual(by_id["full_garment"]["label_zh"], "连衣裙/套装")
+        self.assertEqual(by_id["scene"]["label_zh"], "场景/背景")
+        self.assertEqual(by_id["scene_prop"]["label_zh"], "场景道具")
 
     def test_ecommerce_task_rejects_provider_without_api_key_before_queueing(self):
         provider = {"id": "grsai", "name": "Grsai", "enabled": True, "image_models": ["gpt-image-2-vip"]}
@@ -1026,11 +1306,11 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertTrue(attempted_override["source_composition_locked"])
         self.assertEqual((attempted_override["aspect_ratio"], attempted_override["size"]), ("source", "1152x2048"))
 
-    def test_user_prompt_request_preserves_universal_panel_reference_order_and_supplements_auto_prompt(self):
+    def test_user_prompt_request_preserves_universal_panel_order_and_uses_raw_prompt(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         inputs = [
             {"role": "subject", "reference_type": "subject", "reference_id": "panel_1", "url": "/assets/input/1.png"},
-            {"role": "detail", "reference_type": "detail", "reference_id": "panel_2", "url": "/assets/input/2.png"},
+            {"role": "full_garment", "reference_type": "full_garment", "reference_id": "panel_2", "url": "/assets/input/2.png"},
             {"role": "scene", "reference_type": "scene", "reference_id": "panel_3", "url": "/assets/input/3.png"},
         ]
         payload = self.main.EcommerceTaskRequest(
@@ -1042,7 +1322,7 @@ class EcommerceBackendTests(unittest.TestCase):
         )
         observed = {}
 
-        def validate_local_inputs(values, operation):
+        def validate_local_inputs(values, operation, options=None):
             observed["operation"] = operation
             observed["reference_ids"] = [item["reference_id"] for item in values]
             return values, (100, 100)
@@ -1056,13 +1336,12 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(observed["operation"], "universal")
         self.assertEqual(observed["reference_ids"], ["panel_1", "panel_2", "panel_3"])
         self.assertEqual([item["reference_id"] for item in snapshot["inputs"]], ["panel_1", "panel_2", "panel_3"])
-        self.assertIn("USER SUPPLEMENT: 图1使用图2材质，图3作为背景", snapshot["prompt"])
-        self.assertIn("Image 1 = [PRIMARY SUBJECT / BODY MODEL / NATIVE STYLING]", snapshot["prompt"])
-        self.assertIn("Image 2 = [PRODUCT DETAIL]", snapshot["prompt"])
-        self.assertIn("Image 3 = [SCENE / BACKGROUND ONLY]", snapshot["prompt"])
-        self.assertIn("REFERENCE OWNERSHIP RULES", snapshot["prompt"])
+        self.assertEqual(snapshot["prompt"], "图1使用图2材质，图3作为背景")
+        self.assertEqual(snapshot["composition_mode"], "manual_prompt")
+        self.assertEqual(snapshot["reference_plan"]["ordered_reference_ids"], ["panel_1", "panel_2", "panel_3"])
+        self.assertEqual(snapshot["reference_plan"]["conflicts"], [])
 
-    def test_pose_reference_controls_source_ratio_and_comparison_metadata(self):
+    def test_subject_edit_preserves_subject_ratio_and_comparison_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             subject = Path(root) / "subject.png"
             pose = Path(root) / "pose.png"
@@ -1074,8 +1353,8 @@ class EcommerceBackendTests(unittest.TestCase):
                 {"role": "pose", "reference_type": "pose", "reference_id": "pose", "url": "/assets/input/pose.png"},
             ]
             with patch.object(self.main, "output_file_from_url", side_effect=lambda url: lookup.get(url)):
-                checked, source_dimensions = self.main.validate_ecommerce_local_inputs(inputs)
-            self.assertEqual(source_dimensions, (60, 120))
+                checked, source_dimensions = self.main.validate_ecommerce_local_inputs(inputs, "universal")
+            self.assertEqual(source_dimensions, (120, 80))
 
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         payload = self.main.EcommerceTaskRequest(
@@ -1087,14 +1366,16 @@ class EcommerceBackendTests(unittest.TestCase):
         )
         with (
             patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
-            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(checked, (60, 120))),
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(checked, (120, 80))),
         ):
             snapshot = self.main.prepare_ecommerce_request(payload)
         self.assertEqual(snapshot["pose_reference_url"], "/assets/input/pose.png")
         self.assertEqual(snapshot["comparison_reference_url"], "/assets/input/pose.png")
-        self.assertEqual(snapshot["size"], "1024x2048")
+        self.assertEqual(snapshot["composition_mode"], "subject_edit")
+        self.assertTrue(snapshot["source_composition_locked"])
+        self.assertEqual(snapshot["aspect_ratio"], "source")
 
-    def test_base_transfer_pose_reference_controls_source_ratio_and_comparison_metadata(self):
+    def test_invisible_outfit_uses_pose_ratio_and_comparison_metadata(self):
         with tempfile.TemporaryDirectory() as root:
             dress = Path(root) / "dress.png"
             pose = Path(root) / "pose.png"
@@ -1122,23 +1403,24 @@ class EcommerceBackendTests(unittest.TestCase):
             patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(checked, (60, 120))),
         ):
             snapshot = self.main.prepare_ecommerce_request(payload)
-        self.assertEqual(snapshot["composition_mode"], "base_transfer")
-        self.assertEqual(snapshot["base_reference_id"], "dress")
-        self.assertEqual(snapshot["base_reference_url"], "/assets/input/dress.png")
+        self.assertEqual(snapshot["composition_mode"], "invisible_outfit")
+        self.assertEqual(snapshot["reference_plan"]["ordered_reference_ids"], ["dress", "pose"])
+        self.assertEqual(snapshot["reference_plan"]["owners"]["body"], "invisible_volume")
+        self.assertEqual(snapshot["reference_plan"]["owners"]["pose"], "pose")
+        self.assertEqual(snapshot["base_reference_id"], "")
+        self.assertEqual(snapshot["base_reference_url"], "")
         self.assertEqual(snapshot["pose_reference_url"], "/assets/input/pose.png")
         self.assertEqual(snapshot["comparison_reference_url"], "/assets/input/pose.png")
+        self.assertFalse(snapshot["source_composition_locked"])
         self.assertEqual(snapshot["size"], "1024x2048")
 
-    def test_detail_only_universal_request_uses_first_image_dimensions_and_metadata(self):
+    def test_garment_only_universal_request_uses_first_image_dimensions_and_typed_metadata(self):
         with tempfile.TemporaryDirectory() as root:
-            detail_a = Path(root) / "detail-a.png"
-            detail_b = Path(root) / "detail-b.png"
+            detail_a = Path(root) / "garment.png"
             self.make_image(detail_a, (160, 100))
-            self.make_image(detail_b, (80, 160))
-            lookup = {"/assets/input/a.png": str(detail_a), "/assets/input/b.png": str(detail_b)}
+            lookup = {"/assets/input/a.png": str(detail_a)}
             inputs = [
-                {"role": "detail", "reference_type": "detail", "reference_id": "detail-a", "url": "/assets/input/a.png"},
-                {"role": "detail", "reference_type": "detail", "reference_id": "detail-b", "url": "/assets/input/b.png"},
+                {"role": "full_garment", "reference_type": "full_garment", "reference_id": "garment-a", "url": "/assets/input/a.png"},
             ]
             with patch.object(self.main, "output_file_from_url", side_effect=lambda url: lookup.get(url)):
                 checked, source_dimensions = self.main.validate_ecommerce_local_inputs(inputs, "universal")
@@ -1157,10 +1439,12 @@ class EcommerceBackendTests(unittest.TestCase):
             patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(checked, (160, 100))),
         ):
             snapshot = self.main.prepare_ecommerce_request(payload)
-        self.assertEqual(snapshot["composition_mode"], "base_transfer")
-        self.assertEqual(snapshot["base_reference_id"], "detail-a")
-        self.assertEqual(snapshot["base_reference_url"], "/assets/input/a.png")
-        self.assertEqual(snapshot["comparison_reference_url"], "/assets/input/a.png")
+        self.assertEqual(snapshot["composition_mode"], "product_showcase")
+        self.assertEqual(snapshot["reference_plan"]["ordered_reference_ids"], ["garment-a"])
+        self.assertEqual(snapshot["reference_plan"]["fallbacks"]["identity"], "none")
+        self.assertEqual(snapshot["base_reference_id"], "")
+        self.assertEqual(snapshot["base_reference_url"], "")
+        self.assertEqual(snapshot["comparison_reference_url"], "")
         self.assertEqual(snapshot["size"], "2048x1280")
 
     def test_removed_provider_presets_are_pruned_once(self):
@@ -1248,7 +1532,7 @@ class EcommerceBackendTests(unittest.TestCase):
                 max_active = max(max_active, active)
                 await asyncio.sleep(0.02)
                 active -= 1
-                return '{"item_name":"商品","category":"道具","interaction":"hold"}', "qwen3.5-9b-vlm"
+                return '{"item_name":"商品","category":"道具","interaction":"hold","pose_description":"人物抬手","camera_view":"低机位","body_direction":"朝向画面右侧","composition":"人物全身构图"}', "qwen3.5-9b-vlm"
 
             self.main.ECOMMERCE_VISION_CACHE.clear()
             route = {"provider_id": "local-vision", "provider_name": "本地视觉模型", "model": "qwen3.5-9b-vlm"}
@@ -1264,6 +1548,11 @@ class EcommerceBackendTests(unittest.TestCase):
             self.assertGreaterEqual(max_active, 2)
             self.assertEqual(mocked_caption.await_count, 3)
             self.assertTrue(all(item.get("cached") for item in second["items"].values()))
+            for analysis in first["items"].values():
+                self.assertEqual(analysis["pose_description"], "")
+                self.assertEqual(analysis["camera_view"], "")
+                self.assertEqual(analysis["body_direction"], "")
+                self.assertEqual(analysis["composition"], "")
 
     def test_auto_garment_analysis_enriches_prompt(self):
         snapshot = {
@@ -1292,6 +1581,26 @@ class EcommerceBackendTests(unittest.TestCase):
                 {"reference_id": "style", "reference_type": "style", "role": "style", "url": "/assets/input/style.png"},
             ],
             "options": {"prompt_policy": "free", "instruction": prompt},
+            "prompt": prompt,
+        }
+        analyzer = AsyncMock()
+        with patch.object(self.main, "analyze_ecommerce_universal_references", new=analyzer):
+            enriched, returned = asyncio.run(self.main.enrich_ecommerce_snapshot_with_universal_analysis(snapshot))
+        analyzer.assert_not_awaited()
+        self.assertIsNone(returned)
+        self.assertEqual(enriched["prompt"], prompt)
+        self.assertNotIn("reference_analysis", enriched["options"])
+
+    def test_standard_universal_manual_prompt_skips_reference_analysis(self):
+        prompt = "图2服装穿到图1主体上，其余保持不变"
+        snapshot = {
+            "operation": "universal",
+            "inputs": [
+                {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/source.png"},
+                {"reference_id": "garment", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/garment.png"},
+            ],
+            "options": {"instruction": prompt},
+            "composition_mode": "manual_prompt",
             "prompt": prompt,
         }
         analyzer = AsyncMock()
@@ -1582,10 +1891,10 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("data-task-candidate-time", self.javascript)
         self.assertIn("syncCandidateTimer()", self.javascript)
         self.assertIn("const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation'", self.javascript)
-        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.02.ivory-surfaces.1"', self.index_html)
-        self.assertIn('id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.08.02.ivory-surfaces.1"', self.index_html)
-        self.assertIn('/static/js/ecommerce.js?v=2026.08.02.count-pending.1', self.html)
-        self.assertIn('/static/css/ecommerce.css?v=2026.08.02.ivory-surfaces.1', self.html)
+        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.10.universal-plan-banner-removed.1"', self.index_html)
+        self.assertIn('id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.08.10.universal-plan-banner-removed.1"', self.index_html)
+        self.assertIn('/static/js/ecommerce.js?v=2026.08.10.universal-plan-banner-removed.1', self.html)
+        self.assertIn('/static/css/ecommerce.css?v=2026.08.10.universal-plan-banner-removed.1', self.html)
 
     def test_generation_parameters_wait_for_server_preferences_before_initial_defaults(self):
         self.assertIn("initializing:true", self.javascript)
@@ -1709,7 +2018,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertNotIn("freeCreation.referenceRequired", self.ecommerce_i18n)
         self.assertIn("querySelector('h3 + p')", self.javascript)
         self.assertIn("querySelector('option[value=\"source\"]')", self.javascript)
-        self.assertIn("2026.07.29.free-creation-optional-reference.1", self.i18n_loader)
+        self.assertIn("2026.08.09.universal-routes.1", self.i18n_loader)
         self.assertIn(".ec-page.is-universal.is-free-creation .ec-operation-controls { order:1; }", self.css)
 
     def test_universal_tab_supports_ordered_role_aware_references(self):
@@ -1722,7 +2031,9 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn(".sort((a,b) => Number(a[1].order || 0) - Number(b[1].order || 0))", self.javascript)
         request_builder = re.search(r"function taskInputsForRequest\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(request_builder)
-        self.assertIn("return universalEntries().map", request_builder.group(1))
+        self.assertIn("IS_FREE_CREATION || manualPrompt ? universalEntries().filter", request_builder.group(1))
+        self.assertIn(": universalTypedEntries()", request_builder.group(1))
+        self.assertIn("return entries.map", request_builder.group(1))
         self.assertNotIn("universalInstructionRequired", self.javascript)
 
     def test_all_tabs_render_clickable_studio_reference_slot(self):
@@ -1743,29 +2054,53 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for key in ("ecommerce.studioWhite", "ecommerce.studioGray", "ecommerce.studioBlack", "ecommerce.studioRedGold"):
             self.assertIn(key, self.ecommerce_i18n)
 
-    def test_ecommerce_hints_emphasize_listing_detail_quality(self):
-        for phrase in ("电商级提示词", "材质", "Logo", "吊牌文字", "上架氛围"):
+    def test_ecommerce_hints_explain_automatic_and_manual_routing(self):
+        for phrase in ("主体局部换装", "可见模特穿搭", "无人物三维穿搭", "原始提示词", "上传顺序"):
             self.assertIn(phrase, self.ecommerce_i18n)
 
-    def test_universal_detail_only_mode_uses_first_uploaded_reference_as_base(self):
+    def test_universal_mode_exposes_four_routes_and_manual_prompt_without_base_reference(self):
         self.assertIn("['model_identity','model_identity','ecommerce.refModelIdentity']", self.javascript)
+        self.assertIn("['scene_prop','scene_prop','ecommerce.refSceneProp']", self.javascript)
         self.assertIn("['detail','detail','ecommerce.refDetail']", self.javascript)
         self.assertIn("model_identity:'ecommerce.presetModelIdentity'", self.javascript)
+        self.assertIn("scene_prop:'ecommerce.presetSceneProp'", self.javascript)
         self.assertIn("detail:'ecommerce.presetDetail'", self.javascript)
-        self.assertIn("const baseReferenceKey = IS_FREE_CREATION ? '' : (hasSubject ? '' : (uploadedEntries[0]?.[0] || ''))", self.javascript)
-        self.assertIn("ec-base-reference-badge", self.javascript)
-        self.assertIn(".ec-universal-reference.is-base-reference", self.css)
+        self.assertIn("const UNIVERSAL_CANONICAL_ROLE_ORDER", self.javascript)
+        self.assertIn("function universalTypedEntries()", self.javascript)
+        self.assertIn("function universalHasManualPrompt()", self.javascript)
+        self.assertIn("function resolveUniversalReferencePlan()", self.javascript)
+        for mode in ("manual_prompt", "subject_edit", "visible_model", "invisible_outfit", "product_showcase"):
+            self.assertIn(mode, self.javascript)
+        self.assertIn("data-detail-target", self.javascript)
+        self.assertIn("detail_target_id", self.javascript)
+        self.assertNotIn("universalPlanPreview", self.javascript)
+        self.assertNotIn('id="universalPlanPreview"', self.html)
+        self.assertNotIn("baseReferenceKey", self.javascript)
+        self.assertNotIn("ec-base-reference-badge", self.javascript)
+        self.assertNotIn(".ec-universal-reference.is-base-reference", self.css)
         validation = re.search(r"function validateForm\(show=true\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(validation)
         self.assertIn("if(!IS_FREE_CREATION && !references.length)", validation.group(1))
         self.assertIn("ecommerce.universalReferenceRequired", validation.group(1))
+        self.assertIn("resolveUniversalReferencePlan()", validation.group(1))
+        self.assertIn("!universalHasManualPrompt()", validation.group(1))
+        self.assertIn("if(plan.conflicts.length)", validation.group(1))
         self.assertNotIn("freeCreation.referenceRequired", validation.group(1))
         self.assertNotIn("reference_type === 'subject'", validation.group(1))
         comparison = re.search(r"function comparisonReferenceForTask\(task\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(comparison)
-        self.assertIn("compositionMode === 'base_transfer'", comparison.group(1))
-        self.assertIn("base_reference_id", comparison.group(1))
-        self.assertIn("['detail','细节图']", self.asset_manager_javascript)
+        self.assertNotIn("base_transfer", comparison.group(1))
+        self.assertNotIn("base_reference_id", comparison.group(1))
+        self.assertNotIn("const first = taskReferences(task).find", comparison.group(1))
+        self.assertIn("['detail','商品补充/细节图']", self.asset_manager_javascript)
+
+    def test_universal_plan_banner_is_not_rendered_but_keeps_submit_validation(self):
+        self.assertNotIn("function universalPlanHtml", self.javascript)
+        self.assertNotIn("ec-universal-plan", self.css)
+        validation = re.search(r"function validateForm\(show=true\)\{(.*?)\n    \}", self.javascript, re.S)
+        self.assertIsNotNone(validation)
+        self.assertIn("if(plan.conflicts.length)", validation.group(1))
+        self.assertIn("showFormError(plan.conflicts[0])", validation.group(1))
 
     def test_universal_dock_accepts_multi_image_file_drops_and_creates_frames(self):
         self.assertIn("function bindUniversalDockDrop()", self.javascript)
@@ -1827,8 +2162,9 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("align-items:center", add_reference_rule)
         self.assertIn("justify-content:center", add_reference_rule)
 
-    def test_universal_tab_uses_six_presets_and_a_bottom_action_dock(self):
-        self.assertIn("const UNIVERSAL_PRESET_ROLES = ['subject','full_garment','detail','detail','pose','scene']", self.javascript)
+    def test_universal_tab_uses_four_presets_and_a_bottom_action_dock(self):
+        self.assertIn("const UNIVERSAL_PRESET_ROLES = ['subject','model_identity','full_garment','accessory']", self.javascript)
+        self.assertIn("const LEGACY_UNIVERSAL_PRESET_ROLES = [...UNIVERSAL_PRESET_ROLES,'pose','scene']", self.javascript)
         self.assertIn('id="universalDock"', self.html)
         self.assertIn('id="universalDockInputs"', self.html)
         self.assertIn('id="universalDockActions"', self.html)
@@ -1897,12 +2233,24 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for key in ("ecommerce.tryOnPreviewTitle", "ecommerce.tryOnWardrobe", "ecommerce.tryOnLookRail", "ecommerce.tryOnPreviewBoardHint", "ecommerce.tryOnPoseStage", "ecommerce.tryOnDialogTitle", "ecommerce.tryOnDialogHint", "ecommerce.tryOnOutfitRequired"):
             self.assertIn(key, self.javascript)
         self.assertIn("const outfitCount = tryOnOutfitCount();", self.javascript)
-        self.assertIn("Number(sourceReady) + outfitCount + Number(Boolean(state.inputs.pose?.url))", self.javascript)
+        self.assertIn("const completedVisibleReferences = Number(sourceReady) + visibleWardrobe.filter", self.javascript)
+        self.assertIn("`${completedVisibleReferences}/${visibleReferenceCount}`", self.javascript)
         self.assertIn("TRY_ON_REQUEST_ROLES.includes(role)", self.javascript)
         self.assertIn("ec-tryon-reference-grid ec-tryon-closet-grid", self.javascript)
         self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr));", self.css)
         self.assertIn(".ec-tryon-slot-card.is-model,\n.ec-tryon-slot-card.is-outfit", self.css)
         self.assertNotIn("grid-template-columns:minmax(250px,.9fr) minmax(0,1.1fr)", self.css)
+
+    def test_try_on_defaults_to_four_reference_slots_and_expands_on_demand(self):
+        self.assertIn("const TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT = 3", self.javascript)
+        self.assertIn("visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT", self.javascript)
+        self.assertIn("function visibleTryOnWardrobeRoles()", self.javascript)
+        self.assertIn("const visible = ordered.slice(0, visibleCount)", self.javascript)
+        self.assertIn("if(tryOnSlotHasUserContent(item.role)) visible.push(item)", self.javascript)
+        self.assertIn("function addTryOnReferenceSlot()", self.javascript)
+        self.assertIn("data-add-tryon-reference", self.javascript)
+        self.assertIn("visibleWardrobe.map(tryOnWardrobeCard)", self.javascript)
+        self.assertIn(".ec-tryon-add-reference", self.css)
 
     def test_try_on_reference_slots_support_stacked_candidates(self):
         self.assertIn('id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden', self.html)
@@ -1980,7 +2328,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
             "function tryOnReorderedPreviewOrder(draggedRole, targetRole)",
             "function updateTryOnDragPreview(draggedRole, targetRole)",
             "clearTryOnDragPreview()",
-            "orderedTryOnWardrobeRoles().map(tryOnWardrobeCard)",
+            "visibleWardrobe.map(tryOnWardrobeCard)",
             "orderedWardrobe.forEach(item => entries.push([item.role, state.inputs[item.role]]))",
             "data-tryon-reference-type",
             "data-reference-type-inline",
@@ -2093,7 +2441,9 @@ class EcommerceFrontendContractTests(unittest.TestCase):
     def test_universal_presets_are_seeded_once_and_can_be_deleted_to_one(self):
         seed_body = re.search(r"function seedUniversalPresetsIfEmpty\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(seed_body)
-        self.assertIn("if(universalEntries().length) return", seed_body.group(1))
+        self.assertIn("const entries = universalEntries()", seed_body.group(1))
+        self.assertIn("if(!universalReferenceHasContent(item)) delete state.inputs[key]", seed_body.group(1))
+        self.assertIn("UNIVERSAL_PRESET_ROLES.forEach", seed_body.group(1))
         self.assertIn("if(entries.length <= 1)", self.javascript)
         remove_handler = re.search(r"querySelectorAll\('\[data-remove-reference\]'\).*?\n        \}\)\);", self.javascript, re.S)
         self.assertIsNotNone(remove_handler)
@@ -2134,14 +2484,16 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for ratio in ("1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "9:16", "16:9"):
             self.assertIn(f'data-crop-ratio="{ratio}"', self.html)
 
-    def test_pose_reference_is_used_as_the_comparison_base(self):
+    def test_comparison_always_prefers_pose_then_subject(self):
         self.assertIn('id="compareBeforeLabel"', self.html)
         self.assertIn("function taskPoseReference(task)", self.javascript)
         self.assertIn("function comparisonReferenceForTask(task)", self.javascript)
         self.assertIn("ecommerce.poseReference", self.javascript)
         comparison = re.search(r"function comparisonReferenceForTask\(task\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(comparison)
-        self.assertLess(comparison.group(1).index("taskPoseReference(task)"), comparison.group(1).index("sourceReferenceForTask(task)"))
+        self.assertNotIn("compositionMode === 'subject_edit' && source", comparison.group(1))
+        self.assertLess(comparison.group(1).index("if(pose) return"), comparison.group(1).index("if(source) return"))
+        self.assertNotIn("const first = taskReferences(task).find", comparison.group(1))
 
     def test_ecommerce_preferences_are_written_in_order(self):
         self.assertIn("preferenceWriteChain:Promise.resolve()", self.javascript)

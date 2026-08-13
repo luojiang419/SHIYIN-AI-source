@@ -16,6 +16,7 @@ INSTALLER_VERIFY_SCRIPT = ROOT / "tools" / "verify-installer-artifact.ps1"
 INSTALLER_SCRIPT = ROOT / "installer" / "shiyin_ai.iss"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
 INSTALLER_SMOKE = ROOT / "tools" / "smoke-installer-updater.ps1"
+INSTALLER_PROGRESS_SMOKE = ROOT / "tools" / "smoke-installer-progress.ps1"
 UPDATER_PAGE = ROOT / "desktop-placeholder" / "updater.html"
 BROWSER_SMOKE_SERVER = ROOT / "tools" / "browser-smoke-server.ps1"
 BACKEND_SPEC = ROOT / "canvas-backend.spec"
@@ -108,9 +109,16 @@ class DesktopUpdaterContractTests(unittest.TestCase):
 
     def test_build_and_publish_scripts_share_release_asset_contract(self):
         installer_build = INSTALLER_BUILD_SCRIPT.read_text(encoding="utf-8")
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         self.assertIn('SHIYIN-AI-Setup-$version.exe', installer_build)
         self.assertIn('Get-Command ISCC.exe', installer_build)
         self.assertIn('dist\\installer-stage', installer_build)
+        self.assertIn("smoke-desktop.ps1", installer_build)
+        self.assertIn("Packaged desktop runtime smoke test failed", installer_build)
+        self.assertIn("$runtimeSmokeSucceeded = $?", installer_build)
+        self.assertEqual(package["scripts"]["desktop:build"], "npm run installer:build")
+        self.assertIn("tauri build --no-bundle", package["scripts"]["desktop:host-build"])
+        self.assertIn("npm run desktop:host-build", installer_build)
         installer_verify = INSTALLER_VERIFY_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('SHIYIN-AI-Setup-$Version.exe', installer_verify)
         self.assertIn('ProductVersion', installer_verify)
@@ -135,6 +143,13 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         installer_smoke = INSTALLER_SMOKE.read_text(encoding="utf-8")
         self.assertIn("$FromInstaller", installer_smoke)
         self.assertNotIn("FromZip", installer_smoke)
+        progress_smoke = INSTALLER_PROGRESS_SMOKE.read_text(encoding="utf-8")
+        self.assertIn("smoke-desktop.ps1", progress_smoke)
+        self.assertIn("runtime_health", progress_smoke)
+        self.assertIn("Installed desktop runtime did not satisfy the startup contract", progress_smoke)
+        self.assertIn("$runtimeSmokeSucceeded = $?", progress_smoke)
+        self.assertIn("refuses to overwrite an existing SHIYIN AI registration", progress_smoke)
+        self.assertIn("Remove-Item -LiteralPath $uninstallKey", progress_smoke)
 
     def test_portable_backend_collects_websocket_runtime_modules(self):
         self.assertIn("websockets", REQUIREMENTS.read_text(encoding="utf-8").splitlines())

@@ -1,5 +1,5 @@
 (function(){
-    const VERSION = '2026.07.29.free-creation-optional-reference.1';
+    const VERSION = '2026.08.09.universal-routes.1';
     const scripts = [
         '/static/js/i18n-core.js',
         '/static/js/i18n/common.js',

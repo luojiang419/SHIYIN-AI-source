@@ -117,7 +117,7 @@ const LOCAL_MEDIA_EXTS = /\.(png|jpe?g|webp|gif|bmp|avif|svg|mp4|webm|mov|m4v|mp
 const SEARCH_INPUT_IDS = new Set(['assetSearch','promptSearch','localSearch','localUploadSearch','canvasAssetSearch']);
 const REFERENCE_TYPE_ROLE_OPTIONS = [
     ['subject','主体/身体模特'],['model_identity','模特形象'],['upper_garment','上装'],['lower_garment','下装'],['full_garment','连衣裙/套装'],
-    ['shoes','鞋靴'],['accessory','首饰/配饰'],['prop','道具/商品'],['detail','细节图'],['pose','动作参考'],['scene','场景/背景'],['style','风格/光影'],
+    ['shoes','鞋靴'],['accessory','首饰/配饰'],['prop','道具/商品'],['detail','商品补充/细节图'],['pose','动作参考'],['scene','场景/背景'],['style','风格/光影'],
 ];
 
 function refreshIcons(){ if(window.lucide) lucide.createIcons(); }

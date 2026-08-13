@@ -119,6 +119,11 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-universal-reference.drag-target { border-color:var(--ec-accent); box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ec-accent) 24%,transparent); }
 .ec-universal-reference > header { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:7px; }
 .ec-universal-reference > header b { font-size:9px; white-space:nowrap; }
+.ec-detail-target { display:grid; gap:5px; }
+.ec-detail-target b { color:var(--ec-muted); font-size:8px; }
+.ec-detail-target select { min-width:0; width:100%; padding:6px 8px; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-panel); color:var(--ec-text); font:700 9px Inter,sans-serif; }
+.ec-detail-target.is-error { padding:7px 8px; border:1px solid color-mix(in srgb,var(--ec-danger) 45%,var(--ec-border)); border-radius:9px; color:var(--ec-danger); font-size:8px; }
+.ec-detail-target.is-error span { line-height:1.4; }
 .ec-universal-reference > header select { min-width:0; height:34px; padding:0 9px; border:1px solid var(--ec-border); border-radius:9px; outline:0; background:var(--ec-control); color:var(--ec-text); font-size:9px; }
 .ec-universal-reference > header button { width:30px; height:30px; border:0; border-radius:8px; background:var(--ec-control-hover); color:var(--ec-muted); }
 .ec-drag-handle { color:var(--ec-muted); cursor:grab; font-size:13px; letter-spacing:-.18em; }
@@ -734,6 +739,7 @@ body {
     height:236px;
     gap:14px;
     padding:14px 16px 15px;
+    overflow:visible;
     border-color:var(--ec-border);
     border-radius:20px;
     background:color-mix(in srgb,var(--ec-panel-raised) 90%,transparent);
@@ -792,25 +798,6 @@ body {
 .ec-universal-dock .ec-universal-reference.drag-target .ec-upload-slot {
     border-color:var(--ec-accent);
     box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--ec-accent) 24%,transparent);
-}
-.ec-universal-dock .ec-universal-reference.is-base-reference .ec-upload-slot {
-    border-color:color-mix(in srgb,var(--ec-accent) 72%,var(--ec-border));
-    box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ec-accent) 26%,transparent);
-}
-.ec-universal-dock .ec-base-reference-badge {
-    position:absolute;
-    top:7px;
-    left:34px;
-    z-index:7;
-    padding:4px 7px;
-    border:1px solid color-mix(in srgb,var(--ec-accent) 38%,var(--ec-border));
-    border-radius:999px;
-    background:color-mix(in srgb,var(--ec-panel-raised) 88%,transparent);
-    color:var(--ec-accent);
-    font:700 8px Inter,sans-serif;
-    letter-spacing:.02em;
-    pointer-events:none;
-    backdrop-filter:blur(8px);
 }
 .ec-universal-dock .ec-universal-reference::before {
     content:attr(data-reference-index);
@@ -974,6 +961,17 @@ body {
     background:color-mix(in srgb,var(--ec-panel-raised) 90%,transparent);
     backdrop-filter:blur(8px);
 }
+.ec-universal-dock .ec-detail-target {
+    position:absolute;
+    right:6px;
+    bottom:42px;
+    left:6px;
+    z-index:6;
+}
+.ec-universal-dock .ec-detail-target b { display:none; }
+.ec-universal-dock .ec-detail-target select { height:25px; padding:0 7px; background:color-mix(in srgb,var(--ec-panel-raised) 92%,transparent); backdrop-filter:blur(8px); }
+.ec-universal-dock .ec-detail-target.is-error { padding:5px 6px; background:color-mix(in srgb,var(--ec-panel-raised) 92%,transparent); backdrop-filter:blur(8px); }
+.ec-universal-dock .ec-universal-reference:has(.ec-detail-target) .ec-reference-fields { bottom:72px; }
 .ec-universal-dock .ec-generate-actions {
     display:grid;
     grid-template-columns:104px 184px;
@@ -1124,7 +1122,7 @@ html.studio-theme-dark body .ec-result-frame {
         padding:18px 18px 20px;
     }
     .ec-page.is-universal {
-        padding-bottom:282px;
+        padding-bottom:350px;
     }
     .ec-workspace {
         grid-template-columns:330px minmax(0,1fr);
@@ -1466,7 +1464,7 @@ html.studio-theme-dark body .ec-result-frame {
     display:grid;
     grid-template-columns:minmax(0,1fr);
     align-content:start;
-    gap:0;
+    gap:12px;
     padding:22px;
     border:1px solid color-mix(in srgb,var(--ec-border) 82%,transparent);
     border-radius:26px;
@@ -1503,6 +1501,23 @@ html.studio-theme-dark body .ec-result-frame {
 .ec-tryon-slot-card.is-outfit .ec-tryon-card-kicker b {
     font-size:15px;
 }
+.ec-tryon-add-reference {
+    min-height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:0 14px;
+    border:1px dashed var(--ec-border-strong);
+    border-radius:14px;
+    background:color-mix(in srgb,var(--ec-control) 72%,transparent);
+    color:var(--ec-text);
+    font-size:10px;
+    font-weight:800;
+    cursor:pointer;
+}
+.ec-tryon-add-reference:hover { border-color:var(--ec-accent); background:var(--ec-control-hover); }
+.ec-tryon-add-reference small { color:var(--ec-muted); font:800 8px "JetBrains Mono",monospace; }
 .ec-tryon-card-kicker {
     display:flex;
     align-items:center;

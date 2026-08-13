@@ -237,7 +237,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.135"
+APP_VERSION = "1.0.136"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -392,7 +392,7 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
@@ -406,6 +406,26 @@ LOCAL_VISION_DEFAULT_BASE_URL = "http://115.231.35.105:12345/v1"
 LOCAL_VISION_DEFAULT_MODEL = "qwen3.5-9b-vlm"
 LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
 LOCAL_VISION_SECRET_SEED_SETTING = "local_vision_builtin_secret_v1"
+MINIMAX_H3_DEFAULT_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "http://115.231.35.105:7866").strip().rstrip("/")
+MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
+MINIMAX_H3_DEFAULT_RESOLUTION = "0.2MP 16:9 - 608x352"
+MINIMAX_H3_RESOLUTION_PRESETS = (
+    "0.2MP 21:9 - 672x288", "0.3MP 21:9 - 896x384", "0.5MP 21:9 - 1120x480",
+    "0.2MP 16:9 - 608x352", "0.3MP 16:9 - 736x416", "0.4MP 16:9 - 864x480",
+    "0.5MP 16:9 - 960x544", "0.6MP 16:9 - 1056x608",
+    "0.2MP 4:3 - 512x384", "0.3MP 4:3 - 640x480", "0.4MP 4:3 - 768x576",
+    "Square 512x512",
+    "0.2MP 3:4 - 384x512", "0.3MP 3:4 - 480x640", "0.4MP 3:4 - 576x768",
+    "0.2MP 9:16 - 352x608", "0.3MP 9:16 - 416x736", "0.4MP 9:16 - 480x864",
+)
+MINIMAX_H3_RESOLUTIONS = {
+    "21:9": "0.2MP 21:9 - 672x288",
+    "16:9": MINIMAX_H3_DEFAULT_RESOLUTION,
+    "4:3": "0.2MP 4:3 - 512x384",
+    "1:1": "Square 512x512",
+    "3:4": "0.2MP 3:4 - 384x512",
+    "9:16": "0.2MP 9:16 - 352x608",
+}
 LINGJING_DEFAULT_BASE_URL = "https://apistudio.vip"
 RUNNINGHUB_LLM_MODELS_URLS = [
     "https://llm.runninghub.cn/v1/models",
@@ -914,6 +934,23 @@ def api_provider_templates():
             "ms_defaults_version": 0,
         },
         {
+            "id": "minimax-h3",
+            "name": "MiniMax H3",
+            "base_url": MINIMAX_H3_DEFAULT_BASE_URL,
+            "protocol": "minimax-h3",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": [],
+            "chat_models": [],
+            "video_models": MINIMAX_H3_DEFAULT_VIDEO_MODELS,
+            "model_protocols": {},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
             "id": "lingjing",
             "name": "灵境API",
             "base_url": LINGJING_DEFAULT_BASE_URL,
@@ -950,7 +987,7 @@ def api_provider_templates():
 
 
 def default_api_providers():
-    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision"}]
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "minimax-h3"}]
 
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
@@ -1045,6 +1082,18 @@ def merge_default_api_providers(providers):
             current["image_models"] = []
             current["chat_models"] = model_list_from_values(current.get("chat_models") or local_vision_default["chat_models"])
             current["video_models"] = []
+    minimax_h3_default = next((d for d in default_api_providers() if d["id"] == "minimax-h3"), None)
+    if minimax_h3_default:
+        current = next((item for item in merged if item.get("id") == "minimax-h3"), None)
+        if not current:
+            merged.append(minimax_h3_default)
+        else:
+            current["name"] = str(current.get("name") or minimax_h3_default["name"])
+            current["base_url"] = str(current.get("base_url") or minimax_h3_default["base_url"]).rstrip("/")
+            current["protocol"] = "minimax-h3"
+            current["image_models"] = []
+            current["chat_models"] = []
+            current["video_models"] = model_list_from_values([*(current.get("video_models") or []), *MINIMAX_H3_DEFAULT_VIDEO_MODELS])
     lingjing_default = next((d for d in default_api_providers() if d["id"] == "lingjing"), None)
     if lingjing_default:
         current = next((item for item in merged if item.get("id") == "lingjing"), None)
@@ -1451,6 +1500,10 @@ def normalize_provider(item):
     if provider_id == "local-vision":
         protocol = "openai"
         image_request_mode = "openai"
+    if provider_id == "minimax-h3":
+        protocol = "minimax-h3"
+        base_url = base_url or MINIMAX_H3_DEFAULT_BASE_URL
+        image_request_mode = "openai"
     return {
         "id": provider_id,
         "name": name,
@@ -1461,9 +1514,9 @@ def normalize_provider(item):
         "image_edit_endpoint": image_edit_endpoint,
         "enabled": bool(item.get("enabled", True)),
         "primary": bool(item.get("primary", False)),
-        "image_models": [] if provider_id == "local-vision" else model_list_from_values(item.get("image_models") or []),
-        "chat_models": model_list_from_values(item.get("chat_models") or []),
-        "video_models": [] if provider_id == "local-vision" else model_list_from_values(item.get("video_models") or []),
+        "image_models": [] if provider_id in {"local-vision", "minimax-h3"} else model_list_from_values(item.get("image_models") or []),
+        "chat_models": [] if provider_id == "minimax-h3" else model_list_from_values(item.get("chat_models") or []),
+        "video_models": [] if provider_id == "local-vision" else model_list_from_values(item.get("video_models") or (MINIMAX_H3_DEFAULT_VIDEO_MODELS if provider_id == "minimax-h3" else [])),
         "model_protocols": normalize_model_protocols(item.get("model_protocols")),
         "ms_loras": normalize_ms_loras(item.get("ms_loras") or []),
         "ms_defaults_version": int(item.get("ms_defaults_version") or 0),
@@ -3074,6 +3127,7 @@ class CanvasVideoRequest(BaseModel):
     return_last_frame: bool = False
     generate_audio: bool = False
     multimodal: bool = False
+    steps: int = Field(default=12, ge=4, le=30)
     trusted_asset: bool = False
 
 class TempShUploadRequest(BaseModel):
@@ -4204,7 +4258,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -4271,6 +4325,9 @@ def is_jimeng_provider(provider):
 
 def is_codex_provider(provider):
     return provider_protocol(provider) == "codex" or str((provider or {}).get("id") or "").strip().lower() == "codex"
+
+def is_minimax_h3_provider(provider):
+    return provider_protocol(provider) == "minimax-h3" or str((provider or {}).get("id") or "").strip().lower() == "minimax-h3"
 
 def codex_env_value(key):
     return os.getenv(key, "") or read_api_env_value(key)
@@ -14316,6 +14373,100 @@ async def generate_yuli_openai_video(client, payload, provider, base_url, reques
     local_urls = [await save_remote_video_to_output(url) for url in urls]
     return {"videos": local_urls, "task_id": task_id, "raw": result}
 
+def minimax_h3_resolution(aspect_ratio: str = "", resolution: str = "") -> str:
+    requested = str(resolution or "").strip()
+    if requested in MINIMAX_H3_RESOLUTION_PRESETS:
+        return requested
+    return MINIMAX_H3_RESOLUTIONS.get(str(aspect_ratio or "16:9").strip(), MINIMAX_H3_DEFAULT_RESOLUTION)
+
+async def minimax_h3_reference_value(client, url: str, kind: str) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    if value.startswith(f"data:{kind}/"):
+        return value
+    path = output_file_from_url(value)
+    if path:
+        try:
+            raw = Path(path).read_bytes()
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail="MiniMax H3 参考素材读取失败") from exc
+        mime = mimetypes.guess_type(path)[0] or ("image/png" if kind == "image" else "video/mp4")
+    elif value.startswith("http://") or value.startswith("https://"):
+        try:
+            response = await client.get(value)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=400, detail="MiniMax H3 远程参考素材下载失败") from exc
+        raw = response.content
+        mime = (response.headers.get("content-type") or mimetypes.guess_type(value)[0] or ("image/png" if kind == "image" else "video/mp4")).split(";", 1)[0]
+    else:
+        raise HTTPException(status_code=400, detail=f"MiniMax H3 的参考{('图' if kind == 'image' else '视频')}地址无效")
+    max_bytes = 20 * 1024 * 1024 if kind == "image" else 50 * 1024 * 1024
+    if len(raw) > max_bytes:
+        raise HTTPException(status_code=400, detail=f"MiniMax H3 参考{('图' if kind == 'image' else '视频')}不能超过 {20 if kind == 'image' else 50}MB")
+    if not mime.startswith(f"{kind}/"):
+        raise HTTPException(status_code=400, detail=f"MiniMax H3 参考素材不是有效{('图片' if kind == 'image' else '视频')}")
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+async def generate_minimax_h3_video(client, payload: CanvasVideoRequest, provider):
+    base_url = str(provider.get("base_url") or MINIMAX_H3_DEFAULT_BASE_URL).rstrip("/")
+    image_refs = [ref for ref in (payload.images or []) if str(ref.url or "").strip()]
+    video_refs = [str(url or "").strip() for url in (payload.videos or []) if str(url or "").strip()]
+    use_references = bool((image_refs or video_refs) and (payload.multimodal or video_refs or len(image_refs) > 2))
+    body = {
+        "mode": "references" if use_references else "keyframes",
+        "prompt": str(payload.prompt or "").strip(),
+        "resolution": minimax_h3_resolution(payload.aspect_ratio, payload.resolution),
+        "duration": max(1, min(15, int(payload.duration or 5))),
+        "steps": max(4, min(30, int(payload.steps or 12))),
+        "seed": payload.seed if payload.seed is not None else "random",
+    }
+    if use_references:
+        body["reference_images"] = [
+            await minimax_h3_reference_value(client, ref.url, "image") for ref in image_refs[:9]
+        ]
+        body["reference_videos"] = [
+            await minimax_h3_reference_value(client, url, "video") for url in video_refs[:3]
+        ]
+        if not body["reference_images"] and not body["reference_videos"]:
+            raise HTTPException(status_code=400, detail="MiniMax H3 全能参考模式至少需要 1 张图片或 1 个参考视频")
+    else:
+        first = next((ref for ref in image_refs if str(ref.role or "").lower() == "first_frame"), image_refs[0] if image_refs else None)
+        last = next((ref for ref in image_refs if str(ref.role or "").lower() == "last_frame"), image_refs[1] if len(image_refs) > 1 else None)
+        if first:
+            body["first_frame"] = await minimax_h3_reference_value(client, first.url, "image")
+        if last:
+            body["last_frame"] = await minimax_h3_reference_value(client, last.url, "image")
+
+    response = await client.post(f"{base_url}/api/generate", json=body)
+    response.raise_for_status()
+    result = response.json()
+    job_id = str(result.get("id") or "").strip()
+    if not job_id:
+        raise HTTPException(status_code=502, detail=f"MiniMax H3 未返回任务 ID：{result}")
+    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
+    delay = max(2.0, IMAGE_POLL_INTERVAL)
+    while time.monotonic() < deadline:
+        if str(result.get("status") or "").lower() in {"done", "error", "canceled"}:
+            break
+        await asyncio.sleep(delay)
+        response = await client.get(f"{base_url}/api/jobs/{urllib.parse.quote(job_id, safe='')}")
+        response.raise_for_status()
+        result = response.json()
+        delay = min(delay * 1.35, 10)
+    status = str(result.get("status") or "").lower()
+    if status != "done":
+        if status in {"error", "canceled"}:
+            raise HTTPException(status_code=502, detail=f"MiniMax H3 生成失败：{result.get('error') or result.get('message') or status}")
+        raise HTTPException(status_code=504, detail=f"MiniMax H3 生成任务超时：{job_id}")
+    output = str(result.get("output") or "").strip()
+    if not output:
+        raise HTTPException(status_code=502, detail="MiniMax H3 任务已完成，但没有返回视频")
+    output_url = output if output.startswith("http://") or output.startswith("https://") else f"{base_url}/{output.lstrip('/')}"
+    local_url = await save_remote_video_to_output(output_url, prefix="minimax_h3_")
+    return {"videos": [local_url], "task_id": job_id, "raw": result, "request": body}
+
 def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     text = str(prompt or "").strip()
     suffixes = []
@@ -14330,6 +14481,17 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest):
     provider = get_api_provider(payload.provider_id)
+    if is_minimax_h3_provider(provider):
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=VIDEO_POLL_TIMEOUT, write=VIDEO_POLL_TIMEOUT, pool=20.0), follow_redirects=True) as h3_client:
+                return await generate_minimax_h3_video(h3_client, payload, provider)
+        except HTTPException:
+            raise
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:600] if exc.response is not None else str(exc)
+            raise HTTPException(status_code=exc.response.status_code if exc.response is not None else 502, detail=f"MiniMax H3 接口错误：{detail}") from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"请求 MiniMax H3 失败：{exc}") from exc
     if is_jimeng_provider(provider):
         return await generate_jimeng_video(payload, provider)
     if is_runninghub_provider(provider):
@@ -14344,7 +14506,7 @@ async def canvas_video(payload: CanvasVideoRequest):
     base_url = video_api_root(provider)
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
-    api_key = os.getenv(provider_key_env(provider["id"]), "")
+    api_key = provider_env_key_value(provider["id"])
     if not api_key:
         raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider['id']} 的 API Key，请在 API 设置中填写。")
     is_apimart = is_apimart_provider(provider)

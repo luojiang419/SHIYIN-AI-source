@@ -773,6 +773,19 @@ function sanitizeVideoNodeProviderModel(node){
     if(!models.length) node.model = '';
     else if(!models.includes(node.model)) node.model = models[0] || '';
 }
+function isMiniMaxH3VideoNode(node){
+    return Boolean(node && (node.apiProvider === 'minimax-h3' || node.model === 'MiniMax H3'));
+}
+function h3VideoResolutionOptions(selected=''){
+    const options = [
+        '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
+        '0.2MP 16:9 - 608x352','0.3MP 16:9 - 736x416','0.4MP 16:9 - 864x480','0.5MP 16:9 - 960x544','0.6MP 16:9 - 1056x608',
+        '0.2MP 4:3 - 512x384','0.3MP 4:3 - 640x480','0.4MP 4:3 - 768x576','Square 512x512',
+        '0.2MP 3:4 - 384x512','0.3MP 3:4 - 480x640','0.4MP 3:4 - 576x768',
+        '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
+    ];
+    return options.map(value => `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('');
+}
 function videoModelOptions(selectedModel, providerId){
     const models = providerVideoModels(providerId);
     if(!models.length){
@@ -2639,6 +2652,21 @@ function addVideoNode(point){
         running:false
     });
 }
+function addH3VideoNode(point){
+    const node = addVideoNode(point);
+    if(!node) return node;
+    node.apiProvider = 'minimax-h3';
+    node.model = 'MiniMax H3';
+    node.duration = 5;
+    node.aspectRatio = '16:9';
+    node.resolution = '0.2MP 16:9 - 608x352';
+    node.steps = 12;
+    node.multimodal = true;
+    node.useFrameRoles = false;
+    render();
+    scheduleSave();
+    return node;
+}
 function addRhNode(point){
     const p = point || defaultPoint(180, 0);
     return addNode({
@@ -3523,6 +3551,7 @@ function createNodeByType(type, point){
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'video') return addVideoNode(point);
+    if(type === 'h3-video') return addH3VideoNode(point);
     if(type === 'rh') return addRhNode(point);
     if(type === 'output') return addOutputNode(point);
     return null;
@@ -3535,6 +3564,7 @@ function menuAdd(type){
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
+    if(type === 'h3-video') addH3VideoNode(menuPoint);
     if(type === 'rh') addRhNode(menuPoint);
     if(type === 'output') addOutputNode(menuPoint);
 }
@@ -8513,6 +8543,7 @@ function renderVideoBody(node){
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     sanitizeVideoNodeProviderModel(node);
     node.model = node.model || 'veo3-fast';
+    const isH3 = isMiniMaxH3VideoNode(node);
     wrap.innerHTML = `
         <div class="prompt-list mb-3"></div>
         <div class="video-input-head">
@@ -8550,14 +8581,22 @@ function renderVideoBody(node){
                 <label class="field" style="flex:1">
                     <div class="setting-title">${tr('canvas.videoResolution')}</div>
                     <select class="select-lite video-resolution compact-select">
-                        <option value="">Auto</option>
-                        <option value="480p">480p</option>
-                        <option value="720p">720p</option>
-                        <option value="1080p">1080p</option>
-                        <option value="780P">780P</option>
+                        ${isH3 ? h3VideoResolutionOptions(node.resolution || '0.2MP 16:9 - 608x352') : `
+                            <option value="">Auto</option>
+                            <option value="480p">480p</option>
+                            <option value="720p">720p</option>
+                            <option value="1080p">1080p</option>
+                            <option value="780P">780P</option>`}
                     </select>
                 </label>
             </div>
+            ${isH3 ? `<div class="gen-settings-row">
+                <label class="field" style="flex:1">
+                    <div class="setting-title">采样步数（4–30）</div>
+                    <input class="setting-input" data-h3-steps type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}">
+                </label>
+                <div class="field" style="flex:2"><div class="setting-title">参考能力</div><div class="text-[11px] text-gray-500">全能参考最多 9 图 + 3 视频；参考视频音轨会自动参与生成</div></div>
+            </div>` : ''}
             <div class="gen-settings-row" style="flex-wrap:wrap">
                 <button type="button" class="setting-check ${node.enhancePrompt ? 'active' : ''}" data-video-toggle="enhancePrompt"><span class="check-dot"></span>${tr('canvas.videoEnhancePrompt')}</button>
                 <button type="button" class="setting-check ${node.enableUpsample ? 'active' : ''}" data-video-toggle="enableUpsample"><span class="check-dot"></span>${tr('canvas.videoUpsample')}</button>
@@ -8579,6 +8618,7 @@ function renderVideoBody(node){
     const durationSelect = wrap.querySelector('.video-duration');
     const aspectSelect = wrap.querySelector('.video-aspect');
     const resolutionSelect = wrap.querySelector('.video-resolution');
+    const stepsInput = wrap.querySelector('[data-h3-steps]');
     providerSelect.value = node.apiProvider;
     durationSelect.value = String(node.duration || 5);
     aspectSelect.value = node.aspectRatio || '16:9';
@@ -8592,7 +8632,15 @@ function renderVideoBody(node){
         node.apiProvider = e.target.value;
         const models = providerVideoModels(node.apiProvider);
         if(!models.includes(node.model)) node.model = models[0] || node.model;
+        if(isMiniMaxH3VideoNode(node)){
+            node.model = 'MiniMax H3';
+            node.resolution = '0.2MP 16:9 - 608x352';
+            node.steps = Number(node.steps || 12);
+            node.multimodal = true;
+            node.useFrameRoles = false;
+        }
         modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
+        render();
         scheduleSave();
     };
     modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
@@ -8600,6 +8648,12 @@ function renderVideoBody(node){
     durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
     aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
     resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
+    if(stepsInput){
+        stepsInput.onmousedown = e => e.stopPropagation();
+        stepsInput.onclick = e => e.stopPropagation();
+        stepsInput.oninput = e => { e.stopPropagation(); node.steps = Math.max(4, Math.min(30, Number(e.target.value || 12))); scheduleSave(); };
+        stepsInput.onblur = e => { e.target.value = String(Math.max(4, Math.min(30, Number(node.steps || 12)))); };
+    }
     wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
         btn.onmousedown = e => e.stopPropagation();
         btn.onclick = e => {
@@ -10307,11 +10361,13 @@ async function runGeneratorLegacy(genId, opts={}){
 async function runVideoNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || (node.running && !opts.cascade)) return;
+    const isH3 = isMiniMaxH3VideoNode(node);
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(node, generatorSources(node));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
     const allRefs = sources.flatMap(s => s.refs || []);
-    const mediaRefs = applyUploadedUrlToRefs((allRefs || []).filter(ref => ['image','video','audio'].includes(mediaKindForRef(ref))), node);
+    const rawMediaRefs = (allRefs || []).filter(ref => ['image','video','audio'].includes(mediaKindForRef(ref)));
+    const mediaRefs = isH3 ? rawMediaRefs : applyUploadedUrlToRefs(rawMediaRefs, node);
     const refs = imageRefsOnly(mediaRefs);
     const videoRefs = videoRefsOnly(mediaRefs);
     const audioRefs = audioRefsOnly(mediaRefs);
@@ -10336,16 +10392,19 @@ async function runVideoNode(nodeId, opts={}){
                 aspect_ratio:node.aspectRatio || '16:9',
                 resolution:node.resolution || '',
                 images:refs,
-                videos:manualVideoUrlForNode(node)
-                    ? [manualVideoUrlForNode(node)]
-                    : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
+                videos:isH3
+                    ? videoRefs.map(ref => ref.url).filter(Boolean).slice(0, 3)
+                    : manualVideoUrlForNode(node)
+                        ? [manualVideoUrlForNode(node)]
+                        : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
                 audios:audioRefs.map(ref => ref.url).filter(Boolean),
                 enhance_prompt:Boolean(node.enhancePrompt),
                 enable_upsample:Boolean(node.enableUpsample),
                 watermark:Boolean(node.watermark),
                 camerafixed:Boolean(node.cameraFixed),
                 generate_audio:Boolean(node.generateAudio),
-                multimodal:Boolean(node.multimodal)
+                multimodal:Boolean(node.multimodal),
+                steps:Number(node.steps || 12)
             })
         }, {cascadeTargetId}).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
         const meta = collectRunMeta(out, pendingId);

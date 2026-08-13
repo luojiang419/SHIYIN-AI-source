@@ -337,6 +337,7 @@ let settings = {
     videoDuration:5,
     videoAspect:'16:9',
     videoResolution:'',
+    videoSteps:12,
     videoEnhancePrompt:false,
     videoEnableUpsample:false,
     videoWatermark:false,
@@ -1307,6 +1308,29 @@ function mediaNodeDefaultScale(node){
 function createImageNodeAt(point, images=[], options={}){
     const layout = imageLayout(images || [], mediaNodeDefaultScale({type:'smart-image', images:images || []}), {type:'smart-image', images:images || []});
     return createNode((point?.x || 0) - Math.round(layout.width / 2), (point?.y || 0) - Math.round(layout.height / 2), images, options);
+}
+function createH3VideoNode(point){
+    const created = createImageNodeAt(point, []);
+    created.title = 'MiniMax H3 视频';
+    created.runSettings = settingsForStorage({
+        ...cloneSmartSettings(settings),
+        engine:'api',
+        apiKind:'video',
+        videoProvider:'minimax-h3',
+        videoModel:'MiniMax H3',
+        videoDuration:5,
+        videoAspect:'16:9',
+        videoResolution:'0.2MP 16:9 - 608x352',
+        videoSteps:12,
+        videoMultimodal:true,
+        _videoMultimodalUserSet:true,
+        videoUseFrameRoles:false,
+        videoTrustedAsset:false,
+        videoTempShLinks:[]
+    });
+    render();
+    scheduleSave();
+    return created;
 }
 function smartGroupLayoutSize(node){
     const explicitW = Number(node?.w);
@@ -2527,6 +2551,34 @@ function renderVideoResolutionControl(){
         </div>
     </div>`;
 }
+function isMiniMaxH3SmartSettings(source=settings){
+    return Boolean(source && (source.videoProvider === 'minimax-h3' || source.videoModel === 'MiniMax H3'));
+}
+function h3SmartVideoResolutions(){
+    return [
+        '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
+        '0.2MP 16:9 - 608x352','0.3MP 16:9 - 736x416','0.4MP 16:9 - 864x480','0.5MP 16:9 - 960x544','0.6MP 16:9 - 1056x608',
+        '0.2MP 4:3 - 512x384','0.3MP 4:3 - 640x480','0.4MP 4:3 - 768x576','Square 512x512',
+        '0.2MP 3:4 - 384x512','0.3MP 3:4 - 480x640','0.4MP 3:4 - 576x768',
+        '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
+    ];
+}
+function renderH3VideoResolutionControl(){
+    const options = h3SmartVideoResolutions();
+    const value = options.includes(settings.videoResolution) ? settings.videoResolution : '0.2MP 16:9 - 608x352';
+    return `<div class="smart-control resolution-control">
+        <button class="smart-pill" type="button"><i data-lucide="monitor"></i><span>${escapeHtml(value)}</span></button>
+        <div class="smart-popover compact-popover"><div class="smart-popover-title">H3 分辨率</div><div class="model-list">
+            ${options.map(item => `<button type="button" class="direct-option ${item === value ? 'active' : ''}" data-smart-param="videoResolution" data-smart-value="${escapeHtml(item)}"><span>${escapeHtml(item)}</span></button>`).join('')}
+        </div></div>
+    </div>`;
+}
+function renderH3VideoStepsControl(){
+    const value = Math.max(4, Math.min(30, Number(settings.videoSteps) || 12));
+    return `<div class="smart-control duration-control"><button class="smart-pill" type="button"><i data-lucide="sliders-horizontal"></i><span>${value} steps</span></button>
+        <div class="smart-popover compact-popover"><div class="smart-popover-title">采样步数（4–30）</div><label class="duration-custom"><input type="number" min="4" max="30" step="1" data-param="videoSteps" value="${value}"></label></div>
+    </div>`;
+}
 function renderVideoToggleControl(key, label){
     const on = !!settings[key];
     return `<button type="button" class="setting-check ${on ? 'active' : ''}" data-toggle-param="${escapeHtml(key)}"><span class="check-box"></span><span>${escapeHtml(label)}</span></button>`;
@@ -2704,20 +2756,21 @@ function renderApiVideoParams(){
     if(!settings.videoProvider || !providers.some(p => p.id === settings.videoProvider)) settings.videoProvider = providers[0]?.id || 'comfly';
     const models = filterJimengVideoModels(providerVideoModels(settings.videoProvider));
     if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'veo3-fast';
+    const isH3 = isMiniMaxH3SmartSettings(settings);
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
-        ${renderVideoResolutionControl()}
+        ${isH3 ? renderH3VideoResolutionControl() : renderVideoResolutionControl()}
         ${renderVideoAspectControl()}
         ${renderVideoDurationControl()}
-        ${renderVideoToggleControl('videoEnhancePrompt', tr('smart.videoEnhancePrompt'))}
-        ${renderVideoToggleControl('videoEnableUpsample', tr('smart.videoUpsample'))}
-        ${renderVideoToggleControl('videoGenerateAudio', tr('smart.videoGenerateAudio'))}
-        ${renderVideoToggleControl('videoCameraFixed', tr('smart.videoCameraFixed'))}
-        ${renderVideoToggleControl('videoWatermark', tr('smart.videoWatermark'))}
+        ${isH3 ? renderH3VideoStepsControl() : renderVideoToggleControl('videoEnhancePrompt', tr('smart.videoEnhancePrompt'))}
+        ${isH3 ? '' : renderVideoToggleControl('videoEnableUpsample', tr('smart.videoUpsample'))}
+        ${isH3 ? '' : renderVideoToggleControl('videoGenerateAudio', tr('smart.videoGenerateAudio'))}
+        ${isH3 ? '' : renderVideoToggleControl('videoCameraFixed', tr('smart.videoCameraFixed'))}
+        ${isH3 ? '' : renderVideoToggleControl('videoWatermark', tr('smart.videoWatermark'))}
         ${renderVideoToggleControl('videoMultimodal', tr('smart.videoMultimodal'))}
         ${renderVideoToggleControl('videoUseFrameRoles', tr('smart.videoUseFrameRoles'))}
-        ${settings.videoProvider === 'jimeng' ? '' : renderVideoTrustedAssetControl()}
+        ${settings.videoProvider === 'jimeng' || isH3 ? '' : renderVideoTrustedAssetControl()}
     `;
 }
 function renderVolcengineParams(){
@@ -3767,7 +3820,7 @@ function smartComfyRandomValue(field){
     return Math.floor(value);
 }
 function setDynamicSetting(key, value){
-    const numericKeys = new Set(['count','width','height','videoDuration','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
+    const numericKeys = new Set(['count','width','height','videoDuration','videoSteps','enhanceStrength','enhanceUpscaleRes','editUpscaleRes','customRatioWidth','customRatioHeight','customWidth','customHeight','msCustomRatioWidth','msCustomRatioHeight','msCustomWidth','msCustomHeight']);
     const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     if(key === 'provider_id') settings.model = '';
@@ -3885,7 +3938,7 @@ function bindDynamicParams(){
         input.oninput = input.onchange = event => {
             event?.stopPropagation?.();
             setDynamicSetting(input.dataset.param, input.value);
-            if(input.dataset.param === 'videoDuration' && event?.type === 'change') renderDynamicParams();
+            if(['videoDuration','videoSteps'].includes(input.dataset.param) && event?.type === 'change') renderDynamicParams();
         };
     });
     dynamicParams.querySelectorAll('[data-toggle-param]').forEach(btn => {
@@ -14572,6 +14625,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
     try {
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
+        const isH3 = isMiniMaxH3SmartSettings(runSettings);
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
         const trustedSource = trustedMode ? (['library','cloud','manual'].includes(runSettings.videoTrustedSource) ? runSettings.videoTrustedSource : 'library') : 'none';
         // 仅「素材库链接」来源才走 asset:// 认证地址 + 后端可信素材路由；上传云端/手动网址走普通直链。
@@ -14587,7 +14641,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             }
             return ref?.url;
         };
-        const refImages = imageRefsOnly(uploadedRefs).map((ref, i) => {
+        const refImages = imageRefsOnly(isH3 ? refs : uploadedRefs).map((ref, i) => {
             const item = {url:effUrl(ref), name:ref.name || `图${i + 1}`};
             if(runSettings.videoUseFrameRoles){
                 if(i === 0) item.role = 'first_frame';
@@ -14596,7 +14650,9 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             return item;
         });
         const manualVideo = manualSmartVideoLink(runSettings)?.url || '';
-        const refVideos = manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean);
+        const refVideos = isH3
+            ? videoRefsOnly(refs).map(ref => ref?.url).filter(Boolean).slice(0, 3)
+            : manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean);
         const refAudios = audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, 3);
         if(mismatchedAsset) toast('部分认证素材属于其它平台，已回退为普通素材。切换到对应平台的视频接口才能用 asset:// 认证地址。');
         const payload = {
@@ -14615,7 +14671,8 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             camerafixed: Boolean(runSettings.videoCameraFixed),
             generate_audio: Boolean(runSettings.videoGenerateAudio),
             multimodal: Boolean(runSettings.videoMultimodal),
-            trusted_asset: useAssetUris
+            trusted_asset: useAssetUris,
+            steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))
         };
         const result = await fetch('/api/canvas-video', {
             method:'POST',
@@ -15319,7 +15376,8 @@ function createNodeFromMenu(type){
     closeCreateMenu();
     if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
     let created = null;
-    if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
+    if(type === 'h3-video') created = createH3VideoNode(p);
+    else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
     else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
     else created = createImageNodeAt(p);
     createMenuGroupId = groupId;

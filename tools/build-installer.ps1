@@ -64,6 +64,7 @@ $connectors = Join-Path $stageRoot 'app\connectors'
 New-Item -ItemType Directory -Force $connectors | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\chrome-local-asset-importer') -Destination (Join-Path $connectors 'chrome') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\photoshop-asset-connector') -Destination (Join-Path $connectors 'photoshop') -Recurse
+Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\blender-addon') -Destination (Join-Path $connectors 'blender') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'VERSION') -Destination (Join-Path $stageRoot 'app\VERSION')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $stageRoot 'LICENSE')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-Path $stageRoot 'README.md')

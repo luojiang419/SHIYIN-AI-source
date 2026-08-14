@@ -1158,7 +1158,7 @@ function rememberCanvasListProject(projectId){
 }
 function canvasListUrlForProject(projectId){
     const pid = rememberCanvasListProject(projectId);
-    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
+    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}&v=2026.08.14.canvas-neutral-no-blue.1`;
 }
 function backToCanvasList(){
     savePromptDraftForCurrent();
@@ -6214,7 +6214,7 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
             isHistory ? 'conn-history' : '',
             isSelectedLine ? 'conn-selected' : ''
         ].filter(Boolean).join(' ');
-        const color = isCascade ? '#16a34a' : isHistory ? 'rgba(100,116,139,0.46)' : kind === 'input' ? 'rgba(100,116,139,0.62)' : 'rgba(148,163,184,0.62)';
+        const color = isCascade ? '#16a34a' : isHistory ? 'rgba(118,111,104,0.46)' : kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
         const opacity = isPendingLine ? '.82' : '1';
         const width = kind === 'input' ? '1.9' : '1.6';
         return `<path class="${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path><path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
@@ -7701,7 +7701,7 @@ function ensurePortDragPathElement(){
     if(!path){
         path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('class', 'port-drag-temp conn-pending');
-        path.setAttribute('stroke', 'rgba(100,116,139,0.92)');
+        path.setAttribute('stroke', 'rgba(118,111,104,0.92)');
         path.setAttribute('stroke-width', '1.9');
         path.setAttribute('fill', 'none');
         path.setAttribute('stroke-linecap', 'round');
@@ -8755,10 +8755,10 @@ function renderEditTextCanvas(){
         if(selected){
             ctx.setLineDash([7, 5]);
             ctx.lineWidth = 1.5;
-            ctx.strokeStyle = 'rgba(15,23,42,.72)';
+            ctx.strokeStyle = 'rgba(0,0,0,.72)';
             ctx.strokeRect(box.x, box.y, box.w, box.h);
             ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(15,23,42,.92)';
+            ctx.fillStyle = 'rgba(0,0,0,.92)';
             ctx.beginPath();
             ctx.arc(item.x + box.w / 2 - box.pad, item.y - box.h / 2 + box.pad, 3.5, 0, Math.PI * 2);
             ctx.fill();
@@ -10572,7 +10572,7 @@ function refreshGridSplitPreview(){
     const countEl = document.getElementById('gridSplitCount');
     const lineWidth = Math.max(2, Math.round(Math.min(canvasEl.width, canvasEl.height) / 320));
     const drawLine = (x1, y1, x2, y2) => {
-        ctx.save(); ctx.lineWidth = lineWidth + 2; ctx.strokeStyle = 'rgba(2,6,23,0.72)'; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.save(); ctx.lineWidth = lineWidth + 2; ctx.strokeStyle = 'rgba(0,0,0,0.72)'; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
         ctx.lineWidth = lineWidth; ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore();
     };
     if(gridCustomMode){

@@ -1824,6 +1824,12 @@ body.theme-dark #shell.shell > .board {
     box-shadow:var(--studio-shadow) !important;
 }
 
+/* Blender 节点连接状态与相机折叠区必须跟随节点本体的中性深灰，不能继承旧的蓝黑节点变量。 */
+#shell .blender-connection,
+#shell .blender-camera-settings {
+    background:color-mix(in srgb,var(--studio-panel) 96%,transparent) !important;
+}
+
 #shell .prompt-node textarea,
 #shell .llm-system,
 #shell .llm-chat-input,

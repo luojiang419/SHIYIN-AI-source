@@ -1922,7 +1922,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("p.enabled !== false && (p.image_models || []).length", self.gpt_chat_html)
         for source in (self.canvas_javascript, self.smart_canvas_javascript):
             self.assertNotRegex(source, r"p\.id\s*!==\s*'(?:modelscope|volcengine)'.*image_models")
-        self.assertEqual(self.canvas_list_javascript.count("api-provider-unification.1"), 2)
+        self.assertEqual(self.canvas_list_javascript.count("canvas-neutral-no-blue.1"), 2)
 
     def test_canvas_api_generation_creates_count_pending_outputs_before_task_submit(self):
         run_generator = re.search(r"async function runGenerator\(genId, opts=\{\}\)\{(.*?)\n\}", self.canvas_javascript, re.S)

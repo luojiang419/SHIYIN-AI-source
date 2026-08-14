@@ -747,7 +747,9 @@ function canvasAssetsForCategory(categoryId=activeCanvasAssetCategory){
 function canvasAssetOpenUrl(canvas){
     if(!canvas?.id) return '';
     const id = encodeURIComponent(canvas.id);
-    return canvas.kind === 'smart' ? `/static/smart-canvas.html?id=${id}` : `/static/canvas.html?id=${id}`;
+    return canvas.kind === 'smart'
+        ? `/static/smart-canvas.html?id=${id}&v=2026.08.14.canvas-neutral-no-blue.1`
+        : `/static/canvas.html?id=${id}&v=2026.08.14.canvas-neutral-no-blue.1`;
 }
 function activeCanvasAssetCanvas(){
     if(!activeCanvasAssetCanvasId) return null;

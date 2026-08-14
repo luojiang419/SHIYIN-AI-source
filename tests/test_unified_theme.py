@@ -1,3 +1,4 @@
+import colorsys
 import re
 import unittest
 from pathlib import Path
@@ -9,6 +10,22 @@ UNIFIED_CSS = STATIC / "css" / "studio-unified.css"
 THEME_CSS = STATIC / "css" / "theme.css"
 ECOMMERCE_CSS = STATIC / "css" / "ecommerce.css"
 IMAGE_PREVIEW_JS = STATIC / "js" / "image-preview.js"
+CANVAS_UI_FILES = (
+    UNIFIED_CSS,
+    STATIC / "css" / "canvas.css",
+    STATIC / "css" / "canvas-list.css",
+    STATIC / "css" / "smart-canvas.css",
+    STATIC / "js" / "canvas.js",
+    STATIC / "js" / "canvas-list.js",
+    STATIC / "js" / "smart-canvas.js",
+    STATIC / "canvas.html",
+    STATIC / "canvas-list.html",
+    STATIC / "smart-canvas.html",
+)
+COLOR_LITERAL = re.compile(
+    r"#([0-9a-fA-F]{6})\b|"
+    r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})",
+)
 
 
 class UnifiedThemeTests(unittest.TestCase):
@@ -43,7 +60,7 @@ class UnifiedThemeTests(unittest.TestCase):
                 rf'id="{frame_id}"[^>]+ivory-surfaces\.1',
                 frame_id,
             )
-        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-dark-neutral\.3')
+        self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-neutral-no-blue\.1')
         for frame_id in ("frame-ecommerce", "frame-free-creation"):
             self.assertRegex(
                 source,
@@ -67,9 +84,48 @@ class UnifiedThemeTests(unittest.TestCase):
             page_source = (STATIC / page).read_text(encoding="utf-8")
             self.assertRegex(
                 page_source,
-                r"studio-unified\.css\?v=2026\.08\.02\.canvas-dark-neutral\.3",
+                r"studio-unified\.css\?v=2026\.08\.14\.blender-neutral\.1",
                 page,
             )
+
+    def test_canvas_pages_do_not_load_legacy_blue_theme_and_bust_page_css(self):
+        page_styles = {
+            "canvas.html": "canvas.css",
+            "canvas-list.html": "canvas-list.css",
+            "smart-canvas.html": "smart-canvas.css",
+        }
+        for page, stylesheet in page_styles.items():
+            source = (STATIC / page).read_text(encoding="utf-8")
+            self.assertNotIn('/static/css/theme.css', source, page)
+            self.assertRegex(
+                source,
+                rf"{re.escape(stylesheet)}\?v=2026\.08\.14\.canvas-neutral-no-blue\.1",
+                page,
+            )
+
+    def test_canvas_ui_has_no_blue_or_cyan_color_literals(self):
+        residues = []
+        for path in CANVAS_UI_FILES:
+            source = path.read_text(encoding="utf-8")
+            for match in COLOR_LITERAL.finditer(source):
+                if match.group(1):
+                    value = match.group(1)
+                    red, green, blue = (
+                        int(value[offset:offset + 2], 16)
+                        for offset in (0, 2, 4)
+                    )
+                else:
+                    red, green, blue = (int(match.group(index)) for index in (2, 3, 4))
+                hue, saturation, _ = colorsys.rgb_to_hsv(
+                    red / 255,
+                    green / 255,
+                    blue / 255,
+                )
+                hue *= 360
+                if 165 <= hue < 250 and saturation >= 0.01:
+                    line = source.count("\n", 0, match.start()) + 1
+                    residues.append(f"{path.relative_to(ROOT)}:{line} {match.group(0)}")
+        self.assertEqual([], residues, "画布仍存在蓝色/青色色相：\n" + "\n".join(residues))
 
     def test_infinite_canvas_nodes_use_theme_tokens_for_inner_surfaces(self):
         source = UNIFIED_CSS.read_text(encoding="utf-8")
@@ -131,7 +187,7 @@ class UnifiedThemeTests(unittest.TestCase):
             page_source = (STATIC / page).read_text(encoding="utf-8")
             self.assertRegex(
                 page_source,
-                r"studio-unified\.css\?v=2026\.08\.02\.canvas-dark-neutral\.3",
+                r"studio-unified\.css\?v=2026\.08\.14\.blender-neutral\.1",
                 page,
             )
 

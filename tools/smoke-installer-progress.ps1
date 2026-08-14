@@ -40,6 +40,7 @@ try {
     }
     $arguments = @(
         '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL',
+        '/NOBLENDERPLUGIN=1',
         '/CLOSEAPPLICATIONS', '/FORCECLOSEAPPLICATIONS',
         ('/DIR="' + $installRoot + '"'),
         ('/LOG="' + $logPath + '"'),

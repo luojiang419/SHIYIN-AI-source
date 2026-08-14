@@ -537,6 +537,9 @@ let gridCustomLines = []; // [{type:'h'|'v', pos:0-1}] 相对图片尺寸的分�
 let gridCustomOrientation = 'h'; // 当前点击放置方向
 let gridCustomHistory = []; // 撤销栈：每次放线前快照
 let gridCustomDrag = null; // {index, pointerId}
+let gridAutoDetectedNodeId = '';
+let gridAutoDetecting = false;
+let gridRulerGuide = null; // {type:'h'|'v', pos:0-1}
 let imageEditZoom = 1.0;
 let imageEditBaseW = 0; // zoom=1 时图片显示宽度
 let imageEditBaseH = 0;
@@ -548,7 +551,7 @@ const ZOOM_PREVIEW_NODE_MAX_SCALE = 1.15;
 const LTX_DIRECTOR_WORKFLOW = 'LTXDirectorv2-API.json';
 const LTX_DIRECTOR_WF_NODE = '46';
 const LTX_DIRECTOR_SEED_NODE = '94:28';
-const LTX_SEGMENT_COLORS = ['#e07b3a', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b'];
+const LTX_SEGMENT_COLORS = ['#e07b3a', '#b7793f', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b'];
 const CANVAS_EMOJIS = ['layers','sparkles','image','palette','wand-2','star','heart','rocket','flame','moon','cloud','leaf','gem','compass','pin','flag','bookmark','crown'];
 function renderCanvasIcon(icon, size = 14) {
     // 旧的默认 emoji 或空值都映射为 layers
@@ -1480,6 +1483,9 @@ function serializableCanvasNode(node){
     delete copy._cascadeIdx;
     delete copy._cascadeFailed;
     delete copy._activeLoopCtx;
+    delete copy._blenderState;
+    delete copy._blenderStatusRequested;
+    delete copy._blenderConnecting;
     return copy;
 }
 function serializableCanvasNodes(list=nodes){
@@ -1974,7 +1980,7 @@ async function createSmartCanvas(){
 }
 function openSmartCanvasPage(id){
     if(!id) return;
-    window.location.href = `/static/smart-canvas.html?id=${encodeURIComponent(id)}&v=2026.05.22.1`;
+    window.location.href = `/static/smart-canvas.html?id=${encodeURIComponent(id)}&v=2026.08.14.canvas-neutral-no-blue.1`;
 }
 function toggleEmojiPicker(id, event){
     event?.preventDefault();
@@ -2454,6 +2460,13 @@ document.getElementById('editDrawCanvas').addEventListener('pointermove', moveEd
 document.getElementById('editDrawCanvas').addEventListener('pointerup', endEditDraw);
 document.getElementById('editDrawCanvas').addEventListener('pointercancel', endEditDraw);
 document.getElementById('editDrawCanvas').addEventListener('pointerleave', endEditDraw);
+document.getElementById('editDrawCanvas').addEventListener('contextmenu', handleGridLineContextMenu);
+document.getElementById('gridRulerTop')?.addEventListener('pointermove', event => handleGridRulerMove(event, 'v'));
+document.getElementById('gridRulerTop')?.addEventListener('pointerleave', handleGridRulerLeave);
+document.getElementById('gridRulerTop')?.addEventListener('click', event => handleGridRulerClick(event, 'v'));
+document.getElementById('gridRulerLeft')?.addEventListener('pointermove', event => handleGridRulerMove(event, 'h'));
+document.getElementById('gridRulerLeft')?.addEventListener('pointerleave', handleGridRulerLeave);
+document.getElementById('gridRulerLeft')?.addEventListener('click', event => handleGridRulerClick(event, 'h'));
 document.getElementById('editTextCanvas')?.addEventListener('pointerdown', beginEditText);
 document.getElementById('editTextCanvas')?.addEventListener('pointermove', moveEditText);
 document.getElementById('editTextCanvas')?.addEventListener('pointerup', endEditText);
@@ -2523,7 +2536,7 @@ function requestedCanvasListProject(){
 
 function canvasListUrlForProject(projectId){
     const pid = rememberCanvasListProject(projectId);
-    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
+    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}&v=2026.08.14.canvas-neutral-no-blue.1`;
 }
 
 function addNode(node){
@@ -2667,6 +2680,32 @@ function addH3VideoNode(point){
     scheduleSave();
     return node;
 }
+function addBlenderDirectorNode(point){
+    const p = point || defaultPoint(200, 0);
+    const node = addNode({
+        id:uid('blender'),
+        type:'blenderDirector',
+        x:p.x,
+        y:p.y,
+        w:440,
+        blenderPort:9876,
+        cameraX:0,
+        cameraY:-8,
+        cameraZ:3,
+        rotationX:67,
+        rotationY:0,
+        rotationZ:0,
+        cameraLens:50,
+        cameraFrame:1,
+        cameraSettingsExpanded:false,
+        frameStart:1,
+        frameEnd:120,
+        renderKind:'image',
+        generatedOutputs:[],
+        running:false
+    });
+    return node;
+}
 function addRhNode(point){
     const p = point || defaultPoint(180, 0);
     return addNode({
@@ -2718,6 +2757,191 @@ async function urlToBase64(url){
         reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
+}
+function blenderSceneSummary(state){
+    const scene = state?.scene || {};
+    const camera = scene.camera || {};
+    if(!state?.connected) return state?.error || '未检测到 Blender 插件';
+    const resolution = scene.resolution_x && scene.resolution_y ? `${scene.resolution_x}×${scene.resolution_y}` : '';
+    return [scene.scene || 'Scene', camera.name || '未设置相机', resolution, scene.engine || ''].filter(Boolean).join(' · ');
+}
+function blenderField(node, key, fallback){
+    const value = Number(node?.[key]);
+    return Number.isFinite(value) ? value : fallback;
+}
+function renderBlenderDirectorBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'blender-director-body';
+    if(!node._blenderStatusRequested){
+        node._blenderStatusRequested = true;
+        setTimeout(() => checkBlenderStatus(node.id), 0);
+    }
+    const state = node._blenderState || {connected:false};
+    const latest = latestGeneratedOutputItem(node);
+    const latestUrl = outputUrlValue(latest);
+    const latestKind = mediaKindForOutputItem(latest);
+    const preview = latestUrl
+        ? latestKind === 'video'
+            ? `<div class="blender-preview" data-blender-preview="${escapeAttr(latestUrl)}">${canvasVideoPreviewHtml(latestUrl, 768, 'controls preload="metadata" playsinline')}</div>`
+            : `<div class="blender-preview" data-blender-preview="${escapeAttr(latestUrl)}">${canvasPreviewImgHtml(latestUrl, 768, 'draggable="false"')}</div>`
+        : '<div class="blender-empty"><i data-lucide="scan-3d"></i><span>渲染结果会回传到这里，并可连接下游图片/视频节点</span></div>';
+    const disabled = node.running || node._blenderConnecting ? 'disabled' : '';
+    const connectLabel = node._blenderConnecting ? '正在启动并连接…' : state.connected ? '刷新连接' : '启动 / 连接 Blender';
+    wrap.innerHTML = `
+        <div class="blender-connection ${state.connected ? 'connected' : 'offline'}">
+            <span class="blender-dot"></span><span>${escapeHtml(blenderSceneSummary(state))}</span>
+        </div>
+        <div class="blender-connect-row">
+            <button type="button" class="image-edit-btn primary" data-blender-action="connect" ${disabled}>${connectLabel}</button>
+            <a class="blender-addon-link" href="/api/blender/addon" download="shiyin_blender_bridge.zip" title="下载 Blender 插件"><i data-lucide="download"></i>插件</a>
+        </div>
+        <details class="blender-camera-settings" ${node.cameraSettingsExpanded ? 'open' : ''}>
+            <summary><span>相机设置</span><small>位置 · 旋转 · 焦距 · 当前帧</small></summary>
+            <div class="blender-camera-settings-body">
+                <div class="blender-section-title">相机位置</div>
+                <div class="blender-field-grid">
+                    <label>X<input type="number" step="0.1" data-blender-field="cameraX" value="${blenderField(node,'cameraX',0)}"></label>
+                    <label>Y<input type="number" step="0.1" data-blender-field="cameraY" value="${blenderField(node,'cameraY',-8)}"></label>
+                    <label>Z<input type="number" step="0.1" data-blender-field="cameraZ" value="${blenderField(node,'cameraZ',3)}"></label>
+                </div>
+                <div class="blender-section-title">旋转角度</div>
+                <div class="blender-field-grid">
+                    <label>X°<input type="number" step="1" data-blender-field="rotationX" value="${blenderField(node,'rotationX',67)}"></label>
+                    <label>Y°<input type="number" step="1" data-blender-field="rotationY" value="${blenderField(node,'rotationY',0)}"></label>
+                    <label>Z°<input type="number" step="1" data-blender-field="rotationZ" value="${blenderField(node,'rotationZ',0)}"></label>
+                </div>
+                <div class="blender-field-grid blender-shot-grid">
+                    <label>焦距<input type="number" min="1" max="300" step="1" data-blender-field="cameraLens" value="${blenderField(node,'cameraLens',50)}"></label>
+                    <label>当前帧<input type="number" step="1" data-blender-field="cameraFrame" value="${blenderField(node,'cameraFrame',1)}"></label>
+                    <button type="button" class="image-edit-btn secondary" data-blender-action="camera" ${disabled}>同步相机</button>
+                </div>
+            </div>
+        </details>
+        <div class="blender-section-title">动画范围</div>
+        <div class="blender-field-grid blender-shot-grid">
+            <label>起始<input type="number" step="1" data-blender-field="frameStart" value="${blenderField(node,'frameStart',1)}"></label>
+            <label>结束<input type="number" step="1" data-blender-field="frameEnd" value="${blenderField(node,'frameEnd',120)}"></label>
+            <span class="blender-render-note">视频输出 MP4 / H.264</span>
+        </div>
+        <div class="blender-render-actions">
+            <button type="button" class="gen-btn" data-blender-render="image" ${disabled}><i data-lucide="camera"></i>${node.running ? '渲染中…' : '渲染图片'}</button>
+            <button type="button" class="gen-btn secondary" data-blender-render="video" ${disabled}><i data-lucide="film"></i>${node.running ? '渲染中…' : '渲染视频'}</button>
+        </div>
+        ${preview}
+    `;
+    wrap.querySelectorAll('[data-blender-field]').forEach(input => {
+        input.onchange = () => {
+            node[input.dataset.blenderField] = Number(input.value) || 0;
+            scheduleSave();
+        };
+    });
+    wrap.querySelector('[data-blender-action="connect"]').onclick = () => connectBlenderDirector(node.id);
+    wrap.querySelector('[data-blender-action="camera"]').onclick = () => syncBlenderCamera(node.id);
+    wrap.querySelector('.blender-camera-settings').ontoggle = event => {
+        node.cameraSettingsExpanded = event.currentTarget.open;
+        scheduleSave();
+    };
+    wrap.querySelectorAll('[data-blender-render]').forEach(button => {
+        button.onclick = () => runBlenderDirectorNode(node.id, button.dataset.blenderRender || 'image');
+    });
+    wrap.querySelector('[data-blender-preview]')?.addEventListener('click', event => {
+        event.stopPropagation();
+        openOutputLightbox(event.currentTarget.dataset.blenderPreview, node);
+    });
+    bindCanvasPreviewImageFallbacks(wrap);
+    return wrap;
+}
+async function blenderJson(url, options={}){
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(data.detail || 'Blender 插件操作失败');
+    return data;
+}
+async function checkBlenderStatus(nodeId){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node) return;
+    try {
+        node._blenderState = await blenderJson(`/api/blender/status?port=${encodeURIComponent(Number(node.blenderPort) || 9876)}`, {cache:'no-store'});
+    } catch(err) {
+        node._blenderState = {connected:false, paired:false, error:err.message || '未检测到 Blender 插件'};
+    }
+    render();
+}
+async function connectBlenderDirector(nodeId){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node || node._blenderConnecting) return;
+    node._blenderConnecting = true;
+    render();
+    try {
+        node._blenderState = await blenderJson('/api/blender/connect', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({port:Number(node.blenderPort) || 9876})
+        });
+    } catch(err) {
+        node._blenderState = {connected:false, error:err.message || 'Blender 自动连接失败'};
+        showErrorModal(err.message || 'Blender 自动连接失败', '3D 导演台');
+    } finally {
+        node._blenderConnecting = false;
+        render();
+    }
+}
+async function syncBlenderCamera(nodeId){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node) return;
+    try {
+        const scene = await blenderJson('/api/blender/camera', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                port:Number(node.blenderPort) || 9876,
+                location:[blenderField(node,'cameraX',0), blenderField(node,'cameraY',-8), blenderField(node,'cameraZ',3)],
+                rotation:[blenderField(node,'rotationX',67), blenderField(node,'rotationY',0), blenderField(node,'rotationZ',0)],
+                lens:blenderField(node,'cameraLens',50),
+                frame:blenderField(node,'cameraFrame',1)
+            })
+        });
+        node._blenderState = {...(node._blenderState || {}), connected:true, scene};
+        render();
+    } catch(err) {
+        showErrorModal(err.message || '同步 Blender 相机失败', '3D 导演台');
+    }
+}
+async function runBlenderDirectorNode(nodeId, kind='image'){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node || node.running) return;
+    node.renderKind = kind === 'video' ? 'video' : 'image';
+    node.running = true;
+    node.runStatus = 'running';
+    render();
+    try {
+        const result = await blenderJson('/api/blender/render', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                port:Number(node.blenderPort) || 9876,
+                kind:node.renderKind,
+                frame_start:Math.round(blenderField(node,'frameStart',1)),
+                frame_end:Math.round(blenderField(node,'frameEnd',120))
+            })
+        });
+        const item = {url:result.url, name:result.name || '', kind:result.kind || node.renderKind};
+        const out = outputForNode(node, 500);
+        mergeGeneratedOutputs(node, [item], true);
+        if(out) appendOutputImagesWithoutDuplicates(out, [item]);
+        node._blenderState = {...(node._blenderState || {}), connected:true, paired:true, scene:result.scene || node._blenderState?.scene || {}};
+        node.runStatus = 'done';
+        node.runError = '';
+        scheduleSave();
+        render();
+    } catch(err) {
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        showErrorModal(node.runError, 'Blender 渲染失败');
+    } finally {
+        node.running = false;
+        render();
+    }
 }
 function renderMsGenBody(node){
     const wrap = document.createElement('div');
@@ -3552,6 +3776,7 @@ function createNodeByType(type, point){
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'video') return addVideoNode(point);
     if(type === 'h3-video') return addH3VideoNode(point);
+    if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
     if(type === 'output') return addOutputNode(point);
     return null;
@@ -3565,6 +3790,7 @@ function menuAdd(type){
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
     if(type === 'h3-video') addH3VideoNode(menuPoint);
+    if(type === 'blenderDirector') addBlenderDirectorNode(menuPoint);
     if(type === 'rh') addRhNode(menuPoint);
     if(type === 'output') addOutputNode(menuPoint);
 }
@@ -4244,10 +4470,10 @@ function renderEditTextCanvas(){
         if(selected){
             ctx.setLineDash([7, 5]);
             ctx.lineWidth = 1.5;
-            ctx.strokeStyle = 'rgba(15,23,42,.72)';
+            ctx.strokeStyle = 'rgba(0,0,0,.72)';
             ctx.strokeRect(box.x, box.y, box.w, box.h);
             ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(15,23,42,.92)';
+            ctx.fillStyle = 'rgba(0,0,0,.92)';
             ctx.beginPath();
             ctx.arc(item.x + box.w / 2 - box.pad, item.y - box.h / 2 + box.pad, 3.5, 0, Math.PI * 2);
             ctx.fill();
@@ -4517,7 +4743,10 @@ function resizeEditDrawCanvas(){
     canvasEl.style.width = `${img.clientWidth || 1}px`;
     canvasEl.style.height = `${img.clientHeight || 1}px`;
     resizeEditTextCanvas();
-    if(imageEditMode === 'grid') refreshGridSplitPreview();
+    if(imageEditMode === 'grid'){
+        refreshGridSplitPreview();
+        refreshGridRulers();
+    }
 }
 function setImageEditMode(mode, userTouched=false){
     if(userTouched) imageEditModeTouched = true;
@@ -4566,7 +4795,10 @@ function setImageEditMode(mode, userTouched=false){
     }
     resizeEditDrawCanvas();
     if(isPreview) clearEditDrawing(true);
-    else if(imageEditMode === 'grid') refreshGridSplitPreview();
+    else if(imageEditMode === 'grid'){
+        refreshGridSplitPreview();
+        if(prevImageEditMode !== 'grid') setTimeout(() => autoDetectGridLines(false), 0);
+    }
     else if(imageEditMode === 'outpaint') resetOutpaintBox();
     else if(imageEditMode === 'crop' || imageEditMode === 'resize') clearEditDrawing(true);
     else if(prevImageEditMode === 'grid') clearEditDrawing(true); // 离开 grid 时主动清掉画布上残留的分割线预览
@@ -4769,6 +5001,7 @@ function drawNumberLabel(point){
     ctx.restore();
 }
 function beginEditDraw(event){
+    if(event.button !== 0) return;
     if(imageEditMode === 'crop') return;
     if(imageEditMode === 'grid'){
         if(!gridCustomMode) return;
@@ -4779,8 +5012,8 @@ function beginEditDraw(event){
         canvasEl.setPointerCapture?.(event.pointerId);
         const point = editDrawPoint(event);
         const hitIndex = gridCustomLineHit(point);
-        gridCustomHistory.push([...gridCustomLines.map(line => ({...line}))]);
         if(hitIndex >= 0){
+            gridCustomHistory.push(gridLineSnapshot());
             gridCustomDrag = {index: hitIndex, pointerId: event.pointerId};
             setGridCustomLinePos(hitIndex, point);
             refreshGridSplitPreview();
@@ -4790,10 +5023,11 @@ function beginEditDraw(event){
         const rect = canvasEl.getBoundingClientRect();
         const fracX = Math.max(0.001, Math.min(0.999, (event.clientX - rect.left) / rect.width));
         const fracY = Math.max(0.001, Math.min(0.999, (event.clientY - rect.top) / rect.height));
-        gridCustomLines.push({type: gridCustomOrientation, pos: gridCustomOrientation === 'h' ? fracY : fracX});
-        gridCustomDrag = {index: gridCustomLines.length - 1, pointerId: event.pointerId};
-        _syncGridCustomUndoBtn();
-        refreshGridSplitPreview();
+        const linePos = gridCustomOrientation === 'h' ? fracY : fracX;
+        if(addGridCustomLine(gridCustomOrientation, linePos)){
+            const nextIndex = gridCustomLines.findIndex(line => line.type === gridCustomOrientation && Math.abs(line.pos - linePos) < 0.001);
+            gridCustomDrag = {index:Math.max(0, nextIndex), pointerId:event.pointerId};
+        }
         return;
     }
     event.preventDefault();
@@ -4923,6 +5157,7 @@ function applyGridPreset(rows, cols){
     gridCustomLines = [];
     gridCustomHistory = [];
     gridCustomDrag = null;
+    gridRulerGuide = null;
     const h = document.getElementById('gridHorizontalLines');
     const v = document.getElementById('gridVerticalLines');
     if(h){ h.disabled = false; h.value = String(Math.max(0, Number(rows || 1) - 1)); }
@@ -4936,15 +5171,18 @@ function applyGridPreset(rows, cols){
     }
     if(custom) custom.style.display = 'none';
     if(regular) regular.style.display = 'contents';
+    document.getElementById('cropCanvas')?.classList.remove('grid-ruler-mode');
     _syncGridCustomCursor();
     _syncGridCustomUndoBtn();
     refreshGridSplitPreview();
+    refreshGridRulers();
 }
 // ——— 自定义宫格辅助函数 ———
-function toggleGridCustomMode(){
-    gridCustomMode = !gridCustomMode;
-    if(gridCustomMode){ gridCustomLines = []; gridCustomHistory = []; } // 进入自定义时清空旧线及历史
+function setGridCustomMode(enabled, {clear=false}={}){
+    gridCustomMode = Boolean(enabled);
+    if(clear){ gridCustomLines = []; gridCustomHistory = []; }
     gridCustomDrag = null;
+    gridRulerGuide = null;
     const toggle = document.getElementById('gridCustomToggle');
     const regular = document.getElementById('gridRegularControls');
     const custom = document.getElementById('gridCustomControls');
@@ -4956,9 +5194,14 @@ function toggleGridCustomMode(){
         if(el) el.disabled = gridCustomMode;
     });
     if(custom) custom.style.display = gridCustomMode ? 'flex' : 'none';
+    document.getElementById('cropCanvas')?.classList.toggle('grid-ruler-mode', imageEditMode === 'grid' && gridCustomMode);
     _syncGridCustomCursor();
     _syncGridCustomUndoBtn();
     refreshGridSplitPreview();
+    refreshGridRulers();
+}
+function toggleGridCustomMode(){
+    setGridCustomMode(!gridCustomMode, {clear:!gridCustomMode});
 }
 function setGridCustomOrientation(orient){
     gridCustomOrientation = orient;
@@ -4987,6 +5230,139 @@ function _syncGridCustomUndoBtn(){
     if(!btn) return;
     btn.disabled = gridCustomHistory.length === 0;
     btn.style.opacity = gridCustomHistory.length === 0 ? '0.4' : '1';
+}
+function gridLineSnapshot(){
+    return gridCustomLines.map(line => ({...line}));
+}
+function addGridCustomLine(type, pos){
+    const img = document.getElementById('cropImage');
+    const axisLength = type === 'h' ? Number(img?.naturalHeight || 1) : Number(img?.naturalWidth || 1);
+    const minGap = Math.min(0.1, 8 / Math.max(1, axisLength));
+    const next = Math.max(minGap, Math.min(1 - minGap, Number(pos) || 0));
+    if(gridCustomLines.some(line => line.type === type && Math.abs(line.pos - next) < minGap)) return false;
+    gridCustomHistory.push(gridLineSnapshot());
+    gridCustomLines.push({type, pos:next});
+    gridCustomLines.sort((a, b) => a.type.localeCompare(b.type) || a.pos - b.pos);
+    _syncGridCustomUndoBtn();
+    refreshGridSplitPreview();
+    return true;
+}
+async function autoDetectGridLines(force=false){
+    if(imageEditMode !== 'grid' || !cropState || gridAutoDetecting) return;
+    const node = nodes.find(item => item.id === cropState.nodeId);
+    if(!node?.url || (!force && gridAutoDetectedNodeId === node.id)) return;
+    const button = document.getElementById('gridAutoDetectBtn');
+    const status = document.getElementById('gridDetectStatus');
+    gridAutoDetecting = true;
+    if(button) button.disabled = true;
+    if(status) status.textContent = '正在识别裁切线…';
+    try {
+        const source = await fetch(canvasDisplayMediaUrl(node.url, node.name || ''));
+        if(!source.ok) throw new Error('图片读取失败');
+        const blob = await source.blob();
+        const form = new FormData();
+        form.append('file', blob, node.name || 'grid.png');
+        const response = await fetch('/api/canvas-tools/grid/detect', {method:'POST', body:form});
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '宫格识别失败');
+        if(cropState?.nodeId !== node.id || imageEditMode !== 'grid') return;
+        const horizontal = (data.horizontal || []).map(pos => ({type:'h', pos:Number(pos)}));
+        const vertical = (data.vertical || []).map(pos => ({type:'v', pos:Number(pos)}));
+        gridCustomLines = [...horizontal, ...vertical].filter(line => Number.isFinite(line.pos) && line.pos > 0 && line.pos < 1);
+        gridCustomHistory = [];
+        gridAutoDetectedNodeId = node.id;
+        setGridCustomMode(true);
+        if(status){
+            status.textContent = gridCustomLines.length
+                ? `已识别 ${Number(data.rows || horizontal.length + 1)}×${Number(data.cols || vertical.length + 1)}，可拖动微调，右键删除线`
+                : '未识别到明显分隔线，请从横纵标尺添加或在图片上手动放线';
+        }
+    } catch(err) {
+        if(status) status.textContent = err.message || '宫格识别失败，请手动调整';
+    } finally {
+        gridAutoDetecting = false;
+        if(button) button.disabled = false;
+    }
+}
+function gridRulerStep(imageLength, displayLength){
+    const target = Math.max(1, imageLength * 58 / Math.max(1, displayLength));
+    const power = Math.pow(10, Math.floor(Math.log10(target)));
+    return [1, 2, 5, 10].map(value => value * power).find(value => value >= target) || power * 10;
+}
+function drawGridRuler(canvasEl, type){
+    const img = document.getElementById('cropImage');
+    if(!canvasEl || !img?.clientWidth || !img?.clientHeight) return;
+    const horizontal = type === 'v';
+    const cssW = horizontal ? img.clientWidth : 34;
+    const cssH = horizontal ? 26 : img.clientHeight;
+    const ratio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvasEl.style.width = `${cssW}px`;
+    canvasEl.style.height = `${cssH}px`;
+    canvasEl.width = Math.round(cssW * ratio);
+    canvasEl.height = Math.round(cssH * ratio);
+    const ctx = canvasEl.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const imageLength = horizontal ? img.naturalWidth : img.naturalHeight;
+    const displayLength = horizontal ? cssW : cssH;
+    const step = gridRulerStep(imageLength, displayLength);
+    ctx.strokeStyle = 'rgba(232,232,234,.82)';
+    ctx.fillStyle = 'rgba(232,232,234,.92)';
+    ctx.lineWidth = 1;
+    ctx.font = '8px ui-monospace,Consolas,monospace';
+    for(let value = 0; value <= imageLength; value += step){
+        const position = value / imageLength * displayLength;
+        ctx.beginPath();
+        if(horizontal){
+            ctx.moveTo(position + .5, cssH); ctx.lineTo(position + .5, cssH - 9); ctx.stroke();
+            if(position + 24 < cssW) ctx.fillText(String(Math.round(value)), position + 3, 9);
+        } else {
+            ctx.moveTo(cssW, position + .5); ctx.lineTo(cssW - 9, position + .5); ctx.stroke();
+            ctx.save(); ctx.translate(4, Math.min(cssH - 2, position + 4)); ctx.rotate(-Math.PI / 2); ctx.fillText(String(Math.round(value)), 0, 7); ctx.restore();
+        }
+    }
+}
+function refreshGridRulers(){
+    const visible = imageEditMode === 'grid' && gridCustomMode;
+    document.getElementById('cropCanvas')?.classList.toggle('grid-ruler-mode', visible);
+    if(!visible) return;
+    drawGridRuler(document.getElementById('gridRulerTop'), 'v');
+    drawGridRuler(document.getElementById('gridRulerLeft'), 'h');
+}
+function gridRulerPointer(event, type){
+    const rect = event.currentTarget.getBoundingClientRect();
+    return type === 'v'
+        ? Math.max(0.001, Math.min(0.999, (event.clientX - rect.left) / Math.max(1, rect.width)))
+        : Math.max(0.001, Math.min(0.999, (event.clientY - rect.top) / Math.max(1, rect.height)));
+}
+function handleGridRulerMove(event, type){
+    if(imageEditMode !== 'grid' || !gridCustomMode) return;
+    gridRulerGuide = {type, pos:gridRulerPointer(event, type)};
+    refreshGridSplitPreview();
+}
+function handleGridRulerLeave(){
+    if(!gridRulerGuide) return;
+    gridRulerGuide = null;
+    refreshGridSplitPreview();
+}
+function handleGridRulerClick(event, type){
+    event.preventDefault();
+    event.stopPropagation();
+    addGridCustomLine(type, gridRulerPointer(event, type));
+}
+function handleGridLineContextMenu(event){
+    if(imageEditMode !== 'grid' || !gridCustomMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const hitIndex = gridCustomLineHit(editDrawPoint(event));
+    if(hitIndex < 0) return;
+    gridCustomHistory.push(gridLineSnapshot());
+    gridCustomLines.splice(hitIndex, 1);
+    gridCustomDrag = null;
+    _syncGridCustomUndoBtn();
+    refreshGridSplitPreview();
+    const status = document.getElementById('gridDetectStatus');
+    if(status) status.textContent = '已移除裁切线';
 }
 function clampImageResizeScale(value){
     const num = Number(value);
@@ -5099,7 +5475,7 @@ function refreshGridSplitPreview(){
     const drawGuideLine = (x1, y1, x2, y2) => {
         ctx.save();
         ctx.lineWidth = lineWidth + 2;
-        ctx.strokeStyle = 'rgba(2,6,23,0.72)';
+        ctx.strokeStyle = 'rgba(0,0,0,0.72)';
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
         ctx.lineWidth = lineWidth;
         ctx.strokeStyle = 'rgba(255,255,255,0.92)';
@@ -5131,6 +5507,14 @@ function refreshGridSplitPreview(){
                 drawGuideLine(x, 0, x, canvasEl.height);
             }
         });
+        if(gridRulerGuide){
+            ctx.save();
+            ctx.setLineDash([Math.max(8, lineWidth * 4), Math.max(5, lineWidth * 2)]);
+            ctx.globalAlpha = 0.78;
+            if(gridRulerGuide.type === 'h') drawGuideLine(0, gridRulerGuide.pos * canvasEl.height, canvasEl.width, gridRulerGuide.pos * canvasEl.height);
+            else drawGuideLine(gridRulerGuide.pos * canvasEl.width, 0, gridRulerGuide.pos * canvasEl.width, canvasEl.height);
+            ctx.restore();
+        }
         ctx.restore();
         return;
     }
@@ -5338,6 +5722,8 @@ function openImageEditor(nodeId, initialMode='crop'){
     gridCustomHistory = [];
     gridCustomDrag = null;
     gridCustomOrientation = 'h';
+    gridAutoDetectedNodeId = '';
+    gridRulerGuide = null;
     imageEditZoom = 1.0;
     imageEditBaseW = 0;
     imageEditBaseH = 0;
@@ -5418,6 +5804,7 @@ function closeImageEditor(){
     editDrawState = null;
     resetEditDrawingHistory();
     gridCustomDrag = null;
+    gridRulerGuide = null;
     imageEditZoom = 1.0;
     imageEditBaseW = 0;
     imageEditBaseH = 0;
@@ -5428,7 +5815,7 @@ function closeImageEditor(){
     syncCropRatioButtons();
     document.getElementById('imageEditStage')?.classList.remove('overflowing', 'overflow-x', 'overflow-y');
     const cropCanvasEl = document.getElementById('cropCanvas');
-    cropCanvasEl.classList.remove('grid-custom-h', 'grid-custom-v', 'outpaint-mode', 'outpaint-warning', 'dragging-image', 'text-mode', 'resize-mode');
+    cropCanvasEl.classList.remove('grid-custom-h', 'grid-custom-v', 'grid-ruler-mode', 'outpaint-mode', 'outpaint-warning', 'dragging-image', 'text-mode', 'resize-mode');
     cropCanvasEl.style.width = '';
     cropCanvasEl.style.height = '';
     const textCanvas = editTextCanvas();
@@ -6058,7 +6445,7 @@ function restoreOutputScrolls(state){
     });
 }
 function isNodeControl(target){
-    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area');
+    return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .blender-preview, .blender-addon-link, .blender-camera-settings, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area');
 }
 function destroyLTXEditor(node){
     if(!node?._ltxEditor) return;
@@ -6094,10 +6481,10 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh','blenderDirector'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -6251,6 +6638,7 @@ function renderNode(node){
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'msgen') body.innerHTML = '<div class="muted-note">旧版 ModelScope 专用生成已移除，请改用 API 生成节点。</div>';
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
+    if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'comfy' || node.type === 'ltxDirector') {
         body.innerHTML = '<div class="muted-note">本地生成功能已移除，此历史节点仅保留用于识别旧画布。</div>';
@@ -6275,7 +6663,7 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','output'].includes(node.type);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -6447,6 +6835,7 @@ function defaultNodeSize(type){
     if(type === 'generator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
+    if(type === 'blenderDirector') return {w:440, h:0};
     if(type === 'rh') return {w:430, h:0};
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'ltxDirector') return {w:1000, h:800};
@@ -9956,8 +10345,8 @@ function updateComfyField(node, input, event){
 }
 
 const CANVAS_GENERATOR_TYPES = ['generator','video','rh'];
-const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','rh'];
-const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','video','rh'];
+const CANVAS_IMAGE_OUTPUT_TYPES = ['generator','rh','blenderDirector'];
+const CANVAS_MEDIA_OUTPUT_TYPES = ['generator','video','rh','blenderDirector'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -10032,7 +10421,7 @@ function syncConnectedOutputsFromGenerated(node, outputs){
     outputNodesForSource(node.id).forEach(out => appendOutputImagesWithoutDuplicates(out, list));
 }
 function generatedImageRefs(node){
-    const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node?.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','blenderDirector'].includes(node?.type);
     return (node?.generatedOutputs || [])
         .map((item, i) => {
             const url = outputUrlValue(item);
@@ -12009,7 +12398,7 @@ function makePendingForRun(id, run, node, options={}, task={}){
 }
 function mergeGeneratedOutputs(node, outputs, append=false){
     if(!node) return;
-    const keepGeneratedMedia = ['rh','ltxDirector','video'].includes(node.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','blenderDirector'].includes(node.type);
     const clean = (outputs || []).map(item => {
         const url = outputUrlValue(item);
         if(!url) return null;
@@ -13772,6 +14161,11 @@ function canConnect(fromId, toId){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    if(from.type === 'blenderDirector'){
+        if(to.type === 'output') return true;
+        if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId);
+        return false;
+    }
     if(CANVAS_GENERATOR_TYPES.includes(from.type)){
         if(to.type === 'output') return true;
         if(CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type) && CANVAS_GENERATOR_TYPES.includes(to.type)){

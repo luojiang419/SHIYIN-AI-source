@@ -60,6 +60,15 @@ from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
 from canvas_core.generated_output import export_generated_files
 from canvas_core.image_upload import normalize_image_orientation
+from canvas_core.grid_crop import detect_grid
+from canvas_core.blender_bridge import (
+    DEFAULT_PORT as BLENDER_DEFAULT_PORT,
+    BlenderBridgeClient,
+    BlenderBridgeError,
+    blender_addon_source,
+    build_blender_addon_zip,
+    validated_render_path,
+)
 from canvas_core.ecommerce import (
     QUALITY_CHECKS as ECOMMERCE_QUALITY_CHECKS,
     build_model_catalog as build_ecommerce_model_catalog,
@@ -237,7 +246,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.136"
+APP_VERSION = "1.0.143"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -375,6 +384,7 @@ CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
 LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 RUNNINGHUB_THUMBNAIL_EXTS = (".jpg",)
+BLENDER_BRIDGE = BlenderBridgeClient()
 
 HISTORY_LOCK = Lock()
 GLOBAL_CONFIG_LOCK = Lock()
@@ -10513,6 +10523,135 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             item.update({"width": image_width, "height": image_height, "orientation_normalized": orientation_normalized})
         uploaded.append(item)
     return {"files": uploaded}
+
+
+@app.post("/api/canvas-tools/grid/detect")
+async def detect_canvas_grid(file: UploadFile = File(...)):
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="宫格识别图片为空")
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="宫格识别图片不能超过 50MB")
+    try:
+        with Image.open(BytesIO(content)) as source:
+            image = source.copy()
+        result = await asyncio.to_thread(detect_grid, image)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"无法识别宫格图片：{exc}") from exc
+    return result.as_dict()
+
+
+class BlenderConnectRequest(BaseModel):
+    port: int = Field(default=BLENDER_DEFAULT_PORT, ge=1024, le=65535)
+
+
+class BlenderCameraRequest(BaseModel):
+    port: int = Field(default=BLENDER_DEFAULT_PORT, ge=1024, le=65535)
+    location: List[float] = Field(default=[0.0, -8.0, 3.0], min_length=3, max_length=3)
+    rotation: List[float] = Field(default=[67.0, 0.0, 0.0], min_length=3, max_length=3)
+    lens: float = Field(default=50.0, ge=1.0, le=300.0)
+    frame: int = 1
+
+
+class BlenderRenderRequest(BaseModel):
+    port: int = Field(default=BLENDER_DEFAULT_PORT, ge=1024, le=65535)
+    kind: str = "image"
+    frame_start: Optional[int] = None
+    frame_end: Optional[int] = None
+
+
+def blender_http_error(exc: Exception) -> HTTPException:
+    message = str(exc) or "Blender 插件操作失败"
+    unavailable = any(
+        marker in message
+        for marker in ("无法连接", "未检测到 Blender", "未响应", "无法启动", "自动连接", "版本过旧")
+    )
+    return HTTPException(status_code=503 if unavailable else 400, detail=message)
+
+
+@app.get("/api/blender/addon")
+def download_blender_addon():
+    try:
+        payload = build_blender_addon_zip(blender_addon_source(APP_PATHS.app_root))
+    except (OSError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="shiyin_blender_bridge.zip"'},
+    )
+
+
+@app.get("/api/blender/status")
+async def blender_status(port: int = BLENDER_DEFAULT_PORT):
+    try:
+        return await asyncio.to_thread(BLENDER_BRIDGE.connect, port)
+    except BlenderBridgeError as exc:
+        return {"connected": False, "port": port, "error": str(exc)}
+
+
+@app.post("/api/blender/connect")
+async def connect_blender(payload: BlenderConnectRequest):
+    try:
+        return await asyncio.to_thread(BLENDER_BRIDGE.connect_or_launch, payload.port)
+    except BlenderBridgeError as exc:
+        raise blender_http_error(exc) from exc
+
+
+@app.post("/api/blender/camera")
+async def update_blender_camera(payload: BlenderCameraRequest):
+    try:
+        return await asyncio.to_thread(
+            BLENDER_BRIDGE.command,
+            "set_camera",
+            {
+                "location": payload.location,
+                "rotation": payload.rotation,
+                "lens": payload.lens,
+                "frame": payload.frame,
+            },
+            port=payload.port,
+            timeout=10.0,
+        )
+    except BlenderBridgeError as exc:
+        raise blender_http_error(exc) from exc
+
+
+@app.post("/api/blender/render")
+async def render_from_blender(payload: BlenderRenderRequest):
+    kind = str(payload.kind or "image").lower()
+    if kind not in {"image", "video"}:
+        raise HTTPException(status_code=400, detail="Blender 只支持图片或视频渲染")
+    action = "render_still" if kind == "image" else "render_animation"
+    command_payload = {
+        "frame_start": payload.frame_start,
+        "frame_end": payload.frame_end,
+    }
+    try:
+        result = await asyncio.to_thread(
+            BLENDER_BRIDGE.command,
+            action,
+            command_payload,
+            port=payload.port,
+            timeout=900.0 if kind == "image" else 7200.0,
+        )
+        source = validated_render_path(str(result.get("path") or ""), kind)
+        filename = f"blender_{uuid.uuid4().hex[:12]}{source.suffix.lower()}"
+        destination = Path(OUTPUT_OUTPUT_DIR) / filename
+        shutil.copy2(source, destination)
+        source.unlink(missing_ok=True)
+        url = output_url_for(filename, "output")
+        register_internal_media_object(url, "output", kind, "blender-render")
+        return {
+            "ok": True,
+            "url": url,
+            "name": filename,
+            "kind": kind,
+            "scene": result.get("scene") or {},
+        }
+    except (BlenderBridgeError, OSError) as exc:
+        raise blender_http_error(exc) from exc
+
 
 class Base64UploadRequest(BaseModel):
     data: str = ""            # 纯 base64 或 data:URL

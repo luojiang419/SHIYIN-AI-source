@@ -25,9 +25,8 @@
     <script src="/static/js/theme.js?v=2026.07.31.theme-picker.1"></script>
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.02.canvas-node-theme.1">
-    <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.30.1782781876">
-    <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.canvas-dark-neutral.3">
+    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.14.canvas-neutral-no-blue.1">
+    <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1">
 </head>
 <body>
     <div id="shell" class="shell no-canvas">
@@ -50,6 +49,7 @@
                     <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                     <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
                     <button class="tool-btn" onclick="addH3VideoNode()"><i data-lucide="badge-hd" class="w-4 h-4"></i><span>H3 视频</span></button>
+                    <button class="tool-btn" onclick="addBlenderDirectorNode()"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
                     <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
                     <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
                 </div>
@@ -74,6 +74,7 @@
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">API生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('h3-video')"><i data-lucide="badge-hd" class="w-4 h-4"></i><span>MiniMax H3 视频</span></button>
+                <button class="menu-btn" onclick="menuAdd('blenderDirector')"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
             <div id="linkCreateMenu" class="create-menu"></div>
@@ -242,6 +243,7 @@
                     <span id="imageResizeResolution" class="image-edit-sub image-resize-resolution">-</span>
                 </div>
                 <div id="imageGridTools" class="image-edit-tools">
+                    <button id="gridAutoDetectBtn" class="image-edit-btn secondary" type="button" onclick="autoDetectGridLines(true)" title="自动识别横向和竖向裁切线"><i data-lucide="scan-line" class="w-3.5 h-3.5"></i><span>自动识别</span></button>
                     <button id="gridCustomToggle" class="image-edit-btn secondary" type="button" onclick="toggleGridCustomMode()" data-i18n="canvas.gridCustom" data-i18n-title="canvas.gridCustomTitle" title="自由放置切割线">自定义</button>
                     <div class="grid-preset-row">
                         <span class="image-edit-sub" data-i18n="canvas.gridPresets">预设</span>
@@ -264,11 +266,15 @@
                     </div>
                     <label class="grid-gap-control"><span data-i18n="canvas.gridGap">间隔(px)</span> <input id="gridGapSize" type="range" min="0" max="240" step="1" value="0"><span id="gridGapValue" class="grid-gap-value">0</span></label>
                     <span id="gridSplitCount" class="image-edit-sub"></span>
+                    <span id="gridDetectStatus" class="image-edit-sub"></span>
                 </div>
                 <div id="imageEditStage" class="image-edit-stage">
                     <div class="image-edit-stage-inner">
                         <div id="cropCanvas" class="crop-canvas">
                             <img id="cropImage" alt="crop source">
+                            <canvas id="gridRulerTop" class="grid-ruler grid-ruler-top" aria-label="竖向裁切线标尺"></canvas>
+                            <canvas id="gridRulerLeft" class="grid-ruler grid-ruler-left" aria-label="横向裁切线标尺"></canvas>
+                            <div id="gridRulerCorner" class="grid-ruler-corner" title="从上方或左侧标尺点击添加裁切线">↔<br>↕</div>
                             <canvas id="editDrawCanvas" class="edit-draw-canvas"></canvas>
                             <canvas id="editTextCanvas" class="edit-text-canvas"></canvas>
                             <div id="cropBox" class="crop-box">
@@ -294,7 +300,7 @@
                     </div>
                 </div>
                 <div class="image-edit-actions">
-                    <span id="imageEditZoomLabel" style="color:#94a3b8;font-size:11px;font-weight:800;padding:0 4px;margin-right:auto;cursor:pointer;user-select:none" title="双击重置缩放" ondblclick="resetImageEditZoom()">100%</span>
+                    <span id="imageEditZoomLabel" style="color:var(--faint);font-size:11px;font-weight:800;padding:0 4px;margin-right:auto;cursor:pointer;user-select:none" title="双击重置缩放" ondblclick="resetImageEditZoom()">100%</span>
                     <button class="image-edit-btn secondary" type="button" onclick="resetCropBox()"><i data-lucide="rotate-ccw" class="w-4 h-4"></i><span data-i18n="canvas.reset">重置</span></button>
                     <button class="image-edit-btn secondary" type="button" onclick="closeImageEditor()" data-i18n="common.cancel">取消</button>
                     <button id="imageEditApplyBtn" class="image-edit-btn primary" type="button" onclick="applyImageEdit()"><i data-lucide="crop" class="w-4 h-4"></i><span data-i18n="canvas.applyCrop">应用裁剪</span></button>

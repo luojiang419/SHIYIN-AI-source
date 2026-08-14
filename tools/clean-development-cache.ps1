@@ -64,6 +64,8 @@ $poseBackdropSmokeResults = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot
 $targets += $poseBackdropSmokeResults
 $releaseSourceStages = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -Directory -Filter "release-source-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
 $targets += $releaseSourceStages
+$installerProgressSmokeDirs = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -Directory -Filter "installer-progress-smoke-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+$targets += $installerProgressSmokeDirs
 $prefix = $projectRoot.TrimEnd('\') + '\'
 foreach ($target in $targets) {
     $fullPath = [System.IO.Path]::GetFullPath($target)

@@ -58,6 +58,7 @@ def main() -> int:
             CANVAS_PORT="3998",
             CANVAS_RUNTIME_MODE="desktop",
             API_PROVIDER_SHIYING_KEY="ecommerce-smoke-configured-key",
+            CANVAS_DWPOSE_AUTO_DOWNLOAD="0",
         )
         from fastapi.testclient import TestClient
         import main as canvas_main
@@ -94,7 +95,7 @@ def main() -> int:
             return '{"subject":"商品主体","garment":"服装参考","composition":"居中构图","lighting":"柔和棚拍光","background":"纯色背景","constraints":"保持主体一致"}'
 
         with (
-            TestClient(canvas_main.app) as client,
+            TestClient(canvas_main.app, client=("127.0.0.1", 50000)) as client,
             patch.object(canvas_main, "execute_ai_image_batch", side_effect=fake_batch),
             patch.object(canvas_main, "classify_asset_image_best_effort", side_effect=no_classification),
             patch.object(canvas_main, "caption_image_with_provider", side_effect=fake_vision_caption),

@@ -65,7 +65,7 @@
     if (a.loaded || !state.connected) return;
     setStatus('正在加载模型 …');
     try {
-      const data = await net.apiGet('/api/providers');
+      const data = await net.apiGet('/api/runtime/providers');
       const all = data.providers || data.api_providers || [];
       a.chatProviders = all.filter((p) => Array.isArray(p.chat_models) && p.chat_models.length);
       a.imgProviders = all.filter((p) => Array.isArray(p.image_models) && p.image_models.length);

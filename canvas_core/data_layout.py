@@ -57,7 +57,11 @@ class DataLayout:
 
     @classmethod
     def from_app_paths(cls, paths: AppPaths) -> "DataLayout":
-        root = paths.data_root
+        return cls.from_root(paths.data_root)
+
+    @classmethod
+    def from_root(cls, root: Path) -> "DataLayout":
+        root = Path(root).expanduser().resolve()
         config = root / "config"
         database = root / "database"
         media = root / "media"

@@ -9,12 +9,12 @@
     closeSocket();
     if (!handlers.isLive()) return;
     let ws;
-    try { ws = new WebSocket(`${net.wsBase()}/ws/events`); }
+    try { ws = new WebSocket(`${net.wsBase()}/ws/events?client_id=photoshop`); }
     catch (e) { return; }
     state.ws = ws;
 
     ws.addEventListener('open', () => {
-      ws.send(JSON.stringify({ type: 'auth', token: state.token, client_id: 'photoshop' }));
+      ws.send(JSON.stringify({ type: 'hello', client_id: 'photoshop' }));
       state.wsBackoff = 1000;
       clearInterval(state.wsPing);
       state.wsPing = setInterval(() => { try { ws.send('ping'); } catch (e) {} }, 15000);

@@ -973,7 +973,7 @@ class EcommerceBackendTests(unittest.TestCase):
                     {"id": "lingjing", "name": "灵境", "enabled": True, "image_models": ["gpt-image-2"]},
                 ]
 
-        with patch.object(self.main, "DATABASE", FakeDatabase()):
+        with patch.object(self.main, "ADMIN_DATABASE", FakeDatabase()):
             providers = self.main.load_api_providers()
         self.assertEqual(
             [item["id"] for item in providers],
@@ -1472,7 +1472,7 @@ class EcommerceBackendTests(unittest.TestCase):
                 self.marker = (key, value, only_if_empty)
 
         fake = FakeDatabase()
-        with patch.object(self.main, "DATABASE", fake):
+        with patch.object(self.main, "ADMIN_DATABASE", fake):
             report = self.main.prune_removed_provider_presets_once()
         self.assertEqual(report["removed"], ["modelscope", "lingjing"])
         self.assertEqual([item["id"] for item in fake.saved], ["grsai", "custom-provider"])

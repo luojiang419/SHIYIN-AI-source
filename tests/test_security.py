@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from canvas_core.auth import AuthManager, token_hash
+from canvas_core.auth import AuthManager
 from canvas_core.database import CanvasDatabase
 from canvas_core.secrets import DpapiProtector, SecretStore
 
@@ -38,7 +38,7 @@ class SecurityTests(unittest.TestCase):
         self.assertNotIn("仅当前 Windows 用户可读取".encode("utf-8"), protected)
         self.assertEqual(protector.unprotect(protected), "仅当前 Windows 用户可读取")
 
-    def test_pair_code_is_single_use_and_revocation_is_immediate(self):
+    def test_desktop_bootstrap_token_is_single_use(self):
         with tempfile.TemporaryDirectory() as root:
             database = self.make_database(root)
             auth = AuthManager(database, desktop_token="desktop-once")
@@ -47,16 +47,6 @@ class SecurityTests(unittest.TestCase):
             self.assertIsNotNone(auth.authenticate(desktop_session))
             with self.assertRaises(PermissionError):
                 auth.consume_desktop_token("desktop-once")
-
-            code, expires_at = auth.create_pair_code()
-            self.assertGreater(expires_at, 0)
-            access_token, identity = auth.pair(code, "测试浏览器", "browser")
-            self.assertEqual(auth.authenticate(access_token).device_id, identity.device_id)
-            self.assertEqual(database.paired_device_by_hash(token_hash(access_token))["name"], "测试浏览器")
-            with self.assertRaises(PermissionError):
-                auth.pair(code, "重复配对")
-            self.assertTrue(auth.revoke(identity.device_id))
-            self.assertIsNone(auth.authenticate(access_token))
 
 
 if __name__ == "__main__":

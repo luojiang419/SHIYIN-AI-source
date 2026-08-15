@@ -11,8 +11,8 @@
 
   function httpBase() { return state.host ? `http://${state.host}` : ''; }
   function wsBase() { return state.host ? `ws://${state.host}` : ''; }
-  function authHeaders(extra) {
-    return state.token ? Object.assign({}, extra || {}, { Authorization: `Bearer ${state.token}` }) : Object.assign({}, extra || {});
+  function requestHeaders(extra) {
+    return Object.assign({}, extra || {});
   }
   function isBackendUrl(url) {
     const value = String(url || '');
@@ -28,7 +28,7 @@
   }
 
   async function apiGet(path) {
-    const res = await fetch(`${httpBase()}${path}`, { cache: 'no-store', headers: authHeaders() });
+    const res = await fetch(`${httpBase()}${path}`, { cache: 'no-store', headers: requestHeaders() });
     const text = await res.text();
     if (!res.ok) throw new Error(`HTTP ${res.status} ${text.slice(0, 160)}`.trim());
     try { return JSON.parse(text || '{}'); }
@@ -38,7 +38,7 @@
   async function apiSend(method, path, body) {
     const res = await fetch(`${httpBase()}${path}`, {
       method,
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      headers: requestHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body || {}),
     });
     const text = await res.text();
@@ -65,25 +65,14 @@
   }
 
   async function fetchBytes(url) {
-    const res = await fetch(absUrl(url), { headers: isBackendUrl(url) ? authHeaders() : {} });
+    const res = await fetch(absUrl(url), { headers: isBackendUrl(url) ? requestHeaders() : {} });
     if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`);
     return res.arrayBuffer();
   }
 
-  async function pair(code, name, clientType) {
-    const res = await fetch(`${httpBase()}/api/auth/pair`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, name, client_type: clientType }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.access_token) throw new Error(data.detail || '配对失败');
-    return data.access_token;
-  }
-
   async function mediaObjectUrl(url) {
     if (!isBackendUrl(url)) return absUrl(url);
-    const res = await fetch(absUrl(url), { headers: authHeaders() });
+    const res = await fetch(absUrl(url), { headers: requestHeaders() });
     if (!res.ok) throw new Error(`预览失败 HTTP ${res.status}`);
     return URL.createObjectURL(await res.blob());
   }
@@ -139,5 +128,5 @@
     throw new Error((r && r.error) || '上传失败，后端未返回地址');
   }
 
-  DX.net = { parseHost, httpBase, wsBase, absUrl, thumbUrl, displayUrl, needsJpeg, apiGet, apiSend, pair, fetchBytes, mediaObjectUrl, hydrateImages, toBase64, uploadInputBase64 };
+  DX.net = { parseHost, httpBase, wsBase, absUrl, thumbUrl, displayUrl, needsJpeg, apiGet, apiSend, fetchBytes, mediaObjectUrl, hydrateImages, toBase64, uploadInputBase64 };
 })();

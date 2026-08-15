@@ -114,7 +114,7 @@
   /* ---------- API 平台 / ModelScope ---------- */
   async function ensureProviders() {
     if (g.providersLoaded || !state.connected) return;
-    const data = await net.apiGet('/api/providers');
+    const data = await net.apiGet('/api/runtime/providers');
     const all = (data.providers || data.api_providers || []).filter((p) => Array.isArray(p.image_models) && p.image_models.length);
     // API 模式排除 RunningHub 与 ModelScope（它们是独立模式）
     g.apiProviders = all.filter((p) => p.protocol !== 'runninghub' && p.id !== 'runninghub' && p.id !== 'modelscope');

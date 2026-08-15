@@ -843,7 +843,7 @@
 
         async function loadConfig(){
             try {
-                const data = await fetch('/api/config').then(r=>r.json());
+                const data = await fetch('/api/runtime/config').then(r=>r.json());
                 config = { ...config, ...data };
                 apiProviders = Array.isArray(config.api_providers) ? config.api_providers : [];
                 config.chat_model = (config.chat_models || []).find(m => m === 'gpt-5.5') || config.chat_model || 'gpt-5.5';

@@ -10,6 +10,9 @@
         html.studio-route-booting body {
             visibility: hidden !important;
         }
+        [hidden] {
+            display: none !important;
+        }
     </style>
     <script>
         (function(){
@@ -2078,7 +2081,7 @@
             </nav>
 
             <div class="side-actions">
-                <button class="side-pill" onclick="openDesktopUpdater()" type="button" title="检查更新">
+                <button class="side-pill" data-admin-only hidden onclick="openDesktopUpdater()" type="button" title="检查更新">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4"></path>
                         <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4"></path>
@@ -2096,7 +2099,13 @@
                     </svg>
                 </button>
                 <div class="settings-fold-group is-collapsed" id="settings-fold-group">
-                    <button class="side-pill" onclick="switchUI(this, 'api-settings')" type="button" title="API 设置">
+                    <a class="side-pill" data-admin-only hidden href="/admin" title="账号管理">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6M22 11h-6"></path>
+                        </svg>
+                        <span class="side-pill-text">账号管理</span>
+                    </a>
+                    <button class="side-pill" data-admin-only hidden onclick="switchUI(this, 'api-settings')" type="button" title="API 设置">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M15 7h3a5 5 0 0 1 0 10h-3"></path>
                             <path d="M9 17H6A5 5 0 0 1 6 7h3"></path>
@@ -2104,7 +2113,7 @@
                         </svg>
                         <span class="side-pill-text" data-i18n="common.apiSettings">API 设置</span>
                     </button>
-                    <button class="side-pill" onclick="switchUI(this, 'app-settings')" type="button" title="软件设置">
+                    <button class="side-pill" data-admin-only hidden onclick="switchUI(this, 'app-settings')" type="button" title="软件设置">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <rect x="4" y="5" width="16" height="14" rx="3"></rect>
                             <path d="M8 10h8M8 14h5"></path>
@@ -2141,6 +2150,12 @@
                         <span class="side-pill-text" data-i18n="common.language">中文</span>
                     </button>
                 </div>
+                <button class="side-pill" id="account-logout-btn" onclick="logoutStudioAccount()" type="button" title="退出当前账号">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M10 17l5-5-5-5"></path><path d="M15 12H3"></path><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                    </svg>
+                    <span class="side-pill-text" id="account-logout-text">退出账号</span>
+                </button>
                 <div id="project-version-badge" class="project-version-badge" title="当前版本">v-</div>
             </div>
 
@@ -2342,6 +2357,8 @@
         const DEFAULT_PAGE_ID = 'ecommerce';
         const PAGE_IDS = ['ecommerce','free-creation','gpt-chat','canvas','asset-manager','works','api-settings','app-settings'];
         const PROJECT_URL = 'https://github.com/luojiang419/SHIYIN-AI-source';
+        const ADMIN_PAGE_IDS = new Set(['api-settings', 'app-settings']);
+        let currentStudioAccount = null;
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION' };
         let updateConnectivityResult = null;
         let projectUpdateRunning = false;
@@ -2584,6 +2601,7 @@
         function switchUI(el, id, options = {}) {
             resetStudioRootScroll();
             if(!PAGE_IDS.includes(id)) id = DEFAULT_PAGE_ID;
+            if(ADMIN_PAGE_IDS.has(id) && !currentStudioAccount?.is_admin) id = DEFAULT_PAGE_ID;
             document.querySelectorAll('.nav-item,.side-pill').forEach(n => n.classList.remove('active'));
             if(el) el.classList.add('active');
             document.querySelectorAll('iframe').forEach(f => f.classList.remove('active'));
@@ -2637,14 +2655,55 @@
             studioApiChannel.onmessage = event => forwardStudioApiChange(event.data);
         } catch(e) {}
 
-        function restoreActivePage() {
+        async function loadStudioAccount() {
+            const response = await fetch('/api/account/me', {cache:'no-store'});
+            if(response.status === 401) {
+                location.replace('/login');
+                throw new Error('登录会话已失效');
+            }
+            const data = await response.json().catch(() => ({}));
+            if(!response.ok || !data.account) throw new Error(data.detail || '无法读取当前账号');
+            currentStudioAccount = data.account;
+            document.documentElement.dataset.accountRole = currentStudioAccount.role || 'user';
+            document.querySelectorAll('[data-admin-only]').forEach(element => {
+                element.hidden = !currentStudioAccount.is_admin;
+            });
+            updateAccountLogoutText();
+            return currentStudioAccount;
+        }
+
+        function updateAccountLogoutText() {
+            const logoutText = document.getElementById('account-logout-text');
+            if(!logoutText || !currentStudioAccount) return;
+            const prefix = window.StudioI18n?.lang?.() === 'en' ? 'Sign out' : '退出';
+            logoutText.textContent = `${prefix} ${currentStudioAccount.account}`;
+        }
+
+        async function logoutStudioAccount() {
+            try { await fetch('/api/account/logout', {method:'POST'}); }
+            finally { location.replace('/login'); }
+        }
+
+        async function restoreActivePage() {
             restoreSidebarPinned();
-            const id = PAGE_IDS.includes(localStorage.getItem(ACTIVE_PAGE_KEY)) ? localStorage.getItem(ACTIVE_PAGE_KEY) : DEFAULT_PAGE_ID;
+            try {
+                await loadStudioAccount();
+            } catch(error) {
+                console.error(error);
+                return;
+            }
+            const remembered = localStorage.getItem(ACTIVE_PAGE_KEY);
+            const id = PAGE_IDS.includes(remembered) && (!ADMIN_PAGE_IDS.has(remembered) || currentStudioAccount.is_admin)
+                ? remembered
+                : DEFAULT_PAGE_ID;
             restoreSidebarSettings(id);
             const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
             switchUI(trigger, id, { skipRemember:true });
             document.documentElement.classList.remove('studio-route-booting');
-            ensureShiyingApiKeyOnboarding();
+            if(currentStudioAccount.is_admin) {
+                ensureShiyingApiKeyOnboarding();
+                checkForUpdates();
+            }
         }
         document.addEventListener('DOMContentLoaded', restoreActivePage, { once:true });
 
@@ -2765,6 +2824,7 @@
             updateProjectUpdateTitle();
             refreshUpdateButtonText();
             refreshProjectUpdateModalText();
+            updateAccountLogoutText();
         }
 
         function syncLanguageToFrame(frame) {
@@ -2800,7 +2860,6 @@
             updateThemeIcon(theme);
             if(window.StudioI18n) window.StudioI18n.apply();
             broadcastLanguage();
-            checkForUpdates();
         });
 
         // sync theme when iframe loads

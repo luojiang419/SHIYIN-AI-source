@@ -1,6 +1,5 @@
 const els = {
   server: document.getElementById('serverInput'),
-  token: document.getElementById('tokenInput'),
   folder: document.getElementById('folderInput'),
   classify: document.getElementById('classifyInput'),
   autoScroll: document.getElementById('autoScrollInput'),
@@ -51,9 +50,8 @@ function apiBase(){
   }
 }
 
-function authHeaders(extra={}){
-  const token = String(els.token?.value || '').trim();
-  return token ? {...extra, Authorization: `Bearer ${token}`} : {...extra};
+function requestHeaders(extra={}){
+  return {...extra};
 }
 
 function setStatus(text){
@@ -538,7 +536,6 @@ async function saveSettings(){
 function getSettingsPayload(){
   return {
     server: els.server.value || '127.0.0.1:3000',
-    accessToken: els.token?.value || '',
     folder: els.folder.value || '网页采集',
     classify: Boolean(els.classify.checked),
     autoScroll: Boolean(els.autoScroll.checked),
@@ -551,9 +548,8 @@ function getSettingsPayload(){
 }
 
 async function loadSettings(){
-  const data = await chrome.storage.local.get(['server', 'port', 'accessToken', 'folder', 'classify', 'autoScroll', 'filterLowRes', 'provider', 'model', 'prompt', 'settingsCollapsed']);
+  const data = await chrome.storage.local.get(['server', 'port', 'folder', 'classify', 'autoScroll', 'filterLowRes', 'provider', 'model', 'prompt', 'settingsCollapsed']);
   els.server.value = data.server || (data.port ? `127.0.0.1:${data.port}` : '127.0.0.1:3000');
-  if(els.token) els.token.value = data.accessToken || '';
   els.folder.value = data.folder || '网页采集';
   els.classify.checked = data.classify !== false;
   els.autoScroll.checked = Boolean(data.autoScroll);
@@ -566,31 +562,16 @@ async function loadSettings(){
 }
 
 async function loadProviders(){
-  const res = await fetch(`${apiBase()}/api/providers`, {headers: authHeaders()});
+  const res = await fetch(`${apiBase()}/api/runtime/providers`, {headers: requestHeaders()});
   if(!res.ok) throw new Error(await res.text());
   const data = await res.json();
   providers = Array.isArray(data.providers) ? data.providers : [];
   renderProviders();
 }
 
-async function pairIfNeeded(){
-  const value = String(els.token?.value || '').trim();
-  if(!/^\d{6}$/.test(value)) return;
-  const res = await fetch(`${apiBase()}/api/auth/pair`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({code: value, name: 'Chrome 素材导入插件', client_type: 'chrome'}),
-  });
-  const data = await res.json().catch(() => ({}));
-  if(!res.ok || !data.access_token) throw new Error(data.detail || '配对失败');
-  els.token.value = data.access_token;
-  await saveSettings();
-}
-
 async function testConnection(){
   await saveSettings();
   setStatus('正在连接本地服务...');
-  await pairIfNeeded();
   await loadProviders();
   setStatus('连接成功，可以扫描当前页面图片。');
 }
@@ -1113,7 +1094,7 @@ async function importSelected(){
   };
   const res = await fetch(`${apiBase()}/api/local-assets/import-urls`, {
     method: 'POST',
-    headers: authHeaders({'Content-Type': 'application/json'}),
+    headers: requestHeaders({'Content-Type': 'application/json'}),
     body: JSON.stringify(body),
   });
   if(!res.ok) throw new Error(await res.text());

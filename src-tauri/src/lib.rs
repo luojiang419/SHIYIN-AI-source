@@ -515,7 +515,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let open_item = MenuItem::with_id(app, "open", "打开软件", true, None::<&str>)?;
     let browser_item = MenuItem::with_id(app, "browser", "浏览器打开", true, None::<&str>)?;
     let copy_item = MenuItem::with_id(app, "copy", "复制局域网地址", true, None::<&str>)?;
-    let devices_item = MenuItem::with_id(app, "devices", "配对设备", true, None::<&str>)?;
     let data_item = MenuItem::with_id(app, "data", "打开 data 目录", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -524,7 +523,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             &open_item,
             &browser_item,
             &copy_item,
-            &devices_item,
             &data_item,
             &quit_item,
         ],
@@ -546,12 +544,6 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             let state = app.state::<DesktopState>();
             let address = format!("http://{}:{}", local_ip(), state.port);
             let _ = Clipboard::new().and_then(|mut value| value.set_text(address));
-        }
-        "devices" => {
-            show_main(app);
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval("location.href='/devices'");
-            }
         }
         "data" => {
             let state = app.state::<DesktopState>();

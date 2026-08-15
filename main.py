@@ -47,14 +47,28 @@ if PROJECT_MODULE_DIR not in sys.path:
 from canvas_core.paths import APP_PATHS
 from canvas_core.runtime import RUNTIME_OPTIONS, request_shutdown, run_uvicorn
 from canvas_core.storage_bootstrap import (
+    ACCOUNT_STORE,
+    ACCOUNT_STORAGE,
+    ADMIN_DATABASE,
     DATA_LAYOUT,
     DATABASE,
+    DWPOSE_MODEL_MANAGER,
     MAINTENANCE_REPORT,
     MIGRATION_REPORT,
     SECRET_MIGRATION_REPORT,
     SECRET_STORE,
 )
-from canvas_core.auth import AuthIdentity, AuthManager, SESSION_COOKIE
+from canvas_core.auth import AuthManager, SESSION_COOKIE
+from canvas_core.accounts import (
+    ACCOUNT_SESSION_COOKIE,
+    ADMIN_ACCOUNT,
+    AccountIdentity,
+    account_lookup_key,
+    is_admin_account,
+    is_loopback_address,
+)
+from canvas_core.account_storage import ScopedPath, current_account_id, reset_current_account, set_current_account
+from canvas_core.account_resources import AccountResourceService
 from canvas_core.database import RevisionConflict
 from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
@@ -90,6 +104,26 @@ from canvas_core.ecommerce import (
 )
 
 AUTH_MANAGER = AuthManager(DATABASE, RUNTIME_OPTIONS.desktop_token)
+ACCOUNT_RESOURCE_SERVICE = AccountResourceService(ACCOUNT_STORE, ACCOUNT_STORAGE)
+DWPOSE_INFERENCE = None
+DWPOSE_INFERENCE_LOCK = Lock()
+DWPOSE_AUTO_DOWNLOAD_ENABLED = str(os.getenv("CANVAS_DWPOSE_AUTO_DOWNLOAD", "1")).strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+
+
+def render_dwpose_image(image: Image.Image):
+    global DWPOSE_INFERENCE
+    import numpy as np
+    from canvas_core.dwpose_inference import DWPoseInference
+
+    with DWPOSE_INFERENCE_LOCK:
+        if DWPOSE_INFERENCE is None:
+            DWPOSE_INFERENCE = DWPoseInference(DWPOSE_MODEL_MANAGER)
+    return DWPOSE_INFERENCE.render(np.asarray(image, dtype=np.uint8))
 
 QUIET_ACCESS_PATHS = {
     "/api/canvases",
@@ -122,34 +156,85 @@ logging.getLogger("uvicorn.access").addFilter(QuietAccessLogFilter())
 app = FastAPI()
 
 PUBLIC_HTTP_PATHS = {
-    "/pair",
+    "/login",
     "/favicon.ico",
     "/api/health",
-    "/api/auth/status",
-    "/api/auth/pair",
+    "/api/account/login",
+    "/api/account/register",
     "/api/auth/bootstrap",
     "/api/runtime/shutdown",
 }
 
+ADMIN_ONLY_HTTP_PATHS = {
+    "/admin",
+    "/api/config",
+    "/api/config/token",
+    "/api/providers",
+    "/api/app-settings",
+    "/api/runtime/info",
+    "/api/check-update",
+    "/api/update-connectivity",
+    "/api/update-connectivity/probe",
+    "/api/update-backups",
+    "/api/update-from-github",
+    "/api/update-rollback",
+    "/static/api-settings.html",
+    "/static/app-settings.html",
+    "/static/admin.html",
+}
 
-def request_access_token(request: Request) -> str:
-    bearer = AUTH_MANAGER.bearer_token(request.headers.get("authorization", ""))
-    return bearer or request.cookies.get(SESSION_COOKIE, "")
+ADMIN_ONLY_HTTP_PREFIXES = (
+    "/api/admin/",
+    "/api/providers/",
+    "/api/app-settings/",
+)
+
+
+def request_remote_address(request: Request) -> str:
+    return str(request.client.host if request.client else "")
+
+
+def request_account_token(request: Request) -> str:
+    return str(request.cookies.get(ACCOUNT_SESSION_COOKIE, "") or "")
+
+
+def request_identity(request: Request) -> AccountIdentity:
+    identity = getattr(request.state, "account_identity", None)
+    if not isinstance(identity, AccountIdentity):
+        raise HTTPException(status_code=401, detail="请先登录")
+    return identity
+
+
+def require_admin(request: Request) -> AccountIdentity:
+    identity = request_identity(request)
+    if not identity.is_admin or not is_loopback_address(request_remote_address(request)):
+        raise HTTPException(status_code=403, detail="仅安装软件的本机管理员可以访问")
+    return identity
 
 
 @app.middleware("http")
-async def authentication_middleware(request: Request, call_next):
+async def account_authentication_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if request.method == "OPTIONS" or path in PUBLIC_HTTP_PATHS:
         return await call_next(request)
-    identity = AUTH_MANAGER.authenticate(request_access_token(request))
-    if identity:
-        request.state.auth_identity = identity
+    identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
+    if identity and identity.is_admin and not is_loopback_address(request_remote_address(request)):
+        identity = None
+    if not identity:
+        if path == "/" or (not path.startswith("/api/") and "text/html" in request.headers.get("accept", "")):
+            return RedirectResponse("/login", status_code=303)
+        return JSONResponse({"detail": "请先登录或注册账号"}, status_code=401)
+    request.state.account_identity = identity
+    if (
+        not identity.is_admin
+        and (path in ADMIN_ONLY_HTTP_PATHS or any(path.startswith(prefix) for prefix in ADMIN_ONLY_HTTP_PREFIXES))
+    ):
+        return JSONResponse({"detail": "普通账号无权查看或修改本机配置"}, status_code=403)
+    context_token = set_current_account(identity.account_id)
+    try:
         return await call_next(request)
-    if path == "/" or not path.startswith("/api/") and "text/html" in request.headers.get("accept", ""):
-        return RedirectResponse("/pair", status_code=307)
-    return JSONResponse({"detail": "设备尚未配对或会话已失效"}, status_code=401)
-
+    finally:
+        reset_current_account(context_token)
 
 app.add_middleware(
     CORSMiddleware,
@@ -164,52 +249,52 @@ app.add_middleware(
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-        self.user_connections: Dict[str, WebSocket] = {}
+        self.user_connections: Dict[tuple[str, str], WebSocket] = {}
         self.connection_clients: Dict[WebSocket, str] = {}
-        self.connection_devices: Dict[WebSocket, str] = {}
+        self.connection_accounts: Dict[WebSocket, str] = {}
 
-    async def connect(self, websocket: WebSocket, client_id: str = None, identity: AuthIdentity = None, accept: bool = True):
+    async def connect(self, websocket: WebSocket, account_id: str, client_id: str = None, accept: bool = True):
         if accept:
             await websocket.accept()
         self.active_connections.append(websocket)
         self.connection_clients[websocket] = client_id or f"anon-{id(websocket)}"
-        if identity:
-            self.connection_devices[websocket] = identity.device_id
+        self.connection_accounts[websocket] = account_id
         if client_id:
-            self.user_connections[client_id] = websocket
-        print(f"WS Connected. Total: {len(self.active_connections)}, Online: {self.online_count()}")
-        await self.broadcast_count()
+            self.user_connections[(account_id, client_id)] = websocket
+        print(f"WS Connected. Account: {account_id}, Online: {self.online_count(account_id)}")
+        await self.broadcast_count(account_id)
 
     async def disconnect(self, websocket: WebSocket, client_id: str = None):
+        account_id = self.connection_accounts.get(websocket, "")
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
         self.connection_clients.pop(websocket, None)
-        self.connection_devices.pop(websocket, None)
-        if client_id and self.user_connections.get(client_id) is websocket:
-            del self.user_connections[client_id]
-        print(f"WS Disconnected. Total: {len(self.active_connections)}, Online: {self.online_count()}")
-        await self.broadcast_count()
+        self.connection_accounts.pop(websocket, None)
+        key = (account_id, client_id or "")
+        if client_id and self.user_connections.get(key) is websocket:
+            del self.user_connections[key]
+        print(f"WS Disconnected. Account: {account_id}, Online: {self.online_count(account_id)}")
+        if account_id:
+            await self.broadcast_count(account_id)
 
-    async def disconnect_device(self, device_id: str):
-        targets = [ws for ws, current in self.connection_devices.items() if current == device_id]
-        for websocket in targets:
-            try:
-                await websocket.close(code=4403, reason="设备授权已撤销")
-            except Exception:
-                pass
-            await self.disconnect(websocket)
-
-    def online_count(self):
+    def online_count(self, account_id: str):
         visible_clients = {
             client_id for client_id in self.connection_clients.values()
             if client_id and not str(client_id).startswith("canvas_")
         }
-        return len(visible_clients)
+        return len({
+            self.connection_clients[connection]
+            for connection in self.active_connections
+            if self.connection_accounts.get(connection) == account_id
+            and self.connection_clients.get(connection) in visible_clients
+        })
 
-    async def broadcast_count(self):
-        count = self.online_count()
+    async def broadcast_count(self, account_id: str):
+        count = self.online_count(account_id)
         data = json.dumps({"type": "stats", "online_count": count})
         for connection in self.active_connections[:]:
+            if self.connection_accounts.get(connection) != account_id:
+                continue
             try:
                 await connection.send_text(data)
             except Exception as e:
@@ -228,8 +313,11 @@ class ConnectionManager:
         await self.broadcast_entity_changed("asset", "global", revision, updated_at=updated_at)
 
     async def broadcast_entity_changed(self, topic: str, entity_id: str, revision: int, actor_id: str = "", updated_at: int = 0):
+        account_id = current_account_id()
         data = json.dumps(entity_changed(topic, entity_id, revision, actor_id, updated_at).public(), ensure_ascii=False)
         for connection in self.active_connections[:]:
+            if self.connection_accounts.get(connection) != account_id:
+                continue
             try:
                 await connection.send_text(data)
             except Exception as e:
@@ -237,7 +325,7 @@ class ConnectionManager:
                 self.active_connections.remove(connection)
 
     async def send_personal_message(self, message: dict, client_id: str):
-        ws = self.user_connections.get(client_id)
+        ws = self.user_connections.get((current_account_id(), client_id))
         if ws:
             try:
                 await ws.send_text(json.dumps(message))
@@ -246,7 +334,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.143"
+APP_VERSION = "1.0.147"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -265,6 +353,8 @@ MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infini
 async def startup_event():
     global GLOBAL_LOOP
     GLOBAL_LOOP = asyncio.get_running_loop()
+    if DWPOSE_AUTO_DOWNLOAD_ENABLED:
+        DWPOSE_MODEL_MANAGER.start_background()
     # 程序资源在桌面包内按只读处理；静态资源版本号只在构建阶段写入暂存副本。
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
@@ -317,28 +407,21 @@ async def startup_event():
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
     await websocket.accept()
     connected = False
+    context_token = None
     try:
-        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-        try:
-            auth_message = json.loads(raw_auth)
-        except json.JSONDecodeError:
-            auth_message = {}
-        if auth_message.get("type") != "auth":
-            await websocket.send_text(json.dumps({"type": "auth.failed", "message": "首条消息必须完成鉴权"}))
-            await websocket.close(code=4401)
-            return
-        token = str(auth_message.get("token") or "").strip()
-        token = token or websocket.cookies.get(SESSION_COOKIE, "")
-        token = token or AUTH_MANAGER.bearer_token(websocket.headers.get("authorization", ""))
-        identity = AUTH_MANAGER.authenticate(token)
+        session_token = str(websocket.cookies.get(ACCOUNT_SESSION_COOKIE, "") or "")
+        identity = ACCOUNT_STORE.resolve_session(session_token)
+        remote_address = str(websocket.client.host if websocket.client else "")
+        if identity and identity.is_admin and not is_loopback_address(remote_address):
+            identity = None
         if not identity:
-            await websocket.send_text(json.dumps({"type": "auth.failed", "message": "设备尚未配对或授权已失效"}))
-            await websocket.close(code=4401)
+            await websocket.close(code=4401, reason="请先登录")
             return
-        client_id = str(auth_message.get("client_id") or client_id or "").strip()
-        await manager.connect(websocket, client_id, identity, accept=False)
+        context_token = set_current_account(identity.account_id)
+        client_id = str(client_id or "").strip()
+        await manager.connect(websocket, identity.account_id, client_id, accept=False)
         connected = True
-        await websocket.send_text(json.dumps({"type": "auth.ok", "device": identity.public()}))
+        await websocket.send_text(json.dumps({"type": "connection.ready", "account": identity.public()}))
         while True:
             data = await websocket.receive_text()
             if data == "ping" or data == '{"type":"ping"}':
@@ -346,12 +429,13 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
     except WebSocketDisconnect:
         if connected:
             await manager.disconnect(websocket, client_id)
-    except asyncio.TimeoutError:
-        await websocket.close(code=4401, reason="鉴权超时")
     except Exception as e:
         print(f"WS Error: {e}")
         if connected:
             await manager.disconnect(websocket, client_id)
+    finally:
+        if context_token is not None:
+            reset_current_account(context_token)
 
 # --- 配置区域 ---
 
@@ -361,18 +445,18 @@ STATIC_RUNNINGHUB_DIR = os.path.join(STATIC_DIR, "runninghub")
 STATIC_RUNNINGHUB_THUMBNAIL_DIR = os.path.join(STATIC_RUNNINGHUB_DIR, "thumbnails")
 STATIC_RUNNINGHUB_API_PROVIDERS_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "api_providers.json")
 STATIC_RUNNINGHUB_MODEL_REGISTRY_FILE = os.path.join(STATIC_RUNNINGHUB_DIR, "models_registry.json")
-OUTPUT_DIR = str(DATA_LAYOUT.exports)
-ASSETS_DIR = str(DATA_LAYOUT.media)
-OUTPUT_INPUT_DIR = str(DATA_LAYOUT.media_input)
-OUTPUT_OUTPUT_DIR = str(DATA_LAYOUT.media_generated)
-ASSET_LIBRARY_DIR = str(DATA_LAYOUT.media_library)
-LOCAL_UPLOAD_DIR = str(DATA_LAYOUT.media_uploads)
+OUTPUT_DIR = ScopedPath(lambda layout: layout.exports, ACCOUNT_STORAGE)
+ASSETS_DIR = ScopedPath(lambda layout: layout.media, ACCOUNT_STORAGE)
+OUTPUT_INPUT_DIR = ScopedPath(lambda layout: layout.media_input, ACCOUNT_STORAGE)
+OUTPUT_OUTPUT_DIR = ScopedPath(lambda layout: layout.media_generated, ACCOUNT_STORAGE)
+ASSET_LIBRARY_DIR = ScopedPath(lambda layout: layout.media_library, ACCOUNT_STORAGE)
+LOCAL_UPLOAD_DIR = ScopedPath(lambda layout: layout.media_uploads, ACCOUNT_STORAGE)
 HISTORY_FILE = ""
-API_ENV_FILE = str(DATA_LAYOUT.secret_env)
-DATA_DIR = str(APP_PATHS.data_root)
+API_ENV_FILE = str(ACCOUNT_STORAGE.admin_layout.secret_env)
+DATA_DIR = ScopedPath(lambda layout: layout.root, ACCOUNT_STORAGE)
 CONVERSATION_DIR = ""
 CANVAS_DIR = ""
-MEDIA_PREVIEW_DIR = str(DATA_LAYOUT.cache_previews)
+MEDIA_PREVIEW_DIR = ScopedPath(lambda layout: layout.cache_previews, ACCOUNT_STORAGE)
 ASSET_LIBRARY_PATH = ""
 PROMPT_LIBRARY_PATH = ""
 API_PROVIDERS_FILE = ""
@@ -382,6 +466,8 @@ ONLINE_IMAGE_TASKS_FILE = ""
 GLOBAL_CONFIG_FILE = ""
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
+DWPOSE_INPUT_MAX_BYTES = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_BYTES", str(25 * 1024 * 1024)))
+DWPOSE_INPUT_MAX_PIXELS = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_PIXELS", str(25_000_000)))
 LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 RUNNINGHUB_THUMBNAIL_EXTS = (".jpg",)
 BLENDER_BRIDGE = BlenderBridgeClient()
@@ -1538,7 +1624,7 @@ def normalize_provider(item):
 
 def load_api_providers():
     defaults = default_api_providers()
-    raw = DATABASE.load_providers()
+    raw = ADMIN_DATABASE.load_providers()
     if not raw:
         return merge_default_api_providers(defaults)
     try:
@@ -1553,11 +1639,11 @@ def load_api_providers():
         return defaults
 
 def prune_removed_provider_presets_once() -> Dict[str, Any]:
-    marker = DATABASE.get_setting(PROVIDER_PRESET_CLEANUP_SETTING, {})
+    marker = ADMIN_DATABASE.get_setting(PROVIDER_PRESET_CLEANUP_SETTING, {})
     value = marker.get("value") if isinstance(marker, dict) else {}
     if isinstance(value, dict) and value.get("done"):
         return {"removed": [], "skipped": True}
-    raw = DATABASE.load_providers()
+    raw = ADMIN_DATABASE.load_providers()
     rows = [item for item in raw if isinstance(item, dict)]
     removed = [
         str(item.get("id") or "").strip().lower()
@@ -1569,8 +1655,8 @@ def prune_removed_provider_presets_once() -> Dict[str, Any]:
         if str(item.get("id") or "").strip().lower() not in REMOVED_PROVIDER_PRESET_IDS
     ]
     if removed:
-        DATABASE.save_providers(kept)
-    DATABASE.save_setting(
+        ADMIN_DATABASE.save_providers(kept)
+    ADMIN_DATABASE.save_setting(
         PROVIDER_PRESET_CLEANUP_SETTING,
         {"done": True, "removed": removed, "completed_at": int(time.time() * 1000)},
         only_if_empty=True,
@@ -1579,7 +1665,7 @@ def prune_removed_provider_presets_once() -> Dict[str, Any]:
 
 def save_api_providers(providers):
     with GLOBAL_CONFIG_LOCK:
-        DATABASE.save_providers(providers)
+        ADMIN_DATABASE.save_providers(providers)
     publish_entity_changed("platform", "global")
 
 def public_provider(provider):
@@ -1619,6 +1705,40 @@ def public_provider(provider):
 
 def public_api_providers():
     return [public_provider(p) for p in load_api_providers()]
+
+
+RUNTIME_PROVIDER_FIELDS = (
+    "id",
+    "name",
+    "protocol",
+    "image_request_mode",
+    "enabled",
+    "primary",
+    "image_models",
+    "chat_models",
+    "video_models",
+    "model_protocols",
+    "ms_loras",
+    "ms_defaults_version",
+    "rh_apps",
+    "rh_workflows",
+)
+
+
+def runtime_api_provider(provider: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        field: provider.get(field)
+        for field in RUNTIME_PROVIDER_FIELDS
+        if field in provider
+    }
+
+
+def runtime_api_providers() -> List[Dict[str, Any]]:
+    return [
+        runtime_api_provider(provider)
+        for provider in load_api_providers()
+        if provider.get("enabled", True)
+    ]
 
 def get_primary_provider_id(providers=None):
     """返回当前首选 provider 的 id；优先 primary=True 的，否则取第一个非 modelscope 的，再次取第一个。"""
@@ -1714,12 +1834,6 @@ os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
 # static 和内置 workflows 属于只读程序资源，不在运行时创建或改写。
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/output", StaticFiles(directory=OUTPUT_DIR), name="output")
-app.mount("/assets/input", StaticFiles(directory=OUTPUT_INPUT_DIR), name="assets-input")
-app.mount("/assets/output", StaticFiles(directory=OUTPUT_OUTPUT_DIR), name="assets-output")
-app.mount("/assets/library", StaticFiles(directory=ASSET_LIBRARY_DIR), name="assets-library")
-app.mount("/assets/uploads", StaticFiles(directory=LOCAL_UPLOAD_DIR), name="assets-uploads")
-app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 
 # --- Pydantic 模型 ---
 
@@ -2054,12 +2168,6 @@ def health_check():
     }
 
 
-class PairDeviceRequest(BaseModel):
-    code: str
-    name: str = ""
-    client_type: str = "browser"
-
-
 PREFERENCE_KEYS = {
     "theme",
     "language",
@@ -2072,6 +2180,18 @@ PREFERENCE_KEYS = {
     "default_chat_model",
     "ecommerce_settings",
 }
+USER_PREFERENCE_KEYS = {"theme", "language"}
+
+
+class AccountCredentialsRequest(BaseModel):
+    account: str
+    password: str
+
+
+class AdminAccountUpdateRequest(BaseModel):
+    account: Optional[str] = None
+    password: Optional[str] = None
+    disabled: Optional[bool] = None
 
 
 class PreferencesUpdateRequest(BaseModel):
@@ -2088,42 +2208,26 @@ class AppSettingsUpdateRequest(BaseModel):
 
 @app.get("/pair")
 def pair_page():
-    return FileResponse(os.path.join(STATIC_DIR, "pair.html"), media_type="text/html")
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/devices")
 def devices_page():
-    return FileResponse(os.path.join(STATIC_DIR, "devices.html"), media_type="text/html")
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/api/auth/status")
 def auth_status(request: Request):
-    identity = AUTH_MANAGER.authenticate(request_access_token(request))
-    return {"authenticated": bool(identity), "device": identity.public() if identity else None}
+    identity = request_identity(request)
+    return {"authenticated": True, "access_mode": "account", "account": identity.public()}
 
 
-@app.get("/api/auth/bootstrap")
-def desktop_bootstrap(token: str = ""):
-    try:
-        session_token, _identity = AUTH_MANAGER.consume_desktop_token(token)
-    except PermissionError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    response = RedirectResponse("/", status_code=303)
-    response.set_cookie(SESSION_COOKIE, session_token, httponly=True, samesite="strict", path="/")
-    return response
-
-
-@app.post("/api/auth/pair")
-def pair_device(payload: PairDeviceRequest):
-    try:
-        access_token, identity = AUTH_MANAGER.pair(payload.code, payload.name, payload.client_type)
-    except PermissionError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    response = JSONResponse({"ok": True, "access_token": access_token, "device": identity.public()})
+def account_session_response(identity: AccountIdentity, token: str, status_code: int = 200):
+    response = JSONResponse({"ok": True, "account": identity.public()}, status_code=status_code)
     response.set_cookie(
-        SESSION_COOKIE,
-        access_token,
-        max_age=365 * 24 * 60 * 60,
+        ACCOUNT_SESSION_COOKIE,
+        token,
+        max_age=30 * 24 * 60 * 60 if not identity.is_admin else 12 * 60 * 60,
         httponly=True,
         samesite="strict",
         path="/",
@@ -2131,35 +2235,185 @@ def pair_device(payload: PairDeviceRequest):
     return response
 
 
-@app.post("/api/auth/pair-code")
-def create_pair_code():
-    code, expires_at = AUTH_MANAGER.create_pair_code()
-    return {"code": code, "expires_at": expires_at, "ttl_seconds": 300}
+@app.post("/api/account/register")
+def register_account(payload: AccountCredentialsRequest, request: Request):
+    remote_address = request_remote_address(request)
+    key = f"register:{remote_address}:{account_lookup_key(payload.account)}"
+    ACCOUNT_STORE.rate_limiter.check(key)
+    try:
+        identity = ACCOUNT_STORE.register(payload.account, payload.password)
+        token = ACCOUNT_STORE.create_session(identity)
+    except ValueError as exc:
+        ACCOUNT_STORE.rate_limiter.fail(key)
+        detail = str(exc)
+        raise HTTPException(status_code=409 if "已存在" in detail else 400, detail=detail) from exc
+    ACCOUNT_STORE.rate_limiter.success(key)
+    return account_session_response(identity, token, status_code=201)
 
 
-@app.get("/api/auth/devices")
-def paired_devices():
-    return {"devices": AUTH_MANAGER.list_devices()}
+@app.post("/api/account/login")
+def login_account(payload: AccountCredentialsRequest, request: Request):
+    remote_address = request_remote_address(request)
+    admin_login = is_admin_account(payload.account)
+    key = f"login:{remote_address}:{account_lookup_key(payload.account)}"
+    ACCOUNT_STORE.rate_limiter.check(key)
+    try:
+        if admin_login:
+            token = ACCOUNT_STORE.create_admin_session(payload.account, payload.password, remote_address)
+            identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
+        else:
+            identity = ACCOUNT_STORE.authenticate(payload.account, payload.password)
+            if not identity:
+                raise PermissionError("账号或密码错误")
+            token = ACCOUNT_STORE.create_session(identity)
+    except (PermissionError, ValueError) as exc:
+        ACCOUNT_STORE.rate_limiter.fail(key)
+        raise HTTPException(status_code=403 if admin_login else 401, detail=str(exc)) from exc
+    ACCOUNT_STORE.rate_limiter.success(key)
+    return account_session_response(identity, token)
 
 
-@app.delete("/api/auth/devices/{device_id}")
-async def revoke_paired_device(device_id: str):
-    if not AUTH_MANAGER.revoke(device_id):
-        raise HTTPException(status_code=404, detail="设备不存在或已撤销")
-    await manager.disconnect_device(device_id)
-    return {"ok": True}
+@app.get("/api/account/me")
+def current_account(request: Request):
+    return {"account": request_identity(request).public()}
+
+
+@app.post("/api/account/logout")
+def logout_account(request: Request):
+    ACCOUNT_STORE.logout(request_account_token(request))
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(ACCOUNT_SESSION_COOKIE, path="/")
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+def admin_account_payload(account_id: str) -> Dict[str, Any]:
+    account = next(
+        (item for item in ACCOUNT_STORE.list_accounts(include_passwords=True) if item["id"] == account_id),
+        None,
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    account["resources_url"] = f"/admin?account_id={urllib.parse.quote(account_id)}"
+    return account
+
+
+@app.get("/api/admin/accounts")
+def admin_list_accounts(request: Request):
+    require_admin(request)
+    accounts = ACCOUNT_STORE.list_accounts(include_passwords=True)
+    for account in accounts:
+        account["resources_url"] = f"/admin?account_id={urllib.parse.quote(str(account['id']))}"
+    return {"accounts": accounts}
+
+
+@app.get("/api/admin/dwpose/status")
+def admin_dwpose_status(request: Request):
+    require_admin(request)
+    return DWPOSE_MODEL_MANAGER.status()
+
+
+@app.post("/api/admin/dwpose/retry", status_code=202)
+def admin_dwpose_retry(request: Request):
+    require_admin(request)
+    started = DWPOSE_MODEL_MANAGER.start_background()
+    return {"started": started, "status": DWPOSE_MODEL_MANAGER.status()}
+
+
+@app.put("/api/admin/accounts/{account_id}")
+def admin_update_account(account_id: str, payload: AdminAccountUpdateRequest, request: Request):
+    require_admin(request)
+    try:
+        ACCOUNT_STORE.update_account(
+            account_id,
+            account=payload.account,
+            password=payload.password,
+            disabled=payload.disabled,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409 if "已存在" in str(exc) else 400, detail=str(exc)) from exc
+    return {"account": admin_account_payload(account_id)}
+
+
+@app.get("/api/admin/accounts/{account_id}/resources")
+def admin_account_resources(
+    account_id: str,
+    request: Request,
+    scope: str = "",
+    limit: int = 300,
+):
+    require_admin(request)
+    try:
+        return ACCOUNT_RESOURCE_SERVICE.list_resources(account_id, scope=scope, limit=limit)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from exc
+
+
+@app.get("/api/admin/accounts/{account_id}/resource-file/{scope}/{relative_path:path}")
+def admin_account_resource_file(
+    account_id: str,
+    scope: str,
+    relative_path: str,
+    request: Request,
+):
+    require_admin(request)
+    try:
+        path = ACCOUNT_RESOURCE_SERVICE.resolve_file(account_id, scope, relative_path)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+
+
+@app.get("/api/auth/bootstrap")
+def desktop_bootstrap(token: str = ""):
+    try:
+        AUTH_MANAGER.consume_desktop_token(token)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
+    session_token = ACCOUNT_STORE.create_session(identity, ttl_seconds=12 * 60 * 60)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        ACCOUNT_SESSION_COOKIE,
+        session_token,
+        max_age=12 * 60 * 60,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+    return response
 
 
 @app.get("/api/preferences")
-def get_preferences():
+def get_preferences(request: Request):
+    identity = request_identity(request)
     record = DATABASE.get_setting("global_preferences", {})
     values = record.get("value") if isinstance(record.get("value"), dict) else {}
-    return {"values": values, "revision": record["revision"], "updated_at": record["updated_at"]}
+    allowed = PREFERENCE_KEYS if identity.is_admin else USER_PREFERENCE_KEYS
+    if not identity.is_admin:
+        values = {key: value for key, value in values.items() if key in USER_PREFERENCE_KEYS}
+    return {
+        "values": values,
+        "allowed_keys": sorted(allowed),
+        "revision": record["revision"],
+        "updated_at": record["updated_at"],
+    }
 
 
 @app.put("/api/preferences")
-def save_preferences(payload: PreferencesUpdateRequest):
-    clean = {key: value for key, value in payload.values.items() if key in PREFERENCE_KEYS and value not in (None, "")}
+def save_preferences(payload: PreferencesUpdateRequest, request: Request):
+    identity = request_identity(request)
+    allowed = PREFERENCE_KEYS if identity.is_admin else USER_PREFERENCE_KEYS
+    denied = sorted(set(payload.values) - allowed)
+    if denied:
+        raise HTTPException(status_code=403, detail="普通账号只能修改主题和显示语言")
+    clean = {key: value for key, value in payload.values.items() if key in allowed and value not in (None, "")}
     before = DATABASE.get_setting("global_preferences", {})
     try:
         record = DATABASE.save_setting(
@@ -3092,6 +3346,24 @@ CANVAS_TASK_MEMORY_LIMIT = 200
 ONLINE_IMAGE_TASK_MEMORY_LIMIT = 500
 ECOMMERCE_TASK_MEMORY_LIMIT = 1000
 ECOMMERCE_VISION_CACHE_LIMIT = 512
+ONLINE_TASKS_LOADED_ACCOUNTS: set[str] = set()
+ECOMMERCE_TASKS_LOADED_ACCOUNTS: set[str] = set()
+ONLINE_TASK_LOAD_LOCK = Lock()
+ECOMMERCE_TASK_LOAD_LOCK = Lock()
+
+
+def task_belongs_to_current_account(task: Dict[str, Any]) -> bool:
+    owner = str(task.get("_account_id") or "admin")
+    return owner == current_account_id()
+
+
+def current_account_tasks(tasks: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [task for task in tasks.values() if task_belongs_to_current_account(task)]
+
+
+def current_account_task(tasks: Dict[str, Dict[str, Any]], task_id: str) -> Dict[str, Any]:
+    task = tasks.get(task_id) or {}
+    return task if task_belongs_to_current_account(task) else {}
 
 
 def prune_task_map_locked(
@@ -3116,6 +3388,22 @@ def prune_task_map_locked(
         task_id = str(task.get("id") or task.get("task_id") or "")
         if task_id and tasks.pop(task_id, None) is not None:
             removed.append(task_id)
+    return removed
+
+
+def prune_current_account_tasks_locked(
+    tasks: Dict[str, Dict[str, Any]],
+    active_statuses: set[str],
+    limit: int,
+) -> List[str]:
+    scoped = {
+        str(task.get("id") or task.get("task_id") or ""): task
+        for task in current_account_tasks(tasks)
+        if str(task.get("id") or task.get("task_id") or "")
+    }
+    removed = prune_task_map_locked(scoped, active_statuses, limit)
+    for task_id in removed:
+        tasks.pop(task_id, None)
     return removed
 
 class CanvasVideoRequest(BaseModel):
@@ -10402,6 +10690,42 @@ async def build_chat_text_reply(payload, conversation):
 
 # --- 路由接口 ---
 
+@app.get("/login")
+async def login_page(request: Request):
+    identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
+    if identity and (not identity.is_admin or is_loopback_address(request_remote_address(request))):
+        return RedirectResponse("/", status_code=303)
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"), media_type="text/html")
+
+
+@app.get("/admin")
+async def admin_page(request: Request):
+    require_admin(request)
+    return FileResponse(os.path.join(STATIC_DIR, "admin.html"), media_type="text/html")
+
+
+def account_file_response(root: Path, relative_path: str):
+    resolved_root = Path(root).resolve()
+    candidate = (resolved_root / str(relative_path or "").replace("\\", "/")).resolve()
+    try:
+        candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="文件路径越界") from exc
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(str(candidate), media_type=content_type_for_path(str(candidate)))
+
+
+@app.get("/output/{relative_path:path}")
+def account_output_file(relative_path: str):
+    return account_file_response(DATA_LAYOUT.exports, relative_path)
+
+
+@app.get("/assets/{relative_path:path}")
+def account_asset_file(relative_path: str):
+    return account_file_response(DATA_LAYOUT.media, relative_path)
+
+
 @app.get("/")
 async def index():
     return static_html_response("index.html")
@@ -10539,6 +10863,52 @@ async def detect_canvas_grid(file: UploadFile = File(...)):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"无法识别宫格图片：{exc}") from exc
     return result.as_dict()
+
+
+@app.post("/api/dwpose/detect")
+async def detect_dwpose(request: Request, file: UploadFile = File(...)):
+    request_identity(request)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="DWPose 输入图片为空")
+    if len(content) > DWPOSE_INPUT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="DWPose 输入图片不能超过 25MB")
+    try:
+        with Image.open(BytesIO(content)) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+            image.load()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="DWPose 输入图片无法读取") from exc
+    width, height = image.size
+    if width < 1 or height < 1 or width * height > DWPOSE_INPUT_MAX_PIXELS:
+        raise HTTPException(status_code=413, detail="DWPose 输入图片像素不能超过 2500 万")
+    status = DWPOSE_MODEL_MANAGER.status()
+    if not status.get("ready") and not await asyncio.to_thread(DWPOSE_MODEL_MANAGER.verify_installed):
+        if DWPOSE_AUTO_DOWNLOAD_ENABLED:
+            DWPOSE_MODEL_MANAGER.start_background()
+        detail = str(DWPOSE_MODEL_MANAGER.status().get("message") or "DWPose 模型尚未下载完成")
+        raise HTTPException(status_code=503, detail=detail)
+    try:
+        result = await asyncio.to_thread(render_dwpose_image, image)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        from canvas_core.dwpose_inference import DWPoseUnavailableError
+
+        if isinstance(exc, DWPoseUnavailableError):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        print(f"DWPose 本地推理失败: {exc}")
+        raise HTTPException(status_code=500, detail="DWPose 本地推理失败，请重试") from exc
+    output = BytesIO()
+    Image.fromarray(result.image_rgb, mode="RGB").save(output, format="PNG", compress_level=4)
+    return Response(
+        output.getvalue(),
+        media_type="image/png",
+        headers={
+            "X-DWPose-People": str(result.people),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 class BlenderConnectRequest(BaseModel):
@@ -11912,6 +12282,21 @@ async def ai_config():
         "has_ms_key": bool(modelscope_api_key()),
     }
 
+
+@app.get("/api/runtime/config")
+async def runtime_ai_config():
+    """普通创作页面使用的无密钥、无地址模型目录。"""
+    preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
+    return {
+        "chat_model": preferred_chat_model,
+        "image_model": IMAGE_MODEL,
+        "chat_models": CHAT_MODELS,
+        "image_models": IMAGE_MODELS,
+        "video_models": VIDEO_MODELS,
+        "api_providers": runtime_api_providers(),
+        "ms_chat_models": MODELSCOPE_CHAT_MODELS,
+    }
+
 @app.get("/api/models")
 async def ai_models():
     return {"chat_models": CHAT_MODELS, "image_models": IMAGE_MODELS, "video_models": VIDEO_MODELS}
@@ -11919,6 +12304,12 @@ async def ai_models():
 @app.get("/api/providers")
 async def api_providers():
     return {"providers": public_api_providers()}
+
+
+@app.get("/api/runtime/providers")
+async def runtime_providers():
+    """返回创作所需的模型目录，不包含 API 地址、密钥或配置状态。"""
+    return {"providers": runtime_api_providers()}
 
 @app.put("/api/providers")
 async def save_providers(payload: List[ApiProviderPayload]):
@@ -12833,7 +13224,7 @@ def online_image_request_snapshot(payload: OnlineImageRequest) -> Dict[str, Any]
 
 def write_online_image_tasks_locked(task: Optional[Dict[str, Any]] = None):
     retained_statuses = {*ONLINE_IMAGE_ACTIVE_STATUSES, "jimeng_pending", "recovery_pending"}
-    removed_ids = prune_task_map_locked(
+    removed_ids = prune_current_account_tasks_locked(
         ONLINE_IMAGE_TASKS,
         retained_statuses,
         ONLINE_IMAGE_TASK_MEMORY_LIMIT,
@@ -12844,7 +13235,7 @@ def write_online_image_tasks_locked(task: Optional[Dict[str, Any]] = None):
             DATABASE.delete_task("online_image", task_id)
     else:
         tasks = sorted(
-            ONLINE_IMAGE_TASKS.values(),
+            current_account_tasks(ONLINE_IMAGE_TASKS),
             key=lambda item: float(item.get("created_at") or 0),
             reverse=True,
         )[:ONLINE_IMAGE_TASK_MEMORY_LIMIT]
@@ -12852,6 +13243,7 @@ def write_online_image_tasks_locked(task: Optional[Dict[str, Any]] = None):
     publish_entity_changed("task", "online_image")
 
 def load_online_image_tasks_from_disk():
+    account_id = current_account_id()
     items = DATABASE.load_tasks("online_image")
     if not isinstance(items, list):
         return
@@ -12867,6 +13259,7 @@ def load_online_image_tasks_from_disk():
         task = dict(item)
         task["id"] = task_id
         task["task_id"] = task_id
+        task["_account_id"] = account_id
         if task.get("status") in ONLINE_IMAGE_ACTIVE_STATUSES:
             recoverable_id = next((str(task.get(key) or "").strip() for key in (
                 "upstream_task_id", "submit_id", "taskId", "video_id", "asset_id"
@@ -12883,14 +13276,33 @@ def load_online_image_tasks_from_disk():
             changed = True
         restored[task_id] = task
     with ONLINE_IMAGE_TASK_LOCK:
-        ONLINE_IMAGE_TASKS.clear()
+        for existing_id, existing in list(ONLINE_IMAGE_TASKS.items()):
+            if str(existing.get("_account_id") or "admin") == account_id:
+                ONLINE_IMAGE_TASKS.pop(existing_id, None)
         ONLINE_IMAGE_TASKS.update(restored)
+        ONLINE_TASKS_LOADED_ACCOUNTS.add(account_id)
         if changed:
             write_online_image_tasks_locked()
 
+
+def ensure_online_image_tasks_loaded() -> None:
+    account_id = current_account_id()
+    if account_id in ONLINE_TASKS_LOADED_ACCOUNTS:
+        return
+    with ONLINE_TASK_LOAD_LOCK:
+        if account_id not in ONLINE_TASKS_LOADED_ACCOUNTS:
+            load_online_image_tasks_from_disk()
+
+
+def ensure_online_image_task_loaded(task_id: str) -> None:
+    with ONLINE_IMAGE_TASK_LOCK:
+        if current_account_task(ONLINE_IMAGE_TASKS, task_id):
+            return
+    ensure_online_image_tasks_loaded()
+
 def update_online_image_task(task_id: str, changes: Dict[str, Any]):
     with ONLINE_IMAGE_TASK_LOCK:
-        task = ONLINE_IMAGE_TASKS.get(task_id)
+        task = current_account_task(ONLINE_IMAGE_TASKS, task_id)
         if not task:
             return
         task.update(changes)
@@ -12899,6 +13311,7 @@ def update_online_image_task(task_id: str, changes: Dict[str, Any]):
 
 def public_online_image_task(task: Dict[str, Any]) -> Dict[str, Any]:
     data = dict(task or {})
+    data.pop("_account_id", None)
     task_id = str(data.get("id") or data.get("task_id") or "")
     data["id"] = task_id
     data["task_id"] = task_id
@@ -12938,6 +13351,7 @@ async def run_online_image_task(task_id: str, payload: OnlineImageRequest):
 
 @app.post("/api/online-image-tasks")
 async def create_online_image_task(payload: OnlineImageRequest):
+    ensure_online_image_tasks_loaded()
     task_id = f"online_img_{uuid.uuid4().hex}"
     snapshot = online_image_request_snapshot(payload)
     now = time.time()
@@ -12953,6 +13367,7 @@ async def create_online_image_task(payload: OnlineImageRequest):
         "queue_info": {},
         "submit_id": "",
         "message": "",
+        "_account_id": current_account_id(),
         **snapshot,
         "request": snapshot,
     }
@@ -12964,10 +13379,11 @@ async def create_online_image_task(payload: OnlineImageRequest):
 
 @app.get("/api/online-image-tasks")
 async def list_online_image_tasks(limit: int = 50):
+    ensure_online_image_tasks_loaded()
     safe_limit = max(1, min(200, int(limit or 50)))
     with ONLINE_IMAGE_TASK_LOCK:
         tasks = sorted(
-            (public_online_image_task(task) for task in ONLINE_IMAGE_TASKS.values()),
+            (public_online_image_task(task) for task in current_account_tasks(ONLINE_IMAGE_TASKS)),
             key=lambda item: float(item.get("created_at") or 0),
             reverse=True,
         )[:safe_limit]
@@ -12975,8 +13391,9 @@ async def list_online_image_tasks(limit: int = 50):
 
 @app.get("/api/online-image-tasks/{task_id}")
 async def get_online_image_task(task_id: str):
+    ensure_online_image_task_loaded(task_id)
     with ONLINE_IMAGE_TASK_LOCK:
-        task = public_online_image_task(ONLINE_IMAGE_TASKS.get(task_id) or {})
+        task = public_online_image_task(current_account_task(ONLINE_IMAGE_TASKS, task_id))
     if not task.get("id"):
         raise HTTPException(status_code=404, detail="在线生图任务不存在，可能服务已重启或任务已过期")
     return task
@@ -13014,6 +13431,7 @@ def public_ecommerce_route(route: Dict[str, Any]) -> Dict[str, Any]:
 
 def public_ecommerce_task(task: Dict[str, Any]) -> Dict[str, Any]:
     data = dict(task or {})
+    data.pop("_account_id", None)
     task_id = str(data.get("id") or data.get("task_id") or "")
     data["id"] = task_id
     data["task_id"] = task_id
@@ -13023,10 +13441,11 @@ def write_ecommerce_task_locked(task: Dict[str, Any]):
     if hasattr(DATABASE, "upsert_task"):
         DATABASE.upsert_task("ecommerce", task)
     else:
-        DATABASE.save_tasks("ecommerce", ECOMMERCE_TASKS.values())
+        DATABASE.save_tasks("ecommerce", current_account_tasks(ECOMMERCE_TASKS))
     publish_entity_changed("task", "ecommerce")
 
 def load_ecommerce_tasks_from_disk():
+    account_id = current_account_id()
     items = DATABASE.load_tasks("ecommerce")
     if not isinstance(items, list):
         return
@@ -13042,6 +13461,7 @@ def load_ecommerce_tasks_from_disk():
         task = dict(item)
         task["id"] = task_id
         task["task_id"] = task_id
+        task["_account_id"] = account_id
         if task.get("status") in ECOMMERCE_ACTIVE_STATUSES:
             task.update({
                 "status": "interrupted",
@@ -13051,9 +13471,12 @@ def load_ecommerce_tasks_from_disk():
             changed = True
         restored[task_id] = task
     with ECOMMERCE_TASK_LOCK:
-        ECOMMERCE_TASKS.clear()
+        for existing_id, existing in list(ECOMMERCE_TASKS.items()):
+            if str(existing.get("_account_id") or "admin") == account_id:
+                ECOMMERCE_TASKS.pop(existing_id, None)
         ECOMMERCE_TASKS.update(restored)
-        removed_ids = prune_task_map_locked(
+        ECOMMERCE_TASKS_LOADED_ACCOUNTS.add(account_id)
+        removed_ids = prune_current_account_tasks_locked(
             ECOMMERCE_TASKS,
             ECOMMERCE_ACTIVE_STATUSES,
             ECOMMERCE_TASK_MEMORY_LIMIT,
@@ -13067,12 +13490,28 @@ def load_ecommerce_tasks_from_disk():
                     for task_id in removed_ids:
                         DATABASE.delete_task("ecommerce", task_id)
             else:
-                DATABASE.save_tasks("ecommerce", ECOMMERCE_TASKS.values())
+                DATABASE.save_tasks("ecommerce", current_account_tasks(ECOMMERCE_TASKS))
             publish_entity_changed("task", "ecommerce")
+
+
+def ensure_ecommerce_tasks_loaded() -> None:
+    account_id = current_account_id()
+    if account_id in ECOMMERCE_TASKS_LOADED_ACCOUNTS:
+        return
+    with ECOMMERCE_TASK_LOAD_LOCK:
+        if account_id not in ECOMMERCE_TASKS_LOADED_ACCOUNTS:
+            load_ecommerce_tasks_from_disk()
+
+
+def ensure_ecommerce_task_loaded(task_id: str) -> None:
+    with ECOMMERCE_TASK_LOCK:
+        if current_account_task(ECOMMERCE_TASKS, task_id):
+            return
+    ensure_ecommerce_tasks_loaded()
 
 def update_ecommerce_task(task_id: str, changes: Dict[str, Any]):
     with ECOMMERCE_TASK_LOCK:
-        task = ECOMMERCE_TASKS.get(task_id)
+        task = current_account_task(ECOMMERCE_TASKS, task_id)
         if not task:
             return
         task.update(changes)
@@ -13388,8 +13827,9 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         candidates = candidates[:1]
     parent_task_id = str(payload.parent_task_id or "").strip()
     if parent_task_id:
+        ensure_ecommerce_tasks_loaded()
         with ECOMMERCE_TASK_LOCK:
-            parent = dict(ECOMMERCE_TASKS.get(parent_task_id) or {})
+            parent = dict(current_account_task(ECOMMERCE_TASKS, parent_task_id))
         if not parent:
             raise HTTPException(status_code=400, detail="父任务不存在，无法创建新版本")
         if parent.get("operation") != operation:
@@ -13694,6 +14134,7 @@ async def get_ecommerce_capabilities():
 
 @app.post("/api/ecommerce/tasks")
 async def create_ecommerce_task(payload: EcommerceTaskRequest):
+    ensure_ecommerce_tasks_loaded()
     snapshot = prepare_ecommerce_request(payload)
     task_id = f"ecommerce_{uuid.uuid4().hex}"
     now = time.time()
@@ -13707,13 +14148,14 @@ async def create_ecommerce_task(payload: EcommerceTaskRequest):
         "result": None,
         "error": "",
         "approval": {"status": "pending", "output_index": None, "checks": {}, "note": ""},
+        "_account_id": current_account_id(),
         **snapshot,
         "request": snapshot,
     }
     with ECOMMERCE_TASK_LOCK:
         ECOMMERCE_TASKS[task_id] = task
         write_ecommerce_task_locked(task)
-        removed_ids = prune_task_map_locked(
+        removed_ids = prune_current_account_tasks_locked(
             ECOMMERCE_TASKS,
             ECOMMERCE_ACTIVE_STATUSES,
             ECOMMERCE_TASK_MEMORY_LIMIT,
@@ -13722,7 +14164,7 @@ async def create_ecommerce_task(payload: EcommerceTaskRequest):
             for removed_id in removed_ids:
                 DATABASE.delete_task("ecommerce", removed_id)
         elif removed_ids:
-            DATABASE.save_tasks("ecommerce", ECOMMERCE_TASKS.values())
+            DATABASE.save_tasks("ecommerce", current_account_tasks(ECOMMERCE_TASKS))
         if hasattr(DATABASE, "prune_tasks"):
             DATABASE.prune_tasks("ecommerce", ECOMMERCE_TASK_MEMORY_LIMIT)
     asyncio.create_task(run_ecommerce_task(task_id, snapshot))
@@ -13730,6 +14172,7 @@ async def create_ecommerce_task(payload: EcommerceTaskRequest):
 
 @app.get("/api/ecommerce/tasks")
 async def list_ecommerce_tasks(limit: int = 50, operation: str = ""):
+    ensure_ecommerce_tasks_loaded()
     safe_limit = max(1, min(2000, int(limit or 50)))
     operation = str(operation or "").strip().lower()
     if operation:
@@ -13741,7 +14184,7 @@ async def list_ecommerce_tasks(limit: int = 50, operation: str = ""):
         tasks = sorted(
             (
                 public_ecommerce_task(task)
-                for task in ECOMMERCE_TASKS.values()
+                for task in current_account_tasks(ECOMMERCE_TASKS)
                 if not operation or task.get("operation") == operation
             ),
             key=lambda item: float(item.get("created_at") or 0),
@@ -13752,11 +14195,15 @@ async def list_ecommerce_tasks(limit: int = 50, operation: str = ""):
 @app.post("/api/ecommerce/tasks/status")
 async def ecommerce_task_status(payload: EcommerceTaskStatusRequest):
     ids = list(dict.fromkeys(str(item or "").strip() for item in payload.ids if str(item or "").strip()))[:2000]
+    with ECOMMERCE_TASK_LOCK:
+        has_loaded_task = any(current_account_task(ECOMMERCE_TASKS, task_id) for task_id in ids)
+    if not has_loaded_task:
+        ensure_ecommerce_tasks_loaded()
     tasks = []
     missing = []
     with ECOMMERCE_TASK_LOCK:
         for task_id in ids:
-            task = ECOMMERCE_TASKS.get(task_id)
+            task = current_account_task(ECOMMERCE_TASKS, task_id)
             if not task:
                 missing.append(task_id)
                 continue
@@ -13774,19 +14221,21 @@ async def ecommerce_task_status(payload: EcommerceTaskStatusRequest):
 
 @app.get("/api/ecommerce/tasks/{task_id}")
 async def get_ecommerce_task(task_id: str):
+    ensure_ecommerce_task_loaded(task_id)
     with ECOMMERCE_TASK_LOCK:
-        task = public_ecommerce_task(ECOMMERCE_TASKS.get(task_id) or {})
+        task = public_ecommerce_task(current_account_task(ECOMMERCE_TASKS, task_id))
     if not task.get("id"):
         raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
     return task
 
 @app.delete("/api/ecommerce/tasks/{task_id}")
 async def delete_ecommerce_task(task_id: str):
+    ensure_ecommerce_task_loaded(task_id)
     task_id = str(task_id or "").strip()
     if not task_id:
         raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
     with ECOMMERCE_TASK_LOCK:
-        task = ECOMMERCE_TASKS.get(task_id)
+        task = current_account_task(ECOMMERCE_TASKS, task_id)
         if not task:
             raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
         if task.get("status") in ECOMMERCE_ACTIVE_STATUSES:
@@ -13795,14 +14244,15 @@ async def delete_ecommerce_task(task_id: str):
         if hasattr(DATABASE, "delete_task"):
             DATABASE.delete_task("ecommerce", task_id)
         else:
-            DATABASE.save_tasks("ecommerce", ECOMMERCE_TASKS.values())
+            DATABASE.save_tasks("ecommerce", current_account_tasks(ECOMMERCE_TASKS))
     publish_entity_changed("task", "ecommerce")
     return {"task_id": task_id, "deleted": True}
 
 @app.post("/api/ecommerce/tasks/{task_id}/approve")
 async def approve_ecommerce_task(task_id: str, payload: EcommerceApprovalRequest):
+    ensure_ecommerce_task_loaded(task_id)
     with ECOMMERCE_TASK_LOCK:
-        task = dict(ECOMMERCE_TASKS.get(task_id) or {})
+        task = dict(current_account_task(ECOMMERCE_TASKS, task_id))
     if not task:
         raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
     if task.get("status") != "succeeded" or not isinstance(task.get("result"), dict):
@@ -13829,8 +14279,9 @@ async def approve_ecommerce_task(task_id: str, payload: EcommerceApprovalRequest
 
 @app.post("/api/ecommerce/tasks/{task_id}/export")
 async def export_ecommerce_task(task_id: str):
+    ensure_ecommerce_task_loaded(task_id)
     with ECOMMERCE_TASK_LOCK:
-        task = dict(ECOMMERCE_TASKS.get(task_id) or {})
+        task = dict(current_account_task(ECOMMERCE_TASKS, task_id))
     if not task:
         raise HTTPException(status_code=404, detail="电商任务不存在或已过期")
     approval = dict(task.get("approval") or {})
@@ -13973,7 +14424,7 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
             })
     finally:
         with CANVAS_TASK_LOCK:
-            prune_task_map_locked(
+            prune_current_account_tasks_locked(
                 CANVAS_TASKS,
                 {"queued", "running", "jimeng_pending", "recovery_pending"},
                 CANVAS_TASK_MEMORY_LIMIT,
@@ -13993,8 +14444,9 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
             "error": "",
             "provider_id": payload.provider_id,
             "model": payload.model,
+            "_account_id": current_account_id(),
         }
-        prune_task_map_locked(
+        prune_current_account_tasks_locked(
             CANVAS_TASKS,
             {"queued", "running", "jimeng_pending", "recovery_pending"},
             CANVAS_TASK_MEMORY_LIMIT,
@@ -14005,9 +14457,10 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
 @app.get("/api/canvas-image-tasks/{task_id}")
 async def get_canvas_image_task(task_id: str):
     with CANVAS_TASK_LOCK:
-        task = dict(CANVAS_TASKS.get(task_id) or {})
+        task = dict(current_account_task(CANVAS_TASKS, task_id))
     if not task:
         raise HTTPException(status_code=404, detail="画布任务不存在，可能服务已重启或任务已过期")
+    task.pop("_account_id", None)
     return task
 
 
@@ -16804,7 +17257,7 @@ def online_history_task_meta_index():
     by_timestamp = {}
     by_image = {}
     with ONLINE_IMAGE_TASK_LOCK:
-        tasks = list(ONLINE_IMAGE_TASKS.values())
+        tasks = list(current_account_tasks(ONLINE_IMAGE_TASKS))
     for task in tasks:
         meta = online_history_task_meta(task)
         if not meta:

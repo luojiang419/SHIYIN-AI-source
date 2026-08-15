@@ -37,10 +37,13 @@ $appConfig = [ordered]@{
 } | ConvertTo-Json
 [System.IO.File]::WriteAllText((Join-Path $configRoot "app.json"), "$appConfig`n", [System.Text.UTF8Encoding]::new($false))
 
-$process = Start-Process -FilePath (Join-Path $smokeRoot "SHIYIN AI.exe") -WorkingDirectory $smokeRoot -WindowStyle Hidden -PassThru
+$previousDwposeAutoDownload = $env:CANVAS_DWPOSE_AUTO_DOWNLOAD
+$env:CANVAS_DWPOSE_AUTO_DOWNLOAD = "0"
+$process = $null
 $watch = [System.Diagnostics.Stopwatch]::StartNew()
 $health = $null
 try {
+    $process = Start-Process -FilePath (Join-Path $smokeRoot "SHIYIN AI.exe") -WorkingDirectory $smokeRoot -WindowStyle Hidden -PassThru
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
         if ($process.HasExited) { throw "SHIYIN AI.exe exited before the backend became healthy (code $($process.ExitCode))" }
         try {
@@ -106,8 +109,13 @@ try {
     if (-not $backendStopped) { throw "Sidecar did not stop after the desktop parent exited" }
     if ($EnforceMemoryTarget -and $privateBytes -gt 250MB) { throw "Desktop process tree exceeded 250 MiB private memory target" }
 } finally {
-    if (-not $process.HasExited) {
+    if ($process -and -not $process.HasExited) {
         $process.Kill()
         [void]$process.WaitForExit(5000)
+    }
+    if ($null -eq $previousDwposeAutoDownload) {
+        Remove-Item Env:CANVAS_DWPOSE_AUTO_DOWNLOAD -ErrorAction SilentlyContinue
+    } else {
+        $env:CANVAS_DWPOSE_AUTO_DOWNLOAD = $previousDwposeAutoDownload
     }
 }

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>账号管理 · SHIYIN AI</title>
+  <style>
+    :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#25231f;background:#f4f1ea;color-scheme:light}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(180deg,#faf8f2 0,#f0ece3 100%)}
+    button,input{font:inherit}button{cursor:pointer}.shell{width:min(1440px,calc(100% - 36px));margin:0 auto;padding:26px 0 60px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}.brand{display:flex;align-items:center;gap:13px}
+    .mark{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:#302f2b;color:#fff;font-weight:800}.title h1{margin:0;font-size:22px}.title p{margin:5px 0 0;color:#787269;font-size:13px}
+    .head-actions{display:flex;gap:9px}.btn{border:1px solid #d7d0c4;border-radius:10px;padding:9px 14px;background:#fff;color:#39352f;text-decoration:none}.btn.primary{background:#302f2b;color:#fff;border-color:#302f2b}.btn.danger{color:#9b3b34}.btn:disabled{opacity:.5;cursor:wait}
+    .notice{padding:12px 15px;border:1px solid #ded6c9;border-radius:12px;background:#fff9e9;color:#665b44;font-size:13px;margin-bottom:18px}
+    .model-panel{margin-bottom:18px}.model-body{display:grid;grid-template-columns:minmax(240px,1fr) auto;gap:12px 18px;align-items:center;padding:16px 19px}.model-copy strong{display:block;font-size:14px}.model-copy span{display:block;color:#7c756b;font-size:12px;margin-top:5px;line-height:1.5}.progress-track{height:8px;border-radius:999px;background:#e9e3da;overflow:hidden;margin-top:10px}.progress-fill{height:100%;width:0;background:#4e7660;transition:width .25s}.model-detail{grid-column:1/-1;color:#8c8479;font-size:11px;word-break:break-all}.status-ready{color:#377a52!important}.status-failed{color:#ad3c34!important}
+    .layout{display:grid;grid-template-columns:minmax(540px,1.05fr) minmax(440px,.95fr);gap:18px;align-items:start}.panel{border:1px solid #ddd6ca;border-radius:17px;background:rgba(255,255,255,.88);box-shadow:0 12px 38px rgba(62,54,43,.07);overflow:hidden}
+    .panel-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:17px 19px;border-bottom:1px solid #e7e1d7}.panel-head h2{font-size:16px;margin:0}.panel-head span{color:#898278;font-size:12px}
+    .account-list{padding:8px 12px 14px}.account-row{display:grid;grid-template-columns:1.05fr 1.25fr auto;gap:10px;align-items:end;padding:13px 7px;border-bottom:1px solid #eee8de}.account-row:last-child{border-bottom:0}
+    label{display:block;color:#756e64;font-size:11px}.field{width:100%;margin-top:6px;border:1px solid #d9d2c7;border-radius:9px;padding:9px 10px;background:#fff;color:#292621;outline:none}.field:focus{border-color:#817568;box-shadow:0 0 0 3px rgba(129,117,104,.12)}
+    .row-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.toggle{display:flex;align-items:center;gap:5px;color:#675f56;font-size:12px;white-space:nowrap}.toggle input{accent-color:#302f2b}
+    .mini{border:1px solid #d8d1c6;border-radius:8px;padding:8px 10px;background:#f8f5ef;color:#39352f;font-size:12px}.mini.primary{background:#302f2b;border-color:#302f2b;color:#fff}
+    .account-meta{grid-column:1/-1;color:#9a9287;font-size:11px;margin-top:-3px}.empty{padding:42px 20px;text-align:center;color:#90897f}
+    .resource-body{padding:14px}.resource-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:13px}.stat{padding:10px 8px;border:1px solid #e3ddd3;border-radius:11px;background:#faf8f4;text-align:center}.stat strong{display:block;font-size:17px}.stat span{font-size:10px;color:#888076}
+    .scope-tabs{display:flex;gap:7px;overflow:auto;padding-bottom:11px}.scope-tab{border:1px solid #ddd6ca;border-radius:999px;padding:7px 11px;background:#fff;color:#625c54;font-size:12px;white-space:nowrap}.scope-tab.active{background:#302f2b;color:#fff;border-color:#302f2b}
+    .resource-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;max-height:490px;overflow:auto;padding-right:3px}.resource-card{min-width:0;border:1px solid #e0d9ce;border-radius:12px;overflow:hidden;background:#faf8f4;color:inherit;text-decoration:none}.preview{height:112px;background:#e9e4da;display:grid;place-items:center;overflow:hidden}.preview img,.preview video{width:100%;height:100%;object-fit:cover}.preview audio{width:92%}.file-icon{font-size:31px;color:#7e756a}.resource-copy{padding:9px}.resource-name{font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.resource-meta{margin-top:4px;color:#948c81;font-size:10px}
+    .data-lists{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.data-box{border:1px solid #e2dcd1;border-radius:12px;padding:11px;background:#faf8f4}.data-box h3{margin:0 0 8px;font-size:12px}.data-box ul{margin:0;padding-left:17px;max-height:130px;overflow:auto}.data-box li{font-size:11px;color:#6c655c;margin:5px 0}.message{min-height:20px;padding:0 18px 12px;color:#70695f;font-size:12px}.message.error{color:#ad3c34}.message.ok{color:#377a52}
+    @media(max-width:1050px){.layout{grid-template-columns:1fr}.resource-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+    @media(max-width:720px){.shell{width:min(100% - 20px,1440px)}header{align-items:flex-start}.account-row{grid-template-columns:1fr}.account-meta{grid-column:1}.resource-summary{grid-template-columns:repeat(3,1fr)}.resource-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand"><div class="mark">S</div><div class="title"><h1>局域网账号管理</h1><p>仅限安装软件的本机管理员访问</p></div></div>
+      <div class="head-actions"><a class="btn" href="/">返回工作台</a><button class="btn danger" id="logoutBtn" type="button">退出管理员</button></div>
+    </header>
+    <div class="notice">管理员可以查看和修改普通用户的原账号、原密码及启用状态。账号可使用中文、英文字母和数字，英文字母大小写视为同一账号；密码不限制长度或复杂度，但不能为空。修改密码后，该用户已登录的设备会立即退出，需要使用新密码重新登录。</div>
+    <section class="panel model-panel">
+      <div class="panel-head"><h2>DWPose 本地模型</h2><span id="dwposeState">正在检查</span></div>
+      <div class="model-body">
+        <div class="model-copy"><strong id="dwposeMessage">正在读取模型状态…</strong><span id="dwposeProgressText">模型缺失时会优先通过国内镜像自动补齐，升级后继续复用。</span><div class="progress-track"><div class="progress-fill" id="dwposeProgress"></div></div></div>
+        <button class="btn" id="dwposeRetry" type="button">重新检查</button>
+        <div class="model-detail" id="dwposeDetail"></div>
+      </div>
+    </section>
+    <main class="layout">
+      <section class="panel">
+        <div class="panel-head"><h2>已注册账号</h2><span id="accountCount">0 个账号</span></div>
+        <div class="account-list" id="accountList"><div class="empty">正在读取账号…</div></div>
+        <div class="message" id="accountMessage"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2 id="resourceTitle">账号资源</h2><span id="resourceHint">选择左侧账号查看</span></div>
+        <div class="resource-body" id="resourceBody"><div class="empty">尚未选择账号</div></div>
+        <div class="message" id="resourceMessage"></div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const accountList = document.getElementById('accountList');
+    const accountMessage = document.getElementById('accountMessage');
+    const resourceBody = document.getElementById('resourceBody');
+    const resourceMessage = document.getElementById('resourceMessage');
+    const dwposeRetry = document.getElementById('dwposeRetry');
+    let dwposeTimer = 0;
+    let accounts = [];
+    let activeAccountId = new URLSearchParams(location.search).get('account_id') || '';
+    let activeScope = '';
+
+    async function api(path, options={}){
+      const response = await fetch(path, {cache:'no-store', ...options});
+      const data = await response.json().catch(() => ({}));
+      if(response.status === 401){ location.replace('/login'); throw new Error('管理员会话已失效'); }
+      if(response.status === 403){ throw new Error(data.detail || '该页面只能在安装软件的本机访问'); }
+      if(!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
+      return data;
+    }
+    function setMessage(element, text='', kind=''){ element.textContent=text; element.className=`message ${kind}`.trim(); }
+    function formatTime(value){ return value ? new Date(value).toLocaleString() : '从未登录'; }
+    function formatSize(value){
+      let size=Number(value||0); const units=['B','KB','MB','GB','TB']; let unit=0;
+      while(size>=1024&&unit<units.length-1){size/=1024;unit++;}
+      return `${size.toFixed(unit?1:0)} ${units[unit]}`;
+    }
+    function el(tag, className='', text=''){
+      const node=document.createElement(tag); if(className) node.className=className; if(text!==undefined) node.textContent=text; return node;
+    }
+    function field(labelText, value){
+      const label=el('label','',labelText); const input=el('input','field');
+      input.type='text'; input.inputMode='text'; input.autocomplete='off'; input.spellcheck=false; input.value=String(value??'');
+      label.append(input); return {label,input};
+    }
+    function renderDwposeStatus(status){
+      const stateNames={idle:'等待检查',checking:'正在校验',downloading:'正在下载',ready:'已就绪',failed:'补齐失败'};
+      const state=String(status.state||'idle'); const progress=Math.max(0,Math.min(1,Number(status.progress||0)));
+      const stateNode=document.getElementById('dwposeState'); stateNode.textContent=stateNames[state]||state;
+      stateNode.className=state==='ready'?'status-ready':state==='failed'?'status-failed':'';
+      document.getElementById('dwposeMessage').textContent=status.message||'等待检查 DWPose 模型';
+      document.getElementById('dwposeProgress').style.width=`${(progress*100).toFixed(1)}%`;
+      const downloaded=formatSize(status.downloaded_bytes||0); const total=formatSize(status.total_bytes||0);
+      document.getElementById('dwposeProgressText').textContent=state==='ready'?`两个模型已持久化，共 ${total}，软件升级后无需重新下载。`:`已处理 ${downloaded} / ${total}（${Math.round(progress*100)}%）`;
+      const detail=[]; if(status.source_label)detail.push(`当前来源：${status.source_label}`); if(status.error)detail.push(`失败原因：${status.error}`);
+      document.getElementById('dwposeDetail').textContent=detail.join(' · ');
+      dwposeRetry.disabled=state==='checking'||state==='downloading'; dwposeRetry.textContent=state==='failed'?'重新下载':'重新检查';
+      clearTimeout(dwposeTimer); if(state==='checking'||state==='downloading')dwposeTimer=setTimeout(loadDwposeStatus,1500);
+    }
+    async function loadDwposeStatus(){
+      try{renderDwposeStatus(await api('/api/admin/dwpose/status'));}
+      catch(error){document.getElementById('dwposeMessage').textContent=error.message;document.getElementById('dwposeState').textContent='读取失败';}
+    }
+    function renderAccounts(){
+      accountList.replaceChildren(); document.getElementById('accountCount').textContent=`${accounts.length} 个账号`;
+      if(!accounts.length){accountList.append(el('div','empty','尚无普通账号，局域网同事首次注册后会出现在这里。'));return;}
+      accounts.forEach(account=>{
+        const row=el('div','account-row'); row.dataset.id=account.id;
+        const accountField=field('账号（中文、英文字母或数字）',account.account);
+        const passwordField=field('原密码（可直接修改）',account.password);
+        const actions=el('div','row-actions');
+        const toggle=el('label','toggle'); const disabled=document.createElement('input'); disabled.type='checkbox'; disabled.checked=!!account.disabled;
+        toggle.append(disabled,document.createTextNode(' 禁用'));
+        const save=el('button','mini primary','保存'); save.type='button';
+        const resources=el('button','mini','查看资源'); resources.type='button';
+        const copy=el('button','mini','复制账号密码'); copy.type='button';
+        actions.append(toggle,save,resources,copy);
+        const meta=el('div','account-meta',`注册：${formatTime(account.created_at)} · 最后登录：${formatTime(account.last_login_at)} · 数据目录：accounts/${account.folder_name}`);
+        save.onclick=async()=>{
+          const payload={disabled:disabled.checked};
+          if(accountField.input.value!==account.account) payload.account=accountField.input.value;
+          if(passwordField.input.value!==account.password) payload.password=passwordField.input.value;
+          save.disabled=true; setMessage(accountMessage,'正在保存…');
+          try{
+            const data=await api(`/api/admin/accounts/${encodeURIComponent(account.id)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+            Object.assign(account,data.account||{}); accountField.input.value=account.account; passwordField.input.value=account.password;
+            setMessage(accountMessage,`账号 ${account.account} 已保存。`,'ok');
+          }catch(error){setMessage(accountMessage,error.message,'error');}
+          finally{save.disabled=false;}
+        };
+        resources.onclick=()=>selectAccount(account.id,'');
+        copy.onclick=async()=>{
+          try{await navigator.clipboard.writeText(`账号：${accountField.input.value}\n密码：${passwordField.input.value}`);setMessage(accountMessage,'账号和密码已复制。','ok');}
+          catch(error){setMessage(accountMessage,'复制失败，请手动选择。','error');}
+        };
+        row.append(accountField.label,passwordField.label,actions,meta); accountList.append(row);
+      });
+    }
+    async function loadAccounts(){
+      try{
+        const data=await api('/api/admin/accounts'); accounts=Array.isArray(data.accounts)?data.accounts:[]; renderAccounts();
+        if(activeAccountId&&accounts.some(item=>item.id===activeAccountId)) await selectAccount(activeAccountId,activeScope,false);
+      }catch(error){accountList.replaceChildren(el('div','empty',error.message));setMessage(accountMessage,error.message,'error');}
+    }
+    function renderPreview(item){
+      const preview=el('div','preview');
+      if(item.kind==='image'){const image=document.createElement('img');image.src=item.url;image.loading='lazy';image.alt=item.name;preview.append(image);}
+      else if(item.kind==='video'){const video=document.createElement('video');video.src=item.url;video.controls=true;video.preload='metadata';preview.append(video);}
+      else if(item.kind==='audio'){const audio=document.createElement('audio');audio.src=item.url;audio.controls=true;audio.preload='metadata';preview.append(audio);}
+      else preview.append(el('div','file-icon','⌑'));
+      return preview;
+    }
+    function renderResources(data){
+      resourceBody.replaceChildren(); const summary=data.summary||{};
+      const stats=el('div','resource-summary');
+      [['文件',summary.file_count||0],['容量',formatSize(summary.total_bytes)],['作品',summary.work_count||0],['画布',summary.canvas_count||0],['项目',summary.project_count||0]].forEach(([label,value])=>{const box=el('div','stat');box.append(el('strong','',String(value)),el('span','',label));stats.append(box);});
+      const tabs=el('div','scope-tabs'); const names={all:'全部',generated:'生成媒体',exports:'导出文件',uploads:'上传素材',library:'素材库',inputs:'输入文件'};
+      ['',...(data.scopes||[])].forEach(scope=>{const button=el('button',`scope-tab ${scope===activeScope?'active':''}`.trim(),names[scope||'all']||scope);button.type='button';button.onclick=()=>selectAccount(activeAccountId,scope);tabs.append(button);});
+      const grid=el('div','resource-grid');
+      (data.files||[]).forEach(item=>{const card=el('a','resource-card');card.href=item.url;card.target='_blank';card.rel='noopener';card.title=item.relative_path;card.append(renderPreview(item));const copy=el('div','resource-copy');copy.append(el('div','resource-name',item.name),el('div','resource-meta',`${names[item.scope]||item.scope} · ${formatSize(item.size)}`));card.append(copy);grid.append(card);});
+      if(!(data.files||[]).length) grid.append(el('div','empty','这个分类暂时没有文件。'));
+      const lists=el('div','data-lists');
+      [['项目',data.projects||[],'name'],['画布',data.canvases||[],'title']].forEach(([title,items,key])=>{const box=el('div','data-box');box.append(el('h3','',`${title}（${items.length}）`));const list=el('ul');items.slice(0,100).forEach(item=>list.append(el('li','',item[key]||item.id||'未命名')));if(!items.length)list.append(el('li','','暂无'));box.append(list);lists.append(box);});
+      resourceBody.append(stats,tabs,grid,lists);
+    }
+    async function selectAccount(accountId,scope='',remember=true){
+      activeAccountId=accountId;activeScope=scope;const account=accounts.find(item=>item.id===accountId);
+      document.getElementById('resourceTitle').textContent=account?`${account.account} 的资源`:'账号资源';document.getElementById('resourceHint').textContent='仅管理员可查看';
+      resourceBody.replaceChildren(el('div','empty','正在扫描资源…'));setMessage(resourceMessage,'');
+      if(remember)history.replaceState(null,'',`/admin?account_id=${encodeURIComponent(accountId)}`);
+      try{const query=new URLSearchParams({limit:'500'});if(scope)query.set('scope',scope);const data=await api(`/api/admin/accounts/${encodeURIComponent(accountId)}/resources?${query}`);renderResources(data);}
+      catch(error){resourceBody.replaceChildren(el('div','empty',error.message));setMessage(resourceMessage,error.message,'error');}
+    }
+    document.getElementById('logoutBtn').onclick=async()=>{try{await fetch('/api/account/logout',{method:'POST'});}finally{location.replace('/login');}};
+    dwposeRetry.onclick=async()=>{dwposeRetry.disabled=true;try{const data=await api('/api/admin/dwpose/retry',{method:'POST'});renderDwposeStatus(data.status||{});}catch(error){document.getElementById('dwposeMessage').textContent=error.message;dwposeRetry.disabled=false;}};
+    loadAccounts();
+    loadDwposeStatus();
+  </script>
+</body>
+</html>

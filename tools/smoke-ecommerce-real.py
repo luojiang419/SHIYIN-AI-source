@@ -45,6 +45,7 @@ def main() -> int:
         raise FileNotFoundError("案例目录缺少 原图/人物原图.jpg 或 原图/服装原图.jpg")
 
     os.environ.setdefault("CANVAS_DESKTOP_TOKEN", "ecommerce-real-case")
+    os.environ.setdefault("CANVAS_DWPOSE_AUTO_DOWNLOAD", "0")
     from fastapi.testclient import TestClient
     import main as canvas_main
 
@@ -58,7 +59,7 @@ def main() -> int:
         "garment": str(garment_path),
     }
     try:
-        with TestClient(canvas_main.app) as client:
+        with TestClient(canvas_main.app, client=("127.0.0.1", 50000)) as client:
             bootstrap = client.get("/api/auth/bootstrap?token=ecommerce-real-case", follow_redirects=False)
             if bootstrap.status_code != 303:
                 raise RuntimeError(f"测试会话鉴权失败：HTTP {bootstrap.status_code}")

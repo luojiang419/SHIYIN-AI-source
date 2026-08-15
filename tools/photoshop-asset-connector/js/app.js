@@ -22,7 +22,6 @@
     export: $('exportBtn'),
     pushMsg: $('pushMsg'),
     server: $('server'),
-    token: $('accessToken'),
     connect: $('connectBtn'),
     connMsg: $('connMsg'),
     live: $('liveToggle'),
@@ -281,7 +280,6 @@
     const host = net.parseHost(els.server.value);
     if (!host) { setConnMsg('请输入地址，例如 192.168.1.10:3000', 'err'); return; }
     state.host = host;
-    state.token = String(els.token.value || '').trim();
     state.connected = false;
     state.raw = { assets: null, canvas: null, local: null };   // 换后端：清空数据与网格缓存
     for (const k in gridViews) delete gridViews[k];
@@ -289,14 +287,9 @@
     setConnMsg(`正在连接 ${host} …`);
     els.connect.disabled = true;
     try {
-      if (/^\d{6}$/.test(state.token)) {
-        state.token = await net.pair(state.token, 'Photoshop 资产连接器', 'photoshop');
-        els.token.value = state.token;
-      }
       await loadSource(state.source, { keepSelection: false, force: true });
       state.connected = true;
       localStorage.setItem(DX.LS.host, host);
-      localStorage.setItem(DX.LS.token, state.token);
       setDot('on');
       setConnMsg(`已连接 ${host}`, 'ok');
       state.wsWasOpen = false;
@@ -385,7 +378,6 @@
 
   els.connect.addEventListener('click', connect);
   els.server.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
-  els.token.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
   els.live.addEventListener('change', () => {
     if (els.live.checked && state.connected) { socket.openSocket(socketHandlers); scheduleReload(); }
     else socket.closeSocket();
@@ -406,8 +398,6 @@
   /* ---------- 初始化 ---------- */
   (function init() {
     els.server.value = localStorage.getItem(DX.LS.host) || '127.0.0.1:3000';
-    els.token.value = localStorage.getItem(DX.LS.token) || '';
-    state.token = els.token.value;
     state.exportLayer = localStorage.getItem(DX.LS.exportLayer) === '1';
     els.exportLayer.checked = state.exportLayer;
     const savedSource = localStorage.getItem(DX.LS.source);

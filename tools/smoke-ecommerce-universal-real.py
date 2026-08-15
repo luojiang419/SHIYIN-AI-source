@@ -223,10 +223,11 @@ def main() -> int:
 
         with tempfile.TemporaryDirectory(prefix="canvas-universal-real-data-") as data_dir:
             os.environ["CANVAS_DATA_DIR"] = data_dir
+            os.environ.setdefault("CANVAS_DWPOSE_AUTO_DOWNLOAD", "0")
             from fastapi.testclient import TestClient
             import main as canvas_main
 
-            with TestClient(canvas_main.app) as client:
+            with TestClient(canvas_main.app, client=("127.0.0.1", 50000)) as client:
                 bootstrap = client.get("/api/auth/bootstrap?token=ecommerce-universal-real", follow_redirects=False)
                 if bootstrap.status_code != 303:
                     raise RuntimeError(f"测试会话鉴权失败：HTTP {bootstrap.status_code}")

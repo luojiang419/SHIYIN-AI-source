@@ -4094,7 +4094,7 @@ function bindDynamicParams(){
 }
 async function loadConfig(){
     try {
-        const cfg = await fetch('/api/config').then(r => r.json());
+        const cfg = await fetch('/api/runtime/config').then(r => r.json());
         apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
         // 提供商配置已就绪即先渲染参数面板，避免等工作流/RunningHub 预取完成后参数才「突然刷新出来」。
         sanitizeSmartApiSelection(settings);
@@ -5278,7 +5278,7 @@ function connectAssetLibrarySyncSocket(){
             retryTimer = setTimeout(connect, 3000);
             return;
         }
-        socket.onopen = () => socket.send(JSON.stringify({ type: 'auth', client_id: clientId }));
+        socket.onopen = () => socket.send(JSON.stringify({ type: 'hello', client_id: clientId }));
         socket.onmessage = event => {
             try {
                 const data = JSON.parse(event.data);

@@ -1085,7 +1085,7 @@ async function loadAll(){
         apiJson('/api/asset-library'),
         apiJson('/api/prompt-libraries'),
         apiJson('/api/reference-slot-types').catch(() => ({types:[]})),
-        apiJson('/api/providers').catch(() => ({providers:[]}))
+        apiJson('/api/runtime/providers').catch(() => ({providers:[]}))
     ]);
     assetLibrary = assetData.library || {libraries:[], categories:[]};
     promptLibrary = promptData.library || {libraries:[]};

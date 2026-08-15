@@ -6298,6 +6298,7 @@ function render(){
         return;
     }
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
+    window.CanvasSpecialNodes?.disposePanoramasIn?.(nodesEl);
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
     const reusableMediaNodes = new Map();
@@ -6355,6 +6356,7 @@ function refreshNodes(ids=[]){
             return;
         }
         try {
+            if(node.type === 'panorama') window.CanvasSpecialNodes?.disposePanoramasIn?.(current);
             const fresh = renderNode(node);
             if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
             current.replaceWith(fresh);
@@ -6556,6 +6558,32 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
+function createClassicPoseOutputNode(sourceNode, item){
+    if(!sourceNode?.id || !item?.url) return null;
+    pushUndo();
+    let out = nodes.find(candidate => candidate.id === sourceNode.poseOutputNodeId && candidate.type === 'output')
+        || nodes.find(candidate => candidate.type === 'output' && candidate.poseReferenceSourceId === sourceNode.id);
+    if(!out){
+        out = {
+            id:uid('out'), type:'output',
+            x:(Number(sourceNode.x) || 0) + Math.max(380, Number(sourceNode.w) || 380) + 100,
+            y:Number(sourceNode.y) || 0,
+            images:[], poseReferenceSourceId:sourceNode.id
+        };
+        nodes.push(out);
+    }
+    if(!connections.some(connection => connection.from === sourceNode.id && connection.to === out.id)){
+        connections.push({id:uid('c'), from:sourceNode.id, to:out.id});
+    }
+    out.poseReferenceSourceId = sourceNode.id;
+    out.images = [{...item, kind:'image'}];
+    selected.clear();
+    selected.add(out.id);
+    syncGeneratorInputs();
+    render();
+    scheduleSave();
+    return out;
+}
 function bindClassicSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(!api) return;
@@ -6566,6 +6594,7 @@ function bindClassicSpecialNode(el, node){
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
         generateImageEdit:generateClassicSpecialEdit,
+        createOutputNode:createClassicPoseOutputNode,
         toast:message => setStatus(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
             scheduleSave();

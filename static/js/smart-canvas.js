@@ -7541,6 +7541,7 @@ function render(){
         return;
     }
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
+    window.CanvasSpecialNodes?.disposePanoramasIn?.(world);
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
     const nodeIndex = new Map(nodes.map(node => [node.id, node]));
     rememberInlineVideoActivations(nodeIndex);
@@ -8232,6 +8233,34 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
+function createSmartPoseOutputNode(sourceNode, item){
+    if(!sourceNode?.id || !item?.url) return null;
+    pushUndo();
+    let output = nodes.find(candidate => candidate.id === sourceNode.poseOutputNodeId && candidate.type === 'smart-image' && !candidate.specialType)
+        || nodes.find(candidate => candidate.type === 'smart-image' && !candidate.specialType && candidate.poseReferenceSourceId === sourceNode.id);
+    if(!output){
+        output = {
+            id:uid('smart'), type:'smart-image',
+            x:(Number(sourceNode.x) || 0) + Math.max(380, Number(sourceNode.w) || 380) + 120,
+            y:Number(sourceNode.y) || 0,
+            title:'骨架参考图', images:[], poseReferenceSourceId:sourceNode.id,
+            scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+        };
+        nodes.push(output);
+    }
+    if(!(canvas?.connections || []).some(connection => connection.from === sourceNode.id && connection.to === output.id)){
+        connectInputNode(sourceNode.id, output.id);
+    }
+    output.title = '骨架参考图';
+    output.poseReferenceSourceId = sourceNode.id;
+    output.images = [{...item, kind:'image'}];
+    selectedId = output.id;
+    selectedIds = [];
+    selectedImage = {nodeId:output.id, index:0};
+    render();
+    scheduleSave();
+    return output;
+}
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(!api || !node?.specialType) return;
@@ -8242,6 +8271,7 @@ function bindSmartSpecialNode(el, node){
         resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
         generatePanorama:generateSmartPanorama,
         generateImageEdit:generateSmartSpecialEdit,
+        createOutputNode:createSmartPoseOutputNode,
         toast:message => toast(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
             scheduleSave();

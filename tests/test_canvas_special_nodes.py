@@ -24,7 +24,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
             self.assertIn("灯光重塑", page)
-            self.assertIn("special-nodes.3", page)
+            self.assertIn("special-nodes.4", page)
 
     def test_angle_node_creation_is_hidden_but_legacy_canvas_data_remains_compatible(self):
         self.assertNotIn('onclick="addAngleNode()"', self.classic_html)
@@ -53,6 +53,19 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("gl.CLAMP_TO_EDGE", self.shared)
         self.assertNotIn("gl.REPEAT", self.shared)
 
+    def test_panorama_releases_replaced_webgl_contexts_and_restores_lost_context(self):
+        for marker in (
+            "function disposePanoramaCanvas(canvas)",
+            "function disposePanoramasIn(root)",
+            "WEBGL_lose_context",
+            "webglcontextlost",
+            "webglcontextrestored",
+            "state.gl?.isContextLost?.()",
+        ):
+            self.assertIn(marker, self.shared)
+        self.assertIn("disposePanoramasIn?.(nodesEl)", self.classic)
+        self.assertIn("disposePanoramasIn?.(world)", self.smart)
+
     def test_panorama_exports_view_and_mannequin_as_one_downstream_image(self):
         export_body = re.search(
             r"async function exportReference\(.*?\n\s*return file;\n\s*\}",
@@ -73,6 +86,20 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("X-DWPose-People", self.shared)
         self.assertIn("uploadBlob(blob, `dwpose-", self.shared)
         self.assertIn("poseSourceSignature", self.shared)
+
+    def test_dwpose_export_creates_a_visible_connected_output_node_on_both_canvases(self):
+        for marker in (
+            'data-special-action="export-pose"',
+            "options.createOutputNode(node, item)",
+            "node.poseOutputNodeId",
+        ):
+            self.assertIn(marker, self.shared)
+        for source, markers in (
+            (self.classic, ("function createClassicPoseOutputNode(sourceNode, item)", "type:'output'", "poseReferenceSourceId:sourceNode.id", "createOutputNode:createClassicPoseOutputNode")),
+            (self.smart, ("function createSmartPoseOutputNode(sourceNode, item)", "title:'骨架参考图'", "poseReferenceSourceId:sourceNode.id", "createOutputNode:createSmartPoseOutputNode")),
+        ):
+            for marker in markers:
+                self.assertIn(marker, source)
 
     def test_relight_compiles_mature_direction_temperature_and_consistency_controls(self):
         for marker in (

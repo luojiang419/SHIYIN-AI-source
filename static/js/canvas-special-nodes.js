@@ -170,6 +170,7 @@
             <div class="special-toolbar">
                 <button type="button" data-special-action="upload-pose"><i data-lucide="upload"></i><span>导入人物图</span></button>
                 <button type="button" data-special-action="retry-pose" ${status === 'running' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新提取</span></button>
+                <button type="button" data-special-action="export-pose" ${!output?.url || status === 'running' ? 'disabled' : ''}><i data-lucide="square-arrow-out-up-right"></i><span>导出骨架图</span></button>
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(label)}</span></div>
             <div class="special-output-row"><span>${output?.url ? esc(output.name || 'dwpose.png') : '输出：黑底彩色骨架参考图'}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
@@ -389,7 +390,31 @@
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.uniform1i(gl.getUniformLocation(program, 'tex'), 0);
-        return {gl, program, texture, image:null, signature:'', loading:'', drag:null};
+        return {canvas, gl, program, buffer, texture, image:null, signature:'', loading:'', drag:null, contextLost:false, disposed:false};
+    }
+    function disposePanoramaCanvas(canvas){
+        const state = canvas ? panoramaStates.get(canvas) : null;
+        if(!state || state.disposed) return false;
+        state.disposed = true;
+        state.drag = null;
+        try {
+            const {gl} = state;
+            if(gl && !gl.isContextLost()){
+                if(state.texture) gl.deleteTexture(state.texture);
+                if(state.buffer) gl.deleteBuffer(state.buffer);
+                if(state.program) gl.deleteProgram(state.program);
+                gl.getExtension('WEBGL_lose_context')?.loseContext();
+            }
+        } catch(_) {}
+        panoramaStates.delete(canvas);
+        return true;
+    }
+    function disposePanoramasIn(root){
+        if(!root) return 0;
+        const canvases = [];
+        if(root.matches?.('.special-panorama-canvas')) canvases.push(root);
+        root.querySelectorAll?.('.special-panorama-canvas').forEach(canvas => canvases.push(canvas));
+        return canvases.reduce((count, canvas) => count + (disposePanoramaCanvas(canvas) ? 1 : 0), 0);
     }
     async function loadImage(url, resolveUrl){
         const src = resolveUrl?.(url) || url;
@@ -449,7 +474,7 @@
         ctx.fillText('位置参考', x, Math.min(height - 5, groundY + Math.max(13, scale*.1))); ctx.restore();
     }
     function renderPanorama(state, canvas, overlay, node){
-        if(!state.image) return;
+        if(!state.image || state.disposed || state.contextLost || state.gl?.isContextLost?.()) return;
         fitCanvas(canvas, overlay, node);
         const {gl, program} = state;
         gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(program);
@@ -477,25 +502,31 @@
         finally { if(state.loading === signature) state.loading = ''; }
     }
     async function exportReference(root, state, node){
-        if(!state.image) throw new Error('请先导入或连接全景图');
+        if(!state.image || state.disposed || state.contextLost || state.gl?.isContextLost?.()) throw new Error('全景取景器正在恢复，请稍后重试');
         const [width,height] = String(node.panoramaResolution || '1280x720').split('x').map(Number);
         const canvas = root.querySelector('.special-panorama-canvas'), overlay = root.querySelector('.special-overlay-canvas');
         const old = {w:canvas.width,h:canvas.height,ow:overlay.width,oh:overlay.height};
-        canvas.width = Math.max(320, width || 1280); canvas.height = Math.max(320, height || 720); overlay.width = canvas.width; overlay.height = canvas.height;
-        const {gl, program} = state;
-        gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(program);
-        gl.uniform1f(gl.getUniformLocation(program, 'aspect'), canvas.width / canvas.height);
-        gl.uniform1f(gl.getUniformLocation(program, 'tanHalf'), Math.tan(clamp(node.panoramaFov, 35, 100) * Math.PI / 360));
-        gl.uniform1f(gl.getUniformLocation(program, 'yaw'), Number(node.panoramaYaw || 0) * Math.PI / 180);
-        gl.uniform1f(gl.getUniformLocation(program, 'pitch'), Number(node.panoramaPitch || 0) * Math.PI / 180);
-        gl.drawArrays(gl.TRIANGLES, 0, 6); drawMannequin(overlay.getContext('2d'), overlay.width, overlay.height, node);
-        const merged = document.createElement('canvas'); merged.width = canvas.width; merged.height = canvas.height;
-        const ctx = merged.getContext('2d'); ctx.drawImage(canvas, 0, 0); ctx.drawImage(overlay, 0, 0);
-        const blob = await new Promise(resolve => merged.toBlob(resolve, 'image/png'));
-        if(!blob) throw new Error('参考图合成失败');
-        const file = await uploadBlob(blob, `panorama-reference-${Date.now()}.png`); file.natural_w = merged.width; file.natural_h = merged.height;
-        canvas.width = old.w; canvas.height = old.h; overlay.width = old.ow; overlay.height = old.oh; renderPanorama(state, canvas, overlay, node);
-        return file;
+        try {
+            canvas.width = Math.max(320, width || 1280); canvas.height = Math.max(320, height || 720); overlay.width = canvas.width; overlay.height = canvas.height;
+            const {gl, program} = state;
+            gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(program);
+            gl.uniform1f(gl.getUniformLocation(program, 'aspect'), canvas.width / canvas.height);
+            gl.uniform1f(gl.getUniformLocation(program, 'tanHalf'), Math.tan(clamp(node.panoramaFov, 35, 100) * Math.PI / 360));
+            gl.uniform1f(gl.getUniformLocation(program, 'yaw'), Number(node.panoramaYaw || 0) * Math.PI / 180);
+            gl.uniform1f(gl.getUniformLocation(program, 'pitch'), Number(node.panoramaPitch || 0) * Math.PI / 180);
+            gl.drawArrays(gl.TRIANGLES, 0, 6); drawMannequin(overlay.getContext('2d'), overlay.width, overlay.height, node);
+            const merged = document.createElement('canvas'); merged.width = canvas.width; merged.height = canvas.height;
+            const ctx = merged.getContext('2d'); ctx.drawImage(canvas, 0, 0); ctx.drawImage(overlay, 0, 0);
+            const blob = await new Promise(resolve => merged.toBlob(resolve, 'image/png'));
+            if(!blob) throw new Error('参考图合成失败');
+            const file = await uploadBlob(blob, `panorama-reference-${Date.now()}.png`); file.natural_w = merged.width; file.natural_h = merged.height;
+            return file;
+        } finally {
+            if(!state.disposed){
+                canvas.width = old.w; canvas.height = old.h; overlay.width = old.ow; overlay.height = old.oh;
+                renderPanorama(state, canvas, overlay, node);
+            }
+        }
     }
     function notify(options, node, render=false){ options.onChange?.(node, {render}); }
     function bindPanorama(root, node, options={}){
@@ -507,6 +538,21 @@
         try { state = panoramaStates.get(canvas) || panoramaGl(canvas); } catch(error){ options.toast?.(error.message); return; }
         panoramaStates.set(canvas, state); ensurePanoramaSource(root, state, node, options);
         const renderNow = () => { renderPanorama(state, canvas, overlay, node); updateAngleLabels(root, node); };
+        canvas.addEventListener('webglcontextlost', event => {
+            if(state.disposed) return;
+            event.preventDefault();
+            state.contextLost = true;
+        });
+        canvas.addEventListener('webglcontextrestored', () => {
+            if(state.disposed || !canvas.isConnected) return;
+            const image = state.image, signature = state.signature;
+            try {
+                const restored = panoramaGl(canvas);
+                Object.assign(state, restored, {image:null, signature, loading:''});
+                if(image) setPanoramaTexture(state, image);
+                renderNow();
+            } catch(error){ options.toast?.(error.message || '全景取景器恢复失败'); }
+        });
         const panoramaFileInput = root.querySelector('[data-special-file="panorama"]');
         if(panoramaFileInput) panoramaFileInput.onchange = async () => {
             try {
@@ -543,7 +589,7 @@
                     if(action === 'toggle-mannequin'){ node.mannequinEnabled = !node.mannequinEnabled; renderNow(); notify(options, node, true); return; }
                     if(action === 'reset-view'){ node.panoramaYaw = 0; node.panoramaPitch = 0; node.panoramaFov = 72; renderNow(); notify(options, node, true); return; }
                     if(action === 'export-reference'){
-                        node.panoramaExporting = true; notify(options, node, true); const file = await exportReference(root, state, node);
+                        node.panoramaExporting = true; button.disabled = true; const file = await exportReference(root, state, node);
                         node.panoramaExporting = false; setOutputItem(node, file, options); notify(options, node, true); options.toast?.('位置参考图已生成，可连接到下游节点');
                     }
                 } catch(error){ node.panoramaGenerating = false; node.panoramaExporting = false; notify(options, node, true); options.toast?.(error.message || '操作失败'); }
@@ -604,12 +650,24 @@
         };
         root.querySelectorAll('[data-special-action]').forEach(button => {
             button.addEventListener('pointerdown', e => e.stopPropagation());
-            button.addEventListener('click', e => {
+            button.addEventListener('click', async e => {
                 e.preventDefault(); e.stopPropagation(); const action = button.dataset.specialAction;
                 if(action === 'upload-pose'){
                     poseFileInput?.click(); return;
                 }
                 if(action === 'retry-pose'){ delete node.poseSourceSignature; runPose(node, options, true).catch(error => options.toast?.(error.message)); }
+                if(action === 'export-pose'){
+                    const item = outputItem(node);
+                    if(!item?.url){ options.toast?.('请先完成骨架提取'); return; }
+                    if(!options.createOutputNode){ options.toast?.('当前画布不支持创建输出节点'); return; }
+                    try {
+                        const outputNode = await options.createOutputNode(node, item);
+                        if(!outputNode) throw new Error('输出节点创建失败');
+                        node.poseOutputNodeId = outputNode.id || '';
+                        notify(options, node, false);
+                        options.toast?.('骨架参考图已导出到输出节点，可继续连接下一个节点');
+                    } catch(error){ options.toast?.(error.message || '骨架图导出失败'); }
+                }
             });
         });
         runPose(node, options, false).catch(() => {});
@@ -756,6 +814,7 @@
         DEFAULT_PANORAMA_PROMPT, DEFAULT_RELIGHT_PROMPT, DEFAULT_ANGLE_PROMPT,
         panoramaBodyHtml, poseBodyHtml, relightBodyHtml, angleBodyHtml,
         bindPanorama, bindPose, bindRelight, bindAngle,
-        buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle
+        buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle,
+        disposePanoramaCanvas, disposePanoramasIn
     };
 })();

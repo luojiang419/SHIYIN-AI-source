@@ -1,0 +1,761 @@
+(function(){
+    'use strict';
+
+    const DEFAULT_PANORAMA_PROMPT = '生成一个完整球面 720° 全景 VR 场景，使用标准 2:1 等距柱状投影，水平左右边缘像素级无缝衔接，上下极点自然连续，无接缝、无重复主体、无文字水印；空间结构真实、尺度统一、光照方向一致，封闭场景保留合理出入口。';
+    const DEFAULT_RELIGHT_PROMPT = '只重塑原图的光照、阴影、色温和氛围，严格保持主体身份、五官、姿势、服装、材质、构图、机位、背景结构、文字与标志不变，不新增或删除任何物体。';
+    const DEFAULT_ANGLE_PROMPT = 'Image 1 is one frozen physical 3D scene. Re-render that same world from the requested camera; change camera extrinsics only.';
+    const panoramaStates = new WeakMap();
+    const poseTasks = new Map();
+
+    function esc(value){
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function clamp(value, min, max){ return Math.max(min, Math.min(max, Number(value) || 0)); }
+    function nameFromUrl(url, fallback='image.png'){
+        try {
+            const pathname = new URL(String(url || ''), location.href).pathname;
+            return decodeURIComponent(pathname.split('/').pop() || fallback);
+        } catch(_) { return fallback; }
+    }
+    function sourceSignature(item){
+        if(!item?.url) return '';
+        return `${item.url}|${item.name || ''}|${item.natural_w || ''}x${item.natural_h || ''}`;
+    }
+    async function responseError(response, fallback){
+        const data = await response.clone().json().catch(() => null);
+        return data?.detail || data?.error || await response.text().catch(() => '') || fallback;
+    }
+    async function uploadBlob(blob, filename){
+        const form = new FormData();
+        form.append('files', blob, filename || 'canvas-reference.png');
+        const response = await fetch('/api/ai/upload', {method:'POST', body:form});
+        if(!response.ok) throw new Error(await responseError(response, '参考图上传失败'));
+        const data = await response.json();
+        const file = data.files?.[0];
+        if(!file?.url) throw new Error('上传接口没有返回图片');
+        return {...file, kind:'image'};
+    }
+    async function uploadFile(file){
+        if(!file) throw new Error('请选择图片');
+        if(!String(file.type || '').startsWith('image/')) throw new Error('仅支持图片文件');
+        return uploadBlob(file, file.name || 'panorama.png');
+    }
+    function panoramaSource(node, options){
+        const upstream = options.getInputImage?.(node);
+        if(upstream?.url) return upstream;
+        if(node.panoramaSourceUrl) return {
+            url:node.panoramaSourceUrl,
+            name:node.panoramaSourceName || nameFromUrl(node.panoramaSourceUrl, 'panorama.png'),
+            natural_w:node.panoramaSourceWidth || 0,
+            natural_h:node.panoramaSourceHeight || 0,
+            kind:'image'
+        };
+        return null;
+    }
+    function poseSource(node, options){
+        const upstream = options.getInputImage?.(node);
+        if(upstream?.url) return upstream;
+        if(node.poseSourceUrl) return {
+            url:node.poseSourceUrl,
+            name:node.poseSourceName || nameFromUrl(node.poseSourceUrl, 'pose-source.png'),
+            natural_w:node.poseSourceWidth || 0,
+            natural_h:node.poseSourceHeight || 0,
+            kind:'image'
+        };
+        return null;
+    }
+    function editSource(node, options, prefix){
+        const upstream = options.getInputImage?.(node);
+        if(upstream?.url) return upstream;
+        const url = node[`${prefix}SourceUrl`];
+        if(!url) return null;
+        return {
+            url,
+            name:node[`${prefix}SourceName`] || nameFromUrl(url, `${prefix}-source.png`),
+            natural_w:node[`${prefix}SourceWidth`] || 0,
+            natural_h:node[`${prefix}SourceHeight`] || 0,
+            kind:'image'
+        };
+    }
+    function specialTitle(node){
+        const type = node?.specialType || node?.type;
+        if(type === 'dwpose') return '动作提取';
+        if(type === 'relight') return '灯光重塑';
+        if(type === 'angle') return '角度调整';
+        return '720°取景器';
+    }
+    function outputItem(node){
+        const item = Array.isArray(node?.images) ? node.images.find(img => img?.url) : null;
+        if(item?.url) return item;
+        if(node?.outputUrl) return {url:node.outputUrl, name:node.outputName || 'reference.png', kind:'image', natural_w:node.outputWidth || 0, natural_h:node.outputHeight || 0};
+        return null;
+    }
+    function setOutputItem(node, file, options){
+        const item = {...file, kind:'image'};
+        if(options.smart){
+            node.images = [item];
+            node.title = specialTitle(node);
+        } else {
+            node.outputUrl = item.url;
+            node.outputName = item.name || 'reference.png';
+            node.outputWidth = item.natural_w || 0;
+            node.outputHeight = item.natural_h || 0;
+        }
+        options.onOutput?.(node, item);
+    }
+    function clearOutputItem(node, options){
+        const hadOutput = Boolean(outputItem(node)?.url);
+        if(options.smart) node.images = [];
+        delete node.outputUrl;
+        delete node.outputName;
+        delete node.outputWidth;
+        delete node.outputHeight;
+        delete node.specialGeneratedSourceSignature;
+        delete node.specialGeneratedControlSignature;
+        if(hadOutput) options.onOutput?.(node, null);
+    }
+    function normalizePanorama(node){
+        if(!node.panoramaPrompt) node.panoramaPrompt = DEFAULT_PANORAMA_PROMPT;
+        node.panoramaYaw = Number.isFinite(Number(node.panoramaYaw)) ? Number(node.panoramaYaw) : 0;
+        node.panoramaPitch = clamp(Number.isFinite(Number(node.panoramaPitch)) ? node.panoramaPitch : 0, -85, 85);
+        node.panoramaFov = clamp(Number.isFinite(Number(node.panoramaFov)) ? node.panoramaFov : 72, 35, 100);
+        node.panoramaAspect = ['16:9','9:16','1:1','4:3','3:4'].includes(node.panoramaAspect) ? node.panoramaAspect : '16:9';
+        node.mannequinX = clamp(Number.isFinite(Number(node.mannequinX)) ? node.mannequinX : 0.5, 0.04, 0.96);
+        node.mannequinY = clamp(Number.isFinite(Number(node.mannequinY)) ? node.mannequinY : 0.68, 0.12, 0.96);
+        node.mannequinScale = clamp(Number.isFinite(Number(node.mannequinScale)) ? node.mannequinScale : 0.32, 0.12, 0.7);
+        node.panoramaResolution = ['1280x720','1024x1024','720x1280','1440x1080','1080x1440'].includes(node.panoramaResolution) ? node.panoramaResolution : '1280x720';
+        return node;
+    }
+    function panoramaBodyHtml(node){
+        normalizePanorama(node);
+        const source = node.panoramaSourceUrl || '';
+        const output = outputItem(node);
+        return `<div class="special-node panorama-special" data-special-node="panorama">
+            <input class="special-file-input" type="file" accept="image/*" data-special-file="panorama" hidden>
+            <div class="special-stage-wrap" data-panorama-stage>
+                <canvas class="special-panorama-canvas"></canvas>
+                <canvas class="special-overlay-canvas"></canvas>
+                <div class="special-empty ${source ? 'hidden' : ''}" data-panorama-empty><i data-lucide="scan-line"></i><strong>导入或连接 2:1 全景图</strong><span>拖动选角 · 滚轮变焦 · 点击放置人偶</span></div>
+                <div class="special-angle-badge">水平 <b data-yaw-label>${Math.round(node.panoramaYaw)}°</b> · 俯仰 <b data-pitch-label>${Math.round(node.panoramaPitch)}°</b> · FOV <b data-fov-label>${Math.round(node.panoramaFov)}°</b></div>
+            </div>
+            <div class="special-toolbar">
+                <button type="button" data-special-action="upload-panorama"><i data-lucide="upload"></i><span>导入全景</span></button>
+                <button type="button" data-special-action="generate-panorama" ${node.panoramaGenerating ? 'disabled' : ''}><i data-lucide="${node.panoramaGenerating ? 'loader-2' : 'sparkles'}"></i><span>${node.panoramaGenerating ? '生成中' : '生成720°'}</span></button>
+                <button type="button" data-special-action="toggle-mannequin" class="${node.mannequinEnabled ? 'active' : ''}"><i data-lucide="person-standing"></i><span>${node.mannequinEnabled ? '移除人偶' : '添加人偶'}</span></button>
+                <button type="button" data-special-action="reset-view"><i data-lucide="rotate-ccw"></i><span>复位</span></button>
+            </div>
+            <div class="special-settings-grid">
+                <label><span>画幅</span><select data-special-field="panoramaAspect"><option value="16:9" ${node.panoramaAspect === '16:9' ? 'selected' : ''}>16:9</option><option value="9:16" ${node.panoramaAspect === '9:16' ? 'selected' : ''}>9:16</option><option value="1:1" ${node.panoramaAspect === '1:1' ? 'selected' : ''}>1:1</option><option value="4:3" ${node.panoramaAspect === '4:3' ? 'selected' : ''}>4:3</option><option value="3:4" ${node.panoramaAspect === '3:4' ? 'selected' : ''}>3:4</option></select></label>
+                <label><span>导出</span><select data-special-field="panoramaResolution"><option value="1280x720" ${node.panoramaResolution === '1280x720' ? 'selected' : ''}>1280×720</option><option value="1024x1024" ${node.panoramaResolution === '1024x1024' ? 'selected' : ''}>1024×1024</option><option value="720x1280" ${node.panoramaResolution === '720x1280' ? 'selected' : ''}>720×1280</option><option value="1440x1080" ${node.panoramaResolution === '1440x1080' ? 'selected' : ''}>1440×1080</option><option value="1080x1440" ${node.panoramaResolution === '1080x1440' ? 'selected' : ''}>1080×1440</option></select></label>
+                <label class="special-range"><span>焦距</span><input type="range" min="35" max="100" step="1" value="${node.panoramaFov}" data-special-field="panoramaFov"></label>
+                <label class="special-range ${node.mannequinEnabled ? '' : 'disabled'}"><span>人偶大小</span><input type="range" min="12" max="70" step="1" value="${Math.round(node.mannequinScale * 100)}" data-special-field="mannequinScale" ${node.mannequinEnabled ? '' : 'disabled'}></label>
+            </div>
+            <textarea class="special-prompt" data-special-field="panoramaPrompt" rows="2" placeholder="描述全景场景">${esc(node.panoramaPrompt)}</textarea>
+            <div class="special-output-row">
+                <span>${output?.url ? `位置参考图已就绪 · ${esc(output.name || 'reference.png')}` : '选择视角后导出，输出会作为下游位置参考图'}</span>
+                <button type="button" class="special-primary" data-special-action="export-reference" ${node.panoramaExporting ? 'disabled' : ''}><i data-lucide="${node.panoramaExporting ? 'loader-2' : 'camera'}"></i><span>${node.panoramaExporting ? '合成中' : '导出参考图'}</span></button>
+            </div>
+        </div>`;
+    }
+    function poseBodyHtml(node){
+        const output = outputItem(node);
+        const status = node.poseStatus || (output?.url ? 'done' : 'idle');
+        const label = status === 'running' ? '正在提取身体、手部和面部关键点…' : status === 'failed' ? (node.poseError || '动作提取失败') : output?.url ? '骨架图已就绪，将自动传递给下游节点' : '连接或导入人物图片后自动提取骨架';
+        return `<div class="special-node pose-special" data-special-node="dwpose">
+            <input class="special-file-input" type="file" accept="image/*" data-special-file="dwpose" hidden>
+            <div class="pose-preview ${output?.url ? 'has-output' : ''}">
+                ${output?.url ? `<img src="${esc(output.url)}" alt="DWPose 骨架图" draggable="false">` : `<div class="special-empty"><i data-lucide="person-standing"></i><strong>DWPose 动作提取</strong><span>本地 CPU 推理 · 数据不离开设备</span></div>`}
+                ${status === 'running' ? '<div class="pose-running"><i data-lucide="loader-2"></i></div>' : ''}
+            </div>
+            <div class="special-toolbar">
+                <button type="button" data-special-action="upload-pose"><i data-lucide="upload"></i><span>导入人物图</span></button>
+                <button type="button" data-special-action="retry-pose" ${status === 'running' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新提取</span></button>
+            </div>
+            <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(label)}</span></div>
+            <div class="special-output-row"><span>${output?.url ? esc(output.name || 'dwpose.png') : '输出：黑底彩色骨架参考图'}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
+        </div>`;
+    }
+
+    const RELIGHT_DIRECTIONS = {
+        left:['左侧主光','camera-left key light'], right:['右侧主光','camera-right key light'],
+        top:['顶部光','top-down light'], bottom:['底部光','bottom-up light'],
+        front:['正面柔光','frontal beauty light'], back:['逆光','backlight with controlled silhouette'],
+        rim:['轮廓光','clean rim light around the subject']
+    };
+    const RELIGHT_MOODS = {
+        natural:'自然真实光照', studio:'专业影棚布光', cinematic:'电影级层次光影',
+        sunset:'日落金色时刻', night:'低调夜景照明', neon:'霓虹双色氛围'
+    };
+    function normalizeRelight(node){
+        node.relightDirection = RELIGHT_DIRECTIONS[node.relightDirection] ? node.relightDirection : 'left';
+        node.relightTemperature = clamp(Number.isFinite(Number(node.relightTemperature)) ? node.relightTemperature : 18, -100, 100);
+        node.relightIntensity = clamp(Number.isFinite(Number(node.relightIntensity)) ? node.relightIntensity : 68, 10, 100);
+        node.relightSoftness = ['soft','balanced','hard'].includes(node.relightSoftness) ? node.relightSoftness : 'balanced';
+        node.relightMood = RELIGHT_MOODS[node.relightMood] ? node.relightMood : 'cinematic';
+        node.relightPreserve = node.relightPreserve !== false;
+        node.relightNotes = String(node.relightNotes || '');
+        return node;
+    }
+    function relightTemperatureText(value){
+        const number = Number(value) || 0;
+        if(number <= -55) return '冷蓝 7600K';
+        if(number <= -15) return '清冷 6500K';
+        if(number < 15) return '中性 5600K';
+        if(number < 55) return '暖光 4300K';
+        return '金色 3200K';
+    }
+    function buildRelightPrompt(node){
+        normalizeRelight(node);
+        const direction = RELIGHT_DIRECTIONS[node.relightDirection];
+        const softness = node.relightSoftness === 'soft' ? '大面积柔光、阴影边缘柔和' : node.relightSoftness === 'hard' ? '硬质聚光、阴影轮廓清晰' : '软硬平衡、明暗过渡自然';
+        const intensity = node.relightIntensity >= 80 ? '高强度主光' : node.relightIntensity >= 45 ? '中等强度主光' : '低强度补光';
+        const preserve = node.relightPreserve ? '以原图为严格结构约束，只允许光照相关像素发生变化；人物身份、产品造型、纹理、文字和构图必须保持一致。' : '允许为了合理受光而轻微调整局部细节，但不得改变主体身份和核心造型。';
+        return [
+            DEFAULT_RELIGHT_PROMPT,
+            `主光方向：${direction[0]}（${direction[1]}）。`,
+            `光照参数：${intensity}，强度 ${Math.round(node.relightIntensity)}%，${relightTemperatureText(node.relightTemperature)}，${softness}。`,
+            `氛围目标：${RELIGHT_MOODS[node.relightMood]}。阴影方向、接触阴影、反射、高光和环境色必须符合统一的三维光照逻辑。`,
+            preserve,
+            node.relightNotes ? `补充要求：${node.relightNotes.trim()}` : ''
+        ].filter(Boolean).join('\n');
+    }
+    function relightBodyHtml(node){
+        normalizeRelight(node);
+        const output = outputItem(node), preview = output?.url || node.relightSourceUrl || '';
+        const directions = [['top','上'],['left','左'],['front','正'],['right','右'],['bottom','下'],['rim','轮廓'],['back','逆光']];
+        return `<div class="special-node edit-special relight-special" data-special-node="relight">
+            <input class="special-file-input" type="file" accept="image/*" data-special-file="relight" hidden>
+            <div class="special-edit-stage ${preview ? 'has-source' : ''}" data-edit-stage>
+                <img data-edit-preview src="${esc(preview)}" alt="灯光重塑预览" draggable="false" ${preview ? '' : 'hidden'}>
+                <div class="special-empty" data-edit-empty ${preview ? 'hidden' : ''}><i data-lucide="sun-medium"></i><strong>连接或导入一张图片</strong><span>选择光向后提交到画布默认图片 API</span></div>
+                <div class="relight-preview-overlay" data-relight-overlay></div>
+                <div class="special-edit-badge" data-edit-badge>${output?.url ? 'API 结果' : '实时灯光示意'}</div>
+            </div>
+            <div class="special-toolbar">
+                <button type="button" data-special-action="upload-relight"><i data-lucide="upload"></i><span>导入图片</span></button>
+                <span class="special-model-hint"><i data-lucide="cloud-cog"></i>画布默认图片模型</span>
+            </div>
+            <div class="relight-direction-pad" aria-label="主光方向">
+                ${directions.map(([value,label]) => `<button type="button" data-relight-direction="${value}" class="${node.relightDirection === value ? 'active' : ''}">${label}</button>`).join('')}
+            </div>
+            <div class="special-settings-grid edit-settings-grid">
+                <label><span>氛围</span><select data-edit-field="relightMood">${Object.entries(RELIGHT_MOODS).map(([value,label]) => `<option value="${value}" ${node.relightMood === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+                <label><span>光质</span><select data-edit-field="relightSoftness"><option value="soft" ${node.relightSoftness === 'soft' ? 'selected' : ''}>柔光</option><option value="balanced" ${node.relightSoftness === 'balanced' ? 'selected' : ''}>平衡</option><option value="hard" ${node.relightSoftness === 'hard' ? 'selected' : ''}>硬光</option></select></label>
+                <label class="special-range"><span>色温</span><input type="range" min="-100" max="100" step="1" value="${node.relightTemperature}" data-edit-field="relightTemperature"><b data-relight-temperature>${esc(relightTemperatureText(node.relightTemperature))}</b></label>
+                <label class="special-range"><span>强度</span><input type="range" min="10" max="100" step="1" value="${node.relightIntensity}" data-edit-field="relightIntensity"><b data-relight-intensity>${Math.round(node.relightIntensity)}%</b></label>
+            </div>
+            <label class="special-check"><input type="checkbox" data-edit-field="relightPreserve" ${node.relightPreserve ? 'checked' : ''}><span>严格保持人物/产品与构图不变</span></label>
+            <textarea class="special-prompt" data-edit-field="relightNotes" rows="2" placeholder="可选：补充灯光颜色、窗影、舞台光等要求">${esc(node.relightNotes)}</textarea>
+            <div class="special-output-row"><span data-edit-status>${output?.url ? `灯光重塑结果已就绪 · ${esc(output.name || 'relight.png')}` : '调整参数后点击生成，不会自动产生 API 费用'}</span><button type="button" class="special-primary" data-special-action="run-relight" ${node.specialRunning ? 'disabled' : ''}><i data-lucide="${node.specialRunning ? 'loader-2' : 'wand-sparkles'}"></i><span>${node.specialRunning ? '重塑中' : '生成重塑图'}</span></button></div>
+        </div>`;
+    }
+
+    const ANGLE_AZIMUTHS = [
+        [0,'正面','front view'],[45,'右前 45°','front-right quarter view'],[90,'右侧 90°','right side view'],[135,'右后 135°','back-right quarter view'],
+        [180,'背面 180°','back view'],[225,'左后 225°','back-left quarter view'],[270,'左侧 270°','left side view'],[315,'左前 315°','front-left quarter view']
+    ];
+    function normalizeAngle(node){
+        node.angleAzimuth = ((Number.isFinite(Number(node.angleAzimuth)) ? Number(node.angleAzimuth) : 45) % 360 + 360) % 360;
+        node.angleElevation = clamp(Number.isFinite(Number(node.angleElevation)) ? node.angleElevation : 0, -30, 60);
+        node.angleDistance = ['close','medium','wide'].includes(node.angleDistance) ? node.angleDistance : 'medium';
+        node.angleLens = ['24','35','50','85'].includes(String(node.angleLens)) ? String(node.angleLens) : '50';
+        node.angleSubject = ['person','product','scene'].includes(node.angleSubject) ? node.angleSubject : 'person';
+        node.anglePreserve = node.anglePreserve !== false;
+        node.angleNotes = String(node.angleNotes || '');
+        return node;
+    }
+    function nearestAzimuth(value){
+        const normalized = ((Number(value) || 0) % 360 + 360) % 360;
+        return ANGLE_AZIMUTHS.reduce((best, item) => {
+            const delta = Math.min(Math.abs(item[0] - normalized), 360 - Math.abs(item[0] - normalized));
+            return !best || delta < best.delta ? {item, delta} : best;
+        }, null).item;
+    }
+    function angleElevationText(value){
+        const number = Number(value) || 0;
+        if(number <= -15) return ['低机位','low-angle shot'];
+        if(number <= 15) return ['平视','eye-level shot'];
+        if(number <= 45) return ['俯视','elevated shot'];
+        return ['高俯视','high-angle shot'];
+    }
+    function angleControlSignature(node){
+        return [Math.round(Number(node.angleAzimuth)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes].join('|');
+    }
+    function signedAngleAzimuth(value){
+        const normalized = ((Number(value) || 0) % 360 + 360) % 360;
+        return normalized > 180 ? normalized - 360 : normalized;
+    }
+    function angleOrbitInstruction(value){
+        const offset = signedAngleAzimuth(value), magnitude = Math.abs(offset);
+        if(magnitude < 0.5) return 'Keep the camera at Image 1 azimuth 0°. This is the original camera ray.';
+        if(magnitude === 180) return 'Relocate the camera on a same-radius half-orbit to the physically opposite side of the subject. Do not rotate the subject or world.';
+        const axis = offset > 0
+            ? 'toward +X, Image 1’s camera-right basis'
+            : 'toward -X, Image 1’s camera-left basis';
+        return `Physically relocate the camera on a same-radius horizontal arc ${magnitude}° ${axis}. Aim at the same 3D target. Signed azimuth: ${offset > 0 ? '+' : ''}${offset}°. Move the camera, not the subject.`;
+    }
+    function angleParallaxInstruction(value){
+        const offset = signedAngleAzimuth(value), magnitude = Math.abs(offset);
+        if(magnitude < 0.5) return 'REQUIRED PROJECTION: Preserve Image 1 projection because the requested orbit is 0°.';
+        if(magnitude === 180) return 'REQUIRED NEW PROJECTION: Show true reverse-side surfaces, reverse-camera occlusion and half-orbit depth ordering. A source-matching view is invalid.';
+        const side = offset > 0 ? '+X-facing' : '-X-facing';
+        const hiddenSide = offset > 0 ? '-X-facing' : '+X-facing';
+        const parallax = offset > 0 ? 'screen-left' : 'screen-right';
+        const viewClass = magnitude <= 45 ? 'quarter-orbit' : magnitude <= 90 ? 'side-orbit' : 'rear-quarter orbit';
+        return `REQUIRED NEW PROJECTION: The ${viewClass} must be unmistakable. Reveal ${side} surfaces, hide more ${hiddenSide} surfaces, rebuild occlusions, and shift near layers toward ${parallax} relative to far layers. A source-matching or near-copy view is invalid.`;
+    }
+    function angleSubjectLock(subject){
+        if(subject === 'product') return 'OBJECT CHIRALITY LOCK: Keep asymmetric parts on their physical side. Preserve controls, fasteners, labels, logos and readable non-reversed text.';
+        if(subject === 'scene') return 'SCENE TOPOLOGY LOCK: Keep walls, windows, doors, mirrors, furniture and props at fixed world coordinates. Preserve adjacency; complete newly visible architecture conservatively.';
+        return 'ANATOMICAL CHIRALITY LOCK: Preserve anatomical left/right, head/body/gaze direction, hair part, jewelry side, hand-to-prop assignment, grip and crossed-leg order. Keep the person motionless; let the new camera change facial and body occlusion.';
+    }
+    function buildAnglePrompt(node){
+        normalizeAngle(node);
+        const azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
+        const distance = node.angleDistance === 'close' ? ['近景','close-up'] : node.angleDistance === 'wide' ? ['远景','wide shot'] : ['中景','medium shot'];
+        const subject = node.angleSubject === 'product' ? '产品/物体' : node.angleSubject === 'scene' ? '场景空间' : '人物主体';
+        const preserve = node.anglePreserve
+            ? 'CONTENT LOCK: Preserve identity, facial geometry, proportions, pose, expression, wardrobe, materials, object count, lighting and environment. Preserve physical content, not Image 1 pixel positions.'
+            : 'CONTENT LOCK: Preserve identity, design, world-space pose and scene while reprojecting them from the target camera.';
+        return [
+            DEFAULT_ANGLE_PROMPT,
+            'EXECUTION: Infer a coarse 3D scene from Image 1, discard its 2D projection, then render a fresh image from the target camera.',
+            'CAMERA COORDINATE SYSTEM: Image 1 defines azimuth 0°, elevation 0° and camera-right +X. Every world object remains fixed.',
+            `CAMERA TRANSFORM: ${angleOrbitInstruction(node.angleAzimuth)} Set camera elevation to ${Math.round(node.angleElevation)}° (${elevation[1]}). Target view: ${azimuth[2]}.`,
+            angleParallaxInstruction(node.angleAzimuth),
+            `OPTICS: ${distance[1]}, ${node.angleLens}mm lens. Keep approximately the same subject scale and image region; use the new camera’s perspective and horizon.`,
+            'WORLD COORDINATE LOCK: Preserve each object’s world position, orientation and topology. Screen position may change only by reprojection; never exchange physical left and right.',
+            angleSubjectLock(node.angleSubject),
+            'MIRROR LOCK: Existing mirror/glass stays fixed. Show ray-consistent content only inside it; never add a mirror, reflected room or duplicate subject.',
+            preserve,
+            'VALIDITY TEST: Never flip, mirror or rotate Image 1 in 2D. Each signed orbit is a new camera ray through the same frozen world.',
+            node.angleNotes ? `补充要求：${node.angleNotes.trim()}` : ''
+        ].filter(Boolean).join('\n');
+    }
+    function angleBodyHtml(node){
+        normalizeAngle(node);
+        const output = outputItem(node), preview = output?.url || node.angleSourceUrl || '', azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
+        return `<div class="special-node edit-special angle-special" data-special-node="angle">
+            <input class="special-file-input" type="file" accept="image/*" data-special-file="angle" hidden>
+            <div class="angle-control-shell">
+                <div class="angle-orbit" data-angle-orbit>
+                    <div class="angle-orbit-ring"></div><div class="angle-axis horizontal"></div><div class="angle-axis vertical"></div>
+                    <div class="angle-subject-preview"><img data-edit-preview src="${esc(preview)}" alt="角度调整参考" draggable="false" ${preview ? '' : 'hidden'}><i data-lucide="box" data-angle-empty ${preview ? 'hidden' : ''}></i></div>
+                    <div class="angle-camera-marker" data-angle-marker><i data-lucide="camera"></i></div>
+                    <span class="angle-front-label">正面 0°</span><span class="angle-back-label">背面 180°</span>
+                </div>
+                <div class="angle-readout"><strong data-angle-azimuth>${Math.round(node.angleAzimuth)}° · ${azimuth[1]}</strong><span data-angle-elevation>${Math.round(node.angleElevation)}° · ${elevation[0]}</span></div>
+            </div>
+            <div class="special-toolbar"><button type="button" data-special-action="upload-angle"><i data-lucide="upload"></i><span>导入图片</span></button><span class="special-model-hint"><i data-lucide="cloud-cog"></i>画布默认图片模型</span></div>
+            <div class="angle-preset-row">${ANGLE_AZIMUTHS.map(item => `<button type="button" data-angle-preset="${item[0]}" class="${nearestAzimuth(node.angleAzimuth)[0] === item[0] ? 'active' : ''}">${item[0]}°</button>`).join('')}</div>
+            <div class="special-settings-grid edit-settings-grid">
+                <label class="special-range wide"><span>水平环绕</span><input type="range" min="0" max="359" step="1" value="${node.angleAzimuth}" data-edit-field="angleAzimuth"></label>
+                <label class="special-range wide"><span>俯仰角</span><input type="range" min="-30" max="60" step="1" value="${node.angleElevation}" data-edit-field="angleElevation"></label>
+                <label><span>景别</span><select data-edit-field="angleDistance"><option value="close" ${node.angleDistance === 'close' ? 'selected' : ''}>近景</option><option value="medium" ${node.angleDistance === 'medium' ? 'selected' : ''}>中景</option><option value="wide" ${node.angleDistance === 'wide' ? 'selected' : ''}>远景</option></select></label>
+                <label><span>镜头</span><select data-edit-field="angleLens"><option value="24" ${node.angleLens === '24' ? 'selected' : ''}>24mm 广角</option><option value="35" ${node.angleLens === '35' ? 'selected' : ''}>35mm</option><option value="50" ${node.angleLens === '50' ? 'selected' : ''}>50mm 标准</option><option value="85" ${node.angleLens === '85' ? 'selected' : ''}>85mm 人像</option></select></label>
+                <label><span>对象</span><select data-edit-field="angleSubject"><option value="person" ${node.angleSubject === 'person' ? 'selected' : ''}>人物</option><option value="product" ${node.angleSubject === 'product' ? 'selected' : ''}>产品/物体</option><option value="scene" ${node.angleSubject === 'scene' ? 'selected' : ''}>场景空间</option></select></label>
+            </div>
+            <label class="special-check"><input type="checkbox" data-edit-field="anglePreserve" ${node.anglePreserve ? 'checked' : ''}><span>严格锁定主体身份、造型与环境连续性</span></label>
+            <textarea class="special-prompt" data-edit-field="angleNotes" rows="2" placeholder="可选：补充动作、视线或构图要求">${esc(node.angleNotes)}</textarea>
+            <div class="special-output-row"><span data-edit-status>${output?.url ? `新视角结果已就绪 · ${esc(output.name || 'angle.png')}` : '拖动圆环选机位，点击后才会调用 API'}</span><button type="button" class="special-primary" data-special-action="run-angle" ${node.specialRunning ? 'disabled' : ''}><i data-lucide="${node.specialRunning ? 'loader-2' : 'camera'}"></i><span>${node.specialRunning ? '生成中' : '生成新视角'}</span></button></div>
+        </div>`;
+    }
+
+    function compile(gl, type, source){
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader) || 'WebGL shader failed');
+        return shader;
+    }
+    function panoramaGl(canvas){
+        const gl = canvas.getContext('webgl', {alpha:false, antialias:true, preserveDrawingBuffer:true});
+        if(!gl) throw new Error('当前显卡或浏览器不支持全景取景');
+        const vertex = compile(gl, gl.VERTEX_SHADER, `attribute vec2 p;varying vec2 v;void main(){v=p;gl_Position=vec4(p,0.,1.);}`);
+        const fragment = compile(gl, gl.FRAGMENT_SHADER, `precision highp float;varying vec2 v;uniform sampler2D tex;uniform float aspect;uniform float tanHalf;uniform float yaw;uniform float pitch;const float PI=3.141592653589793;void main(){vec3 d=normalize(vec3(v.x*aspect*tanHalf,v.y*tanHalf,-1.));float cp=cos(pitch),sp=sin(pitch);d=vec3(d.x,cp*d.y-sp*d.z,sp*d.y+cp*d.z);float cy=cos(yaw),sy=sin(yaw);d=vec3(cy*d.x+sy*d.z,d.y,-sy*d.x+cy*d.z);float u=atan(d.x,-d.z)/(2.0*PI)+0.5;float vv=0.5-asin(clamp(d.y,-1.0,1.0))/PI;gl_FragColor=texture2D(tex,vec2(fract(u),clamp(vv,0.001,0.999)));}`);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertex); gl.attachShader(program, fragment); gl.linkProgram(program);
+        if(!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || 'WebGL program failed');
+        gl.useProgram(program);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+        const pos = gl.getAttribLocation(program, 'p');
+        gl.enableVertexAttribArray(pos); gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.uniform1i(gl.getUniformLocation(program, 'tex'), 0);
+        return {gl, program, texture, image:null, signature:'', loading:'', drag:null};
+    }
+    async function loadImage(url, resolveUrl){
+        const src = resolveUrl?.(url) || url;
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = () => reject(new Error('全景图片加载失败'));
+            image.src = src;
+        });
+        return image;
+    }
+    function setPanoramaTexture(state, image){
+        const {gl, texture} = state;
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        state.image = image;
+    }
+    function aspectNumber(value){
+        const [w,h] = String(value || '16:9').split(':').map(Number);
+        return w > 0 && h > 0 ? w / h : 16 / 9;
+    }
+    function fitCanvas(canvas, overlay, node){
+        const stage = canvas.closest('[data-panorama-stage]');
+        const width = Math.max(240, Math.round(stage?.clientWidth || 480));
+        const height = Math.max(150, Math.round(width / aspectNumber(node.panoramaAspect)));
+        stage.style.aspectRatio = String(aspectNumber(node.panoramaAspect));
+        if(canvas.width !== width) canvas.width = width;
+        if(canvas.height !== height) canvas.height = height;
+        if(overlay){ overlay.width = width; overlay.height = height; }
+    }
+    function drawMannequin(ctx, width, height, node){
+        ctx.clearRect(0, 0, width, height);
+        if(!node.mannequinEnabled) return;
+        const scale = clamp(node.mannequinScale, 0.12, 0.7) * height;
+        const x = clamp(node.mannequinX, 0.04, 0.96) * width;
+        const groundY = clamp(node.mannequinY, 0.12, 0.96) * height;
+        const headR = scale * 0.09;
+        const shoulderY = groundY - scale * 0.72;
+        const hipY = groundY - scale * 0.35;
+        ctx.save();
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.shadowColor = 'rgba(0,0,0,.48)'; ctx.shadowBlur = Math.max(3, scale * 0.025);
+        ctx.fillStyle = 'rgba(248,248,248,.88)';
+        ctx.strokeStyle = 'rgba(35,35,35,.82)';
+        ctx.lineWidth = Math.max(2, scale * 0.025);
+        ctx.beginPath(); ctx.arc(x, groundY - scale * 0.86, headR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x - scale*.13, shoulderY); ctx.lineTo(x + scale*.13, shoulderY); ctx.lineTo(x + scale*.1, hipY); ctx.lineTo(x - scale*.1, hipY); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.lineWidth = Math.max(5, scale * 0.065);
+        ctx.beginPath(); ctx.moveTo(x - scale*.11, shoulderY + scale*.04); ctx.lineTo(x - scale*.23, groundY - scale*.43); ctx.lineTo(x - scale*.18, groundY - scale*.25); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + scale*.11, shoulderY + scale*.04); ctx.lineTo(x + scale*.23, groundY - scale*.43); ctx.lineTo(x + scale*.18, groundY - scale*.25); ctx.stroke();
+        ctx.lineWidth = Math.max(6, scale * 0.075);
+        ctx.beginPath(); ctx.moveTo(x - scale*.055, hipY); ctx.lineTo(x - scale*.075, groundY - scale*.16); ctx.lineTo(x - scale*.1, groundY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + scale*.055, hipY); ctx.lineTo(x + scale*.075, groundY - scale*.16); ctx.lineTo(x + scale*.1, groundY); ctx.stroke();
+        ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(24,24,24,.76)'; ctx.font = `700 ${Math.max(10, scale*.07)}px system-ui`; ctx.textAlign = 'center';
+        ctx.fillText('位置参考', x, Math.min(height - 5, groundY + Math.max(13, scale*.1))); ctx.restore();
+    }
+    function renderPanorama(state, canvas, overlay, node){
+        if(!state.image) return;
+        fitCanvas(canvas, overlay, node);
+        const {gl, program} = state;
+        gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(program);
+        gl.uniform1f(gl.getUniformLocation(program, 'aspect'), canvas.width / Math.max(1, canvas.height));
+        gl.uniform1f(gl.getUniformLocation(program, 'tanHalf'), Math.tan(clamp(node.panoramaFov, 35, 100) * Math.PI / 360));
+        gl.uniform1f(gl.getUniformLocation(program, 'yaw'), Number(node.panoramaYaw || 0) * Math.PI / 180);
+        gl.uniform1f(gl.getUniformLocation(program, 'pitch'), Number(node.panoramaPitch || 0) * Math.PI / 180);
+        gl.drawArrays(gl.TRIANGLES, 0, 6); drawMannequin(overlay.getContext('2d'), overlay.width, overlay.height, node);
+    }
+    function updateAngleLabels(root, node){
+        const yaw = root.querySelector('[data-yaw-label]'), pitch = root.querySelector('[data-pitch-label]'), fov = root.querySelector('[data-fov-label]');
+        if(yaw) yaw.textContent = `${Math.round(node.panoramaYaw)}°`; if(pitch) pitch.textContent = `${Math.round(node.panoramaPitch)}°`; if(fov) fov.textContent = `${Math.round(node.panoramaFov)}°`;
+    }
+    async function ensurePanoramaSource(root, state, node, options){
+        const source = panoramaSource(node, options), signature = sourceSignature(source), empty = root.querySelector('[data-panorama-empty]');
+        empty?.classList.toggle('hidden', Boolean(signature));
+        if(!signature || state.signature === signature || state.loading === signature) return;
+        state.loading = signature;
+        try {
+            const image = await loadImage(source.url, options.resolveUrl);
+            if(state.loading !== signature) return;
+            setPanoramaTexture(state, image); state.signature = signature;
+            renderPanorama(state, root.querySelector('.special-panorama-canvas'), root.querySelector('.special-overlay-canvas'), node);
+        } catch(error) { options.toast?.(error.message || '全景图片加载失败'); }
+        finally { if(state.loading === signature) state.loading = ''; }
+    }
+    async function exportReference(root, state, node){
+        if(!state.image) throw new Error('请先导入或连接全景图');
+        const [width,height] = String(node.panoramaResolution || '1280x720').split('x').map(Number);
+        const canvas = root.querySelector('.special-panorama-canvas'), overlay = root.querySelector('.special-overlay-canvas');
+        const old = {w:canvas.width,h:canvas.height,ow:overlay.width,oh:overlay.height};
+        canvas.width = Math.max(320, width || 1280); canvas.height = Math.max(320, height || 720); overlay.width = canvas.width; overlay.height = canvas.height;
+        const {gl, program} = state;
+        gl.viewport(0, 0, canvas.width, canvas.height); gl.useProgram(program);
+        gl.uniform1f(gl.getUniformLocation(program, 'aspect'), canvas.width / canvas.height);
+        gl.uniform1f(gl.getUniformLocation(program, 'tanHalf'), Math.tan(clamp(node.panoramaFov, 35, 100) * Math.PI / 360));
+        gl.uniform1f(gl.getUniformLocation(program, 'yaw'), Number(node.panoramaYaw || 0) * Math.PI / 180);
+        gl.uniform1f(gl.getUniformLocation(program, 'pitch'), Number(node.panoramaPitch || 0) * Math.PI / 180);
+        gl.drawArrays(gl.TRIANGLES, 0, 6); drawMannequin(overlay.getContext('2d'), overlay.width, overlay.height, node);
+        const merged = document.createElement('canvas'); merged.width = canvas.width; merged.height = canvas.height;
+        const ctx = merged.getContext('2d'); ctx.drawImage(canvas, 0, 0); ctx.drawImage(overlay, 0, 0);
+        const blob = await new Promise(resolve => merged.toBlob(resolve, 'image/png'));
+        if(!blob) throw new Error('参考图合成失败');
+        const file = await uploadBlob(blob, `panorama-reference-${Date.now()}.png`); file.natural_w = merged.width; file.natural_h = merged.height;
+        canvas.width = old.w; canvas.height = old.h; overlay.width = old.ow; overlay.height = old.oh; renderPanorama(state, canvas, overlay, node);
+        return file;
+    }
+    function notify(options, node, render=false){ options.onChange?.(node, {render}); }
+    function bindPanorama(root, node, options={}){
+        if(!root || !node) return;
+        normalizePanorama(node);
+        const canvas = root.querySelector('.special-panorama-canvas'), overlay = root.querySelector('.special-overlay-canvas');
+        if(!canvas || !overlay) return;
+        let state;
+        try { state = panoramaStates.get(canvas) || panoramaGl(canvas); } catch(error){ options.toast?.(error.message); return; }
+        panoramaStates.set(canvas, state); ensurePanoramaSource(root, state, node, options);
+        const renderNow = () => { renderPanorama(state, canvas, overlay, node); updateAngleLabels(root, node); };
+        const panoramaFileInput = root.querySelector('[data-special-file="panorama"]');
+        if(panoramaFileInput) panoramaFileInput.onchange = async () => {
+            try {
+                const file = await uploadFile(panoramaFileInput.files?.[0]);
+                node.panoramaSourceUrl = file.url; node.panoramaSourceName = file.name || 'panorama.png';
+                node.panoramaSourceWidth = file.natural_w || 0; node.panoramaSourceHeight = file.natural_h || 0;
+                state.signature = ''; await ensurePanoramaSource(root, state, node, options); notify(options, node, true);
+            } catch(error){ options.toast?.(error.message); }
+            finally { panoramaFileInput.value = ''; }
+        };
+        root.querySelectorAll('[data-special-field]').forEach(control => {
+            control.addEventListener('pointerdown', e => e.stopPropagation());
+            control.addEventListener(control.matches('textarea,input[type="range"]') ? 'input' : 'change', e => {
+                e.stopPropagation(); const key = control.dataset.specialField; let value = control.value;
+                if(key === 'panoramaFov') value = clamp(value, 35, 100); if(key === 'mannequinScale') value = clamp(value, 12, 70) / 100;
+                node[key] = value; renderNow(); notify(options, node, false);
+            });
+        });
+        root.querySelectorAll('[data-special-action]').forEach(button => {
+            button.addEventListener('pointerdown', e => e.stopPropagation());
+            button.addEventListener('click', async e => {
+                e.preventDefault(); e.stopPropagation(); const action = button.dataset.specialAction;
+                try {
+                    if(action === 'upload-panorama'){
+                        panoramaFileInput?.click(); return;
+                    }
+                    if(action === 'generate-panorama'){
+                        if(!options.generatePanorama) throw new Error('当前画布未配置全景生成模型');
+                        node.panoramaGenerating = true; notify(options, node, true);
+                        const file = await options.generatePanorama(node, node.panoramaPrompt || DEFAULT_PANORAMA_PROMPT);
+                        if(!file?.url) throw new Error('全景生成没有返回图片');
+                        node.panoramaSourceUrl = file.url; node.panoramaSourceName = file.name || 'generated-panorama.png'; node.panoramaSourceWidth = file.natural_w || 0; node.panoramaSourceHeight = file.natural_h || 0; node.panoramaGenerating = false; notify(options, node, true); return;
+                    }
+                    if(action === 'toggle-mannequin'){ node.mannequinEnabled = !node.mannequinEnabled; renderNow(); notify(options, node, true); return; }
+                    if(action === 'reset-view'){ node.panoramaYaw = 0; node.panoramaPitch = 0; node.panoramaFov = 72; renderNow(); notify(options, node, true); return; }
+                    if(action === 'export-reference'){
+                        node.panoramaExporting = true; notify(options, node, true); const file = await exportReference(root, state, node);
+                        node.panoramaExporting = false; setOutputItem(node, file, options); notify(options, node, true); options.toast?.('位置参考图已生成，可连接到下游节点');
+                    }
+                } catch(error){ node.panoramaGenerating = false; node.panoramaExporting = false; notify(options, node, true); options.toast?.(error.message || '操作失败'); }
+            });
+        });
+        canvas.addEventListener('pointerdown', e => {
+            if(e.button !== 0 || !state.image) return; e.preventDefault(); e.stopPropagation(); canvas.setPointerCapture?.(e.pointerId);
+            const rect = canvas.getBoundingClientRect(), nx = (e.clientX - rect.left) / Math.max(1, rect.width), ny = (e.clientY - rect.top) / Math.max(1, rect.height);
+            const mannequinHit = node.mannequinEnabled && Math.abs(nx - node.mannequinX) < node.mannequinScale * .28 && Math.abs(ny - node.mannequinY + node.mannequinScale * .42) < node.mannequinScale * .55;
+            state.drag = {x:e.clientX,y:e.clientY,yaw:Number(node.panoramaYaw)||0,pitch:Number(node.panoramaPitch)||0,mannequin:mannequinHit,pointerId:e.pointerId,moved:false};
+        });
+        canvas.addEventListener('pointermove', e => {
+            if(!state.drag || state.drag.pointerId !== e.pointerId) return; e.preventDefault(); e.stopPropagation(); const rect = canvas.getBoundingClientRect();
+            state.drag.moved = state.drag.moved || Math.abs(e.clientX - state.drag.x) + Math.abs(e.clientY - state.drag.y) > 3;
+            if(state.drag.mannequin){ node.mannequinX = clamp((e.clientX - rect.left) / Math.max(1, rect.width), .04, .96); node.mannequinY = clamp((e.clientY - rect.top) / Math.max(1, rect.height), .12, .96); }
+            else { node.panoramaYaw = state.drag.yaw - (e.clientX - state.drag.x) * .2; node.panoramaPitch = clamp(state.drag.pitch + (e.clientY - state.drag.y) * .18, -85, 85); }
+            renderNow();
+        });
+        const finish = e => { if(!state.drag) return; canvas.releasePointerCapture?.(state.drag.pointerId); state.lastDragMoved = Boolean(state.drag.moved); state.drag = null; notify(options, node, false); e?.stopPropagation?.(); };
+        canvas.addEventListener('pointerup', finish); canvas.addEventListener('pointercancel', finish);
+        canvas.addEventListener('click', e => { if(state.lastDragMoved){ state.lastDragMoved = false; return; } if(!node.mannequinEnabled) return; const rect = canvas.getBoundingClientRect(); node.mannequinX = clamp((e.clientX - rect.left) / Math.max(1, rect.width), .04, .96); node.mannequinY = clamp((e.clientY - rect.top) / Math.max(1, rect.height), .12, .96); renderNow(); notify(options, node, false); e.stopPropagation(); });
+        canvas.addEventListener('wheel', e => { if(!state.image) return; e.preventDefault(); e.stopPropagation(); node.panoramaFov = clamp(Number(node.panoramaFov || 72) + Math.sign(e.deltaY) * 3, 35, 100); const slider = root.querySelector('[data-special-field="panoramaFov"]'); if(slider) slider.value = node.panoramaFov; renderNow(); notify(options, node, false); }, {passive:false});
+        window.requestAnimationFrame(renderNow);
+    }
+
+    async function runPose(node, options, force=false){
+        const source = poseSource(node, options), signature = sourceSignature(source);
+        if(!signature) return; if(!force && node.poseSourceSignature === signature && outputItem(node)?.url) return;
+        const taskKey = `${options.canvasKey || 'canvas'}:${node.id}`; if(poseTasks.has(taskKey)) return poseTasks.get(taskKey);
+        const task = (async () => {
+            node.poseStatus = 'running'; node.poseError = ''; notify(options, node, true);
+            try {
+                const sourceUrl = options.resolveUrl?.(source.url) || source.url, imageResponse = await fetch(sourceUrl);
+                if(!imageResponse.ok) throw new Error('人物图片读取失败');
+                const imageBlob = await imageResponse.blob(), form = new FormData(); form.append('file', imageBlob, source.name || 'pose-source.png');
+                const response = await fetch('/api/dwpose/detect', {method:'POST', body:form});
+                if(!response.ok) throw new Error(await responseError(response, 'DWPose 动作提取失败'));
+                const people = Number(response.headers.get('X-DWPose-People') || 0), blob = await response.blob(), file = await uploadBlob(blob, `dwpose-${Date.now()}.png`);
+                file.natural_w = source.natural_w || 0; file.natural_h = source.natural_h || 0; node.poseSourceSignature = signature; node.posePeople = people; node.poseStatus = 'done'; node.poseError = '';
+                setOutputItem(node, file, options); notify(options, node, true); options.toast?.(people > 0 ? `已提取 ${people} 人骨架` : '未检测到人物，已输出空骨架图'); return file;
+            } catch(error) { node.poseStatus = 'failed'; node.poseError = error.message || '动作提取失败'; notify(options, node, true); throw error; }
+            finally { poseTasks.delete(taskKey); }
+        })();
+        poseTasks.set(taskKey, task); return task;
+    }
+    function bindPose(root, node, options={}){
+        if(!root || !node) return;
+        const poseFileInput = root.querySelector('[data-special-file="dwpose"]');
+        if(poseFileInput) poseFileInput.onchange = async () => {
+            try {
+                const file = await uploadFile(poseFileInput.files?.[0]);
+                node.poseSourceUrl = file.url; node.poseSourceName = file.name || 'pose-source.png';
+                node.poseSourceWidth = file.natural_w || 0; node.poseSourceHeight = file.natural_h || 0;
+                delete node.poseSourceSignature; notify(options, node, true);
+                runPose(node, options, true).catch(error => options.toast?.(error.message));
+            } catch(error){ options.toast?.(error.message); }
+            finally { poseFileInput.value = ''; }
+        };
+        root.querySelectorAll('[data-special-action]').forEach(button => {
+            button.addEventListener('pointerdown', e => e.stopPropagation());
+            button.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation(); const action = button.dataset.specialAction;
+                if(action === 'upload-pose'){
+                    poseFileInput?.click(); return;
+                }
+                if(action === 'retry-pose'){ delete node.poseSourceSignature; runPose(node, options, true).catch(error => options.toast?.(error.message)); }
+            });
+        });
+        runPose(node, options, false).catch(() => {});
+    }
+
+    function relightControlSignature(node){
+        return [node.relightDirection,node.relightTemperature,node.relightIntensity,node.relightSoftness,node.relightMood,node.relightPreserve,node.relightNotes].join('|');
+    }
+    function editControlSignature(node, prefix){
+        return prefix === 'relight' ? relightControlSignature(normalizeRelight(node)) : angleControlSignature(normalizeAngle(node));
+    }
+    function editPrompt(node, prefix){ return prefix === 'relight' ? buildRelightPrompt(node) : buildAnglePrompt(node); }
+    function updateRelightPreview(root, node){
+        const overlay = root.querySelector('[data-relight-overlay]');
+        if(!overlay) return;
+        const temperature = Number(node.relightTemperature || 0);
+        const color = temperature < -10 ? '104,166,255' : temperature > 10 ? '255,178,92' : '255,244,222';
+        overlay.style.setProperty('--relight-color', color);
+        overlay.style.setProperty('--relight-opacity', String(0.12 + clamp(node.relightIntensity, 10, 100) / 220));
+        overlay.dataset.direction = node.relightDirection;
+        const temp = root.querySelector('[data-relight-temperature]'), intensity = root.querySelector('[data-relight-intensity]');
+        if(temp) temp.textContent = relightTemperatureText(node.relightTemperature);
+        if(intensity) intensity.textContent = `${Math.round(node.relightIntensity)}%`;
+    }
+    function updateAnglePreview(root, node){
+        const marker = root.querySelector('[data-angle-marker]');
+        if(marker){
+            const radians = Number(node.angleAzimuth || 0) * Math.PI / 180;
+            marker.style.left = `${50 + Math.sin(radians) * 42}%`;
+            marker.style.top = `${50 - Math.cos(radians) * 42}%`;
+            marker.style.transform = `translate(-50%,-50%) rotate(${Math.round(node.angleAzimuth)}deg)`;
+        }
+        const azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
+        const azimuthEl = root.querySelector('[data-angle-azimuth]'), elevationEl = root.querySelector('[data-angle-elevation]');
+        if(azimuthEl) azimuthEl.textContent = `${Math.round(node.angleAzimuth)}° · ${azimuth[1]}`;
+        if(elevationEl) elevationEl.textContent = `${Math.round(node.angleElevation)}° · ${elevation[0]}`;
+        root.querySelectorAll('[data-angle-preset]').forEach(button => button.classList.toggle('active', Number(button.dataset.anglePreset) === azimuth[0]));
+    }
+    function updateEditPreview(root, node, options, prefix, source){
+        const output = outputItem(node), item = output || source, image = root.querySelector('[data-edit-preview]');
+        if(image){
+            if(item?.url){ image.src = options.resolveUrl?.(item.url) || item.url; image.hidden = false; }
+            else { image.removeAttribute('src'); image.hidden = true; }
+        }
+        root.querySelector('[data-edit-empty]')?.toggleAttribute('hidden', Boolean(item?.url));
+        root.querySelector('[data-angle-empty]')?.toggleAttribute('hidden', Boolean(item?.url));
+        root.querySelector('[data-edit-stage]')?.classList.toggle('has-source', Boolean(item?.url));
+        const relightOverlay = root.querySelector('[data-relight-overlay]');
+        if(relightOverlay) relightOverlay.hidden = Boolean(output?.url);
+        const badge = root.querySelector('[data-edit-badge]');
+        if(badge) badge.textContent = output?.url ? 'API 结果' : '实时灯光示意';
+        if(prefix === 'relight') updateRelightPreview(root, node); else updateAnglePreview(root, node);
+    }
+    function markEditChanged(root, node, options, prefix, source){
+        if(outputItem(node)?.url) clearOutputItem(node, options);
+        const status = root.querySelector('[data-edit-status]');
+        if(status) status.textContent = source?.url ? '参数已更新，点击生成后输出新结果' : '请先连接或导入图片';
+        updateEditPreview(root, node, options, prefix, source);
+        notify(options, node, false);
+    }
+    function bindEditNode(root, node, options, prefix){
+        if(!root || !node) return;
+        if(prefix === 'relight') normalizeRelight(node); else normalizeAngle(node);
+        let source = editSource(node, options, prefix);
+        const sourceSig = sourceSignature(source), controlSig = editControlSignature(node, prefix), output = outputItem(node);
+        if(output?.url && ((node.specialGeneratedSourceSignature && node.specialGeneratedSourceSignature !== sourceSig) || (node.specialGeneratedControlSignature && node.specialGeneratedControlSignature !== controlSig))){
+            clearOutputItem(node, options);
+            notify(options, node, true);
+        }
+        updateEditPreview(root, node, options, prefix, source);
+        const fileInput = root.querySelector(`[data-special-file="${prefix}"]`);
+        if(fileInput) fileInput.onchange = async () => {
+            try {
+                const file = await uploadFile(fileInput.files?.[0]);
+                node[`${prefix}SourceUrl`] = file.url; node[`${prefix}SourceName`] = file.name || `${prefix}-source.png`;
+                node[`${prefix}SourceWidth`] = file.natural_w || 0; node[`${prefix}SourceHeight`] = file.natural_h || 0;
+                clearOutputItem(node, options); source = editSource(node, options, prefix); notify(options, node, true);
+            } catch(error){ options.toast?.(error.message); }
+            finally { fileInput.value = ''; }
+        };
+        root.querySelectorAll('[data-edit-field]').forEach(control => {
+            control.addEventListener('pointerdown', event => event.stopPropagation());
+            const eventName = control.matches('textarea,input[type="range"]') ? 'input' : 'change';
+            control.addEventListener(eventName, event => {
+                event.stopPropagation(); const key = control.dataset.editField;
+                let value = control.type === 'checkbox' ? control.checked : control.value;
+                if(['relightTemperature','relightIntensity','angleAzimuth','angleElevation'].includes(key)) value = Number(value);
+                node[key] = value; source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+            });
+        });
+        root.querySelectorAll('[data-relight-direction]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+            button.addEventListener('click', event => {
+                event.preventDefault(); event.stopPropagation(); node.relightDirection = button.dataset.relightDirection;
+                root.querySelectorAll('[data-relight-direction]').forEach(item => item.classList.toggle('active', item === button));
+                source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+            });
+        });
+        root.querySelectorAll('[data-angle-preset]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+            button.addEventListener('click', event => {
+                event.preventDefault(); event.stopPropagation(); node.angleAzimuth = Number(button.dataset.anglePreset || 0);
+                const slider = root.querySelector('[data-edit-field="angleAzimuth"]'); if(slider) slider.value = node.angleAzimuth;
+                source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+            });
+        });
+        const orbit = root.querySelector('[data-angle-orbit]');
+        if(orbit){
+            const updateOrbit = event => {
+                const rect = orbit.getBoundingClientRect(), dx = event.clientX - rect.left - rect.width / 2, dy = event.clientY - rect.top - rect.height / 2;
+                node.angleAzimuth = ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360;
+                const slider = root.querySelector('[data-edit-field="angleAzimuth"]'); if(slider) slider.value = Math.round(node.angleAzimuth);
+                source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+            };
+            orbit.addEventListener('pointerdown', event => { if(event.button !== 0) return; event.preventDefault(); event.stopPropagation(); orbit.setPointerCapture?.(event.pointerId); orbit.dataset.dragging = String(event.pointerId); updateOrbit(event); });
+            orbit.addEventListener('pointermove', event => { if(orbit.dataset.dragging !== String(event.pointerId)) return; event.preventDefault(); event.stopPropagation(); updateOrbit(event); });
+            const finish = event => { if(orbit.dataset.dragging !== String(event.pointerId)) return; orbit.releasePointerCapture?.(event.pointerId); delete orbit.dataset.dragging; event.stopPropagation(); };
+            orbit.addEventListener('pointerup', finish); orbit.addEventListener('pointercancel', finish);
+        }
+        root.querySelectorAll('[data-special-action]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+            button.addEventListener('click', async event => {
+                event.preventDefault(); event.stopPropagation(); const action = button.dataset.specialAction;
+                if(action === `upload-${prefix}`){ fileInput?.click(); return; }
+                if(action !== `run-${prefix}`) return;
+                try {
+                    source = editSource(node, options, prefix);
+                    if(!source?.url) throw new Error('请先连接或导入一张图片');
+                    if(!options.generateImageEdit) throw new Error('当前画布未配置图片 API 生成能力');
+                    node.specialRunning = true; notify(options, node, true);
+                    const generatedSourceSignature = sourceSignature(source), generatedControlSignature = editControlSignature(node, prefix);
+                    const file = await options.generateImageEdit(node, editPrompt(node, prefix), source, prefix);
+                    if(!file?.url) throw new Error('图片 API 没有返回生成结果');
+                    node.specialRunning = false; node.specialGeneratedSourceSignature = generatedSourceSignature; node.specialGeneratedControlSignature = generatedControlSignature;
+                    setOutputItem(node, file, options); notify(options, node, true); options.toast?.(prefix === 'relight' ? '灯光重塑已完成，可连接到下游节点' : '新视角已生成，可连接到下游节点');
+                } catch(error){ node.specialRunning = false; notify(options, node, true); options.toast?.(error.message || '图片生成失败'); }
+            });
+        });
+    }
+    function bindRelight(root, node, options={}){ bindEditNode(root, node, options, 'relight'); }
+    function bindAngle(root, node, options={}){ bindEditNode(root, node, options, 'angle'); }
+
+    window.CanvasSpecialNodes = {
+        DEFAULT_PANORAMA_PROMPT, DEFAULT_RELIGHT_PROMPT, DEFAULT_ANGLE_PROMPT,
+        panoramaBodyHtml, poseBodyHtml, relightBodyHtml, angleBodyHtml,
+        bindPanorama, bindPose, bindRelight, bindAngle,
+        buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle
+    };
+})();

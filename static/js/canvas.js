@@ -1486,6 +1486,10 @@ function serializableCanvasNode(node){
     delete copy._blenderState;
     delete copy._blenderStatusRequested;
     delete copy._blenderConnecting;
+    delete copy.panoramaGenerating;
+    delete copy.panoramaExporting;
+    delete copy.specialRunning;
+    if(copy.poseStatus === 'running') copy.poseStatus = 'idle';
     return copy;
 }
 function serializableCanvasNodes(list=nodes){
@@ -2680,6 +2684,36 @@ function addH3VideoNode(point){
     scheduleSave();
     return node;
 }
+function addPanoramaNode(point){
+    const p = point || defaultPoint(80, 0);
+    return addNode({
+        id:uid('pano'), type:'panorama', x:p.x, y:p.y, w:520, h:520,
+        panoramaPrompt:window.CanvasSpecialNodes?.DEFAULT_PANORAMA_PROMPT || '',
+        panoramaYaw:0, panoramaPitch:0, panoramaFov:72, panoramaAspect:'16:9',
+        panoramaResolution:'1280x720', mannequinEnabled:false, mannequinX:0.5,
+        mannequinY:0.68, mannequinScale:0.32
+    });
+}
+function addDWPoseNode(point){
+    const p = point || defaultPoint(100, 20);
+    return addNode({id:uid('pose'), type:'dwpose', x:p.x, y:p.y, w:380, h:390, poseStatus:'idle'});
+}
+function addRelightNode(point){
+    const p = point || defaultPoint(120, 40);
+    return addNode({
+        id:uid('relight'), type:'relight', x:p.x, y:p.y, w:460, h:590,
+        relightDirection:'left', relightTemperature:18, relightIntensity:68,
+        relightSoftness:'balanced', relightMood:'cinematic', relightPreserve:true, relightNotes:''
+    });
+}
+function addAngleNode(point){
+    const p = point || defaultPoint(140, 60);
+    return addNode({
+        id:uid('angle'), type:'angle', x:p.x, y:p.y, w:460, h:660,
+        angleAzimuth:45, angleElevation:0, angleDistance:'medium', angleLens:'50',
+        angleSubject:'person', anglePreserve:true, angleNotes:''
+    });
+}
 function addBlenderDirectorNode(point){
     const p = point || defaultPoint(200, 0);
     const node = addNode({
@@ -3404,7 +3438,7 @@ function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
     if(!node) return [];
     if(state.originKind === 'out'){
-        if(['image','prompt','loop','group','promptGroup','llm','output'].includes(node.type)){
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','relight','angle'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
@@ -3413,13 +3447,16 @@ function linkCreateOptions(state){
         }
         return [];
     }
-    if(CANVAS_GENERATOR_TYPES.includes(node.type) || node.type === 'llm'){
+    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','relight','angle'].includes(node.type)){
         return [
             {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
             {type:'loop', label:tr('canvas.loopNode'), icon:'repeat-2'},
             {type:'group', label:tr('canvas.group'), icon:'group'},
-            {type:'llm', label:'LLM', icon:'message-square-text'}
+            {type:'llm', label:'LLM', icon:'message-square-text'},
+            {type:'panorama', label:'720°取景器', icon:'scan-line'},
+            {type:'dwpose', label:'动作提取', icon:'person-standing'},
+            {type:'relight', label:'灯光重塑', icon:'sun-medium'}
         ];
     }
     return [];
@@ -3776,6 +3813,9 @@ function createNodeByType(type, point){
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'video') return addVideoNode(point);
     if(type === 'h3-video') return addH3VideoNode(point);
+    if(type === 'panorama') return addPanoramaNode(point);
+    if(type === 'dwpose') return addDWPoseNode(point);
+    if(type === 'relight') return addRelightNode(point);
     if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
     if(type === 'output') return addOutputNode(point);
@@ -3790,6 +3830,9 @@ function menuAdd(type){
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
     if(type === 'h3-video') addH3VideoNode(menuPoint);
+    if(type === 'panorama') addPanoramaNode(menuPoint);
+    if(type === 'dwpose') addDWPoseNode(menuPoint);
+    if(type === 'relight') addRelightNode(menuPoint);
     if(type === 'blenderDirector') addBlenderDirectorNode(menuPoint);
     if(type === 'rh') addRhNode(menuPoint);
     if(type === 'output') addOutputNode(menuPoint);
@@ -6455,6 +6498,89 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
+function classicSpecialInputImage(node){
+    const sources = connections
+        .filter(connection => connection.to === node.id)
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .filter(Boolean)
+        .reverse();
+    for(const source of sources){
+        const ref = mediaRefsFromNode(source).find(item => item?.url && (item.kind || 'image') === 'image');
+        if(ref) return ref;
+    }
+    return null;
+}
+async function generateClassicPanorama(node, prompt){
+    const providerId = imageApiProviders()[0]?.id || '';
+    const model = allImageModels(providerId)[0] || '';
+    if(!providerId || !model) throw new Error('请先在 API 设置中配置图片生成模型');
+    const payload = {
+        prompt,
+        provider_id:resolveImageProviderId(providerId),
+        model:resolveImageModel(model),
+        size:apiImageSize('custom', '2k', '2:1', ''),
+        quality:'high',
+        reference_images:[]
+    };
+    const task = await createCanvasImageTask(payload);
+    const result = await waitCanvasImageTaskResult(task.task_id);
+    const raw = result?.images?.[0] || result?.image_items?.[0] || resultMediaUrls(result)[0];
+    const url = outputUrlValue(raw);
+    if(!url) throw new Error('全景生成没有返回图片');
+    return raw && typeof raw === 'object'
+        ? {...raw, url, name:raw.name || 'generated-panorama.png', kind:'image'}
+        : {url, name:'generated-panorama.png', kind:'image'};
+}
+async function generateClassicSpecialEdit(node, prompt, source, kind){
+    const providerId = imageApiProviders()[0]?.id || '';
+    const model = allImageModels(providerId)[0] || '';
+    if(!providerId || !model) throw new Error('请先在 API 设置中配置图片生成模型');
+    let width = Number(source?.natural_w || 0), height = Number(source?.natural_h || 0);
+    if((!width || !height) && source?.url){
+        try { const dimensions = await getImageDimensions(source.url); width = dimensions.width; height = dimensions.height; } catch(_) {}
+    }
+    const ratioParts = width > 0 && height > 0 ? ratioPartsFromDimensions(width, height) : {width:1, height:1};
+    const payload = {
+        prompt,
+        provider_id:resolveImageProviderId(providerId),
+        model:resolveImageModel(model),
+        size:apiImageSize('custom', '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
+        quality:'high',
+        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}]
+    };
+    const task = await createCanvasImageTask(payload);
+    const result = await waitCanvasImageTaskResult(task.task_id);
+    const raw = result?.images?.[0] || result?.image_items?.[0] || resultMediaUrls(result)[0];
+    const url = outputUrlValue(raw);
+    if(!url) throw new Error(kind === 'relight' ? '灯光重塑没有返回图片' : '角度调整没有返回图片');
+    const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
+    return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
+}
+function bindClassicSpecialNode(el, node){
+    const api = window.CanvasSpecialNodes;
+    if(!api) return;
+    const options = {
+        smart:false,
+        canvasKey:`classic:${canvas?.id || ''}`,
+        getInputImage:classicSpecialInputImage,
+        resolveUrl:url => canvasDisplayMediaUrl(url, ''),
+        generatePanorama:generateClassicPanorama,
+        generateImageEdit:generateClassicSpecialEdit,
+        toast:message => setStatus(String(message || '').slice(0, 120)),
+        onChange:(_changed, meta={}) => {
+            scheduleSave();
+            if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); }, 0);
+        },
+        onOutput:() => {
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        }
+    };
+    if(node.type === 'panorama') api.bindPanorama(el, node, options);
+    if(node.type === 'dwpose') api.bindPose(el, node, options);
+    if(node.type === 'relight') api.bindRelight(el, node, options);
+    if(node.type === 'angle') api.bindAngle(el, node, options);
+}
 function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
@@ -6481,7 +6607,7 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh','blenderDirector'].includes(node.type) && node.runStatus
@@ -6640,6 +6766,10 @@ function renderNode(node){
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
+    if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
+    if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
+    if(node.type === 'relight') body.innerHTML = window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="muted-note">灯光重塑节点加载失败</div>';
+    if(node.type === 'angle') body.innerHTML = window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="muted-note">角度调整节点加载失败</div>';
     if(node.type === 'comfy' || node.type === 'ltxDirector') {
         body.innerHTML = '<div class="muted-note">本地生成功能已移除，此历史节点仅保留用于识别旧画布。</div>';
     }
@@ -6662,8 +6792,8 @@ function renderNode(node){
         if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
         startNodeDrag(e, node);
     };
-    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output'].includes(node.type);
+    const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','panorama','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output','panorama','dwpose','relight','angle'].includes(node.type);
     if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -6685,6 +6815,7 @@ function renderNode(node){
     if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'out'); };
     const inp = el.querySelector('.port.in');
     if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in'); };
+    if(['panorama','dwpose','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -6840,6 +6971,10 @@ function defaultNodeSize(type){
     if(type === 'comfy') return {w:420, h:460};
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
+    if(type === 'panorama') return {w:520, h:520};
+    if(type === 'dwpose') return {w:380, h:390};
+    if(type === 'relight') return {w:460, h:590};
+    if(type === 'angle') return {w:460, h:660};
     return {w:260, h:0};
 }
 function loopCount(node){
@@ -10456,6 +10591,10 @@ function mediaRefsFromNode(node){
             return {url, name:outputImageName(url) || `output-${i + 1}`, kind, nodeId:node.id, outputIndex:i};
         }).filter(Boolean);
     }
+    if(['panorama','dwpose','relight','angle'].includes(node.type)){
+        const item = window.CanvasSpecialNodes?.outputItem(node);
+        return item?.url ? [{url:item.url, name:item.name || `${node.type}.png`, kind:'image'}] : [];
+    }
     if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node);
     return [];
 }
@@ -10483,6 +10622,11 @@ function generatorSources(gen){
                     prompt:''
                 }));
             }
+        }
+        if(['panorama','dwpose','relight','angle'].includes(n.type)){
+            const refs = mediaRefsFromNode(n);
+            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'relight' ? '灯光重塑结果' : '新视角结果';
+            if(refs.length) return {id:n.id, type:n.type, label, preview:refs[0].url, refs, prompt:''};
         }
         if(n.type === 'image' && n.url) {
             const kind = mediaKindForNode(n);
@@ -14161,6 +14305,7 @@ function canConnect(fromId, toId){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    const specialTypes = ['panorama','dwpose','relight','angle'];
     if(from.type === 'blenderDirector'){
         if(to.type === 'output') return true;
         if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId);
@@ -14168,10 +14313,17 @@ function canConnect(fromId, toId){
     }
     if(CANVAS_GENERATOR_TYPES.includes(from.type)){
         if(to.type === 'output') return true;
+        if(specialTypes.includes(to.type) && CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type)) return true;
         if(CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type) && CANVAS_GENERATOR_TYPES.includes(to.type)){
             return !wouldCreateGeneratorCycle(fromId, toId);
         }
         return false;
+    }
+    if(specialTypes.includes(to.type)) return ['image','group','output','panorama','dwpose','relight','angle'].includes(from.type);
+    if(specialTypes.includes(from.type)){
+        if(to.type === 'output') return true;
+        if(to.type === 'loop') return Boolean(to.imageInput);
+        return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
     }
     if(to.type === 'loop'){
         const allowImage = Boolean(to.imageInput) && ['image','group','output'].includes(from.type);
@@ -14180,7 +14332,7 @@ function canConnect(fromId, toId){
     }
     if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm'].includes(from.type);
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','relight','angle'].includes(from.type);
 }
 function sanitizeConnections(){
     connections = (connections || []).filter(c => canConnect(c.from, c.to));

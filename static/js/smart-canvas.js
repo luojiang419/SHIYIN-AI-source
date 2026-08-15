@@ -720,6 +720,10 @@ function canvasForStorage(){
     (clean.nodes || []).forEach(node => {
         if(Array.isArray(node.images)) node.images = node.images.map(img => mediaItemForStorage(stripImageGenerationMeta(img)));
         if(node.runSettings) node.runSettings = settingsForStorage(node.runSettings);
+        delete node.panoramaGenerating;
+        delete node.panoramaExporting;
+        delete node.specialRunning;
+        if(node.poseStatus === 'running') node.poseStatus = 'idle';
     });
     return clean;
 }
@@ -993,7 +997,7 @@ function isSmartGroupNode(node){
     return Boolean(node && node.type === 'smart-group');
 }
 function isSmartRunnableNode(node){
-    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
+    return Boolean((isSmartImageNode(node) && !node?.specialType) || isSmartGroupNode(node));
 }
 function isHistoryGroupNode(node){
     return Boolean(isSmartImageNode(node) && (node.isHistoryGroup || node.historyFor));
@@ -1331,6 +1335,54 @@ function createH3VideoNode(point){
     render();
     scheduleSave();
     return created;
+}
+function createPanoramaNode(point){
+    pushUndo();
+    const node = {
+        id:uid('pano'), type:'smart-image', specialType:'panorama',
+        x:(point?.x || 0) - 260, y:(point?.y || 0) - 260, w:520, h:520,
+        title:'720°取景器', images:[], created_at:Date.now(),
+        panoramaPrompt:window.CanvasSpecialNodes?.DEFAULT_PANORAMA_PROMPT || '',
+        panoramaYaw:0, panoramaPitch:0, panoramaFov:72, panoramaAspect:'16:9',
+        panoramaResolution:'1280x720', mannequinEnabled:false, mannequinX:0.5,
+        mannequinY:0.68, mannequinScale:0.32, scale:MEDIA_NODE_DEFAULT_SCALE
+    };
+    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    render(); scheduleSave(); return node;
+}
+function createDWPoseNode(point){
+    pushUndo();
+    const node = {
+        id:uid('pose'), type:'smart-image', specialType:'dwpose',
+        x:(point?.x || 0) - 190, y:(point?.y || 0) - 195, w:380, h:390,
+        title:'动作提取', images:[], poseStatus:'idle', scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+    };
+    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    render(); scheduleSave(); return node;
+}
+function createRelightNode(point){
+    pushUndo();
+    const node = {
+        id:uid('relight'), type:'smart-image', specialType:'relight',
+        x:(point?.x || 0) - 230, y:(point?.y || 0) - 295, w:460, h:590,
+        title:'灯光重塑', images:[], created_at:Date.now(), scale:MEDIA_NODE_DEFAULT_SCALE,
+        relightDirection:'left', relightTemperature:18, relightIntensity:68,
+        relightSoftness:'balanced', relightMood:'cinematic', relightPreserve:true, relightNotes:''
+    };
+    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    render(); scheduleSave(); return node;
+}
+function createAngleNode(point){
+    pushUndo();
+    const node = {
+        id:uid('angle'), type:'smart-image', specialType:'angle',
+        x:(point?.x || 0) - 230, y:(point?.y || 0) - 330, w:460, h:660,
+        title:'角度调整', images:[], created_at:Date.now(), scale:MEDIA_NODE_DEFAULT_SCALE,
+        angleAzimuth:45, angleElevation:0, angleDistance:'medium', angleLens:'50',
+        angleSubject:'person', anglePreserve:true, angleNotes:''
+    };
+    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    render(); scheduleSave(); return node;
 }
 function smartGroupLayoutSize(node){
     const explicitW = Number(node?.w);
@@ -1868,6 +1920,10 @@ function smartGroupImageGridLayout(node){
     return {cols, rows, visibleRows, width, height, thumb:baseThumb};
 }
 function imageLayout(images, scale=1, node=null){
+    if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
+    if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
+    if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
+    if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
     if(node?.type === 'smart-group'){
         const groupThumbLayout = smartGroupThumbLayout(node);
         if(groupThumbLayout) return groupThumbLayout;
@@ -7230,6 +7286,10 @@ function smartGroupBodyHtml(node){
     </div>`;
 }
 function nodeBodyHtml(node, layout){
+    if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
+    if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
+    if(node.specialType === 'relight') return window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="smart-group-empty">灯光重塑节点加载失败</div>';
+    if(node.specialType === 'angle') return window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="smart-group-empty">角度调整节点加载失败</div>';
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
@@ -7302,6 +7362,7 @@ function smartNodeToolbarImageIndex(node){
     return 0;
 }
 function smartNodeToolbarHtml(node){
+    if(node?.specialType) return '';
     const isImageNode = node?.type === 'smart-image' || !node?.type;
     const images = node?.images || [];
     if(!isImageNode || !images.some(img => img?.url)) return '';
@@ -7502,7 +7563,7 @@ function render(){
         .sort((a, b) => (isSmartGroupNode(a) ? 0 : 1) - (isSmartGroupNode(b) ? 0 : 1))
         .map(node => {
         const imgs = node.images || [];
-        const title = node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(imgs, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -7510,16 +7571,17 @@ function render(){
         const isSmartGroup = node.type === 'smart-group';
         const isCompactMember = isSmartGroupCompactMember(node);
         const isImageNode = node.type === 'smart-image' || !node.type;
+        const isSpecial = Boolean(node.specialType);
         const isJimengPending = Boolean(node.jimengPending && node.jimengPending.submitId && imgs.length === 0);
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
-        const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
+        const isEmpty = !isSpecial && isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
         const isHistory = isHistoryGroupNode(node);
         const isGroup = isImageNode && imgs.length > 1;
         const isPending = ((node.pending || isQueued || isJimengPending) && imgs.length === 0);
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        const hint = isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
+        const html = `<div class="image-node ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
@@ -7527,7 +7589,7 @@ function render(){
             <div class="node-body">${body}</div>
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
-            ${imgs.length || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
+            ${imgs.length || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
             <div class="node-port port-in" data-port="in" title="input"></div>
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
@@ -8125,10 +8187,81 @@ function pickMediaForSmartNode(nodeId){
     document.body.appendChild(input);
     input.click();
 }
+function smartSpecialInputImage(node){
+    return inputImagesFor(node).find(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image') || null;
+}
+async function generateSmartPanorama(node, prompt){
+    const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
+    const runSettings = {
+        ...base,
+        engine:'api', apiKind:'image', ratio:'custom', resolution:'2k',
+        customRatio:'2:1', customRatioWidth:2, customRatioHeight:1,
+        customSize:'', customWidth:'', customHeight:'', quality:'high', count:1
+    };
+    if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
+    const task = await runApiGeneration(prompt, [], runSettings);
+    const taskId = task?.taskIds?.[0];
+    if(!taskId) throw new Error('全景生成任务创建失败');
+    const result = await pollSmartCanvasTask(taskId);
+    const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
+    const url = typeof raw === 'string' ? raw : raw?.url || '';
+    if(!url) throw new Error('全景生成没有返回图片');
+    return raw && typeof raw === 'object'
+        ? {...raw, url, name:raw.name || 'generated-panorama.png', kind:'image'}
+        : {url, name:'generated-panorama.png', kind:'image'};
+}
+async function generateSmartSpecialEdit(node, prompt, source, kind){
+    const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
+    const width = Math.max(0, Number(source?.natural_w || 0)), height = Math.max(0, Number(source?.natural_h || 0));
+    const divisor = width > 0 && height > 0 ? gcdInt(Math.round(width), Math.round(height)) : 1;
+    const ratio = width > 0 && height > 0 ? `${Math.round(width / divisor)}:${Math.round(height / divisor)}` : (base.customRatio || '1:1');
+    const runSettings = {
+        ...base,
+        engine:'api', apiKind:'image', ratio:'custom', resolution:'2k',
+        customRatio:ratio, customRatioWidth:ratio.split(':')[0], customRatioHeight:ratio.split(':')[1],
+        customSize:'', customWidth:'', customHeight:'', quality:'high', count:1
+    };
+    if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
+    const task = await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
+    const taskId = task?.taskIds?.[0];
+    if(!taskId) throw new Error(kind === 'relight' ? '灯光重塑任务创建失败' : '角度调整任务创建失败');
+    const result = await pollSmartCanvasTask(taskId);
+    const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
+    const url = typeof raw === 'string' ? raw : raw?.url || '';
+    if(!url) throw new Error(kind === 'relight' ? '灯光重塑没有返回图片' : '角度调整没有返回图片');
+    const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
+    return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
+}
+function bindSmartSpecialNode(el, node){
+    const api = window.CanvasSpecialNodes;
+    if(!api || !node?.specialType) return;
+    const options = {
+        smart:true,
+        canvasKey:`smart:${canvas?.id || ''}`,
+        getInputImage:smartSpecialInputImage,
+        resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
+        generatePanorama:generateSmartPanorama,
+        generateImageEdit:generateSmartSpecialEdit,
+        toast:message => toast(String(message || '').slice(0, 120)),
+        onChange:(_changed, meta={}) => {
+            scheduleSave();
+            if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); }, 0);
+        },
+        onOutput:(_changed, item) => {
+            if(item?.url){ selectedId = node.id; selectedImage = {nodeId:node.id, index:0}; }
+            else if(selectedImage.nodeId === node.id) selectedImage = {nodeId:'', index:-1};
+        }
+    };
+    if(node.specialType === 'panorama') api.bindPanorama(el, node, options);
+    if(node.specialType === 'dwpose') api.bindPose(el, node, options);
+    if(node.specialType === 'relight') api.bindRelight(el, node, options);
+    if(node.specialType === 'angle') api.bindAngle(el, node, options);
+}
 function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
         const nodeForControls = nodeIndex.get(id);
+        if(nodeForControls?.specialType) bindSmartSpecialNode(el, nodeForControls);
         if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-loop') bindLoopNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-group') {
@@ -8456,6 +8589,32 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
         el.ondrop = async e => {
             e.preventDefault();
             e.stopPropagation();
+            if(nodeForControls?.specialType){
+                const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));
+                if(!file){ toast('请拖入图片文件'); return; }
+                try {
+                    const uploaded = await window.CanvasSpecialNodes.uploadBlob(file, file.name || 'special-source.png');
+                    if(nodeForControls.specialType === 'panorama'){
+                        nodeForControls.panoramaSourceUrl = uploaded.url;
+                        nodeForControls.panoramaSourceName = uploaded.name || file.name;
+                    } else if(nodeForControls.specialType === 'dwpose') {
+                        nodeForControls.poseSourceUrl = uploaded.url;
+                        nodeForControls.poseSourceName = uploaded.name || file.name;
+                        delete nodeForControls.poseSourceSignature;
+                    } else {
+                        const prefix = nodeForControls.specialType;
+                        nodeForControls[`${prefix}SourceUrl`] = uploaded.url;
+                        nodeForControls[`${prefix}SourceName`] = uploaded.name || file.name;
+                        nodeForControls[`${prefix}SourceWidth`] = uploaded.natural_w || 0;
+                        nodeForControls[`${prefix}SourceHeight`] = uploaded.natural_h || 0;
+                        nodeForControls.images = [];
+                        delete nodeForControls.specialGeneratedSourceSignature;
+                        delete nodeForControls.specialGeneratedControlSignature;
+                    }
+                    render(); scheduleSave();
+                } catch(error){ toast(error.message || '图片导入失败'); }
+                return;
+            }
             const payload = await resolveSmartImageDropPayload(e.dataTransfer);
             if(payload.type === 'none') return;
             await handleSmartImageDropPayload(payload, id);
@@ -15353,7 +15512,7 @@ function openCreateMenu(event, options={}){
     createMenuPoint = screenToWorld(event);
     createMenuGroupId = options.groupId || '';
     const w = 500;
-    const h = 114;
+    const h = 330;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
     const top = Math.max(14, Math.min(window.innerHeight - h - 14, event.clientY + 8));
     createMenu.style.left = `${left}px`;
@@ -15375,6 +15534,9 @@ function createNodeFromMenu(type){
     const groupId = createMenuGroupId;
     closeCreateMenu();
     if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
+    if(type === 'panorama') return createPanoramaNode(p);
+    if(type === 'dwpose') return createDWPoseNode(p);
+    if(type === 'relight') return createRelightNode(p);
     let created = null;
     if(type === 'h3-video') created = createH3VideoNode(p);
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);

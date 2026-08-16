@@ -66,6 +66,19 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("disposePanoramasIn?.(nodesEl)", self.classic)
         self.assertIn("disposePanoramasIn?.(world)", self.smart)
 
+    def test_smart_canvas_blank_click_does_not_rebuild_live_panorama(self):
+        handler = re.search(
+            r"shell\.onclick\s*=\s*e\s*=>\s*\{(?P<body>.*?)\n\s*\};",
+            self.smart,
+            re.S,
+        )
+        self.assertIsNotNone(handler)
+        body = handler.group("body")
+        self.assertIn("clearSelection();", body)
+        self.assertIn("syncSelectionUi();", body)
+        self.assertIn("updateComposer();", body)
+        self.assertNotIn("render();", body)
+
     def test_panorama_exports_view_and_mannequin_as_one_downstream_image(self):
         export_body = re.search(
             r"async function exportReference\(.*?\n\s*return file;\n\s*\}",

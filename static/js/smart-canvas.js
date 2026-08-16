@@ -15651,7 +15651,8 @@ shell.onclick = e => {
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
-    render();
+    syncSelectionUi();
+    updateComposer();
 };
 minimap?.addEventListener('mousedown', e => {
     if(e.button !== 0) return;

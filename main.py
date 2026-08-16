@@ -69,6 +69,7 @@ from canvas_core.accounts import (
 )
 from canvas_core.account_storage import ScopedPath, current_account_id, reset_current_account, set_current_account
 from canvas_core.account_resources import AccountResourceService
+from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
 from canvas_core.database import RevisionConflict
 from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
@@ -334,7 +335,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.151"
+APP_VERSION = "1.0.155"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -467,7 +468,9 @@ GLOBAL_CONFIG_FILE = ""
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
 DWPOSE_INPUT_MAX_BYTES = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_BYTES", str(25 * 1024 * 1024)))
-DWPOSE_INPUT_MAX_PIXELS = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_PIXELS", str(25_000_000)))
+DWPOSE_INPUT_MAX_PIXELS = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_PIXELS", str(100_000_000)))
+DWPOSE_INFERENCE_MAX_PIXELS = int(os.getenv("CANVAS_DWPOSE_INFERENCE_MAX_PIXELS", str(4_000_000)))
+DWPOSE_INFERENCE_MAX_EDGE = int(os.getenv("CANVAS_DWPOSE_INFERENCE_MAX_EDGE", "3072"))
 LOCAL_IMAGE_IMPORT_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 RUNNINGHUB_THUMBNAIL_EXTS = (".jpg",)
 BLENDER_BRIDGE = BlenderBridgeClient()
@@ -2318,6 +2321,12 @@ def admin_dwpose_retry(request: Request):
     require_admin(request)
     started = DWPOSE_MODEL_MANAGER.start_background()
     return {"started": started, "status": DWPOSE_MODEL_MANAGER.status()}
+
+
+@app.get("/api/dwpose/status")
+def dwpose_status(request: Request):
+    request_identity(request)
+    return DWPOSE_MODEL_MANAGER.public_status()
 
 
 @app.put("/api/admin/accounts/{account_id}")
@@ -5760,12 +5769,61 @@ def register_internal_media_object(url: str, category: str = "output", kind: str
     except Exception as exc:
         print(f"登记内部媒体失败: {exc}")
 
+
+INTERNAL_MEDIA_PATH_PREFIXES = (
+    "/assets/input/",
+    "/assets/output/",
+    "/assets/library/",
+    "/assets/uploads/",
+    "/output/",
+)
+
+
+def internal_media_request_path(value: Any, *, keep_query: bool = False) -> str:
+    if isinstance(value, dict):
+        value = value.get("url", "")
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or not is_loopback_address(parsed.hostname):
+            return ""
+        path = parsed.path or ""
+        query = parsed.query
+    else:
+        path = text.split("?", 1)[0].split("#", 1)[0]
+        query = text.split("?", 1)[1].split("#", 1)[0] if "?" in text else ""
+    if not path.startswith(INTERNAL_MEDIA_PATH_PREFIXES):
+        return ""
+    return f"{path}?{query}" if keep_query and query else path
+
+
+def canonical_local_media_origin_url(value: str) -> str:
+    text = str(value or "")
+    parsed = urllib.parse.urlparse(text.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or not is_loopback_address(parsed.hostname):
+        return text
+    return internal_media_request_path(text, keep_query=True) or text
+
+
+def normalize_local_media_origins(value: Any) -> Any:
+    if isinstance(value, str):
+        return canonical_local_media_origin_url(value)
+    if isinstance(value, list):
+        return [normalize_local_media_origins(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(normalize_local_media_origins(item) for item in value)
+    if isinstance(value, dict):
+        return {key: normalize_local_media_origins(item) for key, item in value.items()}
+    return value
+
+
 def output_file_from_url(url):
-    if isinstance(url, dict):
-        url = url.get("url", "")
-    if not url or not (url.startswith("/output/") or url.startswith("/assets/")):
+    url = internal_media_request_path(url)
+    if not url:
         return None
-    clean = urllib.parse.unquote(url.split("?", 1)[0]).replace("\\", "/")
+    clean = urllib.parse.unquote(url).replace("\\", "/")
     mappings = (
         ("/assets/input/", OUTPUT_INPUT_DIR),
         ("/assets/output/", OUTPUT_OUTPUT_DIR),
@@ -5879,6 +5937,10 @@ def collect_persistent_media_references() -> Dict[str, int]:
         collect_internal_media_urls(record, refs)
     for canvas in DATABASE.list_canvases(include_deleted=True):
         collect_internal_media_urls(canvas, refs)
+    if hasattr(DATABASE, "load_tasks"):
+        for kind in ("online-image", "ecommerce"):
+            for task in DATABASE.load_tasks(kind):
+                collect_internal_media_urls(task, refs)
     for item in iter_indexed_local_asset_items():
         collect_internal_media_urls(item, refs)
     return refs
@@ -10723,7 +10785,10 @@ def account_output_file(relative_path: str):
 
 @app.get("/assets/{relative_path:path}")
 def account_asset_file(relative_path: str):
-    return account_file_response(DATA_LAYOUT.media, relative_path)
+    clean_path = str(relative_path or "").replace("\\", "/").lstrip("/")
+    if clean_path == "output" or clean_path.startswith("output/"):
+        clean_path = f"generated{clean_path[len('output') :]}"
+    return account_file_response(DATA_LAYOUT.media, clean_path)
 
 
 @app.get("/")
@@ -10874,14 +10939,16 @@ async def detect_dwpose(request: Request, file: UploadFile = File(...)):
     if len(content) > DWPOSE_INPUT_MAX_BYTES:
         raise HTTPException(status_code=413, detail="DWPose 输入图片不能超过 25MB")
     try:
-        with Image.open(BytesIO(content)) as source:
-            image = ImageOps.exif_transpose(source).convert("RGB")
-            image.load()
+        image = prepare_dwpose_input(
+            content,
+            decode_max_pixels=DWPOSE_INPUT_MAX_PIXELS,
+            inference_max_pixels=DWPOSE_INFERENCE_MAX_PIXELS,
+            inference_max_edge=DWPOSE_INFERENCE_MAX_EDGE,
+        )
+    except DWPoseInputTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail="DWPose 输入图片无法读取") from exc
-    width, height = image.size
-    if width < 1 or height < 1 or width * height > DWPOSE_INPUT_MAX_PIXELS:
-        raise HTTPException(status_code=413, detail="DWPose 输入图片像素不能超过 2500 万")
     status = DWPOSE_MODEL_MANAGER.status()
     if not status.get("ready") and not await asyncio.to_thread(DWPOSE_MODEL_MANAGER.verify_installed):
         if DWPOSE_AUTO_DOWNLOAD_ENABLED:
@@ -10906,6 +10973,8 @@ async def detect_dwpose(request: Request, file: UploadFile = File(...)):
         media_type="image/png",
         headers={
             "X-DWPose-People": str(result.people),
+            "X-DWPose-Width": str(result.image_rgb.shape[1]),
+            "X-DWPose-Height": str(result.image_rgb.shape[0]),
             "Cache-Control": "no-store",
         },
     )
@@ -13429,8 +13498,65 @@ def public_ecommerce_route(route: Dict[str, Any]) -> Dict[str, Any]:
         if key in route
     }
 
+
+def ecommerce_export_recovery_url(saved: Dict[str, Any]) -> str:
+    if not isinstance(saved, dict):
+        return ""
+    export_root = Path(os.fspath(OUTPUT_DIR)).resolve()
+    candidates = []
+    raw_path = str(saved.get("path") or "").strip()
+    if raw_path:
+        candidates.append(Path(raw_path).expanduser())
+    name = os.path.basename(str(saved.get("name") or raw_path or ""))
+    if name:
+        candidates.extend((export_root / "generated" / name, export_root / name))
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(export_root)
+        except (OSError, ValueError):
+            continue
+        if not resolved.is_file():
+            continue
+        return media_url_from_path(str(resolved)) or ""
+    return ""
+
+
+def recover_ecommerce_exported_outputs(task: Dict[str, Any]) -> Dict[str, Any]:
+    result = task.get("result") if isinstance(task.get("result"), dict) else None
+    if not result:
+        return task
+    images = list(result.get("images") or [])
+    saved_images = list(result.get("saved_images") or [])
+    if not images or not saved_images:
+        return task
+    image_items = [dict(item) if isinstance(item, dict) else item for item in (result.get("image_items") or [])]
+    changed = False
+    for index, url in enumerate(images):
+        local_path = internal_media_request_path(url)
+        if not local_path or output_file_from_url(local_path):
+            continue
+        recovered = ecommerce_export_recovery_url(saved_images[index] if index < len(saved_images) else {})
+        if not recovered:
+            continue
+        images[index] = recovered
+        if index < len(image_items) and isinstance(image_items[index], dict):
+            image_items[index]["url"] = recovered
+        changed = True
+    if not changed:
+        return task
+    recovered_task = dict(task)
+    recovered_result = dict(result)
+    recovered_result["images"] = images
+    if image_items:
+        recovered_result["image_items"] = image_items
+    recovered_task["result"] = recovered_result
+    return recovered_task
+
+
 def public_ecommerce_task(task: Dict[str, Any]) -> Dict[str, Any]:
-    data = dict(task or {})
+    data = normalize_local_media_origins(task or {})
+    data = recover_ecommerce_exported_outputs(data)
     data.pop("_account_id", None)
     task_id = str(data.get("id") or data.get("task_id") or "")
     data["id"] = task_id
@@ -13455,6 +13581,10 @@ def load_ecommerce_tasks_from_disk():
     for item in items:
         if not isinstance(item, dict):
             continue
+        normalized_item = normalize_local_media_origins(item)
+        if normalized_item != item:
+            changed = True
+        item = normalized_item
         task_id = str(item.get("id") or item.get("task_id") or "").strip()
         if not task_id:
             continue
@@ -17470,7 +17600,7 @@ def generated_work_items(records: List[Dict[str, Any]], metadata: Optional[Dict[
 def finalize_work_items(works: List[Dict[str, Any]], offset: int = 0) -> List[Dict[str, Any]]:
     finalized = []
     for index, item in enumerate(works, offset + 1):
-        value = dict(item)
+        value = normalize_local_media_origins(dict(item))
         value["download_sequence"] = index
         value["download_name"] = work_download_name(value, index)
         custom_name = str(value.get("name") or "").strip()

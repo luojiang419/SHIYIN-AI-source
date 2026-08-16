@@ -3,6 +3,8 @@ param(
     [switch]$SkipBackend,
     [switch]$SkipDesktop,
     [switch]$SkipRuntimeSmoke,
+    [string]$DwposeSmokeInput = "",
+    [switch]$SkipDwposeFreshDownloadSmoke,
     [int]$SmokePort = 3118
 )
 
@@ -83,6 +85,17 @@ if (-not $SkipRuntimeSmoke) {
     & (Join-Path $PSScriptRoot 'smoke-desktop.ps1') -Stage $stageRoot -Port $SmokePort -IdleSeconds 1 | Out-Host
     $runtimeSmokeSucceeded = $?
     if (-not $runtimeSmokeSucceeded) { throw 'Packaged desktop runtime smoke test failed.' }
+    if ($DwposeSmokeInput) {
+        $dwposeSmoke = Join-Path $PSScriptRoot 'smoke-dwpose-packaged.py'
+        & python $dwposeSmoke --stage $stageRoot --input $DwposeSmokeInput --port ($SmokePort + 1) --output (Join-Path $projectRoot '.build\dwpose-packaged-output.png') | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Packaged DWPose cached-model smoke test failed.' }
+        if (-not $SkipDwposeFreshDownloadSmoke) {
+            & python $dwposeSmoke --stage $stageRoot --input $DwposeSmokeInput --port ($SmokePort + 2) --download-models --output (Join-Path $projectRoot '.build\dwpose-fresh-install-output.png') | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged DWPose fresh-install smoke test failed.' }
+        }
+    } else {
+        Write-Warning 'DWPose real-person runtime smoke was skipped. Supply -DwposeSmokeInput before publishing an update.'
+    }
 }
 
 New-Item -ItemType Directory -Force (Join-Path $projectRoot 'dist\installer') | Out-Null

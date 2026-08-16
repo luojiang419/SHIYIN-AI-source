@@ -7,6 +7,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from canvas_core.database import CanvasDatabase
@@ -131,6 +132,31 @@ class WorksBackendTests(unittest.TestCase):
         works = self.main.generated_work_items([record], {})
         self.assertRegex(works[0]["name"], r"^SHIYIN-000001-\d{8}\.png$")
         self.assertEqual(works[0]["original_name"], "ecommerce_0205d638aa.png")
+
+    def test_generated_asset_route_maps_output_url_to_generated_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            media = Path(root) / "media"
+            generated = media / "generated"
+            generated.mkdir(parents=True)
+            image = generated / "history.png"
+            image.write_bytes(b"history-image")
+            with patch.object(self.main, "DATA_LAYOUT", SimpleNamespace(media=media)):
+                response = self.main.account_asset_file("output/history.png")
+        self.assertEqual(Path(response.path), image)
+
+    def test_works_api_normalizes_legacy_loopback_media_urls(self):
+        works = self.main.finalize_work_items([{
+            "id": "legacy-work",
+            "name": "legacy.png",
+            "original_name": "legacy.png",
+            "url": "http://localhost:3000/assets/output/legacy.png?old=1",
+            "source_url": "http://127.0.0.1:3000/assets/input/source.png",
+            "references": [{"url": "http://localhost:3000/assets/uploads/ref.png"}],
+            "created_at": 10,
+        }])
+        self.assertEqual(works[0]["url"], "/assets/output/legacy.png?old=1")
+        self.assertEqual(works[0]["source_url"], "/assets/input/source.png")
+        self.assertEqual(works[0]["references"][0]["url"], "/assets/uploads/ref.png")
 
     def test_save_ai_image_to_output_can_use_enterprise_filename_sequence(self):
         with tempfile.TemporaryDirectory() as root:
@@ -287,8 +313,10 @@ class WorksBackendTests(unittest.TestCase):
             for folder in (output, input_dir, uploads, legacy_output, assets):
                 folder.mkdir(parents=True)
             used = output / "used.png"
+            task_used = output / "task-used.png"
             orphan = output / "orphan.png"
             used.write_bytes(b"used")
+            task_used.write_bytes(b"task-used")
             orphan.write_bytes(b"orphan")
             old = time.time() - 3 * 24 * 60 * 60
             os.utime(orphan, (old, old))
@@ -308,6 +336,11 @@ class WorksBackendTests(unittest.TestCase):
                 "updated_at": 30,
                 "nodes": [{"id": "node-used", "url": "/assets/output/used.png"}],
             }, touch=False)
+            database.upsert_task("ecommerce", {
+                "id": "ecommerce-media-reference",
+                "status": "succeeded",
+                "result": {"images": ["/assets/output/task-used.png"]},
+            })
             with (
                 patch.object(self.main, "DATABASE", database),
                 patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(output)),
@@ -317,7 +350,7 @@ class WorksBackendTests(unittest.TestCase):
                 patch.object(self.main, "ASSETS_DIR", str(assets)),
             ):
                 reconciled = self.main.reconcile_internal_media_index()
-                self.assertEqual(reconciled["summary"]["categories"]["output"]["count"], 2)
+                self.assertEqual(reconciled["summary"]["categories"]["output"]["count"], 3)
                 self.assertEqual(reconciled["summary"]["orphaned"]["output"]["count"], 1)
                 dry_run = self.main.cleanup_orphan_internal_media(grace_seconds=24 * 60 * 60, dry_run=True)
                 self.assertEqual(dry_run["candidate_count"], 1)
@@ -326,6 +359,7 @@ class WorksBackendTests(unittest.TestCase):
                 self.assertEqual(cleaned["deleted_files"], 1)
                 self.assertFalse(orphan.exists())
                 self.assertTrue(used.exists())
+                self.assertTrue(task_used.exists())
 
 
 if __name__ == "__main__":

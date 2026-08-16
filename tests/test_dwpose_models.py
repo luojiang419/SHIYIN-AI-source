@@ -145,6 +145,24 @@ class DWPoseModelManagerTests(unittest.TestCase):
             self.assertTrue(manager.status()["ready"])
             self.assertEqual(manager.status()["source_label"], "已安装模型")
 
+    def test_public_status_keeps_progress_but_hides_local_diagnostics(self):
+        with tempfile.TemporaryDirectory() as root:
+            manager = self.make_manager(root)
+            manager._update_state(
+                state="downloading",
+                downloaded_bytes=5,
+                total_bytes=10,
+                message="正在准备模型",
+                error="proxy credentials must stay private",
+                attempts=[{"source": "private source"}],
+            )
+            status = manager.public_status()
+            self.assertEqual(status["state"], "downloading")
+            self.assertEqual(status["progress"], 0.5)
+            self.assertEqual(status["message"], "正在准备模型")
+            for private_key in ("model_root", "files", "error", "attempts"):
+                self.assertNotIn(private_key, status)
+
     def test_range_resume_appends_partial_download(self):
         with tempfile.TemporaryDirectory() as root:
             manager = self.make_manager(root)
@@ -176,6 +194,7 @@ class DWPoseModelManagerTests(unittest.TestCase):
 
             with patch.object(manager, "ensure_now", side_effect=slow_ensure):
                 self.assertTrue(manager.start_background())
+                self.assertEqual(manager.status()["state"], "checking")
                 self.assertTrue(entered.wait(1))
                 self.assertFalse(manager.start_background())
                 release.set()

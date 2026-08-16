@@ -28,6 +28,18 @@ class BlenderDirectorCanvasTests(unittest.TestCase):
         self.assertIn("mergeGeneratedOutputs(node, [item], true)", self.javascript)
         self.assertIn("appendOutputImagesWithoutDuplicates(out, [item])", self.javascript)
 
+    def test_rendered_video_can_be_dragged_from_output_back_to_canvas(self):
+        self.assertIn("output-media-drag.1", self.html)
+        self.assertIn("application/x-canvas-output-media", self.javascript)
+        self.assertIn("function setCanvasOutputDragData(event, url, kind)", self.javascript)
+        self.assertIn("function bindCanvasOutputMediaDrag(element, url, kind)", self.javascript)
+        self.assertIn("if(outputWrap) bindCanvasOutputMediaDrag(video", self.javascript)
+        self.assertIn("function outputMediaDragPayload(dataTransfer)", self.javascript)
+        self.assertIn("function hasOutputMediaDrag(dataTransfer)", self.javascript)
+        self.assertIn("const mediaKind = mediaKindForRef({url:mediaUrl})", self.javascript)
+        self.assertIn("createMediaCardFromOutput(outputMediaDragPayload(e.dataTransfer)", self.javascript)
+        self.assertIn("mediaKind:kind", self.javascript)
+
     def test_camera_settings_are_collapsed_by_default_and_remember_toggle(self):
         self.assertIn("cameraSettingsExpanded:false", self.javascript)
         self.assertIn("<details class=\"blender-camera-settings\" ${node.cameraSettingsExpanded ? 'open' : ''}>", self.javascript)

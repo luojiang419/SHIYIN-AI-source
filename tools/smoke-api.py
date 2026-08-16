@@ -120,6 +120,10 @@ def main() -> int:
         dwpose_status = local_admin.get("/api/admin/dwpose/status")
         require_status(dwpose_status, 200, "Local admin DWPose status")
         require_status(user_one.get("/api/admin/dwpose/status"), 403, "Regular user DWPose status")
+        public_dwpose_status = user_one.get("/api/dwpose/status")
+        require_status(public_dwpose_status, 200, "Regular user DWPose progress")
+        if any(key in public_dwpose_status.json() for key in ("model_root", "files", "error", "attempts")):
+            raise AssertionError("Regular user DWPose progress exposed local diagnostics")
         dwpose_input = io.BytesIO()
         Image.new("RGB", (32, 48), "white").save(dwpose_input, "PNG")
         require_status(

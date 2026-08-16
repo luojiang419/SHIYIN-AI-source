@@ -103,6 +103,8 @@ function canvasActivateVideoPreview(img){
     const video = tpl.content.firstElementChild;
     if(!video) return false;
     target.replaceWith(video);
+    const outputWrap = video.closest?.('.output-img-wrap');
+    if(outputWrap) bindCanvasOutputMediaDrag(video, outputWrap.dataset.outputUrl || original, 'video');
     video.parentElement?.querySelector?.('.canvas-video-play')?.style?.setProperty('display', 'none');
     video.play?.().catch(() => {});
     return true;
@@ -4058,6 +4060,7 @@ function nodeTitleForMedia(node){
     if(kind === 'audio') return 'Audio';
     return 'Image';
 }
+const CANVAS_OUTPUT_MEDIA_DRAG_TYPE = 'application/x-canvas-output-media';
 const IMAGE_DROP_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
 const IMAGE_DROP_TEXT_TYPES = [
     'text/uri-list',
@@ -6855,17 +6858,10 @@ function bindOutputWrap(wrap, node){
     const playBtn = wrap.querySelector('.canvas-video-play');
     const del = wrap.querySelector('.output-del');
     const recoverQuery = wrap.querySelector('.output-recover-query');
+    const mediaUrl = wrap.dataset.outputUrl || img?.dataset.url || video?.dataset.url || '';
+    const mediaKind = mediaKindForRef({url:mediaUrl});
     if(img){
-        img.draggable = true;
-        img.ondragstart = e => {
-            e.stopPropagation();
-            img.dataset.dragging = '1';
-            setOutputDragPreview(e, img);
-            e.dataTransfer.effectAllowed = 'copy';
-            e.dataTransfer.setData('application/x-canvas-output-image', img.dataset.url);
-            e.dataTransfer.setData('text/uri-list', img.dataset.url);
-        };
-        img.ondragend = () => setTimeout(() => { delete img.dataset.dragging; }, 0);
+        bindCanvasOutputMediaDrag(img, mediaUrl || img.dataset.url, mediaKind);
         img.onclick = e => {
             e.stopPropagation();
             if(img.dataset.dragging) return;
@@ -6879,8 +6875,10 @@ function bindOutputWrap(wrap, node){
         openOutputLightbox(fallbackVideo.dataset.url, node);
     });
     if(video){
+        bindCanvasOutputMediaDrag(video, mediaUrl || video.dataset.url, mediaKind);
         video.onclick = e => {
             e.stopPropagation();
+            if(video.dataset.dragging) return;
             openOutputLightbox(video.dataset.url, node);
         };
     }
@@ -12887,6 +12885,25 @@ function setOutputDragPreview(event, img){
     event.dataTransfer.setDragImage(wrap, Math.min(rect.width / 2, 120), Math.min(rect.height / 2, 120));
     setTimeout(() => wrap.remove(), 0);
 }
+function setCanvasOutputDragData(event, url, kind){
+    if(!event.dataTransfer || !url) return;
+    const media = {url, name:outputImageName(url), kind:mediaKindForRef({url, kind})};
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(CANVAS_OUTPUT_MEDIA_DRAG_TYPE, JSON.stringify(media));
+    if(media.kind === 'image') event.dataTransfer.setData('application/x-canvas-output-image', url);
+    event.dataTransfer.setData('text/uri-list', url);
+}
+function bindCanvasOutputMediaDrag(element, url, kind){
+    if(!element || !url) return;
+    element.draggable = true;
+    element.ondragstart = event => {
+        event.stopPropagation();
+        element.dataset.dragging = '1';
+        setOutputDragPreview(event, element);
+        setCanvasOutputDragData(event, url, kind);
+    };
+    element.ondragend = () => setTimeout(() => { delete element.dataset.dragging; }, 0);
+}
 function appendOutputImages(out, images, compareRef, metas=[], layout=null){
     const list = (images || []).filter(Boolean);
     if(!out || !list.length) return;
@@ -12980,14 +12997,17 @@ function navigateOutputLightbox(direction){
     openOutputLightbox(next.url, nextOut);
     return true;
 }
-function createImageCardFromOutput(url, point){
-    if(!ensureCanvas() || !url) return;
-    if(mediaKindForRef(url) !== 'image') return;
+function createMediaCardFromOutput(payload, point){
+    const media = typeof payload === 'string' ? {url:payload} : (payload || {});
+    const url = String(media.url || '');
+    const kind = mediaKindForRef(media);
+    if(!ensureCanvas() || !url || !['image','video','audio'].includes(kind)) return;
     const p = point || defaultPoint(0, 0);
-    nodes.push({id:uid('img'), type:'image', x:p.x, y:p.y, url, name:outputImageName(url)});
+    nodes.push({id:uid('img'), type:'image', x:p.x, y:p.y, url, name:media.name || outputImageName(url), mediaKind:kind});
     render();
     scheduleSave();
 }
+function createImageCardFromOutput(url, point){ return createMediaCardFromOutput({url}, point); }
 async function downloadUrl(url, filename){
     const res = await fetch(url);
     if(!res.ok) throw new Error('下载失败');
@@ -14968,7 +14988,7 @@ board.addEventListener('dragover', e => {
         dropOverlay.classList.remove('active');
         return;
     }
-    if(hasImageDropData(e.dataTransfer) || hasOutputImageDrag(e.dataTransfer)){
+    if(hasImageDropData(e.dataTransfer) || hasOutputMediaDrag(e.dataTransfer)){
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
         dropOverlay.classList.add('active');
@@ -14981,8 +15001,8 @@ board.addEventListener('drop', async e => {
     e.preventDefault();
     dropOverlay.classList.remove('active');
     if(e.target.closest?.('.image-node')) return;
-    if(hasOutputImageDrag(e.dataTransfer)) {
-        createImageCardFromOutput(e.dataTransfer.getData('application/x-canvas-output-image'), screenToWorld(e.clientX, e.clientY));
+    if(hasOutputMediaDrag(e.dataTransfer)) {
+        createMediaCardFromOutput(outputMediaDragPayload(e.dataTransfer), screenToWorld(e.clientX, e.clientY));
         return;
     }
     if(Array.from(e.dataTransfer?.types || []).includes('application/x-canvas-asset')){
@@ -15138,6 +15158,19 @@ function hasImageDropData(dataTransfer){
     return imageDropPayload(dataTransfer).type !== 'none';
 }
 function hasOutputImageDrag(dataTransfer){ return [...(dataTransfer?.types || [])].includes('application/x-canvas-output-image'); }
+function hasOutputMediaDrag(dataTransfer){
+    const types = [...(dataTransfer?.types || [])];
+    return types.includes(CANVAS_OUTPUT_MEDIA_DRAG_TYPE) || types.includes('application/x-canvas-output-image');
+}
+function outputMediaDragPayload(dataTransfer){
+    try {
+        const raw = dataTransfer?.getData?.(CANVAS_OUTPUT_MEDIA_DRAG_TYPE) || '';
+        const payload = raw ? JSON.parse(raw) : null;
+        if(payload?.url) return payload;
+    } catch(e) {}
+    const url = dataTransfer?.getData?.('application/x-canvas-output-image') || '';
+    return url ? {url, kind:'image'} : null;
+}
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 function escapeAttr(str){ return escapeHtml(str); }
 

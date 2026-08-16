@@ -119,6 +119,23 @@ class DWPoseModelManager:
         ]
         return payload
 
+    def public_status(self) -> dict[str, object]:
+        """Return model readiness without exposing local paths or download details."""
+        status = self.status()
+        return {
+            key: status.get(key)
+            for key in (
+                "state",
+                "ready",
+                "source_label",
+                "downloaded_bytes",
+                "total_bytes",
+                "progress",
+                "message",
+                "updated_at",
+            )
+        }
+
     def _update_state(self, **values: object) -> None:
         with self._state_lock:
             self._state.update(values)
@@ -148,6 +165,12 @@ class DWPoseModelManager:
         with self._state_lock:
             if self._thread and self._thread.is_alive():
                 return False
+            self._update_state(
+                state="checking",
+                ready=False,
+                message="正在检查 DWPose 模型",
+                error="",
+            )
             self._thread = threading.Thread(target=self.ensure_now, name="dwpose-model-download", daemon=True)
             self._thread.start()
             return True

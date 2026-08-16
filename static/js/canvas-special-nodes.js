@@ -4,6 +4,7 @@
     const DEFAULT_PANORAMA_PROMPT = '生成一个完整球面 720° 全景 VR 场景，使用标准 2:1 等距柱状投影，水平左右边缘像素级无缝衔接，上下极点自然连续，无接缝、无重复主体、无文字水印；空间结构真实、尺度统一、光照方向一致，封闭场景保留合理出入口。';
     const DEFAULT_RELIGHT_PROMPT = '只重塑原图的光照、阴影、色温和氛围，严格保持主体身份、五官、姿势、服装、材质、构图、机位、背景结构、文字与标志不变，不新增或删除任何物体。';
     const DEFAULT_ANGLE_PROMPT = 'Image 1 is one frozen physical 3D scene. Re-render that same world from the requested camera; change camera extrinsics only.';
+    const DWPOSE_MODEL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
     const panoramaStates = new WeakMap();
     const poseTasks = new Map();
 
@@ -160,7 +161,7 @@
     function poseBodyHtml(node){
         const output = outputItem(node);
         const status = node.poseStatus || (output?.url ? 'done' : 'idle');
-        const label = status === 'running' ? '正在提取身体、手部和面部关键点…' : status === 'failed' ? (node.poseError || '动作提取失败') : output?.url ? '骨架图已就绪，将自动传递给下游节点' : '连接或导入人物图片后自动提取骨架';
+        const label = status === 'running' ? (node.posePreparing || '正在提取身体、手部和面部关键点…') : status === 'failed' ? (node.poseError || '动作提取失败') : output?.url ? '骨架图已就绪，将自动传递给下游节点' : '连接或导入人物图片后自动提取骨架';
         return `<div class="special-node pose-special" data-special-node="dwpose">
             <input class="special-file-input" type="file" accept="image/*" data-special-file="dwpose" hidden>
             <div class="pose-preview ${output?.url ? 'has-output' : ''}">
@@ -615,22 +616,46 @@
         window.requestAnimationFrame(renderNow);
     }
 
+    function sleep(milliseconds){ return new Promise(resolve => setTimeout(resolve, milliseconds)); }
+    async function waitForPoseModel(node, options){
+        const startedAt = Date.now();
+        while(Date.now() - startedAt < DWPOSE_MODEL_WAIT_TIMEOUT_MS){
+            const response = await fetch('/api/dwpose/status', {cache:'no-store'});
+            if(!response.ok) throw new Error(await responseError(response, 'DWPose 模型状态读取失败'));
+            const status = await response.json();
+            if(status?.ready) return;
+            if(status?.state === 'failed') throw new Error(status.message || 'DWPose 模型下载失败，请重新提取');
+            const progress = Math.max(0, Math.min(1, Number(status?.progress) || 0));
+            const progressText = progress > 0 ? ` ${Math.round(progress * 100)}%` : '';
+            const message = String(status?.message || '正在准备 DWPose 模型');
+            const nextLabel = `${message}${progressText}，完成后将自动提取骨架`;
+            if(node.posePreparing !== nextLabel){ node.posePreparing = nextLabel; notify(options, node, true); }
+            await sleep(1500);
+        }
+        throw new Error('DWPose 模型准备超时，请检查网络后重新提取');
+    }
     async function runPose(node, options, force=false){
         const source = poseSource(node, options), signature = sourceSignature(source);
         if(!signature) return; if(!force && node.poseSourceSignature === signature && outputItem(node)?.url) return;
         const taskKey = `${options.canvasKey || 'canvas'}:${node.id}`; if(poseTasks.has(taskKey)) return poseTasks.get(taskKey);
         const task = (async () => {
-            node.poseStatus = 'running'; node.poseError = ''; notify(options, node, true);
+            node.poseStatus = 'running'; node.poseError = ''; node.posePreparing = ''; notify(options, node, true);
             try {
                 const sourceUrl = options.resolveUrl?.(source.url) || source.url, imageResponse = await fetch(sourceUrl);
                 if(!imageResponse.ok) throw new Error('人物图片读取失败');
                 const imageBlob = await imageResponse.blob(), form = new FormData(); form.append('file', imageBlob, source.name || 'pose-source.png');
-                const response = await fetch('/api/dwpose/detect', {method:'POST', body:form});
+                let response = await fetch('/api/dwpose/detect', {method:'POST', body:form});
+                if(response.status === 503){
+                    await waitForPoseModel(node, options);
+                    node.posePreparing = ''; notify(options, node, true);
+                    const retryForm = new FormData(); retryForm.append('file', imageBlob, source.name || 'pose-source.png');
+                    response = await fetch('/api/dwpose/detect', {method:'POST', body:retryForm});
+                }
                 if(!response.ok) throw new Error(await responseError(response, 'DWPose 动作提取失败'));
-                const people = Number(response.headers.get('X-DWPose-People') || 0), blob = await response.blob(), file = await uploadBlob(blob, `dwpose-${Date.now()}.png`);
-                file.natural_w = source.natural_w || 0; file.natural_h = source.natural_h || 0; node.poseSourceSignature = signature; node.posePeople = people; node.poseStatus = 'done'; node.poseError = '';
+                const people = Number(response.headers.get('X-DWPose-People') || 0), outputWidth = Number(response.headers.get('X-DWPose-Width') || 0), outputHeight = Number(response.headers.get('X-DWPose-Height') || 0), blob = await response.blob(), file = await uploadBlob(blob, `dwpose-${Date.now()}.png`);
+                file.natural_w = outputWidth || file.width || source.natural_w || 0; file.natural_h = outputHeight || file.height || source.natural_h || 0; node.poseSourceSignature = signature; delete node.poseFailedSignature; node.posePeople = people; node.poseStatus = 'done'; node.poseError = ''; node.posePreparing = '';
                 setOutputItem(node, file, options); notify(options, node, true); options.toast?.(people > 0 ? `已提取 ${people} 人骨架` : '未检测到人物，已输出空骨架图'); return file;
-            } catch(error) { node.poseStatus = 'failed'; node.poseError = error.message || '动作提取失败'; notify(options, node, true); throw error; }
+            } catch(error) { node.poseStatus = 'failed'; node.poseFailedSignature = signature; node.poseError = error.message || '动作提取失败'; node.posePreparing = ''; notify(options, node, true); throw error; }
             finally { poseTasks.delete(taskKey); }
         })();
         poseTasks.set(taskKey, task); return task;
@@ -643,7 +668,7 @@
                 const file = await uploadFile(poseFileInput.files?.[0]);
                 node.poseSourceUrl = file.url; node.poseSourceName = file.name || 'pose-source.png';
                 node.poseSourceWidth = file.natural_w || 0; node.poseSourceHeight = file.natural_h || 0;
-                delete node.poseSourceSignature; notify(options, node, true);
+                node.poseStatus = 'idle'; node.poseError = ''; delete node.poseSourceSignature; delete node.poseFailedSignature; notify(options, node, true);
                 runPose(node, options, true).catch(error => options.toast?.(error.message));
             } catch(error){ options.toast?.(error.message); }
             finally { poseFileInput.value = ''; }
@@ -670,7 +695,8 @@
                 }
             });
         });
-        runPose(node, options, false).catch(() => {});
+        const currentSignature = sourceSignature(poseSource(node, options));
+        if(node.poseStatus !== 'failed' || node.poseFailedSignature !== currentSignature) runPose(node, options, false).catch(() => {});
     }
 
     function relightControlSignature(node){

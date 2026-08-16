@@ -24,7 +24,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
             self.assertIn("灯光重塑", page)
-            self.assertIn("special-nodes.4", page)
+            self.assertIn("special-nodes.6", page)
 
     def test_angle_node_creation_is_hidden_but_legacy_canvas_data_remains_compatible(self):
         self.assertNotIn('onclick="addAngleNode()"', self.classic_html)
@@ -86,6 +86,27 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("X-DWPose-People", self.shared)
         self.assertIn("uploadBlob(blob, `dwpose-", self.shared)
         self.assertIn("poseSourceSignature", self.shared)
+
+    def test_dwpose_waits_for_upgrade_model_download_then_retries_automatically(self):
+        for marker in (
+            "function waitForPoseModel(node, options)",
+            "'/api/dwpose/status'",
+            "response.status === 503",
+            "完成后将自动提取骨架",
+            "DWPOSE_MODEL_WAIT_TIMEOUT_MS",
+            "const retryForm = new FormData()",
+        ):
+            self.assertIn(marker, self.shared)
+
+    def test_dwpose_large_input_uses_returned_size_and_failed_input_does_not_retry_forever(self):
+        for marker in (
+            "X-DWPose-Width",
+            "X-DWPose-Height",
+            "node.poseFailedSignature = signature",
+            "delete node.poseFailedSignature",
+            "node.poseFailedSignature !== currentSignature",
+        ):
+            self.assertIn(marker, self.shared)
 
     def test_dwpose_export_creates_a_visible_connected_output_node_on_both_canvases(self):
         for marker in (

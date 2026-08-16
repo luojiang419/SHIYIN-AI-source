@@ -1777,6 +1777,54 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(fake.saved[0]["status"], "interrupted")
         self.main.ECOMMERCE_TASKS.clear()
 
+    def test_public_task_rewrites_legacy_loopback_media_urls_for_authenticated_origin(self):
+        task = {
+            "id": "ecommerce_legacy_origin",
+            "status": "succeeded",
+            "inputs": [{"role": "source", "url": "http://localhost:3000/assets/input/source.png"}],
+            "result": {
+                "images": ["http://127.0.0.1:3000/assets/output/result.png?legacy=1"],
+                "image_items": [{"url": "http://localhost:3000/assets/output/result.png"}],
+                "remote_reference": "https://example.com/reference.png",
+            },
+        }
+
+        public = self.main.public_ecommerce_task(task)
+
+        self.assertEqual(public["inputs"][0]["url"], "/assets/input/source.png")
+        self.assertEqual(public["result"]["images"][0], "/assets/output/result.png?legacy=1")
+        self.assertEqual(public["result"]["image_items"][0]["url"], "/assets/output/result.png")
+        self.assertEqual(public["result"]["remote_reference"], "https://example.com/reference.png")
+        self.assertEqual(task["inputs"][0]["url"], "http://localhost:3000/assets/input/source.png")
+
+    def test_public_task_recovers_missing_output_from_default_export_copy(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            generated = root_path / "exports" / "generated"
+            media_output = root_path / "media-output"
+            generated.mkdir(parents=True)
+            media_output.mkdir(parents=True)
+            exported = generated / "SHIYIN-000123-20260816.png"
+            exported.write_bytes(b"exported-image")
+            task = {
+                "id": "ecommerce_missing_media",
+                "status": "succeeded",
+                "result": {
+                    "images": ["/assets/output/deleted.png"],
+                    "image_items": [{"url": "/assets/output/deleted.png", "width": 1024}],
+                    "saved_images": [{"name": exported.name, "path": str(exported)}],
+                },
+            }
+            with (
+                patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(media_output)),
+                patch.object(self.main, "OUTPUT_DIR", str(root_path / "exports")),
+            ):
+                public = self.main.public_ecommerce_task(task)
+
+        recovered = "/output/generated/SHIYIN-000123-20260816.png"
+        self.assertEqual(public["result"]["images"], [recovered])
+        self.assertEqual(public["result"]["image_items"][0]["url"], recovered)
+
     def test_batch_task_status_returns_lightweight_updates(self):
         self.main.ECOMMERCE_TASKS.clear()
         self.main.ECOMMERCE_TASKS.update({

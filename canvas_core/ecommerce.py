@@ -620,13 +620,15 @@ def resolve_universal_reference_plan(
     ordering in this plan.
     """
     options = options if isinstance(options, dict) else {}
-    manual_prompt = bool(str(options.get("instruction") or "").strip())
-    normalized = normalize_universal_inputs(inputs, canonical_order=not manual_prompt)
+    prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
+    raw_prompt = prompt_policy == FREE_CREATION_PROMPT_POLICY
+    user_supplement = bool(str(options.get("instruction") or "").strip()) and not raw_prompt
+    normalized = normalize_universal_inputs(inputs, canonical_order=not (raw_prompt or user_supplement))
     by_role: dict[str, list[dict[str, Any]]] = {role: [] for role in UNIVERSAL_CANONICAL_ROLE_ORDER}
     for item in normalized:
         by_role.setdefault(item["reference_type"], []).append(item)
 
-    if manual_prompt:
+    if raw_prompt:
         return {
             "mode": "manual_prompt",
             "inputs": normalized,
@@ -812,14 +814,15 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         if len(values) > UNIVERSAL_REFERENCE_LIMIT:
             raise ValueError(f"全能模式最多上传 {UNIVERSAL_REFERENCE_LIMIT} 张参考图")
         prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
-        manual_prompt = bool(str(options.get("instruction") or "").strip())
+        raw_prompt = prompt_policy == FREE_CREATION_PROMPT_POLICY
+        user_supplement = bool(str(options.get("instruction") or "").strip()) and not raw_prompt
         normalized = normalize_universal_inputs(
             values,
-            canonical_order=prompt_policy != FREE_CREATION_PROMPT_POLICY and not manual_prompt,
+            canonical_order=not (raw_prompt or user_supplement),
         )
         if not normalized and prompt_policy != FREE_CREATION_PROMPT_POLICY:
             raise ValueError("全能模式至少需要一张已上传的参考图")
-        if prompt_policy == FREE_CREATION_PROMPT_POLICY or manual_prompt:
+        if raw_prompt:
             return normalized
         plan = resolve_universal_reference_plan(normalized, options)
         if plan["conflicts"]:
@@ -1288,7 +1291,7 @@ def build_universal_auto_instruction(inputs: Iterable[dict[str, Any]], options: 
                 pose_preservation = f"Preserve the face identity from Image {identity[0]} and the background from Image {subject[0]}"
             else:
                 pose_subject_line = (
-                    f"Image {subject[0]} supplies the model identity and body but its original pose is not retained; all assigned garments, shoes and accessories must conform to Image {pose[0]}'s pose, never the reverse. "
+                    f"Image {subject[0]} supplies the model identity and body but the original subject pose is not retained; all assigned garments, shoes and accessories must conform to Image {pose[0]}'s pose, never the reverse. "
                     f"The final person is the model from Image {subject[0]} wearing the assigned products while performing Image {pose[0]}'s pose."
                 )
                 pose_preservation = "Preserve base identity and background"
@@ -1431,8 +1434,6 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             raise ValueError("自由创作提示词策略仅支持全能模式工作区")
         if not instruction:
             raise ValueError("自由创作必须填写提示词")
-        return raw_instruction
-    if operation == "universal" and instruction:
         return raw_instruction
     reference_map = build_ordered_reference_map(normalized)
     if instruction and operation != "universal":

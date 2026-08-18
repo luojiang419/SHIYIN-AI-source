@@ -76,6 +76,13 @@ from canvas_core.app_config import read_app_config, update_app_settings
 from canvas_core.generated_output import export_generated_files
 from canvas_core.image_upload import normalize_image_orientation
 from canvas_core.grid_crop import detect_grid
+from canvas_core.kling_cli import (
+    KlingCliError,
+    KlingCliService,
+    install_kling_cli,
+    resolve_kling_cli,
+    start_kling_login,
+)
 from canvas_core.blender_bridge import (
     DEFAULT_PORT as BLENDER_DEFAULT_PORT,
     BlenderBridgeClient,
@@ -335,7 +342,16 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 GLOBAL_LOOP = None
-APP_VERSION = "1.0.156"
+STARTUP_MAINTENANCE_TASK = None
+STARTUP_MAINTENANCE_DELAY_SECONDS = 0.75
+STARTUP_MAINTENANCE_STATE = {
+    "status": "pending",
+    "current": "",
+    "started_at": 0.0,
+    "finished_at": 0.0,
+    "steps": {},
+}
+APP_VERSION = "1.0.163"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -350,28 +366,68 @@ MODELSCOPE_VERSION_URL = MODELSCOPE_FILE_API_ROOT + "VERSION"
 MODELSCOPE_UPDATE_NOTES_URL = MODELSCOPE_FILE_API_ROOT + "static/update-notes.json"
 MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infinite-Canvas/repo/files?Revision=master&Recursive=true"
 
+
+def startup_maintenance_public_state():
+    return {
+        "status": str(STARTUP_MAINTENANCE_STATE.get("status") or "pending"),
+        "current": str(STARTUP_MAINTENANCE_STATE.get("current") or ""),
+        "started_at": float(STARTUP_MAINTENANCE_STATE.get("started_at") or 0),
+        "finished_at": float(STARTUP_MAINTENANCE_STATE.get("finished_at") or 0),
+        "steps": dict(STARTUP_MAINTENANCE_STATE.get("steps") or {}),
+    }
+
+
+async def run_deferred_startup_maintenance():
+    await asyncio.sleep(STARTUP_MAINTENANCE_DELAY_SECONDS)
+    STARTUP_MAINTENANCE_STATE.update({
+        "status": "running",
+        "current": "",
+        "started_at": time.time(),
+        "finished_at": 0.0,
+        "steps": {},
+    })
+    steps = (
+        ("asset_library_migration", migrate_asset_library_into_dirs),
+        ("double_extension_migration", migrate_double_extension_uploads),
+        ("image_extension_migration", migrate_mislabeled_image_extensions),
+        ("work_index", lambda: DATABASE.ensure_work_items_indexed(work_metadata())),
+        ("local_upload_index", ensure_local_upload_indexed),
+    )
+    failed = False
+    try:
+        for name, operation in steps:
+            STARTUP_MAINTENANCE_STATE["current"] = name
+            started = time.perf_counter()
+            try:
+                result = await asyncio.to_thread(operation)
+                STARTUP_MAINTENANCE_STATE["steps"][name] = {
+                    "status": "ok",
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000),
+                    "changed": int(result or 0) if isinstance(result, (int, bool)) else 0,
+                }
+            except Exception as exc:
+                failed = True
+                STARTUP_MAINTENANCE_STATE["steps"][name] = {
+                    "status": "error",
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000),
+                    "error": str(exc)[:500],
+                }
+                print(f"启动后台维护失败 [{name}]: {exc}")
+    except asyncio.CancelledError:
+        STARTUP_MAINTENANCE_STATE["status"] = "cancelled"
+        raise
+    finally:
+        STARTUP_MAINTENANCE_STATE["current"] = ""
+        STARTUP_MAINTENANCE_STATE["finished_at"] = time.time()
+        if STARTUP_MAINTENANCE_STATE.get("status") != "cancelled":
+            STARTUP_MAINTENANCE_STATE["status"] = "complete_with_errors" if failed else "complete"
+
 @app.on_event("startup")
 async def startup_event():
-    global GLOBAL_LOOP
+    global GLOBAL_LOOP, STARTUP_MAINTENANCE_TASK
     GLOBAL_LOOP = asyncio.get_running_loop()
     if DWPOSE_AUTO_DOWNLOAD_ENABLED:
         DWPOSE_MODEL_MANAGER.start_background()
-    # 程序资源在桌面包内按只读处理；静态资源版本号只在构建阶段写入暂存副本。
-    # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
-    try:
-        await asyncio.to_thread(migrate_asset_library_into_dirs)
-    except Exception as exc:
-        print(f"资产库分组整理失败: {exc}")
-    # 修复历史遗留的双重扩展名素材（foo.png.png → foo.png），否则这些卡片无法显示
-    try:
-        await asyncio.to_thread(migrate_double_extension_uploads)
-    except Exception as exc:
-        print(f"修复双重扩展名素材失败: {exc}")
-    # 纠正内容与扩展名不符的图片（如 WebP 内容却叫 .png），否则严格客户端解不出来
-    try:
-        await asyncio.to_thread(migrate_mislabeled_image_extensions)
-    except Exception as exc:
-        print(f"纠正图片扩展名失败: {exc}")
     try:
         report = await asyncio.to_thread(prune_removed_provider_presets_once)
         if report.get("removed"):
@@ -391,17 +447,25 @@ async def startup_event():
     except Exception as exc:
         print(f"电商专用任务恢复失败: {exc}")
     try:
-        indexed = await asyncio.to_thread(DATABASE.ensure_work_items_indexed, work_metadata())
-        if indexed:
-            print(f"作品索引就绪：{indexed} 条")
+        await asyncio.to_thread(load_canvas_video_tasks_from_disk)
+        resume_canvas_video_tasks()
     except Exception as exc:
-        print(f"作品索引补偿失败: {exc}")
-    try:
-        indexed = await asyncio.to_thread(ensure_local_upload_indexed)
-        if indexed:
-            print(f"本地素材索引就绪：{indexed} 条")
-    except Exception as exc:
-        print(f"本地素材索引补偿失败: {exc}")
+        print(f"画布视频任务恢复失败: {exc}")
+    # 文件遍历、历史素材修复和索引补偿不阻塞 /api/health；服务就绪后在后台顺序执行。
+    STARTUP_MAINTENANCE_TASK = asyncio.create_task(run_deferred_startup_maintenance())
+
+
+@app.on_event("shutdown")
+async def shutdown_startup_maintenance():
+    global STARTUP_MAINTENANCE_TASK
+    task = STARTUP_MAINTENANCE_TASK
+    STARTUP_MAINTENANCE_TASK = None
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 @app.websocket("/ws/events")
 @app.websocket("/ws/stats")
@@ -491,7 +555,7 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3", "kling-cli"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json"}
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
@@ -507,6 +571,7 @@ LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
 LOCAL_VISION_SECRET_SEED_SETTING = "local_vision_builtin_secret_v1"
 MINIMAX_H3_DEFAULT_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "http://115.231.35.105:7866").strip().rstrip("/")
 MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
+KLING_CLI_PLACEHOLDER_VIDEO_MODELS = ["可灵（连接后选择模型）"]
 MINIMAX_H3_DEFAULT_RESOLUTION = "0.2MP 16:9 - 608x352"
 MINIMAX_H3_RESOLUTION_PRESETS = (
     "0.2MP 21:9 - 672x288", "0.3MP 21:9 - 896x384", "0.5MP 21:9 - 1120x480",
@@ -1050,6 +1115,23 @@ def api_provider_templates():
             "ms_defaults_version": 0,
         },
         {
+            "id": "kling-cli",
+            "name": "可灵 CLI",
+            "base_url": "",
+            "protocol": "kling-cli",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": [],
+            "chat_models": [],
+            "video_models": KLING_CLI_PLACEHOLDER_VIDEO_MODELS,
+            "model_protocols": {},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
             "id": "lingjing",
             "name": "灵境API",
             "base_url": LINGJING_DEFAULT_BASE_URL,
@@ -1086,7 +1168,7 @@ def api_provider_templates():
 
 
 def default_api_providers():
-    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "minimax-h3"}]
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "minimax-h3", "kling-cli"}]
 
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
@@ -1193,6 +1275,20 @@ def merge_default_api_providers(providers):
             current["image_models"] = []
             current["chat_models"] = []
             current["video_models"] = model_list_from_values([*(current.get("video_models") or []), *MINIMAX_H3_DEFAULT_VIDEO_MODELS])
+    kling_cli_default = next((d for d in default_api_providers() if d["id"] == "kling-cli"), None)
+    if kling_cli_default:
+        current = next((item for item in merged if item.get("id") == "kling-cli"), None)
+        if not current:
+            merged.append(kling_cli_default)
+        else:
+            current["name"] = str(current.get("name") or kling_cli_default["name"])
+            current["base_url"] = ""
+            current["protocol"] = "kling-cli"
+            current["image_models"] = []
+            current["chat_models"] = []
+            current["video_models"] = model_list_from_values(
+                [*(current.get("video_models") or []), *KLING_CLI_PLACEHOLDER_VIDEO_MODELS]
+            )
     lingjing_default = next((d for d in default_api_providers() if d["id"] == "lingjing"), None)
     if lingjing_default:
         current = next((item for item in merged if item.get("id") == "lingjing"), None)
@@ -1603,6 +1699,10 @@ def normalize_provider(item):
         protocol = "minimax-h3"
         base_url = base_url or MINIMAX_H3_DEFAULT_BASE_URL
         image_request_mode = "openai"
+    if provider_id == "kling-cli":
+        protocol = "kling-cli"
+        base_url = ""
+        image_request_mode = "openai"
     return {
         "id": provider_id,
         "name": name,
@@ -1613,9 +1713,13 @@ def normalize_provider(item):
         "image_edit_endpoint": image_edit_endpoint,
         "enabled": bool(item.get("enabled", True)),
         "primary": bool(item.get("primary", False)),
-        "image_models": [] if provider_id in {"local-vision", "minimax-h3"} else model_list_from_values(item.get("image_models") or []),
-        "chat_models": [] if provider_id == "minimax-h3" else model_list_from_values(item.get("chat_models") or []),
-        "video_models": [] if provider_id == "local-vision" else model_list_from_values(item.get("video_models") or (MINIMAX_H3_DEFAULT_VIDEO_MODELS if provider_id == "minimax-h3" else [])),
+        "image_models": [] if provider_id in {"local-vision", "minimax-h3", "kling-cli"} else model_list_from_values(item.get("image_models") or []),
+        "chat_models": [] if provider_id in {"minimax-h3", "kling-cli"} else model_list_from_values(item.get("chat_models") or []),
+        "video_models": [] if provider_id == "local-vision" else model_list_from_values(
+            item.get("video_models")
+            or (MINIMAX_H3_DEFAULT_VIDEO_MODELS if provider_id == "minimax-h3" else [])
+            or (KLING_CLI_PLACEHOLDER_VIDEO_MODELS if provider_id == "kling-cli" else [])
+        ),
         "model_protocols": normalize_model_protocols(item.get("model_protocols")),
         "ms_loras": normalize_ms_loras(item.get("ms_loras") or []),
         "ms_defaults_version": int(item.get("ms_defaults_version") or 0),
@@ -2168,6 +2272,7 @@ def health_check():
         "runtime_mode": RUNTIME_OPTIONS.mode,
         "database": "ok",
         "schema_version": DATABASE.SCHEMA_VERSION,
+        "startup_maintenance": startup_maintenance_public_state(),
     }
 
 
@@ -3343,6 +3448,9 @@ class ImageTaskQueryRequest(BaseModel):
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
+CANVAS_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
+CANVAS_VIDEO_TASK_LOCK = Lock()
+CANVAS_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
 ONLINE_IMAGE_TASKS: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_TASKS: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_MAX_CONCURRENCY = max(1, min(8, int(os.getenv("ECOMMERCE_MAX_CONCURRENCY", "3") or 3)))
@@ -3352,12 +3460,15 @@ ECOMMERCE_VISION_SEMAPHORE = asyncio.Semaphore(ECOMMERCE_VISION_MAX_CONCURRENCY)
 ECOMMERCE_VISION_CACHE: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_VISION_CACHE_LOCK = Lock()
 CANVAS_TASK_MEMORY_LIMIT = 200
+CANVAS_VIDEO_TASK_MEMORY_LIMIT = 500
 ONLINE_IMAGE_TASK_MEMORY_LIMIT = 500
 ECOMMERCE_TASK_MEMORY_LIMIT = 1000
 ECOMMERCE_VISION_CACHE_LIMIT = 512
 ONLINE_TASKS_LOADED_ACCOUNTS: set[str] = set()
+CANVAS_VIDEO_TASKS_LOADED_ACCOUNTS: set[str] = set()
 ECOMMERCE_TASKS_LOADED_ACCOUNTS: set[str] = set()
 ONLINE_TASK_LOAD_LOCK = Lock()
+CANVAS_VIDEO_TASK_LOAD_LOCK = Lock()
 ECOMMERCE_TASK_LOAD_LOCK = Lock()
 
 
@@ -3435,7 +3546,16 @@ class CanvasVideoRequest(BaseModel):
     generate_audio: bool = False
     multimodal: bool = False
     steps: int = Field(default=12, ge=4, le=30)
+    model_parameters: Dict[str, Any] = Field(default_factory=dict)
     trusted_asset: bool = False
+
+class CanvasVideoTaskRequest(CanvasVideoRequest):
+    task_id: str = Field(min_length=8, max_length=160)
+    canvas_id: str = Field(default="", max_length=160)
+    node_id: str = Field(default="", max_length=160)
+
+class KlingCliInstallRequest(BaseModel):
+    region: str = "china"
 
 class TempShUploadRequest(BaseModel):
     url: str = ""
@@ -4565,7 +4685,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3", "kling-cli"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
@@ -4635,6 +4755,9 @@ def is_codex_provider(provider):
 
 def is_minimax_h3_provider(provider):
     return provider_protocol(provider) == "minimax-h3" or str((provider or {}).get("id") or "").strip().lower() == "minimax-h3"
+
+def is_kling_cli_provider(provider):
+    return provider_protocol(provider) == "kling-cli" or str((provider or {}).get("id") or "").strip().lower() == "kling-cli"
 
 def codex_env_value(key):
     return os.getenv(key, "") or read_api_env_value(key)
@@ -13815,10 +13938,7 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
     }
     if working.get("operation") != "universal":
         return working, None
-    if (
-        str(working["options"].get("prompt_policy") or "").strip().lower() == "free"
-        or str(working["options"].get("instruction") or "").strip()
-    ):
+    if str(working["options"].get("prompt_policy") or "").strip().lower() == "free":
         return working, None
     analysis = await analyze_ecommerce_universal_references(working["inputs"])
     items = analysis.get("items") if isinstance(analysis, dict) else {}
@@ -15131,8 +15251,7 @@ async def minimax_h3_reference_value(client, url: str, kind: str) -> str:
         raise HTTPException(status_code=400, detail=f"MiniMax H3 参考素材不是有效{('图片' if kind == 'image' else '视频')}")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
-async def generate_minimax_h3_video(client, payload: CanvasVideoRequest, provider):
-    base_url = str(provider.get("base_url") or MINIMAX_H3_DEFAULT_BASE_URL).rstrip("/")
+async def minimax_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[str, Any]:
     image_refs = [ref for ref in (payload.images or []) if str(ref.url or "").strip()]
     video_refs = [str(url or "").strip() for url in (payload.videos or []) if str(url or "").strip()]
     use_references = bool((image_refs or video_refs) and (payload.multimodal or video_refs or len(image_refs) > 2))
@@ -15160,34 +15279,554 @@ async def generate_minimax_h3_video(client, payload: CanvasVideoRequest, provide
             body["first_frame"] = await minimax_h3_reference_value(client, first.url, "image")
         if last:
             body["last_frame"] = await minimax_h3_reference_value(client, last.url, "image")
+    return body
 
+
+async def submit_minimax_h3_video(client, payload: CanvasVideoRequest, provider):
+    base_url = str(provider.get("base_url") or MINIMAX_H3_DEFAULT_BASE_URL).rstrip("/")
+    body = await minimax_h3_video_request(client, payload)
     response = await client.post(f"{base_url}/api/generate", json=body)
     response.raise_for_status()
     result = response.json()
     job_id = str(result.get("id") or "").strip()
     if not job_id:
         raise HTTPException(status_code=502, detail=f"MiniMax H3 未返回任务 ID：{result}")
+    return {
+        "upstream_task_id": job_id,
+        "status": str(result.get("status") or "queued").lower(),
+        "raw": result,
+        "request": body,
+        "base_url": base_url,
+    }
+
+
+async def query_minimax_h3_video(client, job_id: str, provider):
+    base_url = str(provider.get("base_url") or MINIMAX_H3_DEFAULT_BASE_URL).rstrip("/")
+    response = await client.get(f"{base_url}/api/jobs/{urllib.parse.quote(str(job_id), safe='')}")
+    response.raise_for_status()
+    result = response.json()
+    status = str(result.get("status") or "").lower()
+    output = str(result.get("output") or "").strip()
+    output_url = output if output.startswith(("http://", "https://")) else (f"{base_url}/{output.lstrip('/')}" if output else "")
+    if status == "done" and output_url:
+        normalized_status = "succeeded"
+    elif status in {"error", "canceled", "cancelled", "failed"} or status == "done":
+        normalized_status = "failed"
+    else:
+        normalized_status = "running"
+    return {
+        "status": normalized_status,
+        "upstream_status": status,
+        "url": output_url,
+        "error": str(result.get("error") or result.get("message") or ("任务完成但没有返回视频" if status == "done" else "")),
+        "raw": result,
+    }
+
+
+async def generate_minimax_h3_video(client, payload: CanvasVideoRequest, provider):
+    submitted = await submit_minimax_h3_video(client, payload, provider)
+    job_id = submitted["upstream_task_id"]
     deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
     delay = max(2.0, IMAGE_POLL_INTERVAL)
+    result = submitted.get("raw") or {}
     while time.monotonic() < deadline:
-        if str(result.get("status") or "").lower() in {"done", "error", "canceled"}:
-            break
+        queried = await query_minimax_h3_video(client, job_id, provider)
+        result = queried.get("raw") or {}
+        if queried["status"] == "succeeded":
+            local_url = await save_remote_video_to_output(queried["url"], prefix="minimax_h3_")
+            return {"videos": [local_url], "task_id": job_id, "raw": result, "request": submitted["request"]}
+        if queried["status"] == "failed":
+            raise HTTPException(status_code=502, detail=f"MiniMax H3 生成失败：{queried.get('error') or queried.get('upstream_status')}")
         await asyncio.sleep(delay)
-        response = await client.get(f"{base_url}/api/jobs/{urllib.parse.quote(job_id, safe='')}")
-        response.raise_for_status()
-        result = response.json()
         delay = min(delay * 1.35, 10)
-    status = str(result.get("status") or "").lower()
-    if status != "done":
-        if status in {"error", "canceled"}:
-            raise HTTPException(status_code=502, detail=f"MiniMax H3 生成失败：{result.get('error') or result.get('message') or status}")
-        raise HTTPException(status_code=504, detail=f"MiniMax H3 生成任务超时：{job_id}")
-    output = str(result.get("output") or "").strip()
-    if not output:
-        raise HTTPException(status_code=502, detail="MiniMax H3 任务已完成，但没有返回视频")
-    output_url = output if output.startswith("http://") or output.startswith("https://") else f"{base_url}/{output.lstrip('/')}"
-    local_url = await save_remote_video_to_output(output_url, prefix="minimax_h3_")
-    return {"videos": [local_url], "task_id": job_id, "raw": result, "request": body}
+    raise HTTPException(status_code=504, detail=f"MiniMax H3 生成任务超时：{job_id}")
+
+def kling_cli_reference_value(value: str, temporary_dir: str, index: int) -> str:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+    local_path = output_file_from_url(raw_value)
+    if local_path:
+        return str(Path(local_path).resolve())
+    if raw_value.startswith("http://") or raw_value.startswith("https://"):
+        return raw_value
+    match = re.match(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", raw_value, re.S)
+    if not match:
+        raise HTTPException(status_code=400, detail="可灵参考图地址无效，仅支持画布本地图片、HTTP(S) URL 或图片 data URL")
+    try:
+        content = base64.b64decode(match.group(2), validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="可灵参考图 data URL 无法解码") from exc
+    if not content or len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="可灵参考图为空或超过 20MB")
+    extension = mimetypes.guess_extension(match.group(1)) or ".png"
+    destination = Path(temporary_dir) / f"reference_{index}{extension}"
+    destination.write_bytes(content)
+    return str(destination)
+
+async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bool = False):
+    environment = await asyncio.to_thread(resolve_kling_cli)
+    if not environment.is_ready:
+        raise HTTPException(status_code=400, detail=environment.error_message or "可灵 CLI 尚未就绪")
+    service = KlingCliService(environment)
+    try:
+        capabilities = await asyncio.to_thread(service.capabilities)
+        with tempfile.TemporaryDirectory(prefix="shiyin_kling_") as temporary_dir:
+            images = [
+                kling_cli_reference_value(ref.url, temporary_dir, index)
+                for index, ref in enumerate(payload.images or [])
+                if str(ref.url or "").strip()
+            ]
+            command = "image_to_video" if images else "text_to_video"
+            models = capabilities.get(command) or []
+            model = next((item for item in models if str(item.get("model") or "") == str(payload.model or "")), None)
+            if not model:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"当前可灵账号的 {command} 能力中不存在模型：{payload.model or '(empty)'}，请刷新模型列表后重选",
+                )
+            parameter_names = {
+                str(item.get("name") or "")
+                for item in (model.get("arguments") or [])
+                if str(item.get("name") or "") not in {"", "prompt"}
+            }
+            parameters = {
+                str(key): value
+                for key, value in (payload.model_parameters or {}).items()
+                if str(key) in parameter_names
+            }
+            defaults = {
+                "duration": str(payload.duration),
+                "aspect_ratio": str(payload.aspect_ratio or ""),
+                "resolution": str(payload.resolution or ""),
+                "enable_audio": "true" if payload.generate_audio else "false",
+            }
+            for key, value in defaults.items():
+                if key in parameter_names and key not in parameters and value:
+                    parameters[key] = value
+            invoke = service.submit if submit_only else service.generate
+            invoke_kwargs = {
+                "command": command,
+                "model": model,
+                "prompt": str(payload.prompt or "").strip(),
+                "images": images,
+                "parameters": parameters,
+            }
+            if not submit_only:
+                invoke_kwargs["timeout_seconds"] = VIDEO_POLL_TIMEOUT
+            result = await asyncio.to_thread(invoke, **invoke_kwargs)
+    except HTTPException:
+        raise
+    except KlingCliError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return result, command, parameters
+
+
+async def submit_kling_cli_video(payload: CanvasVideoRequest):
+    result, command, parameters = await invoke_kling_cli_video(payload, submit_only=True)
+    return {
+        "upstream_task_id": result.get("generation_id"),
+        "status": result.get("status") or "submitted",
+        "credits_consumed": result.get("credits_consumed"),
+        "raw": result.get("raw"),
+        "request": {
+            "provider_id": "kling-cli",
+            "command": command,
+            "model": payload.model,
+            "parameters": parameters,
+            "image_count": len(payload.images or []),
+        },
+    }
+
+
+async def query_kling_cli_video(generation_id: str, service: Optional[KlingCliService] = None):
+    if service is None:
+        environment = await asyncio.to_thread(resolve_kling_cli)
+        if not environment.is_ready:
+            raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪")
+        service = KlingCliService(environment)
+    return await asyncio.to_thread(service.query, generation_id, timeout=120)
+
+
+async def generate_kling_cli_video(payload: CanvasVideoRequest):
+    result, command, parameters = await invoke_kling_cli_video(payload)
+    remote_url = str(result.get("url") or "").strip()
+    if not remote_url:
+        raise HTTPException(status_code=502, detail="可灵任务完成但没有返回视频地址")
+    local_url = await save_remote_video_to_output(remote_url, prefix="kling_")
+    return {
+        "videos": [local_url],
+        "task_id": result.get("generation_id"),
+        "credits_consumed": result.get("credits_consumed"),
+        "raw": result.get("raw"),
+        "request": {
+            "provider_id": "kling-cli",
+                "command": command,
+                "model": payload.model,
+                "parameters": parameters,
+                "image_count": len(payload.images or []),
+        },
+    }
+
+
+CANVAS_VIDEO_ACTIVE_STATUSES = {"submitting", "queued", "running", "recovery_pending", "finalizing"}
+CANVAS_VIDEO_RESTART_MESSAGE = "服务已重启，正在根据已保存的上游任务 ID 继续查询"
+CANVAS_VIDEO_INTERRUPTED_ERROR = "服务在上游任务 ID 保存前退出；为避免重复扣费，系统不会自动重新提交"
+
+
+def canvas_video_task_request_snapshot(payload: CanvasVideoRequest) -> Dict[str, Any]:
+    return {
+        "prompt": str(payload.prompt or ""),
+        "provider_id": str(payload.provider_id or ""),
+        "model": str(payload.model or ""),
+        "duration": int(payload.duration or 5),
+        "aspect_ratio": str(payload.aspect_ratio or ""),
+        "resolution": str(payload.resolution or ""),
+        "image_count": len(payload.images or []),
+        "video_count": len(payload.videos or []),
+        "audio_count": len(payload.audios or []),
+        "model_parameters": dict(payload.model_parameters or {}),
+    }
+
+
+def write_canvas_video_tasks_locked(task: Optional[Dict[str, Any]] = None):
+    removed_ids = prune_current_account_tasks_locked(
+        CANVAS_VIDEO_TASKS,
+        CANVAS_VIDEO_ACTIVE_STATUSES,
+        CANVAS_VIDEO_TASK_MEMORY_LIMIT,
+    )
+    if task is not None and hasattr(DATABASE, "upsert_task"):
+        DATABASE.upsert_task("canvas_video", task)
+        for task_id in removed_ids:
+            DATABASE.delete_task("canvas_video", task_id)
+    else:
+        tasks = sorted(
+            current_account_tasks(CANVAS_VIDEO_TASKS),
+            key=lambda item: float(item.get("created_at") or 0),
+            reverse=True,
+        )[:CANVAS_VIDEO_TASK_MEMORY_LIMIT]
+        DATABASE.save_tasks("canvas_video", tasks)
+    publish_entity_changed("task", "canvas_video")
+
+
+def load_canvas_video_tasks_from_disk():
+    account_id = current_account_id()
+    items = DATABASE.load_tasks("canvas_video")
+    now = time.time()
+    changed = False
+    restored: Dict[str, Dict[str, Any]] = {}
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id") or item.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        task = dict(item)
+        task["id"] = task_id
+        task["task_id"] = task_id
+        task["_account_id"] = account_id
+        if str(task.get("status") or "") in CANVAS_VIDEO_ACTIVE_STATUSES:
+            if str(task.get("upstream_task_id") or "").strip():
+                task["status"] = "recovery_pending"
+                task["message"] = CANVAS_VIDEO_RESTART_MESSAGE
+                task["error"] = ""
+            else:
+                task["status"] = "interrupted"
+                task["error"] = CANVAS_VIDEO_INTERRUPTED_ERROR
+                task["message"] = ""
+            task["updated_at"] = now
+            changed = True
+        restored[task_id] = task
+    with CANVAS_VIDEO_TASK_LOCK:
+        for existing_id, existing in list(CANVAS_VIDEO_TASKS.items()):
+            if str(existing.get("_account_id") or "admin") == account_id:
+                CANVAS_VIDEO_TASKS.pop(existing_id, None)
+        CANVAS_VIDEO_TASKS.update(restored)
+        CANVAS_VIDEO_TASKS_LOADED_ACCOUNTS.add(account_id)
+        if changed:
+            write_canvas_video_tasks_locked()
+
+
+def ensure_canvas_video_tasks_loaded():
+    account_id = current_account_id()
+    if account_id in CANVAS_VIDEO_TASKS_LOADED_ACCOUNTS:
+        return
+    with CANVAS_VIDEO_TASK_LOAD_LOCK:
+        if account_id not in CANVAS_VIDEO_TASKS_LOADED_ACCOUNTS:
+            load_canvas_video_tasks_from_disk()
+
+
+def public_canvas_video_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    data = dict(task or {})
+    data.pop("_account_id", None)
+    task_id = str(data.get("id") or data.get("task_id") or "")
+    data["id"] = task_id
+    data["task_id"] = task_id
+    return data
+
+
+def update_canvas_video_task(task_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    with CANVAS_VIDEO_TASK_LOCK:
+        task = current_account_task(CANVAS_VIDEO_TASKS, task_id)
+        if not task:
+            return {}
+        task.update(changes)
+        task["updated_at"] = time.time()
+        write_canvas_video_tasks_locked(task)
+        return dict(task)
+
+
+async def submit_canvas_video_upstream(payload: CanvasVideoRequest, provider: Dict[str, Any]):
+    if is_kling_cli_provider(provider):
+        return await submit_kling_cli_video(payload)
+    if is_minimax_h3_provider(provider):
+        timeout = httpx.Timeout(connect=20.0, read=VIDEO_POLL_TIMEOUT, write=VIDEO_POLL_TIMEOUT, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            return await submit_minimax_h3_video(client, payload, provider)
+    raise HTTPException(status_code=400, detail="当前视频平台不支持重启后自动续查")
+
+
+async def query_canvas_video_upstream(task: Dict[str, Any], *, kling_service: Optional[KlingCliService] = None):
+    provider_id = str(task.get("provider_id") or "")
+    upstream_task_id = str(task.get("upstream_task_id") or "")
+    if provider_id == "kling-cli":
+        if kling_service is None:
+            environment = await asyncio.to_thread(resolve_kling_cli)
+            if not environment.is_ready:
+                raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪")
+            kling_service = KlingCliService(environment)
+        queried = await query_kling_cli_video(upstream_task_id, kling_service)
+        status = str(queried.get("status") or "").lower()
+        url = str(queried.get("url") or "").strip()
+        if url and status in {"", "completed", "partial_completed", "succeed", "succeeded", "success", "done"}:
+            normalized = "succeeded"
+        elif status in {"failed", "cancelled", "canceled", "error"} or status in {"completed", "partial_completed", "succeed", "succeeded", "success", "done"}:
+            normalized = "failed"
+        else:
+            normalized = "running"
+        return {
+            "status": normalized,
+            "upstream_status": status,
+            "url": url,
+            "error": queried.get("error") or ("可灵任务完成但没有返回视频地址" if normalized == "failed" and not url else ""),
+            "raw": queried.get("raw"),
+            "_kling_service": kling_service,
+        }
+    provider = get_api_provider(provider_id)
+    saved_base_url = str(task.get("upstream_base_url") or "").strip()
+    if saved_base_url:
+        provider = {**provider, "base_url": saved_base_url}
+    timeout = httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=20.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        return await query_minimax_h3_video(client, upstream_task_id, provider)
+
+
+async def run_canvas_video_task(task_id: str):
+    retry_delay = max(2.0, IMAGE_POLL_INTERVAL)
+    kling_service: Optional[KlingCliService] = None
+    while True:
+        with CANVAS_VIDEO_TASK_LOCK:
+            task = dict(current_account_task(CANVAS_VIDEO_TASKS, task_id))
+        if not task or str(task.get("status") or "") not in CANVAS_VIDEO_ACTIVE_STATUSES:
+            return
+        upstream_task_id = str(task.get("upstream_task_id") or "").strip()
+        if not upstream_task_id:
+            update_canvas_video_task(task_id, {"status": "interrupted", "error": CANVAS_VIDEO_INTERRUPTED_ERROR})
+            return
+        try:
+            queried = await query_canvas_video_upstream(task, kling_service=kling_service)
+            kling_service = queried.pop("_kling_service", kling_service)
+            status = str(queried.get("status") or "running")
+            if status == "succeeded":
+                remote_url = str(queried.get("url") or "").strip()
+                if not remote_url:
+                    update_canvas_video_task(task_id, {"status": "failed", "error": "视频任务完成但没有返回视频地址", "raw": queried.get("raw")})
+                    return
+                update_canvas_video_task(task_id, {"status": "finalizing", "remote_url": remote_url, "message": "视频已生成，正在保存到本地", "error": ""})
+                prefix = "kling_" if str(task.get("provider_id") or "") == "kling-cli" else "minimax_h3_"
+                local_url = await save_remote_video_to_output(remote_url, prefix=prefix)
+                result = {
+                    "videos": [local_url],
+                    "task_id": upstream_task_id,
+                    "credits_consumed": task.get("credits_consumed"),
+                    "raw": queried.get("raw"),
+                    "request": task.get("request") or {},
+                }
+                update_canvas_video_task(task_id, {"status": "succeeded", "result": result, "message": "", "error": "", "raw": queried.get("raw")})
+                return
+            if status == "failed":
+                update_canvas_video_task(task_id, {"status": "failed", "error": str(queried.get("error") or "视频生成失败"), "message": "", "raw": queried.get("raw")})
+                return
+            update_canvas_video_task(task_id, {"status": "running", "upstream_status": queried.get("upstream_status") or "", "message": "视频正在生成中", "error": "", "raw": queried.get("raw")})
+            retry_delay = min(max(2.0, retry_delay * 1.25), 10.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            update_canvas_video_task(task_id, {"status": "recovery_pending", "message": "查询暂时失败，稍后自动重试", "last_query_error": str(exc), "error": ""})
+            retry_delay = min(max(3.0, retry_delay * 1.5), 30.0)
+        await asyncio.sleep(retry_delay)
+
+
+def start_canvas_video_task_runner(task_id: str):
+    existing = CANVAS_VIDEO_TASK_RUNNERS.get(task_id)
+    if existing and not existing.done():
+        return existing
+    runner = asyncio.create_task(run_canvas_video_task(task_id))
+    CANVAS_VIDEO_TASK_RUNNERS[task_id] = runner
+
+    def discard(done):
+        if CANVAS_VIDEO_TASK_RUNNERS.get(task_id) is done:
+            CANVAS_VIDEO_TASK_RUNNERS.pop(task_id, None)
+
+    runner.add_done_callback(discard)
+    return runner
+
+
+def resume_canvas_video_tasks():
+    with CANVAS_VIDEO_TASK_LOCK:
+        task_ids = [
+            str(task.get("id") or "")
+            for task in current_account_tasks(CANVAS_VIDEO_TASKS)
+            if str(task.get("status") or "") in CANVAS_VIDEO_ACTIVE_STATUSES
+            and str(task.get("upstream_task_id") or "").strip()
+        ]
+    for task_id in task_ids:
+        if task_id:
+            start_canvas_video_task_runner(task_id)
+
+
+@app.post("/api/canvas-video-tasks")
+async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
+    ensure_canvas_video_tasks_loaded()
+    task_id = str(payload.task_id or "").strip()
+    if not re.fullmatch(r"canvas_video_[A-Za-z0-9_-]{1,140}", task_id):
+        raise HTTPException(status_code=400, detail="画布视频任务 ID 格式不正确")
+    with CANVAS_VIDEO_TASK_LOCK:
+        existing = public_canvas_video_task(current_account_task(CANVAS_VIDEO_TASKS, task_id))
+    if existing.get("id"):
+        if str(existing.get("status") or "") in CANVAS_VIDEO_ACTIVE_STATUSES and existing.get("upstream_task_id"):
+            start_canvas_video_task_runner(task_id)
+        return existing
+    provider = get_api_provider(payload.provider_id)
+    if not (is_kling_cli_provider(provider) or is_minimax_h3_provider(provider)):
+        raise HTTPException(status_code=400, detail="只有 H3 和可灵视频任务支持重启后自动续查")
+    now = time.time()
+    request_snapshot = canvas_video_task_request_snapshot(payload)
+    task = {
+        "id": task_id,
+        "task_id": task_id,
+        "type": "online-video",
+        "status": "submitting",
+        "created_at": now,
+        "updated_at": now,
+        "provider_id": str(payload.provider_id or ""),
+        "model": str(payload.model or ""),
+        "canvas_id": str(payload.canvas_id or ""),
+        "node_id": str(payload.node_id or ""),
+        "upstream_task_id": "",
+        "upstream_base_url": "",
+        "result": None,
+        "error": "",
+        "message": "正在提交视频任务",
+        "request": request_snapshot,
+        "_account_id": current_account_id(),
+    }
+    with CANVAS_VIDEO_TASK_LOCK:
+        CANVAS_VIDEO_TASKS[task_id] = task
+        write_canvas_video_tasks_locked(task)
+    try:
+        submitted = await submit_canvas_video_upstream(payload, provider)
+        upstream_task_id = str(submitted.get("upstream_task_id") or "").strip()
+        if not upstream_task_id:
+            raise HTTPException(status_code=502, detail="视频平台未返回可恢复的上游任务 ID")
+        update_canvas_video_task(task_id, {
+            "status": "running",
+            "upstream_task_id": upstream_task_id,
+            "upstream_base_url": str(submitted.get("base_url") or provider.get("base_url") or ""),
+            "upstream_status": str(submitted.get("status") or ""),
+            "credits_consumed": submitted.get("credits_consumed"),
+            "message": "视频任务已提交，正在生成中",
+            "error": "",
+        })
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        update_canvas_video_task(task_id, {"status": "failed", "message": "", "error": str(detail)})
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=502, detail=str(detail)) from exc
+    start_canvas_video_task_runner(task_id)
+    with CANVAS_VIDEO_TASK_LOCK:
+        return public_canvas_video_task(current_account_task(CANVAS_VIDEO_TASKS, task_id))
+
+
+@app.get("/api/canvas-video-tasks")
+async def list_canvas_video_tasks(canvas_id: str = "", limit: int = 100):
+    ensure_canvas_video_tasks_loaded()
+    safe_limit = max(1, min(500, int(limit or 100)))
+    with CANVAS_VIDEO_TASK_LOCK:
+        tasks = [public_canvas_video_task(task) for task in current_account_tasks(CANVAS_VIDEO_TASKS)]
+    if canvas_id:
+        tasks = [task for task in tasks if str(task.get("canvas_id") or "") == str(canvas_id)]
+    tasks.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return {"tasks": tasks[:safe_limit]}
+
+
+@app.get("/api/canvas-video-tasks/{task_id}")
+async def get_canvas_video_task(task_id: str):
+    ensure_canvas_video_tasks_loaded()
+    with CANVAS_VIDEO_TASK_LOCK:
+        task = public_canvas_video_task(current_account_task(CANVAS_VIDEO_TASKS, task_id))
+    if not task.get("id"):
+        raise HTTPException(status_code=404, detail="画布视频任务不存在或已过期")
+    return task
+
+@app.get("/api/kling-cli/capabilities")
+async def kling_cli_capabilities():
+    environment = await asyncio.to_thread(resolve_kling_cli)
+    if not environment.is_ready:
+        return {
+            "installed": False,
+            "authenticated": False,
+            "version": environment.version,
+            "capabilities": {"text_to_video": [], "image_to_video": []},
+            "error": environment.error_message,
+        }
+    try:
+        capabilities = await asyncio.to_thread(KlingCliService(environment).capabilities)
+    except KlingCliError as exc:
+        return {
+            "installed": True,
+            "authenticated": False,
+            "version": environment.version,
+            "capabilities": {"text_to_video": [], "image_to_video": []},
+            "error": str(exc),
+        }
+    return {
+        "installed": True,
+        "authenticated": True,
+        "version": environment.version,
+        "capabilities": capabilities,
+        "error": "",
+    }
+
+@app.post("/api/kling-cli/install")
+async def kling_cli_install(payload: KlingCliInstallRequest):
+    try:
+        environment = await asyncio.to_thread(install_kling_cli, payload.region)
+    except KlingCliError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "installed": True, "version": environment.version}
+
+@app.post("/api/kling-cli/login")
+async def kling_cli_login():
+    environment = await asyncio.to_thread(resolve_kling_cli)
+    if not environment.is_ready:
+        raise HTTPException(status_code=400, detail=environment.error_message or "可灵 CLI 尚未安装")
+    try:
+        pid = await asyncio.to_thread(start_kling_login, environment)
+    except KlingCliError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "started": True, "pid": pid}
 
 def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     text = str(prompt or "").strip()
@@ -15203,6 +15842,8 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest):
     provider = get_api_provider(payload.provider_id)
+    if is_kling_cli_provider(provider):
+        return await generate_kling_cli_video(payload)
     if is_minimax_h3_provider(provider):
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=VIDEO_POLL_TIMEOUT, write=VIDEO_POLL_TIMEOUT, pool=20.0), follow_redirects=True) as h3_client:

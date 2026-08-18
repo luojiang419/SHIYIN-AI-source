@@ -342,23 +342,42 @@ class EcommerceContractTests(unittest.TestCase):
                 prompt = build_prompt(operation, references, options)
                 self.assertEqual(prompt, options["instruction"])
 
-    def test_universal_manual_prompt_is_the_only_prompt_and_keeps_upload_order(self):
+    def test_universal_subject_pose_product_supplement_keeps_typed_pose_authority(self):
+        references = [
+            {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
+            {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
+            {"reference_id": "pants", "reference_type": "lower_garment", "role": "lower_garment", "url": "/assets/input/pants.png"},
+        ]
+        instruction = "图1的模特主体换成图2的模特动作和图3的下装"
+
+        prompt = build_prompt("universal", references, {"instruction": instruction})
+
+        self.assertIn(f"USER SUPPLEMENT: {instruction}", prompt)
+        self.assertIn("Image 2 = [POSE / SPATIAL TEMPLATE ONLY]", prompt)
+        self.assertIn("Image 3 = [LOWER GARMENT SOURCE]", prompt)
+        self.assertIn("SOLE POSE OWNER: Image 2", prompt)
+        self.assertIn("Image 3 owns the exact lower garment product", prompt)
+        self.assertIn("the original subject pose is not retained", prompt)
+
+    def test_universal_typed_prompt_is_a_supplement_and_keeps_type_authority(self):
         references = [
             {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
             {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
         ]
         instruction = "图1穿图2的同款风格服装"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertEqual(prompt, instruction)
-        self.assertNotIn("ORDERED REFERENCE MAP", prompt)
-        self.assertNotIn("MATERIAL EVIDENCE LOCK", prompt)
+        self.assertIn(f"USER SUPPLEMENT: {instruction}", prompt)
+        self.assertIn("ORDERED REFERENCE MAP", prompt)
+        self.assertIn("Image 2 = [SCENE SOURCE ONLY]", prompt)
+        self.assertIn("USER SUPPLEMENT RULE", prompt)
         normalized = validate_input_roles("universal", references, {"instruction": instruction})
         self.assertEqual([item["reference_id"] for item in normalized], ["subject", "scene"])
         plan = resolve_universal_reference_plan(references, {"instruction": instruction})
-        self.assertEqual(plan["mode"], "manual_prompt")
+        self.assertEqual(plan["mode"], "subject_edit")
+        self.assertEqual(plan["owners"]["scene"], "scene")
         self.assertEqual(plan["conflicts"], [])
 
-    def test_universal_manual_prompt_bypasses_automatic_type_conflicts(self):
+    def test_universal_typed_prompt_does_not_bypass_type_conflicts(self):
         references = [
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png"},
             {"reference_id": "dress", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/dress.png"},
@@ -367,10 +386,13 @@ class EcommerceContractTests(unittest.TestCase):
         ]
         instruction = "最终改为半身近景，横向 4:3，背景用红色户外街景，不要沿用动作图全身裁切"
         options = {"instruction": instruction, "studio_reference": "studio_gray"}
-        prompt = build_prompt("universal", references, options)
-        self.assertEqual(prompt, instruction)
-        self.assertEqual(validate_input_roles("universal", references, options)[0]["reference_id"], "model")
-        self.assertEqual(resolve_universal_reference_plan(references, options)["mode"], "manual_prompt")
+        with self.assertRaisesRegex(ValueError, "场景参考图与摄影棚"):
+            build_prompt("universal", references, options)
+        with self.assertRaisesRegex(ValueError, "场景参考图与摄影棚"):
+            validate_input_roles("universal", references, options)
+        plan = resolve_universal_reference_plan(references, options)
+        self.assertEqual(plan["mode"], "subject_edit")
+        self.assertIn("场景参考图与摄影棚只能选择一个最终场景", plan["conflicts"])
 
     def test_free_creation_requires_and_preserves_verbatim_prompt(self):
         references = [
@@ -748,7 +770,9 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual(plan["fallbacks"]["pose"], "pose")
         instruction = "保持横向 4:3 输出"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertEqual(prompt, instruction)
+        self.assertIn(f"USER SUPPLEMENT: {instruction}", prompt)
+        self.assertIn("Image 3 = [POSE / SPATIAL TEMPLATE ONLY]", prompt)
+        self.assertIn("SOLE POSE OWNER: Image 3", prompt)
         automatic = build_prompt("universal", references, {})
         self.assertIn("Image 3 = [POSE / SPATIAL TEMPLATE ONLY]", automatic)
         self.assertIn("POSE LOCAL EDIT: Image 3 replaces only the model's action", automatic)
@@ -801,7 +825,7 @@ class EcommerceContractTests(unittest.TestCase):
         prompt = build_prompt("universal", references, {})
 
         self.assertEqual(comparison_reference(references, "subject_edit")["url"], "/assets/input/pose.png")
-        self.assertIn("Image 1 supplies the model identity and body but its original pose is not retained", prompt)
+        self.assertIn("Image 1 supplies the model identity and body but the original subject pose is not retained", prompt)
         self.assertIn("all assigned garments, shoes and accessories must conform to Image 3's pose, never the reverse", prompt)
         self.assertIn("Never copy or imitate any product-reference wearer", prompt)
         self.assertNotIn("LOWER-GARMENT-ONLY LOCAL EDIT", prompt)
@@ -916,18 +940,19 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("IMMUTABLE BASE: Image 1 is the final base image", prompt)
         self.assertIn("Preserve its native pose, camera, viewpoint, framing", prompt)
 
-    def test_universal_manual_waistband_instruction_is_not_wrapped_by_hidden_rules(self):
+    def test_universal_waistband_supplement_adds_typed_geometry_lock(self):
         references = [
             {"reference_id": "model", "reference_type": "subject", "role": "subject", "url": "/assets/input/model.png", "label": "图1模特姿势"},
             {"reference_id": "pants", "reference_type": "lower_garment", "role": "lower_garment", "url": "/assets/input/pants.png", "label": "橙色阔腿裤"},
         ]
         instruction = "参考产品图腰头红线标识，把前中下凹处补高到与左右两侧同一水平高度"
         prompt = build_prompt("universal", references, {"instruction": instruction})
-        self.assertEqual(prompt, instruction)
-        self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", prompt)
+        self.assertIn(f"USER SUPPLEMENT: {instruction}", prompt)
+        self.assertIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", prompt)
+        self.assertIn("Image 2 = [LOWER GARMENT SOURCE]", prompt)
 
         ordinary = build_prompt("universal", references, {"instruction": "保持横向 4:3 输出"})
-        self.assertEqual(ordinary, "保持横向 4:3 输出")
+        self.assertIn("USER SUPPLEMENT: 保持横向 4:3 输出", ordinary)
         self.assertNotIn("USER-REQUESTED WAISTBAND GEOMETRY LOCK", ordinary)
 
     def test_capabilities_do_not_expose_provider_secrets(self):
@@ -977,7 +1002,7 @@ class EcommerceBackendTests(unittest.TestCase):
             providers = self.main.load_api_providers()
         self.assertEqual(
             [item["id"] for item in providers],
-            ["modelscope", "grsai", "lingjing", "shiying", "local-vision", "minimax-h3"],
+            ["modelscope", "grsai", "lingjing", "shiying", "local-vision", "minimax-h3", "kling-cli"],
         )
         self.assertEqual(providers[3]["base_url"], "https://www.shiying-api.com")
         self.assertEqual(providers[3]["model_protocols"]["gemini-3-pro-image-preview"], "gemini")
@@ -1307,7 +1332,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertTrue(attempted_override["source_composition_locked"])
         self.assertEqual((attempted_override["aspect_ratio"], attempted_override["size"]), ("source", "1152x2048"))
 
-    def test_user_prompt_request_preserves_universal_panel_order_and_uses_raw_prompt(self):
+    def test_user_prompt_request_uses_typed_universal_plan_and_supplement(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         inputs = [
             {"role": "subject", "reference_type": "subject", "reference_id": "panel_1", "url": "/assets/input/1.png"},
@@ -1337,8 +1362,9 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(observed["operation"], "universal")
         self.assertEqual(observed["reference_ids"], ["panel_1", "panel_2", "panel_3"])
         self.assertEqual([item["reference_id"] for item in snapshot["inputs"]], ["panel_1", "panel_2", "panel_3"])
-        self.assertEqual(snapshot["prompt"], "图1使用图2材质，图3作为背景")
-        self.assertEqual(snapshot["composition_mode"], "manual_prompt")
+        self.assertIn("USER SUPPLEMENT: 图1使用图2材质，图3作为背景", snapshot["prompt"])
+        self.assertIn("ORDERED REFERENCE MAP", snapshot["prompt"])
+        self.assertEqual(snapshot["composition_mode"], "subject_edit")
         self.assertEqual(snapshot["reference_plan"]["ordered_reference_ids"], ["panel_1", "panel_2", "panel_3"])
         self.assertEqual(snapshot["reference_plan"]["conflicts"], [])
 
@@ -1592,7 +1618,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(enriched["prompt"], prompt)
         self.assertNotIn("reference_analysis", enriched["options"])
 
-    def test_standard_universal_manual_prompt_skips_reference_analysis(self):
+    def test_standard_universal_supplement_keeps_reference_analysis(self):
         prompt = "图2服装穿到图1主体上，其余保持不变"
         snapshot = {
             "operation": "universal",
@@ -1601,16 +1627,17 @@ class EcommerceBackendTests(unittest.TestCase):
                 {"reference_id": "garment", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/garment.png"},
             ],
             "options": {"instruction": prompt},
-            "composition_mode": "manual_prompt",
+            "composition_mode": "subject_edit",
             "prompt": prompt,
         }
-        analyzer = AsyncMock()
+        analysis = {"status": "succeeded", "items": {}}
+        analyzer = AsyncMock(return_value=analysis)
         with patch.object(self.main, "analyze_ecommerce_universal_references", new=analyzer):
             enriched, returned = asyncio.run(self.main.enrich_ecommerce_snapshot_with_universal_analysis(snapshot))
-        analyzer.assert_not_awaited()
-        self.assertIsNone(returned)
-        self.assertEqual(enriched["prompt"], prompt)
-        self.assertNotIn("reference_analysis", enriched["options"])
+        analyzer.assert_awaited_once()
+        self.assertEqual(returned, analysis)
+        self.assertIn(f"USER SUPPLEMENT: {prompt}", enriched["prompt"])
+        self.assertEqual(enriched["composition_mode"], "subject_edit")
 
     def test_free_creation_request_allows_zero_reference_images(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
@@ -1950,10 +1977,18 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("async function waitForPreferenceBootstrap", self.javascript)
         init_body = re.search(r"async function init\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(init_body)
+        self.assertLess(init_body.group(1).index("renderInitialWorkspace()"), init_body.group(1).index("await waitForPreferenceBootstrap()"))
         self.assertLess(init_body.group(1).index("await waitForPreferenceBootstrap()"), init_body.group(1).index("loadSettings()"))
+        self.assertIn("await Promise.all([loadCapabilities(), loadTasks()])", init_body.group(1))
+        self.assertIn("el.ecommercePage?.setAttribute('aria-busy', 'false')", init_body.group(1))
         populate = re.search(r"function populateModelSelectors\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(populate)
         self.assertIn("!state.initializing", populate.group(1))
+
+    def test_initial_local_api_reads_have_timeouts(self):
+        self.assertIn("async function fetchJsonWithTimeout", self.javascript)
+        self.assertIn("fetchJsonWithTimeout('/api/ecommerce/tasks?limit=500')", self.javascript)
+        self.assertIn("fetchJsonWithTimeout('/api/ecommerce/capabilities')", self.javascript)
 
     def test_api_settings_auto_save_without_confirmation_buttons(self):
         self.assertNotIn('api-page-save-btn', self.api_html)
@@ -2080,7 +2115,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn(".sort((a,b) => Number(a[1].order || 0) - Number(b[1].order || 0))", self.javascript)
         request_builder = re.search(r"function taskInputsForRequest\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(request_builder)
-        self.assertIn("IS_FREE_CREATION || manualPrompt ? universalEntries().filter", request_builder.group(1))
+        self.assertIn("IS_FREE_CREATION || userSupplement ? universalEntries().filter", request_builder.group(1))
         self.assertIn(": universalTypedEntries()", request_builder.group(1))
         self.assertIn("return entries.map", request_builder.group(1))
         self.assertNotIn("universalInstructionRequired", self.javascript)
@@ -2107,7 +2142,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         for phrase in ("主体局部换装", "可见模特穿搭", "无人物三维穿搭", "原始提示词", "上传顺序"):
             self.assertIn(phrase, self.ecommerce_i18n)
 
-    def test_universal_mode_exposes_four_routes_and_manual_prompt_without_base_reference(self):
+    def test_universal_mode_exposes_four_typed_routes_and_user_supplements(self):
         self.assertIn("['model_identity','model_identity','ecommerce.refModelIdentity']", self.javascript)
         self.assertIn("['scene_prop','scene_prop','ecommerce.refSceneProp']", self.javascript)
         self.assertIn("['detail','detail','ecommerce.refDetail']", self.javascript)
@@ -2116,10 +2151,11 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("detail:'ecommerce.presetDetail'", self.javascript)
         self.assertIn("const UNIVERSAL_CANONICAL_ROLE_ORDER", self.javascript)
         self.assertIn("function universalTypedEntries()", self.javascript)
-        self.assertIn("function universalHasManualPrompt()", self.javascript)
+        self.assertIn("function universalHasUserSupplement()", self.javascript)
         self.assertIn("function resolveUniversalReferencePlan()", self.javascript)
-        for mode in ("manual_prompt", "subject_edit", "visible_model", "invisible_outfit", "product_showcase"):
+        for mode in ("subject_edit", "visible_model", "invisible_outfit", "product_showcase"):
             self.assertIn(mode, self.javascript)
+        self.assertNotIn("mode:'manual_prompt'", self.javascript)
         self.assertIn("data-detail-target", self.javascript)
         self.assertIn("detail_target_id", self.javascript)
         self.assertNotIn("universalPlanPreview", self.javascript)
@@ -2132,7 +2168,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("if(!IS_FREE_CREATION && !references.length)", validation.group(1))
         self.assertIn("ecommerce.universalReferenceRequired", validation.group(1))
         self.assertIn("resolveUniversalReferencePlan()", validation.group(1))
-        self.assertIn("!universalHasManualPrompt()", validation.group(1))
+        self.assertIn("if(!IS_FREE_CREATION)", validation.group(1))
         self.assertIn("if(plan.conflicts.length)", validation.group(1))
         self.assertNotIn("freeCreation.referenceRequired", validation.group(1))
         self.assertNotIn("reference_type === 'subject'", validation.group(1))

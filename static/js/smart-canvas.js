@@ -33,6 +33,8 @@ const smartWorkflowExportMeta = document.getElementById('smartWorkflowExportMeta
 const smartWorkflowImportInput = document.getElementById('smartWorkflowImportInput');
 const smartWorkflowImportDropZone = document.getElementById('smartWorkflowImportDropZone');
 const selectionBox = document.getElementById('selectionBox');
+const smartCanvasSelectTool = document.getElementById('smartCanvasSelectTool');
+const smartCanvasPanTool = document.getElementById('smartCanvasPanTool');
 const assetToggle = document.getElementById('assetToggle');
 const assetPanel = document.getElementById('assetPanel');
 const assetCloseBtn = document.getElementById('assetCloseBtn');
@@ -67,6 +69,10 @@ const promptTemplateLibrarySelect = document.getElementById('promptTemplateLibra
 const promptTemplateCats = document.getElementById('promptTemplateCats');
 const promptTemplateBody = document.getElementById('promptTemplateBody');
 const composerTemplateBtn = document.getElementById('composerTemplateBtn');
+const composerPromptExpandBtn = document.getElementById('composerPromptExpandBtn');
+const expandedPromptModal = document.getElementById('expandedPromptModal');
+const expandedPromptTextarea = document.getElementById('expandedPromptTextarea');
+const expandedPromptRich = document.getElementById('expandedPromptRich');
 let minimapViewport = document.getElementById('minimapViewport');
 let canvas = null;
 let canvasUsesConnections = true;
@@ -78,6 +84,9 @@ let dragState = null;
 let loopInsertPreview = null;
 let selectionState = null;
 let isRKeyDown = false;
+let smartCanvasToolMode = 'select';
+let isSpaceKeyDown = false;
+let isControlKeyDown = false;
 let selectionJustFinished = false;
 let resizeState = null;
 let llmInstructionResizeState = null;
@@ -90,6 +99,63 @@ let mentionAnchorEl = null;
 let mentionInsertMode = 'token';
 let panState = null;
 let didPan = false;
+let expandedPromptSource = null;
+function openExpandedPromptEditor(source){
+    if(!source || !expandedPromptModal || !expandedPromptTextarea || !expandedPromptRich) return;
+    expandedPromptSource = source;
+    const richMode = source === promptInput;
+    expandedPromptTextarea.style.display = richMode ? 'none' : '';
+    expandedPromptRich.style.display = richMode ? 'block' : 'none';
+    if(richMode){
+        expandedPromptRich.innerHTML = source.innerHTML;
+        expandedPromptRich.contentEditable = source.dataset.promptLocked === '1' ? 'false' : 'true';
+    } else {
+        expandedPromptTextarea.value = source.value || '';
+        expandedPromptTextarea.readOnly = Boolean(source.readOnly || source.disabled);
+    }
+    expandedPromptModal.classList.add('open');
+    expandedPromptModal.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+        const editor = richMode ? expandedPromptRich : expandedPromptTextarea;
+        editor.focus();
+        if(!richMode) editor.setSelectionRange(editor.value.length, editor.value.length);
+    });
+}
+function closeExpandedPromptEditor(){
+    expandedPromptModal?.classList.remove('open');
+    expandedPromptModal?.setAttribute('aria-hidden', 'true');
+    expandedPromptSource = null;
+}
+expandedPromptTextarea?.addEventListener('input', () => {
+    if(!expandedPromptSource?.isConnected || expandedPromptTextarea.readOnly) return;
+    expandedPromptSource.value = expandedPromptTextarea.value;
+    expandedPromptSource.dispatchEvent(new Event('input', {bubbles:true}));
+});
+expandedPromptRich?.addEventListener('input', () => {
+    if(expandedPromptSource !== promptInput || promptInput.dataset.promptLocked === '1') return;
+    expandedPromptSource.innerHTML = expandedPromptRich.innerHTML;
+    expandedPromptSource.dispatchEvent(new Event('input', {bubbles:true}));
+});
+['pointerdown','mousedown','wheel','dblclick','contextmenu'].forEach(type => {
+    expandedPromptModal?.addEventListener(type, event => event.stopPropagation());
+});
+function activeSmartCanvasTool(event=null){
+    const temporaryTool = Boolean(event?.ctrlKey || isControlKeyDown || isSpaceKeyDown);
+    return temporaryTool ? (smartCanvasToolMode === 'select' ? 'pan' : 'select') : smartCanvasToolMode;
+}
+function syncSmartCanvasToolUi(){
+    const activeTool = activeSmartCanvasTool();
+    smartCanvasSelectTool?.classList.toggle('active', smartCanvasToolMode === 'select');
+    smartCanvasPanTool?.classList.toggle('active', smartCanvasToolMode === 'pan');
+    smartCanvasSelectTool?.setAttribute('aria-pressed', String(smartCanvasToolMode === 'select'));
+    smartCanvasPanTool?.setAttribute('aria-pressed', String(smartCanvasToolMode === 'pan'));
+    shell.classList.toggle('smart-tool-pan', activeTool === 'pan');
+}
+function setSmartCanvasToolMode(mode){
+    smartCanvasToolMode = mode === 'pan' ? 'pan' : 'select';
+    syncSmartCanvasToolUi();
+}
+syncSmartCanvasToolUi();
 let portDragState = null;
 let saveTimer = null;
 let apiProviders = [];
@@ -7092,6 +7158,7 @@ function promptNodeBodyHtml(node){
     return `<div class="prompt-node-card">
         <textarea class="prompt-node-text prompt-node-control" ${readonly} placeholder="${escapeHtml(tr('smart.promptPlaceholderNode'))}">${escapeHtml(node.text || '')}</textarea>
         <div class="prompt-node-tools">
+            <button class="prompt-node-pill prompt-node-control prompt-expand-open" type="button" title="${escapeHtml(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-preset-edit ${templateActive ? 'active' : ''}" type="button"><i data-lucide="library"></i><span>模板库</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-split-toggle ${node.promptSplitEnabled ? 'active' : ''}" type="button"><i data-lucide="split"></i><span>分隔符</span></button>
             <button class="prompt-node-pill prompt-llm-toggle ${node.llmEnabled ? 'active' : ''}" type="button"><i data-lucide="sparkles"></i><span>LLM</span></button>
@@ -7294,6 +7361,9 @@ function nodeBodyHtml(node, layout){
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
     const imgs = (node.images || []).map(imageForDisplay);
+    if(smartGenerationSlots(node).length){
+        return smartGenerationSlotsBodyHtml(node, layout);
+    }
     if(node.jimengPending && node.jimengPending.submitId && imgs.length === 0){
         return jimengPendingBodyHtml(node, layout);
     }
@@ -7322,6 +7392,32 @@ function nodeBodyHtml(node, layout){
         <span class="upload-node-title">${escapeHtml(tr('smart.createImportNode'))}</span>
         <span class="upload-node-sub">拖拽 / 粘贴 / 点击上传</span>
     </div>`;
+}
+function smartGenerationSlotsBodyHtml(node, layout){
+    const slots = smartGenerationSlots(node);
+    if(!slots.length) return '';
+    const multi = slots.length > 1;
+    const visibleRows = Math.max(1, Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, Number(layout.visibleRows || layout.rows || 1)));
+    const maxHeight = visibleRows * Number(layout.thumb || 96) + Math.max(0, visibleRows - 1) * 8;
+    let imageIndex = 0;
+    const cells = slots.map(slot => {
+        const slotId = escapeAttr(slot.id || '');
+        if(slot.status === 'success' && slot.image?.url){
+            const img = imageForDisplay(slot.image);
+            const currentImageIndex = imageIndex++;
+            return `<div class="thumb-item generation-slot generation-slot-success has-outside-image-name ${selectedImage.nodeId === node.id && selectedImage.index === currentImageIndex ? 'image-selected' : ''}" data-generation-slot-id="${slotId}" data-image-index="${currentImageIndex}" data-media-signature="${escapeAttr(`${mediaKindForItem(img)}:${img?.url || ''}`)}">${thumbMediaHtml(img)}${imageNameBadgeHtml(img, {outside:true})}${imageResolutionBadgeHtml(img)}<button class="mini-x image-delete" type="button" data-image-index="${currentImageIndex}" data-generation-slot-id="${slotId}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button></div>`;
+        }
+        if(slot.status === 'error'){
+            const task = smartPendingTasks(node).find(item => item.slotId === slot.id);
+            const queryButton = task?.recoverTaskId ? `<button type="button" data-image-task-query="${escapeAttr(node.id)}" data-task-id="${escapeAttr(task.taskId || '')}"><i data-lucide="search"></i><span>${escapeHtml(tr('smart.querySlot'))}</span></button>` : '';
+            return `<div class="generation-slot generation-slot-error" data-generation-slot-id="${slotId}"><i data-lucide="circle-alert"></i><strong>${escapeHtml(tr('smart.slotFailed'))}</strong><span title="${escapeAttr(slot.error || '')}">${escapeHtml((slot.error || tr('smart.errRunFailed')).slice(0, 72))}</span><div class="generation-slot-actions"><button type="button" data-generation-slot-retry="${slotId}"><i data-lucide="refresh-cw"></i><span>${escapeHtml(tr('smart.retrySlot'))}</span></button>${queryButton}<button type="button" data-generation-slot-delete="${slotId}"><i data-lucide="trash-2"></i><span>${escapeHtml(tr('smart.deleteSlot'))}</span></button></div></div>`;
+        }
+        return `<div class="generation-slot generation-slot-loading loading-cell" data-generation-slot-id="${slotId}"><i data-lucide="loader-2"></i><span>${escapeHtml(tr('smart.slotGenerating'))}</span></div>`;
+    }).join('');
+    const style = multi
+        ? `--thumb-cols:${layout.cols}; --thumb-size:${layout.thumb}px; --thumb-max-height:${maxHeight}px`
+        : `--thumb-cols:1; --thumb-size:${Math.max(72, Number(layout.width || 260))}px; --thumb-max-height:${Math.max(72, Number(layout.height || 180))}px`;
+    return `<div class="thumb-grid generation-slot-grid ${multi ? '' : 'single'}" data-thumb-scroll="1" style="${style}">${cells}</div>`;
 }
 function jimengPendingBodyHtml(node, layout){
     const jp = node.jimengPending || {};
@@ -7564,9 +7660,14 @@ function render(){
         .sort((a, b) => (isSmartGroupNode(a) ? 0 : 1) - (isSmartGroupNode(b) ? 0 : 1))
         .map(node => {
         const imgs = node.images || [];
-        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : imgs.length ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const generationSlots = smartGenerationSlots(node);
+        const displayCount = generationSlots.length || imgs.length;
+        const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
+        const slotLoading = generationSlots.some(slot => slot.status === 'loading');
+        const slotFailed = generationSlots.some(slot => slot.status === 'error');
+        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
-        const layout = imageLayout(imgs, scale, node);
+        const layout = imageLayout(layoutImages, scale, node);
         const isPrompt = node.type === 'smart-prompt';
         const isLoop = node.type === 'smart-loop';
         const isSmartGroup = node.type === 'smart-group';
@@ -7575,13 +7676,13 @@ function render(){
         const isSpecial = Boolean(node.specialType);
         const isJimengPending = Boolean(node.jimengPending && node.jimengPending.submitId && imgs.length === 0);
         const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
-        const isEmpty = !isSpecial && isImageNode && imgs.length === 0 && !node.pending && !isQueued && !isJimengPending;
+        const isEmpty = !isSpecial && isImageNode && displayCount === 0 && !node.pending && !isQueued && !isJimengPending;
         const isHistory = isHistoryGroupNode(node);
-        const isGroup = isImageNode && imgs.length > 1;
-        const isPending = ((node.pending || isQueued || isJimengPending) && imgs.length === 0);
+        const isGroup = isImageNode && displayCount > 1;
+        const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
+        const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
         const html = `<div class="image-node ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
@@ -7590,7 +7691,7 @@ function render(){
             <div class="node-body">${body}</div>
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
-            ${imgs.length || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
+            ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
             <div class="node-port port-in" data-port="in" title="input"></div>
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
@@ -7797,6 +7898,12 @@ function bindPromptNodeControls(el, node){
             scheduleSave();
         };
     }
+    const expandBtn = el.querySelector('.prompt-expand-open');
+    if(expandBtn) expandBtn.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        openExpandedPromptEditor(textEl);
+    };
     const separatorEl = el.querySelector('.prompt-node-separator');
     if(separatorEl) {
         separatorEl.oninput = e => {
@@ -8158,7 +8265,7 @@ function handlePortDrop(drag, e){
         return;
     }
     if(!drag.moved){ discardPendingUndo(); render(); return; }
-    if(hit?.closest?.('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
+    if(hit?.closest?.('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
     const p = screenToWorld(e);
@@ -8380,6 +8487,20 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
                 querySmartImageTaskNow(btn.dataset.imageTaskQuery, btn.dataset.taskId);
             });
         });
+        el.querySelectorAll('[data-generation-slot-retry]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                retrySmartGenerationSlot(id, btn.dataset.generationSlotRetry);
+            });
+        });
+        el.querySelectorAll('[data-generation-slot-delete]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                deleteSmartGenerationSlot(id, btn.dataset.generationSlotDelete);
+            });
+        });
         el.querySelectorAll('[data-thumb-scroll]').forEach(scroller => {
             scroller.addEventListener('wheel', e => {
                 e.stopPropagation();
@@ -8388,7 +8509,8 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
         el.querySelectorAll('.image-delete').forEach(btn => {
             btn.addEventListener('click', e => {
                 e.preventDefault(); e.stopPropagation();
-                deleteImage(id, Number(btn.dataset.imageIndex));
+                if(btn.dataset.generationSlotId) deleteSmartGenerationSlot(id, btn.dataset.generationSlotId);
+                else deleteImage(id, Number(btn.dataset.imageIndex));
             });
         });
         el.querySelectorAll('.image-name-badge').forEach(badge => {
@@ -14202,14 +14324,15 @@ async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, c
                 delete history.h;
                 outputSlot.images = [];
             }
-            outputSlot.pendingTasks = taskIds.map(taskId => ({taskId, kind:'image', providerId:taskResult.providerId, model:taskResult.model}));
+            attachRunMeta(outputSlot, meta);
+            initializeSmartGenerationSlots(outputSlot, taskIds.map(taskId => ({taskId, kind:'image', providerId:taskResult.providerId, model:taskResult.model})));
             outputSlot.pending = Math.max(taskIds.length, Number(outputSlot.pending || 0) || taskIds.length);
             outputSlot.running = false;
             render();
             scheduleSave();
             await saveCanvas();
             await resumeSmartPendingNode(outputSlot, {run:runLog, runLogStart});
-            if(outputSlot.jimengPending || smartRecoverableImageTask(outputSlot)){
+            if(outputSlot.jimengPending || smartGenerationSlots(outputSlot).some(slot => slot.status === 'error')){
                 outputSlot.queued = false;
                 return [];
             }
@@ -14644,7 +14767,7 @@ async function runGeneration(){
         if(isApiLikeEngine(settings.engine)){
             const taskIds = Array.isArray(outImages?.taskIds) ? outImages.taskIds : [];
             if(!taskIds.length) throw new Error(tr('smart.errRunFailed'));
-            pendingNode.pendingTasks = taskIds.map(taskId => ({taskId, kind:'image', providerId:outImages.providerId, model:outImages.model}));
+            initializeSmartGenerationSlots(pendingNode, taskIds.map(taskId => ({taskId, kind:'image', providerId:outImages.providerId, model:outImages.model})));
             pendingNode.pending = Math.max(taskIds.length, Number(pendingNode.pending || 0) || taskIds.length);
             pendingNode.runStartedAt = nowMs();
             pendingNode.runTimerHidden = false;
@@ -14653,7 +14776,7 @@ async function runGeneration(){
             scheduleSave();
             await saveCanvas();
             await resumeSmartPendingNode(pendingNode, {run:runLog, runLogStart});
-            if(pendingNode.jimengPending || smartRecoverableImageTask(pendingNode)){
+            if(pendingNode.jimengPending || smartGenerationSlots(pendingNode).some(slot => slot.status === 'error')){
                 if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
                 clearPromptInput({preserveDraft:true});
                 settings = previousSettings;
@@ -14968,6 +15091,161 @@ async function runComfyEdit(node, prompt, refs, pendingNode, meta){
 async function comfyNameForRef(ref){
     throw new Error('本地生成功能已移除，请改用在线 API 生成。');
 }
+function smartGenerationSlots(node){
+    if(!node || !Array.isArray(node.generationSlots)) return [];
+    return node.generationSlots.filter(slot => slot && slot.id).sort((a, b) => Number(a.index || 0) - Number(b.index || 0));
+}
+function initializeSmartGenerationSlots(node, tasks=[]){
+    if(!node) return [];
+    const existingImages = cleanHistoryImages(node.images || []);
+    const successSlots = existingImages.map((image, index) => ({
+        id:uid('generation-slot'),
+        index,
+        status:'success',
+        image
+    }));
+    const preparedTasks = (tasks || []).filter(task => task?.taskId).map((task, offset) => {
+        const slotId = task.slotId || uid('generation-slot');
+        task.slotId = slotId;
+        return {...task, slotId, slotIndex:successSlots.length + offset};
+    });
+    node.pendingTasks = preparedTasks;
+    node.generationSlots = [
+        ...successSlots,
+        ...preparedTasks.map(task => ({
+            id:task.slotId,
+            index:task.slotIndex,
+            taskId:task.taskId,
+            status:task.failed ? 'error' : 'loading',
+            error:task.error || ''
+        }))
+    ];
+    node.pending = node.generationSlots.filter(slot => slot.status === 'loading').length;
+    return node.generationSlots;
+}
+function rebuildSmartGenerationSlotImages(node){
+    if(!node) return [];
+    const images = smartGenerationSlots(node)
+        .filter(slot => slot.status === 'success' && slot.image?.url)
+        .map(slot => stripImageGenerationMeta({...slot.image}))
+        .filter(image => image.url);
+    node.images = images.length > SMART_NODE_MEDIA_LIMIT ? images.slice(-SMART_NODE_MEDIA_LIMIT) : images;
+    return node.images;
+}
+function settleSmartGenerationSlots(node, kind='image'){
+    if(!node) return;
+    const slots = smartGenerationSlots(node);
+    node.pending = slots.filter(slot => slot.status === 'loading').length;
+    rebuildSmartGenerationSlotImages(node);
+    if(node.pending) return;
+    node.running = false;
+    node.runFinishedAt = nowMs();
+    if(!node.runStartedAt) node.runStartedAt = node.runFinishedAt;
+    node.runElapsedMs = Math.max(0, node.runFinishedAt - Number(node.runStartedAt || node.runFinishedAt));
+    node.runTimerHidden = false;
+    node.title = node.images.length > 1 ? (kind === 'video' ? 'Videos' : 'Group') : (kind === 'video' ? 'Video' : 'Image');
+    if(node.images.length > 1 && (!Number.isFinite(Number(node.scale)) || Number(node.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(node.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)) node.scale = MEDIA_GROUP_DEFAULT_SCALE;
+    else node.scale = mediaNodeDefaultScale(node);
+    delete node.w;
+    delete node.h;
+    if(slots.length && slots.every(slot => slot.status === 'success')){
+        delete node.generationSlots;
+        delete node.pendingTasks;
+    }
+}
+function markSmartGenerationSlotFailed(node, task, error, recover={}){
+    if(!node || !task) return;
+    if(!smartGenerationSlots(node).length) initializeSmartGenerationSlots(node, smartPendingTasks(node));
+    const slot = smartGenerationSlots(node).find(item => item.id === task.slotId || item.taskId === task.taskId);
+    if(!slot) return;
+    task.slotId = slot.id;
+    task.failed = true;
+    task.querying = false;
+    task.error = error || tr('smart.errRunFailed');
+    if(recover.recoverTaskId) task.recoverTaskId = recover.recoverTaskId;
+    if(recover.providerId) task.providerId = recover.providerId;
+    slot.taskId = task.taskId;
+    slot.status = 'error';
+    slot.error = task.error;
+    settleSmartGenerationSlots(node, task.kind || 'image');
+}
+async function retrySmartGenerationSlot(nodeId, slotId){
+    const node = nodes.find(item => item.id === nodeId);
+    const slot = smartGenerationSlots(node).find(item => item.id === slotId);
+    if(!node || !slot || slot.status === 'loading') return;
+    const previousTask = smartPendingTasks(node).find(item => item.slotId === slotId);
+    const retrySettings = {
+        ...cloneSmartSettings(node.runSettings || settings),
+        engine:'api',
+        apiKind:'image',
+        provider_id:previousTask?.providerId || node.runSettings?.provider_id || settings.provider_id,
+        model:previousTask?.model || node.runSettings?.model || settings.model,
+        count:1
+    };
+    const prompt = String(node.runModelPrompt || node.runPrompt || '').trim();
+    const refs = (node.runInputRefs || node.runPromptRefs || []).filter(ref => ref?.url).map(ref => ({...ref}));
+    if(!prompt && smartRunNeedsPrompt(retrySettings)){
+        toast(tr('smart.toastNeedPrompt'));
+        return;
+    }
+    slot.status = 'loading';
+    slot.error = '';
+    node.pending = smartGenerationSlots(node).filter(item => item.status === 'loading').length;
+    node.runStartedAt = nowMs();
+    delete node.runFinishedAt;
+    delete node.runElapsedMs;
+    render();
+    scheduleSave();
+    try {
+        const submitted = await runApiGeneration(prompt, refs, retrySettings);
+        const taskId = submitted.taskIds?.[0];
+        if(!taskId) throw new Error(tr('smart.errRunFailed'));
+        const task = previousTask || {};
+        task.slotId = slotId;
+        task.slotIndex = slot.index;
+        task.taskId = taskId;
+        task.kind = 'image';
+        task.providerId = submitted.providerId || retrySettings.provider_id;
+        task.model = submitted.model || retrySettings.model;
+        task.failed = false;
+        task.querying = false;
+        delete task.error;
+        delete task.recoverTaskId;
+        node.pendingTasks = smartPendingTasks(node).filter(item => item.slotId !== slotId);
+        node.pendingTasks.push(task);
+        slot.taskId = taskId;
+        await saveCanvas();
+        const result = await pollSmartCanvasTask(taskId);
+        finalizeSmartPendingTask(node, taskId, resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result)), 'image');
+    } catch(e) {
+        const task = smartPendingTasks(node).find(item => item.slotId === slotId) || previousTask || {slotId, taskId:slot.taskId, kind:'image', providerId:retrySettings.provider_id, model:retrySettings.model};
+        if(!smartPendingTasks(node).includes(task)) node.pendingTasks = [...smartPendingTasks(node), task];
+        markSmartGenerationSlotFailed(node, task, e.message || tr('smart.errRunFailed'), e?.imageTaskRecover ? e : {});
+        toast((e.message || tr('smart.errRunFailed')).slice(0, 160));
+    } finally {
+        render();
+        scheduleSave();
+    }
+}
+function deleteSmartGenerationSlot(nodeId, slotId){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node) return;
+    const slots = smartGenerationSlots(node);
+    if(!slots.some(slot => slot.id === slotId)) return;
+    pushUndo();
+    node.generationSlots = slots.filter(slot => slot.id !== slotId).map((slot, index) => ({...slot, index}));
+    node.pendingTasks = smartPendingTasks(node).filter(task => task.slotId !== slotId);
+    if(!node.generationSlots.length){
+        delete node.generationSlots;
+        if(!node.pendingTasks.length) delete node.pendingTasks;
+        node.pending = 0;
+    } else {
+        settleSmartGenerationSlots(node, 'image');
+    }
+    if(selectedImage.nodeId === nodeId) selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+}
 function smartPendingTasks(node){
     if(!node || !Array.isArray(node.pendingTasks)) return [];
     return node.pendingTasks.filter(task => task && task.taskId);
@@ -15144,13 +15422,18 @@ async function querySmartImageTaskNow(nodeId, localTaskId){
         }
         if(data.status === 'failed'){
             task.error = data.error || tr('smart.errRunFailed');
+            markSmartGenerationSlotFailed(node, task, task.error, {recoverTaskId, providerId:providerIdForSmartTask(node, task)});
             toast(task.error.slice(0, 160));
         } else {
             task.error = data.message || '任务仍在生成中，请稍后再查询';
+            const slot = smartGenerationSlots(node).find(item => item.id === task.slotId);
+            if(slot) slot.error = task.error;
             toast(task.error);
         }
     } catch(e){
         task.error = e.message || '查询失败';
+        const slot = smartGenerationSlots(node).find(item => item.id === task.slotId);
+        if(slot) slot.error = task.error;
         toast(task.error.slice(0, 160));
     } finally {
         const latest = smartPendingTasks(node).find(item => item.taskId === localTaskId);
@@ -15221,41 +15504,37 @@ async function pollSmartCanvasTask(taskId){
 }
 function finalizeSmartPendingTask(node, taskId, images, kind='image'){
     if(!node || !taskId) return;
-    node.pendingTasks = smartPendingTasks(node).filter(task => task.taskId !== taskId);
-    node.pending = Math.max(0, Number(node.pending || 0) - 1);
+    const trackedTask = smartPendingTasks(node).find(task => task.taskId === taskId);
+    if(!trackedTask) return;
+    if(!smartGenerationSlots(node).length) initializeSmartGenerationSlots(node, smartPendingTasks(node));
+    const slot = smartGenerationSlots(node).find(item => item.id === trackedTask.slotId || item.taskId === taskId);
     const ext = kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : kind === 'text' ? 'txt' : 'png';
     const mediaItems = resultMediaUrls(images);
-    const existing = cleanHistoryImages(node.images || []);
-    const seen = new Set(existing.map(img => `${img.kind || ''}|${img.url || ''}`));
     const additions = cleanHistoryImages((mediaItems || []).map((item, i) => {
         const url = typeof item === 'string' ? item : item?.url || '';
         const itemKind = (typeof item === 'object' && item.kind) || kind;
         return stripImageGenerationMeta(copyMediaSizeFields(item, {url, name:(typeof item === 'object' && item.name) || `output-${i + 1}.${ext}`, kind:itemKind, generatedResult:true}));
-    }).filter(item => item.url)).filter(item => {
-        const key = `${item.kind || ''}|${item.url || ''}`;
-        if(seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-    node.images = boundedSmartNodeImages([...existing, ...additions]);
-    if(additions.length) node.outputKind = kind;
-    if(!node.pending && smartPendingTasks(node).length === 0){
-        delete node.pendingTasks;
-        node.runFinishedAt = nowMs();
-        if(!node.runStartedAt) node.runStartedAt = node.runFinishedAt;
-        node.runElapsedMs = Math.max(0, node.runFinishedAt - Number(node.runStartedAt || node.runFinishedAt));
-        node.runTimerHidden = false;
-        node.running = false;
-        node.title = node.images.length > 1 ? (kind === 'video' ? 'Videos' : kind === 'audio' ? 'Audios' : kind === 'text' ? 'Texts' : 'Group') : (kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : kind === 'text' ? 'Text' : 'Image');
-        if(node.images.length > 1 && (!Number.isFinite(Number(node.scale)) || Number(node.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(node.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)) node.scale = MEDIA_GROUP_DEFAULT_SCALE;
-        else node.scale = mediaNodeDefaultScale(node);
-        delete node.w;
-        delete node.h;
+    }).filter(item => item.url));
+    if(!slot || !additions.length){
+        markSmartGenerationSlotFailed(node, trackedTask, tr('smart.errNoOutImages'));
+        return;
     }
+    slot.status = 'success';
+    slot.error = '';
+    slot.image = additions[0];
+    delete slot.taskId;
+    node.pendingTasks = smartPendingTasks(node).filter(task => task.taskId !== taskId);
+    node.outputKind = kind;
+    rebuildSmartGenerationSlotImages(node);
+    settleSmartGenerationSlots(node, kind);
 }
 async function resumeSmartPendingNode(node, logContext={}){
-    const tasks = smartPendingTasks(node);
+    let tasks = smartPendingTasks(node);
     if(!node || !tasks.length) return;
+    if(!smartGenerationSlots(node).length){
+        initializeSmartGenerationSlots(node, tasks);
+        tasks = smartPendingTasks(node);
+    }
     const logTaskFailure = (message, task) => {
         if(!logContext?.run || !message) return;
         const runMs = Math.max(0, nowMs() - Number(logContext.runLogStart || nowMs()));
@@ -15266,12 +15545,12 @@ async function resumeSmartPendingNode(node, logContext={}){
             error:message
         });
     };
-    node.pending = Math.max(tasks.length, Number(node.pending || 0) || tasks.length);
+    node.pending = Math.max(tasks.filter(task => !task.failed).length, Number(node.pending || 0));
     node.running = false;
     render();
     const failures = [];
     await Promise.all(tasks.map(async task => {
-        if(task.failed && task.recoverTaskId) return;
+        if(task.failed) return;
         try {
             const result = await pollSmartCanvasTask(task.taskId);
             finalizeSmartPendingTask(node, task.taskId, resultMediaUrls(result?.image_items?.length ? result.image_items : (result?.images?.length ? result.images : result)), task.kind || 'image');
@@ -15286,29 +15565,17 @@ async function resumeSmartPendingNode(node, logContext={}){
                 return;
             }
             if(e && e.imageTaskRecover && e.recoverTaskId){
-                task.failed = true;
-                task.querying = false;
-                task.recoverTaskId = e.recoverTaskId;
-                task.providerId = e.providerId || task.providerId || providerIdForSmartTask(node, task);
-                task.error = e.message || tr('smart.errRunFailed');
-                node.running = false;
-                node.pending = Math.max(1, smartPendingTasks(node).length);
+                markSmartGenerationSlotFailed(node, task, e.message || tr('smart.errRunFailed'), {
+                    recoverTaskId:e.recoverTaskId,
+                    providerId:e.providerId || task.providerId || providerIdForSmartTask(node, task)
+                });
                 logTaskFailure(task.error, task);
                 toast('任务未丢失，可稍后手动查询结果');
                 render();
                 scheduleSave();
                 return;
             }
-            node.pendingTasks = smartPendingTasks(node).filter(item => item.taskId !== task.taskId);
-            node.pending = Math.max(0, Number(node.pending || 0) - 1);
-            if(!node.pending && smartPendingTasks(node).length === 0){
-                delete node.pendingTasks;
-                node.running = false;
-                if(!(node.images || []).length){
-                    delete node.w;
-                    delete node.h;
-                }
-            }
+            markSmartGenerationSlotFailed(node, task, e.message || tr('smart.errRunFailed'));
             failures.push(e);
             logTaskFailure(e.message || tr('smart.errRunFailed'), task);
             if(e && typeof e === 'object') e.smartGenerationLogged = true;
@@ -15317,7 +15584,7 @@ async function resumeSmartPendingNode(node, logContext={}){
             scheduleSave();
         }
     }));
-    if(failures.length && !(node.images || []).length){
+    if(failures.length && !(node.images || []).length && !smartGenerationSlots(node).length){
         throw failures[0];
     }
 }
@@ -15580,14 +15847,14 @@ function createNodeFromMenu(type){
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
 }, true);
 shell.addEventListener('click', e => {
     if(!zoomPreviewState) return;
     if(e.button !== 0) return;
-    if(e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     e.preventDefault();
     e.stopPropagation();
     const nodeEl = e.target.closest('.image-node');
@@ -15595,8 +15862,8 @@ shell.addEventListener('click', e => {
     else exitZoomPreview(screenToWorld(e));
 }, true);
 shell.onmousedown = e => {
-    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
-    if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
+    if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.target.closest('.image-node,.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
     if(e.button === 0 && isRKeyDown){
         e.preventDefault();
@@ -15605,7 +15872,7 @@ shell.onmousedown = e => {
         updateSelectionBox(e);
         return;
     }
-    if(e.button === 0 && (e.ctrlKey || e.metaKey)){
+    if(e.button === 0 && activeSmartCanvasTool(e) === 'select'){
         e.preventDefault();
         didPan = false;
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
@@ -15624,7 +15891,7 @@ shell.oncontextmenu = e => {
         e.stopPropagation();
         return;
     }
-    if(didPan || e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(didPan || e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -15640,14 +15907,14 @@ shell.oncontextmenu = e => {
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     openCreateMenu(e);
 };
 shell.onclick = e => {
     if(selectionJustFinished) return;
-    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
+    if(didPan || e.target.closest('.image-node,.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu')) return;
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
@@ -16114,7 +16381,7 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -16166,6 +16433,16 @@ window.addEventListener('paste', e => {
 });
 window.addEventListener('keydown', e => {
     const key = String(e.key || '').toLowerCase();
+    if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }
+    if(e.key === 'Control' && !isEditableTarget(e.target)){
+        isControlKeyDown = true;
+        syncSmartCanvasToolUi();
+    }
+    if(e.key === ' ' && !isEditableTarget(e.target)){
+        e.preventDefault();
+        isSpaceKeyDown = true;
+        syncSmartCanvasToolUi();
+    }
     if(key === 'r' && !isEditableTarget(e.target)) isRKeyDown = true;
     if(imageEditModal.classList.contains('open') && imageEditMode === 'preview' && !isEditableTarget(e.target)){
         if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
@@ -16235,9 +16512,20 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => {
     if(String(e.key || '').toLowerCase() === 'r') isRKeyDown = false;
+    if(e.key === 'Control'){
+        isControlKeyDown = false;
+        syncSmartCanvasToolUi();
+    }
+    if(e.key === ' '){
+        isSpaceKeyDown = false;
+        syncSmartCanvasToolUi();
+    }
 });
 window.addEventListener('blur', () => {
     isRKeyDown = false;
+    isSpaceKeyDown = false;
+    isControlKeyDown = false;
+    syncSmartCanvasToolUi();
 });
 engineSelect.onchange = () => {
     settings.engine = engineSelect.value;
@@ -16666,6 +16954,11 @@ composer.addEventListener('click', event => {
     // 参数控件(.smart-control)内部点击本就不关;运行按钮也排除,让参数栏熬过生成与重渲染。
     if(!event.target.closest('.smart-control') && !event.target.closest('#runBtn') && !event.target.closest('#cascadeRunBtn')) closeAllSmartPopovers();
     event.stopPropagation();
+});
+composerPromptExpandBtn?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    openExpandedPromptEditor(promptInput);
 });
 promptInput.addEventListener('input', maybeOpenMentionPicker);
 promptInput.addEventListener('input', () => {

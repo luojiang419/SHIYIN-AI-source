@@ -278,7 +278,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision' || item.id === 'minimax-h3';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision' || item.id === 'minimax-h3' || item.id === 'kling-cli';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -736,7 +736,7 @@ function syncEditor(){
     item.id = nextId;
     if(oldId !== item.id) selectedId = item.id;
     item.name = nameInput.value.trim() || item.id;
-    const selectedProtocol = item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : (protocolInput?.value || 'openai');
+    const selectedProtocol = item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : (protocolInput?.value || 'openai');
     item.base_url = ['jimeng', 'codex'].includes(selectedProtocol) ? '' : (item.id === 'local-vision' ? normalizeOpenAiCompatibleBaseUrl(baseInput.value || LOCAL_VISION_DEFAULT_BASE_URL) : baseInput.value.trim());
     if(item.id === 'local-vision') baseInput.value = item.base_url;
     // 固定平台不从协议下拉读取
@@ -779,7 +779,7 @@ function ensureRunningHubLists(item){
 }
 function updateProtocolFromInput(){
     const item = provider();
-    if(!item || !protocolInput || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'minimax-h3') return;
+    if(!item || !protocolInput || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'minimax-h3' || item.id === 'kling-cli') return;
     const value = String(protocolInput.value || 'openai').toLowerCase();
     item.protocol = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(value) ? value : 'openai';
     if(['jimeng', 'codex'].includes(item.protocol)) item.base_url = '';
@@ -2386,7 +2386,7 @@ function renderEditor(){
     baseInput.placeholder = EXAMPLE_BASE_URL;
     baseInput.value = item.base_url || '';
     if(protocolInput){
-        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : (item.protocol || 'openai');
+        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : (item.protocol || 'openai');
         protocolInput.disabled = FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
         protocolInput.title = protocolInput.disabled ? '内置平台使用固定协议' : '';
     }
@@ -3177,7 +3177,7 @@ async function clearKeyOnly(){
     const ok = await saveProviders();
     if(ok) keyInput.value = '';
 }
-const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub', 'codex', 'local-vision', 'minimax-h3']);
+const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub', 'codex', 'local-vision', 'minimax-h3', 'kling-cli']);
 function providerSupportsModelProtocol(item){
     return Boolean(item) && !FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
 }
@@ -3461,7 +3461,9 @@ async function persistProviders(options={}){
             ? 'codex'
             : item.id === 'minimax-h3'
             ? 'minimax-h3'
-            : ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'minimax-h3'].includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
+            : item.id === 'kling-cli'
+            ? 'kling-cli'
+            : ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'minimax-h3', 'kling-cli'].includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
         item.image_request_mode = normalizeImageRequestMode(
             item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
                 ? 'openai'

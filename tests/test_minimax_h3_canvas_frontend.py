@@ -9,10 +9,14 @@ class MiniMaxH3CanvasFrontendTests(unittest.TestCase):
         cls.html = (root / "static" / "canvas.html").read_text(encoding="utf-8")
         cls.javascript = (root / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
 
-    def test_toolbar_and_context_menu_create_h3_nodes(self):
-        self.assertIn('onclick="addH3VideoNode()"', self.html)
-        self.assertIn("menuAdd('h3-video')", self.html)
+    def test_h3_entry_is_merged_into_unified_video_node(self):
+        self.assertNotIn('onclick="addH3VideoNode()"', self.html)
+        self.assertNotIn("menuAdd('h3-video')", self.html)
+        self.assertIn('onclick="addVideoNode()"', self.html)
+        self.assertIn("menuAdd('video')", self.html)
+        # 保留函数和旧类型路由，兼容历史画布或外部脚本。
         self.assertIn("function addH3VideoNode(point)", self.javascript)
+        self.assertIn("if(type === 'h3-video') return addH3VideoNode(point);", self.javascript)
         self.assertIn("node.apiProvider = 'minimax-h3'", self.javascript)
         self.assertIn("node.model = 'MiniMax H3'", self.javascript)
 

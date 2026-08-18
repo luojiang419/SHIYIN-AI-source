@@ -50,6 +50,9 @@
                     <div id="inputPromptPreview" class="input-prompt-preview"></div>
                     <div class="prompt-row">
                         <div id="promptInput" class="prompt-input" contenteditable="true" data-i18n-placeholder="smart.promptPlaceholder" data-placeholder="描述你想生成或编辑的图片..."></div>
+                        <button id="composerPromptExpandBtn" class="composer-prompt-expand-btn" type="button" title="放大编辑提示词" aria-label="放大编辑提示词" data-i18n-title="canvas.promptExpandTitle">
+                            <i data-lucide="maximize-2"></i><span data-i18n="canvas.promptExpandTitle">放大编辑提示词</span>
+                        </button>
                         <button id="composerTemplateBtn" class="composer-template-btn" type="button" title="模板库" aria-label="模板库" data-i18n-title="smart.promptTemplateLibrary">
                             <i data-lucide="library"></i><span data-i18n="smart.promptTemplateLibrary">模板库</span>
                         </button>
@@ -67,6 +70,10 @@
             </div>
         </div>
         <button class="smart-back" type="button" onclick="backToCanvasList()"><i data-lucide="arrow-left"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
+        <div id="smartCanvasToolSwitch" class="smart-canvas-tool-switch" role="group" aria-label="画布操作模式" data-i18n-aria-label="canvas.toolMode">
+            <button id="smartCanvasSelectTool" class="smart-canvas-tool-btn active" type="button" onclick="setSmartCanvasToolMode('select')" title="选择模式" aria-label="选择模式" aria-pressed="true" data-i18n-title="canvas.toolSelect"><i data-lucide="mouse-pointer-2"></i><span data-i18n="canvas.toolSelect">选择</span></button>
+            <button id="smartCanvasPanTool" class="smart-canvas-tool-btn" type="button" onclick="setSmartCanvasToolMode('pan')" title="移动模式" aria-label="移动模式" aria-pressed="false" data-i18n-title="canvas.toolPan"><i data-lucide="hand"></i><span data-i18n="canvas.toolPan">移动</span></button>
+        </div>
         <div id="smartTitle" class="smart-title" data-i18n="smart.title">智能画布</div>
         <div id="createMenu" class="create-menu">
             <div class="create-menu-grid">
@@ -212,7 +219,7 @@
                     <button class="preview-icon-btn" type="button" onclick="closeSmartCanvasShortcuts()" title="关闭" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
                 </div>
                 <div class="shortcut-list">
-                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd></span><span data-i18n="smart.shortcutBoxSelect">按住并拖拽框选节点</span></div>
+                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>空格</kbd></span><span data-i18n="smart.shortcutBoxSelect">临时反转选择/移动模式</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>G</kbd></span><span data-i18n="smart.shortcutGroup">合并选中的图片为组</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>G</kbd></span><span data-i18n="smart.shortcutUngroup">释放选中的分组</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Ctrl</kbd><kbd>Z</kbd></span><span data-i18n="smart.shortcutUndo">撤销上一步操作</span></div>
@@ -224,12 +231,23 @@
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>A</kbd></span><span data-i18n="smart.shortcutAssets">打开/关闭资源库</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Z</kbd></span><span data-i18n="smart.shortcutOverview">缩小画布视图</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>双击</kbd></span><span data-i18n="smart.shortcutCreateMenu">打开快捷菜单</span></div>
-                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>空白处</kbd></span><span data-i18n="smart.shortcutPan">拖动画布</span></div>
+                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>空白处</kbd></span><span data-i18n="smart.shortcutPan">选择模式框选，移动模式平移</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>滚轮</kbd></span><span data-i18n="smart.shortcutZoom">缩放画布或预览图片</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Del</kbd></span><span data-i18n="smart.shortcutDelete">删除选中节点</span></div>
                 </div>
             </div>
         </div>
+        <div id="expandedPromptModal" class="expanded-prompt-modal" aria-hidden="true" onclick="closeExpandedPromptEditor()">
+            <div class="expanded-prompt-panel" role="dialog" aria-modal="true" aria-labelledby="expandedPromptTitle" onclick="event.stopPropagation()">
+                <div class="expanded-prompt-head">
+                    <div><strong id="expandedPromptTitle" data-i18n="canvas.promptExpandTitle">放大编辑提示词</strong><span data-i18n="canvas.promptExpandHint">内容会实时同步到原输入框</span></div>
+                    <button type="button" onclick="closeExpandedPromptEditor()" title="关闭" aria-label="关闭" data-i18n-title="common.close"><i data-lucide="x"></i></button>
+                </div>
+                <textarea id="expandedPromptTextarea" class="expanded-prompt-textarea" data-i18n-placeholder="canvas.promptPlaceholder" placeholder="描述你想生成的内容..."></textarea>
+                <div id="expandedPromptRich" class="expanded-prompt-rich" contenteditable="true" data-placeholder="描述你想生成或编辑的内容..."></div>
+            </div>
+        </div>
+
         <div id="imageEditModal" class="image-edit-modal">
             <div class="image-edit-panel">
                 <div class="image-edit-head">

@@ -39,6 +39,47 @@ fn boxed_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
     Box::new(std::io::Error::other(message.into()))
 }
 
+fn is_legacy_webview_version_dir(name: &str) -> bool {
+    let parts: Vec<&str> = name.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|part| {
+            !part.is_empty() && part.chars().all(|character| character.is_ascii_digit())
+        })
+}
+
+fn prune_legacy_webview_profiles(webview_root: &Path) {
+    let Ok(entries) = fs::read_dir(webview_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !is_legacy_webview_version_dir(name) {
+            continue;
+        }
+        let path = entry.path();
+        if path.parent() == Some(webview_root) {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
+fn schedule_legacy_webview_profile_cleanup(webview_root: PathBuf) {
+    thread::spawn(move || {
+        // 首屏与当前操作页完成加载后再清理，避免旧缓存删除占用启动阶段磁盘 IO。
+        thread::sleep(Duration::from_secs(20));
+        prune_legacy_webview_profiles(&webview_root);
+    });
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct AppConfig {
     #[serde(default = "default_host")]
@@ -593,8 +634,10 @@ pub fn run() {
             let url: tauri::Url = format!("http://127.0.0.1:{}/api/auth/bootstrap?token={token}", config.port).parse().map_err(|e| boxed_error(format!("URL 错误：{e}")))?;
             let placement_path = data_root.join("config").join("window.json");
             let placement = fs::read_to_string(placement_path).ok().and_then(|raw| serde_json::from_str::<WindowPlacement>(&raw).ok()).unwrap_or_default();
-            // 按应用版本隔离 WebView 缓存，避免升级后继续命中旧版 HTML 或 i18n 资源。
-            let webview_data_root = data_root.join("cache").join("webview2").join(env!("CARGO_PKG_VERSION"));
+            // HTML 使用 no-cache，静态资源 URL 在打包阶段写入版本号，因此 WebView 配置可跨版本复用。
+            // 这会避免每次升级都重新创建浏览器配置，并在首屏完成后回收旧的纯版本号缓存目录。
+            let webview_root = data_root.join("cache").join("webview2");
+            let webview_data_root = webview_root.join("shared");
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title(APP_DISPLAY_NAME)
                 .min_inner_size(960.0, 640.0)
@@ -614,7 +657,10 @@ pub fn run() {
                 }
             }
             match window.build() {
-                Ok(view) => { if placement.maximized { let _ = view.maximize(); } }
+                Ok(view) => {
+                    if placement.maximized { let _ = view.maximize(); }
+                    schedule_legacy_webview_profile_cleanup(webview_root);
+                }
                 Err(error) => {
                     stop_backend(app.handle());
                     MessageDialog::new().set_level(MessageLevel::Error).set_title("缺少 Microsoft Edge WebView2").set_description(format!("SHIYIN AI 无法创建窗口：{error}\n\n请安装 Microsoft Edge WebView2 Evergreen Runtime 后重试。\nhttps://developer.microsoft.com/microsoft-edge/webview2/")).show();
@@ -698,7 +744,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::suggested_download_name;
+    use super::{is_legacy_webview_version_dir, suggested_download_name};
     use std::path::Path;
 
     #[test]
@@ -721,5 +767,14 @@ mod tests {
             suggested_download_name(&url, Path::new("C:\\Downloads\\local-work.webp")),
             "local-work.webp"
         );
+    }
+
+    #[test]
+    fn legacy_webview_cleanup_only_accepts_plain_semver_directories() {
+        assert!(is_legacy_webview_version_dir("1.0.156"));
+        assert!(is_legacy_webview_version_dir("12.34.5678"));
+        for protected in ["shared", "1.0", "1.0.1-beta", "v1.0.1", "1..1", ""] {
+            assert!(!is_legacy_webview_version_dir(protected));
+        }
     }
 }

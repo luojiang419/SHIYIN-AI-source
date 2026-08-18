@@ -301,6 +301,8 @@ const nodeOutputMenu = document.getElementById('nodeOutputMenu');
 const imageNodeMenu = document.getElementById('imageNodeMenu');
 const selectionBox = document.getElementById('selectionBox');
 const selectionHub = document.getElementById('selectionHub');
+const canvasSelectTool = document.getElementById('canvasSelectTool');
+const canvasPanTool = document.getElementById('canvasPanTool');
 const gateStatus = document.getElementById('gateStatus');
 const gateCreateBtn = document.getElementById('gateCreateBtn');
 const gateCreateSmartBtn = document.getElementById('gateCreateSmartBtn');
@@ -334,6 +336,8 @@ const outputPromptPanel = document.getElementById('outputPromptPanel');
 const outputPromptText = document.getElementById('outputPromptText');
 const outputCopyPromptBtn = document.getElementById('outputCopyPromptBtn');
 const outputRerunBtn = document.getElementById('outputRerunBtn');
+const expandedPromptModal = document.getElementById('expandedPromptModal');
+const expandedPromptTextarea = document.getElementById('expandedPromptTextarea');
 const promptTemplateModal = document.getElementById('promptTemplateModal');
 const promptTemplatePanel = document.getElementById('promptTemplatePanel') || promptTemplateModal?.querySelector('.prompt-template-panel');
 const promptTemplateClose = document.getElementById('promptTemplateClose');
@@ -396,6 +400,9 @@ let knifeChanged = false;
 let knifeNeedsRender = false;
 let selectDrag = null;
 let isRKeyDown = false;
+let canvasToolMode = 'select';
+let isSpaceKeyDown = false;
+let isControlKeyDown = false;
 let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
@@ -408,6 +415,46 @@ let pendingDeleteCanvasId = null;
 let pendingPurgeCanvasId = null;
 let emojiPickerCanvasId = null;
 let canvasMetaAnchorId = '';
+let expandedPromptSource = null;
+function openExpandedPromptEditor(source){
+    if(!source || !expandedPromptModal || !expandedPromptTextarea) return;
+    expandedPromptSource = source;
+    expandedPromptTextarea.value = source.value || '';
+    expandedPromptTextarea.readOnly = Boolean(source.readOnly || source.disabled);
+    expandedPromptModal.classList.add('open');
+    expandedPromptModal.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+        expandedPromptTextarea.focus();
+        expandedPromptTextarea.setSelectionRange(expandedPromptTextarea.value.length, expandedPromptTextarea.value.length);
+    });
+}
+function closeExpandedPromptEditor(){
+    expandedPromptModal?.classList.remove('open');
+    expandedPromptModal?.setAttribute('aria-hidden', 'true');
+    expandedPromptSource = null;
+}
+expandedPromptTextarea?.addEventListener('input', () => {
+    if(!expandedPromptSource?.isConnected || expandedPromptTextarea.readOnly) return;
+    expandedPromptSource.value = expandedPromptTextarea.value;
+    expandedPromptSource.dispatchEvent(new Event('input', {bubbles:true}));
+});
+function activeCanvasTool(event=null){
+    const temporaryTool = Boolean(event?.ctrlKey || isControlKeyDown || isSpaceKeyDown);
+    return temporaryTool ? (canvasToolMode === 'select' ? 'pan' : 'select') : canvasToolMode;
+}
+function syncCanvasToolUi(){
+    const activeTool = activeCanvasTool();
+    canvasSelectTool?.classList.toggle('active', canvasToolMode === 'select');
+    canvasPanTool?.classList.toggle('active', canvasToolMode === 'pan');
+    canvasSelectTool?.setAttribute('aria-pressed', String(canvasToolMode === 'select'));
+    canvasPanTool?.setAttribute('aria-pressed', String(canvasToolMode === 'pan'));
+    board?.classList.toggle('canvas-tool-pan', activeTool === 'pan');
+}
+function setCanvasToolMode(mode){
+    canvasToolMode = mode === 'pan' ? 'pan' : 'select';
+    syncCanvasToolUi();
+}
+syncCanvasToolUi();
 let canvasSortMode = (() => { try { return localStorage.getItem('canvasSortMode') || 'recent'; } catch(e){ return 'recent'; } })();
 const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';
 const CANVAS_COLOR_OPTIONS = ['red','orange','amber','green','teal','blue','violet','pink','slate'];
@@ -430,6 +477,15 @@ let chatModels = ['gpt-4o-mini'];
 let videoModels = [];
 let msChatModels = [];
 let apiProviders = [];
+let klingCliState = {
+    loaded:false,
+    loading:false,
+    installed:false,
+    authenticated:false,
+    version:'',
+    error:'',
+    capabilities:{text_to_video:[], image_to_video:[]}
+};
 let comfyWorkflows = [];
 let comfyWorkflowCache = {};
 let runningHubWorkflowCache = {};
@@ -483,6 +539,7 @@ let managerSelectedWorkflowIds = new Set();
 let managerSelectedPromptIds = new Set();
 let activeCanvasWorkflowCategoryId = '';
 const activeCanvasTaskPolls = new Set();
+const activeCanvasVideoTaskPolls = new Set();
 let hoveredConnectionId = '';
 let lastMouseBoard = {x: 0, y: 0};
 let undoStack = [];
@@ -774,12 +831,105 @@ function providerVideoModels(providerId){
 function sanitizeVideoNodeProviderModel(node){
     if(!node || node.type !== 'video') return;
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
+    if(node.apiProvider === 'kling-cli'){
+        const models = klingModelsForNode(node);
+        if(models.length && !models.some(item => item.model === node.model)) node.model = models[0].model;
+        if(!node.model || node.model === '可灵（连接后选择模型）') node.model = models[0]?.model || '';
+        return;
+    }
     const models = providerVideoModels(node.apiProvider);
     if(!models.length) node.model = '';
     else if(!models.includes(node.model)) node.model = models[0] || '';
 }
 function isMiniMaxH3VideoNode(node){
     return Boolean(node && (node.apiProvider === 'minimax-h3' || node.model === 'MiniMax H3'));
+}
+function isKlingVideoNode(node){
+    return Boolean(node && node.apiProvider === 'kling-cli');
+}
+function klingCapabilityModeForNode(node){
+    const sources = orderedSources(node, generatorSources(node));
+    const hasImage = sources.some(source => (source.refs || []).some(ref => mediaKindForRef(ref) === 'image'));
+    return hasImage ? 'image_to_video' : 'text_to_video';
+}
+function klingModelsForNode(node){
+    const mode = klingCapabilityModeForNode(node);
+    const models = klingCliState.capabilities?.[mode];
+    return Array.isArray(models) ? models : [];
+}
+function klingModelSpec(node){
+    return klingModelsForNode(node).find(item => item.model === node.model) || null;
+}
+function updateKlingProviderModels(){
+    const provider = apiProviders.find(item => item.id === 'kling-cli');
+    if(!provider) return;
+    provider.video_models = uniqueModels([
+        ...(klingCliState.capabilities?.text_to_video || []).map(item => item.model),
+        ...(klingCliState.capabilities?.image_to_video || []).map(item => item.model)
+    ]);
+    if(!provider.video_models.length) provider.video_models = ['可灵（连接后选择模型）'];
+}
+async function loadKlingCapabilities({renderAfter=true}={}){
+    if(klingCliState.loading) return klingCliState;
+    klingCliState.loading = true;
+    if(renderAfter) render();
+    try {
+        const response = await fetch('/api/kling-cli/capabilities');
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '读取可灵能力失败');
+        klingCliState = {
+            loaded:true,
+            loading:false,
+            installed:Boolean(data.installed),
+            authenticated:Boolean(data.authenticated),
+            version:String(data.version || ''),
+            error:String(data.error || ''),
+            capabilities:data.capabilities || {text_to_video:[], image_to_video:[]}
+        };
+        updateKlingProviderModels();
+        nodes.filter(isKlingVideoNode).forEach(sanitizeVideoNodeProviderModel);
+    } catch(err) {
+        klingCliState = {
+            ...klingCliState,
+            loaded:true,
+            loading:false,
+            authenticated:false,
+            error:err.message || '读取可灵能力失败'
+        };
+    }
+    if(renderAfter) render();
+    return klingCliState;
+}
+function ensureKlingCapabilities(){
+    if(klingCliState.loaded || klingCliState.loading) return;
+    setTimeout(() => loadKlingCapabilities(), 0);
+}
+async function installKlingCli(region='china'){
+    klingCliState = {...klingCliState, loading:true, error:''};
+    render();
+    try {
+        const response = await fetch('/api/kling-cli/install', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({region})
+        });
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '安装可灵 CLI 失败'));
+        klingCliState = {...klingCliState, loaded:false, loading:false};
+        await loadKlingCapabilities();
+    } catch(err) {
+        klingCliState = {...klingCliState, loaded:true, loading:false, error:err.message || '安装可灵 CLI 失败'};
+        render();
+    }
+}
+async function startKlingCliLogin(){
+    try {
+        const response = await fetch('/api/kling-cli/login', {method:'POST'});
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '启动可灵登录失败'));
+        klingCliState = {...klingCliState, error:'已打开浏览器授权；完成后点击“刷新模型”。'};
+    } catch(err) {
+        klingCliState = {...klingCliState, error:err.message || '启动可灵登录失败'};
+    }
+    render();
 }
 function h3VideoResolutionOptions(selected=''){
     const options = [
@@ -2126,6 +2276,7 @@ async function openCanvas(id){
         render();
         if(prunedRuntimeCollections) scheduleSave();
         resumeCanvasImageTasks();
+        resumeCanvasVideoTasks();
         startCanvasRemotePolling();
         setStatus('Ready');
     } catch(e) {
@@ -2163,6 +2314,7 @@ function applyRemoteCanvasData(remote){
         renderCanvasList();
         render();
         resumeCanvasImageTasks();
+        resumeCanvasVideoTasks();
         if(currentCanvasTitle) currentCanvasTitle.textContent = canvas.title || tr('canvas.untitled');
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at || canvas.created_at);
         setStatus('Synced');
@@ -2616,9 +2768,10 @@ function addLLMNode(point){
 }
 function addGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
-    const providerId = imageApiProviders()[0]?.id || '';
+    const providers = imageApiProviders();
+    const providerId = providers.find(provider => provider.id === 'shiying')?.id || providers[0]?.id || '';
     const model = allImageModels(providerId)[0] || '';
-    return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, ratio:'square', resolution:defaultApiImageResolution(model), customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
+    return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
 }
 function addMsGenNode(point){
     const p = point || defaultPoint(140, 0);
@@ -3426,13 +3579,24 @@ function addOutputNode(point){
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
     closeLinkCreateMenu();
+    const viewportMargin = 10;
+    createMenu.classList.remove('create-menu-two-column');
     createMenu.style.left = `${clientX}px`;
     createMenu.style.top = `${clientY}px`;
     createMenu.classList.add('open');
+    const singleColumnHeight = createMenu.getBoundingClientRect().height;
+    const lacksBottomSpace = clientY + singleColumnHeight + viewportMargin > window.innerHeight;
+    createMenu.classList.toggle('create-menu-two-column', lacksBottomSpace);
+    const menuRect = createMenu.getBoundingClientRect();
+    const left = Math.max(viewportMargin, Math.min(window.innerWidth - menuRect.width - viewportMargin, clientX));
+    const top = Math.max(viewportMargin, Math.min(window.innerHeight - menuRect.height - viewportMargin, clientY));
+    createMenu.style.left = `${left}px`;
+    createMenu.style.top = `${top}px`;
     refreshIcons();
 }
 function closeCreateMenu(){
     createMenu.classList.remove('open');
+    createMenu.classList.remove('create-menu-two-column');
     closeLinkCreateMenu();
     closeImageNodeMenu();
 }
@@ -6742,15 +6906,21 @@ function renderNode(node){
     }
     if(node.type === 'prompt') {
         const templateActive = promptTemplateModal?.classList.contains('open') && promptTemplateNodeId === node.id;
-        body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button>${promptCounterHtml(node.text || '')}</div><textarea placeholder="${tr('canvas.promptPlaceholder')}">${escapeHtml(node.text || '')}</textarea></div>`;
+        body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><div class="prompt-toolbar-actions"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button><button class="prompt-template-btn" type="button" data-prompt-expand title="${escapeAttr(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button></div>${promptCounterHtml(node.text || '')}</div><textarea placeholder="${tr('canvas.promptPlaceholder')}">${escapeHtml(node.text || '')}</textarea></div>`;
         const textarea = body.querySelector('textarea');
         const templateBtn = body.querySelector('[data-prompt-template-open]');
+        const expandBtn = body.querySelector('[data-prompt-expand]');
         templateBtn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
             openPromptTemplateModal(node.id);
         };
         bindScrollableText(textarea);
+        expandBtn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            openExpandedPromptEditor(textarea);
+        };
         textarea.oninput = e => {
             node.text = e.target.value;
             refreshPromptCounter(body, node.text);
@@ -9085,6 +9255,92 @@ function renderGeneratorBody(node){
     bindCascadeButtons(wrap, node.id);
     return wrap;
 }
+function videoParameterLabel(name){
+    return ({
+        duration:'时长（秒）', aspect_ratio:'画幅比例', resolution:'分辨率', imageCount:'生成数量',
+        prefer_multi_shots:'优先多镜头', enable_audio:'生成音频', enable_asmr:'ASMR 音效',
+        audio_prompt:'音效提示词', music_prompt:'音乐提示词'
+    })[name] || name;
+}
+function videoModelOptionsForNode(node){
+    if(!isKlingVideoNode(node)) return videoModelOptions(node.model, node.apiProvider);
+    const models = klingModelsForNode(node);
+    if(!models.length){
+        const label = klingCliState.loading ? '正在读取模型…' : '连接后选择可灵模型';
+        return `<option value="" disabled selected>${label}</option>`;
+    }
+    return models.map(item => {
+        const alias = String(item.alias || '').split(',')[0].trim();
+        const label = alias ? `${item.model} · ${alias}` : item.model;
+        return `<option value="${escapeHtml(item.model)}" ${item.model === node.model ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+}
+function h3VideoSettingsHtml(node){
+    return `
+        <div class="gen-settings-row">
+            <label class="field"><div class="setting-title">${tr('canvas.videoDuration')}</div><input class="setting-input video-duration" type="number" min="1" max="15" step="1" value="${Number(node.duration || 5)}"></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoAspect')}</div><select class="select-lite video-aspect compact-select">
+                ${['21:9','16:9','4:3','1:1','3:4','9:16'].map(value => `<option value="${value}" ${value === (node.aspectRatio || '16:9') ? 'selected' : ''}>${value}</option>`).join('')}
+            </select></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${h3VideoResolutionOptions(node.resolution || '0.2MP 16:9 - 608x352')}</select></label>
+        </div>
+        <div class="gen-settings-row">
+            <label class="field"><div class="setting-title">采样步数（4–30）</div><input class="setting-input" data-h3-steps type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}"></label>
+            <div class="field"><div class="setting-title">参考能力</div><div class="text-[11px] text-gray-500">全能参考最多 9 图 + 3 视频；关键帧模式使用前两张图</div></div>
+        </div>
+        <div class="gen-settings-row">
+            <button type="button" class="setting-check ${node.multimodal ? 'active' : ''}" data-video-toggle="multimodal"><span class="check-dot"></span>${tr('canvas.videoMultimodal')}</button>
+            <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-video-toggle="useFrameRoles"><span class="check-dot"></span>${tr('canvas.videoFirstLastFrames')}</button>
+        </div>`;
+}
+function klingConnectionPanelHtml(){
+    const state = klingCliState;
+    const modeText = state.authenticated ? '已连接' : state.installed ? '等待登录' : '尚未安装';
+    const statusClass = state.authenticated ? 'ready' : state.error ? 'error' : '';
+    return `<div class="kling-connection-panel ${statusClass}">
+        <div class="kling-connection-copy"><strong>可灵 CLI · ${modeText}</strong><span>${escapeHtml(state.version || state.error || '动态读取账号可用模型与参数')}</span></div>
+        <div class="kling-connection-actions">
+            ${!state.installed ? `<select class="select-lite kling-install-region"><option value="china">中国区</option><option value="global">海外区</option></select><button type="button" class="tool-btn" data-kling-install ${state.loading ? 'disabled' : ''}>${state.loading ? '安装中…' : '安装'}</button>` : ''}
+            ${state.installed && !state.authenticated ? '<button type="button" class="tool-btn" data-kling-login>登录</button>' : ''}
+            <button type="button" class="tool-btn" data-kling-refresh ${state.loading ? 'disabled' : ''}>${state.loading ? '读取中…' : '刷新模型'}</button>
+        </div>
+    </div>`;
+}
+function klingVideoSettingsHtml(node){
+    ensureKlingCapabilities();
+    const mode = klingCapabilityModeForNode(node);
+    const model = klingModelSpec(node);
+    const modeLabel = mode === 'image_to_video' ? '图生视频（已检测到图片输入）' : '文生视频（未检测到图片输入）';
+    if(!klingCliState.authenticated || !model){
+        return `${klingConnectionPanelHtml()}<div class="muted-note">${escapeHtml(klingCliState.error || '安装并登录后，模型参数会从可灵账号实时加载。')}</div>`;
+    }
+    node.modelParameters = node.modelParameters && typeof node.modelParameters === 'object' ? node.modelParameters : {};
+    const fields = (model.arguments || []).filter(argument => argument.name && argument.name !== 'prompt').map(argument => {
+        const allowed_values = Array.isArray(argument.allowed_values) ? argument.allowed_values : [];
+        const stored = node.modelParameters[argument.name];
+        const value = stored == null || stored === '' ? String(argument.default || '') : String(stored);
+        if(node.modelParameters[argument.name] == null && value !== '') node.modelParameters[argument.name] = value;
+        const control = allowed_values.length
+            ? `<select class="select-lite" data-kling-parameter="${escapeAttr(argument.name)}">${allowed_values.map(option => `<option value="${escapeHtml(option)}" ${String(option) === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`
+            : `<input class="setting-input" data-kling-parameter="${escapeAttr(argument.name)}" value="${escapeAttr(value)}" ${argument.required ? 'required' : ''}>`;
+        return `<label class="field kling-parameter-field"><div class="setting-title">${escapeHtml(videoParameterLabel(argument.name))}${argument.required ? ' *' : ''}</div>${control}${argument.description ? `<div class="kling-parameter-help">${escapeHtml(argument.description)}</div>` : ''}</label>`;
+    }).join('');
+    return `${klingConnectionPanelHtml()}<div class="kling-mode-note">${modeLabel}</div><div class="kling-parameter-grid">${fields || '<div class="muted-note">当前模型没有额外参数</div>'}</div>`;
+}
+function legacyVideoSettingsHtml(node){
+    return `<div class="gen-settings-row">
+        <label class="field"><div class="setting-title">${tr('canvas.videoDuration')}</div><input class="setting-input video-duration" type="number" min="1" max="60" step="1" value="${Number(node.duration || 5)}"></label>
+        <label class="field"><div class="setting-title">${tr('canvas.videoAspect')}</div><select class="select-lite video-aspect compact-select">${['16:9','9:16','1:1','4:3','3:4','21:9','9:21','keep_ratio','adaptive'].map(value => `<option value="${value}" ${value === (node.aspectRatio || '16:9') ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+        <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${['','480p','720p','1080p','780P'].map(value => `<option value="${value}" ${value === (node.resolution || '') ? 'selected' : ''}>${value || 'Auto'}</option>`).join('')}</select></label>
+    </div><div class="gen-settings-row" style="flex-wrap:wrap">
+        <button type="button" class="setting-check ${node.enhancePrompt ? 'active' : ''}" data-video-toggle="enhancePrompt"><span class="check-dot"></span>${tr('canvas.videoEnhancePrompt')}</button>
+        <button type="button" class="setting-check ${node.enableUpsample ? 'active' : ''}" data-video-toggle="enableUpsample"><span class="check-dot"></span>${tr('canvas.videoUpsample')}</button>
+        <button type="button" class="setting-check ${node.watermark ? 'active' : ''}" data-video-toggle="watermark"><span class="check-dot"></span>${tr('canvas.videoWatermark')}</button>
+        <button type="button" class="setting-check ${node.cameraFixed ? 'active' : ''}" data-video-toggle="cameraFixed"><span class="check-dot"></span>${tr('canvas.videoCameraFixed')}</button>
+        <button type="button" class="setting-check ${node.generateAudio ? 'active' : ''}" data-video-toggle="generateAudio"><span class="check-dot"></span>${tr('canvas.videoGenerateAudio')}</button>
+        <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-video-toggle="useFrameRoles"><span class="check-dot"></span>${tr('canvas.videoFirstLastFrames')}</button>
+    </div>`;
+}
 function renderVideoBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
@@ -9093,13 +9349,14 @@ function renderVideoBody(node){
     const mediaInputs = ordered.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     sanitizeVideoNodeProviderModel(node);
-    node.model = node.model || 'veo3-fast';
     const isH3 = isMiniMaxH3VideoNode(node);
+    const isKling = isKlingVideoNode(node);
+    if(!isKling) node.model = node.model || 'veo3-fast';
     wrap.innerHTML = `
         <div class="prompt-list mb-3"></div>
         <div class="video-input-head">
             <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Media</div>
-            <div class="video-input-actions">
+            <div class="video-input-actions" ${isKling ? 'hidden' : ''}>
                 <button type="button" class="tool-btn" data-video-manual-url title="手动输入视频 URL"><i data-lucide="link" class="w-4 h-4"></i><span>输入网址</span></button>
                 <button type="button" class="tool-btn" data-video-temp-sh ${node.tempShUploading ? 'disabled' : ''} title="上传当前输入视频到云端直链"><i data-lucide="upload-cloud" class="w-4 h-4"></i><span>${node.tempShUploading ? '上传中...' : '上传云端'}</span></button>
             </div>
@@ -9108,55 +9365,9 @@ function renderVideoBody(node){
         <div class="gen-settings">
             <div class="gen-settings-row">
                 <select class="select-lite video-provider" style="flex:1">${videoProviderOptions(node.apiProvider)}</select>
-                <select class="select-lite video-model" style="flex:2">${videoModelOptions(node.model, node.apiProvider)}</select>
+                <select class="select-lite video-model" style="flex:2">${videoModelOptionsForNode(node)}</select>
             </div>
-            <div class="gen-settings-row">
-                <label class="field" style="flex:1">
-                    <div class="setting-title">${tr('canvas.videoDuration')}</div>
-                    <input class="setting-input video-duration" type="number" min="1" max="60" step="1" value="${Number(node.duration || 5)}">
-                </label>
-                <label class="field" style="flex:1">
-                    <div class="setting-title">${tr('canvas.videoAspect')}</div>
-                    <select class="select-lite video-aspect compact-select">
-                        <option value="16:9">16:9</option>
-                        <option value="9:16">9:16</option>
-                        <option value="1:1">1:1</option>
-                        <option value="4:3">4:3</option>
-                        <option value="3:4">3:4</option>
-                        <option value="21:9">21:9</option>
-                        <option value="9:21">9:21</option>
-                        <option value="keep_ratio">keep</option>
-                        <option value="adaptive">adapt</option>
-                    </select>
-                </label>
-                <label class="field" style="flex:1">
-                    <div class="setting-title">${tr('canvas.videoResolution')}</div>
-                    <select class="select-lite video-resolution compact-select">
-                        ${isH3 ? h3VideoResolutionOptions(node.resolution || '0.2MP 16:9 - 608x352') : `
-                            <option value="">Auto</option>
-                            <option value="480p">480p</option>
-                            <option value="720p">720p</option>
-                            <option value="1080p">1080p</option>
-                            <option value="780P">780P</option>`}
-                    </select>
-                </label>
-            </div>
-            ${isH3 ? `<div class="gen-settings-row">
-                <label class="field" style="flex:1">
-                    <div class="setting-title">采样步数（4–30）</div>
-                    <input class="setting-input" data-h3-steps type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}">
-                </label>
-                <div class="field" style="flex:2"><div class="setting-title">参考能力</div><div class="text-[11px] text-gray-500">全能参考最多 9 图 + 3 视频；参考视频音轨会自动参与生成</div></div>
-            </div>` : ''}
-            <div class="gen-settings-row" style="flex-wrap:wrap">
-                <button type="button" class="setting-check ${node.enhancePrompt ? 'active' : ''}" data-video-toggle="enhancePrompt"><span class="check-dot"></span>${tr('canvas.videoEnhancePrompt')}</button>
-                <button type="button" class="setting-check ${node.enableUpsample ? 'active' : ''}" data-video-toggle="enableUpsample"><span class="check-dot"></span>${tr('canvas.videoUpsample')}</button>
-                <button type="button" class="setting-check ${node.watermark ? 'active' : ''}" data-video-toggle="watermark"><span class="check-dot"></span>${tr('canvas.videoWatermark')}</button>
-                <button type="button" class="setting-check ${node.cameraFixed ? 'active' : ''}" data-video-toggle="cameraFixed"><span class="check-dot"></span>${tr('canvas.videoCameraFixed')}</button>
-                <button type="button" class="setting-check ${node.generateAudio ? 'active' : ''}" data-video-toggle="generateAudio"><span class="check-dot"></span>${tr('canvas.videoGenerateAudio')}</button>
-                <button type="button" class="setting-check ${node.multimodal ? 'active' : ''}" data-video-toggle="multimodal"><span class="check-dot"></span>${tr('canvas.videoMultimodal')}</button>
-                <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-video-toggle="useFrameRoles"><span class="check-dot"></span>${tr('canvas.videoFirstLastFrames')}</button>
-            </div>
+            ${isH3 ? h3VideoSettingsHtml(node) : isKling ? klingVideoSettingsHtml(node) : legacyVideoSettingsHtml(node)}
         </div>
         <div class="gen-run-row">
             <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.videoGenerate')}</button>
@@ -9171,18 +9382,24 @@ function renderVideoBody(node){
     const resolutionSelect = wrap.querySelector('.video-resolution');
     const stepsInput = wrap.querySelector('[data-h3-steps]');
     providerSelect.value = node.apiProvider;
-    durationSelect.value = String(node.duration || 5);
-    aspectSelect.value = node.aspectRatio || '16:9';
-    resolutionSelect.value = node.resolution || '';
-    [providerSelect, modelSelect, durationSelect, aspectSelect, resolutionSelect].forEach(input => {
+    if(durationSelect) durationSelect.value = String(node.duration || 5);
+    if(aspectSelect) aspectSelect.value = node.aspectRatio || '16:9';
+    if(resolutionSelect) resolutionSelect.value = node.resolution || '';
+    [providerSelect, modelSelect, durationSelect, aspectSelect, resolutionSelect].filter(Boolean).forEach(input => {
         input.onmousedown = e => e.stopPropagation();
         input.onclick = e => e.stopPropagation();
     });
     providerSelect.onchange = e => {
         e.stopPropagation();
         node.apiProvider = e.target.value;
-        const models = providerVideoModels(node.apiProvider);
-        if(!models.includes(node.model)) node.model = models[0] || node.model;
+        node.modelParameters = {};
+        if(isKlingVideoNode(node)){
+            node.model = klingModelsForNode(node)[0]?.model || '';
+            ensureKlingCapabilities();
+        } else {
+            const models = providerVideoModels(node.apiProvider);
+            if(!models.includes(node.model)) node.model = models[0] || node.model;
+        }
         if(isMiniMaxH3VideoNode(node)){
             node.model = 'MiniMax H3';
             node.resolution = '0.2MP 16:9 - 608x352';
@@ -9190,21 +9407,60 @@ function renderVideoBody(node){
             node.multimodal = true;
             node.useFrameRoles = false;
         }
-        modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
         render();
         scheduleSave();
     };
-    modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
-    durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5))); scheduleSave(); };
-    durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
-    aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
-    resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
+    modelSelect.onchange = e => {
+        e.stopPropagation();
+        node.model = e.target.value;
+        node.modelParameters = {};
+        render();
+        scheduleSave();
+    };
+    if(durationSelect){
+        durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(isH3 ? 15 : 60, Number(e.target.value || 5))); scheduleSave(); };
+        durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(isH3 ? 15 : 60, Number(node.duration || 5)))); };
+    }
+    if(aspectSelect) aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
+    if(resolutionSelect) resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
     if(stepsInput){
         stepsInput.onmousedown = e => e.stopPropagation();
         stepsInput.onclick = e => e.stopPropagation();
         stepsInput.oninput = e => { e.stopPropagation(); node.steps = Math.max(4, Math.min(30, Number(e.target.value || 12))); scheduleSave(); };
         stepsInput.onblur = e => { e.target.value = String(Math.max(4, Math.min(30, Number(node.steps || 12)))); };
     }
+    wrap.querySelectorAll('[data-kling-parameter]').forEach(input => {
+        input.onmousedown = e => e.stopPropagation();
+        input.onclick = e => e.stopPropagation();
+        const syncValue = e => {
+            e.stopPropagation();
+            const name = input.dataset.klingParameter;
+            node.modelParameters = node.modelParameters && typeof node.modelParameters === 'object' ? node.modelParameters : {};
+            node.modelParameters[name] = input.value;
+            if(name === 'duration') node.duration = Number(input.value || 5);
+            if(name === 'aspect_ratio') node.aspectRatio = input.value;
+            if(name === 'resolution') node.resolution = input.value;
+            if(name === 'enable_audio') node.generateAudio = input.value === 'true';
+            scheduleSave();
+        };
+        input.onchange = syncValue;
+        if(input.tagName === 'INPUT') input.oninput = syncValue;
+    });
+    const installRegion = wrap.querySelector('.kling-install-region');
+    if(installRegion){
+        installRegion.onmousedown = e => e.stopPropagation();
+        installRegion.onclick = e => e.stopPropagation();
+    }
+    const installButton = wrap.querySelector('[data-kling-install]');
+    if(installButton) installButton.onclick = e => { e.stopPropagation(); installKlingCli(installRegion?.value || 'china'); };
+    const loginButton = wrap.querySelector('[data-kling-login]');
+    if(loginButton) loginButton.onclick = e => { e.stopPropagation(); startKlingCliLogin(); };
+    const refreshKlingButton = wrap.querySelector('[data-kling-refresh]');
+    if(refreshKlingButton) refreshKlingButton.onclick = e => {
+        e.stopPropagation();
+        klingCliState = {...klingCliState, loaded:false};
+        loadKlingCapabilities();
+    };
     wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
         btn.onmousedown = e => e.stopPropagation();
         btn.onclick = e => {
@@ -10922,6 +11178,7 @@ async function runVideoNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || (node.running && !opts.cascade)) return;
     const isH3 = isMiniMaxH3VideoNode(node);
+    const isKling = isKlingVideoNode(node);
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(node, generatorSources(node));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
@@ -10931,41 +11188,76 @@ async function runVideoNode(nodeId, opts={}){
     const refs = imageRefsOnly(mediaRefs);
     const videoRefs = videoRefsOnly(mediaRefs);
     const audioRefs = audioRefsOnly(mediaRefs);
+    const persistentVideoTask = isH3 || isKling;
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
     if(!prompt){ alert(tr('canvas.videoNeedsPrompt')); return; }
     let out = outputForNode(node, 460);
     const pendingId = uid('p');
+    const canvasVideoTaskId = persistentVideoTask ? `canvas_video_${uid('task')}` : '';
     const run = runSnapshot(node, prompt, refs);
-    if(out) out._pending = [...(out._pending || []), makePendingForRun(pendingId, run, node, {refs, cascadeTargetId})];
+    const pendingRecord = makePendingForRun(
+        pendingId,
+        run,
+        node,
+        {refs, cascadeTargetId},
+        persistentVideoTask ? {
+            canvasTaskType:'online-video',
+            canvasTaskId:canvasVideoTaskId,
+            providerId:resolveVideoProviderId(node.apiProvider || 'comfly'),
+            model:node.model || '',
+            appendGenerated:Boolean(opts.cascade)
+        } : {}
+    );
+    if(out) out._pending = [...(out._pending || []), pendingRecord];
+    else if(persistentVideoTask) node._videoPending = [...(node._videoPending || []), pendingRecord];
     if(!opts.cascade){ node.running = true; refreshRunNodes(node, out); }
     else refreshRunNodes(node, out);
     try {
+        const requestPayload = {
+            prompt,
+            provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
+            model:node.model || 'veo3-fast',
+            duration:Number(node.duration || 5),
+            aspect_ratio:node.aspectRatio || '16:9',
+            resolution:node.resolution || '',
+            images:refs,
+            videos:isH3
+                ? videoRefs.map(ref => ref.url).filter(Boolean).slice(0, 3)
+                : manualVideoUrlForNode(node)
+                    ? [manualVideoUrlForNode(node)]
+                    : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
+            audios:audioRefs.map(ref => ref.url).filter(Boolean),
+            enhance_prompt:Boolean(node.enhancePrompt),
+            enable_upsample:Boolean(node.enableUpsample),
+            watermark:Boolean(node.watermark),
+            camerafixed:Boolean(node.cameraFixed),
+            generate_audio:Boolean(node.generateAudio),
+            multimodal:Boolean(node.multimodal),
+            steps:Number(node.steps || 12),
+            model_parameters:isKling ? {...(node.modelParameters || {})} : {}
+        };
+        if(persistentVideoTask){
+            scheduleSave();
+            await saveCanvas();
+            const task = await createCanvasVideoTask({
+                ...requestPayload,
+                task_id:canvasVideoTaskId,
+                canvas_id:canvas?.id || '',
+                node_id:node.id
+            }, {cascadeTargetId});
+            if(['failed','interrupted'].includes(String(task.status || ''))){
+                failCanvasVideoTask(canvasVideoTaskId, task.error || tr('canvas.videoFailed'));
+                return;
+            }
+            const status = await pollCanvasVideoTask(canvasVideoTaskId, {cascadeTargetId});
+            if(status === 'aborted') throw cascadeAbortError(cascadeStopMessage());
+            return;
+        }
         const result = await cascadeFetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                prompt,
-                provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
-                model:node.model || 'veo3-fast',
-                duration:Number(node.duration || 5),
-                aspect_ratio:node.aspectRatio || '16:9',
-                resolution:node.resolution || '',
-                images:refs,
-                videos:isH3
-                    ? videoRefs.map(ref => ref.url).filter(Boolean).slice(0, 3)
-                    : manualVideoUrlForNode(node)
-                        ? [manualVideoUrlForNode(node)]
-                        : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
-                audios:audioRefs.map(ref => ref.url).filter(Boolean),
-                enhance_prompt:Boolean(node.enhancePrompt),
-                enable_upsample:Boolean(node.enableUpsample),
-                watermark:Boolean(node.watermark),
-                camerafixed:Boolean(node.cameraFixed),
-                generate_audio:Boolean(node.generateAudio),
-                multimodal:Boolean(node.multimodal),
-                steps:Number(node.steps || 12)
-            })
+            body:JSON.stringify(requestPayload)
         }, {cascadeTargetId}).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
@@ -10982,9 +11274,10 @@ async function runVideoNode(nodeId, opts={}){
         refreshRunNodes(node, out);
         scheduleSave();
     } catch(err) {
-        const meta = collectRunMeta(out, pendingId);
+        const meta = out ? collectRunMeta(out, pendingId) : {runMs:nowMs() - Number(pendingRecord.startedAt || nowMs()), run};
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+        else if(persistentVideoTask) node._videoPending = (node._videoPending || []).filter(p => p.id !== pendingId);
         if(isCascadeAbortError(err)){
             if(opts.cascade) throw err;
             return;
@@ -12614,6 +12907,10 @@ function findPendingTask(taskId){
         const pending = (out._pending || []).find(p => p.canvasTaskId === taskId);
         if(pending) return {out, pending};
     }
+    for(const host of nodes.filter(node => Array.isArray(node._videoPending))){
+        const pending = host._videoPending.find(item => item.canvasTaskId === taskId);
+        if(pending) return {out:null, pending, host};
+    }
     return null;
 }
 async function createCanvasImageTask(payload, options={}){
@@ -12828,6 +13125,127 @@ function resumeCanvasImageTasks(){
         (out._pending || []).forEach(p => {
             if(p.canvasTaskType === 'online-image' && p.canvasTaskId && !p.failed) pollCanvasImageTask(p.canvasTaskId, {cascadeTargetId:p.cascadeTargetId || ''});
         });
+    });
+}
+async function createCanvasVideoTask(payload, options={}){
+    const res = await cascadeFetch('/api/canvas-video-tasks', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+    }, options);
+    if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.videoFailed')));
+    return res.json();
+}
+function completeCanvasVideoTask(taskId, result){
+    const found = findPendingTask(taskId);
+    if(!found) return;
+    const {out, pending, host} = found;
+    const meta = {
+        runMs:nowMs() - Number(pending.startedAt || nowMs()),
+        run:pending.run || {},
+    };
+    meta.run.request = requestMetaFromResult(result);
+    const videos = resultMediaUrls(result).map(item => {
+        const url = outputUrlValue(item);
+        return item && typeof item === 'object' ? {...item, url, kind:'video'} : {url, kind:'video'};
+    }).filter(item => item.url);
+    if(out){
+        out._pending = (out._pending || []).filter(item => item.id !== pending.id);
+        appendOutputImagesWithoutDuplicates(out, videos, meta.run?.refs?.[0], [{...meta, kind:'video'}]);
+    } else if(host) {
+        host._videoPending = (host._videoPending || []).filter(item => item.id !== pending.id);
+    }
+    const gen = nodes.find(node => node.id === meta.run?.node?.id);
+    if(gen){
+        mergeGeneratedOutputs(gen, videos, Boolean(pending.appendGenerated));
+        gen.runStatus = 'done';
+        gen.runError = '';
+        gen.running = false;
+    }
+    addGenerationLog({run:meta.run, outputs:videos, runMs:meta.runMs || 0});
+    refreshRunNodes(gen, out);
+    scheduleSave();
+}
+function failCanvasVideoTask(taskId, message){
+    const found = findPendingTask(taskId);
+    if(!found) return;
+    const {out, pending, host} = found;
+    const run = pending.run || {};
+    const runMs = nowMs() - Number(pending.startedAt || nowMs());
+    if(out) out._pending = (out._pending || []).filter(item => item.id !== pending.id);
+    else if(host) host._videoPending = (host._videoPending || []).filter(item => item.id !== pending.id);
+    const gen = nodes.find(node => node.id === run?.node?.id);
+    if(gen){
+        gen.runStatus = 'failed';
+        gen.runError = message || tr('canvas.videoFailed');
+        gen.running = false;
+    }
+    addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.videoFailed')});
+    refreshRunNodes(gen, out);
+    scheduleSave();
+}
+async function pollCanvasVideoTask(taskId, options={}){
+    if(!taskId) return 'failed';
+    if(activeCanvasVideoTaskPolls.has(taskId)) return 'running';
+    activeCanvasVideoTaskPolls.add(taskId);
+    try {
+        while(true){
+            const found = findPendingTask(taskId);
+            if(!found) return 'missing';
+            const cascadeTargetId = String(options?.cascadeTargetId || found.pending?.cascadeTargetId || '');
+            if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
+            try {
+                const res = await cascadeFetch(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
+                if(!res.ok){
+                    if(res.status === 404){
+                        failCanvasVideoTask(taskId, langIsEn() ? 'Saved video task was not found' : '已保存的视频任务不存在或已过期');
+                        return 'failed';
+                    }
+                    throw new Error(await responseErrorMessage(res, tr('canvas.videoFailed')));
+                }
+                const task = await res.json();
+                if(task.status === 'succeeded'){
+                    completeCanvasVideoTask(taskId, task.result || {});
+                    return 'succeeded';
+                }
+                if(['failed','interrupted'].includes(String(task.status || ''))){
+                    failCanvasVideoTask(taskId, task.error || tr('canvas.videoFailed'));
+                    return 'failed';
+                }
+                const pending = findPendingTask(taskId)?.pending;
+                if(pending){
+                    pending.canvasTaskStatus = task.status || 'running';
+                    pending.statusMessage = task.message || '';
+                    pending.lastQueryError = task.last_query_error || '';
+                }
+            } catch(err) {
+                if(isCascadeAbortError(err)) return 'aborted';
+                const pending = findPendingTask(taskId)?.pending;
+                if(pending) pending.lastQueryError = err.message || String(err);
+            }
+            await sleep(2200);
+        }
+    } finally {
+        activeCanvasVideoTaskPolls.delete(taskId);
+    }
+}
+function resumeCanvasVideoTasks(){
+    const resume = (pending, out=null) => {
+            if(pending.canvasTaskType !== 'online-video' || !pending.canvasTaskId || pending.failed) return;
+            const gen = nodes.find(node => node.id === pending.run?.node?.id);
+            if(gen){
+                gen.running = true;
+                gen.runStatus = 'running';
+                gen.runError = '';
+                refreshRunNodes(gen, out);
+            }
+            pollCanvasVideoTask(pending.canvasTaskId);
+    };
+    nodes.filter(node => node.type === 'output').forEach(out => {
+        (out._pending || []).forEach(pending => resume(pending, out));
+    });
+    nodes.filter(node => Array.isArray(node._videoPending)).forEach(node => {
+        (node._videoPending || []).forEach(pending => resume(pending));
     });
 }
 function renderOutputMedia(item, useGridLayout=false){
@@ -14931,7 +15349,7 @@ board.onmousedown = e => {
         startSelection(e);
         return;
     }
-    if(e.ctrlKey || e.metaKey){
+    if(activeCanvasTool(e) === 'select'){
         e.preventDefault();
         startSelection(e);
         return;
@@ -15044,6 +15462,16 @@ window.addEventListener('paste', e => {
 window.addEventListener('keydown', e => {
     if(!canvas) return;
     const key = String(e.key || '').toLowerCase();
+    if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }
+    if(e.key === 'Control' && !isEditableTarget(e.target)){
+        isControlKeyDown = true;
+        syncCanvasToolUi();
+    }
+    if(e.key === ' ' && !isEditableTarget(e.target)){
+        e.preventDefault();
+        isSpaceKeyDown = true;
+        syncCanvasToolUi();
+    }
     if(key === 'r' && !isEditableTarget(e.target)) isRKeyDown = true;
     if(e.key === 'Shift' && !e.altKey && !isEditableTarget(document.activeElement)) setKnifeMode(true);
     if(e.key === 'Escape' && document.getElementById('imageEditModal').classList.contains('open')) { closeImageEditor(); return; }
@@ -15106,9 +15534,23 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => {
     if(String(e.key || '').toLowerCase() === 'r') isRKeyDown = false;
+    if(e.key === 'Control'){
+        isControlKeyDown = false;
+        syncCanvasToolUi();
+    }
+    if(e.key === ' '){
+        isSpaceKeyDown = false;
+        syncCanvasToolUi();
+    }
     if(e.key === 'Shift') setKnifeMode(false);
 });
-window.addEventListener('blur', () => { isRKeyDown = false; setKnifeMode(false); });
+window.addEventListener('blur', () => {
+    isRKeyDown = false;
+    isSpaceKeyDown = false;
+    isControlKeyDown = false;
+    syncCanvasToolUi();
+    setKnifeMode(false);
+});
 window.addEventListener('blur', () => {
     if(selectDrag){
         selectionBox.style.display = 'none';

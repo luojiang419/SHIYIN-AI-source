@@ -607,7 +607,7 @@
         });
     }
 
-    function universalHasManualPrompt(){
+    function universalHasUserSupplement(){
         return !IS_FREE_CREATION && Boolean(String(currentOptions()?.instruction || '').trim());
     }
 
@@ -616,8 +616,8 @@
     }
 
     function resolveUniversalReferencePlan(){
-        const manualPrompt = universalHasManualPrompt();
-        const entries = manualPrompt ? universalEntries().filter(([,item]) => item.url) : universalTypedEntries();
+        const userSupplement = universalHasUserSupplement();
+        const entries = userSupplement ? universalEntries().filter(([,item]) => item.url) : universalTypedEntries();
         const byRole = Object.fromEntries(UNIVERSAL_CANONICAL_ROLE_ORDER.map(role => [role,[]]));
         entries.forEach(entry => {
             const role = String(entry[1].reference_type || entry[1].role || 'prop');
@@ -625,15 +625,6 @@
             byRole[role].push(entry);
         });
         const products = entries.filter(([,item]) => UNIVERSAL_PRODUCT_ROLES.has(String(item.reference_type || item.role || '')));
-        if(manualPrompt) {
-            return {
-                mode:'manual_prompt', manualPrompt:true, entries, byRole, products, conflicts:[],
-                summary:[
-                    [t('ecommerce.planGenerationMode'), t('ecommerce.planManualControl')],
-                    [t('ecommerce.planImageOrder'), t('ecommerce.planUploadOrder')],
-                ],
-            };
-        }
         const conflicts = [];
         UNIVERSAL_EXCLUSIVE_ROLES.forEach(role => {
             if((byRole[role] || []).length > 1) {
@@ -705,14 +696,14 @@
             summary = [[t('ecommerce.planGenerationMode'), t('ecommerce.planMissingTarget')]];
         }
         return {
-            mode, manualPrompt:false, entries, byRole, products, conflicts, summary,
+            mode, userSupplement, entries, byRole, products, conflicts, summary,
         };
     }
 
     function syncUniversalPromptModeUi(){
         if(state.operation !== 'universal' || IS_FREE_CREATION) return;
         const plan = resolveUniversalReferencePlan();
-        el.inputSlots?.querySelectorAll('.ec-detail-target').forEach(node => node.classList.toggle('hidden', plan.manualPrompt));
+        el.inputSlots?.querySelectorAll('.ec-detail-target').forEach(node => node.classList.remove('hidden'));
     }
 
     function detailTargetIdForItem(item, plan){
@@ -1667,7 +1658,7 @@
                 if(item){
                     applySlotTypeToInput(item, select.value, item.reference_type || item.role || 'prop');
                     if(item.reference_type !== 'detail') delete item.detail_target_id;
-                    if(item.reference_type === 'scene' && currentOptions().studio_reference && !universalHasManualPrompt()) {
+                    if(item.reference_type === 'scene' && currentOptions().studio_reference) {
                         currentOptions().studio_reference = '';
                         showToast(t('ecommerce.sceneReplacedStudio'));
                     }
@@ -2078,7 +2069,7 @@
     function selectStudioReference(id){
         const item = studioReferenceById(id);
         if(!item) return;
-        if(currentConfig()?.universal && !universalHasManualPrompt() && universalTypedEntries().some(([,reference]) => reference.reference_type === 'scene')) {
+        if(currentConfig()?.universal && universalTypedEntries().some(([,reference]) => reference.reference_type === 'scene')) {
             showToast(t('ecommerce.sceneStudioConflict'), true);
             return;
         }
@@ -2257,6 +2248,16 @@
             throw new Error(Array.isArray(message) ? message.map(item => item.msg || item).join('; ') : String(message));
         }
         return body || {};
+    }
+
+    async function fetchJsonWithTimeout(url, options={}, timeoutMs=6000){
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetchJson(url, {...options, signal:controller.signal});
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     function showToast(message, isError=false){
@@ -2925,7 +2926,7 @@
                 if(show) showFormError(t('freeCreation.promptRequired'));
                 return false;
             }
-            if(!IS_FREE_CREATION && !universalHasManualPrompt()) {
+            if(!IS_FREE_CREATION) {
                 const plan = resolveUniversalReferencePlan();
                 if(plan.conflicts.length) {
                     if(show) showFormError(plan.conflicts[0]);
@@ -3033,13 +3034,13 @@
 
     function taskInputsForRequest(){
         if(currentConfig().universal) {
-            const manualPrompt = universalHasManualPrompt();
-            const entries = IS_FREE_CREATION || manualPrompt ? universalEntries().filter(([,item]) => item.url) : universalTypedEntries();
+            const userSupplement = universalHasUserSupplement();
+            const entries = IS_FREE_CREATION || userSupplement ? universalEntries().filter(([,item]) => item.url) : universalTypedEntries();
             const plan = IS_FREE_CREATION ? null : resolveUniversalReferencePlan();
             return entries.map(([,item]) => ({
                 url:item.url,name:item.name || '',role:item.reference_type,reference_id:item.reference_id,
                 reference_type:item.reference_type,label:requestReferenceLabel(item),instruction:item.instruction || '',kind:'image',mime:item.mime || '',
-                detail_target_id:!IS_FREE_CREATION && !manualPrompt && item.reference_type === 'detail' ? detailTargetIdForItem(item, plan) : '',
+                detail_target_id:!IS_FREE_CREATION && item.reference_type === 'detail' ? detailTargetIdForItem(item, plan) : '',
             }));
         }
         if(state.operation === 'try_on') {
@@ -3684,7 +3685,7 @@
 
     async function loadTasks(){
         try {
-            const response = await fetchJson('/api/ecommerce/tasks?limit=500');
+            const response = await fetchJsonWithTimeout('/api/ecommerce/tasks?limit=500');
             (response.tasks || []).filter(taskMatchesWorkspace).forEach(storeTask);
             renderTaskList();
             renderCandidateRail();
@@ -3985,9 +3986,7 @@
 
     async function loadCapabilities(){
         try {
-            const response = await fetch('/api/ecommerce/capabilities');
-            if(!response.ok) throw new Error(`HTTP ${response.status}`);
-            state.capabilities = await response.json();
+            state.capabilities = await fetchJsonWithTimeout('/api/ecommerce/capabilities');
             state.referenceSlotTypes = Array.isArray(state.capabilities.reference_slot_types) ? state.capabilities.reference_slot_types : [];
             const reconciledSlotTypes = reconcileUniversalSlotTypes();
             updateCapabilityStatus();
@@ -4123,9 +4122,20 @@
         document.addEventListener('visibilitychange', () => setEcommerceRouteActive(state.routeActive));
     }
 
+    function renderInitialWorkspace(){
+        restoreWorkspace(state.operation);
+        syncGenerationParameterControls();
+        updateTabs();
+        renderInputs();
+        renderOperationControls();
+        if(el.generateButton) el.generateButton.disabled = true;
+        el.ecommercePage?.setAttribute('aria-busy', 'true');
+    }
+
     async function init(){
         cacheElements();
         configureWorkspaceVariant();
+        renderInitialWorkspace();
         await waitForPreferenceBootstrap();
         loadSettings();
         restoreWorkspace(state.operation);
@@ -4138,11 +4148,12 @@
         bindUniversalDockDrop();
         bindReferencePreview();
         bindComparison();
-        await loadCapabilities();
-        await loadTasks();
+        await Promise.all([loadCapabilities(), loadTasks()]);
         const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem(CURRENT_TASK_KEY);
         if(savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
         state.initializing = false;
+        if(el.generateButton) el.generateButton.disabled = false;
+        el.ecommercePage?.setAttribute('aria-busy', 'false');
     }
 
     window.EcommerceStudio = {

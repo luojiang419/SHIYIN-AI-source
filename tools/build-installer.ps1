@@ -67,6 +67,12 @@ New-Item -ItemType Directory -Force $connectors | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\chrome-local-asset-importer') -Destination (Join-Path $connectors 'chrome') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\photoshop-asset-connector') -Destination (Join-Path $connectors 'photoshop') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\blender-addon') -Destination (Join-Path $connectors 'blender') -Recurse
+Get-ChildItem -LiteralPath $connectors -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in @('.pyc', '.pyo') } |
+    Remove-Item -Force
+Get-ChildItem -LiteralPath $connectors -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    Remove-Item -Recurse -Force
 $licenses = Join-Path $stageRoot 'app\licenses'
 New-Item -ItemType Directory -Force $licenses | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'third_party\dwpose') -Destination (Join-Path $licenses 'dwpose') -Recurse

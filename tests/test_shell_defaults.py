@@ -107,9 +107,20 @@ class ShellDefaultsTests(unittest.TestCase):
         self.assertIn('id="product-identity"', self.source)
         self.assertIn('concat!("SHIYIN AI V", env!("CARGO_PKG_VERSION"))', tauri_host)
 
-    def test_windows_shell_isolates_webview_cache_by_app_version(self):
+    def test_windows_shell_reuses_stable_webview_profile_and_prunes_legacy_caches(self):
         tauri_host = TAURI_HOST.read_text(encoding="utf-8")
-        self.assertIn('join("webview2").join(env!("CARGO_PKG_VERSION"))', tauri_host)
+        self.assertRegex(
+            tauri_host,
+            re.compile(
+                r'let webview_root = data_root\.join\("cache"\)\.join\("webview2"\);\s*'
+                r'let webview_data_root = webview_root\.join\("shared"\);',
+                re.S,
+            ),
+        )
+        self.assertNotIn('join("webview2").join(env!("CARGO_PKG_VERSION"))', tauri_host)
+        self.assertIn("schedule_legacy_webview_profile_cleanup", tauri_host)
+        self.assertIn("is_legacy_webview_version_dir", tauri_host)
+        self.assertIn("Duration::from_secs(20)", tauri_host)
 
     def test_runtime_sync_conflict_retry_does_not_replay_stale_preferences(self):
         runtime_source = RUNTIME_SYNC.read_text(encoding="utf-8")

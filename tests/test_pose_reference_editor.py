@@ -52,6 +52,12 @@ class PoseReferenceEditorContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.styles)
 
+    def test_empty_pose_node_keeps_editor_button_above_placeholder(self):
+        self.assertIn(".pose-reference-preview>.pose-reference-edit{z-index:3}", self.styles)
+        for name in ("canvas.html", "smart-canvas.html"):
+            page = (STATIC / name).read_text(encoding="utf-8")
+            self.assertIn("pose-reference-editor.css?v=2026.08.18.pose-reference.4", page)
+
     def test_editor_resolves_all_workspace_themes_and_updates_live(self):
         for marker in (
             "const RESOLVED_THEMES = ['light','dark','pure-white']",

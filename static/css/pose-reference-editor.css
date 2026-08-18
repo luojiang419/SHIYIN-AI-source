@@ -34,4 +34,5 @@ body.pose-ref-editor-open{overflow:hidden!important}
 .smart-pose-reference-node .pose-reference-special{height:100%;min-height:0;overflow:hidden;box-sizing:border-box}
 .smart-pose-reference-node .pose-reference-preview{min-height:0;height:auto;flex:1 1 auto}
 .smart-pose-reference-node .pose-reference-preview img{position:absolute;inset:0}
+.pose-reference-preview>.pose-reference-edit{z-index:3}
 @media(max-width:1100px){.pose-ref-editor{min-width:760px}.pose-ref-editor-layout{grid-template-columns:210px minmax(330px,1fr) 260px}.pose-ref-preset-list{grid-template-columns:1fr}.pose-ref-bone-grid{grid-template-columns:repeat(2,1fr)}}

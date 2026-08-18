@@ -788,7 +788,7 @@
             event.stopPropagation();
             editor.open({
                 state:node.poseEditorState,
-                theme:document.documentElement.dataset.theme || document.body.dataset.theme || 'dark',
+                theme:window.StudioTheme?.get?.(),
                 onSave:state => {
                     node.poseEditorState = state;
                     notify(options, node, false);

@@ -3,8 +3,9 @@
 
     const THREE_MODULE_URL = '/static/vendor/js/three-0.160.0.module.js';
     const EDITOR_VERSION = 1;
-    const DEFAULT_BACKGROUND = '#171927';
+    const DEFAULT_BACKGROUND = '#1a1a1a';
     const DEFAULT_SELECTED_BONE = 'chest';
+    const RESOLVED_THEMES = ['light','dark','pure-white'];
     const DEFAULT_CAMERA = {theta:0.12, phi:1.42, radius:3.05, target:[0,0.12,0]};
     const DEFAULT_SCENE = {
         background:DEFAULT_BACKGROUND,
@@ -83,6 +84,24 @@
     function clamp(value, min, max){ return Math.max(min, Math.min(max, Number(value) || 0)); }
     function clone(value){ return JSON.parse(JSON.stringify(value)); }
     function esc(value){ return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+    function resolveTheme(value){
+        const requested = String(value || '').trim();
+        if(RESOLVED_THEMES.includes(requested)) return requested;
+        if(requested === 'system') return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+        const studioTheme = window.StudioTheme?.get?.();
+        if(RESOLVED_THEMES.includes(studioTheme)) return studioTheme;
+        const root = document.documentElement;
+        const body = document.body;
+        if(root?.classList.contains('theme-pure-white') || root?.classList.contains('studio-theme-pure-white') || body?.classList.contains('theme-pure-white') || body?.classList.contains('studio-theme-pure-white')) return 'pure-white';
+        if(root?.classList.contains('theme-dark') || root?.classList.contains('studio-theme-dark') || body?.classList.contains('theme-dark') || body?.classList.contains('studio-theme-dark')) return 'dark';
+        return 'light';
+    }
+    function applyResolvedTheme(overlay, editor, value){
+        const theme = resolveTheme(value);
+        overlay.dataset.theme = theme;
+        editor.dataset.theme = theme;
+        return theme;
+    }
     function normalizeTriplet(value, fallback=[0,0,0]){
         return [0,1,2].map(index => Number.isFinite(Number(value?.[index])) ? Number(value[index]) : Number(fallback[index] || 0));
     }
@@ -155,7 +174,7 @@
     }
     function editorHtml(state, theme){
         const selected = BONE_MAP.get(state.selectedBone) || BONE_MAP.get(DEFAULT_SELECTED_BONE);
-        return `<div class="pose-ref-editor" data-theme="${theme === 'light' ? 'light' : 'dark'}" role="dialog" aria-modal="true" aria-label="姿势参考编辑器">
+        return `<div class="pose-ref-editor" data-theme="${resolveTheme(theme)}" role="dialog" aria-modal="true" aria-label="姿势参考编辑器">
             <header class="pose-ref-editor-head">
                 <div class="pose-ref-editor-brand"><span class="pose-ref-brand-icon"><i data-lucide="person-standing"></i></span><div><strong>姿势参考编辑器</strong><small>3D 人形 · 关节微调 · 高清导出</small></div></div>
                 <div class="pose-ref-head-actions">
@@ -234,7 +253,9 @@
         const state = normalizeState(options.state || {});
         const overlay = document.createElement('div');
         overlay.className = 'pose-ref-editor-overlay';
-        overlay.innerHTML = editorHtml(state, options.theme || document.documentElement.dataset.theme || 'dark');
+        const initialTheme = resolveTheme(options.theme);
+        overlay.dataset.theme = initialTheme;
+        overlay.innerHTML = editorHtml(state, initialTheme);
         document.body.appendChild(overlay);
         document.body.classList.add('pose-ref-editor-open');
         iconRefresh(overlay);
@@ -249,6 +270,10 @@
         let closed = false;
         let runtime = null;
         let saveTimer = 0;
+
+        const onThemeChange = event => applyResolvedTheme(overlay, editor, event.detail?.theme);
+        window.addEventListener('studio-theme-change', onThemeChange);
+        disposers.push(() => window.removeEventListener('studio-theme-change', onThemeChange));
 
         function setStatus(message, error=false){
             if(status) status.textContent = String(message || '');
@@ -391,17 +416,17 @@
         container.appendChild(renderer.domElement);
 
         const camera = new THREE.PerspectiveCamera(34, 1, 0.01, 100);
-        const ambient = new THREE.HemisphereLight(0xe6edff, 0x352b2a, state.scene.fillIntensity);
+        const ambient = new THREE.HemisphereLight(0xf0eee9, 0x352f2a, state.scene.fillIntensity);
         const key = new THREE.DirectionalLight(0xfff4e4, state.scene.keyIntensity);
         key.position.set(2.8,3.8,3.2); key.castShadow = true;
         key.shadow.mapSize.set(2048,2048); key.shadow.camera.left = -2; key.shadow.camera.right = 2; key.shadow.camera.top = 2; key.shadow.camera.bottom = -2;
-        const rim = new THREE.DirectionalLight(0xaeb9ff, 0.6); rim.position.set(-2,2,-2.5);
+        const rim = new THREE.DirectionalLight(0xd9d6d0, 0.6); rim.position.set(-2,2,-2.5);
         scene.add(ambient,key,rim);
 
-        const groundMaterial = new THREE.MeshStandardMaterial({color:0x202231, roughness:0.92, metalness:0});
+        const groundMaterial = new THREE.MeshStandardMaterial({color:0x242424, roughness:0.92, metalness:0});
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(12,12), groundMaterial);
         ground.rotation.x = -Math.PI / 2; ground.position.y = -0.91; ground.receiveShadow = true; scene.add(ground);
-        const grid = new THREE.GridHelper(10,40,0x6972a8,0x34384f);
+        const grid = new THREE.GridHelper(10,40,0x77736e,0x3d3b39);
         grid.position.y = -0.905; grid.material.transparent = true; grid.material.opacity = 0.34; scene.add(grid);
 
         const figure = new THREE.Group();
@@ -568,7 +593,7 @@
 
     window.PoseReferenceEditor = {
         BONES, PRESETS, ASPECTS, RESOLUTIONS,
-        normalizeState, exportDimensions, nodeBodyHtml, open,
+        normalizeState, exportDimensions, nodeBodyHtml, resolveTheme, open,
         close(){ activeEditor?.close?.({save:true}); }
     };
 })();

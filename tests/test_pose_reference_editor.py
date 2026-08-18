@@ -52,6 +52,38 @@ class PoseReferenceEditorContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.styles)
 
+    def test_editor_resolves_all_workspace_themes_and_updates_live(self):
+        for marker in (
+            "const RESOLVED_THEMES = ['light','dark','pure-white']",
+            "function resolveTheme(value)",
+            "requested === 'system'",
+            "window.StudioTheme?.get?.()",
+            "overlay.dataset.theme = theme",
+            "editor.dataset.theme = theme",
+            "window.addEventListener('studio-theme-change', onThemeChange)",
+            "window.removeEventListener('studio-theme-change', onThemeChange)",
+        ):
+            self.assertIn(marker, self.editor)
+        self.assertIn("theme:window.StudioTheme?.get?.()", self.shared)
+
+    def test_editor_and_node_colors_use_unified_neutral_tokens(self):
+        for marker in (
+            '.pose-ref-editor-overlay[data-theme="light"]',
+            '.pose-ref-editor-overlay[data-theme="dark"]',
+            '.pose-ref-editor-overlay[data-theme="pure-white"]',
+            '--pr-bg:var(--studio-bg',
+            '--pr-accent:var(--studio-accent',
+            '--pr-success:var(--studio-success',
+            'var(--strong,var(--studio-accent',
+        ):
+            self.assertIn(marker, self.styles)
+        forbidden = (
+            '#7c6df2', '#a06cf2', '#6860df', '#9a62e4',
+            'rgba(124,109,242', 'rgba(117,94,237', '#11131f',
+        )
+        for color in forbidden:
+            self.assertNotIn(color, self.styles.lower())
+
     def test_shared_adapter_persists_and_uploads_export(self):
         for marker in (
             "function poseReferenceBodyHtml(node)",

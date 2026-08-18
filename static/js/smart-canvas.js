@@ -1427,6 +1427,18 @@ function createDWPoseNode(point){
     nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
     render(); scheduleSave(); return node;
 }
+function createPoseReferenceNode(point){
+    pushUndo();
+    const node = {
+        id:uid('pose-ref'), type:'smart-image', specialType:'pose-reference',
+        x:(point?.x || 0) - 190, y:(point?.y || 0) - 195, w:380, h:390,
+        title:'姿势参考', images:[],
+        poseEditorState:window.PoseReferenceEditor?.normalizeState({}) || {},
+        scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+    };
+    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    render(); scheduleSave(); return node;
+}
 function createPoseReplicateNode(point){
     pushUndo();
     const node = {
@@ -2000,6 +2012,7 @@ function smartGroupImageGridLayout(node){
 function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
+    if(node?.specialType === 'pose-reference') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
@@ -7369,6 +7382,7 @@ function smartGroupBodyHtml(node){
 function nodeBodyHtml(node, layout){
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
+    if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">姿势参考节点加载失败</div>';
     if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
     if(node.specialType === 'relight') return window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="smart-group-empty">灯光重塑节点加载失败</div>';
     if(node.specialType === 'angle') return window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="smart-group-empty">角度调整节点加载失败</div>';
@@ -7680,7 +7694,7 @@ function render(){
         const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
         const slotLoading = generationSlots.some(slot => slot.status === 'loading');
         const slotFailed = generationSlots.some(slot => slot.status === 'error');
-        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(layoutImages, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -7707,7 +7721,7 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
             ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         return {node, html};
@@ -8477,6 +8491,7 @@ function bindSmartSpecialNode(el, node){
     };
     if(node.specialType === 'panorama') api.bindPanorama(el, node, options);
     if(node.specialType === 'dwpose') api.bindPose(el, node, options);
+    if(node.specialType === 'pose-reference') api.bindPoseReference?.(el, node, options);
     if(node.specialType === 'pose-replicate') api.bindPoseReplicate?.(el, node, options);
     if(node.specialType === 'relight') api.bindRelight(el, node, options);
     if(node.specialType === 'angle') api.bindAngle(el, node, options);
@@ -8833,6 +8848,10 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
             if(nodeForControls?.specialType){
                 if(nodeForControls.specialType === 'pose-replicate'){
                     toast('一键复刻仅接受端口连线，请连接动作参考和目标图');
+                    return;
+                }
+                if(nodeForControls.specialType === 'pose-reference'){
+                    toast('姿势参考请点击“编辑动作”，无需导入图片');
                     return;
                 }
                 const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));
@@ -15932,6 +15951,7 @@ function createNodeFromMenu(type){
     closeCreateMenu();
     if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
     if(type === 'panorama') return createPanoramaNode(p);
+    if(type === 'pose-reference') return createPoseReferenceNode(p);
     if(type === 'dwpose') return createDWPoseNode(p);
     if(type === 'pose-replicate') return createPoseReplicateNode(p);
     if(type === 'relight') return createRelightNode(p);

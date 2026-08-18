@@ -2854,6 +2854,13 @@ function addDWPoseNode(point){
     const p = point || defaultPoint(100, 20);
     return addNode({id:uid('pose'), type:'dwpose', x:p.x, y:p.y, w:380, h:390, poseStatus:'idle'});
 }
+function addPoseReferenceNode(point){
+    const p = point || defaultPoint(110, 30);
+    return addNode({
+        id:uid('pose-ref'), type:'poseReference', x:p.x, y:p.y, w:380, h:390,
+        poseEditorState:window.PoseReferenceEditor?.normalizeState({}) || {}, images:[]
+    });
+}
 function addPoseReplicateNode(point){
     const p = point || defaultPoint(120, 40);
     return addNode({
@@ -3615,7 +3622,7 @@ function linkCreateOptions(state){
         if(node.type === 'poseReplicate'){
             return [{type:'output', label:'Output', icon:'circle-dot'}];
         }
-        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','poseReplicate','relight','angle'].includes(node.type)){
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
@@ -3627,7 +3634,7 @@ function linkCreateOptions(state){
     if(node.type === 'poseReplicate'){
         return [{type:'image', label:tr('canvas.imageCard'), icon:'image-plus'}];
     }
-    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','relight','angle'].includes(node.type)){
+    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','poseReference','relight','angle'].includes(node.type)){
         return [
             {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
@@ -3635,6 +3642,7 @@ function linkCreateOptions(state){
             {type:'group', label:tr('canvas.group'), icon:'group'},
             {type:'llm', label:'LLM', icon:'message-square-text'},
             {type:'panorama', label:'720°取景器', icon:'scan-line'},
+            {type:'poseReference', label:'姿势参考', icon:'pencil-ruler'},
             {type:'dwpose', label:'动作提取', icon:'person-standing'},
             {type:'relight', label:'灯光重塑', icon:'sun-medium'}
         ];
@@ -3997,6 +4005,7 @@ function createNodeByType(type, point){
     if(type === 'video') return addVideoNode(point);
     if(type === 'h3-video') return addH3VideoNode(point);
     if(type === 'panorama') return addPanoramaNode(point);
+    if(type === 'poseReference') return addPoseReferenceNode(point);
     if(type === 'dwpose') return addDWPoseNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
     if(type === 'relight') return addRelightNode(point);
@@ -4015,6 +4024,7 @@ function menuAdd(type){
     if(type === 'video') addVideoNode(menuPoint);
     if(type === 'h3-video') addH3VideoNode(menuPoint);
     if(type === 'panorama') addPanoramaNode(menuPoint);
+    if(type === 'poseReference') addPoseReferenceNode(menuPoint);
     if(type === 'dwpose') addDWPoseNode(menuPoint);
     if(type === 'poseReplicate') addPoseReplicateNode(menuPoint);
     if(type === 'relight') addRelightNode(menuPoint);
@@ -6863,6 +6873,7 @@ function bindClassicSpecialNode(el, node){
     };
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
+    if(node.type === 'poseReference') api.bindPoseReference?.(el, node, options);
     if(node.type === 'poseReplicate') api.bindPoseReplicate(el, node, options);
     if(node.type === 'relight') api.bindRelight(el, node, options);
     if(node.type === 'angle') api.bindAngle(el, node, options);
@@ -6893,7 +6904,7 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh','blenderDirector'].includes(node.type) && node.runStatus
@@ -7060,6 +7071,7 @@ function renderNode(node){
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
+    if(node.type === 'poseReference') body.innerHTML = window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="muted-note">姿势参考节点加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="muted-note">一键复刻节点加载失败</div>';
     if(node.type === 'relight') body.innerHTML = window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="muted-note">灯光重塑节点加载失败</div>';
     if(node.type === 'angle') body.innerHTML = window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="muted-note">角度调整节点加载失败</div>';
@@ -7086,7 +7098,7 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','panorama','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output','panorama','dwpose','poseReplicate','relight','angle'].includes(node.type);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output','panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
     if(node.type === 'poseReplicate'){
         el.insertAdjacentHTML('beforeend', `<div class="port in pose-role-port" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="port in pose-role-port" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>`);
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
@@ -7111,7 +7123,7 @@ function renderNode(node){
     el.querySelectorAll('.port.in').forEach(inp => {
         inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in', inp.dataset.inputRole || ''); };
     });
-    if(['panorama','dwpose','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    if(['panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -7264,6 +7276,7 @@ function defaultNodeSize(type){
     if(type === 'output') return {w:460, h:0};
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'dwpose') return {w:380, h:390};
+    if(type === 'poseReference') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};
     if(type === 'relight') return {w:460, h:590};
     if(type === 'angle') return {w:460, h:660};
@@ -10969,7 +10982,7 @@ function mediaRefsFromNode(node){
             return {url, name:outputImageName(url) || `output-${i + 1}`, kind, nodeId:node.id, outputIndex:i};
         }).filter(Boolean);
     }
-    if(['panorama','dwpose','relight','angle'].includes(node.type)){
+    if(['panorama','dwpose','poseReference','relight','angle'].includes(node.type)){
         const item = window.CanvasSpecialNodes?.outputItem(node);
         return item?.url ? [{url:item.url, name:item.name || `${node.type}.png`, kind:'image'}] : [];
     }
@@ -11001,9 +11014,9 @@ function generatorSources(gen){
                 }));
             }
         }
-        if(['panorama','dwpose','relight','angle'].includes(n.type)){
+        if(['panorama','dwpose','poseReference','relight','angle'].includes(n.type)){
             const refs = mediaRefsFromNode(n);
-            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'relight' ? '灯光重塑结果' : '新视角结果';
+            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'poseReference' ? '3D 姿势参考' : n.type === 'relight' ? '灯光重塑结果' : '新视角结果';
             if(refs.length) return {id:n.id, type:n.type, label, preview:refs[0].url, refs, prompt:''};
         }
         if(n.type === 'image' && n.url) {
@@ -14872,9 +14885,14 @@ function canConnect(fromId, toId, inputRole=''){
     const specialTypes = ['panorama','dwpose','relight','angle'];
     if(to.type === 'poseReplicate'){
         if(!['pose-reference','target-image'].includes(inputRole)) return false;
-        return ['image','group','output','panorama','dwpose','relight','angle'].includes(from.type);
+        return ['image','group','output','panorama','dwpose','poseReference','relight','angle'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';
+    if(from.type === 'poseReference'){
+        if(to.type === 'output') return true;
+        if(to.type === 'loop') return Boolean(to.imageInput);
+        return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
+    }
     if(from.type === 'blenderDirector'){
         if(to.type === 'output') return true;
         if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId);
@@ -14901,7 +14919,7 @@ function canConnect(fromId, toId, inputRole=''){
     }
     if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','relight','angle'].includes(from.type);
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','poseReference','relight','angle'].includes(from.type);
 }
 function sanitizeConnections(){
     connections = (connections || []).filter(c => canConnect(c.from, c.to, c.inputRole || ''));

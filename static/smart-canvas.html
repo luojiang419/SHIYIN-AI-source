@@ -26,6 +26,7 @@
     <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
     <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.08.14.canvas-neutral-no-blue.1">
     <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.08.15.special-nodes.4">
+    <link rel="stylesheet" href="/static/css/pose-reference-editor.css?v=2026.08.18.pose-reference.2">
     <link rel="stylesheet" href="/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1">
 </head>
@@ -116,6 +117,10 @@
                 <button class="create-card" type="button" data-create-type="panorama">
                     <span class="create-card-icon"><i data-lucide="scan-line"></i></span>
                     <span><div class="create-card-title">720°取景器</div><div class="create-card-sub">全景选角、人偶占位与位置参考图</div></span>
+                </button>
+                <button class="create-card" type="button" data-create-type="pose-reference">
+                    <span class="create-card-icon"><i data-lucide="pencil-ruler"></i></span>
+                    <span><div class="create-card-title">姿势参考</div><div class="create-card-sub">3D 人形摆姿、关节微调与高清参考图</div></span>
                 </button>
                 <button class="create-card" type="button" data-create-type="dwpose">
                     <span class="create-card-icon"><i data-lucide="person-standing"></i></span>
@@ -448,7 +453,8 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/canvas-special-nodes.js?v=2026.08.18.pose-replicate.2"></script>
-    <script src="/static/js/smart-canvas.js?v=2026.08.18.pose-replicate.2"></script>
+    <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.1"></script>
+    <script src="/static/js/canvas-special-nodes.js?v=2026.08.18.pose-reference.1"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.08.18.pose-reference.1"></script>
 </body>
 </html>

@@ -27,6 +27,7 @@
     <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
     <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.14.canvas-neutral-no-blue.1">
     <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.08.15.special-nodes.4">
+    <link rel="stylesheet" href="/static/css/pose-reference-editor.css?v=2026.08.18.pose-reference.2">
     <link rel="stylesheet" href="/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1">
 </head>
@@ -55,6 +56,7 @@
                     <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                     <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
                     <button class="tool-btn" onclick="addPanoramaNode()"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
+                    <button class="tool-btn" onclick="addPoseReferenceNode()"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>姿势参考</span></button>
                     <button class="tool-btn" onclick="addDWPoseNode()"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
                     <button class="tool-btn" onclick="addPoseReplicateNode()"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
                     <button class="tool-btn" onclick="addRelightNode()"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
@@ -83,6 +85,7 @@
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('panorama')"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
+                <button class="menu-btn" onclick="menuAdd('poseReference')"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>姿势参考</span></button>
                 <button class="menu-btn" onclick="menuAdd('dwpose')"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
                 <button class="menu-btn" onclick="menuAdd('poseReplicate')"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
                 <button class="menu-btn" onclick="menuAdd('relight')"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
@@ -344,7 +347,8 @@
         </div>
     </div>
 
-    <script src="/static/js/canvas-special-nodes.js?v=2026.08.18.pose-replicate.2"></script>
-    <script src="/static/js/canvas.js?v=2026.08.18.pose-replicate.2"></script>
+    <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.1"></script>
+    <script src="/static/js/canvas-special-nodes.js?v=2026.08.18.pose-reference.1"></script>
+    <script src="/static/js/canvas.js?v=2026.08.18.pose-reference.1"></script>
 </body>
 </html>

@@ -140,7 +140,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.18.pose-replicate.2", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.18.pose-reference.1", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
@@ -268,7 +268,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "function addRelightNode(point)",
             "function addAngleNode(point)",
             "function bindClassicSpecialNode(el, node)",
-            "['panorama','dwpose','relight','angle'].includes(node.type)",
+            "['panorama','dwpose','poseReference','relight','angle'].includes(node.type)",
             "function generateClassicSpecialEdit(node, prompt, source, kind)",
             "delete copy.panoramaGenerating",
             "delete copy.specialRunning",

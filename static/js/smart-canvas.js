@@ -789,6 +789,7 @@ function canvasForStorage(){
         delete node.panoramaGenerating;
         delete node.panoramaExporting;
         delete node.specialRunning;
+        delete node.poseReplicateActiveRuns;
         if(node.poseStatus === 'running') node.poseStatus = 'idle';
     });
     return clean;
@@ -1426,6 +1427,17 @@ function createDWPoseNode(point){
     nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
     render(); scheduleSave(); return node;
 }
+function createPoseReplicateNode(point){
+    pushUndo();
+    const node = {
+        id:uid('replicate'), type:'smart-image', specialType:'pose-replicate',
+        x:(point?.x || 0) - 280, y:(point?.y || 0) - 260, w:560, h:520,
+        title:'一键复刻', images:[], poseReplicateStatus:'idle', poseStatus:'idle',
+        poseReplicateRuns:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+    };
+    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    render(); scheduleSave(); return node;
+}
 function createRelightNode(point){
     pushUndo();
     const node = {
@@ -1988,6 +2000,7 @@ function smartGroupImageGridLayout(node){
 function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
+    if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
     if(node?.type === 'smart-group'){
@@ -5267,7 +5280,7 @@ function mergeSmartConnections(localConns, remoteConns, nodeIds){
     const seen = new Set();
     [...(localConns || []), ...(remoteConns || [])].forEach(c => {
         if(!c || !nodeIds.has(c.from) || !nodeIds.has(c.to)) return;
-        const key = `${c.from}->${c.to}:${c.kind || 'flow'}`;
+        const key = `${c.from}->${c.to}:${c.kind || 'flow'}:${c.inputRole || ''}`;
         if(seen.has(key)) return;
         seen.add(key);
         out.push(c);
@@ -6241,7 +6254,7 @@ function duplicateForAltDrag(node, preserveConnections=false){
         const nextConnections = [...(canvas.connections || [])];
         newConnections.forEach(conn => {
             const kind = conn.kind || 'flow';
-            if(nextConnections.some(c => c.from === conn.from && c.to === conn.to && (c.kind || 'flow') === kind)) return;
+            if(nextConnections.some(c => c.from === conn.from && c.to === conn.to && (c.kind || 'flow') === kind && (c.inputRole || '') === (conn.inputRole || ''))) return;
             nextConnections.push(conn);
             const toNode = nodes.find(n => n.id === conn.to) || copies.find(n => n.id === conn.to);
             if(toNode && (conn.kind || 'flow') === 'input'){
@@ -6290,13 +6303,13 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         // 终点是某分组的成员：把同一来源连到该分组各成员的线合并成一条到分组的线。
         const isMemberTarget = toScope && toScope !== conn.to;
         if(isMemberTarget){
-            const key = `${conn.from}|${toScope}|${kind}`;
+            const key = `${conn.from}|${toScope}|${kind}|${conn.inputRole || ''}`;
             let b = buckets.get(key);
-            if(!b){ b = {merged:true, from:conn.from, toId:toScope, kind, indices:[], targets:[]}; buckets.set(key, b); items.push(b); }
+            if(!b){ b = {merged:true, from:conn.from, toId:toScope, kind, inputRole:conn.inputRole || '', indices:[], targets:[]}; buckets.set(key, b); items.push(b); }
             b.indices.push(conn.index);
             b.targets.push(conn.to);
         } else {
-            items.push({merged:false, from:conn.from, toId:conn.to, kind, indices:[conn.index], targets:[conn.to]});
+            items.push({merged:false, from:conn.from, toId:conn.to, kind, inputRole:conn.inputRole || '', indices:[conn.index], targets:[conn.to]});
         }
     });
     const paths = items.map(item => {
@@ -6320,7 +6333,8 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         const fx = isHistory ? fr.x + fr.width / 2 : fr.x + fr.width;
         const fy = isHistory ? fr.y + fr.height : fr.y + fr.height / 2;
         const tx = isHistory ? tr.x + tr.width / 2 : tr.x;
-        const ty = isHistory ? tr.y : tr.y + tr.height / 2;
+        const roleRatio = item.inputRole === 'pose-reference' ? 0.36 : item.inputRole === 'target-image' ? 0.68 : 0.5;
+        const ty = isHistory ? tr.y : tr.y + tr.height * roleRatio;
         const dx = Math.max(50, Math.abs(tx - fx) * 0.45);
         const dy = Math.max(36, Math.abs(ty - fy) * 0.45);
         const curve = isHistory
@@ -7355,6 +7369,7 @@ function smartGroupBodyHtml(node){
 function nodeBodyHtml(node, layout){
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
+    if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
     if(node.specialType === 'relight') return window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="smart-group-empty">灯光重塑节点加载失败</div>';
     if(node.specialType === 'angle') return window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="smart-group-empty">角度调整节点加载失败</div>';
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
@@ -7665,7 +7680,7 @@ function render(){
         const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
         const slotLoading = generationSlots.some(slot => slot.status === 'loading');
         const slotFailed = generationSlots.some(slot => slot.status === 'error');
-        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(layoutImages, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -7692,7 +7707,7 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
             ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            <div class="node-port port-in" data-port="in" title="input"></div>
+            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         return {node, html};
@@ -8217,7 +8232,8 @@ function updatePortDragVisual(){
     const fr = nodeRect(fromNode);
     const isOut = portDragState.fromPort === 'out';
     const fx = isOut ? fr.x + fr.width : fr.x;
-    const fy = fr.y + fr.height / 2;
+    const fromRoleRatio = portDragState.fromRole === 'pose-reference' ? 0.36 : portDragState.fromRole === 'target-image' ? 0.68 : 0.5;
+    const fy = fr.y + fr.height * fromRoleRatio;
     const tx = portDragState.currentWorld.x;
     const ty = portDragState.currentWorld.y;
     const dx = Math.max(50, Math.abs(tx - fx) * 0.45);
@@ -8229,32 +8245,35 @@ function updatePortDragVisual(){
     if(portDragState.hoverTargetId){
         const targetNodeEl = world.querySelector(`.image-node[data-id="${portDragState.hoverTargetId}"]`);
         targetNodeEl?.classList.add('port-hover');
-        targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]`)?.classList.add('is-active');
+        const roleSelector = portDragState.hoverRole ? `[data-input-role="${CSS.escape(portDragState.hoverRole)}"]` : '';
+        targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]${roleSelector}`)?.classList.add('is-active');
     }
 }
 function handlePortDrop(drag, e){
-    const {targetId, targetPort, hit} = (() => {
+    const {targetId, targetPort, targetRole, hit} = (() => {
         const hitEl = document.elementFromPoint(e.clientX, e.clientY);
         const portEl = hitEl?.closest?.('.node-port');
         const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
-        let id = '', port = '';
+        let id = '', port = '', role = '';
         if(nodeEl && nodeEl.dataset.id && nodeEl.dataset.id !== drag.fromId){
             id = nodeEl.dataset.id;
             if(portEl){
                 port = portEl.dataset.port;
+                role = portEl.dataset.inputRole || '';
             } else {
                 const rect = nodeEl.getBoundingClientRect();
                 port = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
             }
         }
-        return {targetId:id, targetPort:port, hit:hitEl};
+        return {targetId:id, targetPort:port, targetRole:role, hit:hitEl};
     })();
     if(targetId){
         const compatible = (drag.fromPort === 'out' && targetPort === 'in') || (drag.fromPort === 'in' && targetPort === 'out');
         if(!compatible){ discardPendingUndo(); render(); return; }
         const fromId = drag.fromPort === 'out' ? drag.fromId : targetId;
         const toId = drag.fromPort === 'out' ? targetId : drag.fromId;
-        if(connectInputNode(fromId, toId)){
+        const inputRole = drag.fromPort === 'out' ? targetRole : (drag.fromRole || '');
+        if(connectInputNode(fromId, toId, inputRole)){
             commitPendingUndo();
             render();
             scheduleSave();
@@ -8295,7 +8314,12 @@ function pickMediaForSmartNode(nodeId){
     document.body.appendChild(input);
     input.click();
 }
-function smartSpecialInputImage(node){
+function smartSpecialInputImage(node, inputRole=''){
+    if(inputRole){
+        const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && item.inputRole === inputRole);
+        const source = connection ? nodes.find(item => item.id === connection.from) : null;
+        return source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') || null : null;
+    }
     return inputImagesFor(node).find(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image') || null;
 }
 async function generateSmartPanorama(node, prompt){
@@ -8340,6 +8364,67 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
+async function generateSmartPoseReplicate(node, inputs, prompt){
+    const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
+    const ratio = node.poseReplicateRatio || '1:1';
+    const [ratioWidth, ratioHeight] = ratio.split(':').map(value => Math.max(1, Number(value) || 1));
+    const runSettings = {
+        ...base,
+        engine:'api', apiKind:'image', ratio:'custom', resolution:node.poseReplicateResolution || '2k',
+        customRatio:ratio, customRatioWidth:ratioWidth, customRatioHeight:ratioHeight,
+        customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1
+    };
+    if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
+    const refs = [inputs.skeleton, inputs.action, inputs.target].filter(item => item?.url).map((item, index) => ({
+        ...item,
+        name:item.name || ['pose-skeleton.png','action-reference.png','target-image.png'][index],
+        kind:'image'
+    }));
+    if(refs.length !== 3) throw new Error('动作骨架、动作参考或目标图缺失');
+    const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
+    meta.settings = settingsForStorage(runSettings);
+    const runLog = {
+        nodeId:node.id, nodeType:'pose-replicate', kind:'image', settings:cloneSmartSettings(runSettings),
+        prompt, refs:refs.map(ref => ({url:ref.url, name:ref.name, kind:'image'})), size:sizeForRun(runSettings)
+    };
+    const startedAt = nowMs();
+    pushUndo();
+    const output = createPendingOutputFromSource(node, 1, meta, {selectOutput:true, refs});
+    output.title = '复刻结果';
+    output.poseReplicateSourceId = node.id;
+    output.runSettings = settingsForStorage(runSettings);
+    render(); scheduleSave();
+    try {
+        const submitted = await runApiGeneration(prompt, refs, runSettings);
+        const taskIds = Array.isArray(submitted?.taskIds) ? submitted.taskIds : [];
+        if(!taskIds.length) throw new Error('一键复刻任务创建失败');
+        initializeSmartGenerationSlots(output, taskIds.map(taskId => ({
+            taskId, kind:'image', providerId:submitted.providerId, model:submitted.model
+        })));
+        output.pending = taskIds.length;
+        output.running = false;
+        output.runStartedAt = startedAt;
+        render(); scheduleSave();
+        await saveCanvas();
+        await resumeSmartPendingNode(output, {run:runLog, runLogStart:startedAt});
+        if((output.images || []).length){
+            addSmartGenerationLog({run:runLog, outputs:output.images, runMs:nowMs() - startedAt});
+        }
+        scheduleSave();
+        return output;
+    } catch(error){
+        if(!smartGenerationSlots(output).length){
+            output.generationSlots = [{id:uid('generation-slot'), index:0, status:'error', error:error.message || '一键复刻任务创建失败'}];
+            output.pending = 0;
+            output.running = false;
+            output.runFinishedAt = nowMs();
+            output.runElapsedMs = output.runFinishedAt - startedAt;
+            addSmartGenerationLog({run:runLog, outputs:[], runMs:output.runElapsedMs, error:error.message || '一键复刻任务创建失败'});
+            render(); scheduleSave();
+        }
+        throw error;
+    }
+}
 function createSmartPoseOutputNode(sourceNode, item){
     if(!sourceNode?.id || !item?.url) return null;
     pushUndo();
@@ -8378,6 +8463,7 @@ function bindSmartSpecialNode(el, node){
         resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
         generatePanorama:generateSmartPanorama,
         generateImageEdit:generateSmartSpecialEdit,
+        generatePoseReplicate:generateSmartPoseReplicate,
         createOutputNode:createSmartPoseOutputNode,
         toast:message => toast(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
@@ -8391,6 +8477,7 @@ function bindSmartSpecialNode(el, node){
     };
     if(node.specialType === 'panorama') api.bindPanorama(el, node, options);
     if(node.specialType === 'dwpose') api.bindPose(el, node, options);
+    if(node.specialType === 'pose-replicate') api.bindPoseReplicate?.(el, node, options);
     if(node.specialType === 'relight') api.bindRelight(el, node, options);
     if(node.specialType === 'angle') api.bindAngle(el, node, options);
 }
@@ -8723,9 +8810,11 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
                 portDragState = {
                     fromId:id,
                     fromPort:portType,
+                    fromRole:port.dataset.inputRole || '',
                     currentWorld:p,
                     hoverTargetId:'',
                     hoverPort:'',
+                    hoverRole:'',
                     moved:false
                 };
                 shell.classList.add('port-dragging');
@@ -8742,6 +8831,10 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
             e.preventDefault();
             e.stopPropagation();
             if(nodeForControls?.specialType){
+                if(nodeForControls.specialType === 'pose-replicate'){
+                    toast('一键复刻仅接受端口连线，请连接动作参考和目标图');
+                    return;
+                }
                 const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));
                 if(!file){ toast('请拖入图片文件'); return; }
                 try {
@@ -12511,16 +12604,21 @@ function stripImageGenerationMeta(img){
     delete img.promptDraftText;
     return img;
 }
-function addConnection(fromId, toId, kind='flow'){
+function addConnection(fromId, toId, kind='flow', inputRole=''){
     if(!fromId || !toId || fromId === toId) return;
     canvas.connections = canvas.connections || [];
-    if(canvas.connections.some(c => c.from === fromId && c.to === toId && (c.kind || 'flow') === kind)) return;
-    canvas.connections.push({from:fromId, to:toId, kind});
+    if(canvas.connections.some(c => c.from === fromId && c.to === toId && (c.kind || 'flow') === kind && (c.inputRole || '') === inputRole)) return;
+    if(inputRole) canvas.connections = canvas.connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+    canvas.connections.push({from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})});
 }
-function connectInputNode(fromId, toId){
+function connectInputNode(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to || from.id === to.id) return false;
+    if(to.specialType === 'pose-replicate'){
+        if(!['pose-reference','target-image'].includes(inputRole)) return false;
+        if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
+    }
     if(to.type === 'smart-loop'){
         const groupImages = isSmartGroupNode(from) ? imagesForNode(from).filter(img => img?.url) : [];
         const groupPrompts = isSmartGroupNode(from) ? promptTextItemsForNode(from).filter(Boolean) : [];
@@ -12533,8 +12631,10 @@ function connectInputNode(fromId, toId){
         const canPrompt = Boolean(to.showPrompt) && looksPrompt;
         if(!canImage && !canPrompt) return false;
     }
-    to.inputNodeIds = Array.from(new Set([...(to.inputNodeIds || []), from.id]));
-    addConnection(from.id, to.id, 'input');
+    addConnection(from.id, to.id, 'input', inputRole);
+    to.inputNodeIds = Array.from(new Set((canvas.connections || [])
+        .filter(item => item.to === to.id && (item.kind || 'flow') === 'input')
+        .map(item => item.from)));
     return true;
 }
 function upstreamNodesForKinds(node, kinds=['input']){
@@ -15833,6 +15933,7 @@ function createNodeFromMenu(type){
     if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
     if(type === 'panorama') return createPanoramaNode(p);
     if(type === 'dwpose') return createDWPoseNode(p);
+    if(type === 'pose-replicate') return createPoseReplicateNode(p);
     if(type === 'relight') return createRelightNode(p);
     let created = null;
     if(type === 'h3-video') created = createH3VideoNode(p);
@@ -15950,20 +16051,22 @@ window.onmousemove = e => {
         const hitEl = document.elementFromPoint(e.clientX, e.clientY);
         const portEl = hitEl?.closest?.('.node-port');
         const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
-        let targetId = '', targetPort = '';
+        let targetId = '', targetPort = '', targetRole = '';
         if(nodeEl && nodeEl.dataset.id && nodeEl.dataset.id !== portDragState.fromId){
             targetId = nodeEl.dataset.id;
             if(portEl){
                 targetPort = portEl.dataset.port;
+                targetRole = portEl.dataset.inputRole || '';
             } else {
                 const rect = nodeEl.getBoundingClientRect();
                 targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
             }
             const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
-            if(!compatible){ targetId = ''; targetPort = ''; }
+            if(!compatible){ targetId = ''; targetPort = ''; targetRole = ''; }
         }
         portDragState.hoverTargetId = targetId;
         portDragState.hoverPort = targetPort;
+        portDragState.hoverRole = targetRole;
         updatePortDragVisual();
         return;
     }

@@ -1641,6 +1641,7 @@ function serializableCanvasNode(node){
     delete copy.panoramaGenerating;
     delete copy.panoramaExporting;
     delete copy.specialRunning;
+    delete copy.poseReplicateActiveRuns;
     if(copy.poseStatus === 'running') copy.poseStatus = 'idle';
     return copy;
 }
@@ -2853,6 +2854,13 @@ function addDWPoseNode(point){
     const p = point || defaultPoint(100, 20);
     return addNode({id:uid('pose'), type:'dwpose', x:p.x, y:p.y, w:380, h:390, poseStatus:'idle'});
 }
+function addPoseReplicateNode(point){
+    const p = point || defaultPoint(120, 40);
+    return addNode({
+        id:uid('replicate'), type:'poseReplicate', x:p.x, y:p.y, w:560, h:520,
+        poseReplicateStatus:'idle', poseStatus:'idle', poseReplicateRuns:[]
+    });
+}
 function addRelightNode(point){
     const p = point || defaultPoint(120, 40);
     return addNode({
@@ -3604,7 +3612,10 @@ function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
     if(!node) return [];
     if(state.originKind === 'out'){
-        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','relight','angle'].includes(node.type)){
+        if(node.type === 'poseReplicate'){
+            return [{type:'output', label:'Output', icon:'circle-dot'}];
+        }
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','poseReplicate','relight','angle'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
@@ -3612,6 +3623,9 @@ function linkCreateOptions(state){
             ];
         }
         return [];
+    }
+    if(node.type === 'poseReplicate'){
+        return [{type:'image', label:tr('canvas.imageCard'), icon:'image-plus'}];
     }
     if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','relight','angle'].includes(node.type)){
         return [
@@ -3627,8 +3641,8 @@ function linkCreateOptions(state){
     }
     return [];
 }
-function openLinkCreateMenu(originId, originKind, clientX, clientY){
-    const state = {originId, originKind, point:screenToWorld(clientX, clientY)};
+function openLinkCreateMenu(originId, originKind, clientX, clientY, inputRole=''){
+    const state = {originId, originKind, inputRole, point:screenToWorld(clientX, clientY)};
     const options = linkCreateOptions(state);
     if(!options.length) return false;
     linkCreateState = state;
@@ -3859,14 +3873,15 @@ function convertOutputNodeToInputGroup(nodeId){
     if(!node || node.type !== 'output') return;
     if(!outputImageUrls(node).length) return;
     pushUndo();
-    const downstream = connections.filter(c => c.from === nodeId).map(c => c.to);
+    const downstream = connections.filter(c => c.from === nodeId).map(c => ({...c}));
     const group = createInputGroupFromOutput(node, {x:Number(node.x || 0), y:Number(node.y || 0)});
     if(!group) return;
     nodes = nodes.filter(n => n.id !== nodeId);
     connections = connections.filter(c => c.from !== nodeId && c.to !== nodeId);
-    downstream.forEach(toId => {
-        if(canConnect(group.id, toId) && !connections.some(c => c.from === group.id && c.to === toId)){
-            connections.push({id:uid('c'), from:group.id, to:toId});
+    downstream.forEach(connection => {
+        const inputRole = connection.inputRole || '';
+        if(canConnect(group.id, connection.to, inputRole) && !connections.some(c => c.from === group.id && c.to === connection.to && (c.inputRole || '') === inputRole)){
+            connections.push({id:uid('c'), from:group.id, to:connection.to, ...(inputRole ? {inputRole} : {})});
         }
     });
     selected.clear();
@@ -3962,8 +3977,10 @@ function createLinkedNode(type){
     if(!created) return;
     const fromId = state.originKind === 'out' ? origin.id : created.id;
     const toId = state.originKind === 'out' ? created.id : origin.id;
-    if(canConnect(fromId, toId) && !connections.some(c => c.from === fromId && c.to === toId)){
-        connections.push({id:uid('c'), from:fromId, to:toId});
+    const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
+    if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
+        if(inputRole) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+        connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
         syncLatestGeneratedOutputToConnection(fromId, toId);
         syncGeneratorInputs();
         scheduleSave();
@@ -3981,6 +3998,7 @@ function createNodeByType(type, point){
     if(type === 'h3-video') return addH3VideoNode(point);
     if(type === 'panorama') return addPanoramaNode(point);
     if(type === 'dwpose') return addDWPoseNode(point);
+    if(type === 'poseReplicate') return addPoseReplicateNode(point);
     if(type === 'relight') return addRelightNode(point);
     if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
@@ -3998,6 +4016,7 @@ function menuAdd(type){
     if(type === 'h3-video') addH3VideoNode(menuPoint);
     if(type === 'panorama') addPanoramaNode(menuPoint);
     if(type === 'dwpose') addDWPoseNode(menuPoint);
+    if(type === 'poseReplicate') addPoseReplicateNode(menuPoint);
     if(type === 'relight') addRelightNode(menuPoint);
     if(type === 'blenderDirector') addBlenderDirectorNode(menuPoint);
     if(type === 'rh') addRhNode(menuPoint);
@@ -4525,7 +4544,7 @@ async function fillImageNode(nodeId, files, opts={}){
         const source = nodes.find(n => n.id === nodeId);
         pushUndo();
         const point = source ? {x:Number(source.x || 0), y:Number(source.y || 0)} : defaultPoint(0, 0);
-        const outgoing = connections.filter(c => c.from === source?.id).map(c => c.to);
+        const outgoing = connections.filter(c => c.from === source?.id).map(c => ({...c}));
         const incoming = connections.filter(c => c.to === source?.id).map(c => c.from);
         const created = await uploadImageGroup(imgs, point);
         const group = created?.group;
@@ -4533,9 +4552,10 @@ async function fillImageNode(nodeId, files, opts={}){
             nodes = nodes.filter(n => n.id !== source.id);
             connections = connections.filter(c => c.from !== source.id && c.to !== source.id);
             if(group){
-                outgoing.forEach(toId => {
-                    if(canConnect(group.id, toId) && !connections.some(c => c.from === group.id && c.to === toId)){
-                        connections.push({id:uid('c'), from:group.id, to:toId});
+                outgoing.forEach(connection => {
+                    const inputRole = connection.inputRole || '';
+                    if(canConnect(group.id, connection.to, inputRole) && !connections.some(c => c.from === group.id && c.to === connection.to && (c.inputRole || '') === inputRole)){
+                        connections.push({id:uid('c'), from:group.id, to:connection.to, ...(inputRole ? {inputRole} : {})});
                     }
                 });
                 incoming.forEach(fromId => {
@@ -6667,9 +6687,9 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
-function classicSpecialInputImage(node){
+function classicSpecialInputImage(node, inputRole=''){
     const sources = connections
-        .filter(connection => connection.to === node.id)
+        .filter(connection => connection.to === node.id && (!inputRole || connection.inputRole === inputRole))
         .map(connection => nodes.find(item => item.id === connection.from))
         .filter(Boolean)
         .reverse();
@@ -6725,6 +6745,74 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
+function classicPoseReplicateOutputPosition(sourceNode){
+    const sourceWidth = Math.max(560, Number(sourceNode?.w) || 560);
+    const existing = nodes.filter(candidate => candidate.type === 'output' && candidate.poseReplicateSourceId === sourceNode.id);
+    const index = existing.length;
+    return {
+        x:(Number(sourceNode.x) || 0) + sourceWidth + 100 + Math.floor(index / 3) * 500,
+        y:(Number(sourceNode.y) || 0) + (index % 3) * 220
+    };
+}
+async function generateClassicPoseReplicate(node, inputs, prompt){
+    const providerId = imageApiProviders()[0]?.id || '';
+    const model = allImageModels(providerId)[0] || '';
+    if(!providerId || !model) throw new Error('请先在 API 设置中配置图片生成模型');
+    const refs = [inputs.skeleton, inputs.action, inputs.target].filter(item => item?.url).map((item, index) => ({
+        ...item,
+        name:item.name || ['pose-skeleton.png','action-reference.png','target-image.png'][index],
+        kind:'image'
+    }));
+    if(refs.length !== 3) throw new Error('动作骨架、动作参考或目标图缺失');
+    const ratio = node.poseReplicateRatio || '1:1';
+    const resolution = node.poseReplicateResolution || '2k';
+    const requestSize = apiImageSize('custom', resolution, ratio, '');
+    const payload = {
+        prompt,
+        provider_id:resolveImageProviderId(providerId),
+        model:resolveImageModel(model),
+        size:requestSize,
+        quality:'high',
+        reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+    };
+    const position = classicPoseReplicateOutputPosition(node);
+    const pendingId = uid('p');
+    const run = runSnapshot({...node, id:''}, prompt, refs);
+    run.nodeType = 'poseReplicate';
+    run.taskLabel = '一键复刻';
+    const output = {
+        id:uid('out'), type:'output', x:position.x, y:position.y, images:[],
+        poseReplicateSourceId:node.id,
+        _pending:[makePendingForRun(pendingId, run, node, {refs, requestSize}, {
+            canvasTaskType:'online-image', providerId:payload.provider_id, model:payload.model
+        })]
+    };
+    pushUndo();
+    nodes.push(output);
+    connections.push({id:uid('c'), from:node.id, to:output.id});
+    selected.clear(); selected.add(output.id);
+    render(); scheduleSave();
+    try {
+        const task = await createCanvasImageTask(payload);
+        const pending = pendingById(output, pendingId);
+        if(!pending) throw new Error('复刻输出节点已被删除');
+        pending.canvasTaskId = task.task_id;
+        render(); scheduleSave();
+        await saveCanvas();
+        const status = await pollCanvasImageTask(task.task_id);
+        if(status === 'failed') throw new Error('一键复刻生成失败，请查看输出节点或生成日志');
+        return output;
+    } catch(error){
+        const pending = pendingById(output, pendingId);
+        if(pending && !pending.canvasTaskId){
+            pending.failed = true;
+            pending.error = error.message || '一键复刻任务创建失败';
+            addGenerationLog({run, outputs:[], runMs:nowMs() - Number(pending.startedAt || nowMs()), error:pending.error});
+            render(); scheduleSave();
+        }
+        throw error;
+    }
+}
 function createClassicPoseOutputNode(sourceNode, item){
     if(!sourceNode?.id || !item?.url) return null;
     pushUndo();
@@ -6761,6 +6849,7 @@ function bindClassicSpecialNode(el, node){
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
         generateImageEdit:generateClassicSpecialEdit,
+        generatePoseReplicate:generateClassicPoseReplicate,
         createOutputNode:createClassicPoseOutputNode,
         toast:message => setStatus(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
@@ -6774,6 +6863,7 @@ function bindClassicSpecialNode(el, node){
     };
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
+    if(node.type === 'poseReplicate') api.bindPoseReplicate(el, node, options);
     if(node.type === 'relight') api.bindRelight(el, node, options);
     if(node.type === 'angle') api.bindAngle(el, node, options);
 }
@@ -6803,7 +6893,7 @@ function renderNode(node){
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh','blenderDirector'].includes(node.type) && node.runStatus
@@ -6970,6 +7060,7 @@ function renderNode(node){
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
+    if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="muted-note">一键复刻节点加载失败</div>';
     if(node.type === 'relight') body.innerHTML = window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="muted-note">灯光重塑节点加载失败</div>';
     if(node.type === 'angle') body.innerHTML = window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="muted-note">角度调整节点加载失败</div>';
     if(node.type === 'comfy' || node.type === 'ltxDirector') {
@@ -6995,8 +7086,10 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const canInput = ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','panorama','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output','panorama','dwpose','relight','angle'].includes(node.type);
-    if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output','panorama','dwpose','poseReplicate','relight','angle'].includes(node.type);
+    if(node.type === 'poseReplicate'){
+        el.insertAdjacentHTML('beforeend', `<div class="port in pose-role-port" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="port in pose-role-port" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>`);
+    } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
     el.querySelector('.node-head').onmousedown = e => {
@@ -7015,9 +7108,10 @@ function renderNode(node){
     el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
     const out = el.querySelector('.port.out');
     if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'out'); };
-    const inp = el.querySelector('.port.in');
-    if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in'); };
-    if(['panorama','dwpose','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    el.querySelectorAll('.port.in').forEach(inp => {
+        inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in', inp.dataset.inputRole || ''); };
+    });
+    if(['panorama','dwpose','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -7170,6 +7264,7 @@ function defaultNodeSize(type){
     if(type === 'output') return {w:460, h:0};
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'dwpose') return {w:380, h:390};
+    if(type === 'poseReplicate') return {w:560, h:520};
     if(type === 'relight') return {w:460, h:590};
     if(type === 'angle') return {w:460, h:660};
     return {w:260, h:0};
@@ -14296,7 +14391,7 @@ function duplicateNodesForAltDrag(node, preserveConnections=false){
             }))
             .filter(conn => conn.from && conn.to && conn.from !== conn.to);
         copiedConnections.forEach(conn => {
-            if(canConnect(conn.from, conn.to) && !connections.some(c => c.from === conn.from && c.to === conn.to)){
+            if(canConnect(conn.from, conn.to, conn.inputRole || '') && !connections.some(c => c.from === conn.from && c.to === conn.to && (c.inputRole || '') === (conn.inputRole || ''))){
                 connections.push(conn);
             }
         });
@@ -14677,12 +14772,12 @@ function onNodeResize(e){
     renderSelectionHub();
     scheduleMinimapRender();
 }
-function startLink(e, originId, originKind){
+function startLink(e, originId, originKind, originRole=''){
     e.stopPropagation();
     originKind = originKind || 'out';
-    const src = portPoint(originId, originKind);
+    const src = portPoint(originId, originKind, originRole);
     const source = nodes.find(n => n.id === originId);
-    tempLink = {from:originId, originKind, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
+    tempLink = {from:originId, originKind, originRole, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
     window.onmousemove = e2 => {
         const p = screenToWorld(e2.clientX, e2.clientY);
         tempLink.x2 = p.x;
@@ -14697,10 +14792,12 @@ function startLink(e, originId, originKind){
             const targetId = target.dataset.id;
             const fromId = originKind === 'out' ? originId : targetId;
             const toId = originKind === 'out' ? targetId : originId;
-            if(canConnect(fromId, toId)){
-                if(!connections.some(c => c.from === fromId && c.to === toId)){
+            const inputRole = originKind === 'out' ? (targetPort.dataset.inputRole || '') : originRole;
+            if(canConnect(fromId, toId, inputRole)){
+                if(!connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
                     pushUndo();
-                    connections.push({id:uid('c'), from:fromId, to:toId});
+                    if(inputRole) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+                    connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
                     syncLatestGeneratedOutputToConnection(fromId, toId);
                 }
                 syncGeneratorInputs();
@@ -14719,10 +14816,10 @@ function startLink(e, originId, originKind){
                 scheduleSave();
                 render();
             } else {
-                openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY);
+                openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY, originRole);
             }
         } else if(originKind === 'in'){
-            openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY);
+            openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY, originRole);
         }
         tempLink = null;
         window.onmousemove = null;
@@ -14767,12 +14864,17 @@ function wouldCreateGeneratorCycle(fromId, toId){
     };
     return walk(toId);
 }
-function canConnect(fromId, toId){
+function canConnect(fromId, toId, inputRole=''){
     if(!fromId || !toId || fromId === toId) return false;
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
     const specialTypes = ['panorama','dwpose','relight','angle'];
+    if(to.type === 'poseReplicate'){
+        if(!['pose-reference','target-image'].includes(inputRole)) return false;
+        return ['image','group','output','panorama','dwpose','relight','angle'].includes(from.type);
+    }
+    if(from.type === 'poseReplicate') return to.type === 'output';
     if(from.type === 'blenderDirector'){
         if(to.type === 'output') return true;
         if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId);
@@ -14802,7 +14904,7 @@ function canConnect(fromId, toId){
     return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','relight','angle'].includes(from.type);
 }
 function sanitizeConnections(){
-    connections = (connections || []).filter(c => canConnect(c.from, c.to));
+    connections = (connections || []).filter(c => canConnect(c.from, c.to, c.inputRole || ''));
 }
 function endDrag(event=null){
     const hadContentDrag = Boolean(dragNode || resizeNode || llmPaneDrag || knifeChanged || tempLink);
@@ -15021,11 +15123,12 @@ function updateGroupMembership(movedNodes){
     }
 }
 
-function portPoint(id, kind){
+function portPoint(id, kind, inputRole=''){
     const n = nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    const port = el?.querySelector(`.port.${kind}`);
+    const roleSelector = inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : '';
+    const port = el?.querySelector(`.port.${kind}${roleSelector}`);
     if(port){
         const r = port.getBoundingClientRect();
         return screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
@@ -15051,7 +15154,7 @@ function renderLinks(){
         // 端点无法解析（节点已删除、或尚未渲染出 DOM）就跳过，否则连线会被画到 (0,0)，
         // 看起来像很多连线都从同一个空白处中转。
         if(!canResolvePort(c.from) || !canResolvePort(c.to)) return;
-        segments.push({c, a:portPoint(c.from, 'out'), b:portPoint(c.to, 'in')});
+        segments.push({c, a:portPoint(c.from, 'out'), b:portPoint(c.to, 'in', c.inputRole || '')});
     });
     segments.forEach(({c, a, b}) => {
         const relClass = isConnectionSelected(c) ? ' link-active' : '';
@@ -15104,7 +15207,7 @@ function setHoveredConnection(id){
 }
 function connectionDistanceToPoint(connection, point){
     const from = portPoint(connection.from, 'out');
-    const to = portPoint(connection.to, 'in');
+    const to = portPoint(connection.to, 'in', connection.inputRole || '');
     let min = Infinity;
     let prev = cubicPoint(from, to, 0);
     for(let i = 1; i <= 28; i++){

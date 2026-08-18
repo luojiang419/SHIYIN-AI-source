@@ -29,7 +29,7 @@ class BlenderDirectorCanvasTests(unittest.TestCase):
         self.assertIn("appendOutputImagesWithoutDuplicates(out, [item])", self.javascript)
 
     def test_rendered_video_can_be_dragged_from_output_back_to_canvas(self):
-        self.assertIn("output-media-drag.1", self.html)
+        self.assertIn("pose-replicate.2", self.html)
         self.assertIn("application/x-canvas-output-media", self.javascript)
         self.assertIn("function setCanvasOutputDragData(event, url, kind)", self.javascript)
         self.assertIn("function bindCanvasOutputMediaDrag(element, url, kind)", self.javascript)

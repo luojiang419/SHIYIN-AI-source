@@ -4,6 +4,21 @@
     const DEFAULT_PANORAMA_PROMPT = '生成一个完整球面 720° 全景 VR 场景，使用标准 2:1 等距柱状投影，水平左右边缘像素级无缝衔接，上下极点自然连续，无接缝、无重复主体、无文字水印；空间结构真实、尺度统一、光照方向一致，封闭场景保留合理出入口。';
     const DEFAULT_RELIGHT_PROMPT = '只重塑原图的光照、阴影、色温和氛围，严格保持主体身份、五官、姿势、服装、材质、构图、机位、背景结构、文字与标志不变，不新增或删除任何物体。';
     const DEFAULT_ANGLE_PROMPT = 'Image 1 is one frozen physical 3D scene. Re-render that same world from the requested camera; change camera extrinsics only.';
+    const DEFAULT_POSE_REPLICATE_PROMPT = [
+        'POSE REPLICATION TASK: Transfer the exact body pose from the action reference to the person in the target image.',
+        '',
+        'REFERENCE ORDER:',
+        '- Image 1: DWPose skeleton extracted from the action reference. Use it as the precise joint-position constraint.',
+        '- Image 2: Original action reference. Use it to understand body orientation, hand gestures and occlusion.',
+        '- Image 3: Target image. Preserve this person and this scene.',
+        '',
+        'REQUIREMENTS:',
+        '1. Rebuild the target person with the exact pose from Images 1 and 2: head angle, gaze, shoulders, elbows, wrists, fingers, torso, hips, knees and feet.',
+        '2. Preserve the target identity, face, hairstyle, body type, clothing, accessories, shoes, background, camera, lighting and image style.',
+        '3. Do not copy the source person identity, clothing or background.',
+        '4. Keep anatomical left/right semantics; never mirror the pose.',
+        '5. Produce a photorealistic result with natural anatomy, correct limb connections and no extra fingers or limbs.'
+    ].join('\n');
     const DWPOSE_MODEL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
     const panoramaStates = new WeakMap();
     const poseTasks = new Map();
@@ -53,8 +68,8 @@
         };
         return null;
     }
-    function poseSource(node, options){
-        const upstream = options.getInputImage?.(node);
+    function poseSource(node, options, inputRole=''){
+        const upstream = options.getInputImage?.(node, inputRole);
         if(upstream?.url) return upstream;
         if(node.poseSourceUrl) return {
             url:node.poseSourceUrl,
@@ -81,6 +96,7 @@
     function specialTitle(node){
         const type = node?.specialType || node?.type;
         if(type === 'dwpose') return '动作提取';
+        if(type === 'pose-replicate' || type === 'poseReplicate') return '一键复刻';
         if(type === 'relight') return '灯光重塑';
         if(type === 'angle') return '角度调整';
         return '720°取景器';
@@ -175,6 +191,56 @@
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(label)}</span></div>
             <div class="special-output-row"><span>${output?.url ? esc(output.name || 'dwpose.png') : '输出：黑底彩色骨架参考图'}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
+        </div>`;
+    }
+
+    function poseReplicateImageCard(item, role, emptyIcon, emptyText){
+        const url = item?.url || '';
+        return `<div class="pose-replicate-column">
+            <div class="pose-replicate-column-title">${role === 'pose-reference' ? '动作参考' : role === 'pose-skeleton' ? '姿势骨架' : '目标图'}</div>
+            <div class="pose-replicate-input-card ${url ? 'has-image' : ''}" data-pose-replicate-slot="${role}">
+                ${url ? `<img src="${esc(url)}" alt="${esc(role)}" draggable="false">` : `<i data-lucide="${emptyIcon}"></i><strong>${esc(emptyText)}</strong><span>${role === 'pose-skeleton' ? '连接动作参考后自动生成' : '请从对应端口连接图片'}</span>`}
+            </div>
+        </div>`;
+    }
+    function poseReplicateBodyHtml(node){
+        const action = node.poseReferenceUrl ? {url:node.poseReferenceUrl} : null;
+        const skeleton = node.poseSkeletonUrl ? {url:node.poseSkeletonUrl} : null;
+        const target = node.targetImageUrl ? {url:node.targetImageUrl} : null;
+        const status = node.poseStatus || 'idle';
+        const ready = Boolean(action?.url && skeleton?.url && target?.url);
+        const activeRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0);
+        const statusText = status === 'running'
+            ? (node.posePreparing || '正在自动提取动作骨架…')
+            : status === 'failed'
+                ? (node.poseError || '动作骨架提取失败')
+                : ready
+                    ? '动作骨架和目标图已就绪，可连续点击并发抽卡'
+                    : action?.url && !skeleton?.url
+                        ? '动作参考已连接，等待骨架提取'
+                        : '请连接动作参考和目标图';
+        const ratios = ['1:1','16:9','9:16','4:3','3:4','3:2','2:3'];
+        const resolutions = ['1k','2k','4k'];
+        node.poseReplicateRatio = ratios.includes(node.poseReplicateRatio) ? node.poseReplicateRatio : '1:1';
+        node.poseReplicateResolution = resolutions.includes(node.poseReplicateResolution) ? node.poseReplicateResolution : '2k';
+        if(!node.poseReplicatePrompt) node.poseReplicatePrompt = DEFAULT_POSE_REPLICATE_PROMPT;
+        return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
+            <div class="pose-replicate-inputs">
+                ${poseReplicateImageCard(action, 'pose-reference', 'person-standing', '连接动作参考')}
+                ${poseReplicateImageCard(skeleton, 'pose-skeleton', status === 'running' ? 'loader-2' : 'scan-line', status === 'running' ? '骨架提取中' : status === 'failed' ? '提取失败' : '等待自动提取')}
+                ${poseReplicateImageCard(target, 'target-image', 'image', '连接目标图')}
+            </div>
+            <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
+            <textarea class="special-prompt pose-replicate-prompt" data-pose-replicate-field="poseReplicatePrompt" rows="4" placeholder="复刻提示词">${esc(node.poseReplicatePrompt)}</textarea>
+            <div class="pose-replicate-controls">
+                <label><span>画幅</span><select data-pose-replicate-field="poseReplicateRatio">${ratios.map(value => `<option value="${value}" ${node.poseReplicateRatio === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+                <label><span>分辨率</span><select data-pose-replicate-field="poseReplicateResolution">${resolutions.map(value => `<option value="${value}" ${node.poseReplicateResolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select></label>
+                <span class="pose-replicate-model-hint"><i data-lucide="sparkles"></i>使用当前图片生成模型</span>
+            </div>
+            <div class="special-output-row pose-replicate-run-row">
+                <span>${activeRuns ? `${activeRuns} 个复刻任务正在并发生成` : '每次点击都会创建一个独立输出节点'}</span>
+                <button type="button" class="special-primary" data-special-action="run-pose-replicate" ${ready ? '' : 'disabled'}><i data-lucide="wand-sparkles"></i><span>一键复刻</span></button>
+            </div>
         </div>`;
     }
 
@@ -635,8 +701,9 @@
         throw new Error('DWPose 模型准备超时，请检查网络后重新提取');
     }
     async function runPose(node, options, force=false){
-        const source = poseSource(node, options), signature = sourceSignature(source);
-        if(!signature) return; if(!force && node.poseSourceSignature === signature && outputItem(node)?.url) return;
+        const source = poseSource(node, options, options.poseInputRole || ''), signature = sourceSignature(source);
+        const currentOutput = options.getPoseOutput?.(node) || outputItem(node);
+        if(!signature) return; if(!force && node.poseSourceSignature === signature && currentOutput?.url) return currentOutput;
         const taskKey = `${options.canvasKey || 'canvas'}:${node.id}`; if(poseTasks.has(taskKey)) return poseTasks.get(taskKey);
         const task = (async () => {
             node.poseStatus = 'running'; node.poseError = ''; node.posePreparing = ''; notify(options, node, true);
@@ -654,7 +721,9 @@
                 if(!response.ok) throw new Error(await responseError(response, 'DWPose 动作提取失败'));
                 const people = Number(response.headers.get('X-DWPose-People') || 0), outputWidth = Number(response.headers.get('X-DWPose-Width') || 0), outputHeight = Number(response.headers.get('X-DWPose-Height') || 0), blob = await response.blob(), file = await uploadBlob(blob, `dwpose-${Date.now()}.png`);
                 file.natural_w = outputWidth || file.width || source.natural_w || 0; file.natural_h = outputHeight || file.height || source.natural_h || 0; node.poseSourceSignature = signature; delete node.poseFailedSignature; node.posePeople = people; node.poseStatus = 'done'; node.poseError = ''; node.posePreparing = '';
-                setOutputItem(node, file, options); notify(options, node, true); options.toast?.(people > 0 ? `已提取 ${people} 人骨架` : '未检测到人物，已输出空骨架图'); return file;
+                if(options.setPoseOutput) options.setPoseOutput(node, file);
+                else setOutputItem(node, file, options);
+                notify(options, node, true); options.toast?.(people > 0 ? `已提取 ${people} 人骨架` : '未检测到人物，已输出空骨架图'); return file;
             } catch(error) { node.poseStatus = 'failed'; node.poseFailedSignature = signature; node.poseError = error.message || '动作提取失败'; node.posePreparing = ''; notify(options, node, true); throw error; }
             finally { poseTasks.delete(taskKey); }
         })();
@@ -697,6 +766,101 @@
         });
         const currentSignature = sourceSignature(poseSource(node, options));
         if(node.poseStatus !== 'failed' || node.poseFailedSignature !== currentSignature) runPose(node, options, false).catch(() => {});
+    }
+
+    function poseReplicateInput(node, options, role){
+        return options.getInputImage?.(node, role) || null;
+    }
+    function assignPoseReplicateInput(node, role, item){
+        const prefix = role === 'pose-reference' ? 'poseReference' : 'targetImage';
+        const previous = node[`${prefix}Signature`] || '';
+        const next = sourceSignature(item);
+        node[`${prefix}Signature`] = next;
+        node[`${prefix}Url`] = item?.url || '';
+        node[`${prefix}Name`] = item?.name || '';
+        node[`${prefix}Width`] = item?.natural_w || item?.width || 0;
+        node[`${prefix}Height`] = item?.natural_h || item?.height || 0;
+        return previous !== next;
+    }
+    function clearPoseReplicateSkeleton(node){
+        node.poseSkeletonUrl = '';
+        node.poseSkeletonName = '';
+        node.poseSkeletonWidth = 0;
+        node.poseSkeletonHeight = 0;
+        delete node.poseSourceSignature;
+        delete node.poseFailedSignature;
+        node.poseStatus = 'idle';
+        node.poseError = '';
+        node.posePreparing = '';
+    }
+    function poseReplicatePoseOptions(options){
+        return {
+            ...options,
+            poseInputRole:'pose-reference',
+            getPoseOutput:node => node.poseSkeletonUrl ? {
+                url:node.poseSkeletonUrl,
+                name:node.poseSkeletonName || 'pose-skeleton.png',
+                natural_w:node.poseSkeletonWidth || 0,
+                natural_h:node.poseSkeletonHeight || 0,
+                kind:'image'
+            } : null,
+            setPoseOutput:(node, file) => {
+                node.poseSkeletonUrl = file.url || '';
+                node.poseSkeletonName = file.name || 'pose-skeleton.png';
+                node.poseSkeletonWidth = file.natural_w || file.width || 0;
+                node.poseSkeletonHeight = file.natural_h || file.height || 0;
+            }
+        };
+    }
+    function bindPoseReplicate(root, node, options={}){
+        if(!root || !node) return;
+        const action = poseReplicateInput(node, options, 'pose-reference');
+        const target = poseReplicateInput(node, options, 'target-image');
+        const actionChanged = assignPoseReplicateInput(node, 'pose-reference', action);
+        const targetChanged = assignPoseReplicateInput(node, 'target-image', target);
+        if(actionChanged) clearPoseReplicateSkeleton(node);
+        if(actionChanged || targetChanged) notify(options, node, true);
+
+        root.querySelectorAll('[data-pose-replicate-field]').forEach(control => {
+            control.addEventListener('pointerdown', event => event.stopPropagation());
+            control.addEventListener(control.matches('textarea') ? 'input' : 'change', event => {
+                event.stopPropagation();
+                node[control.dataset.poseReplicateField] = control.value;
+                notify(options, node, false);
+            });
+        });
+        root.querySelector('[data-special-action="run-pose-replicate"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            const currentAction = poseReplicateInput(node, options, 'pose-reference');
+            const currentTarget = poseReplicateInput(node, options, 'target-image');
+            const skeleton = node.poseSkeletonUrl ? {
+                url:node.poseSkeletonUrl,
+                name:node.poseSkeletonName || 'pose-skeleton.png',
+                natural_w:node.poseSkeletonWidth || 0,
+                natural_h:node.poseSkeletonHeight || 0,
+                kind:'image'
+            } : null;
+            if(!currentAction?.url || !currentTarget?.url || !skeleton?.url){ options.toast?.('请等待动作参考骨架提取完成，并确认目标图已连接'); return; }
+            if(!options.generatePoseReplicate){ options.toast?.('当前画布尚未配置一键复刻生成能力'); return; }
+            const prompt = String(node.poseReplicatePrompt || DEFAULT_POSE_REPLICATE_PROMPT).trim() || DEFAULT_POSE_REPLICATE_PROMPT;
+            node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + 1;
+            notify(options, node, true);
+            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, skeleton, target:currentTarget}, prompt))
+                .catch(error => options.toast?.(error?.message || '一键复刻任务创建失败'))
+                .finally(() => {
+                    node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) - 1;
+                    notify(options, node, true);
+                });
+        });
+
+        if(action?.url){
+            const poseOptions = poseReplicatePoseOptions(options);
+            const currentSignature = sourceSignature(action);
+            if(node.poseStatus !== 'failed' || node.poseFailedSignature !== currentSignature) runPose(node, poseOptions, false).catch(() => {});
+        } else if(node.poseSkeletonUrl || node.poseStatus !== 'idle'){
+            clearPoseReplicateSkeleton(node);
+            notify(options, node, true);
+        }
     }
 
     function relightControlSignature(node){
@@ -838,8 +1002,8 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_RELIGHT_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, relightBodyHtml, angleBodyHtml,
-        bindPanorama, bindPose, bindRelight, bindAngle,
+        panoramaBodyHtml, poseBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
+        bindPanorama, bindPose, bindPoseReplicate, bindRelight, bindAngle,
         buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle,
         disposePanoramaCanvas, disposePanoramasIn
     };

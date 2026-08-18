@@ -12,6 +12,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.shared = (STATIC / "js" / "canvas-special-nodes.js").read_text(encoding="utf-8")
         cls.styles = (STATIC / "css" / "canvas-special-nodes.css").read_text(encoding="utf-8")
+        cls.pose_replicate_styles = (STATIC / "css" / "pose-replicate-node.css").read_text(encoding="utf-8")
         cls.classic = (STATIC / "js" / "canvas.js").read_text(encoding="utf-8")
         cls.smart = (STATIC / "js" / "smart-canvas.js").read_text(encoding="utf-8")
         cls.classic_html = (STATIC / "canvas.html").read_text(encoding="utf-8")
@@ -24,7 +25,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
             self.assertIn("灯光重塑", page)
-            self.assertIn("special-nodes.6", page)
+            self.assertIn("pose-replicate.2", page)
 
     def test_angle_node_creation_is_hidden_but_legacy_canvas_data_remains_compatible(self):
         self.assertNotIn('onclick="addAngleNode()"', self.classic_html)
@@ -135,6 +136,61 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             for marker in markers:
                 self.assertIn(marker, source)
 
+    def test_pose_replicate_node_is_available_on_both_canvases_with_two_role_ports(self):
+        for page in (self.classic_html, self.smart_html):
+            self.assertIn("一键复刻", page)
+            self.assertIn("/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.18.pose-replicate.2", page)
+
+        for marker in (
+            "function addPoseReplicateNode(point)",
+            "type:'poseReplicate'",
+            "data-input-role=\"pose-reference\"",
+            "data-input-role=\"target-image\"",
+            "poseReplicateBodyHtml(node)",
+        ):
+            self.assertIn(marker, self.classic)
+        self.assertIn("if(from.type === 'poseReplicate') return to.type === 'output'", self.classic)
+        self.assertIn("if(node.type === 'poseReplicate')", self.classic)
+
+        for marker in (
+            "function createPoseReplicateNode(point)",
+            "specialType:'pose-replicate'",
+            "data-input-role=\"pose-reference\"",
+            "data-input-role=\"target-image\"",
+            "poseReplicateBodyHtml(node)",
+        ):
+            self.assertIn(marker, self.smart)
+
+    def test_pose_replicate_connections_persist_the_selected_input_role(self):
+        for marker in (
+            "connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})})",
+            "portPoint(c.to, 'in', c.inputRole || '')",
+            "canConnect(c.from, c.to, c.inputRole || '')",
+            "canConnect(conn.from, conn.to, conn.inputRole || '')",
+            "from:group.id, to:connection.to, ...(inputRole ? {inputRole} : {})",
+        ):
+            self.assertIn(marker, self.classic)
+
+        for marker in (
+            "canvas.connections.push({from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})})",
+            "connectInputNode(fromId, toId, inputRole)",
+            "`${c.from}->${c.to}:${c.kind || 'flow'}:${c.inputRole || ''}`",
+            ".filter(item => item.to === to.id && (item.kind || 'flow') === 'input')",
+            "item.inputRole === 'pose-reference'",
+            "item.inputRole === 'target-image'",
+        ):
+            self.assertIn(marker, self.smart)
+
+        for marker in (
+            "data-input-role=\"pose-reference\"",
+            "data-input-role=\"target-image\"",
+            ".poseReplicate-node",
+            ".pose-replicate-node",
+            ".smart-pose-replicate-node",
+        ):
+            self.assertIn(marker, self.pose_replicate_styles)
+
     def test_relight_compiles_mature_direction_temperature_and_consistency_controls(self):
         for marker in (
             "RELIGHT_DIRECTIONS",
@@ -230,7 +286,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "specialType:'relight'",
             "specialType:'angle'",
             "function bindSmartSpecialNode(el, node)",
-            "function smartSpecialInputImage(node)",
+            "function smartSpecialInputImage(node, inputRole='')",
             "function generateSmartSpecialEdit(node, prompt, source, kind)",
             "node.specialType === 'panorama'",
             "delete node.panoramaGenerating",
@@ -256,6 +312,91 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             ".relight-direction-pad",
         ):
             self.assertIn(marker, self.styles)
+
+    def test_pose_replicate_automatically_extracts_a_role_scoped_dwpose_skeleton(self):
+        for marker in (
+            "DEFAULT_POSE_REPLICATE_PROMPT",
+            "function bindPoseReplicate(root, node, options={})",
+            "poseReplicateInput(node, options, 'pose-reference')",
+            "poseReplicateInput(node, options, 'target-image')",
+            "poseInputRole:'pose-reference'",
+            "setPoseOutput:(node, file)",
+            "runPose(node, poseOptions, false)",
+            "node.poseSkeletonUrl = file.url",
+            "data-special-action=\"run-pose-replicate\"",
+        ):
+            self.assertIn(marker, self.shared)
+
+        self.assertIn("function classicSpecialInputImage(node, inputRole='')", self.classic)
+        self.assertIn("connection.inputRole === inputRole", self.classic)
+        self.assertIn("function smartSpecialInputImage(node, inputRole='')", self.smart)
+        self.assertIn("item.inputRole === inputRole", self.smart)
+
+    def test_pose_replicate_uses_connected_inputs_only_and_has_no_upload_surface(self):
+        body = re.search(
+            r"function poseReplicateBodyHtml\(node\).*?\n\s*\}",
+            self.shared,
+            re.S,
+        )
+        self.assertIsNotNone(body)
+        body_source = body.group(0)
+        self.assertIn("动作参考", body_source)
+        self.assertIn("目标图", body_source)
+        self.assertIn("姿势骨架", self.shared)
+        self.assertIn("poseReplicatePrompt", body_source)
+        self.assertNotIn('type="file"', body_source)
+        self.assertNotIn("upload", body_source.lower())
+        self.assertIn("一键复刻仅接受端口连线", self.smart)
+
+    def test_pose_replicate_creates_one_recoverable_output_per_click_on_both_canvases(self):
+        classic_run = re.search(
+            r"async function generateClassicPoseReplicate\(.*?(?=\nfunction createClassicPoseOutputNode)",
+            self.classic,
+            re.S,
+        )
+        self.assertIsNotNone(classic_run)
+        classic_source = classic_run.group(0)
+        self.assertIn("const refs = [inputs.skeleton, inputs.action, inputs.target]", classic_source)
+        self.assertIn("type:'output'", classic_source)
+        self.assertIn("canvasTaskType:'online-image'", classic_source)
+        self.assertIn("nodes.push(output)", classic_source)
+        self.assertIn("createCanvasImageTask(payload)", classic_source)
+        self.assertLess(classic_source.index("nodes.push(output)"), classic_source.index("createCanvasImageTask(payload)"))
+        self.assertIn("pollCanvasImageTask(task.task_id)", classic_source)
+
+        smart_run = re.search(
+            r"async function generateSmartPoseReplicate\(.*?(?=\nfunction createSmartPoseOutputNode)",
+            self.smart,
+            re.S,
+        )
+        self.assertIsNotNone(smart_run)
+        smart_source = smart_run.group(0)
+        self.assertIn("const refs = [inputs.skeleton, inputs.action, inputs.target]", smart_source)
+        self.assertIn("createPendingOutputFromSource(node, 1", smart_source)
+        self.assertIn("runApiGeneration(prompt, refs, runSettings)", smart_source)
+        self.assertLess(smart_source.index("createPendingOutputFromSource(node, 1"), smart_source.index("runApiGeneration(prompt, refs, runSettings)"))
+        self.assertIn("initializeSmartGenerationSlots", smart_source)
+        self.assertIn("resumeSmartPendingNode(output", smart_source)
+
+    def test_pose_replicate_button_stays_clickable_while_previous_runs_continue(self):
+        for marker in (
+            "node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + 1",
+            "Promise.resolve(options.generatePoseReplicate",
+            "每次点击都会创建一个独立输出节点",
+            "个复刻任务正在并发生成",
+        ):
+            self.assertIn(marker, self.shared)
+
+        run_button = re.search(
+            r'<button type="button" class="special-primary" data-special-action="run-pose-replicate"(?P<attrs>.*?)>',
+            self.shared,
+            re.S,
+        )
+        self.assertIsNotNone(run_button)
+        self.assertIn("ready", run_button.group("attrs"))
+        self.assertNotIn("poseReplicateActiveRuns", run_button.group("attrs"))
+        self.assertIn("delete copy.poseReplicateActiveRuns", self.classic)
+        self.assertIn("delete node.poseReplicateActiveRuns", self.smart)
 
 
 if __name__ == "__main__":

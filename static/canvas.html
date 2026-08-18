@@ -91,6 +91,20 @@
                 <button class="menu-btn" onclick="menuAdd('relight')"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
                 <button class="menu-btn" onclick="menuAdd('blenderDirector')"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
+                <div class="menu-submenu-host" data-ecommerce-menu-host>
+                    <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+                        <i data-lucide="shopping-bag" class="w-4 h-4"></i><span>电商工作流</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i>
+                    </button>
+                    <div class="create-submenu" role="menu" aria-label="电商工作流节点">
+                        <button class="menu-btn ecommerce-workflow-create" type="button" onclick="menuCreateEcommerceWorkflow()"><i data-lucide="workflow" class="w-4 h-4"></i><span>创建电商工作流</span></button>
+                        <div class="menu-divider"></div>
+                        <button class="menu-btn" type="button" onclick="menuAdd('ecom-model')"><i data-lucide="user-round" class="w-4 h-4"></i><span>电商模特</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('ecom-product')"><i data-lucide="shirt" class="w-4 h-4"></i><span>电商产品</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('ecom-scene')"><i data-lucide="image" class="w-4 h-4"></i><span>电商场景</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('ecom-compose')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>A+ 图合成</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('ecom-video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>电商视频</span></button>
+                    </div>
+                </div>
             </div>
             <div id="linkCreateMenu" class="create-menu"></div>
             <div id="nodeInputMenu" class="create-menu"></div>
@@ -349,6 +363,7 @@
 
     <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.2"></script>
     <script src="/static/js/canvas-special-nodes.js?v=2026.08.18.pose-reference.2"></script>
-    <script src="/static/js/canvas.js?v=2026.08.18.pose-reference.1"></script>
+    <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>
+    <script src="/static/js/canvas.js?v=2026.08.18.ecommerce-workflow.1"></script>
 </body>
 </html>

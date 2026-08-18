@@ -28,6 +28,16 @@ class CanvasApiGeneratorDefaultsTests(unittest.TestCase):
         self.assertIn("ratio:'wide'", self.function_body)
         self.assertIn("resolution:'2k'", self.function_body)
 
+    def test_uses_image_generation_display_name(self):
+        i18n_source = (ROOT / "static" / "js" / "i18n" / "canvas.js").read_text(encoding="utf-8")
+        html_source = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+        canvas_source = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+
+        self.assertIn('"canvas.apiGenerate": { zh: "图片生成", en: "Image Generation" }', i18n_source)
+        self.assertNotIn('"canvas.apiGenerate": { zh: "API生成"', i18n_source)
+        self.assertEqual(html_source.count('data-i18n="canvas.apiGenerate">图片生成</span>'), 2)
+        self.assertIn("请改用图片生成节点", canvas_source)
+
 
 if __name__ == "__main__":
     unittest.main()

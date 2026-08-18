@@ -6964,7 +6964,7 @@ function renderNode(node){
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
-    if(node.type === 'msgen') body.innerHTML = '<div class="muted-note">旧版 ModelScope 专用生成已移除，请改用 API 生成节点。</div>';
+    if(node.type === 'msgen') body.innerHTML = '<div class="muted-note">旧版 ModelScope 专用生成已移除，请改用图片生成节点。</div>';
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));

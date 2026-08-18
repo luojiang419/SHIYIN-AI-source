@@ -29,7 +29,7 @@
         "api.msEnModels": { zh: "英文模型库：", en: "EN models: " },
         "api.msModelExample": { zh: "模型名称示意：", en: "Model ID example: " },
         "api.imageModels": { zh: "生图模型", en: "Image Models" },
-        "api.imageHint": { zh: "在线生图和无限画布 API 生成使用。", en: "Used by Online Image and Canvas API generation." },
+        "api.imageHint": { zh: "在线生图和无限画布图片生成节点使用。", en: "Used by Online Image and the Canvas Image Generation node." },
         "api.chatModels": { zh: "聊天模型", en: "Chat Models" },
         "api.chatHint": { zh: "GPT 对话和 LLM 节点使用。", en: "Used by GPT Chat and LLM nodes." },
         "api.videoModels": { zh: "视频模型", en: "Video Models" },

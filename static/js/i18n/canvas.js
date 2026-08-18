@@ -70,7 +70,7 @@
         "canvas.progressToken": { zh: "进度", en: "Progress" },
         "canvas.loopRounds": { zh: "轮", en: "rounds" },
         "canvas.loopRound": { zh: "第", en: "Round" },
-        "canvas.apiGenerate": { zh: "API生成", en: "API Generate" },
+        "canvas.apiGenerate": { zh: "图片生成", en: "Image Generation" },
         "canvas.msGenerate": { zh: "Modelscope生成", en: "Modelscope Generate" },
         "canvas.videoGenerate": { zh: "视频生成", en: "Video Generate" },
         "canvas.group": { zh: "分组", en: "Group" },

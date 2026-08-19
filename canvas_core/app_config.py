@@ -10,6 +10,7 @@ from typing import Any
 DEFAULT_CLOSE_BEHAVIOR = "ask_on_close"
 CLOSE_BEHAVIORS = frozenset({DEFAULT_CLOSE_BEHAVIOR, "minimize_to_tray", "exit"})
 DEFAULT_GENERATED_OUTPUT_DIR = ""
+DEFAULT_TOPAZ_VIDEO_INSTALL_DIR = ""
 _CONFIG_LOCK = RLock()
 
 
@@ -24,6 +25,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
             return {
                 "close_behavior": DEFAULT_CLOSE_BEHAVIOR,
                 "generated_output_dir": DEFAULT_GENERATED_OUTPUT_DIR,
+                "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
             }
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -34,6 +36,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         behavior = str(value.get("close_behavior") or DEFAULT_CLOSE_BEHAVIOR)
         value["close_behavior"] = behavior if behavior in CLOSE_BEHAVIORS else DEFAULT_CLOSE_BEHAVIOR
         value["generated_output_dir"] = str(value.get("generated_output_dir") or "").strip()
+        value["topaz_video_install_dir"] = str(value.get("topaz_video_install_dir") or "").strip()
         return value
 
 
@@ -42,8 +45,9 @@ def update_app_settings(
     *,
     close_behavior: str | None = None,
     generated_output_dir: str | None = None,
+    topaz_video_install_dir: str | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None:
+    if close_behavior is None and generated_output_dir is None and topaz_video_install_dir is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -58,6 +62,11 @@ def update_app_settings(
             if directory and not Path(directory).expanduser().is_absolute():
                 raise ValueError("生成图片保存目录必须是绝对路径")
             value["generated_output_dir"] = directory
+        if topaz_video_install_dir is not None:
+            directory = str(topaz_video_install_dir or "").strip()
+            if directory and not Path(directory).expanduser().is_absolute():
+                raise ValueError("Topaz Video AI 安装目录必须是绝对路径")
+            value["topaz_video_install_dir"] = directory
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
         temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -21,7 +21,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.08.05.storage-maintenance.1">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.08.19.topaz-video.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -78,6 +78,32 @@
                 <p id="generatedOutputHint"></p>
             </div>
             <p class="app-settings-note" data-i18n="appSettings.generatedOutputNaming">生成成功后自动保存副本，文件名格式为 SHIYIN-000001-YYYYMMDD。</p>
+        </section>
+
+        <section class="app-settings-card" aria-labelledby="topazVideoTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>TOPAZ VIDEO AI</span>
+                    <h2 id="topazVideoTitle">Topaz 高清放大</h2>
+                </div>
+                <strong id="topazStatus" role="status"></strong>
+            </div>
+            <div class="app-settings-output-control">
+                <label for="topazInstallDir">Topaz Video AI 安装目录</label>
+                <div class="app-settings-output-row topaz-directory-row">
+                    <input id="topazInstallDir" type="text" readonly placeholder="自动检测 Topaz Video AI">
+                    <button id="chooseTopazInstall" type="button">选择文件夹</button>
+                    <button id="resetTopazInstall" type="button" class="secondary">自动检测</button>
+                    <button id="checkTopazInstall" type="button" class="secondary">重新检测</button>
+                </div>
+            </div>
+            <div class="app-settings-topaz-grid">
+                <div><span>运行状态</span><b id="topazReadyState">等待检测</b></div>
+                <div><span>可用模型</span><b id="topazModelCount">--</b></div>
+                <div><span>程序版本</span><b id="topazVersion">--</b></div>
+                <div><span>安全校验</span><b id="topazSignature">--</b></div>
+            </div>
+            <p id="topazInstallHint" class="app-settings-note">只调用 Topaz 自带且数字签名有效的 ffmpeg / ffprobe；不会调用已被修改的主程序。</p>
         </section>
 
         <section class="app-settings-card" aria-labelledby="storageMaintenanceTitle">
@@ -141,6 +167,6 @@
             <p class="app-settings-note">更新源固定为公开 GitHub Release；下载完成后可选择立即更新或下次启动更新。</p>
         </section>
     </main>
-    <script src="/static/js/app-settings.js?v=2026.08.05.storage-maintenance.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.08.19.topaz-video.1"></script>
 </body>
 </html>

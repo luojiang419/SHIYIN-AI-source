@@ -14,6 +14,7 @@ class AppConfigTests(unittest.TestCase):
             settings = read_app_config(Path(tmp))
             self.assertEqual(settings["close_behavior"], "ask_on_close")
             self.assertEqual(settings["generated_output_dir"], "")
+            self.assertEqual(settings["topaz_video_install_dir"], "")
 
     def test_close_behavior_update_preserves_runtime_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -58,6 +59,20 @@ class AppConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 update_app_settings(Path(tmp), generated_output_dir="relative/output")
+
+    def test_topaz_install_directory_can_be_saved_and_reset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            install_dir = data_root / "Topaz Video AI"
+            saved = update_app_settings(data_root, topaz_video_install_dir=str(install_dir))
+            self.assertEqual(saved["topaz_video_install_dir"], str(install_dir))
+            reset = update_app_settings(data_root, topaz_video_install_dir="")
+            self.assertEqual(reset["topaz_video_install_dir"], "")
+
+    def test_topaz_install_directory_rejects_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                update_app_settings(Path(tmp), topaz_video_install_dir="relative/topaz")
 
     def test_generated_files_use_persistent_sequence_and_date(self):
         with tempfile.TemporaryDirectory() as tmp:

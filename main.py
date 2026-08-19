@@ -91,6 +91,18 @@ from canvas_core.blender_bridge import (
     build_blender_addon_zip,
     validated_render_path,
 )
+from canvas_core.topaz_video import (
+    TopazUpscaleSettings,
+    TopazVideoError,
+    available_topaz_models,
+    build_topaz_upscale_command,
+    parse_ffmpeg_progress,
+    preferred_topaz_model,
+    probe_video,
+    resolve_target_dimensions,
+    resolve_topaz_installation,
+    topaz_child_environment,
+)
 from canvas_core.ecommerce import (
     QUALITY_CHECKS as ECOMMERCE_QUALITY_CHECKS,
     build_model_catalog as build_ecommerce_model_catalog,
@@ -351,7 +363,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.172"
+APP_VERSION = "1.0.173"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -2312,6 +2324,7 @@ class PreferencesUpdateRequest(BaseModel):
 class AppSettingsUpdateRequest(BaseModel):
     close_behavior: Optional[str] = None
     generated_output_dir: Optional[str] = None
+    topaz_video_install_dir: Optional[str] = None
 
 
 @app.get("/pair")
@@ -2568,6 +2581,7 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "generated_output_dir": custom_directory,
         "generated_output_effective_dir": effective_directory,
         "generated_output_uses_default": not bool(custom_directory),
+        "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
         "runtime_mode": RUNTIME_OPTIONS.mode,
     }
 
@@ -2584,10 +2598,22 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             fd, probe = tempfile.mkstemp(prefix=".shiyin-write-test-", dir=str(directory))
             os.close(fd)
             os.remove(probe)
+        if payload.topaz_video_install_dir is not None:
+            requested_topaz = str(payload.topaz_video_install_dir or "").strip()
+            if requested_topaz:
+                topaz_directory = Path(requested_topaz).expanduser()
+                if not topaz_directory.is_absolute():
+                    raise ValueError("Topaz Video AI 安装目录必须是绝对路径")
+                if not topaz_directory.is_dir():
+                    raise ValueError("Topaz Video AI 安装目录不存在")
+                missing = [name for name in ("ffmpeg.exe", "ffprobe.exe") if not (topaz_directory / name).is_file()]
+                if missing:
+                    raise ValueError(f"所选目录缺少 Topaz 运行文件：{', '.join(missing)}")
         config = update_app_settings(
             APP_PATHS.data_root,
             close_behavior=payload.close_behavior,
             generated_output_dir=payload.generated_output_dir,
+            topaz_video_install_dir=payload.topaz_video_install_dir,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2606,6 +2632,43 @@ async def select_generated_output_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 SHIYIN AI 生成图片保存目录';"
         "$dialog.ShowNewFolderButton=$true;"
+        "if(Test-Path -LiteralPath $args[0]){$dialog.SelectedPath=$args[0]};"
+        "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
+    )
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        raise HTTPException(status_code=501, detail="未找到 Windows PowerShell，无法打开目录选择器")
+    try:
+        process = await asyncio.to_thread(
+            subprocess.run,
+            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, initial],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=408, detail="目录选择超时") from exc
+    if process.returncode != 0:
+        raise HTTPException(status_code=500, detail=(process.stderr or "无法打开目录选择器").strip()[:300])
+    selected = process.stdout.strip().splitlines()[-1].strip() if process.stdout.strip() else ""
+    return {"selected": bool(selected), "path": selected}
+
+
+@app.post("/api/app-settings/select-topaz-video-directory")
+async def select_topaz_video_directory():
+    if os.name != "nt":
+        raise HTTPException(status_code=501, detail="当前系统不支持原生目录选择")
+    config = read_app_config(APP_PATHS.data_root)
+    initial = str(config.get("topaz_video_install_dir") or r"C:\Program Files\Topaz Labs LLC\Topaz Video AI")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
+        "$dialog.Description='选择 Topaz Video AI 安装目录';"
+        "$dialog.ShowNewFolderButton=$false;"
         "if(Test-Path -LiteralPath $args[0]){$dialog.SelectedPath=$args[0]};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
@@ -3446,11 +3509,48 @@ class ImageTaskQueryRequest(BaseModel):
     provider_id: str = "comfly"
     task_id: str = Field(min_length=1, max_length=240)
 
+
+class TopazAdvancedSettingsRequest(BaseModel):
+    preblur: float = Field(default=0.0, ge=-1.0, le=1.0)
+    noise: float = Field(default=0.0, ge=-1.0, le=1.0)
+    details: float = Field(default=0.0, ge=-1.0, le=1.0)
+    halo: float = Field(default=0.0, ge=-1.0, le=1.0)
+    blur: float = Field(default=0.0, ge=-1.0, le=1.0)
+    compression: float = Field(default=0.0, ge=-1.0, le=1.0)
+    pre_noise: float = Field(default=0.0, ge=0.0, le=0.1)
+    estimate: int = Field(default=0, ge=0, le=100)
+    blend: float = Field(default=0.0, ge=0.0, le=1.0)
+    grain: float = Field(default=0.0, ge=0.0, le=0.1)
+    grain_size: float = Field(default=0.0, ge=0.0, le=5.0)
+    device: str = Field(default="-2", max_length=80)
+    vram: float = Field(default=1.0, ge=0.1, le=1.0)
+    instances: int = Field(default=0, ge=0, le=3)
+    download_models: bool = True
+    color_correction: bool = True
+    encoder: str = Field(default="h264_nvenc", max_length=40)
+    audio_mode: str = Field(default="aac", max_length=20)
+    audio_bitrate_kbps: int = Field(default=320, ge=64, le=512)
+
+
+class TopazUpscaleTaskRequest(BaseModel):
+    input_url: str = Field(min_length=1, max_length=2048)
+    model: str = Field(default="prob-4", min_length=2, max_length=48)
+    target: str = Field(default="2x", min_length=2, max_length=16)
+    quality: str = Field(default="balanced", min_length=2, max_length=24)
+    advanced: TopazAdvancedSettingsRequest = Field(default_factory=TopazAdvancedSettingsRequest)
+    canvas_id: str = Field(default="", max_length=160)
+    node_id: str = Field(default="", max_length=160)
+
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
 CANVAS_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_VIDEO_TASK_LOCK = Lock()
 CANVAS_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
+TOPAZ_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
+TOPAZ_VIDEO_TASK_LOCK = Lock()
+TOPAZ_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
+TOPAZ_VIDEO_PROCESSES: Dict[str, asyncio.subprocess.Process] = {}
+TOPAZ_VIDEO_TASK_SEMAPHORE = asyncio.Semaphore(1)
 ONLINE_IMAGE_TASKS: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_TASKS: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_MAX_CONCURRENCY = max(1, min(8, int(os.getenv("ECOMMERCE_MAX_CONCURRENCY", "3") or 3)))
@@ -3461,14 +3561,17 @@ ECOMMERCE_VISION_CACHE: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_VISION_CACHE_LOCK = Lock()
 CANVAS_TASK_MEMORY_LIMIT = 200
 CANVAS_VIDEO_TASK_MEMORY_LIMIT = 500
+TOPAZ_VIDEO_TASK_MEMORY_LIMIT = 200
 ONLINE_IMAGE_TASK_MEMORY_LIMIT = 500
 ECOMMERCE_TASK_MEMORY_LIMIT = 1000
 ECOMMERCE_VISION_CACHE_LIMIT = 512
 ONLINE_TASKS_LOADED_ACCOUNTS: set[str] = set()
 CANVAS_VIDEO_TASKS_LOADED_ACCOUNTS: set[str] = set()
+TOPAZ_VIDEO_TASKS_LOADED_ACCOUNTS: set[str] = set()
 ECOMMERCE_TASKS_LOADED_ACCOUNTS: set[str] = set()
 ONLINE_TASK_LOAD_LOCK = Lock()
 CANVAS_VIDEO_TASK_LOAD_LOCK = Lock()
+TOPAZ_VIDEO_TASK_LOAD_LOCK = Lock()
 ECOMMERCE_TASK_LOAD_LOCK = Lock()
 
 
@@ -15487,6 +15590,411 @@ def canvas_video_task_request_snapshot(payload: CanvasVideoRequest) -> Dict[str,
         "audio_count": len(payload.audios or []),
         "model_parameters": dict(payload.model_parameters or {}),
     }
+
+
+TOPAZ_VIDEO_ACTIVE_STATUSES = {"queued", "probing", "running", "canceling"}
+TOPAZ_VIDEO_TERMINAL_STATUSES = {"succeeded", "failed", "canceled", "interrupted"}
+TOPAZ_VIDEO_RESTART_ERROR = "软件重启导致本地 Topaz 进程中断，请重新运行此节点"
+
+
+def current_topaz_installation():
+    try:
+        config = read_app_config(APP_PATHS.data_root)
+    except ValueError:
+        config = {}
+    return resolve_topaz_installation(str(config.get("topaz_video_install_dir") or "").strip())
+
+
+def public_topaz_video_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    data = {key: value for key, value in dict(task or {}).items() if not str(key).startswith("_")}
+    task_id = str(data.get("id") or data.get("task_id") or "")
+    data["id"] = task_id
+    data["task_id"] = task_id
+    return data
+
+
+def write_topaz_video_tasks_locked(task: Optional[Dict[str, Any]] = None) -> None:
+    removed_ids = prune_current_account_tasks_locked(
+        TOPAZ_VIDEO_TASKS, TOPAZ_VIDEO_ACTIVE_STATUSES, TOPAZ_VIDEO_TASK_MEMORY_LIMIT
+    )
+    if task is not None and hasattr(DATABASE, "upsert_task"):
+        DATABASE.upsert_task("topaz_video", task)
+        for task_id in removed_ids:
+            DATABASE.delete_task("topaz_video", task_id)
+    else:
+        tasks = sorted(
+            current_account_tasks(TOPAZ_VIDEO_TASKS),
+            key=lambda item: float(item.get("created_at") or 0),
+            reverse=True,
+        )[:TOPAZ_VIDEO_TASK_MEMORY_LIMIT]
+        DATABASE.save_tasks("topaz_video", tasks)
+    publish_entity_changed("task", "topaz_video")
+
+
+def update_topaz_video_task(task_id: str, changes: Dict[str, Any], *, persist: bool = True) -> Dict[str, Any]:
+    with TOPAZ_VIDEO_TASK_LOCK:
+        task = current_account_task(TOPAZ_VIDEO_TASKS, task_id)
+        if not task:
+            return {}
+        task.update(changes)
+        task["updated_at"] = time.time()
+        if persist:
+            write_topaz_video_tasks_locked(task)
+        return dict(task)
+
+
+def load_topaz_video_tasks_from_disk() -> None:
+    account_id = current_account_id()
+    restored: Dict[str, Dict[str, Any]] = {}
+    changed = False
+    for item in DATABASE.load_tasks("topaz_video"):
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id") or item.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        task = dict(item)
+        task.update({"id": task_id, "task_id": task_id, "_account_id": account_id})
+        if str(task.get("status") or "") in TOPAZ_VIDEO_ACTIVE_STATUSES:
+            task.update(
+                {
+                    "status": "interrupted",
+                    "message": "",
+                    "error": TOPAZ_VIDEO_RESTART_ERROR,
+                    "cancel_requested": False,
+                    "updated_at": time.time(),
+                }
+            )
+            changed = True
+        restored[task_id] = task
+    with TOPAZ_VIDEO_TASK_LOCK:
+        for existing_id, existing in list(TOPAZ_VIDEO_TASKS.items()):
+            if str(existing.get("_account_id") or "admin") == account_id:
+                TOPAZ_VIDEO_TASKS.pop(existing_id, None)
+        TOPAZ_VIDEO_TASKS.update(restored)
+        TOPAZ_VIDEO_TASKS_LOADED_ACCOUNTS.add(account_id)
+        if changed:
+            write_topaz_video_tasks_locked()
+
+
+def ensure_topaz_video_tasks_loaded() -> None:
+    account_id = current_account_id()
+    if account_id in TOPAZ_VIDEO_TASKS_LOADED_ACCOUNTS:
+        return
+    with TOPAZ_VIDEO_TASK_LOAD_LOCK:
+        if account_id not in TOPAZ_VIDEO_TASKS_LOADED_ACCOUNTS:
+            load_topaz_video_tasks_from_disk()
+
+
+def safe_remove_topaz_temporary(path_value: str) -> None:
+    if not path_value:
+        return
+    try:
+        root = Path(OUTPUT_OUTPUT_DIR).resolve()
+        path = Path(path_value).resolve()
+        path.relative_to(root)
+        if path.is_file() and ".topaz-part-" in path.name:
+            path.unlink()
+    except (OSError, RuntimeError, ValueError):
+        return
+
+
+async def run_topaz_video_task(task_id: str) -> None:
+    process: Optional[asyncio.subprocess.Process] = None
+    temporary_path = ""
+    try:
+        async with TOPAZ_VIDEO_TASK_SEMAPHORE:
+            with TOPAZ_VIDEO_TASK_LOCK:
+                task = dict(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
+            if not task or str(task.get("status") or "") not in TOPAZ_VIDEO_ACTIVE_STATUSES:
+                return
+            if task.get("cancel_requested"):
+                update_topaz_video_task(task_id, {"status": "canceled", "message": "", "error": ""})
+                return
+            update_topaz_video_task(
+                task_id, {"status": "probing", "message": "正在读取视频与 Topaz 能力", "error": ""}
+            )
+            installation = await asyncio.to_thread(current_topaz_installation)
+            if not installation.ready:
+                raise TopazVideoError(installation.error or "Topaz Video AI 尚未就绪")
+            models = available_topaz_models(installation.model_dir)
+            model_ids = [str(item.get("id") or "") for item in models]
+            input_path = Path(str(task.get("_input_path") or ""))
+            metadata = await asyncio.to_thread(probe_video, installation, input_path)
+            output_width, output_height = resolve_target_dimensions(
+                int(metadata.get("width") or 0),
+                int(metadata.get("height") or 0),
+                str(task.get("settings", {}).get("target") or "2x"),
+            )
+            raw_settings = dict(task.get("settings") or {})
+            raw_settings.update({"output_width": output_width, "output_height": output_height})
+            settings = TopazUpscaleSettings(**raw_settings).validated(available_models=model_ids)
+            final_filename = f"topaz_{uuid.uuid4().hex[:12]}.mp4"
+            final_path = Path(output_path_for(final_filename, "output")).resolve()
+            temporary_path_obj = final_path.with_name(f".{final_path.stem}.topaz-part-{task_id[-8:]}.mp4")
+            temporary_path = str(temporary_path_obj)
+            command = build_topaz_upscale_command(
+                installation, input_path, temporary_path_obj, settings, available_models=model_ids
+            )
+            update_topaz_video_task(
+                task_id,
+                {
+                    "status": "running",
+                    "message": "Topaz 正在高清放大",
+                    "progress": 0.0,
+                    "input": metadata,
+                    "output_width": output_width,
+                    "output_height": output_height,
+                    "_temp_path": temporary_path,
+                    "_output_path": str(final_path),
+                },
+            )
+            process_kwargs: Dict[str, Any] = {
+                "cwd": str(installation.install_dir),
+                "env": topaz_child_environment(installation),
+                "stdin": asyncio.subprocess.DEVNULL,
+                "stdout": asyncio.subprocess.PIPE,
+                "stderr": asyncio.subprocess.PIPE,
+            }
+            if os.name == "nt":
+                process_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                    subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+                )
+            process = await asyncio.create_subprocess_exec(*command, **process_kwargs)
+            TOPAZ_VIDEO_PROCESSES[task_id] = process
+            stderr_lines: List[str] = []
+            progress_block: List[str] = []
+            last_persisted = 0.0
+
+            async def consume_stderr() -> None:
+                if process is None or process.stderr is None:
+                    return
+                while True:
+                    raw_line = await process.stderr.readline()
+                    if not raw_line:
+                        break
+                    text_line = raw_line.decode("utf-8", errors="replace").strip()
+                    if text_line:
+                        stderr_lines.append(text_line)
+                        del stderr_lines[:-120]
+
+            stderr_reader = asyncio.create_task(consume_stderr())
+            if process.stdout is not None:
+                while True:
+                    raw_line = await process.stdout.readline()
+                    if not raw_line:
+                        break
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    progress_block.append(line)
+                    if line.startswith("progress="):
+                        progress = parse_ffmpeg_progress(progress_block, float(metadata.get("duration") or 0))
+                        progress_block.clear()
+                        now = time.monotonic()
+                        should_persist = now - last_persisted >= 1.0 or progress.get("state") == "end"
+                        update_topaz_video_task(
+                            task_id,
+                            {
+                                "progress": round(float(progress.get("progress") or 0), 4),
+                                "processed_seconds": round(float(progress.get("processed_seconds") or 0), 3),
+                                "frame": int(progress.get("frame") or 0),
+                                "fps": float(progress.get("fps") or 0),
+                                "speed": str(progress.get("speed") or ""),
+                            },
+                            persist=should_persist,
+                        )
+                        if should_persist:
+                            last_persisted = now
+            return_code = await process.wait()
+            await stderr_reader
+            with TOPAZ_VIDEO_TASK_LOCK:
+                latest = dict(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
+            if latest.get("cancel_requested"):
+                safe_remove_topaz_temporary(temporary_path)
+                update_topaz_video_task(task_id, {"status": "canceled", "message": "", "error": ""})
+                return
+            if return_code != 0:
+                detail = "\n".join(stderr_lines[-20:]).strip()
+                raise TopazVideoError((detail or f"Topaz FFmpeg 退出码：{return_code}")[-2000:])
+            if not temporary_path_obj.is_file() or temporary_path_obj.stat().st_size <= 0:
+                raise TopazVideoError("Topaz 处理完成但没有生成有效视频")
+            os.replace(temporary_path_obj, final_path)
+            output_url = output_url_for(final_filename, "output")
+            register_internal_media_object(output_url, "output", "video", "topaz-upscale")
+            result = {
+                "videos": [{"url": output_url, "kind": "video", "name": final_filename}],
+                "url": output_url,
+                "width": output_width,
+                "height": output_height,
+                "size": final_path.stat().st_size,
+            }
+            update_topaz_video_task(
+                task_id,
+                {
+                    "status": "succeeded",
+                    "progress": 1.0,
+                    "message": "",
+                    "error": "",
+                    "result": result,
+                    "completed_at": time.time(),
+                    "_temp_path": "",
+                },
+            )
+    except asyncio.CancelledError:
+        if process and process.returncode is None:
+            process.terminate()
+        safe_remove_topaz_temporary(temporary_path)
+        update_topaz_video_task(
+            task_id, {"status": "interrupted", "message": "", "error": TOPAZ_VIDEO_RESTART_ERROR}
+        )
+        raise
+    except (OSError, TopazVideoError, ValueError) as exc:
+        safe_remove_topaz_temporary(temporary_path)
+        with TOPAZ_VIDEO_TASK_LOCK:
+            latest = dict(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
+        canceled = bool(latest.get("cancel_requested"))
+        update_topaz_video_task(
+            task_id,
+            {"status": "canceled" if canceled else "failed", "message": "", "error": "" if canceled else str(exc)},
+        )
+    finally:
+        TOPAZ_VIDEO_PROCESSES.pop(task_id, None)
+
+
+def start_topaz_video_task_runner(task_id: str) -> asyncio.Task:
+    existing = TOPAZ_VIDEO_TASK_RUNNERS.get(task_id)
+    if existing and not existing.done():
+        return existing
+    runner = asyncio.create_task(run_topaz_video_task(task_id))
+    TOPAZ_VIDEO_TASK_RUNNERS[task_id] = runner
+
+    def discard(done: asyncio.Task) -> None:
+        if TOPAZ_VIDEO_TASK_RUNNERS.get(task_id) is done:
+            TOPAZ_VIDEO_TASK_RUNNERS.pop(task_id, None)
+
+    runner.add_done_callback(discard)
+    return runner
+
+
+@app.get("/api/topaz-video/capabilities")
+async def topaz_video_capabilities():
+    installation = await asyncio.to_thread(current_topaz_installation)
+    models = available_topaz_models(installation.model_dir)
+    return {
+        **installation.public(),
+        "models": models,
+        "default_model": preferred_topaz_model(models),
+        "targets": ["2x", "4x", "1080p", "1440p", "2160p"],
+        "qualities": ["high", "balanced", "compact"],
+        "advanced_defaults": TopazUpscaleSettings().public(),
+        "max_concurrency": 1,
+    }
+
+
+@app.post("/api/topaz-video/tasks")
+async def create_topaz_video_task(payload: TopazUpscaleTaskRequest):
+    ensure_topaz_video_tasks_loaded()
+    input_url = normalize_internal_media_url(payload.input_url)
+    input_path = output_file_from_url(input_url)
+    if not input_url or not input_path or not os.path.isfile(input_path):
+        raise HTTPException(status_code=400, detail="Topaz 只接受画布中已保存的本地视频")
+    if not content_type_for_path(input_path).startswith("video/"):
+        raise HTTPException(status_code=400, detail="Topaz 输入素材不是可识别的视频")
+    installation = await asyncio.to_thread(current_topaz_installation)
+    if not installation.ready:
+        raise HTTPException(status_code=400, detail=installation.error or "Topaz Video AI 尚未就绪")
+    models = available_topaz_models(installation.model_dir)
+    model_ids = [str(item.get("id") or "") for item in models]
+    settings_payload = {
+        "model": payload.model,
+        "target": payload.target,
+        "quality": payload.quality,
+        **payload.advanced.model_dump(),
+    }
+    try:
+        settings = TopazUpscaleSettings(**settings_payload).validated(available_models=model_ids)
+    except TopazVideoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    task_id = f"topaz_video_{uuid.uuid4().hex}"
+    now = time.time()
+    task = {
+        "id": task_id,
+        "task_id": task_id,
+        "type": "topaz-video-upscale",
+        "status": "queued",
+        "created_at": now,
+        "updated_at": now,
+        "canvas_id": str(payload.canvas_id or ""),
+        "node_id": str(payload.node_id or ""),
+        "input_url": input_url,
+        "settings": settings.public(),
+        "progress": 0.0,
+        "processed_seconds": 0.0,
+        "frame": 0,
+        "fps": 0.0,
+        "speed": "",
+        "message": "正在等待本地 Topaz 处理",
+        "error": "",
+        "result": None,
+        "cancel_requested": False,
+        "_input_path": str(Path(input_path).resolve()),
+        "_account_id": current_account_id(),
+    }
+    with TOPAZ_VIDEO_TASK_LOCK:
+        TOPAZ_VIDEO_TASKS[task_id] = task
+        write_topaz_video_tasks_locked(task)
+    start_topaz_video_task_runner(task_id)
+    return public_topaz_video_task(task)
+
+
+@app.get("/api/topaz-video/tasks")
+async def list_topaz_video_tasks(canvas_id: str = "", limit: int = 100):
+    ensure_topaz_video_tasks_loaded()
+    safe_limit = max(1, min(200, int(limit or 100)))
+    with TOPAZ_VIDEO_TASK_LOCK:
+        tasks = [public_topaz_video_task(task) for task in current_account_tasks(TOPAZ_VIDEO_TASKS)]
+    if canvas_id:
+        tasks = [task for task in tasks if str(task.get("canvas_id") or "") == str(canvas_id)]
+    tasks.sort(key=lambda item: float(item.get("created_at") or 0), reverse=True)
+    return {"tasks": tasks[:safe_limit]}
+
+
+@app.get("/api/topaz-video/tasks/{task_id}")
+async def get_topaz_video_task(task_id: str):
+    ensure_topaz_video_tasks_loaded()
+    with TOPAZ_VIDEO_TASK_LOCK:
+        task = public_topaz_video_task(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
+    if not task.get("id"):
+        raise HTTPException(status_code=404, detail="Topaz 视频任务不存在")
+    return task
+
+
+@app.post("/api/topaz-video/tasks/{task_id}/cancel")
+async def cancel_topaz_video_task(task_id: str):
+    ensure_topaz_video_tasks_loaded()
+    with TOPAZ_VIDEO_TASK_LOCK:
+        existing = dict(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="Topaz 视频任务不存在")
+    if str(existing.get("status") or "") in TOPAZ_VIDEO_TERMINAL_STATUSES:
+        return public_topaz_video_task(existing)
+    process = TOPAZ_VIDEO_PROCESSES.get(task_id)
+    update_topaz_video_task(
+        task_id,
+        {
+            "cancel_requested": True,
+            "status": "canceling" if process else "canceled",
+            "message": "正在取消 Topaz 任务" if process else "",
+        },
+    )
+    if process and process.returncode is None:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+    with TOPAZ_VIDEO_TASK_LOCK:
+        return public_topaz_video_task(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
 
 
 def write_canvas_video_tasks_locked(task: Optional[Dict[str, Any]] = None):

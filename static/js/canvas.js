@@ -1646,6 +1646,7 @@ function serializableCanvasNode(node){
     delete copy.panoramaExporting;
     delete copy.specialRunning;
     delete copy.poseReplicateActiveRuns;
+    delete copy.topazRunSnapshot;
     if(copy.poseStatus === 'running') copy.poseStatus = 'idle';
     return copy;
 }
@@ -2282,6 +2283,7 @@ async function openCanvas(id){
         if(prunedRuntimeCollections) scheduleSave();
         resumeCanvasImageTasks();
         resumeCanvasVideoTasks();
+        resumeTopazVideoTasks();
         startCanvasRemotePolling();
         setStatus('Ready');
     } catch(e) {
@@ -2320,6 +2322,7 @@ function applyRemoteCanvasData(remote){
         render();
         resumeCanvasImageTasks();
         resumeCanvasVideoTasks();
+        resumeTopazVideoTasks();
         if(currentCanvasTitle) currentCanvasTitle.textContent = canvas.title || tr('canvas.untitled');
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at || canvas.created_at);
         setStatus('Synced');
@@ -3696,6 +3699,7 @@ function linkCreateOptions(state){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
+                {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-up'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'LLM', icon:'message-square-text'}])
             ];
         }
@@ -3703,6 +3707,12 @@ function linkCreateOptions(state){
     }
     if(node.type === 'poseReplicate'){
         return [{type:'image', label:tr('canvas.imageCard'), icon:'image-plus'}];
+    }
+    if(node.type === 'topazVideo'){
+        return [
+            {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
+            {type:'group', label:tr('canvas.group'), icon:'group'}
+        ];
     }
     if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','poseReference','relight','angle'].includes(node.type)){
         return [
@@ -3747,6 +3757,9 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const inputOptions = linkCreateOptions({originId:nodeId, originKind:'in', point});
     const outputOptions = [
         {type:'output', label:'Output', icon:'circle-dot'},
+        ...(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type) ? [
+            {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-up'}
+        ] : []),
         ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) ? [
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
             {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'}
@@ -4074,6 +4087,7 @@ function createNodeByType(type, point){
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
     if(type === 'video') return addVideoNode(point);
+    if(type === 'topazVideo') return addTopazVideoNode(point);
     if(type === 'h3-video') return addH3VideoNode(point);
     if(type === 'panorama') return addPanoramaNode(point);
     if(type === 'poseReference') return addPoseReferenceNode(point);
@@ -4095,6 +4109,7 @@ function menuAdd(type){
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
+    if(type === 'topazVideo') addTopazVideoNode(menuPoint);
     if(type === 'h3-video') addH3VideoNode(menuPoint);
     if(type === 'panorama') addPanoramaNode(menuPoint);
     if(type === 'poseReference') addPoseReferenceNode(menuPoint);
@@ -7154,10 +7169,10 @@ function renderNode(node){
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
-    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -7317,6 +7332,7 @@ function renderNode(node){
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'msgen') body.innerHTML = '<div class="muted-note">旧版 ModelScope 专用生成已移除，请改用图片生成节点。</div>';
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
+    if(node.type === 'topazVideo') body.appendChild(renderTopazVideoBody(node));
     if(node.type === 'ecom-video') body.appendChild(renderVideoBody(node));
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
@@ -7350,8 +7366,8 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const ecommercePorts = window.CanvasEcommerceNodes?.inputPorts?.(node.type) || [];
-    const canInput = ecommercePorts.length > 0 || ['generator','comfy','ltxDirector','output','llm','msgen','video','rh','panorama','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','rh','blenderDirector','output','panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
+    const canInput = ecommercePorts.length > 0 || ['generator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
     if(ecommercePorts.length > 1){
         el.insertAdjacentHTML('beforeend', ecommercePorts.map(port => `<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
@@ -7527,6 +7543,7 @@ function defaultNodeSize(type){
     if(type === 'generator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
+    if(type === 'topazVideo') return {w:400, h:0};
     if(type === 'blenderDirector') return {w:440, h:0};
     if(type === 'rh') return {w:430, h:0};
     if(type === 'comfy') return {w:420, h:460};
@@ -11128,9 +11145,9 @@ function updateComfyField(node, input, event){
     scheduleSave();
 }
 
-const CANVAS_GENERATOR_TYPES = ['generator','video','rh','ecom-compose','ecom-video'];
+const CANVAS_GENERATOR_TYPES = ['generator','video','topazVideo','rh','ecom-compose','ecom-video'];
 const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'ecom-compose'];
-const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'ecom-compose','ecom-video'];
+const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'topazVideo','ecom-compose','ecom-video'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -11390,6 +11407,7 @@ function refreshGeneratorInputViews(){
             renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         }
         if(gen.type === 'video' || gen.type === 'ecom-video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, imageInputs);
+        if(gen.type === 'topazVideo') renderTopazVideoInputPreview(el.querySelector('.topaz-input-list'), gen);
         if(gen.type === 'rh'){
             const media = rhMediaSources(gen);
             renderRhPromptFields(el.querySelector('.rh-prompt-list'), gen, rhActiveFields(gen));
@@ -12602,6 +12620,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'generator') return runGenerator(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
+    if(node.type === 'topazVideo') return runTopazVideoNode(node.id, runOpts);
     if(node.type === 'ecom-video') return runVideoNode(node.id, runOpts);
     if(node.type === 'ecom-compose') return runEcommerceComposeNode(node.id, runOpts);
     if(node.type === 'rh') return runRhNode(node.id, runOpts);
@@ -12877,6 +12896,7 @@ async function runOneCascadePass(order, options={}){
             if(node.type === 'generator') await runGenerator(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'llm') await runLLMNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'video' || node.type === 'ecom-video') await runVideoNode(id, {cascade:true, cascadeTargetId:targetId});
+            else if(node.type === 'topazVideo') await runTopazVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'ecom-compose') await runEcommerceComposeNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'rh') await runRhNode(id, {cascade:true, cascadeTargetId:targetId});
             if(targetId) ensureCascadeActive(targetId);
@@ -12943,6 +12963,8 @@ async function runLLMChat(nodeId){
 
 function deleteNode(id, event){
     event?.stopPropagation();
+    const deletingNode = nodes.find(n => n.id === id);
+    if(deletingNode?.type === 'topazVideo' && deletingNode.topazTaskId) cancelTopazVideoTask(id);
     pushUndo();
     destroyLTXEditor(nodes.find(n => n.id === id));
     nodes = nodes.filter(n => n.id !== id);
@@ -13057,6 +13079,7 @@ function runTaskLabel(run){
     if(run?.nodeType === 'ltxDirector') return '本地生成已停用';
     if(run?.nodeType === 'generator') return node.model || 'API Image';
     if(run?.nodeType === 'video') return node.model || 'Video';
+    if(run?.nodeType === 'topazVideo') return `Topaz ${node.model || 'Video AI'}`;
     if(run?.nodeType === 'msgen') return node.msCustomModel || node.msgenModel || 'Modelscope';
     return run?.nodeType || 'Generate';
 }
@@ -13076,6 +13099,7 @@ function runPlatformLabel(run){
     if(run?.nodeType === 'generator') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'API';
     if(run?.nodeType === 'msgen') return 'Modelscope';
     if(run?.nodeType === 'video') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'Video';
+    if(run?.nodeType === 'topazVideo') return 'Topaz Video AI';
     if(run?.nodeType === 'comfy') return '本地生成已停用';
     if(run?.nodeType === 'ltxDirector') return '本地生成已停用';
     return run?.nodeType || 'Generate';
@@ -13232,11 +13256,11 @@ function makePendingForRun(id, run, node, options={}, task={}){
 }
 function mergeGeneratedOutputs(node, outputs, append=false){
     if(!node) return;
-    const keepGeneratedMedia = ['rh','ltxDirector','video','ecom-video','blenderDirector'].includes(node.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','topazVideo','ecom-video','blenderDirector'].includes(node.type);
     const clean = (outputs || []).map(item => {
         const url = outputUrlValue(item);
         if(!url) return null;
-        const kind = ['video','ecom-video'].includes(node.type)
+        const kind = ['video','topazVideo','ecom-video'].includes(node.type)
             ? 'video'
             : ['rh','ltxDirector'].includes(node.type) && isVideoUrl(url)
                 ? 'video'
@@ -14631,6 +14655,14 @@ function cloneNode(n, dx, dy){
     copy.x = n.x + dx;
     copy.y = n.y + dy;
     copy.running = false;
+    if(copy.type === 'topazVideo'){
+        copy.topazTaskId = '';
+        copy.topazLastTaskId = '';
+        copy.topazLoggedTaskId = '';
+        copy.topazProgress = 0;
+        copy.topazMessage = '';
+        copy.topazSpeed = '';
+    }
     return copy;
 }
 function duplicateNodesForAltDrag(node, preserveConnections=false){
@@ -15151,6 +15183,11 @@ function canConnect(fromId, toId, inputRole=''){
     }
     if(to.type === 'ecom-video'){
         return ['ecom-compose','image','group','output','prompt','promptGroup','loop','llm','generator','rh','panorama','dwpose','poseReference','relight','angle'].includes(from.type)
+            && !wouldCreateGeneratorCycle(fromId,toId);
+    }
+    if(to.type === 'topazVideo'){
+        const knownVideoSource = ['video','topazVideo','ecom-video'].includes(from.type);
+        return (knownVideoSource || mediaRefsFromNode(from).some(ref => ref.kind === 'video'))
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(['ecom-model','ecom-product','ecom-scene'].includes(from.type)) return false;

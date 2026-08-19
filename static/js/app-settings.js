@@ -23,11 +23,22 @@
     const previewOrphanMedia = document.getElementById('previewOrphanMedia');
     const cleanupOrphanMedia = document.getElementById('cleanupOrphanMedia');
     const storageOrphanList = document.getElementById('storageOrphanList');
+    const topazStatus = document.getElementById('topazStatus');
+    const topazInstallDir = document.getElementById('topazInstallDir');
+    const chooseTopazInstall = document.getElementById('chooseTopazInstall');
+    const resetTopazInstall = document.getElementById('resetTopazInstall');
+    const checkTopazInstall = document.getElementById('checkTopazInstall');
+    const topazReadyState = document.getElementById('topazReadyState');
+    const topazModelCount = document.getElementById('topazModelCount');
+    const topazVersion = document.getElementById('topazVersion');
+    const topazSignature = document.getElementById('topazSignature');
+    const topazInstallHint = document.getElementById('topazInstallHint');
     let currentBehavior = 'ask_on_close';
     let currentOutputDirectory = '';
     let statusTimer = null;
     let updateRequestSequence = 0;
     let lastOrphanPreview = [];
+    let currentTopazDirectory = '';
 
     const t = key => window.StudioI18n?.t?.(key) || key;
 
@@ -48,6 +59,51 @@
         if(!storageStatus) return;
         storageStatus.textContent = message;
         storageStatus.classList.toggle('error', isError);
+    }
+
+    function showTopazStatus(message, isError=false){
+        if(!topazStatus) return;
+        topazStatus.textContent = message;
+        topazStatus.classList.toggle('error', isError);
+    }
+
+    function setTopazBusy(busy){
+        [chooseTopazInstall, resetTopazInstall, checkTopazInstall].forEach(button => {
+            if(button) button.disabled = busy || (button === resetTopazInstall && !currentTopazDirectory);
+        });
+    }
+
+    function applyTopazSettings(data){
+        currentTopazDirectory = String(data.topaz_video_install_dir || '');
+        if(topazInstallDir) topazInstallDir.value = currentTopazDirectory;
+        if(resetTopazInstall) resetTopazInstall.disabled = !currentTopazDirectory;
+    }
+
+    function renderTopazCapabilities(data){
+        const ready = Boolean(data?.ready);
+        const detected = String(data?.install_dir || '');
+        if(topazInstallDir) topazInstallDir.value = currentTopazDirectory || detected;
+        if(topazReadyState) topazReadyState.textContent = ready ? '可用' : data?.installed ? '不可用' : '未安装';
+        if(topazModelCount) topazModelCount.textContent = String((data?.models || []).length);
+        if(topazVersion) topazVersion.textContent = String(data?.version || '--');
+        if(topazSignature) topazSignature.textContent = data?.signature_valid ? 'Topaz 签名有效' : String(data?.signature_status || '--');
+        if(topazInstallHint) topazInstallHint.textContent = ready
+            ? `${currentTopazDirectory ? '使用指定目录' : '已自动检测'} · tvai_up 可用 · 模型目录正常`
+            : String(data?.error || 'Topaz Video AI 尚未就绪');
+        showTopazStatus(ready ? '检测通过' : '检测未通过', !ready);
+    }
+
+    async function checkTopazCapabilities(){
+        setTopazBusy(true);
+        showTopazStatus('检测中…');
+        try {
+            renderTopazCapabilities(await requestSettings('/api/topaz-video/capabilities', {cache:'no-store'}));
+        } catch(error) {
+            showTopazStatus(`检测失败：${error.message}`, true);
+            if(topazInstallHint) topazInstallHint.textContent = error.message;
+        } finally {
+            setTopazBusy(false);
+        }
     }
 
     function desktopRequest(type, payload={}){
@@ -248,6 +304,7 @@
             selectBehavior(currentBehavior);
             updateCloseBehaviorNote();
             applyOutputSettings(data);
+            applyTopazSettings(data);
         } catch(error) {
             showStatus(`${t('appSettings.loadFailed')}：${error.message}`, true);
         } finally {
@@ -309,6 +366,34 @@
         }
     }
 
+    async function chooseTopazDirectory(){
+        setTopazBusy(true);
+        try {
+            const selection = await requestSettings('/api/app-settings/select-topaz-video-directory', {method:'POST'});
+            if(!selection.selected || !selection.path) return;
+            const data = await saveSettings({topaz_video_install_dir:selection.path});
+            applyTopazSettings(data);
+            await checkTopazCapabilities();
+        } catch(error) {
+            showTopazStatus(`保存失败：${error.message}`, true);
+        } finally {
+            setTopazBusy(false);
+        }
+    }
+
+    async function resetTopazDirectory(){
+        setTopazBusy(true);
+        try {
+            const data = await saveSettings({topaz_video_install_dir:''});
+            applyTopazSettings(data);
+            await checkTopazCapabilities();
+        } catch(error) {
+            showTopazStatus(`恢复自动检测失败：${error.message}`, true);
+        } finally {
+            setTopazBusy(false);
+        }
+    }
+
     options.addEventListener('change', event => {
         const input = event.target.closest('input[name="closeBehavior"]');
         if(input && input.value !== currentBehavior) saveBehavior(input.value);
@@ -326,9 +411,12 @@
     cleanupOrphanMedia?.addEventListener('click', cleanupOrphans);
     chooseOutput.addEventListener('click', chooseOutputDirectory);
     resetOutput.addEventListener('click', resetOutputDirectory);
+    chooseTopazInstall?.addEventListener('click', chooseTopazDirectory);
+    resetTopazInstall?.addEventListener('click', resetTopazDirectory);
+    checkTopazInstall?.addEventListener('click', checkTopazCapabilities);
     window.addEventListener('message', event => {
         if(event.origin && event.origin !== location.origin) return;
         if(event.data?.type === 'studio-language') window.StudioI18n?.set?.(event.data.lang,{sync:false});
     });
-    document.addEventListener('DOMContentLoaded', () => { loadSettings(); loadUpdateSettings(); loadStorageSummary(); }, {once:true});
+    document.addEventListener('DOMContentLoaded', async () => { await loadSettings(); checkTopazCapabilities(); loadUpdateSettings(); loadStorageSummary(); }, {once:true});
 })();

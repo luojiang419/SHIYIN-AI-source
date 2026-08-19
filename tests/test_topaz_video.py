@@ -227,6 +227,48 @@ class TopazVideoTests(unittest.TestCase):
         self.assertEqual(progress["progress"], 0.5)
         self.assertEqual(progress["frame"], 150)
 
+    def test_progress_tolerates_na_numeric_fields(self):
+        progress = parse_ffmpeg_progress(
+            [
+                "frame=N/A",
+                "fps=N/A",
+                "out_time_us=N/A",
+                "out_time_ms=2500000",
+                "speed=N/A",
+                "progress=continue",
+            ],
+            10.0,
+        )
+        self.assertEqual(progress["frame"], 0)
+        self.assertEqual(progress["fps"], 0.0)
+        self.assertEqual(progress["processed_seconds"], 2.5)
+        self.assertEqual(progress["progress"], 0.25)
+
+        completed = parse_ffmpeg_progress(
+            ["frame=N/A", "out_time_us=N/A", "progress=end"],
+            10.0,
+        )
+        self.assertEqual(completed["progress"], 1.0)
+
+    def test_ffprobe_uses_format_duration_when_stream_duration_is_na(self):
+        metadata = parse_ffprobe_video(
+            json.dumps(
+                {
+                    "streams": [
+                        {
+                            "codec_type": "video",
+                            "codec_name": "h264",
+                            "width": 1056,
+                            "height": 608,
+                            "duration": "N/A",
+                        }
+                    ],
+                    "format": {"duration": "4.458333"},
+                }
+            )
+        )
+        self.assertEqual(metadata["duration"], 4.458333)
+
 
 if __name__ == "__main__":
     unittest.main()

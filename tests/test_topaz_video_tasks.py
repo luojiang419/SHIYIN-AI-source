@@ -150,6 +150,52 @@ class TopazVideoTaskTests(unittest.TestCase):
         self.assertEqual(canceled["status"], "canceled")
         self.assertTrue(canceled["cancel_requested"])
 
+    def test_process_cleanup_terminates_then_waits(self):
+        class FakeProcess:
+            def __init__(self):
+                self.returncode = None
+                self.terminated = False
+                self.waited = False
+
+            def terminate(self):
+                self.terminated = True
+
+            async def wait(self):
+                self.waited = True
+                self.returncode = 0
+                return self.returncode
+
+        process = FakeProcess()
+        asyncio.run(self.main.stop_topaz_video_process(process))
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.waited)
+        self.assertEqual(process.returncode, 0)
+
+    def test_process_cleanup_kills_after_grace_timeout(self):
+        class StubbornProcess:
+            def __init__(self):
+                self.returncode = None
+                self.terminated = False
+                self.killed = False
+
+            def terminate(self):
+                self.terminated = True
+
+            def kill(self):
+                self.killed = True
+                self.returncode = 1
+
+            async def wait(self):
+                if self.killed:
+                    return self.returncode
+                await asyncio.Event().wait()
+
+        process = StubbornProcess()
+        asyncio.run(self.main.stop_topaz_video_process(process, grace_seconds=0.01))
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.killed)
+        self.assertEqual(process.returncode, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

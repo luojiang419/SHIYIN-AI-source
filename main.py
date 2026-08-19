@@ -364,7 +364,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.175"
+APP_VERSION = "1.0.176"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -15700,8 +15700,58 @@ def safe_remove_topaz_temporary(path_value: str) -> None:
         return
 
 
+async def stop_topaz_video_process(
+    process: Optional[asyncio.subprocess.Process], *, grace_seconds: float = 5.0
+) -> None:
+    """Stop and reap a Topaz FFmpeg child before its temporary output is removed."""
+    if process is None or process.returncode is not None:
+        return
+    try:
+        process.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(process.wait(), timeout=max(0.01, float(grace_seconds)))
+        return
+    except asyncio.TimeoutError:
+        pass
+    except (OSError, ProcessLookupError):
+        return
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            return
+    try:
+        await process.wait()
+    except (OSError, ProcessLookupError):
+        return
+
+
+async def finish_topaz_stderr_reader(reader: Optional[asyncio.Task]) -> None:
+    if reader is None:
+        return
+    if reader.done():
+        try:
+            reader.result()
+        except (asyncio.CancelledError, Exception):
+            pass
+        return
+    try:
+        await asyncio.wait_for(reader, timeout=2.0)
+    except asyncio.TimeoutError:
+        reader.cancel()
+        try:
+            await reader
+        except (asyncio.CancelledError, Exception):
+            pass
+    except (asyncio.CancelledError, Exception):
+        reader.cancel()
+
+
 async def run_topaz_video_task(task_id: str) -> None:
     process: Optional[asyncio.subprocess.Process] = None
+    stderr_reader: Optional[asyncio.Task] = None
     temporary_path = ""
     try:
         async with TOPAZ_VIDEO_TASK_SEMAPHORE:
@@ -15811,6 +15861,7 @@ async def run_topaz_video_task(task_id: str) -> None:
                             last_persisted = now
             return_code = await process.wait()
             await stderr_reader
+            stderr_reader = None
             with TOPAZ_VIDEO_TASK_LOCK:
                 latest = dict(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
             if latest.get("cancel_requested"):
@@ -15851,14 +15902,16 @@ async def run_topaz_video_task(task_id: str) -> None:
                 },
             )
     except asyncio.CancelledError:
-        if process and process.returncode is None:
-            process.terminate()
+        await stop_topaz_video_process(process)
+        await finish_topaz_stderr_reader(stderr_reader)
         safe_remove_topaz_temporary(temporary_path)
         update_topaz_video_task(
             task_id, {"status": "interrupted", "message": "", "error": TOPAZ_VIDEO_RESTART_ERROR}
         )
         raise
     except (OSError, TopazVideoError, ValueError) as exc:
+        await stop_topaz_video_process(process)
+        await finish_topaz_stderr_reader(stderr_reader)
         safe_remove_topaz_temporary(temporary_path)
         with TOPAZ_VIDEO_TASK_LOCK:
             latest = dict(current_account_task(TOPAZ_VIDEO_TASKS, task_id))
@@ -15868,6 +15921,8 @@ async def run_topaz_video_task(task_id: str) -> None:
             {"status": "canceled" if canceled else "failed", "message": "", "error": "" if canceled else str(exc)},
         )
     finally:
+        await stop_topaz_video_process(process)
+        await finish_topaz_stderr_reader(stderr_reader)
         TOPAZ_VIDEO_PROCESSES.pop(task_id, None)
 
 

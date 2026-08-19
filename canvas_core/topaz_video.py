@@ -606,6 +606,27 @@ def build_topaz_upscale_command(
     return command
 
 
+def _finite_float(value: Any, default: float | None = 0.0) -> float | None:
+    text = str(value if value is not None else "").strip()
+    if not text or text.lower() in {"n/a", "nan", "+nan", "-nan", "inf", "+inf", "-inf", "infinity"}:
+        return default
+    try:
+        number = float(text)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return number if math.isfinite(number) else default
+
+
+def _finite_int(value: Any, default: int | None = 0) -> int | None:
+    number = _finite_float(value, None)
+    if number is None:
+        return default
+    try:
+        return int(number)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def parse_ffprobe_video(payload: str) -> dict[str, Any]:
     try:
         data = json.loads(payload)
@@ -616,11 +637,17 @@ def parse_ffprobe_video(payload: str) -> dict[str, Any]:
     if not isinstance(stream, dict):
         raise TopazVideoError("输入文件不包含视频流")
     format_data = data.get("format") if isinstance(data.get("format"), dict) else {}
-    duration = float(stream.get("duration") or format_data.get("duration") or 0)
+    duration = _finite_float(stream.get("duration"), None)
+    if duration is None:
+        duration = _finite_float(format_data.get("duration"), 0.0)
+    width = int(_finite_int(stream.get("width"), 0) or 0)
+    height = int(_finite_int(stream.get("height"), 0) or 0)
+    if width <= 0 or height <= 0:
+        raise TopazVideoError("无法读取输入视频的有效分辨率")
     return {
-        "width": int(stream.get("width") or 0),
-        "height": int(stream.get("height") or 0),
-        "duration": max(0.0, duration),
+        "width": width,
+        "height": height,
+        "duration": max(0.0, float(duration or 0.0)),
         "codec": str(stream.get("codec_name") or ""),
         "pix_fmt": str(stream.get("pix_fmt") or ""),
     }
@@ -661,7 +688,10 @@ def parse_ffmpeg_progress(lines: Iterable[str], duration_seconds: float) -> dict
         key, separator, value = str(line).strip().partition("=")
         if separator:
             values[key] = value
-    out_time_us = int(values.get("out_time_us") or values.get("out_time_ms") or 0)
+    out_time_us = _finite_int(values.get("out_time_us"), None)
+    if out_time_us is None:
+        out_time_us = _finite_int(values.get("out_time_ms"), 0)
+    out_time_us = max(0, int(out_time_us or 0))
     processed_seconds = max(0.0, out_time_us / 1_000_000.0)
     progress = 0.0
     if duration_seconds > 0:
@@ -671,8 +701,8 @@ def parse_ffmpeg_progress(lines: Iterable[str], duration_seconds: float) -> dict
     return {
         "progress": progress,
         "processed_seconds": processed_seconds,
-        "frame": int(values.get("frame") or 0),
-        "fps": float(values.get("fps") or 0),
+        "frame": max(0, int(_finite_int(values.get("frame"), 0) or 0)),
+        "fps": max(0.0, float(_finite_float(values.get("fps"), 0.0) or 0.0)),
         "speed": str(values.get("speed") or ""),
         "state": str(values.get("progress") or "continue"),
     }

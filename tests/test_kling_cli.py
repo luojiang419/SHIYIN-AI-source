@@ -295,6 +295,57 @@ class KlingCliTests(unittest.TestCase):
         self.assertEqual(queried["url"], "https://cdn.example/resumed.mp4")
         self.assertEqual(calls[1][-2:], ["--quiet", "generation-resume-1"])
 
+    def test_query_prefers_v3_url_without_watermark_fields(self):
+        responses = [
+            completed(
+                {
+                    "ok": True,
+                    "body": {
+                        "generationId": "generation-v3-camel",
+                        "status": "COMPLETED",
+                        "works": [
+                            {
+                                "contentType": "video",
+                                "urlWithoutWatermark": "https://cdn.example/v3-camel.mp4",
+                            }
+                        ],
+                    },
+                }
+            ),
+            completed(
+                {
+                    "ok": True,
+                    "body": {
+                        "generation_id": "generation-v3-snake",
+                        "status": "COMPLETED",
+                        "works": [
+                            {
+                                "content_type": "video",
+                                "url_without_watermark": "https://cdn.example/v3-snake.mp4",
+                            }
+                        ],
+                    },
+                }
+            ),
+        ]
+
+        service = KlingCliService(
+            environment=KlingCliEnvironment(
+                node_path="node.exe",
+                npm_path="npm.cmd",
+                kling_path="kling.cmd",
+                entrypoint_path="cli.js",
+                version="0.1.3",
+            ),
+            runner=lambda *args, **kwargs: responses.pop(0),
+        )
+
+        camel = service.query("generation-v3-camel")
+        snake = service.query("generation-v3-snake")
+
+        self.assertEqual(camel["url"], "https://cdn.example/v3-camel.mp4")
+        self.assertEqual(snake["url"], "https://cdn.example/v3-snake.mp4")
+
     def test_generation_rejects_value_outside_dynamic_schema_before_submission(self):
         service = KlingCliService(
             environment=KlingCliEnvironment(

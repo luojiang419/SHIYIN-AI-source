@@ -565,7 +565,25 @@ def _result_url(payload: Mapping[str, Any]) -> str:
         for work in works:
             if not isinstance(work, Mapping):
                 continue
-            url = _text(work.get("url") or work.get("videoUrl") or work.get("video_url"))
+            url = _text(
+                work.get("urlWithoutWatermark")
+                or work.get("url_without_watermark")
+                or work.get("url")
+                or work.get("videoUrl")
+                or work.get("video_url")
+            )
             if url:
                 return url
-    return _text(_find_value(payload, ("resultUrl", "result_url", "videoUrl", "video_url")))
+    return _text(
+        _find_value(
+            payload,
+            (
+                "urlWithoutWatermark",
+                "url_without_watermark",
+                "resultUrl",
+                "result_url",
+                "videoUrl",
+                "video_url",
+            ),
+        )
+    )

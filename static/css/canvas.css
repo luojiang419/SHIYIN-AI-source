@@ -923,8 +923,12 @@ body.theme-dark .minimap-node.selected { background:var(--strong-text); box-shad
 body.theme-dark .minimap-viewport { border-color:var(--strong-text); background:color-mix(in srgb,var(--strong-text) 10%,transparent); box-shadow:0 0 0 1px var(--strong); }
 body.theme-dark .minimap-arrange-btn { background:var(--card-solid); color:var(--muted); border-color:var(--line); }
 body.theme-dark .minimap-arrange-btn:hover { background:var(--soft-2); color:var(--text); }
-.selection-hub { position:absolute; z-index:28; display:none; align-items:center; gap:6px; padding:6px; border-radius:999px; background:rgba(255,255,255,.96); border:1px solid #eceae6; box-shadow:0 12px 30px rgba(0,0,0,.12); }
+.selection-hub { position:absolute; z-index:28; display:none; width:max-content; max-width:calc(100vw - 32px); align-items:center; justify-content:center; flex-wrap:wrap; gap:4px; padding:6px; border-radius:16px; background:rgba(255,255,255,.96); border:1px solid #eceae6; box-shadow:0 14px 38px rgba(0,0,0,.16); backdrop-filter:blur(16px); pointer-events:auto; }
 .selection-hub.open { display:flex; }
+.media-quick-btn { height:34px; min-width:34px; display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:0 9px; border:0; border-radius:10px; background:transparent; color:var(--muted); font-size:10px; font-weight:800; white-space:nowrap; transition:background .16s var(--ease), color .16s var(--ease); }
+.media-quick-btn:hover { background:var(--soft-2); color:var(--text); }
+.media-quick-btn svg { width:14px; height:14px; flex:0 0 auto; }
+.output-img-wrap.quick-selected img { border-color:var(--strong); box-shadow:0 0 0 2px color-mix(in srgb,var(--strong) 24%,transparent); }
 .hub-port { height:30px; border-radius:999px; padding:0 10px; display:flex; align-items:center; gap:7px; background:#f4f2ed; color:#58514b; font-size:11px; font-weight:700; cursor:crosshair; }
 .hub-dot { width:10px; height:10px; border-radius:50%; background:#1a1a1a; box-shadow:0 0 0 2px #fff, 0 0 0 3px #d2d0cb; }
 .canvas-gate { position:absolute; inset:0; z-index:18; display:flex; align-items:center; justify-content:center; padding:32px; background:#f4f2ed; background-image:radial-gradient(#dedbd6 1px, transparent 1px); background-size:24px 24px; }

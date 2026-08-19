@@ -411,6 +411,7 @@ let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
 let selected = new Set();
+let selectedOutputMedia = null;
 let saveTimer = null;
 let creatingCanvas = false;
 let createCanvasKind = 'classic';
@@ -7158,6 +7159,7 @@ function renderNode(node){
     el.onclick = (e) => {
         e.stopPropagation();
         if(isNodeControl(e.target)) return;
+        selectedOutputMedia = null;
         if(e.ctrlKey || e.metaKey) selected.has(node.id) ? selected.delete(node.id) : selected.add(node.id);
         else if(!selected.has(node.id)) { selected.clear(); selected.add(node.id); }
         refreshSelectionVisuals();
@@ -7414,8 +7416,14 @@ function bindOutputWrap(wrap, node){
         img.onclick = e => {
             e.stopPropagation();
             if(img.dataset.dragging) return;
-            openOutputLightbox(img.dataset.url, node);
+            if(mediaKind !== 'image'){
+                openOutputLightbox(img.dataset.url, node);
+                return;
+            }
+            if(e.detail >= 2) return;
+            selectOutputMedia(node.id, img.dataset.url, wrap);
         };
+        if(mediaKind === 'image') img.ondblclick = e => { e.preventDefault(); e.stopPropagation(); openOutputLightbox(img.dataset.url, node); };
     }
     wrap.addEventListener('click', e => {
         const fallbackVideo = e.target.closest?.('video[data-output-video-fallback]');
@@ -14618,6 +14626,7 @@ function finishSelection(){
     if(!selectDrag) return;
     const rect = selectionBox.getBoundingClientRect();
     selectionBox.style.display = 'none';
+    selectedOutputMedia = null;
     selected.clear();
     nodesEl.querySelectorAll('.node').forEach(el => {
         const r = el.getBoundingClientRect();
@@ -14634,6 +14643,134 @@ function finishSelection(){
 function renderSelectionHub(){
     selectionHub.innerHTML = '';
     selectionHub.classList.remove('open');
+    nodesEl.querySelectorAll('.output-img-wrap.quick-selected').forEach(element => element.classList.remove('quick-selected'));
+    if(!canvas || selected.size !== 1) return;
+    const selectedId = [...selected][0];
+    const node = nodes.find(item => item.id === selectedId);
+    if(!node) return;
+    let target = null;
+    let anchor = null;
+    if(selectedOutputMedia?.nodeId === node.id && node.type === 'output'){
+        const url = String(selectedOutputMedia.url || '');
+        const item = (node.images || []).find(output => outputUrlValue(output) === url);
+        if(item && mediaKindForOutputItem(item) === 'image'){
+            anchor = [...nodesEl.querySelectorAll(`.output-node[data-id="${CSS.escape(node.id)}"] .output-img-wrap`)]
+                .find(element => String(element.dataset.outputUrl || '') === url) || null;
+            if(anchor){
+                anchor.classList.add('quick-selected');
+                target = {kind:'output', nodeId:node.id, url, name:outputImageName(url)};
+            }
+        }
+    }
+    if(!target && node.type === 'image' && node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)){
+        anchor = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .image-preview-wrap`);
+        if(anchor) target = {kind:'node', nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)};
+    }
+    if(!target || !anchor){
+        selectedOutputMedia = null;
+        return;
+    }
+    const actions = [
+        {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
+        {id:'edit', label:langIsEn() ? 'Edit' : '编辑', icon:'pencil'},
+        {id:'grid', label:tr('canvas.modeGrid'), icon:'grid-3x3'},
+        {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
+        {id:'video', label:tr('canvas.videoGenerate'), icon:'clapperboard'},
+        {id:'panorama', label:langIsEn() ? 'Panorama' : '全景', icon:'scan-line'},
+        {id:'angle', label:langIsEn() ? 'Multi-angle' : '多角度', icon:'rotate-3d'},
+        {id:'relight', label:langIsEn() ? 'Relight' : '灯光', icon:'sun-medium'},
+        {id:'dwpose', label:langIsEn() ? 'Extract Pose' : '动作提取', icon:'person-standing'},
+        {id:'download', label:tr('canvas.download'), icon:'download'}
+    ];
+    selectionHub.innerHTML = actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('');
+    selectionHub.classList.add('open');
+    selectionHub.dataset.targetKind = target.kind;
+    selectionHub.querySelectorAll('[data-media-action]').forEach(button => {
+        button.onmousedown = event => event.stopPropagation();
+        button.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            runMediaQuickAction(button.dataset.mediaAction, target);
+        };
+    });
+    positionSelectionHub(anchor);
+    refreshIcons();
+}
+function selectOutputMedia(nodeId, url, wrap=null){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node || node.type !== 'output' || !url) return;
+    selectedOutputMedia = {nodeId, url};
+    selected.clear();
+    selected.add(nodeId);
+    refreshSelectionVisuals();
+    wrap?.classList?.add('quick-selected');
+}
+function positionSelectionHub(anchor){
+    if(!anchor || !selectionHub.classList.contains('open')) return;
+    const boardRect = board.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const hubRect = selectionHub.getBoundingClientRect();
+    const margin = 12;
+    const maxLeft = Math.max(margin, boardRect.width - hubRect.width - margin);
+    const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
+    let top = anchorRect.top - boardRect.top - hubRect.height - 10;
+    if(top < margin) top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + 10);
+    selectionHub.style.left = `${Math.round(left)}px`;
+    selectionHub.style.top = `${Math.round(Math.max(margin, top))}px`;
+}
+function materializeOutputMediaTarget(target){
+    if(target?.kind === 'node') return nodes.find(item => item.id === target.nodeId && item.type === 'image') || null;
+    if(target?.kind !== 'output' || !target.url) return null;
+    const out = nodes.find(item => item.id === target.nodeId && item.type === 'output');
+    if(!out) return null;
+    const sourceRect = nodeRect(out);
+    const image = {
+        id:uid('img'), type:'image',
+        x:Math.round(out.x + sourceRect.w + 90), y:Math.round(out.y),
+        url:target.url, name:target.name || outputImageName(target.url)
+    };
+    nodes.push(image);
+    selectedOutputMedia = null;
+    selected.clear();
+    selected.add(image.id);
+    return image;
+}
+function addQuickActionNode(source, type){
+    if(!source) return null;
+    const sourceRect = nodeRect(source);
+    const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
+    const created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
+    if(!created) return null;
+    if(canConnect(source.id, created.id) && !connections.some(connection => connection.from === source.id && connection.to === created.id)){
+        connections.push({id:uid('c'), from:source.id, to:created.id});
+    }
+    selected.clear();
+    selected.add(created.id);
+    syncGeneratorInputs();
+    render();
+    scheduleSave();
+    return created;
+}
+function runMediaQuickAction(action, target){
+    const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'preview'){
+        openOutputLightbox(target.url, sourceNode);
+        return;
+    }
+    if(action === 'download'){
+        downloadUrl(target.url, outputDownloadName(target.url)).catch(error => alert(error.message || '下载失败'));
+        return;
+    }
+    if(target?.kind === 'output' || !['edit','grid'].includes(action)) pushUndo();
+    const image = materializeOutputMediaTarget(target);
+    if(!image) return;
+    if(action === 'edit' || action === 'grid'){
+        render();
+        scheduleSave();
+        openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop');
+        return;
+    }
+    addQuickActionNode(image, action);
 }
 function startSelectionLink(e, kind){
     e.preventDefault();

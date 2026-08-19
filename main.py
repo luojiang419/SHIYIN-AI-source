@@ -199,6 +199,8 @@ ADMIN_ONLY_HTTP_PATHS = {
     "/api/update-backups",
     "/api/update-from-github",
     "/api/update-rollback",
+    "/api/kling-cli/install",
+    "/api/kling-cli/login",
     "/static/api-settings.html",
     "/static/app-settings.html",
     "/static/admin.html",
@@ -364,7 +366,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.177"
+APP_VERSION = "1.0.178"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -16352,13 +16354,21 @@ async def get_canvas_video_task(task_id: str):
         raise HTTPException(status_code=404, detail="画布视频任务不存在或已过期")
     return task
 
+def can_manage_kling_cli(request: Request) -> bool:
+    identity = request_identity(request)
+    return bool(identity.is_admin and is_loopback_address(request_remote_address(request)))
+
+
 @app.get("/api/kling-cli/capabilities")
-async def kling_cli_capabilities():
+async def kling_cli_capabilities(request: Request):
+    can_manage = can_manage_kling_cli(request)
     environment = await asyncio.to_thread(resolve_kling_cli)
     if not environment.is_ready:
         return {
             "installed": False,
             "authenticated": False,
+            "generation_enabled": False,
+            "can_manage": can_manage,
             "version": environment.version,
             "capabilities": {"text_to_video": [], "image_to_video": []},
             "error": environment.error_message,
@@ -16369,6 +16379,8 @@ async def kling_cli_capabilities():
         return {
             "installed": True,
             "authenticated": False,
+            "generation_enabled": False,
+            "can_manage": can_manage,
             "version": environment.version,
             "capabilities": {"text_to_video": [], "image_to_video": []},
             "error": str(exc),
@@ -16376,13 +16388,16 @@ async def kling_cli_capabilities():
     return {
         "installed": True,
         "authenticated": True,
+        "generation_enabled": True,
+        "can_manage": can_manage,
         "version": environment.version,
         "capabilities": capabilities,
         "error": "",
     }
 
 @app.post("/api/kling-cli/install")
-async def kling_cli_install(payload: KlingCliInstallRequest):
+async def kling_cli_install(payload: KlingCliInstallRequest, request: Request):
+    require_admin(request)
     try:
         environment = await asyncio.to_thread(install_kling_cli, payload.region)
     except KlingCliError as exc:
@@ -16390,7 +16405,8 @@ async def kling_cli_install(payload: KlingCliInstallRequest):
     return {"ok": True, "installed": True, "version": environment.version}
 
 @app.post("/api/kling-cli/login")
-async def kling_cli_login():
+async def kling_cli_login(request: Request):
+    require_admin(request)
     environment = await asyncio.to_thread(resolve_kling_cli)
     if not environment.is_ready:
         raise HTTPException(status_code=400, detail=environment.error_message or "可灵 CLI 尚未安装")

@@ -489,6 +489,8 @@ let klingCliState = {
     loading:false,
     installed:false,
     authenticated:false,
+    generationEnabled:false,
+    canManage:false,
     version:'',
     error:'',
     capabilities:{text_to_video:[], image_to_video:[]}
@@ -891,6 +893,8 @@ async function loadKlingCapabilities({renderAfter=true}={}){
             loading:false,
             installed:Boolean(data.installed),
             authenticated:Boolean(data.authenticated),
+            generationEnabled:Boolean(data.generation_enabled),
+            canManage:Boolean(data.can_manage),
             version:String(data.version || ''),
             error:String(data.error || ''),
             capabilities:data.capabilities || {text_to_video:[], image_to_video:[]}
@@ -9728,11 +9732,12 @@ function klingConnectionPanelHtml(){
     const state = klingCliState;
     const modeText = state.authenticated ? '已连接' : state.installed ? '等待登录' : '尚未安装';
     const statusClass = state.authenticated ? 'ready' : state.error ? 'error' : '';
+    const remoteHint = !state.canManage && !state.authenticated ? '请联系安装软件的本机管理员完成可灵 CLI 安装与登录。' : '';
     return `<div class="kling-connection-panel ${statusClass}">
-        <div class="kling-connection-copy"><strong>可灵 CLI · ${modeText}</strong><span>${escapeHtml(state.version || state.error || '动态读取账号可用模型与参数')}</span></div>
+        <div class="kling-connection-copy"><strong>可灵 CLI · ${modeText}</strong><span>${escapeHtml(state.version || state.error || remoteHint || '动态读取账号可用模型与参数')}</span></div>
         <div class="kling-connection-actions">
-            ${!state.installed ? `<select class="select-lite kling-install-region"><option value="china">中国区</option><option value="global">海外区</option></select><button type="button" class="tool-btn" data-kling-install ${state.loading ? 'disabled' : ''}>${state.loading ? '安装中…' : '安装'}</button>` : ''}
-            ${state.installed && !state.authenticated ? '<button type="button" class="tool-btn" data-kling-login>登录</button>' : ''}
+            ${state.canManage && !state.installed ? `<select class="select-lite kling-install-region"><option value="china">中国区</option><option value="global">海外区</option></select><button type="button" class="tool-btn" data-kling-install ${state.loading ? 'disabled' : ''}>${state.loading ? '安装中…' : '安装'}</button>` : ''}
+            ${state.canManage && state.installed && !state.authenticated ? '<button type="button" class="tool-btn" data-kling-login>登录</button>' : ''}
             <button type="button" class="tool-btn" data-kling-refresh ${state.loading ? 'disabled' : ''}>${state.loading ? '读取中…' : '刷新模型'}</button>
         </div>
     </div>`;

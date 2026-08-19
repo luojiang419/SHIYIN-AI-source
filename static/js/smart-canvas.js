@@ -159,6 +159,17 @@ syncSmartCanvasToolUi();
 let portDragState = null;
 let saveTimer = null;
 let apiProviders = [];
+let smartKlingCliState = {
+    loaded:false,
+    loading:false,
+    installed:false,
+    authenticated:false,
+    generationEnabled:false,
+    canManage:false,
+    version:'',
+    error:'',
+    capabilities:{text_to_video:[], image_to_video:[]}
+};
 let comfyWorkflows = [];
 let comfyInstanceCount = 1;
 let assetLibrary = {categories:[]};
@@ -2624,6 +2635,66 @@ function providerVideoModels(providerId){
     const models = provider?.video_models || DEFAULT_VIDEO_MODELS;
     return [...new Set(models)];
 }
+function isKlingSmartSettings(source=settings){
+    return Boolean(source && source.videoProvider === 'kling-cli');
+}
+function smartKlingModelsForMode(mode){
+    const models = smartKlingCliState.capabilities?.[mode];
+    return Array.isArray(models) ? models : [];
+}
+function smartKlingModeForRefs(refs=[]){
+    return imageRefsOnly(refs).length ? 'image_to_video' : 'text_to_video';
+}
+function updateSmartKlingProviderModels(){
+    const provider = (apiProviders || []).find(item => item.id === 'kling-cli');
+    if(!provider) return;
+    const models = [
+        ...smartKlingModelsForMode('text_to_video'),
+        ...smartKlingModelsForMode('image_to_video')
+    ].map(item => String(item?.model || '').trim()).filter(Boolean);
+    provider.video_models = [...new Set(models)];
+    if(!provider.video_models.length) provider.video_models = ['可灵（连接后选择模型）'];
+}
+async function loadSmartKlingCapabilities(){
+    if(smartKlingCliState.loading) return smartKlingCliState;
+    smartKlingCliState = {...smartKlingCliState, loading:true};
+    try {
+        const response = await fetch('/api/kling-cli/capabilities', {cache:'no-store'});
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '读取可灵模型失败');
+        smartKlingCliState = {
+            loaded:true,
+            loading:false,
+            installed:Boolean(data.installed),
+            authenticated:Boolean(data.authenticated),
+            generationEnabled:Boolean(data.generation_enabled),
+            canManage:Boolean(data.can_manage),
+            version:String(data.version || ''),
+            error:String(data.error || ''),
+            capabilities:data.capabilities || {text_to_video:[], image_to_video:[]}
+        };
+    } catch(error) {
+        smartKlingCliState = {
+            ...smartKlingCliState,
+            loaded:true,
+            loading:false,
+            authenticated:false,
+            generationEnabled:false,
+            error:error.message || '读取可灵模型失败'
+        };
+    }
+    updateSmartKlingProviderModels();
+    return smartKlingCliState;
+}
+function smartKlingConnectionNote(){
+    const state = smartKlingCliState;
+    if(state.loading) return '正在读取可灵账号模型…';
+    if(state.authenticated && state.generationEnabled) return `可灵 CLI 已连接${state.version ? ` · ${state.version}` : ''}，远程账号可直接使用主机可灵账号生成。`;
+    if(state.error) return state.error;
+    return state.canManage
+        ? '请先在无限画布的可灵视频节点中完成安装或登录。'
+        : '主机可灵 CLI 尚未就绪，请联系安装软件的本机管理员。';
+}
 function volcengineVideoModels(){
     const provider = (apiProviders || []).find(p => p.id === 'volcengine');
     return [...new Set(provider?.video_models || DEFAULT_VIDEO_MODELS)];
@@ -2905,9 +2976,11 @@ function renderApiVideoParams(){
     const models = filterJimengVideoModels(providerVideoModels(settings.videoProvider));
     if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'veo3-fast';
     const isH3 = isMiniMaxH3SmartSettings(settings);
+    const isKling = isKlingSmartSettings(settings);
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
+        ${isKling ? `<div class="muted-note">${escapeHtml(smartKlingConnectionNote())}</div>` : ''}
         ${isH3 ? renderH3VideoResolutionControl() : renderVideoResolutionControl()}
         ${renderVideoAspectControl()}
         ${renderVideoDurationControl()}
@@ -4244,6 +4317,7 @@ async function loadConfig(){
     try {
         const cfg = await fetch('/api/runtime/config').then(r => r.json());
         apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
+        if(apiProviders.some(provider => provider.id === 'kling-cli')) await loadSmartKlingCapabilities();
         // 提供商配置已就绪即先渲染参数面板，避免等工作流/RunningHub 预取完成后参数才「突然刷新出来」。
         sanitizeSmartApiSelection(settings);
         updateProviderModels();
@@ -15052,9 +15126,55 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     }
     throw new Error(tr('smart.rhTimeout'));
 }
+async function runPersistentSmartKlingVideo(payload){
+    const taskId = `canvas_video_smart_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const submitted = await fetch('/api/canvas-video-tasks', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            ...payload,
+            task_id:taskId,
+            canvas_id:String(canvas?.id || ''),
+            node_id:String(selectedNode()?.id || '')
+        })
+    }).then(async response => {
+        if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.errRunFailed')));
+        return response.json();
+    });
+    let task = submitted;
+    for(let attempt = 0; attempt < 720; attempt += 1){
+        const status = String(task?.status || '').toLowerCase();
+        if(status === 'succeeded'){
+            const urls = resultMediaUrls(task.result || task);
+            if(!urls.length) throw new Error(tr('smart.errNoOutVideos'));
+            return urls;
+        }
+        if(['failed','interrupted','canceled','cancelled'].includes(status)){
+            throw new Error(String(task?.error || task?.message || tr('smart.errRunFailed')));
+        }
+        await sleep(2500);
+        task = await fetch(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'}).then(async response => {
+            if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.errRunFailed')));
+            return response.json();
+        });
+    }
+    throw new Error('可灵视频仍在生成中，请稍后刷新画布查看任务结果。');
+}
 async function runApiVideoGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
     try {
+        const isKling = isKlingSmartSettings(runSettings);
+        if(isKling){
+            if(!smartKlingCliState.authenticated || !smartKlingCliState.generationEnabled){
+                throw new Error(smartKlingConnectionNote());
+            }
+            const mode = smartKlingModeForRefs(refs);
+            const available = smartKlingModelsForMode(mode);
+            if(!available.some(item => item.model === runSettings.videoModel)){
+                const label = mode === 'image_to_video' ? '图生视频' : '文生视频';
+                throw new Error(`当前可灵账号的${label}能力中不存在模型：${runSettings.videoModel}，请重新选择模型。`);
+            }
+        }
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
         const isH3 = isMiniMaxH3SmartSettings(runSettings);
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
@@ -15105,6 +15225,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             trusted_asset: useAssetUris,
             steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))
         };
+        if(isKling) return await runPersistentSmartKlingVideo(payload);
         const result = await fetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},

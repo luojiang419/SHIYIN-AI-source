@@ -28,8 +28,11 @@ class TopazVideoCanvasTests(unittest.TestCase):
         )
         self.assertEqual(markup_keys, ["model", "target", "quality"])
 
-    def test_detailed_parameters_are_inside_advanced_details(self):
-        self.assertIn('<details class="topaz-advanced-settings"', TOPAZ_JS)
+    def test_detailed_parameters_open_in_a_body_level_modal(self):
+        self.assertIn('data-topaz-advanced-open', TOPAZ_JS)
+        self.assertIn("function openTopazAdvancedSettings(nodeId)", TOPAZ_JS)
+        self.assertIn("document.body.appendChild(modal)", TOPAZ_JS)
+        self.assertIn('role="dialog" aria-modal="true"', TOPAZ_JS)
         for key in (
             "preblur", "noise", "details", "halo", "blur", "compression",
             "pre_noise", "blend", "grain", "grain_size",
@@ -41,8 +44,13 @@ class TopazVideoCanvasTests(unittest.TestCase):
             "color_correction", "download_models",
         ):
             self.assertIn(f'data-topaz-advanced="{key}"', TOPAZ_JS)
-        self.assertIn(".topaz-advanced-settings{margin-left:auto", TOPAZ_CSS)
-        self.assertIn(".topaz-advanced-panel{position:absolute;right:0", TOPAZ_CSS)
+        self.assertIn(".topaz-advanced-modal{position:fixed;inset:0;z-index:520", TOPAZ_CSS)
+        self.assertIn(".topaz-advanced-dialog{width:min(720px", TOPAZ_CSS)
+
+    def test_encoder_defaults_to_auto_and_migrates_legacy_h264_default(self):
+        self.assertIn("encoder:'auto'", TOPAZ_JS)
+        self.assertIn("savedAdvanced.encoder === 'h264_nvenc'", TOPAZ_JS)
+        self.assertIn('<option value="auto">', TOPAZ_JS)
 
     def test_canvas_lifecycle_and_pipeline_are_integrated(self):
         self.assertIn("'topazVideo'", CANVAS_JS)

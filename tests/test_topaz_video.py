@@ -14,11 +14,13 @@ from canvas_core.topaz_video import (
     available_topaz_models,
     build_topaz_upscale_command,
     candidate_topaz_install_dirs,
+    humanize_topaz_ffmpeg_error,
     parse_ffmpeg_progress,
     parse_ffprobe_video,
     preferred_topaz_model,
     inspect_authenticode,
     resolve_target_dimensions,
+    resolve_topaz_output_encoder,
     resolve_topaz_installation,
     topaz_child_environment,
     topaz_filter_available,
@@ -143,6 +145,39 @@ class TopazVideoTests(unittest.TestCase):
             TopazUpscaleSettings(encoder="custom").validated()
         with self.assertRaises(TopazVideoError):
             TopazUpscaleSettings(encoder="libx264").validated()
+
+    def test_auto_encoder_uses_hevc_for_dimensions_above_h264_limit(self):
+        self.assertEqual(
+            resolve_topaz_output_encoder(
+                TopazUpscaleSettings(encoder="auto", output_width=3840, output_height=2160)
+            ),
+            "h264_nvenc",
+        )
+        self.assertEqual(
+            resolve_topaz_output_encoder(
+                TopazUpscaleSettings(encoder="auto", output_width=7680, output_height=4320)
+            ),
+            "hevc_nvenc",
+        )
+        with self.assertRaisesRegex(TopazVideoError, "4096"):
+            resolve_topaz_output_encoder(
+                TopazUpscaleSettings(encoder="h264_nvenc", output_width=7680, output_height=4320)
+            )
+
+    def test_ffmpeg_error_hides_repeated_colorspace_warnings(self):
+        message = humanize_topaz_ffmpeg_error(
+            [
+                "No accelerated colorspace conversion found from yuv420p to rgb48le.",
+                "[h264_nvenc] Width 7680 exceeds 4096",
+                "Error while opening encoder",
+            ],
+            encoder="h264_nvenc",
+            output_width=7680,
+            output_height=4320,
+        )
+        self.assertIn("7680×4320", message)
+        self.assertIn("4096", message)
+        self.assertNotIn("colorspace", message)
 
     def test_builds_safe_command_with_audio_and_progress(self):
         with tempfile.TemporaryDirectory() as temp_dir:

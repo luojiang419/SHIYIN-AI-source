@@ -38,7 +38,7 @@ TOPAZ_MODEL_PREFIXES = frozenset(
         "thm",
     }
 )
-TOPAZ_ENCODERS = frozenset({"h264_nvenc", "hevc_nvenc"})
+TOPAZ_ENCODERS = frozenset({"auto", "h264_nvenc", "hevc_nvenc"})
 TOPAZ_AUDIO_MODES = frozenset({"aac", "copy", "none"})
 TOPAZ_QUALITY_QP = {"high": 18, "balanced": 23, "compact": 28}
 TOPAZ_TARGETS = frozenset({"2x", "4x", "1080p", "1440p", "2160p"})
@@ -140,7 +140,7 @@ class TopazUpscaleSettings:
     instances: int = 0
     download_models: bool = True
     color_correction: bool = True
-    encoder: str = "h264_nvenc"
+    encoder: str = "auto"
     audio_mode: str = "aac"
     audio_bitrate_kbps: int = 320
     output_width: int = 0
@@ -459,6 +459,47 @@ def topaz_filter_expression(settings: TopazUpscaleSettings) -> str:
     return TOPAZ_UPSCALE_FILTER + "=" + ":".join(f"{key}={value}" for key, value in values)
 
 
+def resolve_topaz_output_encoder(settings: TopazUpscaleSettings) -> str:
+    """Resolve the requested encoder after the final output dimensions are known."""
+    settings.validated()
+    largest_edge = max(int(settings.output_width or 0), int(settings.output_height or 0))
+    if settings.encoder == "auto":
+        # NVENC H.264 on several consumer GPU generations rejects dimensions above 4096,
+        # while HEVC NVENC supports the 8K output produced by a 4x upscale of 1080p.
+        return "hevc_nvenc" if largest_edge > 4096 else "h264_nvenc"
+    if settings.encoder == "h264_nvenc" and largest_edge > 4096:
+        raise TopazVideoError(
+            "当前输出尺寸超过 H.264 NVIDIA 编码器的 4096 像素限制；请在高级设置中选择“自动（推荐）”或 H.265 NVIDIA"
+        )
+    return settings.encoder
+
+
+def humanize_topaz_ffmpeg_error(
+    lines: Iterable[str],
+    *,
+    encoder: str = "",
+    output_width: int = 0,
+    output_height: int = 0,
+) -> str:
+    text_lines = [str(line).strip() for line in lines if str(line).strip()]
+    combined = "\n".join(text_lines)
+    if re.search(r"Width\s+\d+\s+exceeds\s+4096", combined, re.I):
+        return (
+            f"输出尺寸 {int(output_width)}×{int(output_height)} 超过 H.264 NVIDIA 编码器的 4096 像素限制。"
+            "请改用“自动（推荐）”或 H.265 NVIDIA 后重试。"
+        )
+    if re.search(r"No capable devices found|Error while opening encoder", combined, re.I):
+        codec = "H.265 NVIDIA" if encoder == "hevc_nvenc" else "H.264 NVIDIA"
+        return f"{codec} 编码器无法在当前显卡上启动。请在高级设置中改用“自动（推荐）”后重试，并确认显卡驱动可用。"
+    useful = [
+        line
+        for line in text_lines
+        if "No accelerated colorspace conversion found" not in line
+    ]
+    detail = "\n".join((useful or text_lines)[-12:]).strip()
+    return (detail or "Topaz FFmpeg 处理失败")[-2000:]
+
+
 def build_topaz_upscale_command(
     installation: TopazInstallation,
     input_path: Path,
@@ -495,7 +536,8 @@ def build_topaz_upscale_command(
         topaz_filter_expression(settings),
     ]
     qp = str(TOPAZ_QUALITY_QP[settings.quality])
-    if settings.encoder == "h264_nvenc":
+    encoder = resolve_topaz_output_encoder(settings)
+    if encoder == "h264_nvenc":
         command.extend(
             [
                 "-c:v",
@@ -520,7 +562,7 @@ def build_topaz_upscale_command(
                 "0",
             ]
         )
-    elif settings.encoder == "hevc_nvenc":
+    elif encoder == "hevc_nvenc":
         command.extend(
             [
                 "-c:v",

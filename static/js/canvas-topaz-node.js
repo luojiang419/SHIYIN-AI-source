@@ -2,11 +2,13 @@ const TOPAZ_NODE_ADVANCED_DEFAULTS = Object.freeze({
     preblur:0, noise:0, details:0, halo:0, blur:0, compression:0, pre_noise:0,
     estimate:0, blend:0, grain:0, grain_size:0, device:'-2', vram:1,
     instances:0, download_models:true, color_correction:true,
-    encoder:'h264_nvenc', audio_mode:'aac', audio_bitrate_kbps:320
+    encoder:'auto', audio_mode:'aac', audio_bitrate_kbps:320
 });
 let topazVideoCapabilitiesCache = null;
 let topazVideoCapabilitiesPromise = null;
 const activeTopazVideoTaskPolls = new Map();
+let topazAdvancedModal = null;
+let topazAdvancedModalKeydown = null;
 
 function topazText(zh, en){ return langIsEn() ? en : zh; }
 function normalizeTopazVideoNode(node){
@@ -14,7 +16,12 @@ function normalizeTopazVideoNode(node){
     node.model = String(node.model || topazVideoCapabilitiesCache?.default_model || 'prob-4');
     node.target = ['2x','4x','1080p','1440p','2160p'].includes(node.target) ? node.target : '2x';
     node.quality = ['high','balanced','compact'].includes(node.quality) ? node.quality : 'balanced';
-    node.topazAdvanced = {...TOPAZ_NODE_ADVANCED_DEFAULTS, ...(node.topazAdvanced || {})};
+    const savedAdvanced = node.topazAdvanced || {};
+    node.topazAdvanced = {...TOPAZ_NODE_ADVANCED_DEFAULTS, ...savedAdvanced};
+    if(Number(node.topazEncoderPolicyVersion || 0) < 2){
+        if(!savedAdvanced.encoder || savedAdvanced.encoder === 'h264_nvenc') node.topazAdvanced.encoder = 'auto';
+        node.topazEncoderPolicyVersion = 2;
+    }
     node.inputs = Array.isArray(node.inputs) ? node.inputs : [];
     node.generatedOutputs = Array.isArray(node.generatedOutputs) ? node.generatedOutputs : [];
     node.topazProgress = Math.max(0, Math.min(1, Number(node.topazProgress || 0)));
@@ -78,11 +85,9 @@ function topazRangeField(key, label, value, min, max, step){
     return `<label class="topaz-advanced-field"><span>${escapeHtml(label)} <b data-topaz-value="${escapeAttr(key)}">${Number(value).toFixed(step < 0.1 ? 2 : 1)}</b></span><input type="range" min="${min}" max="${max}" step="${step}" value="${Number(value)}" data-topaz-advanced="${escapeAttr(key)}"></label>`;
 }
 
-function topazAdvancedSettingsHtml(node){
+function topazAdvancedSettingsContentHtml(node){
     const advanced = node.topazAdvanced;
-    return `<details class="topaz-advanced-settings" ${node.topazAdvancedOpen ? 'open' : ''}>
-        <summary><i data-lucide="sliders-horizontal"></i><span>${topazText('高级设置','Advanced')}</span></summary>
-        <div class="topaz-advanced-panel">
+    return `<div class="topaz-advanced-content">
             <div class="topaz-advanced-title">${topazText('画面修复','Image refinement')}</div>
             ${topazRangeField('preblur',topazText('反锯齿 / 去模糊','Anti-alias / Deblur'),advanced.preblur,-1,1,0.05)}
             ${topazRangeField('noise',topazText('降噪','Reduce noise'),advanced.noise,-1,1,0.05)}
@@ -105,12 +110,67 @@ function topazAdvancedSettingsHtml(node){
             <label class="topaz-check"><input type="checkbox" data-topaz-advanced="download_models" ${advanced.download_models ? 'checked' : ''}><span>${topazText('允许自动下载缺失模型','Download missing models')}</span></label>
             <div class="topaz-advanced-title">${topazText('输出与音频','Output and audio')}</div>
             <div class="topaz-advanced-grid">
-                <label><span>${topazText('视频编码','Video codec')}</span><select data-topaz-advanced="encoder"><option value="h264_nvenc">H.264 NVIDIA</option><option value="hevc_nvenc">H.265 NVIDIA</option></select></label>
+                <label><span>${topazText('视频编码','Video codec')}</span><select data-topaz-advanced="encoder"><option value="auto">${topazText('自动（推荐）','Auto (recommended)')}</option><option value="h264_nvenc">H.264 NVIDIA</option><option value="hevc_nvenc">H.265 NVIDIA</option></select></label>
                 <label><span>${topazText('音频处理','Audio')}</span><select data-topaz-advanced="audio_mode"><option value="aac">AAC ${topazText('保留','Preserve')}</option><option value="copy">${topazText('原流复制','Stream copy')}</option><option value="none">${topazText('移除音频','Remove')}</option></select></label>
                 <label><span>${topazText('音频码率','Audio bitrate')}</span><input type="number" min="64" max="512" step="32" value="${Number(advanced.audio_bitrate_kbps)}" data-topaz-advanced="audio_bitrate_kbps"></label>
             </div>
-        </div>
-    </details>`;
+            <p class="topaz-encoder-hint">${topazText('自动模式会在 8K 或超宽输出时切换到 H.265，避免 H.264 的 4096 像素编码限制。','Auto switches to H.265 for 8K or ultra-wide output to avoid the H.264 4096-pixel limit.')}</p>
+        </div>`;
+}
+
+function bindTopazAdvancedControls(container, node){
+    ['device','encoder','audio_mode'].forEach(key => {
+        const select = container.querySelector(`[data-topaz-advanced="${key}"]`);
+        if(select) select.value = String(node.topazAdvanced[key]);
+    });
+    container.querySelectorAll('[data-topaz-advanced]').forEach(control => {
+        control.onmousedown = event => event.stopPropagation();
+        const update = () => {
+            const key = control.dataset.topazAdvanced;
+            const numeric = new Set(['preblur','noise','details','halo','blur','compression','pre_noise','estimate','blend','grain','grain_size','vram','instances','audio_bitrate_kbps']);
+            node.topazAdvanced[key] = control.type === 'checkbox' ? control.checked : numeric.has(key) ? Number(control.value) : control.value;
+            const value = container.querySelector(`[data-topaz-value="${CSS.escape(key)}"]`);
+            if(value) value.textContent = Number(control.value).toFixed(Number(control.step) < 0.1 ? 2 : 1);
+            scheduleSave();
+        };
+        control.oninput = update;
+        control.onchange = update;
+    });
+}
+
+function closeTopazAdvancedSettings(){
+    if(topazAdvancedModalKeydown){
+        document.removeEventListener('keydown', topazAdvancedModalKeydown, true);
+        topazAdvancedModalKeydown = null;
+    }
+    topazAdvancedModal?.remove();
+    topazAdvancedModal = null;
+}
+
+function openTopazAdvancedSettings(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'topazVideo');
+    if(!node) return;
+    normalizeTopazVideoNode(node);
+    closeTopazAdvancedSettings();
+    const modal = document.createElement('div');
+    modal.className = 'topaz-advanced-modal open';
+    modal.dataset.topazAdvancedModal = node.id;
+    modal.innerHTML = `<section class="topaz-advanced-dialog" role="dialog" aria-modal="true" aria-labelledby="topazAdvancedTitle">
+        <header class="topaz-advanced-head"><div><strong id="topazAdvancedTitle">${topazText('Topaz 高级设置','Topaz advanced settings')}</strong><span>${escapeHtml(node.model)} · ${escapeHtml(node.target)}</span></div><button type="button" class="tool-btn" data-topaz-advanced-close aria-label="${topazText('关闭','Close')}"><i data-lucide="x"></i></button></header>
+        ${topazAdvancedSettingsContentHtml(node)}
+        <footer class="topaz-advanced-footer"><span>${topazText('参数会自动保存到当前节点','Settings are saved to this node automatically')}</span><button type="button" class="gen-btn" data-topaz-advanced-done>${topazText('完成','Done')}</button></footer>
+    </section>`;
+    document.body.appendChild(modal);
+    topazAdvancedModal = modal;
+    bindTopazAdvancedControls(modal, node);
+    modal.querySelectorAll('[data-topaz-advanced-close],[data-topaz-advanced-done]').forEach(button => {
+        button.onclick = event => { event.preventDefault(); event.stopPropagation(); closeTopazAdvancedSettings(); };
+    });
+    modal.onmousedown = event => { if(event.target === modal) closeTopazAdvancedSettings(); };
+    topazAdvancedModalKeydown = event => { if(event.key === 'Escape') closeTopazAdvancedSettings(); };
+    document.addEventListener('keydown', topazAdvancedModalKeydown, true);
+    if(window.lucide) lucide.createIcons();
+    modal.querySelector('[data-topaz-advanced="preblur"]')?.focus({preventScroll:true});
 }
 
 function renderTopazVideoInputPreview(container, node){
@@ -148,14 +208,10 @@ function renderTopazVideoBody(node){
         <div class="topaz-node-actions">
             <button type="button" class="gen-btn ${node.running ? 'running' : ''}" data-topaz-run ${node.running || !ready ? 'disabled' : ''}><i data-lucide="sparkles"></i><span>${node.running ? topazText('处理中','Processing') : topazText('高清放大','Upscale')}</span></button>
             ${node.running ? `<button type="button" class="tool-btn topaz-cancel" data-topaz-cancel><i data-lucide="square"></i><span>${topazText('取消','Cancel')}</span></button>` : ''}
-            ${topazAdvancedSettingsHtml(node)}
+            <button type="button" class="tool-btn topaz-advanced-trigger" data-topaz-advanced-open><i data-lucide="sliders-horizontal"></i><span>${topazText('高级设置','Advanced')}</span></button>
         </div>`;
     wrap.querySelector('[data-topaz-common="target"]').value = node.target;
     wrap.querySelector('[data-topaz-common="quality"]').value = node.quality;
-    ['device','encoder','audio_mode'].forEach(key => {
-        const select = wrap.querySelector(`[data-topaz-advanced="${key}"]`);
-        if(select) select.value = String(node.topazAdvanced[key]);
-    });
     renderTopazVideoInputPreview(wrap.querySelector('.topaz-input-list'), node);
     wrap.querySelectorAll('[data-topaz-common]').forEach(control => {
         control.onmousedown = event => event.stopPropagation();
@@ -164,21 +220,11 @@ function renderTopazVideoBody(node){
             scheduleSave();
         };
     });
-    wrap.querySelectorAll('[data-topaz-advanced]').forEach(control => {
-        control.onmousedown = event => event.stopPropagation();
-        const update = () => {
-            const key = control.dataset.topazAdvanced;
-            const numeric = new Set(['preblur','noise','details','halo','blur','compression','pre_noise','estimate','blend','grain','grain_size','vram','instances','audio_bitrate_kbps']);
-            node.topazAdvanced[key] = control.type === 'checkbox' ? control.checked : numeric.has(key) ? Number(control.value) : control.value;
-            const value = wrap.querySelector(`[data-topaz-value="${CSS.escape(key)}"]`);
-            if(value) value.textContent = Number(control.value).toFixed(Number(control.step) < 0.1 ? 2 : 1);
-            scheduleSave();
-        };
-        control.oninput = update;
-        control.onchange = update;
+    wrap.querySelector('[data-topaz-advanced-open]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTopazAdvancedSettings(node.id);
     });
-    const details = wrap.querySelector('.topaz-advanced-settings');
-    if(details) details.ontoggle = () => { node.topazAdvancedOpen = details.open; scheduleSave(); };
     wrap.querySelector('[data-topaz-run]')?.addEventListener('click', event => {
         event.stopPropagation();
         runTopazVideoNode(node.id);

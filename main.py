@@ -96,6 +96,7 @@ from canvas_core.topaz_video import (
     TopazVideoError,
     available_topaz_models,
     build_topaz_upscale_command,
+    humanize_topaz_ffmpeg_error,
     parse_ffmpeg_progress,
     preferred_topaz_model,
     probe_video,
@@ -363,7 +364,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.173"
+APP_VERSION = "1.0.175"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3527,7 +3528,7 @@ class TopazAdvancedSettingsRequest(BaseModel):
     instances: int = Field(default=0, ge=0, le=3)
     download_models: bool = True
     color_correction: bool = True
-    encoder: str = Field(default="h264_nvenc", max_length=40)
+    encoder: str = Field(default="auto", max_length=40)
     audio_mode: str = Field(default="aac", max_length=20)
     audio_bitrate_kbps: int = Field(default=320, ge=64, le=512)
 
@@ -15736,6 +15737,7 @@ async def run_topaz_video_task(task_id: str) -> None:
             command = build_topaz_upscale_command(
                 installation, input_path, temporary_path_obj, settings, available_models=model_ids
             )
+            resolved_encoder = command[command.index("-c:v") + 1]
             update_topaz_video_task(
                 task_id,
                 {
@@ -15745,6 +15747,7 @@ async def run_topaz_video_task(task_id: str) -> None:
                     "input": metadata,
                     "output_width": output_width,
                     "output_height": output_height,
+                    "encoder": resolved_encoder,
                     "_temp_path": temporary_path,
                     "_output_path": str(final_path),
                 },
@@ -15815,8 +15818,13 @@ async def run_topaz_video_task(task_id: str) -> None:
                 update_topaz_video_task(task_id, {"status": "canceled", "message": "", "error": ""})
                 return
             if return_code != 0:
-                detail = "\n".join(stderr_lines[-20:]).strip()
-                raise TopazVideoError((detail or f"Topaz FFmpeg 退出码：{return_code}")[-2000:])
+                detail = humanize_topaz_ffmpeg_error(
+                    stderr_lines,
+                    encoder=resolved_encoder,
+                    output_width=output_width,
+                    output_height=output_height,
+                )
+                raise TopazVideoError(detail or f"Topaz FFmpeg 退出码：{return_code}")
             if not temporary_path_obj.is_file() or temporary_path_obj.stat().st_size <= 0:
                 raise TopazVideoError("Topaz 处理完成但没有生成有效视频")
             os.replace(temporary_path_obj, final_path)
@@ -15828,6 +15836,7 @@ async def run_topaz_video_task(task_id: str) -> None:
                 "width": output_width,
                 "height": output_height,
                 "size": final_path.stat().st_size,
+                "encoder": resolved_encoder,
             }
             update_topaz_video_task(
                 task_id,

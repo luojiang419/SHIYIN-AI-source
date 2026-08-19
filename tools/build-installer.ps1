@@ -35,6 +35,31 @@ function Remove-BuildPath([string]$Path, [string]$AllowedRoot) {
     if (Test-Path -LiteralPath $fullPath) { Remove-Item -LiteralPath $fullPath -Recurse -Force }
 }
 
+function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
+    $canvasPath = Join-Path $Root 'app\web\canvas.html'
+    $canvasListPath = Join-Path $Root 'app\web\js\canvas-list.js'
+    $topazPath = Join-Path $Root 'app\web\js\canvas-topaz-node.js'
+    foreach ($requiredPath in @($canvasPath, $canvasListPath, $topazPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "Staged web asset is missing: $requiredPath"
+        }
+        if ((Get-Item -LiteralPath $requiredPath).Length -le 0) {
+            throw "Staged web asset is empty: $requiredPath"
+        }
+    }
+    $canvasHtml = [IO.File]::ReadAllText($canvasPath)
+    if (-not $canvasHtml.Contains("menuAdd('topazVideo')")) {
+        throw 'Staged canvas is missing the Topaz create-menu entry.'
+    }
+    if (-not $canvasHtml.Contains("canvas-topaz-node.js?v=$ExpectedVersion")) {
+        throw "Staged canvas Topaz script cache version is not $ExpectedVersion."
+    }
+    $canvasListJs = [IO.File]::ReadAllText($canvasListPath)
+    if (-not $canvasListJs.Contains("&v=$ExpectedVersion")) {
+        throw "Staged canvas navigation cache version is not $ExpectedVersion."
+    }
+}
+
 New-Item -ItemType Directory -Force (Join-Path $projectRoot 'dist') | Out-Null
 New-Item -ItemType Directory -Force $buildRoot | Out-Null
 
@@ -80,12 +105,10 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'VERSION') -Destination (Join-Pat
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination (Join-Path $stageRoot 'LICENSE')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-Path $stageRoot 'README.md')
 
-$utf8 = [Text.UTF8Encoding]::new($false)
-Get-ChildItem -LiteralPath (Join-Path $stageRoot 'app\web') -Recurse -File -Include *.html,*.js | ForEach-Object {
-    $content = [IO.File]::ReadAllText($_.FullName)
-    $updated = [regex]::Replace($content, '\?v=[0-9A-Za-z._-]+', "?v=$version")
-    if ($updated -ne $content) { [IO.File]::WriteAllText($_.FullName, $updated, $utf8) }
-}
+$webRoot = Join-Path $stageRoot 'app\web'
+& node (Join-Path $PSScriptRoot 'stamp-web-cache-version.mjs') --root $webRoot --version $version | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Web cache-version stamping failed.' }
+Assert-StagedWebAssets $stageRoot $version
 
 if (-not $SkipRuntimeSmoke) {
     & (Join-Path $PSScriptRoot 'smoke-desktop.ps1') -Stage $stageRoot -Port $SmokePort -IdleSeconds 1 | Out-Host
@@ -102,6 +125,7 @@ if (-not $SkipRuntimeSmoke) {
     } else {
         Write-Warning 'DWPose real-person runtime smoke was skipped. Supply -DwposeSmokeInput before publishing an update.'
     }
+    Assert-StagedWebAssets $stageRoot $version
 }
 
 New-Item -ItemType Directory -Force (Join-Path $projectRoot 'dist\installer') | Out-Null

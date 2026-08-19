@@ -12,6 +12,7 @@ DESKTOP_UPDATER = ROOT / "static" / "js" / "desktop-updater.js"
 INDEX = ROOT / "static" / "index.html"
 APP_SETTINGS = ROOT / "static" / "app-settings.html"
 INSTALLER_BUILD_SCRIPT = ROOT / "tools" / "build-installer.ps1"
+WEB_CACHE_STAMP_SCRIPT = ROOT / "tools" / "stamp-web-cache-version.mjs"
 INSTALLER_VERIFY_SCRIPT = ROOT / "tools" / "verify-installer-artifact.ps1"
 INSTALLER_SCRIPT = ROOT / "installer" / "shiyin_ai.iss"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
@@ -120,6 +121,15 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("Packaged DWPose fresh-install smoke test failed", installer_build)
         self.assertIn("Packaged desktop runtime smoke test failed", installer_build)
         self.assertIn("$runtimeSmokeSucceeded = $?", installer_build)
+        self.assertIn("stamp-web-cache-version.mjs", installer_build)
+        self.assertIn("Web cache-version stamping failed", installer_build)
+        cache_stamp = WEB_CACHE_STAMP_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("/([?&])v=[0-9A-Za-z._-]+/g", cache_stamp)
+        self.assertIn("Cache-version rewrite unexpectedly emptied web asset", cache_stamp)
+        self.assertIn("function Assert-StagedWebAssets", installer_build)
+        self.assertIn("Staged canvas is missing the Topaz create-menu entry", installer_build)
+        self.assertIn("Staged canvas navigation cache version is not", installer_build)
+        self.assertGreaterEqual(installer_build.count("Assert-StagedWebAssets $stageRoot $version"), 2)
         self.assertEqual(package["scripts"]["desktop:build"], "npm run installer:build")
         self.assertIn("tauri build --no-bundle", package["scripts"]["desktop:host-build"])
         self.assertIn("npm run desktop:host-build", installer_build)

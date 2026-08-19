@@ -48,23 +48,27 @@
                     <button id="canvasSelectTool" class="tool-btn canvas-tool-btn active" type="button" onclick="setCanvasToolMode('select')" title="选择模式" aria-label="选择模式" aria-pressed="true" data-i18n-title="canvas.toolSelect"><i data-lucide="mouse-pointer-2" class="w-4 h-4"></i><span data-i18n="canvas.toolSelect">选择</span></button>
                     <button id="canvasPanTool" class="tool-btn canvas-tool-btn" type="button" onclick="setCanvasToolMode('pan')" title="移动模式" aria-label="移动模式" aria-pressed="false" data-i18n-title="canvas.toolPan"><i data-lucide="hand" class="w-4 h-4"></i><span data-i18n="canvas.toolPan">移动</span></button>
                 </div>
-                <button class="tool-btn toolbar-toggle" type="button" onclick="toggleQuickToolbar()" title="折叠快捷菜单" aria-label="折叠快捷菜单"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+                <button class="tool-btn toolbar-toggle" type="button" onclick="toggleQuickToolbar()" title="收纳为单排" aria-label="收纳为单排"><i data-lucide="chevrons-up" class="w-4 h-4"></i><span class="toolbar-toggle-label">收纳</span></button>
                 <div class="toolbar-items">
-                    <button class="tool-btn" onclick="addImageNode()"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.image">图片</span></button>
-                    <button class="tool-btn" onclick="addPromptNode()"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                    <button class="tool-btn" onclick="addLoopNode()"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loop">循环</span></button>
-                    <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i>LLM</button>
-                    <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
-                    <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
-                    <button class="tool-btn" onclick="addTopazVideoNode()"><i data-lucide="scan-up" class="w-4 h-4"></i><span>Topaz 高清</span></button>
-                    <button class="tool-btn" onclick="addPanoramaNode()"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
-                    <button class="tool-btn" onclick="addPoseReferenceNode()"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>姿势参考</span></button>
-                    <button class="tool-btn" onclick="addDWPoseNode()"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
-                    <button class="tool-btn" onclick="addPoseReplicateNode()"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
-                    <button class="tool-btn" onclick="addRelightNode()"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
-                    <button class="tool-btn" onclick="addBlenderDirectorNode()"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
-                    <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
-                    <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
+                    <div class="toolbar-row">
+                        <button class="tool-btn" onclick="addImageNode()"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.image">图片</span></button>
+                        <button class="tool-btn" onclick="addPromptNode()"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
+                        <button class="tool-btn" onclick="addLoopNode()"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loop">循环</span></button>
+                        <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i><span>LLM</span></button>
+                        <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
+                        <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
+                        <button class="tool-btn" onclick="addTopazVideoNode()"><i data-lucide="scan-up" class="w-4 h-4"></i><span>Topaz 高清</span></button>
+                        <button class="tool-btn" onclick="addPanoramaNode()"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
+                    </div>
+                    <div class="toolbar-row">
+                        <button class="tool-btn" onclick="addPoseReferenceNode()"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>姿势参考</span></button>
+                        <button class="tool-btn" onclick="addDWPoseNode()"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
+                        <button class="tool-btn" onclick="addPoseReplicateNode()"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
+                        <button class="tool-btn" onclick="addRelightNode()"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
+                        <button class="tool-btn" onclick="addBlenderDirectorNode()"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
+                        <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i><span>Output</span></button>
+                        <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
+                    </div>
                 </div>
                 <div class="toolbar-fixed">
                     <button id="canvasAssetToggle" class="tool-btn toolbar-asset canvas-asset-toggle" type="button" title="素材库" aria-label="素材库"><i data-lucide="library" class="w-4 h-4"></i><span>素材库</span></button>

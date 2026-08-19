@@ -203,6 +203,7 @@ function applyLanguage(lang){
         currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
     }
     renderCanvasList();
+    applyQuickToolbarState();
     render();
 }
 async function refreshCanvasConfigFromSettings(){
@@ -280,6 +281,7 @@ window.addEventListener('studio-lang-change', () => {
     refreshGateViewControls();
     if(canvas) currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
     renderCanvasList();
+    applyQuickToolbarState();
     render();
 });
 const shell = document.getElementById('shell');
@@ -714,8 +716,10 @@ function applyQuickToolbarState(){
     toolbar.classList.toggle('collapsed', collapsed);
     const btn = toolbar.querySelector('.toolbar-toggle');
     if(btn){
-        btn.title = collapsed ? '展开快捷菜单' : '折叠快捷菜单';
+        btn.title = collapsed ? tr('canvas.toolbarExpand') : tr('canvas.toolbarCollapse');
         btn.setAttribute('aria-label', btn.title);
+        const label = btn.querySelector('.toolbar-toggle-label');
+        if(label) label.textContent = collapsed ? tr('canvas.toolbarExpandShort') : tr('canvas.toolbarCollapseShort');
     }
     refreshIcons();
 }

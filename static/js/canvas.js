@@ -2779,7 +2779,7 @@ function addGeneratorNode(point){
     const providers = imageApiProviders();
     const providerId = providers.find(provider => provider.id === 'shiying')?.id || providers[0]?.id || '';
     const model = allImageModels(providerId)[0] || '';
-    return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
+    return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, prompt:'', ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
 }
 function addMsGenNode(point){
     const p = point || defaultPoint(140, 0);
@@ -2828,6 +2828,7 @@ function addVideoNode(point){
         useFrameRoles:false,
         multimodal:false,
         tempShLinks:[],
+        prompt:'',
         inputs:[],
         running:false
     });
@@ -9323,6 +9324,39 @@ function llmInputVideos(node){
     });
     return urls;
 }
+function combinedGeneratorPrompt(node, sources=[]){
+    return [String(node?.prompt || '').trim(), ...(sources || []).map(source => String(source?.prompt || '').trim())]
+        .filter(Boolean)
+        .join('\n\n');
+}
+function generatorInlinePromptHtml(node, connectedPromptCount=0){
+    const count = Math.max(0, Number(connectedPromptCount || 0));
+    return `<div class="generator-inline-prompt">
+        <div class="generator-inline-prompt-head">
+            <span>${escapeHtml(tr('canvas.prompt'))}</span>
+            <span class="generator-inline-prompt-meta" data-generator-prompt-meta>${count ? trf('canvas.connectedPromptCount', {n:count}) : tr('canvas.generatorPromptHint')}</span>
+        </div>
+        <textarea class="generator-prompt-input" rows="4" placeholder="${escapeAttr(tr('canvas.generatorPromptPlaceholder'))}">${escapeHtml(node?.prompt || '')}</textarea>
+    </div>`;
+}
+function bindGeneratorInlinePrompt(wrap, node){
+    const input = wrap?.querySelector?.('.generator-prompt-input');
+    if(!input || !node) return;
+    input.onmousedown = event => event.stopPropagation();
+    input.onclick = event => event.stopPropagation();
+    input.oninput = event => {
+        event.stopPropagation();
+        node.prompt = input.value;
+        scheduleSave();
+    };
+    input.onkeydown = event => {
+        if((event.ctrlKey || event.metaKey) && event.key === 'Enter'){
+            event.preventDefault();
+            event.stopPropagation();
+            runCanvasGenerate(node.id);
+        }
+    };
+}
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
@@ -9398,6 +9432,7 @@ function renderGeneratorBody(node){
                 <button class="secondary-btn fit-size-btn" type="button" style="height:32px;align-self:flex-end;padding:0 10px;font-size:11px">${tr('canvas.fitImageSize')}</button>
             </div>
         </div>
+        ${generatorInlinePromptHtml(node, promptInputs.length)}
         <div class="gen-run-row">
             <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.imageGenerateAction')}</button>
             ${cascadeBtnHtml(node)}
@@ -9634,6 +9669,7 @@ function renderGeneratorBody(node){
     const list = wrap.querySelector('.input-list');
     renderImageInputList(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
+    bindGeneratorInlinePrompt(wrap, node);
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
@@ -9752,6 +9788,7 @@ function renderVideoBody(node){
             </div>
             ${isH3 ? h3VideoSettingsHtml(node) : isKling ? klingVideoSettingsHtml(node) : legacyVideoSettingsHtml(node)}
         </div>
+        ${generatorInlinePromptHtml(node, promptInputs.length)}
         <div class="gen-run-row">
             <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.videoGenerate')}</button>
             ${cascadeBtnHtml(node)}
@@ -9881,6 +9918,7 @@ function renderVideoBody(node){
     const list = wrap.querySelector('.video-img-list');
     renderVideoImageInputs(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
+    bindGeneratorInlinePrompt(wrap, node);
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
@@ -11421,7 +11459,7 @@ async function runGenerator(genId, opts={}){
     if(!gen || (gen.running && !opts.cascade)) return;
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(gen, generatorSources(gen));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = combinedGeneratorPrompt(gen, sources);
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     if(!prompt && !refs.length){ alert(tr('canvas.needPromptOrImage')); return; }
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
@@ -11509,7 +11547,7 @@ async function runGeneratorLegacy(genId, opts={}){
     const gen = nodes.find(n => n.id === genId);
     if(!gen || (gen.running && !opts.cascade)) return;
     const sources = orderedSources(gen, generatorSources(gen));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = combinedGeneratorPrompt(gen, sources);
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     if(!prompt && !refs.length){ alert(tr('canvas.needPromptOrImage')); return; }
     const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
@@ -11566,7 +11604,7 @@ async function runVideoNode(nodeId, opts={}){
     const isKling = isKlingVideoNode(node);
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(node, generatorSources(node));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
+    const prompt = combinedGeneratorPrompt(node, sources);
     const allRefs = sources.flatMap(s => s.refs || []);
     const rawMediaRefs = (allRefs || []).filter(ref => ['image','video','audio'].includes(mediaKindForRef(ref)));
     const mediaRefs = isH3 ? rawMediaRefs : applyUploadedUrlToRefs(rawMediaRefs, node);

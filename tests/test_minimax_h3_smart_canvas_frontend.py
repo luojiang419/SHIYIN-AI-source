@@ -25,6 +25,11 @@ class MiniMaxH3SmartCanvasFrontendTests(unittest.TestCase):
         self.assertIn("videos: refVideos", self.javascript)
         self.assertIn("steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))", self.javascript)
 
+    def test_smart_h3_status_is_checked_before_generation(self):
+        self.assertIn("/api/minimax-h3/status", self.javascript)
+        self.assertIn("await loadSmartMiniMaxH3Status();", self.javascript)
+        self.assertIn("if(!smartMiniMaxH3State.generationEnabled)", self.javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

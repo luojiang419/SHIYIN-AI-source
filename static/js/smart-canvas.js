@@ -170,6 +170,14 @@ let smartKlingCliState = {
     error:'',
     capabilities:{text_to_video:[], image_to_video:[]}
 };
+let smartMiniMaxH3State = {
+    loaded:false,
+    loading:false,
+    generationEnabled:true,
+    resolutions:[],
+    defaults:{},
+    error:''
+};
 let comfyWorkflows = [];
 let comfyInstanceCount = 1;
 let assetLibrary = {categories:[]};
@@ -2686,6 +2694,31 @@ async function loadSmartKlingCapabilities(){
     updateSmartKlingProviderModels();
     return smartKlingCliState;
 }
+async function loadSmartMiniMaxH3Status(){
+    if(smartMiniMaxH3State.loading) return smartMiniMaxH3State;
+    smartMiniMaxH3State = {...smartMiniMaxH3State, loading:true};
+    try {
+        const response = await fetch('/api/minimax-h3/status', {cache:'no-store'});
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '读取 MiniMax H3 状态失败');
+        smartMiniMaxH3State = {
+            loaded:true,
+            loading:false,
+            generationEnabled:Boolean(data.generation_enabled),
+            resolutions:Array.isArray(data.resolutions) ? data.resolutions : [],
+            defaults:data.defaults && typeof data.defaults === 'object' ? data.defaults : {},
+            error:String(data.error || '')
+        };
+    } catch(error) {
+        smartMiniMaxH3State = {...smartMiniMaxH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 MiniMax H3 状态失败'};
+    }
+    return smartMiniMaxH3State;
+}
+function smartMiniMaxH3ConnectionNote(){
+    if(smartMiniMaxH3State.loading) return '正在检查 MiniMax H3 服务…';
+    if(smartMiniMaxH3State.generationEnabled) return 'MiniMax H3 本地服务已就绪';
+    return smartMiniMaxH3State.error || 'MiniMax H3 本地服务未启动，请联系本机管理员。';
+}
 function smartKlingConnectionNote(){
     const state = smartKlingCliState;
     if(state.loading) return '正在读取可灵账号模型…';
@@ -2981,6 +3014,7 @@ function renderApiVideoParams(){
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
         ${isKling ? `<div class="muted-note">${escapeHtml(smartKlingConnectionNote())}</div>` : ''}
+        ${isH3 ? `<div class="muted-note">${escapeHtml(smartMiniMaxH3ConnectionNote())}</div>` : ''}
         ${isH3 ? renderH3VideoResolutionControl() : renderVideoResolutionControl()}
         ${renderVideoAspectControl()}
         ${renderVideoDurationControl()}
@@ -4318,6 +4352,7 @@ async function loadConfig(){
         const cfg = await fetch('/api/runtime/config').then(r => r.json());
         apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
         if(apiProviders.some(provider => provider.id === 'kling-cli')) await loadSmartKlingCapabilities();
+        if(apiProviders.some(provider => provider.id === 'minimax-h3')) await loadSmartMiniMaxH3Status();
         // 提供商配置已就绪即先渲染参数面板，避免等工作流/RunningHub 预取完成后参数才「突然刷新出来」。
         sanitizeSmartApiSelection(settings);
         updateProviderModels();
@@ -15177,6 +15212,10 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
         }
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
         const isH3 = isMiniMaxH3SmartSettings(runSettings);
+        if(isH3){
+            await loadSmartMiniMaxH3Status();
+            if(!smartMiniMaxH3State.generationEnabled) throw new Error(smartMiniMaxH3ConnectionNote());
+        }
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
         const trustedSource = trustedMode ? (['library','cloud','manual'].includes(runSettings.videoTrustedSource) ? runSettings.videoTrustedSource : 'library') : 'none';
         // 仅「素材库链接」来源才走 asset:// 认证地址 + 后端可信素材路由；上传云端/手动网址走普通直链。

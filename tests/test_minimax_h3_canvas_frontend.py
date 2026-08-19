@@ -30,6 +30,11 @@ class MiniMaxH3CanvasFrontendTests(unittest.TestCase):
         self.assertIn("videos:isH3", self.javascript)
         self.assertIn("steps:Number(node.steps || 12)", self.javascript)
 
+    def test_h3_status_is_checked_before_generation(self):
+        self.assertIn("/api/minimax-h3/status", self.javascript)
+        self.assertIn("await loadMiniMaxH3Status();", self.javascript)
+        self.assertIn("if(!minimaxH3State.generationEnabled)", self.javascript)
+
     def test_api_settings_keeps_h3_as_a_fixed_protocol(self):
         root = Path(__file__).resolve().parent.parent
         settings_html = (root / "static" / "api-settings.html").read_text(encoding="utf-8")

@@ -366,7 +366,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.178"
+APP_VERSION = "1.0.179"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -584,7 +584,12 @@ LOCAL_VISION_DEFAULT_BASE_URL = "http://115.231.35.105:12345/v1"
 LOCAL_VISION_DEFAULT_MODEL = "qwen3.5-9b-vlm"
 LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
 LOCAL_VISION_SECRET_SEED_SETTING = "local_vision_builtin_secret_v1"
-MINIMAX_H3_DEFAULT_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "http://115.231.35.105:7866").strip().rstrip("/")
+MINIMAX_H3_ENV_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "").strip().rstrip("/")
+MINIMAX_H3_LOCAL_BASE_URL = "http://127.0.0.1:7860"
+MINIMAX_H3_LEGACY_PUBLIC_BASE_URLS = {
+    "http://115.231.35.105:7866",
+}
+MINIMAX_H3_DEFAULT_BASE_URL = MINIMAX_H3_ENV_BASE_URL or MINIMAX_H3_LOCAL_BASE_URL
 MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
 KLING_CLI_PLACEHOLDER_VIDEO_MODELS = ["可灵（连接后选择模型）"]
 MINIMAX_H3_DEFAULT_RESOLUTION = "0.2MP 16:9 - 608x352"
@@ -1185,6 +1190,21 @@ def api_provider_templates():
 def default_api_providers():
     return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "minimax-h3", "kling-cli"}]
 
+
+def normalize_minimax_h3_base_url(value: Any = "") -> str:
+    """Resolve the built-in H3 endpoint used by this backend.
+
+    SHIYIN and MiniMax H3 run on the same workstation. Older releases saved the
+    public FRP address in the provider database, which made the backend leave the
+    machine and hairpin through the tunnel before reaching H3 again. Migrate only
+    that known legacy address; explicit environment overrides and custom remote
+    deployments remain supported.
+    """
+    base_url = str(value or "").strip().rstrip("/")
+    if not MINIMAX_H3_ENV_BASE_URL and base_url in MINIMAX_H3_LEGACY_PUBLIC_BASE_URLS:
+        return MINIMAX_H3_LOCAL_BASE_URL
+    return base_url or MINIMAX_H3_DEFAULT_BASE_URL
+
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
     # 强制保留独立入口平台（不再强制 comfly）
@@ -1285,7 +1305,9 @@ def merge_default_api_providers(providers):
             merged.append(minimax_h3_default)
         else:
             current["name"] = str(current.get("name") or minimax_h3_default["name"])
-            current["base_url"] = str(current.get("base_url") or minimax_h3_default["base_url"]).rstrip("/")
+            current["base_url"] = normalize_minimax_h3_base_url(
+                current.get("base_url") or minimax_h3_default["base_url"]
+            )
             current["protocol"] = "minimax-h3"
             current["image_models"] = []
             current["chat_models"] = []
@@ -1712,7 +1734,7 @@ def normalize_provider(item):
         image_request_mode = "openai"
     if provider_id == "minimax-h3":
         protocol = "minimax-h3"
-        base_url = base_url or MINIMAX_H3_DEFAULT_BASE_URL
+        base_url = normalize_minimax_h3_base_url(base_url)
         image_request_mode = "openai"
     if provider_id == "kling-cli":
         protocol = "kling-cli"
@@ -15389,7 +15411,7 @@ async def minimax_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[
 
 
 async def submit_minimax_h3_video(client, payload: CanvasVideoRequest, provider):
-    base_url = str(provider.get("base_url") or MINIMAX_H3_DEFAULT_BASE_URL).rstrip("/")
+    base_url = normalize_minimax_h3_base_url(provider.get("base_url"))
     body = await minimax_h3_video_request(client, payload)
     response = await client.post(f"{base_url}/api/generate", json=body)
     response.raise_for_status()
@@ -15407,7 +15429,7 @@ async def submit_minimax_h3_video(client, payload: CanvasVideoRequest, provider)
 
 
 async def query_minimax_h3_video(client, job_id: str, provider):
-    base_url = str(provider.get("base_url") or MINIMAX_H3_DEFAULT_BASE_URL).rstrip("/")
+    base_url = normalize_minimax_h3_base_url(provider.get("base_url"))
     response = await client.get(f"{base_url}/api/jobs/{urllib.parse.quote(str(job_id), safe='')}")
     response.raise_for_status()
     result = response.json()
@@ -16353,6 +16375,36 @@ async def get_canvas_video_task(task_id: str):
     if not task.get("id"):
         raise HTTPException(status_code=404, detail="画布视频任务不存在或已过期")
     return task
+
+
+@app.get("/api/minimax-h3/status")
+async def minimax_h3_status():
+    """Expose generation readiness without leaking the private upstream URL."""
+    provider = get_api_provider("minimax-h3")
+    base_url = normalize_minimax_h3_base_url(provider.get("base_url"))
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=3.0),
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(f"{base_url}/api/config")
+            response.raise_for_status()
+            config = response.json()
+    except Exception:
+        return {
+            "available": False,
+            "generation_enabled": False,
+            "resolutions": [],
+            "defaults": {},
+            "error": "MiniMax H3 本地服务未启动或尚未就绪，请联系本机管理员启动 H3 控制面板。",
+        }
+    return {
+        "available": True,
+        "generation_enabled": True,
+        "resolutions": config.get("resolutions") if isinstance(config.get("resolutions"), list) else [],
+        "defaults": config.get("defaults") if isinstance(config.get("defaults"), dict) else {},
+        "error": "",
+    }
 
 def can_manage_kling_cli(request: Request) -> bool:
     identity = request_identity(request)

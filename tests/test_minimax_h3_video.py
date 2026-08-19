@@ -13,8 +13,28 @@ class MiniMaxH3VideoTests(unittest.TestCase):
     def test_builtin_provider_is_available_without_api_key(self):
         providers = {item["id"]: item for item in self.main.default_api_providers()}
         provider = providers["minimax-h3"]
-        self.assertEqual(provider["base_url"], "http://115.231.35.105:7866")
+        self.assertEqual(provider["base_url"], "http://127.0.0.1:7860")
         self.assertEqual(provider["video_models"], ["MiniMax H3"])
+
+    def test_legacy_public_tunnel_address_is_migrated_to_local_service(self):
+        providers = self.main.merge_default_api_providers([
+            {
+                "id": "minimax-h3",
+                "name": "MiniMax H3",
+                "base_url": "http://115.231.35.105:7866",
+                "protocol": "minimax-h3",
+                "enabled": True,
+                "video_models": ["MiniMax H3"],
+            }
+        ])
+        provider = next(item for item in providers if item["id"] == "minimax-h3")
+        self.assertEqual(provider["base_url"], "http://127.0.0.1:7860")
+
+    def test_custom_remote_h3_address_is_preserved(self):
+        self.assertEqual(
+            self.main.normalize_minimax_h3_base_url("https://h3.example.test/api/"),
+            "https://h3.example.test/api",
+        )
 
     def test_resolution_uses_deployed_h3_presets(self):
         self.assertEqual(

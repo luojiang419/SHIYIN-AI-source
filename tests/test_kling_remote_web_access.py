@@ -33,6 +33,8 @@ class KlingRemoteWebAccessTests(unittest.TestCase):
         self.assertNotIn("/api/kling-cli/capabilities", self.main.ADMIN_ONLY_HTTP_PATHS)
         self.assertNotIn("/api/canvas-video", self.main.ADMIN_ONLY_HTTP_PATHS)
         self.assertNotIn("/api/canvas-video-tasks", self.main.ADMIN_ONLY_HTTP_PATHS)
+        self.assertNotIn("/api/minimax-h3/status", self.main.ADMIN_ONLY_HTTP_PATHS)
+        self.assertFalse(any("/api/canvas-video".startswith(prefix) for prefix in self.main.ADMIN_ONLY_HTTP_PREFIXES))
         self.assertIn("/api/kling-cli/install", self.main.ADMIN_ONLY_HTTP_PATHS)
         self.assertIn("/api/kling-cli/login", self.main.ADMIN_ONLY_HTTP_PATHS)
 

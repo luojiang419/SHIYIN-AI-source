@@ -495,6 +495,14 @@ let klingCliState = {
     error:'',
     capabilities:{text_to_video:[], image_to_video:[]}
 };
+let minimaxH3State = {
+    loaded:false,
+    loading:false,
+    generationEnabled:true,
+    resolutions:[],
+    defaults:{},
+    error:''
+};
 let comfyWorkflows = [];
 let comfyWorkflowCache = {};
 let runningHubWorkflowCache = {};
@@ -912,6 +920,32 @@ async function loadKlingCapabilities({renderAfter=true}={}){
     }
     if(renderAfter) render();
     return klingCliState;
+}
+async function loadMiniMaxH3Status({renderAfter=false}={}){
+    if(minimaxH3State.loading) return minimaxH3State;
+    minimaxH3State = {...minimaxH3State, loading:true};
+    try {
+        const response = await fetch('/api/minimax-h3/status', {cache:'no-store'});
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '读取 MiniMax H3 状态失败');
+        minimaxH3State = {
+            loaded:true,
+            loading:false,
+            generationEnabled:Boolean(data.generation_enabled),
+            resolutions:Array.isArray(data.resolutions) ? data.resolutions : [],
+            defaults:data.defaults && typeof data.defaults === 'object' ? data.defaults : {},
+            error:String(data.error || '')
+        };
+    } catch(error) {
+        minimaxH3State = {...minimaxH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 MiniMax H3 状态失败'};
+    }
+    if(renderAfter) render();
+    return minimaxH3State;
+}
+function minimaxH3ConnectionNote(){
+    if(minimaxH3State.loading) return '正在检查 MiniMax H3 服务…';
+    if(minimaxH3State.generationEnabled) return 'MiniMax H3 本地服务已就绪';
+    return minimaxH3State.error || 'MiniMax H3 本地服务未启动，请联系本机管理员。';
 }
 function ensureKlingCapabilities(){
     if(klingCliState.loaded || klingCliState.loading) return;
@@ -1742,6 +1776,7 @@ async function loadConfig(){
         await Promise.all(rhWorkflowIds.map(async workflowId => {
             try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
         }));
+        if(apiProviders.some(provider => provider.id === 'minimax-h3')) await loadMiniMaxH3Status();
     } catch(e) {
         apiProviders = defaultApiProviders();
     }
@@ -9712,6 +9747,7 @@ function videoModelOptionsForNode(node){
 }
 function h3VideoSettingsHtml(node){
     return `
+        <div class="muted-note">${escapeHtml(minimaxH3ConnectionNote())}</div>
         <div class="gen-settings-row">
             <label class="field"><div class="setting-title">${tr('canvas.videoDuration')}</div><input class="setting-input video-duration" type="number" min="1" max="15" step="1" value="${Number(node.duration || 5)}"></label>
             <label class="field"><div class="setting-title">${tr('canvas.videoAspect')}</div><select class="select-lite video-aspect compact-select">
@@ -11619,6 +11655,15 @@ async function runVideoNode(nodeId, opts={}){
     if(!node || (node.running && !opts.cascade)) return;
     const isH3 = isMiniMaxH3VideoNode(node);
     const isKling = isKlingVideoNode(node);
+    if(isH3){
+        await loadMiniMaxH3Status();
+        if(!minimaxH3State.generationEnabled){
+            const message = minimaxH3ConnectionNote();
+            if(opts.cascade) throw new Error(message);
+            showErrorModal(message, tr('canvas.apiFailed'));
+            return;
+        }
+    }
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(node, generatorSources(node));
     const prompt = combinedGeneratorPrompt(node, sources);

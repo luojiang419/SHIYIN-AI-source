@@ -101,6 +101,7 @@ class KlingCliService:
         prompt: str,
         images: Sequence[str],
         parameters: Mapping[str, Any],
+        videos: Sequence[str] = (),
         timeout_seconds: float = 900,
     ) -> dict[str, Any]:
         submitted = self.submit(
@@ -108,6 +109,7 @@ class KlingCliService:
             model=model,
             prompt=prompt,
             images=images,
+            videos=videos,
             parameters=parameters,
         )
         generation_id = submitted["generation_id"]
@@ -154,6 +156,7 @@ class KlingCliService:
         prompt: str,
         images: Sequence[str],
         parameters: Mapping[str, Any],
+        videos: Sequence[str] = (),
     ) -> dict[str, Any]:
         if command not in {"text_to_video", "image_to_video"}:
             raise KlingCliError(f"不支持的可灵视频命令：{command}")
@@ -162,6 +165,8 @@ class KlingCliService:
             raise KlingCliError("提交可灵视频前必须选择动态返回的模型。")
         if command == "image_to_video" and not any(_text(value) for value in images):
             raise KlingCliError("可灵图生视频至少需要一张参考图。")
+        if len(videos) > 1:
+            raise KlingCliError("可灵当前一次只支持一个视频参考片段。")
 
         arguments = [command, "--quiet", "--model", model_name]
         if command == "image_to_video":
@@ -169,6 +174,10 @@ class KlingCliService:
                 value = _text(image)
                 if value:
                     arguments.extend(["--image", value])
+        for video in videos:
+            value = _text(video)
+            if value:
+                arguments.extend(["--video", value])
 
         specs = {
             _text(spec.get("name")): spec

@@ -1,0 +1,8 @@
+[Unit]
+Description=SHIYIN AI remote clip retention cleanup
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/clipdata/.service/clip_media_gc.py --root /opt/clipdata --max-bytes 10737418240 --min-age-seconds 3600

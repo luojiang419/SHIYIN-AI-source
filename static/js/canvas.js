@@ -11771,7 +11771,9 @@ async function runVideoNode(nodeId, opts={}){
             generate_audio:Boolean(node.generateAudio),
             multimodal:Boolean(node.multimodal),
             steps:Number(node.steps || 12),
-            model_parameters:isKling ? {...(node.modelParameters || {})} : {}
+            model_parameters:isKling ? {...(node.modelParameters || {})} : {},
+            canvas_id:canvas?.id || '',
+            node_id:node.id || ''
         };
         if(persistentVideoTask){
             scheduleSave();

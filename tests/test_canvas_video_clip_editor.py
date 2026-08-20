@@ -62,6 +62,21 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn("clipId:result.clip_id", self.javascript)
         self.assertIn("clipCanvasId:canvas?.id || ''", self.javascript)
 
+    def test_owned_clip_deletion_waits_for_canvas_save_and_scrubs_undo(self):
+        self.assertIn("function queueReleasedVideoClipAssets(deletedNodes", self.javascript)
+        self.assertIn("stripVideoClipAssetsFromUndoHistory(assets)", self.javascript)
+        self.assertIn("savedVideoClipSequencesByCanvas.set(", self.javascript)
+        self.assertIn("void flushPendingVideoClipDeletions()", self.javascript)
+        self.assertIn("/api/canvas-tools/video-clip/delete", self.javascript)
+        self.assertIn("body:JSON.stringify({canvas_id:asset.canvasId, clip_id:asset.clipId})", self.javascript)
+
+    def test_owned_clip_is_irreversible_but_shared_asset_waits_for_last_node(self):
+        self.assertIn("const liveKeys = new Set(nodes.map(ownedVideoClipAsset)", self.javascript)
+        self.assertIn("if(!asset || liveKeys.has(videoClipAssetKey(asset))) return", self.javascript)
+        self.assertIn("if(ownedVideoClipAsset(node)) return false", self.javascript)
+        self.assertIn("queueReleasedVideoClipAssets(deletingNode ? [deletingNode] : [])", self.javascript)
+        self.assertIn("queueReleasedVideoClipAssets(deletingNodes)", self.javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

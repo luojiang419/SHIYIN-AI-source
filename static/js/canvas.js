@@ -495,6 +495,10 @@ backToManagerBtn?.addEventListener('click', () => {
 let localCanvasDirty = false;
 let savingCanvasNow = false;
 let saveCanvasAgain = false;
+let localCanvasSaveSequence = 0;
+let flushingVideoClipDeletions = false;
+const pendingVideoClipDeletions = new Map();
+const savedVideoClipSequencesByCanvas = new Map();
 let applyingRemoteCanvas = false;
 let remoteSyncTimer = null;
 let remoteSyncInterval = null;
@@ -1655,6 +1659,7 @@ function refreshGeometryAfterLayout(){
 }
 function scheduleSave(){
     if(!canvas || applyingRemoteCanvas) return;
+    localCanvasSaveSequence += 1;
     localCanvasDirty = true;
     setStatus('Saving...');
     clearTimeout(saveTimer);
@@ -1726,6 +1731,8 @@ async function saveCanvas(){
         return;
     }
     sanitizeConnections();
+    const savingCanvasId = String(canvas.id || '');
+    const savingSequence = localCanvasSaveSequence;
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
@@ -1769,6 +1776,11 @@ async function saveCanvas(){
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
         setStatus('Saved');
         loadCanvasList(false);
+        savedVideoClipSequencesByCanvas.set(
+            savingCanvasId,
+            Math.max(Number(savedVideoClipSequencesByCanvas.get(savingCanvasId) || 0), savingSequence)
+        );
+        void flushPendingVideoClipDeletions();
     } catch(e) {
         setStatus('Save failed');
         console.error(e);
@@ -13059,6 +13071,98 @@ function cancelCascade(nodeId){
     requestCascadeStop(nodeId);
 }
 
+function ownedVideoClipAsset(node){
+    if(node?.assetOwner !== 'videoClip') return null;
+    const canvasId = String(node.clipCanvasId || '').trim();
+    const clipId = String(node.clipId || '').trim();
+    return canvasId && clipId ? {canvasId, clipId} : null;
+}
+function videoClipAssetKey(asset){
+    return `${asset.canvasId}:${asset.clipId}`;
+}
+function stripVideoClipAssetsFromUndoHistory(assets){
+    const keys = new Set((assets || []).map(videoClipAssetKey));
+    if(!keys.size) return;
+    undoStack.forEach(state => {
+        const removedIds = new Set();
+        state.nodes = (state.nodes || []).filter(node => {
+            const asset = ownedVideoClipAsset(node);
+            const remove = asset && keys.has(videoClipAssetKey(asset));
+            if(remove) removedIds.add(node.id);
+            return !remove;
+        });
+        if(!removedIds.size) return;
+        state.nodes.forEach(node => {
+            if((node.type === 'group' || node.type === 'promptGroup') && Array.isArray(node.items)){
+                node.items = node.items.filter(id => !removedIds.has(id));
+            }
+        });
+        state.connections = (state.connections || []).filter(connection => !removedIds.has(connection.from) && !removedIds.has(connection.to));
+    });
+}
+function queueReleasedVideoClipAssets(deletedNodes, saveSequence=localCanvasSaveSequence){
+    const liveKeys = new Set(nodes.map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
+    const released = new Map();
+    (deletedNodes || []).forEach(node => {
+        const asset = ownedVideoClipAsset(node);
+        if(!asset || liveKeys.has(videoClipAssetKey(asset))) return;
+        released.set(videoClipAssetKey(asset), asset);
+    });
+    const assets = [...released.values()];
+    if(!assets.length) return;
+    stripVideoClipAssetsFromUndoHistory(assets);
+    assets.forEach(asset => {
+        const key = videoClipAssetKey(asset);
+        const queued = pendingVideoClipDeletions.get(key);
+        pendingVideoClipDeletions.set(key, {...asset, saveSequence:Math.max(Number(queued?.saveSequence || 0), Number(saveSequence || 0))});
+    });
+}
+async function deleteOwnedVideoClipAsset(asset){
+    let lastError = null;
+    for(let attempt = 0; attempt < 2; attempt += 1){
+        try {
+            const response = await fetch('/api/canvas-tools/video-clip/delete', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({canvas_id:asset.canvasId, clip_id:asset.clipId})
+            });
+            if(!response.ok) throw new Error(await responseErrorMessage(response, '视频片段文件清理失败'));
+            return;
+        } catch(error) {
+            lastError = error;
+            if(attempt === 0) await new Promise(resolve => setTimeout(resolve, 250));
+        }
+    }
+    throw lastError || new Error('视频片段文件清理失败');
+}
+async function flushPendingVideoClipDeletions(){
+    if(flushingVideoClipDeletions) return;
+    flushingVideoClipDeletions = true;
+    let failures = 0;
+    const failedKeys = new Set();
+    try {
+        while(true){
+            const eligible = [...pendingVideoClipDeletions.entries()].filter(([key, asset]) => (
+                !failedKeys.has(key)
+                && Number(asset.saveSequence || 0) <= Number(savedVideoClipSequencesByCanvas.get(asset.canvasId) || 0)
+            ));
+            if(!eligible.length) break;
+            for(const [key, asset] of eligible){
+                try {
+                    await deleteOwnedVideoClipAsset(asset);
+                    pendingVideoClipDeletions.delete(key);
+                } catch(error) {
+                    failures += 1;
+                    failedKeys.add(key);
+                    console.error(error);
+                }
+            }
+        }
+    } finally {
+        flushingVideoClipDeletions = false;
+    }
+    if(failures) setStatus(`节点已删除，但有 ${failures} 个视频片段文件等待下次保存时重试清理`);
+}
+
 async function runLLMChat(nodeId){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.running) return;
@@ -13095,10 +13199,12 @@ function deleteNode(id, event){
     selected.delete(id);
     render();
     scheduleSave();
+    queueReleasedVideoClipAssets(deletingNode ? [deletingNode] : []);
 }
 function clearNodeContentBeforeDelete(id){
     const node = nodes.find(n => n.id === id);
     if(!node) return false;
+    if(ownedVideoClipAsset(node)) return false;
     if(node.type === 'image' && node.url){
         pushUndo();
         node.url = '';
@@ -16511,12 +16617,14 @@ function deleteSelectedNodes(){
         }
     };
     selected.forEach(collect);
+    const deletingNodes = nodes.filter(node => toDelete.has(node.id));
     toDelete.forEach(id => destroyLTXEditor(nodes.find(n => n.id === id)));
     nodes = nodes.filter(n => !toDelete.has(n.id));
     connections = connections.filter(c => !toDelete.has(c.from) && !toDelete.has(c.to));
     selected.clear();
     render();
     scheduleSave();
+    queueReleasedVideoClipAssets(deletingNodes);
 }
 function hasImageFiles(items){
     return [...(items || [])].some(item => {

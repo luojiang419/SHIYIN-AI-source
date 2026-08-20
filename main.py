@@ -85,6 +85,20 @@ from canvas_core.video_clip import (
     reconcile_video_clip_assets,
     resolve_video_clip_tools,
 )
+from canvas_core.video_frame_extraction import (
+    DEFAULT_INTERVAL_SECONDS,
+    DEFAULT_MAX_FRAMES,
+    DEFAULT_SCENE_THRESHOLD,
+    DEFAULT_STRATEGY,
+    MAX_MAX_FRAMES,
+    STRATEGIES as VIDEO_FRAME_STRATEGIES,
+    VideoFrameExtractionError,
+    VideoFrameExtractionRequest,
+    canvas_video_frame_directory,
+    extract_video_frames,
+    probe_video_frames,
+    validate_extraction_options,
+)
 from canvas_core.kling_cli import (
     KlingCliError,
     KlingCliService,
@@ -3584,6 +3598,9 @@ CANVAS_TASK_LOCK = Lock()
 CANVAS_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_VIDEO_TASK_LOCK = Lock()
 CANVAS_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
+CANVAS_VIDEO_FRAME_TASKS: Dict[str, Dict[str, Any]] = {}
+CANVAS_VIDEO_FRAME_TASK_LOCK = Lock()
+CANVAS_VIDEO_FRAME_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
 TOPAZ_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
 TOPAZ_VIDEO_TASK_LOCK = Lock()
 TOPAZ_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
@@ -3599,6 +3616,7 @@ ECOMMERCE_VISION_CACHE: Dict[str, Dict[str, Any]] = {}
 ECOMMERCE_VISION_CACHE_LOCK = Lock()
 CANVAS_TASK_MEMORY_LIMIT = 200
 CANVAS_VIDEO_TASK_MEMORY_LIMIT = 500
+CANVAS_VIDEO_FRAME_TASK_MEMORY_LIMIT = 200
 TOPAZ_VIDEO_TASK_MEMORY_LIMIT = 200
 ONLINE_IMAGE_TASK_MEMORY_LIMIT = 500
 ECOMMERCE_TASK_MEMORY_LIMIT = 1000
@@ -3721,6 +3739,18 @@ class VideoClipCreateRequest(BaseModel):
 class VideoClipDeleteRequest(BaseModel):
     canvas_id: str = Field(min_length=1, max_length=160)
     clip_id: str = Field(min_length=1, max_length=160)
+
+class VideoFrameProbeRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=4096)
+
+class VideoFrameTaskRequest(BaseModel):
+    canvas_id: str = Field(min_length=1, max_length=160)
+    node_id: str = Field(default="", max_length=160)
+    source_url: str = Field(min_length=1, max_length=4096)
+    strategy: str = Field(default=DEFAULT_STRATEGY, min_length=1, max_length=64)
+    interval_seconds: float = Field(default=DEFAULT_INTERVAL_SECONDS, gt=0, le=3600)
+    scene_threshold: float = Field(default=DEFAULT_SCENE_THRESHOLD, ge=0, le=1)
+    max_frames: int = Field(default=DEFAULT_MAX_FRAMES, ge=1, le=MAX_MAX_FRAMES)
 
 class RunningHubSubmitRequest(BaseModel):
     webappId: str = ""
@@ -11286,6 +11316,202 @@ async def delete_canvas_video_clip(payload: VideoClipDeleteRequest):
         "removed": removed,
         "clip_id": payload.clip_id,
     }
+
+
+def _video_frame_task_view(task: Dict[str, Any]) -> Dict[str, Any]:
+    view = dict(task)
+    view.pop("_account_id", None)
+    view.pop("cancel_requested", None)
+    return view
+
+
+async def run_canvas_video_frame_task(task_id: str, payload: VideoFrameTaskRequest):
+    with CANVAS_VIDEO_FRAME_TASK_LOCK:
+        task = CANVAS_VIDEO_FRAME_TASKS.get(task_id)
+        if not task:
+            return
+        task.update({"status": "running", "updated_at": time.time()})
+    output_directory: Optional[Path] = None
+    try:
+        source = local_video_clip_source(payload.source_url)
+        options = validate_extraction_options(
+            payload.strategy,
+            payload.interval_seconds,
+            payload.scene_threshold,
+            payload.max_frames,
+        )
+        run_id = task_id
+        output_directory = canvas_video_frame_directory(os.fspath(OUTPUT_OUTPUT_DIR), payload.canvas_id, run_id)
+        with CANVAS_VIDEO_FRAME_TASK_LOCK:
+            task = CANVAS_VIDEO_FRAME_TASKS.get(task_id)
+            if task and task.get("cancel_requested"):
+                task.update({"status": "cancelled", "updated_at": time.time()})
+                return
+            if task:
+                task.update({"run_id": run_id, "output_directory": str(output_directory), "updated_at": time.time()})
+        output = await asyncio.to_thread(
+            extract_video_frames,
+            VideoFrameExtractionRequest(
+                source=source,
+                output_directory=output_directory,
+                run_id=run_id,
+                **options,
+            ),
+        )
+        frames = []
+        for item in output["frames"]:
+            url = media_url_from_path(item["path"])
+            if not url:
+                raise VideoFrameExtractionError("无法生成抽帧图片访问地址。")
+            register_internal_media_object(url, "output", "image", "canvas-video-frame")
+            frames.append({
+                **item,
+                "url": url,
+                "source_video_url": payload.source_url,
+                "source_video_node_id": payload.node_id,
+                "extract_run_id": run_id,
+                "derived_operation": "video-frame-extraction",
+            })
+        with CANVAS_VIDEO_FRAME_TASK_LOCK:
+            task = CANVAS_VIDEO_FRAME_TASKS.get(task_id)
+            if task and task.get("cancel_requested"):
+                task.update({"status": "cancelled", "updated_at": time.time()})
+            elif task:
+                task.update({
+                    "status": "succeeded",
+                    "progress": 1.0,
+                    "result": {
+                        "run_id": run_id,
+                        "source_url": payload.source_url,
+                        "source_node_id": payload.node_id,
+                        "strategy": output["strategy"],
+                        "interval_seconds": output["interval_seconds"],
+                        "scene_threshold": output["scene_threshold"],
+                        "frame_count": output["frame_count"],
+                        "frames": frames,
+                    },
+                    "error": "",
+                    "updated_at": time.time(),
+                })
+    except (VideoFrameExtractionError, HTTPException) as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        with CANVAS_VIDEO_FRAME_TASK_LOCK:
+            task = CANVAS_VIDEO_FRAME_TASKS.get(task_id)
+            if task:
+                task.update({"status": "failed", "error": str(detail), "updated_at": time.time()})
+    except Exception as exc:
+        with CANVAS_VIDEO_FRAME_TASK_LOCK:
+            task = CANVAS_VIDEO_FRAME_TASKS.get(task_id)
+            if task:
+                task.update({"status": "failed", "error": str(exc), "updated_at": time.time()})
+    finally:
+        with CANVAS_VIDEO_FRAME_TASK_LOCK:
+            prune_current_account_tasks_locked(
+                CANVAS_VIDEO_FRAME_TASKS,
+                {"queued", "running"},
+                CANVAS_VIDEO_FRAME_TASK_MEMORY_LIMIT,
+            )
+        if output_directory is not None:
+            with CANVAS_VIDEO_FRAME_TASK_LOCK:
+                task = CANVAS_VIDEO_FRAME_TASKS.get(task_id) or {}
+                should_cleanup = task.get("status") in {"failed", "cancelled"}
+            if should_cleanup:
+                shutil.rmtree(output_directory, ignore_errors=True)
+
+
+@app.get("/api/canvas-tools/video-frames/capabilities")
+async def video_frame_capabilities():
+    tools = resolve_video_clip_tools()
+    return {
+        "ready": tools.ready,
+        "ffmpeg": bool(tools.ffmpeg),
+        "ffprobe": bool(tools.ffprobe),
+        "strategies": list(VIDEO_FRAME_STRATEGIES),
+        "default_strategy": DEFAULT_STRATEGY,
+        "default_interval_seconds": DEFAULT_INTERVAL_SECONDS,
+        "default_scene_threshold": DEFAULT_SCENE_THRESHOLD,
+        "max_frames": MAX_MAX_FRAMES,
+        "error": "" if tools.ready else "未检测到 FFmpeg，无法抽取视频帧。",
+    }
+
+
+@app.post("/api/canvas-tools/video-frames/probe")
+async def probe_canvas_video_frames(payload: VideoFrameProbeRequest):
+    source = local_video_clip_source(payload.url)
+    try:
+        metadata = await asyncio.to_thread(probe_video_frames, source)
+    except VideoFrameExtractionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"url": payload.url, **metadata}
+
+
+@app.post("/api/canvas-video-frame-tasks")
+async def create_canvas_video_frame_task(payload: VideoFrameTaskRequest):
+    load_canvas(payload.canvas_id)
+    local_video_clip_source(payload.source_url)
+    try:
+        options = validate_extraction_options(
+            payload.strategy,
+            payload.interval_seconds,
+            payload.scene_threshold,
+            payload.max_frames,
+        )
+    except VideoFrameExtractionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    task_id = f"canvas_frame_{uuid.uuid4().hex}"
+    with CANVAS_VIDEO_FRAME_TASK_LOCK:
+        CANVAS_VIDEO_FRAME_TASKS[task_id] = {
+            "id": task_id,
+            "type": "video-frame-extraction",
+            "status": "queued",
+            "progress": 0.0,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "canvas_id": payload.canvas_id,
+            "node_id": payload.node_id,
+            "source_url": payload.source_url,
+            "strategy": options["strategy"],
+            "interval_seconds": options["interval_seconds"],
+            "scene_threshold": options["scene_threshold"],
+            "max_frames": options["max_frames"],
+            "result": None,
+            "error": "",
+            "cancel_requested": False,
+            "_account_id": current_account_id(),
+        }
+        prune_current_account_tasks_locked(
+            CANVAS_VIDEO_FRAME_TASKS,
+            {"queued", "running"},
+            CANVAS_VIDEO_FRAME_TASK_MEMORY_LIMIT,
+        )
+    runner = asyncio.create_task(run_canvas_video_frame_task(task_id, payload))
+    CANVAS_VIDEO_FRAME_TASK_RUNNERS[task_id] = runner
+    return {"task_id": task_id, "status": "queued"}
+
+
+@app.get("/api/canvas-video-frame-tasks/{task_id}")
+async def get_canvas_video_frame_task(task_id: str):
+    with CANVAS_VIDEO_FRAME_TASK_LOCK:
+        task = dict(current_account_task(CANVAS_VIDEO_FRAME_TASKS, task_id))
+    if not task:
+        raise HTTPException(status_code=404, detail="视频抽帧任务不存在，可能服务已重启或任务已过期")
+    return _video_frame_task_view(task)
+
+
+@app.post("/api/canvas-video-frame-tasks/{task_id}/cancel")
+async def cancel_canvas_video_frame_task(task_id: str):
+    with CANVAS_VIDEO_FRAME_TASK_LOCK:
+        task = CANVAS_VIDEO_FRAME_TASKS.get(task_id)
+        if not task or not task_belongs_to_current_account(task):
+            raise HTTPException(status_code=404, detail="视频抽帧任务不存在，可能服务已重启或任务已过期")
+        if task.get("status") in {"queued", "running"}:
+            task["cancel_requested"] = True
+            task["status"] = "cancelled" if task.get("status") == "queued" else "running"
+            task["updated_at"] = time.time()
+    runner = CANVAS_VIDEO_FRAME_TASK_RUNNERS.get(task_id)
+    if runner and runner.done():
+        CANVAS_VIDEO_FRAME_TASK_RUNNERS.pop(task_id, None)
+    return {"ok": True, "task_id": task_id, "status": "cancelled"}
 
 
 @app.post("/api/dwpose/detect")

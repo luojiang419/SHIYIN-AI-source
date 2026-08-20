@@ -163,42 +163,19 @@ class KlingCanvasVideoTests(unittest.TestCase):
         self.assertEqual(captured["model"]["model"], "kling-image-video")
         self.assertEqual(result["videos"], ["/assets/output/kling-image.mp4"])
 
-    def test_kling_video_reference_is_rejected_until_element_command_exists(self):
-        environment = KlingCliEnvironment(
-            node_path="node.exe",
-            npm_path="npm.cmd",
-            kling_path="kling.cmd",
-            entrypoint_path="cli.js",
-            version="0.1.3",
-        )
-
-        class FakeService:
-            def __init__(self, environment):
-                self.environment = environment
-
-            def capabilities(self):
-                return {
-                    "text_to_video": [],
-                    "image_to_video": [],
-                    "video_elements": [{"name": "element_create"}],
-                    "video_reference_supported": False,
-                    "video_reference_message": "请升级可灵 CLI 后再使用视频参考。",
-                }
-
+    def test_kling_video_reference_is_rejected_before_cli_or_upload(self):
         payload = self.main.CanvasVideoRequest(
             prompt="参考视频的节奏生成新镜头",
             provider_id="kling-cli",
             model="kling-video-v3_0",
             videos=["/assets/output/canvases/canvas-1/video-clips/clip-1.mp4"],
         )
-        with (
-            patch.object(self.main, "resolve_kling_cli", return_value=environment),
-            patch.object(self.main, "KlingCliService", FakeService),
-        ):
+        with patch.object(self.main, "resolve_kling_cli") as resolve:
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(self.main.generate_kling_cli_video(payload))
         self.assertEqual(raised.exception.status_code, 400)
-        self.assertIn("升级可灵 CLI", str(raised.exception.detail))
+        self.assertIn("已移除", str(raised.exception.detail))
+        resolve.assert_not_called()
 
 
 if __name__ == "__main__":

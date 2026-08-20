@@ -136,7 +136,7 @@ class KlingCliTests(unittest.TestCase):
         )
         self.assertTrue(capabilities["image_to_video"][0]["inputs"][0]["required"])
 
-    def test_capabilities_surface_video_element_schema_without_claiming_cli_support(self):
+    def test_capabilities_explicitly_keep_video_reference_removed(self):
         payload = {
             "ok": True,
             "body": {
@@ -150,9 +150,9 @@ class KlingCliTests(unittest.TestCase):
             },
         }
         capabilities = parse_kling_capabilities(payload)
-        self.assertEqual(capabilities["video_elements"][0]["name"], "element_create")
+        self.assertEqual(capabilities["video_elements"], [])
         self.assertFalse(capabilities["video_reference_supported"])
-        self.assertIn("升级可灵 CLI", capabilities["video_reference_message"])
+        self.assertIn("已移除", capabilities["video_reference_message"])
 
     def test_windows_environment_uses_node_entrypoint_instead_of_cmd_wrapper(self):
         with TemporaryDirectory() as directory:
@@ -390,55 +390,10 @@ class KlingCliTests(unittest.TestCase):
                 parameters={"duration": "8"},
             )
 
-    def test_skillhub_video_reference_uses_public_url_and_parses_text_output(self):
-        calls = []
-        responses = [
-            subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="Task ID / 任务 ID: skill-task-1\nQuery / 查询: node kling.mjs video --task_id skill-task-1\n",
-                stderr="",
-            ),
-            subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="Task ID / 任务 ID: skill-task-1\nStatus / 状态: succeed\nVideo URL / 视频链接: https://cdn.example/skill.mp4\n",
-                stderr="",
-            ),
-        ]
-
-        def runner(executable, arguments, **kwargs):
-            calls.append((executable, list(arguments)))
-            return responses.pop(0)
-
-        service = KlingCliService(
-            environment=KlingCliEnvironment(
-                node_path="node.exe",
-                kling_path="kling.cmd",
-                entrypoint_path="legacy.js",
-                skill_entrypoint_path="C:/skills/kling.mjs",
-                version="0.1.3",
-            ),
-            runner=runner,
-            sleeper=lambda _: None,
-        )
-        result = service.generate(
-            command="text_to_video",
-            model={"model": "kling-video-v3_0_omni", "arguments": []},
-            prompt="参考视频动作",
-            images=[],
-            videos=["http://64.90.17.178:18080/clip/a/c/c.mp4"],
-            parameters={"duration": "5", "video_refer_type": "feature"},
-            timeout_seconds=30,
-        )
-
-        self.assertEqual(result["generation_id"], "skill-task-1")
-        self.assertEqual(result["url"], "https://cdn.example/skill.mp4")
-        self.assertEqual(calls[0][0], "node.exe")
-        self.assertEqual(calls[0][1][:3], ["C:/skills/kling.mjs", "video", "--no-wait"])
-        self.assertIn("kling-v3-omni", calls[0][1])
-        self.assertIn("--video_refer_type", calls[0][1])
-        self.assertIn("feature", calls[0][1])
+    def test_service_has_no_video_reference_runtime_surface(self):
+        self.assertNotIn("skill_entrypoint_path", KlingCliEnvironment.__dataclass_fields__)
+        self.assertFalse(hasattr(KlingCliService, "_submit_skill_video"))
+        self.assertFalse(hasattr(KlingCliService, "_invoke_skill"))
 
 
 if __name__ == "__main__":

@@ -156,6 +156,21 @@ class CanvasVideoTaskRecoveryTests(unittest.TestCase):
         self.assertEqual(database.tasks["canvas_video_client_1"]["upstream_task_id"], "generation-persisted")
         start_runner.assert_called_once_with("canvas_video_client_1")
 
+    def test_retired_kling_video_reference_task_never_queries_cli(self):
+        task = {
+            "provider_id": "kling-cli",
+            "upstream_task_id": "legacy-video-reference-task",
+            "request": {"video_count": 1},
+        }
+
+        with patch.object(self.main, "resolve_kling_cli") as resolve:
+            result = asyncio.run(self.main.query_canvas_video_upstream(task))
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["upstream_status"], "retired")
+        self.assertIn("不会继续调用开放平台 API", result["error"])
+        resolve.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

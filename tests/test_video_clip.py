@@ -129,6 +129,8 @@ class VideoClipTests(unittest.TestCase):
         self.assertIn('@app.post("/api/canvas-tools/video-clip/delete")', main_source)
         self.assertIn("purge_canvas_video_clips", main_source)
         self.assertIn("reconcile_video_clip_assets", main_source)
+        self.assertNotIn("remote_clip_storage", main_source)
+        self.assertNotIn("remote_removed", main_source)
 
 
 if __name__ == "__main__":

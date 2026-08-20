@@ -9819,15 +9819,12 @@ function klingVideoSettingsHtml(node){
     const model = klingModelSpec(node);
     const modeLabel = mode === 'image_to_video' ? '图生视频（已检测到图片输入）' : '文生视频（未检测到图片输入）';
     const videoRefs = videoRefsOnly(orderedSources(node, generatorSources(node)).flatMap(source => source.refs || []));
-    const videoReferenceSupported = Boolean(klingCliState.capabilities?.video_reference_supported);
     const videoReferenceMessage = String(
         klingCliState.capabilities?.video_reference_message
-        || '当前可灵 CLI 尚未提供 element_create 执行命令，视频参考暂不可用；请升级 CLI 后再生成。'
+        || '可灵视频参考已移除；视频截取片段仍可用于其他支持视频输入的平台。'
     );
     const videoReferenceNote = videoRefs.length
-        ? videoReferenceSupported
-            ? `<div class="muted-note kling-video-reference-ready">已连接 ${videoRefs.length} 个视频片段，将使用 SkillHub Kling AI 视频参考。</div>`
-            : `<div class="muted-note kling-video-reference-warning">${escapeHtml(videoReferenceMessage)}</div>`
+        ? `<div class="muted-note kling-video-reference-warning">${escapeHtml(videoReferenceMessage)}</div>`
         : '';
     if(!klingCliState.authenticated || !model){
         return `${klingConnectionPanelHtml()}${videoReferenceNote}<div class="muted-note">${escapeHtml(klingCliState.error || '安装并登录后，模型参数会从可灵账号实时加载。')}</div>`;
@@ -11721,10 +11718,10 @@ async function runVideoNode(nodeId, opts={}){
     const audioRefs = audioRefsOnly(mediaRefs);
     const persistentVideoTask = isH3 || isKling;
     let out = outputForNode(node, 460);
-    if(isKling && videoRefs.length && !Boolean(klingCliState.capabilities?.video_reference_supported)){
+    if(isKling && (videoRefs.length || manualVideoUrlForNode(node))){
         const message = String(
             klingCliState.capabilities?.video_reference_message
-            || '当前可灵 CLI 尚未支持视频元素参考，请升级 CLI 后重试。'
+            || '可灵视频参考已移除；视频截取片段仍可用于其他支持视频输入的平台。'
         );
         node.runStatus = 'failed';
         node.runError = message;

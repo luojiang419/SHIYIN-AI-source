@@ -52,7 +52,6 @@ class KlingCliEnvironment:
     npm_path: str = ""
     kling_path: str = ""
     entrypoint_path: str = ""
-    skill_entrypoint_path: str = ""
     version: str = ""
     error_message: str = ""
 
@@ -77,10 +76,6 @@ class KlingCliEnvironment:
         return []
 
     @property
-    def skill_ready(self) -> bool:
-        return bool(self.node_path and self.skill_entrypoint_path)
-
-    @property
     def use_shell(self) -> bool:
         return bool(os.name == "nt" and not self.entrypoint_path and self.kling_path.lower().endswith(".cmd"))
 
@@ -93,14 +88,7 @@ class KlingCliService:
     poll_interval: float = 2.5
 
     def capabilities(self) -> dict[str, Any]:
-        capabilities = parse_kling_capabilities(self._invoke_json(["who_am_i", "--quiet"], timeout=45))
-        if self.environment.skill_ready:
-            capabilities["video_reference_supported"] = True
-            capabilities["video_reference_message"] = (
-                "已启用 SkillHub Kling AI 1.1.0 视频参考运行时。"
-            )
-            capabilities["video_reference_cli_version"] = "1.1.0"
-        return capabilities
+        return parse_kling_capabilities(self._invoke_json(["who_am_i", "--quiet"], timeout=45))
 
     def account(self) -> dict[str, Any]:
         return _body(self._invoke_json(["account", "--quiet"], timeout=45))
@@ -113,7 +101,6 @@ class KlingCliService:
         prompt: str,
         images: Sequence[str],
         parameters: Mapping[str, Any],
-        videos: Sequence[str] = (),
         timeout_seconds: float = 900,
     ) -> dict[str, Any]:
         submitted = self.submit(
@@ -121,7 +108,6 @@ class KlingCliService:
             model=model,
             prompt=prompt,
             images=images,
-            videos=videos,
             parameters=parameters,
         )
         generation_id = submitted["generation_id"]
@@ -132,7 +118,6 @@ class KlingCliService:
             queried = self.query(
                 generation_id,
                 timeout=min(120, max(10, timeout_seconds)),
-                use_skill=bool((submitted.get("raw") or {}).get("skill_version")),
             )
             last_payload = queried.get("raw") or {}
             status = _text(queried.get("status")).lower()
@@ -169,7 +154,6 @@ class KlingCliService:
         prompt: str,
         images: Sequence[str],
         parameters: Mapping[str, Any],
-        videos: Sequence[str] = (),
     ) -> dict[str, Any]:
         if command not in {"text_to_video", "image_to_video"}:
             raise KlingCliError(f"不支持的可灵视频命令：{command}")
@@ -178,28 +162,12 @@ class KlingCliService:
             raise KlingCliError("提交可灵视频前必须选择动态返回的模型。")
         if command == "image_to_video" and not any(_text(value) for value in images):
             raise KlingCliError("可灵图生视频至少需要一张参考图。")
-        if len(videos) > 1:
-            raise KlingCliError("可灵当前一次只支持一个视频参考片段。")
-        if videos and self.environment.skill_ready:
-            return self._submit_skill_video(
-                prompt=prompt,
-                model=model,
-                images=images,
-                videos=videos,
-                parameters=parameters,
-            )
-
         arguments = [command, "--quiet", "--model", model_name]
         if command == "image_to_video":
             for image in images:
                 value = _text(image)
                 if value:
                     arguments.extend(["--image", value])
-        for video in videos:
-            value = _text(video)
-            if value:
-                arguments.extend(["--video", value])
-
         specs = {
             _text(spec.get("name")): spec
             for spec in _maps(model.get("arguments"))
@@ -236,82 +204,15 @@ class KlingCliService:
             "raw": submitted,
         }
 
-    def _submit_skill_video(
-        self,
-        *,
-        prompt: str,
-        model: Mapping[str, Any],
-        images: Sequence[str],
-        videos: Sequence[str],
-        parameters: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Invoke the official SkillHub runtime for Omni video references."""
-        if not self.environment.skill_ready:
-            raise KlingCliError("SkillHub Kling AI 视频参考运行时未安装。")
-        arguments = [
-            "video",
-            "--no-wait",
-            "--model",
-            _skill_model_name(_text(model.get("model"))),
-            "--video",
-            _text(videos[0]),
-            "--video_refer_type",
-            _text(parameters.get("video_refer_type")) or "feature",
-            "--prompt",
-            prompt.strip(),
-        ]
-        duration = _argument_text(parameters.get("duration"))
-        if duration:
-            arguments.extend(["--duration", duration])
-        mode = _skill_mode(parameters)
-        if mode:
-            arguments.extend(["--mode", mode])
-        aspect_ratio = _argument_text(parameters.get("aspect_ratio"))
-        if aspect_ratio:
-            arguments.extend(["--aspect_ratio", aspect_ratio])
-        # SkillHub explicitly requires sound=off for video references.
-        arguments.extend(["--sound", "off"])
-        for image in images:
-            value = _text(image)
-            if value:
-                arguments.extend(["--image", value])
-        output = self._invoke_skill(arguments, timeout=120)
-        generation_id = _match_line_value(output, r"Task ID / .*?:\s*(\S+)")
-        if not generation_id:
-            raise KlingCliError("SkillHub 可灵提交响应缺少任务 ID。", raw_output=output)
-        return {
-            "generation_id": generation_id,
-            "credits_consumed": None,
-            "status": "submitted",
-            "raw": {"stdout": output, "skill_version": "1.1.0"},
-        }
-
     def query(
         self,
         generation_id: str,
         *,
         timeout: float = 120,
-        use_skill: bool = False,
     ) -> dict[str, Any]:
         clean_id = _text(generation_id)
         if not clean_id:
             raise KlingCliError("查询可灵视频任务前必须提供 generationId。")
-        if use_skill:
-            if not self.environment.skill_ready:
-                raise KlingCliError("该视频任务需要 SkillHub 运行时，但当前运行时未安装。")
-            output = self._invoke_skill(
-                ["video", "--task_id", clean_id],
-                timeout=max(10, min(120, timeout)),
-            )
-            status = _match_line_value(output, r"Status / .*?:\s*(\S+)").lower()
-            url = _match_line_value(output, r"Video URL / .*?:\s*(\S+)")
-            return {
-                "generation_id": clean_id,
-                "status": status,
-                "url": url,
-                "error": "" if status not in _FAILURE_STATUSES else output,
-                "raw": {"stdout": output, "skill_version": "1.1.0"},
-            }
         queried = _body(
             self._invoke_json(
                 ["query_tasks", "--quiet", clean_id],
@@ -334,25 +235,6 @@ class KlingCliService:
             "error": message if status in _FAILURE_STATUSES else "",
             "raw": queried,
         }
-
-    def _invoke_skill(self, arguments: Sequence[str], *, timeout: float) -> str:
-        skill_env = os.environ.copy()
-        # Canvas downloads image references into a temporary directory before invoking CLI.
-        skill_env["KLING_ALLOW_ABSOLUTE_PATHS"] = "1"
-        result = self.runner(
-            self.environment.node_path,
-            [self.environment.skill_entrypoint_path, *arguments],
-            capture_output=True,
-            check=False,
-            shell=False,
-            timeout=timeout,
-            env=skill_env,
-        )
-        stdout = _decode_output(result.stdout).strip()
-        stderr = _decode_output(result.stderr).strip()
-        if result.returncode != 0:
-            raise KlingCliError(stderr or "SkillHub 可灵运行时执行失败。", exit_code=result.returncode, raw_output=stdout)
-        return stdout
 
     def _invoke_json(self, arguments: Sequence[str], *, timeout: float) -> dict[str, Any]:
         if not self.environment.is_ready:
@@ -395,7 +277,6 @@ def resolve_kling_cli() -> KlingCliEnvironment:
     npm_path = shutil.which("npm.cmd" if os.name == "nt" else "npm") or _windows_program_file("npm.cmd")
     if not npm_path:
         return KlingCliEnvironment(node_path=node_path, error_message="未检测到 npm，无法安装或更新可灵 CLI。")
-    skill_entrypoint = _find_skill_entrypoint()
     kling_path = shutil.which("kling.cmd" if os.name == "nt" else "kling") or ""
     if not kling_path:
         kling_path = _npm_global_kling_candidate(npm_path)
@@ -403,7 +284,6 @@ def resolve_kling_cli() -> KlingCliEnvironment:
         return KlingCliEnvironment(
             node_path=node_path,
             npm_path=npm_path,
-            skill_entrypoint_path=skill_entrypoint,
             error_message="未检测到可灵 CLI，可选择账号区域后安装。",
         )
     entrypoint = _find_kling_entrypoint(kling_path) if os.name == "nt" else ""
@@ -419,7 +299,6 @@ def resolve_kling_cli() -> KlingCliEnvironment:
             npm_path=npm_path,
             kling_path=kling_path,
             error_message="可灵 CLI 的 Node 入口文件缺失，请重新安装可灵 CLI。",
-            skill_entrypoint_path=skill_entrypoint,
         )
     version = _run_command_version(environment)
     if not version:
@@ -429,14 +308,12 @@ def resolve_kling_cli() -> KlingCliEnvironment:
             kling_path=kling_path,
             entrypoint_path=entrypoint,
             error_message="可灵 CLI 无法执行，请尝试重新安装。",
-            skill_entrypoint_path=skill_entrypoint,
         )
     return KlingCliEnvironment(
         node_path=node_path,
         npm_path=npm_path,
         kling_path=kling_path,
         entrypoint_path=entrypoint,
-        skill_entrypoint_path=skill_entrypoint,
         version=version,
     )
 
@@ -477,28 +354,6 @@ def start_kling_login(environment: KlingCliEnvironment) -> int:
         creationflags=_WINDOWS_CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     return process.pid
-
-
-def _collect_video_element_tools(value: Any) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    def visit(item: Any) -> None:
-        if isinstance(item, Mapping):
-            name = _text(item.get("name") or item.get("command") or item.get("id") or item.get("tool"))
-            if name == "element_create":
-                key = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
-                if key not in seen:
-                    seen.add(key)
-                    found.append(dict(item))
-            for child in item.values():
-                visit(child)
-        elif isinstance(item, (list, tuple)):
-            for child in item:
-                visit(child)
-
-    visit(value)
-    return found
 
 
 def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -553,17 +408,11 @@ def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, Any]:
                 }
             )
         result[command] = models
-    video_elements = _collect_video_element_tools(payload)
-    # CLI 0.1.x exposes the element schema in tool_list but has no executable
-    # element_create subcommand; keep this false until submit support exists.
     return {
         **result,
-        "video_elements": video_elements,
+        "video_elements": [],
         "video_reference_supported": False,
-        "video_reference_message": (
-            "当前可灵 CLI 能读取视频元素规范，但未提供 element_create 执行命令；"
-            "请升级可灵 CLI 后再使用视频参考。"
-        ),
+        "video_reference_message": "可灵视频参考已移除；视频截取片段仍可用于其他支持视频输入的平台。",
     }
 
 
@@ -579,21 +428,6 @@ def _find_kling_entrypoint(kling_path: str) -> str:
         pass
     for package in ("cli-cn", "cli-global", "cli"):
         candidates.append(wrapper.parent / "node_modules" / "@klingai" / package / "dist" / "cli.js")
-    return next((str(path.resolve()) for path in candidates if path.is_file()), "")
-
-
-def _find_skill_entrypoint() -> str:
-    explicit = _text(os.getenv("KLING_SKILL_ENTRYPOINT"))
-    candidates: list[Path] = []
-    if explicit:
-        candidates.append(Path(explicit).expanduser())
-    project_root = Path(__file__).resolve().parents[1]
-    candidates.append(project_root / "tools" / "klingai-skill" / "scripts" / "kling.mjs")
-    local_app_data = _text(os.getenv("LOCALAPPDATA"))
-    if local_app_data:
-        skill_root = Path(local_app_data) / "SHIYIN AI" / "klingai-skill"
-        if skill_root.is_dir():
-            candidates.extend(sorted(skill_root.glob("*/scripts/kling.mjs"), reverse=True))
     return next((str(path.resolve()) for path in candidates if path.is_file()), "")
 
 
@@ -714,36 +548,6 @@ def _argument_text(value: Any) -> str:
     if value is False:
         return "false"
     return _text(value)
-
-
-def _match_line_value(value: str, pattern: str) -> str:
-    match = re.search(pattern, _text(value), re.IGNORECASE | re.MULTILINE)
-    return _text(match.group(1)) if match else ""
-
-
-def _skill_model_name(value: str) -> str:
-    """Map legacy MCP model identifiers to SkillHub canonical names."""
-    raw = _text(value).lower()
-    aliases = {
-        "kling-video-v3_0_omni": "kling-v3-omni",
-        "kling-video-v3-omni": "kling-v3-omni",
-        "kling-video-v3_0": "kling-v3",
-        "kling-video-v3": "kling-v3",
-        "kling-video-o1": "kling-video-o1",
-        "kling-video-o1_omni": "kling-video-o1",
-        "kling-video-v2-6": "kling-v2-6",
-    }
-    return aliases.get(raw, raw)
-
-
-def _skill_mode(parameters: Mapping[str, Any]) -> str:
-    resolution = _argument_text(parameters.get("resolution")).lower()
-    if resolution in {"720p", "720", "std"}:
-        return "std"
-    if resolution in {"1080p", "1080", "pro"}:
-        return "pro"
-    mode = _argument_text(parameters.get("mode")).lower()
-    return mode if mode in {"pro", "std"} else ""
 
 
 def _find_value(value: Any, keys: Sequence[str]) -> Any:

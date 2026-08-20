@@ -85,15 +85,6 @@ from canvas_core.video_clip import (
     reconcile_video_clip_assets,
     resolve_video_clip_tools,
 )
-from canvas_core.remote_clip_storage import (
-    RemoteClipStorageError,
-    clip_identity_from_path,
-    delete_video_clip as delete_remote_video_clip,
-    purge_canvas_video_clips as purge_remote_canvas_video_clips,
-    remote_clip_config,
-    validate_public_clip_url,
-    upload_video_clip,
-)
 from canvas_core.kling_cli import (
     KlingCliError,
     KlingCliService,
@@ -384,7 +375,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.190"
+APP_VERSION = "1.0.191"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -11232,18 +11223,12 @@ def local_video_clip_source(url: str) -> str:
 @app.get("/api/canvas-tools/video-clip/capabilities")
 async def video_clip_capabilities():
     tools = resolve_video_clip_tools()
-    remote = remote_clip_config()
     return {
         "ready": tools.ready,
         "ffmpeg": bool(tools.ffmpeg),
         "ffprobe": bool(tools.ffprobe),
         "resolutions": ["1080p", "720p", "original"],
         "default_resolution": "1080p",
-        "remote_media": {
-            "configured": remote.enabled,
-            "public_base_url": remote.public_base_url if remote.enabled else "",
-            "port": remote.port,
-        },
         "error": "" if tools.ready else "未检测到 FFmpeg，无法截取视频。",
     }
 
@@ -11296,20 +11281,9 @@ async def delete_canvas_video_clip(payload: VideoClipDeleteRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     url = f"/assets/output/canvases/{payload.canvas_id}/video-clips/{payload.clip_id}.mp4"
     DATABASE.delete_media_objects([url])
-    remote_removed = False
-    try:
-        remote_removed = await asyncio.to_thread(
-            delete_remote_video_clip,
-            account_id=current_account_id(),
-            canvas_id=payload.canvas_id,
-            clip_id=payload.clip_id,
-        )
-    except RemoteClipStorageError as exc:
-        raise HTTPException(status_code=502, detail=f"远端视频片段删除失败：{exc}") from exc
     return {
         "ok": True,
         "removed": removed,
-        "remote_removed": remote_removed,
         "clip_id": payload.clip_id,
     }
 
@@ -15626,80 +15600,19 @@ def kling_cli_reference_value(value: str, temporary_dir: str, index: int) -> str
     return str(destination)
 
 
-def kling_cli_video_reference_value(value: str, payload: CanvasVideoRequest, index: int) -> str:
-    """Publish a local canvas clip to the SSH-backed public media service."""
-    raw_value = str(value or "").strip()
-    if not raw_value:
-        return ""
-    if raw_value.startswith(("http://", "https://")):
-        return raw_value
-    local_path = output_file_from_url(raw_value)
-    if not local_path:
-        raise HTTPException(
-            status_code=400,
-            detail="可灵视频参考仅支持公网 HTTP(S) 地址或当前画布的视频片段节点。",
-        )
-    identity = clip_identity_from_path(local_path)
-    if not identity:
-        raise HTTPException(
-            status_code=400,
-            detail="可灵视频参考只允许上传视频截取节点生成的片段。",
-        )
-    inferred_canvas_id, clip_id = identity
-    canvas_id = str(payload.canvas_id or inferred_canvas_id).strip()
-    if not canvas_id:
-        raise HTTPException(status_code=400, detail="可灵视频参考缺少画布标识。")
-    config = remote_clip_config()
-    if not config.enabled:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "远端视频素材服务未配置，无法生成可灵公网参考地址。"
-                "请配置 CLIP_REMOTE_SSH_KEY_PATH 后重试。"
-            ),
-        )
-    try:
-        public_url = upload_video_clip(
-            local_path,
-            account_id=current_account_id(),
-            canvas_id=canvas_id,
-            clip_id=clip_id,
-            config=config,
-        )
-        try:
-            validate_public_clip_url(public_url, timeout=config.connect_timeout)
-        except RemoteClipStorageError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"视频片段已上传，但公网地址无法访问：{exc}",
-            ) from exc
-        return public_url
-    except RemoteClipStorageError as exc:
-        raise HTTPException(status_code=502, detail=f"视频片段上传到远端失败：{exc}") from exc
-
 async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bool = False):
+    if any(str(value or "").strip() for value in (payload.videos or [])):
+        raise HTTPException(
+            status_code=400,
+            detail="可灵视频参考已移除；视频截取功能仍可正常使用，片段可连接其他支持视频输入的平台。",
+        )
     environment = await asyncio.to_thread(resolve_kling_cli)
     if not environment.is_ready:
         raise HTTPException(status_code=400, detail=environment.error_message or "可灵 CLI 尚未就绪")
     service = KlingCliService(environment)
     try:
         capabilities = await asyncio.to_thread(service.capabilities)
-        if payload.videos and not bool(capabilities.get("video_reference_supported")):
-            raise HTTPException(
-                status_code=400,
-                detail=str(
-                    capabilities.get("video_reference_message")
-                    or "当前可灵 CLI 尚未支持视频元素参考，请升级 CLI 后重试"
-                ),
-            )
         with tempfile.TemporaryDirectory(prefix="shiyin_kling_") as temporary_dir:
-            video_values = []
-            if payload.videos:
-                video_values = [
-                    kling_cli_video_reference_value(value, payload, index)
-                    for index, value in enumerate(payload.videos[:1])
-                    if str(value or "").strip()
-                ]
             images = [
                 kling_cli_reference_value(ref.url, temporary_dir, index)
                 for index, ref in enumerate(payload.images or [])
@@ -15708,11 +15621,6 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             command = "image_to_video" if images else "text_to_video"
             models = capabilities.get(command) or []
             model = next((item for item in models if str(item.get("model") or "") == str(payload.model or "")), None)
-            if payload.videos and environment.skill_ready and not model:
-                model = {
-                    "model": str(payload.model or "kling-v3-omni"),
-                    "arguments": [],
-                }
             if not model:
                 raise HTTPException(
                     status_code=400,
@@ -15737,17 +15645,12 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             for key, value in defaults.items():
                 if key in parameter_names and key not in parameters and value:
                     parameters[key] = value
-            if payload.videos and environment.skill_ready:
-                parameters["video_refer_type"] = str(
-                    (payload.model_parameters or {}).get("video_refer_type") or "feature"
-                ).strip().lower() or "feature"
             invoke = service.submit if submit_only else service.generate
             invoke_kwargs = {
                 "command": command,
                 "model": model,
                 "prompt": str(payload.prompt or "").strip(),
                 "images": images,
-                "videos": video_values,
                 "parameters": parameters,
             }
             if not submit_only:
@@ -15773,7 +15676,6 @@ async def submit_kling_cli_video(payload: CanvasVideoRequest):
             "model": payload.model,
             "parameters": parameters,
             "image_count": len(payload.images or []),
-            "skill_reference_runtime": bool(payload.videos),
         },
     }
 
@@ -15781,15 +15683,13 @@ async def submit_kling_cli_video(payload: CanvasVideoRequest):
 async def query_kling_cli_video(
     generation_id: str,
     service: Optional[KlingCliService] = None,
-    *,
-    use_skill: bool = False,
 ):
     if service is None:
         environment = await asyncio.to_thread(resolve_kling_cli)
         if not environment.is_ready:
             raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪")
         service = KlingCliService(environment)
-    return await asyncio.to_thread(service.query, generation_id, timeout=120, use_skill=use_skill)
+    return await asyncio.to_thread(service.query, generation_id, timeout=120)
 
 
 async def generate_kling_cli_video(payload: CanvasVideoRequest):
@@ -16402,13 +16302,21 @@ async def query_canvas_video_upstream(task: Dict[str, Any], *, kling_service: Op
     provider_id = str(task.get("provider_id") or "")
     upstream_task_id = str(task.get("upstream_task_id") or "")
     if provider_id == "kling-cli":
+        if int((task.get("request") or {}).get("video_count") or 0) > 0:
+            return {
+                "status": "failed",
+                "upstream_status": "retired",
+                "url": "",
+                "error": "旧版可灵视频参考任务已停止支持，不会继续调用开放平台 API。",
+                "raw": None,
+                "_kling_service": kling_service,
+            }
         if kling_service is None:
             environment = await asyncio.to_thread(resolve_kling_cli)
             if not environment.is_ready:
                 raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪")
             kling_service = KlingCliService(environment)
-        use_skill = bool((task.get("request") or {}).get("skill_reference_runtime"))
-        queried = await query_kling_cli_video(upstream_task_id, kling_service, use_skill=use_skill)
+        queried = await query_kling_cli_video(upstream_task_id, kling_service)
         status = str(queried.get("status") or "").lower()
         url = str(queried.get("url") or "").strip()
         if url and status in {"", "completed", "partial_completed", "succeed", "succeeded", "success", "done"}:
@@ -16632,10 +16540,6 @@ def can_manage_kling_cli(request: Request) -> bool:
 async def kling_cli_capabilities(request: Request):
     can_manage = can_manage_kling_cli(request)
     environment = await asyncio.to_thread(resolve_kling_cli)
-    skill_runtime = {
-        "installed": environment.skill_ready,
-        "version": "1.1.0" if environment.skill_ready else "",
-    }
     if not environment.is_ready:
         return {
             "installed": False,
@@ -16643,7 +16547,6 @@ async def kling_cli_capabilities(request: Request):
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
-            "skill_reference_runtime": skill_runtime,
             "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": environment.error_message,
         }
@@ -16656,7 +16559,6 @@ async def kling_cli_capabilities(request: Request):
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
-            "skill_reference_runtime": skill_runtime,
             "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": str(exc),
         }
@@ -16666,7 +16568,6 @@ async def kling_cli_capabilities(request: Request):
         "generation_enabled": True,
         "can_manage": can_manage,
         "version": environment.version,
-        "skill_reference_runtime": skill_runtime,
         "capabilities": capabilities,
         "error": "",
     }
@@ -18516,14 +18417,6 @@ async def purge_canvas(canvas_id: str):
         await asyncio.to_thread(purge_canvas_video_clips, os.fspath(OUTPUT_OUTPUT_DIR), canvas_id)
     except VideoClipError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        await asyncio.to_thread(
-            purge_remote_canvas_video_clips,
-            account_id=current_account_id(),
-            canvas_id=canvas_id,
-        )
-    except RemoteClipStorageError as exc:
-        raise HTTPException(status_code=502, detail=f"远端画布视频片段清理失败：{exc}") from exc
     DATABASE.purge_canvas(canvas_path(canvas_id))
     publish_entity_changed("canvas", canvas_id)
     return {"ok": True}

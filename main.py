@@ -99,8 +99,9 @@ from canvas_core.video_frame_extraction import (
     probe_video_frames,
     validate_extraction_options,
 )
-from canvas_core.bridge_package import BridgePackageError, read_bridge_package
+from canvas_core.bridge_package import BridgePackageError, read_bridge_package, write_bridge_package
 from canvas_core.bridge_media import materialize_bridge_frames
+from canvas_core.bridge_export import build_shiyin_bridge_payload
 from canvas_core.kling_cli import (
     KlingCliError,
     KlingCliService,
@@ -11306,6 +11307,47 @@ async def import_film_bridge_package(
             package.cleanup()
         shutil.rmtree(extraction_root, ignore_errors=True)
         Path(temp_name).unlink(missing_ok=True)
+
+
+@app.post("/api/canvas-bridges/film/export")
+async def export_film_bridge_package(
+    canvas_id: str = Form(""),
+    group_id: str = Form(""),
+    selected_variant: str = Form(""),
+    include_derived: bool = Form(True),
+):
+    """把当前 GROUP 及其衍生变体打包为 filmstoryboard 可导入的标准包。"""
+    canvas = load_canvas(canvas_id)
+    group = next((node for node in canvas.get("nodes", []) if node.get("id") == group_id and node.get("type") == "group"), None)
+    if not group:
+        raise HTTPException(status_code=404, detail="目标 GROUP 不存在。")
+    try:
+        manifest, files = await asyncio.to_thread(
+            build_shiyin_bridge_payload,
+            canvas=canvas,
+            group=group,
+            nodes=canvas.get("nodes") or [],
+            local_path_for_url=output_file_from_url,
+            selected_variant=selected_variant,
+            include_derived=include_derived,
+        )
+        timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        filename = f"shiyin_{canvas_id[:10]}_{group_id[:10]}_{timestamp}.filmbridge.zip"
+        destination = output_path_for(filename, "output")
+        result = await asyncio.to_thread(write_bridge_package, manifest, files, destination)
+    except BridgePackageError as exc:
+        raise HTTPException(status_code=400, detail=f"无法导出桥接包：{exc}") from exc
+    url = output_url_for(filename, "output")
+    register_internal_media_object(url, "output", "file", "film-bridge-export")
+    return {
+        "url": url,
+        "filename": filename,
+        "size": result.get("size") or 0,
+        "file_count": result.get("file_count") or 0,
+        "bridge_id": manifest.get("bridge_id"),
+        "selected_variant": manifest.get("storyboard", {}).get("selected_variant"),
+        "variants": manifest.get("storyboard", {}).get("variants") or [],
+    }
 
 
 @app.post("/api/canvas-tools/grid/detect")

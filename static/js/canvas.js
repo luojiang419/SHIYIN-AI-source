@@ -4741,6 +4741,26 @@ async function importFilmBridgePackage(){
     };
     input.click();
 }
+async function exportFilmBridgeGroup(groupId){
+    if(!canvas?.id || !groupId) return;
+    setStatus(langIsEn() ? 'Preparing film bridge package...' : '正在生成 filmstoryboard 回传包...');
+    try {
+        if(localCanvasDirty) await saveCanvas();
+        const form = new FormData();
+        form.append('canvas_id', canvas.id);
+        form.append('group_id', groupId);
+        form.append('include_derived', 'true');
+        const response = await fetch('/api/canvas-bridges/film/export', {method:'POST', body:form});
+        if(!response.ok) throw new Error(await responseErrorMessage(response, langIsEn() ? 'Bridge export failed' : '回传包导出失败'));
+        const data = await response.json();
+        await downloadUrl(data.url, data.filename || 'shiyin-film-bridge.filmbridge.zip');
+        setStatus(langIsEn() ? `Exported ${data.file_count || 0} frames` : `已导出 ${data.file_count || 0} 张分镜帧，可发送到 filmstoryboard`);
+    } catch(error) {
+        console.error(error);
+        setStatus(langIsEn() ? 'Ready' : '就绪');
+        alert(error.message || (langIsEn() ? 'Bridge export failed' : '回传包导出失败'));
+    }
+}
 function createImageCardFromUrl(url, point, name='image'){
     if(!ensureCanvas() || !url) return;
     const p = point || defaultPoint(0, 0);
@@ -15237,13 +15257,20 @@ function createStoryboardTransformationGroup(sourceGroup, items, operation){
     const base = {x:Math.round(sourceGroup.x + sourceRect.w + 120), y:Math.round(sourceGroup.y)};
     const imageNodes = frames.map((frame, index) => {
         const col = index % cols, row = Math.floor(index / cols);
+        const sourceFrameNode = nodes.find(node => node.id === frame.sourceNodeId);
         const node = {
             id:uid('derived'), type:'image', mediaKind:'image',
             x:base.x + 24 + col * (cardW + gap), y:base.y + 58 + row * (cardH + gap),
             w:cardW, h:cardH, url:frame.url, name:frame.name || `${operation}-${index + 1}.png`,
             derivedFromGroupId:sourceGroup.id, derivedOperation:operation,
             derivedFromNodeId:sourceGroup.derivedFromNodeId || '', sourceVideoNodeId:sourceGroup.derivedFromNodeId || '',
-            frameIndex:Number(frame.frameIndex ?? index), timestampMs:Number(frame.timestampMs || 0)
+            frameIndex:Number(frame.frameIndex ?? index), timestampMs:Number(frame.timestampMs || 0),
+            bridgeSource:sourceGroup.bridgeSource || sourceFrameNode?.bridgeSource || '', bridgeId:sourceGroup.bridgeId || sourceFrameNode?.bridgeId || '',
+            bridgeVariant:operation === 'expand-canvas' ? 'expanded-16x9' : operation === 'line-art' ? 'line-art' : 'replicated',
+            bridgeFrameIndex:Number(sourceFrameNode?.bridgeFrameIndex ?? frame.frameIndex ?? index),
+            bridgeSlotIndex:Number(sourceFrameNode?.bridgeSlotIndex ?? frame.frameIndex ?? index),
+            bridgeShotNumber:Number(sourceFrameNode?.bridgeShotNumber || 0), bridgeCaption:sourceFrameNode?.bridgeCaption || '',
+            bridgeSourceFrameStableId:sourceFrameNode?.bridgeFrameStableId || '',
         };
         nodes.push(node);
         return node;
@@ -15254,7 +15281,11 @@ function createStoryboardTransformationGroup(sourceGroup, items, operation){
         items:imageNodes.map(node => node.id), derivedOperation:operation,
         derivedFromGroupId:sourceGroup.id, derivedFromNodeId:sourceGroup.derivedFromNodeId || '',
         derivedFromUrl:sourceGroup.derivedFromUrl || '', frameCount:imageNodes.length,
-        sourceGroupOperation:sourceGroup.derivedOperation || ''
+        sourceGroupOperation:sourceGroup.derivedOperation || '',
+        bridgeSource:sourceGroup.bridgeSource || '', bridgeId:sourceGroup.bridgeId || '',
+        bridgeBoardId:sourceGroup.bridgeBoardId || '', bridgeBoardName:sourceGroup.bridgeBoardName || '',
+        bridgeSelectedVariant:operation === 'expand-canvas' ? 'expanded-16x9' : operation === 'line-art' ? 'line-art' : 'replicated',
+        bridgePromptNodeIds:[...(sourceGroup.bridgePromptNodeIds || [])],
     };
     nodes.push(group);
     connections.push({id:uid('c'), from:sourceGroup.id, to:group.id, kind:'derived', derivedOperation:operation});
@@ -15282,7 +15313,7 @@ async function runGroupTransformation(operation, groupId){
             while(cursor < frames.length){
                 const index = cursor++;
                 const result = await transformStoryboardFrame(frames[index], operation, providerId, model, index);
-                results[index] = {...result, frameIndex:frames[index].__index ?? index, timestampMs:Number((nodes.find(node => node.id === frames[index].nodeId)?.timestampMs) || 0)};
+                results[index] = {...result, sourceNodeId:frames[index].nodeId, frameIndex:frames[index].__index ?? index, timestampMs:Number((nodes.find(node => node.id === frames[index].nodeId)?.timestampMs) || 0)};
                 setStatus(`${operation === 'expand-canvas' ? '扩展画幅' : '线稿分镜'} ${index + 1}/${frames.length}`);
             }
         };
@@ -15555,7 +15586,8 @@ function renderSelectionHub(){
     }
     const actions = target.kind === 'group' ? [
         {id:'expand-canvas', label:langIsEn() ? 'Expand canvas' : '扩展画幅', icon:'expand'},
-        {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'}
+        {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'},
+        {id:'send-to-film', label:langIsEn() ? 'Send to filmstoryboard' : '发送到 filmstoryboard', icon:'send'}
     ] : target.mediaKind === 'video' ? [
         {id:'extract-video', label:langIsEn() ? 'Extract frames' : '视频抽帧', icon:'images'},
         {id:'trim-video', label:langIsEn() ? 'Trim video' : '视频截取', icon:'scissors'},
@@ -15644,6 +15676,10 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'send-to-film'){
+        exportFilmBridgeGroup(target?.nodeId);
+        return;
+    }
     if(action === 'expand-canvas' || action === 'line-art'){
         runGroupTransformation(action, target?.nodeId);
         return;

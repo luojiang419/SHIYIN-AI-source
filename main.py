@@ -76,6 +76,14 @@ from canvas_core.app_config import read_app_config, update_app_settings
 from canvas_core.generated_output import export_generated_files
 from canvas_core.image_upload import normalize_image_orientation
 from canvas_core.grid_crop import detect_grid
+from canvas_core.video_clip import (
+    VideoClipError,
+    create_video_clip,
+    delete_video_clip,
+    probe_video as probe_clip_video,
+    purge_canvas_video_clips,
+    resolve_video_clip_tools,
+)
 from canvas_core.kling_cli import (
     KlingCliError,
     KlingCliService,
@@ -3691,6 +3699,21 @@ class TempShUploadRequest(BaseModel):
 class CloudVideoUploadRequest(BaseModel):
     url: str = ""
     service: str = "auto"
+
+class VideoClipProbeRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=4096)
+
+class VideoClipCreateRequest(BaseModel):
+    canvas_id: str = Field(min_length=1, max_length=160)
+    node_id: str = Field(default="", max_length=160)
+    source_url: str = Field(min_length=1, max_length=4096)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    resolution: str = "1080p"
+
+class VideoClipDeleteRequest(BaseModel):
+    canvas_id: str = Field(min_length=1, max_length=160)
+    clip_id: str = Field(min_length=1, max_length=160)
 
 class RunningHubSubmitRequest(BaseModel):
     webappId: str = ""
@@ -11181,6 +11204,79 @@ async def detect_canvas_grid(file: UploadFile = File(...)):
     return result.as_dict()
 
 
+def local_video_clip_source(url: str) -> str:
+    path = output_file_from_url(url)
+    if not path:
+        raise HTTPException(status_code=400, detail="视频截取仅支持已保存到当前画布账户的本地视频。")
+    if media_kind_from_path(path) != "video" and not content_type_for_path(path).startswith("video/"):
+        raise HTTPException(status_code=400, detail="截取源不是有效的视频文件。")
+    return path
+
+
+@app.get("/api/canvas-tools/video-clip/capabilities")
+async def video_clip_capabilities():
+    tools = resolve_video_clip_tools()
+    return {
+        "ready": tools.ready,
+        "ffmpeg": bool(tools.ffmpeg),
+        "ffprobe": bool(tools.ffprobe),
+        "resolutions": ["1080p", "720p", "original"],
+        "default_resolution": "1080p",
+        "error": "" if tools.ready else "未检测到 FFmpeg，无法截取视频。",
+    }
+
+
+@app.post("/api/canvas-tools/video-clip/probe")
+async def probe_canvas_video_clip(payload: VideoClipProbeRequest):
+    source = local_video_clip_source(payload.url)
+    try:
+        metadata = await asyncio.to_thread(probe_clip_video, source)
+    except VideoClipError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"url": payload.url, **metadata}
+
+
+@app.post("/api/canvas-tools/video-clip/create")
+async def create_canvas_video_clip(payload: VideoClipCreateRequest):
+    load_canvas(payload.canvas_id)
+    source = local_video_clip_source(payload.source_url)
+    try:
+        result = await asyncio.to_thread(
+            create_video_clip,
+            source,
+            os.fspath(OUTPUT_OUTPUT_DIR),
+            payload.canvas_id,
+            start=payload.start,
+            end=payload.end,
+            resolution=payload.resolution,
+        )
+    except VideoClipError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    url = media_url_from_path(result["path"])
+    if not url:
+        Path(result["path"]).unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="无法生成视频片段访问地址。")
+    register_internal_media_object(url, "output", "video", "canvas-video-clip")
+    return {**result, "url": url, "source_url": payload.source_url, "node_id": payload.node_id}
+
+
+@app.post("/api/canvas-tools/video-clip/delete")
+async def delete_canvas_video_clip(payload: VideoClipDeleteRequest):
+    load_canvas_any(payload.canvas_id)
+    try:
+        removed = await asyncio.to_thread(
+            delete_video_clip,
+            os.fspath(OUTPUT_OUTPUT_DIR),
+            payload.canvas_id,
+            payload.clip_id,
+        )
+    except VideoClipError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    url = f"/assets/output/canvases/{payload.canvas_id}/video-clips/{payload.clip_id}.mp4"
+    DATABASE.delete_media_objects([url])
+    return {"ok": True, "removed": removed, "clip_id": payload.clip_id}
+
+
 @app.post("/api/dwpose/detect")
 async def detect_dwpose(request: Request, file: UploadFile = File(...)):
     request_identity(request)
@@ -18288,6 +18384,10 @@ async def restore_canvas(canvas_id: str):
 
 @app.delete("/api/canvases/{canvas_id}/purge")
 async def purge_canvas(canvas_id: str):
+    try:
+        await asyncio.to_thread(purge_canvas_video_clips, os.fspath(OUTPUT_OUTPUT_DIR), canvas_id)
+    except VideoClipError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     DATABASE.purge_canvas(canvas_path(canvas_id))
     publish_entity_changed("canvas", canvas_id)
     return {"ok": True}

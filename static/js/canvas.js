@@ -4651,6 +4651,96 @@ async function uploadImages(files, point){
 async function uploadImageGroup(files, point){
     return uploadMediaFiles(files, point, false, {group:true});
 }
+function bridgeImportPoint(){
+    const selectedGroup = [...selected].map(id => nodes.find(n => n.id === id)).find(n => n?.type === 'group');
+    if(selectedGroup) return {x:Number(selectedGroup.x || 0) + Number(selectedGroup.w || 600) + 120, y:Number(selectedGroup.y || 0)};
+    const right = nodes.reduce((max, node) => Math.max(max, Number(node.x || 0) + Number(node.w || 280)), 0);
+    const center = screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+    return {x:Math.max(center.x - 360, right + 120), y:center.y - 180};
+}
+async function importFilmBridgePackage(){
+    if(!ensureCanvas()) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.zip,.filmbridge,.shiyinbridge,application/zip';
+    input.onchange = async () => {
+        const file = input.files?.[0];
+        if(!file) return;
+        const button = document.getElementById('filmBridgeImportBtn');
+        if(button) button.disabled = true;
+        setStatus(langIsEn() ? 'Importing storyboard bridge...' : '正在导入故事板桥接包...');
+        try {
+            const form = new FormData();
+            form.append('file', file);
+            form.append('canvas_id', canvas.id);
+            form.append('create_prompt_nodes', 'true');
+            const response = await fetch('/api/canvas-bridges/film/import', {method:'POST', body:form});
+            if(!response.ok) throw new Error(await responseErrorMessage(response, langIsEn() ? 'Storyboard bridge import failed' : '故事板桥接包导入失败'));
+            const data = await response.json();
+            const frames = Array.isArray(data.frames) ? data.frames : [];
+            if(!frames.length) throw new Error(langIsEn() ? 'No storyboard frames found' : '桥接包中没有故事板图片');
+            pushUndo();
+            const base = bridgeImportPoint();
+            const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(frames.length))));
+            const gapX = 290, gapY = 250;
+            const imageNodes = frames.map((frame, index) => {
+                const node = {
+                    id:uid('img'), type:'image',
+                    x:base.x + 28 + (index % cols) * gapX,
+                    y:base.y + 66 + Math.floor(index / cols) * gapY,
+                    url:frame.url, name:frame.name || `film_frame_${String(index + 1).padStart(4, '0')}`,
+                    mediaKind:'image',
+                    bridgeSource:'filmstoryboard', bridgeId:data.bridge_id || '',
+                    bridgeFrameStableId:frame.stable_id || '', bridgeVariant:frame.variant || data.selected_variant || 'original',
+                    bridgeFrameIndex:Number(frame.frame_index || index), bridgeSlotIndex:Number(frame.slot_index || index),
+                    bridgeShotNumber:Number(frame.shot_number || 0), bridgeCaption:frame.caption || '',
+                };
+                nodes.push(node);
+                return node;
+            });
+            const prompts = [];
+            const shots = Array.isArray(data.shots) ? data.shots : [];
+            shots.forEach((shot, index) => {
+                const text = String(shot.prompt || shot.visual || shot.content || '').trim();
+                if(!text) return;
+                const source = imageNodes.find(node => node.bridgeFrameStableId === shot.frame_stable_id) || imageNodes.find(node => Number(node.bridgeShotNumber) === Number(shot.shot_number));
+                const node = {
+                    id:uid('prompt'), type:'prompt',
+                    x:base.x + 28 + cols * gapX,
+                    y:base.y + 66 + index * 180,
+                    text, bridgeSource:'filmstoryboard', bridgeId:data.bridge_id || '',
+                    bridgeShotStableId:shot.stable_id || '', bridgeFrameStableId:shot.frame_stable_id || '',
+                    bridgeShotNumber:Number(shot.shot_number || 0), bridgeSourceFrameNodeId:source?.id || '',
+                };
+                nodes.push(node);
+                prompts.push(node);
+            });
+            const rows = Math.max(1, Math.ceil(imageNodes.length / cols));
+            const group = {
+                id:uid('grp'), type:'group',
+                x:base.x, y:base.y, w:28 + cols * gapX + (prompts.length ? 340 : 0),
+                h:rows * gapY + 100, items:imageNodes.map(node => node.id),
+                bridgeSource:'filmstoryboard', bridgeId:data.bridge_id || '', bridgeDirection:data.direction || 'film-to-shiyin',
+                bridgeBoardId:data.source?.board_id || data.storyboard?.board_id || '', bridgeBoardName:data.storyboard?.board_name || '',
+                bridgeSelectedVariant:data.selected_variant || 'original', bridgeFrameCount:imageNodes.length,
+                bridgePromptNodeIds:prompts.map(node => node.id),
+            };
+            nodes.push(group);
+            selected.clear();
+            selected.add(group.id);
+            render();
+            scheduleSave();
+            setStatus(langIsEn() ? `Imported ${imageNodes.length} storyboard frames` : `已导入 ${imageNodes.length} 张故事板帧`);
+        } catch(error) {
+            console.error(error);
+            setStatus(langIsEn() ? 'Ready' : '就绪');
+            alert(error.message || (langIsEn() ? 'Storyboard bridge import failed' : '故事板桥接包导入失败'));
+        } finally {
+            if(button) button.disabled = false;
+        }
+    };
+    input.click();
+}
 function createImageCardFromUrl(url, point, name='image'){
     if(!ensureCanvas() || !url) return;
     const p = point || defaultPoint(0, 0);

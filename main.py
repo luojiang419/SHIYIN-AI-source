@@ -99,6 +99,8 @@ from canvas_core.video_frame_extraction import (
     probe_video_frames,
     validate_extraction_options,
 )
+from canvas_core.bridge_package import BridgePackageError, read_bridge_package
+from canvas_core.bridge_media import materialize_bridge_frames
 from canvas_core.kling_cli import (
     KlingCliError,
     KlingCliService,
@@ -11223,6 +11225,87 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             item.update({"width": image_width, "height": image_height, "orientation_normalized": orientation_normalized})
         uploaded.append(item)
     return {"files": uploaded}
+
+
+@app.post("/api/canvas-bridges/film/import")
+async def import_film_bridge_package(
+    file: UploadFile = File(...),
+    canvas_id: str = Form(""),
+    selected_variant: str = Form(""),
+    create_prompt_nodes: bool = Form(True),
+):
+    """导入 filmstoryboard 标准桥接包；只落盘媒体，节点由前端以现有画布保存协议创建。"""
+    if not canvas_id.strip():
+        raise HTTPException(status_code=400, detail="缺少目标画布。")
+    load_canvas(canvas_id)
+    filename = str(file.filename or "bridge.filmbridge.zip")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".zip", ".filmbridge", ".shiyinbridge"}:
+        raise HTTPException(status_code=400, detail="请选择 .filmbridge.zip、.filmbridge 或 .shiyinbridge 文件。")
+    max_upload_bytes = 2 * 1024 * 1024 * 1024
+    temp_fd, temp_name = tempfile.mkstemp(prefix="film_bridge_", suffix=suffix)
+    os.close(temp_fd)
+    extraction_root = tempfile.mkdtemp(prefix="film_bridge_extract_")
+    package = None
+    try:
+        total = 0
+        with open(temp_name, "wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_upload_bytes:
+                    raise HTTPException(status_code=413, detail="桥接包不能超过 2GB。")
+                output.write(chunk)
+        if total <= 0:
+            raise HTTPException(status_code=400, detail="桥接包为空。")
+        try:
+            package = await asyncio.to_thread(
+                read_bridge_package,
+                temp_name,
+                extraction_root,
+                max_total_bytes=max_upload_bytes,
+            )
+            frame_records = await asyncio.to_thread(
+                materialize_bridge_frames,
+                package,
+                os.fspath(OUTPUT_INPUT_DIR),
+                canvas_id,
+                selected_variant=selected_variant,
+            )
+        except BridgePackageError as exc:
+            raise HTTPException(status_code=400, detail=f"桥接包校验失败：{exc}") from exc
+        frames = []
+        for index, frame in enumerate(frame_records):
+            local_path = frame.get("local_path") or ""
+            url = media_url_from_path(local_path)
+            if not url:
+                raise HTTPException(status_code=500, detail="无法为桥接图片生成访问地址。")
+            register_internal_media_object(url, "input", "image", "film-bridge")
+            safe_frame = {key: value for key, value in frame.items() if key != "local_path"}
+            safe_frame.update({
+                "url": url,
+                "name": frame.get("source_name") or f"film_frame_{index + 1:04d}{Path(local_path).suffix.lower() or '.png'}",
+            })
+            frames.append(safe_frame)
+        manifest = package.manifest
+        return {
+            "bridge_id": manifest.get("bridge_id"),
+            "direction": manifest.get("direction"),
+            "source": manifest.get("source") or {},
+            "canvas": manifest.get("canvas") or {},
+            "storyboard": manifest.get("storyboard") or {},
+            "frames": frames,
+            "shots": manifest.get("shots") or [],
+            "create_prompt_nodes": bool(create_prompt_nodes),
+            "selected_variant": frames[0].get("variant") if frames else selected_variant or "original",
+        }
+    finally:
+        if package is not None:
+            package.cleanup()
+        shutil.rmtree(extraction_root, ignore_errors=True)
+        Path(temp_name).unlink(missing_ok=True)
 
 
 @app.post("/api/canvas-tools/grid/detect")

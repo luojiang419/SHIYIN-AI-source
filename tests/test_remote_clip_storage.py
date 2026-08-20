@@ -11,7 +11,9 @@ from canvas_core.remote_clip_storage import (
     clip_identity_from_path,
     delete_video_clip,
     remote_clip_url,
+    remote_clip_config,
     upload_video_clip,
+    validate_public_clip_url,
 )
 
 
@@ -70,3 +72,44 @@ def test_remote_clip_paths_are_validated(tmp_path):
     config = RemoteClipConfig(key_path=str(key))
     with pytest.raises(RemoteClipStorageError):
         remote_clip_url(config, "../escape", "canvas", "clip")
+
+
+def test_installed_runtime_reads_remote_clip_config_from_data_dir(tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    key = tmp_path / "id_ed25519_1panel"
+    key.write_text("dummy", encoding="utf-8")
+    (config_dir / "remote-clip.json").write_text(
+        '{"ssh_key_path": "' + str(key).replace("\\", "\\\\") + '", "public_base_url": "http://example.test/clip"}',
+        encoding="utf-8",
+    )
+    config = remote_clip_config({"CANVAS_DATA_DIR": str(tmp_path)})
+    assert config.enabled
+    assert config.key_path == str(key)
+    assert config.public_base_url == "http://example.test/clip"
+
+
+def test_validate_public_clip_url_accepts_video_head(monkeypatch):
+    class Response:
+        status = 200
+        headers = {"Content-Type": "video/mp4", "Content-Length": "12"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr("canvas_core.remote_clip_storage.urllib.request.urlopen", lambda *args, **kwargs: Response())
+    validate_public_clip_url("http://example.test/clip/a/c.mp4")
+
+
+def test_validate_public_clip_url_reports_unreachable(monkeypatch):
+    def fail(*_args, **_kwargs):
+        raise urllib.error.URLError("connection refused")
+
+    import urllib.error
+
+    monkeypatch.setattr("canvas_core.remote_clip_storage.urllib.request.urlopen", fail)
+    with pytest.raises(RemoteClipStorageError, match="公网素材地址无法访问"):
+        validate_public_clip_url("http://example.test/clip/a/c.mp4")

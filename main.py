@@ -91,6 +91,7 @@ from canvas_core.remote_clip_storage import (
     delete_video_clip as delete_remote_video_clip,
     purge_canvas_video_clips as purge_remote_canvas_video_clips,
     remote_clip_config,
+    validate_public_clip_url,
     upload_video_clip,
 )
 from canvas_core.kling_cli import (
@@ -383,7 +384,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.188"
+APP_VERSION = "1.0.189"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -15658,13 +15659,21 @@ def kling_cli_video_reference_value(value: str, payload: CanvasVideoRequest, ind
             ),
         )
     try:
-        return upload_video_clip(
+        public_url = upload_video_clip(
             local_path,
             account_id=current_account_id(),
             canvas_id=canvas_id,
             clip_id=clip_id,
             config=config,
         )
+        try:
+            validate_public_clip_url(public_url, timeout=config.connect_timeout)
+        except RemoteClipStorageError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"视频片段已上传，但公网地址无法访问：{exc}",
+            ) from exc
+        return public_url
     except RemoteClipStorageError as exc:
         raise HTTPException(status_code=502, detail=f"视频片段上传到远端失败：{exc}") from exc
 

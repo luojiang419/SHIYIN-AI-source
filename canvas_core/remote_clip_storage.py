@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
 import urllib.parse
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -55,10 +58,55 @@ def _truthy(value: str) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _default_key_path() -> str:
-    explicit = str(os.getenv("CLIP_REMOTE_SSH_KEY_PATH") or "").strip()
+def _config_candidates(environ: dict[str, str] | None = None) -> tuple[Path, ...]:
+    env = os.environ if environ is None else environ
+    explicit = str(env.get("CLIP_REMOTE_CONFIG_FILE") or "").strip()
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    data_root = str(env.get("CANVAS_DATA_DIR") or "").strip()
+    if data_root:
+        candidates.append(Path(data_root).expanduser() / "config" / "remote-clip.json")
+    portable_root = str(env.get("CANVAS_PORTABLE_ROOT") or "").strip()
+    if portable_root:
+        candidates.append(Path(portable_root).expanduser() / "data" / "config" / "remote-clip.json")
+    candidates.append(Path.cwd() / "data" / "config" / "remote-clip.json")
+    candidates.append(Path(__file__).resolve().parents[1] / "data" / "config" / "remote-clip.json")
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        normalized = str(path.resolve())
+        if normalized not in seen:
+            seen.add(normalized)
+            unique.append(Path(normalized))
+    return tuple(unique)
+
+
+def _read_file_config(environ: dict[str, str] | None = None) -> dict[str, str]:
+    for path in _config_candidates(environ):
+        try:
+            if not path.is_file():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return {str(key): str(value) for key, value in data.items() if value is not None}
+        except (OSError, ValueError, TypeError):
+            continue
+    return {}
+
+
+def _default_key_path(
+    environ: dict[str, str] | None = None,
+    file_config: dict[str, str] | None = None,
+) -> str:
+    env = os.environ if environ is None else environ
+    explicit = str(env.get("CLIP_REMOTE_SSH_KEY_PATH") or "").strip()
     if explicit:
         return explicit
+    config = file_config if file_config is not None else _read_file_config(environ)
+    configured = str(config.get("ssh_key_path") or config.get("CLIP_REMOTE_SSH_KEY_PATH") or "").strip()
+    if configured:
+        return configured
     project_root = Path(__file__).resolve().parents[1]
     candidates = (
         project_root / "api文档" / "香港云key" / "id_ed25519_1panel",
@@ -71,17 +119,22 @@ def remote_clip_config(environ: dict[str, str] | None = None) -> RemoteClipConfi
     env = os.environ if environ is None else environ
     if "CLIP_REMOTE_MEDIA_ENABLED" in env and not _truthy(env.get("CLIP_REMOTE_MEDIA_ENABLED", "")):
         return RemoteClipConfig()
+    file_config = _read_file_config(environ)
+
+    def setting(env_name: str, file_name: str, default: str) -> str:
+        return str(env.get(env_name) or file_config.get(file_name) or file_config.get(env_name) or default).strip()
+
     return RemoteClipConfig(
-        host=str(env.get("CLIP_REMOTE_SSH_HOST") or "64.90.17.178").strip(),
-        port=int(str(env.get("CLIP_REMOTE_SSH_PORT") or "419").strip() or "419"),
-        user=str(env.get("CLIP_REMOTE_SSH_USER") or "root").strip(),
-        key_path=str(env.get("CLIP_REMOTE_SSH_KEY_PATH") or _default_key_path()).strip(),
-        remote_root=str(env.get("CLIP_REMOTE_ROOT") or "/opt/clipdata").strip().rstrip("/"),
-        public_base_url=str(
-            env.get("CLIP_REMOTE_PUBLIC_BASE_URL") or "http://64.90.17.178:18080/clip"
-        ).strip().rstrip("/"),
-        connect_timeout=max(3, int(str(env.get("CLIP_REMOTE_CONNECT_TIMEOUT") or "15"))),
-        transfer_timeout=max(30, int(str(env.get("CLIP_REMOTE_TRANSFER_TIMEOUT") or "900"))),
+        host=setting("CLIP_REMOTE_SSH_HOST", "host", "64.90.17.178"),
+        port=int(setting("CLIP_REMOTE_SSH_PORT", "port", "419") or "419"),
+        user=setting("CLIP_REMOTE_SSH_USER", "user", "root"),
+        key_path=_default_key_path(environ, file_config),
+        remote_root=setting("CLIP_REMOTE_ROOT", "remote_root", "/opt/clipdata").rstrip("/"),
+        public_base_url=setting(
+            "CLIP_REMOTE_PUBLIC_BASE_URL", "public_base_url", "http://64.90.17.178:18080/clip"
+        ).rstrip("/"),
+        connect_timeout=max(3, int(setting("CLIP_REMOTE_CONNECT_TIMEOUT", "connect_timeout", "15"))),
+        transfer_timeout=max(30, int(setting("CLIP_REMOTE_TRANSFER_TIMEOUT", "transfer_timeout", "900"))),
     )
 
 
@@ -271,6 +324,44 @@ def upload_video_clip(
         runner=runner,
     )
     return remote_clip_url(cfg, account_id, canvas_id, clip_id)
+
+
+def validate_public_clip_url(url: str, *, timeout: int = 15) -> None:
+    """Fail fast when the uploaded clip is not reachable by an HTTP client."""
+    target = str(url or "").strip()
+    if not target.startswith(("http://", "https://")):
+        raise RemoteClipStorageError("远端素材没有生成有效的公网 HTTP(S) 地址")
+
+    def request(method: str, headers: dict[str, str] | None = None) -> tuple[int, str, str]:
+        req = urllib.request.Request(target, method=method, headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=max(3, int(timeout))) as response:
+                if method == "GET":
+                    response.read(1)
+                return (
+                    int(getattr(response, "status", 200)),
+                    str(response.headers.get("Content-Type") or ""),
+                    str(response.headers.get("Content-Length") or ""),
+                )
+        except urllib.error.HTTPError as exc:
+            raise RemoteClipStorageError(f"公网素材地址返回 HTTP {exc.code}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise RemoteClipStorageError(f"公网素材地址无法访问：{exc}") from exc
+
+    try:
+        status, content_type, content_length = request("HEAD")
+    except RemoteClipStorageError as exc:
+        if "HTTP 405" not in str(exc) and "HTTP 501" not in str(exc):
+            raise
+        status, content_type, content_length = request("GET", {"Range": "bytes=0-0"})
+    if not 200 <= status < 300:
+        raise RemoteClipStorageError(f"公网素材地址返回 HTTP {status}")
+    if content_type and not (
+        content_type.lower().startswith("video/") or "octet-stream" in content_type.lower()
+    ):
+        raise RemoteClipStorageError(f"公网素材地址返回的类型不是视频：{content_type}")
+    if content_length and content_length.strip() == "0":
+        raise RemoteClipStorageError("公网素材地址返回空文件")
 
 
 def delete_video_clip(

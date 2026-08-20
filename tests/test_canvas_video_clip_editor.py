@@ -77,6 +77,12 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn("queueReleasedVideoClipAssets(deletingNode ? [deletingNode] : [])", self.javascript)
         self.assertIn("queueReleasedVideoClipAssets(deletingNodes)", self.javascript)
 
+    def test_kling_video_reference_is_capability_gated(self):
+        self.assertIn("video_reference_supported:false", self.javascript)
+        self.assertIn("video_reference_message", self.javascript)
+        self.assertIn("当前可灵 CLI 尚未提供 element_create 执行命令", self.javascript)
+        self.assertIn("if(isKling && videoRefs.length && !Boolean(klingCliState.capabilities?.video_reference_supported))", self.javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

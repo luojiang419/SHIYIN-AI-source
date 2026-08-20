@@ -87,7 +87,7 @@ class KlingCliService:
     sleeper: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     poll_interval: float = 2.5
 
-    def capabilities(self) -> dict[str, list[dict[str, Any]]]:
+    def capabilities(self) -> dict[str, Any]:
         return parse_kling_capabilities(self._invoke_json(["who_am_i", "--quiet"], timeout=45))
 
     def account(self) -> dict[str, Any]:
@@ -353,7 +353,29 @@ def start_kling_login(environment: KlingCliEnvironment) -> int:
     return process.pid
 
 
-def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _collect_video_element_tools(value: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def visit(item: Any) -> None:
+        if isinstance(item, Mapping):
+            name = _text(item.get("name") or item.get("command") or item.get("id") or item.get("tool"))
+            if name == "element_create":
+                key = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+                if key not in seen:
+                    seen.add(key)
+                    found.append(dict(item))
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return found
+
+
+def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, Any]:
     body = _body(payload)
     available = _map(body.get("availableModels") or body.get("available_models"))
     result: dict[str, list[dict[str, Any]]] = {}
@@ -405,7 +427,18 @@ def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, list[dict[
                 }
             )
         result[command] = models
-    return result
+    video_elements = _collect_video_element_tools(payload)
+    # CLI 0.1.x exposes the element schema in tool_list but has no executable
+    # element_create subcommand; keep this false until submit support exists.
+    return {
+        **result,
+        "video_elements": video_elements,
+        "video_reference_supported": False,
+        "video_reference_message": (
+            "当前可灵 CLI 能读取视频元素规范，但未提供 element_create 执行命令；"
+            "请升级可灵 CLI 后再使用视频参考。"
+        ),
+    }
 
 
 def _find_kling_entrypoint(kling_path: str) -> str:

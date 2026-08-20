@@ -136,6 +136,24 @@ class KlingCliTests(unittest.TestCase):
         )
         self.assertTrue(capabilities["image_to_video"][0]["inputs"][0]["required"])
 
+    def test_capabilities_surface_video_element_schema_without_claiming_cli_support(self):
+        payload = {
+            "ok": True,
+            "body": {
+                "tool_list": [
+                    {
+                        "name": "element_create",
+                        "description": "创建视频元素",
+                        "constraints": {"duration": "3-60s", "short_side": ">=700"},
+                    }
+                ]
+            },
+        }
+        capabilities = parse_kling_capabilities(payload)
+        self.assertEqual(capabilities["video_elements"][0]["name"], "element_create")
+        self.assertFalse(capabilities["video_reference_supported"])
+        self.assertIn("升级可灵 CLI", capabilities["video_reference_message"])
+
     def test_windows_environment_uses_node_entrypoint_instead_of_cmd_wrapper(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

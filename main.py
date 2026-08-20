@@ -374,7 +374,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.179"
+APP_VERSION = "1.0.180"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -15595,6 +15595,14 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
     service = KlingCliService(environment)
     try:
         capabilities = await asyncio.to_thread(service.capabilities)
+        if payload.videos:
+            raise HTTPException(
+                status_code=400,
+                detail=str(
+                    capabilities.get("video_reference_message")
+                    or "当前可灵 CLI 尚未支持视频元素参考，请升级 CLI 后重试"
+                ),
+            )
         with tempfile.TemporaryDirectory(prefix="shiyin_kling_") as temporary_dir:
             images = [
                 kling_cli_reference_value(ref.url, temporary_dir, index)
@@ -16518,7 +16526,7 @@ async def kling_cli_capabilities(request: Request):
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
-            "capabilities": {"text_to_video": [], "image_to_video": []},
+            "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": environment.error_message,
         }
     try:
@@ -16530,7 +16538,7 @@ async def kling_cli_capabilities(request: Request):
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
-            "capabilities": {"text_to_video": [], "image_to_video": []},
+            "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": str(exc),
         }
     return {

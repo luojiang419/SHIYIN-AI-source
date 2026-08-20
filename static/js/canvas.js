@@ -520,7 +520,7 @@ let klingCliState = {
     canManage:false,
     version:'',
     error:'',
-    capabilities:{text_to_video:[], image_to_video:[]}
+    capabilities:{text_to_video:[], image_to_video:[], video_elements:[], video_reference_supported:false, video_reference_message:''}
 };
 let minimaxH3State = {
     loaded:false,
@@ -932,7 +932,7 @@ async function loadKlingCapabilities({renderAfter=true}={}){
             canManage:Boolean(data.can_manage),
             version:String(data.version || ''),
             error:String(data.error || ''),
-            capabilities:data.capabilities || {text_to_video:[], image_to_video:[]}
+            capabilities:data.capabilities || {text_to_video:[], image_to_video:[], video_elements:[], video_reference_supported:false, video_reference_message:''}
         };
         updateKlingProviderModels();
         nodes.filter(isKlingVideoNode).forEach(sanitizeVideoNodeProviderModel);
@@ -9818,8 +9818,12 @@ function klingVideoSettingsHtml(node){
     const mode = klingCapabilityModeForNode(node);
     const model = klingModelSpec(node);
     const modeLabel = mode === 'image_to_video' ? '图生视频（已检测到图片输入）' : '文生视频（未检测到图片输入）';
+    const videoRefs = videoRefsOnly(orderedSources(node, generatorSources(node)).flatMap(source => source.refs || []));
+    const videoReferenceNote = videoRefs.length
+        ? `<div class="muted-note kling-video-reference-warning">已连接 ${videoRefs.length} 个视频片段。当前可灵 CLI 尚未提供 element_create 执行命令，视频参考暂不可用；请升级 CLI 后再生成。</div>`
+        : '';
     if(!klingCliState.authenticated || !model){
-        return `${klingConnectionPanelHtml()}<div class="muted-note">${escapeHtml(klingCliState.error || '安装并登录后，模型参数会从可灵账号实时加载。')}</div>`;
+        return `${klingConnectionPanelHtml()}${videoReferenceNote}<div class="muted-note">${escapeHtml(klingCliState.error || '安装并登录后，模型参数会从可灵账号实时加载。')}</div>`;
     }
     node.modelParameters = node.modelParameters && typeof node.modelParameters === 'object' ? node.modelParameters : {};
     const fields = (model.arguments || []).filter(argument => argument.name && argument.name !== 'prompt').map(argument => {
@@ -9832,7 +9836,7 @@ function klingVideoSettingsHtml(node){
             : `<input class="setting-input" data-kling-parameter="${escapeAttr(argument.name)}" value="${escapeAttr(value)}" ${argument.required ? 'required' : ''}>`;
         return `<label class="field kling-parameter-field"><div class="setting-title">${escapeHtml(videoParameterLabel(argument.name))}${argument.required ? ' *' : ''}</div>${control}${argument.description ? `<div class="kling-parameter-help">${escapeHtml(argument.description)}</div>` : ''}</label>`;
     }).join('');
-    return `${klingConnectionPanelHtml()}<div class="kling-mode-note">${modeLabel}</div><div class="kling-parameter-grid">${fields || '<div class="muted-note">当前模型没有额外参数</div>'}</div>`;
+    return `${klingConnectionPanelHtml()}${videoReferenceNote}<div class="kling-mode-note">${modeLabel}</div><div class="kling-parameter-grid">${fields || '<div class="muted-note">当前模型没有额外参数</div>'}</div>`;
 }
 function legacyVideoSettingsHtml(node){
     return `<div class="gen-settings-row">
@@ -11709,6 +11713,18 @@ async function runVideoNode(nodeId, opts={}){
     const videoRefs = videoRefsOnly(mediaRefs);
     const audioRefs = audioRefsOnly(mediaRefs);
     const persistentVideoTask = isH3 || isKling;
+    if(isKling && videoRefs.length && !Boolean(klingCliState.capabilities?.video_reference_supported)){
+        const message = String(
+            klingCliState.capabilities?.video_reference_message
+            || '当前可灵 CLI 尚未支持视频元素参考，请升级 CLI 后重试。'
+        );
+        node.runStatus = 'failed';
+        node.runError = message;
+        refreshRunNodes(node, out);
+        if(opts.cascade) throw new Error(message);
+        showErrorModal(message, '可灵视频参考');
+        return;
+    }
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
     if(!prompt){ alert(tr('canvas.videoNeedsPrompt')); return; }

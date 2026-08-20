@@ -22,6 +22,14 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn("视频截取", body)
         self.assertIn("icon:'scissors'", body)
 
+    def test_video_selection_toolbar_offers_frame_extraction(self):
+        render = re.search(r"function renderSelectionHub\(\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
+        self.assertIsNotNone(render)
+        body = render.group("body")
+        self.assertIn("id:'extract-video'", body)
+        self.assertIn("视频抽帧", body)
+        self.assertIn("icon:'images'", body)
+
     def test_editor_contains_preview_timeline_io_and_resolution_controls(self):
         for element_id in (
             "videoClipModal",
@@ -36,6 +44,23 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn('<option value="1080p">1080P（推荐）</option>', self.html)
         self.assertIn('data-clip-handle="in"', self.html)
         self.assertIn('data-clip-handle="out"', self.html)
+
+    def test_frame_extraction_modal_contains_strategy_and_progress_controls(self):
+        for element_id in (
+            "videoFrameModal",
+            "videoFramePreview",
+            "videoFrameStrategy",
+            "videoFrameInterval",
+            "videoFrameThreshold",
+            "videoFrameMaxFrames",
+            "videoFrameProgress",
+            "videoFrameSubmit",
+        ):
+            self.assertIn(f'id="{element_id}"', self.html)
+        self.assertIn("/api/canvas-tools/video-frames/capabilities", self.javascript)
+        self.assertIn("/api/canvas-tools/video-frames/probe", self.javascript)
+        self.assertIn("/api/canvas-video-frame-tasks", self.javascript)
+        self.assertIn("function pollVideoFrameTask", self.javascript)
 
     def test_editor_probes_source_and_submits_exact_range(self):
         self.assertIn("function openVideoClipEditor(nodeId)", self.javascript)

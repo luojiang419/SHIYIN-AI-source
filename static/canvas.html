@@ -410,6 +410,34 @@
                 </div>
             </div>
         </div>
+        <div id="videoFrameModal" class="video-frame-modal" aria-hidden="true" onclick="closeVideoFrameExtractor()">
+            <div class="video-frame-panel" role="dialog" aria-modal="true" aria-labelledby="videoFrameTitle" onclick="event.stopPropagation()">
+                <div class="video-frame-head">
+                    <div>
+                        <strong id="videoFrameTitle">视频抽帧</strong>
+                        <span id="videoFrameSourceName">--</span>
+                    </div>
+                    <button class="preview-icon-btn" type="button" title="关闭" aria-label="关闭" onclick="closeVideoFrameExtractor()"><i data-lucide="x"></i></button>
+                </div>
+                <div class="video-frame-preview">
+                    <video id="videoFramePreview" preload="metadata" playsinline muted controlslist="nodownload noplaybackrate noremoteplayback"></video>
+                    <div id="videoFrameLoading" class="video-frame-loading"><i data-lucide="loader-2"></i><span>正在读取视频...</span></div>
+                </div>
+                <div id="videoFrameMetadata" class="video-frame-metadata">--</div>
+                <div class="video-frame-settings">
+                    <label><span>抽帧方法</span><select id="videoFrameStrategy"></select></label>
+                    <label><span>间隔（秒）</span><input id="videoFrameInterval" type="number" min="0.05" max="3600" step="0.05" value="1"></label>
+                    <label><span>场景阈值</span><input id="videoFrameThreshold" type="number" min="0" max="1" step="0.05" value="0.3"></label>
+                    <label><span>最大帧数</span><input id="videoFrameMaxFrames" type="number" min="1" max="2000" step="1" value="300"></label>
+                </div>
+                <div id="videoFrameProgress" class="video-frame-progress" hidden><span></span></div>
+                <div class="video-frame-actions">
+                    <span id="videoFrameStatus" class="video-frame-status"></span>
+                    <button id="videoFrameCancel" class="video-frame-btn secondary" type="button">取消</button>
+                    <button id="videoFrameSubmit" class="video-frame-btn primary" type="button"><i data-lucide="images"></i><span>视频抽帧</span></button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.2"></script>

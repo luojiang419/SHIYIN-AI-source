@@ -403,6 +403,19 @@ const videoClipSubmit = document.getElementById('videoClipSubmit');
 const videoClipPlay = document.getElementById('videoClipPlay');
 const videoClipJumpIn = document.getElementById('videoClipJumpIn');
 const videoClipJumpOut = document.getElementById('videoClipJumpOut');
+const videoFrameModal = document.getElementById('videoFrameModal');
+const videoFramePreview = document.getElementById('videoFramePreview');
+const videoFrameLoading = document.getElementById('videoFrameLoading');
+const videoFrameSourceName = document.getElementById('videoFrameSourceName');
+const videoFrameMetadata = document.getElementById('videoFrameMetadata');
+const videoFrameStrategy = document.getElementById('videoFrameStrategy');
+const videoFrameInterval = document.getElementById('videoFrameInterval');
+const videoFrameThreshold = document.getElementById('videoFrameThreshold');
+const videoFrameMaxFrames = document.getElementById('videoFrameMaxFrames');
+const videoFrameStatus = document.getElementById('videoFrameStatus');
+const videoFrameProgress = document.getElementById('videoFrameProgress');
+const videoFrameSubmit = document.getElementById('videoFrameSubmit');
+const videoFrameCancel = document.getElementById('videoFrameCancel');
 let canvases = [];
 let deletedCanvases = [];
 let canvas = null;
@@ -411,6 +424,9 @@ let connections = [];
 let videoClipEditor = null;
 let videoClipHandleDrag = '';
 let videoClipOpenSequence = 0;
+let videoFrameEditor = null;
+let videoFrameOpenSequence = 0;
+let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
 let dragNode = null;
 let dragBoard = null;
@@ -15082,6 +15098,170 @@ async function submitVideoClip(){
     }
 }
 bindVideoClipEditorControls();
+function setVideoFrameStatus(message='', error=false){
+    if(!videoFrameStatus) return;
+    videoFrameStatus.textContent = message || '';
+    videoFrameStatus.classList.toggle('error', Boolean(error));
+}
+function setVideoFrameBusy(busy, message=''){
+    if(videoFrameEditor) videoFrameEditor.busy = Boolean(busy);
+    [videoFrameSubmit, videoFrameCancel, videoFrameStrategy, videoFrameInterval, videoFrameThreshold, videoFrameMaxFrames]
+        .forEach(element => { if(element) element.disabled = Boolean(busy); });
+    if(videoFrameProgress) videoFrameProgress.hidden = !busy;
+    if(message) setVideoFrameStatus(message);
+}
+function renderVideoFrameStrategies(items){
+    if(!videoFrameStrategy) return;
+    const strategies = Array.isArray(items) && items.length ? items : [
+        {value:'sceneAndInterval', label:'场景变化 + 固定间隔'}, {value:'intervalOnly', label:'固定时间间隔'},
+        {value:'perFrame', label:'逐帧抽取'}, {value:'highFidelity', label:'高保真间隔'}
+    ];
+    videoFrameStrategy.innerHTML = strategies.map(item => `<option value="${escapeAttr(item.value)}">${escapeHtml(item.label || item.value)}</option>`).join('');
+    videoFrameStrategy.value = 'sceneAndInterval';
+}
+function updateVideoFrameMetadata(metadata){
+    if(!videoFrameMetadata) return;
+    if(!metadata){ videoFrameMetadata.textContent = '--'; return; }
+    const duration = formatVideoClipTime(Number(metadata.duration || 0));
+    const fps = Number(metadata.fps || metadata.frame_rate || 0);
+    videoFrameMetadata.textContent = `${metadata.display_size || `${metadata.width || 0}×${metadata.height || 0}`} · ${duration} · ${fps ? `${fps.toFixed(2)}fps` : '帧率未知'}`;
+}
+function closeVideoFrameExtractor(force=false){
+    if(videoFrameEditor?.busy && !force) return;
+    videoFrameOpenSequence += 1;
+    if(videoFramePollTimer){ clearTimeout(videoFramePollTimer); videoFramePollTimer = null; }
+    videoFramePreview?.pause();
+    videoFramePreview?.removeAttribute('src');
+    videoFramePreview?.load();
+    videoFrameModal?.classList.remove('open');
+    videoFrameModal?.setAttribute('aria-hidden', 'true');
+    videoFrameEditor = null;
+    setVideoFrameBusy(false);
+    setVideoFrameStatus('');
+}
+async function openVideoFrameExtractor(nodeId){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node || mediaKindForNode(node) !== 'video' || !node.url || !canvas?.id) return;
+    closeVideoClipEditor();
+    videoFrameOpenSequence += 1;
+    const sequence = videoFrameOpenSequence;
+    videoFrameEditor = {nodeId:node.id, sourceUrl:node.url, busy:false, taskId:'', result:null};
+    if(videoFrameSourceName) videoFrameSourceName.textContent = node.name || outputImageName(node.url) || '视频';
+    if(videoFramePreview){ videoFramePreview.src = node.url; videoFramePreview.load(); }
+    if(videoFrameLoading) videoFrameLoading.classList.remove('hidden');
+    if(videoFrameProgress) videoFrameProgress.hidden = true;
+    if(videoFrameSubmit) videoFrameSubmit.disabled = false;
+    setVideoFrameStatus('正在读取视频信息...');
+    videoFrameModal?.classList.add('open');
+    videoFrameModal?.setAttribute('aria-hidden', 'false');
+    refreshIcons();
+    try {
+        const [capabilityResponse, probeResponse] = await Promise.all([
+            fetch('/api/canvas-tools/video-frames/capabilities'),
+            fetch('/api/canvas-tools/video-frames/probe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:node.url})})
+        ]);
+        if(sequence !== videoFrameOpenSequence || !videoFrameEditor) return;
+        if(!capabilityResponse.ok) throw new Error(await responseErrorMessage(capabilityResponse, '无法读取抽帧能力'));
+        if(!probeResponse.ok) throw new Error(await responseErrorMessage(probeResponse, '无法读取视频信息'));
+        const capabilities = await capabilityResponse.json();
+        const metadata = await probeResponse.json();
+        renderVideoFrameStrategies(capabilities.strategies);
+        updateVideoFrameMetadata(metadata);
+        videoFrameEditor.metadata = metadata;
+        if(videoFrameInterval) videoFrameInterval.value = String(capabilities.default_interval_seconds || 1);
+        if(videoFrameThreshold) videoFrameThreshold.value = String(capabilities.default_scene_threshold ?? .3);
+        if(videoFrameMaxFrames) videoFrameMaxFrames.value = String(Math.min(300, Number(capabilities.max_frames || 300)));
+        if(videoFrameLoading) videoFrameLoading.classList.add('hidden');
+        setVideoFrameStatus('请选择抽帧方法后开始。');
+    } catch(error) {
+        if(sequence !== videoFrameOpenSequence) return;
+        if(videoFrameLoading) videoFrameLoading.classList.add('hidden');
+        setVideoFrameStatus(error.message || '无法打开视频抽帧器', true);
+        if(videoFrameSubmit) videoFrameSubmit.disabled = true;
+    }
+}
+function setVideoFrameProgress(value){
+    const percent = Math.max(0, Math.min(1, Number(value) || 0));
+    if(videoFrameProgress) videoFrameProgress.style.setProperty('--video-frame-progress', `${Math.round(percent * 100)}%`);
+}
+async function pollVideoFrameTask(taskId, sequence){
+    if(!taskId || sequence !== videoFrameOpenSequence || !videoFrameEditor) return;
+    try {
+        const response = await fetch(`/api/canvas-video-frame-tasks/${encodeURIComponent(taskId)}`);
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '查询抽帧任务失败'));
+        const task = await response.json();
+        if(sequence !== videoFrameOpenSequence || !videoFrameEditor) return;
+        setVideoFrameProgress(task.progress || 0);
+        if(task.status === 'succeeded'){
+            videoFrameEditor.busy = false;
+            videoFrameEditor.result = task.result || null;
+            setVideoFrameBusy(false);
+            setVideoFrameProgress(1);
+            setVideoFrameStatus(`抽帧完成，共 ${Number(task.result?.frame_count || 0)} 帧。`);
+            if(videoFrameSubmit) videoFrameSubmit.disabled = true;
+            return;
+        }
+        if(task.status === 'cancelled'){
+            setVideoFrameBusy(false);
+            setVideoFrameStatus('抽帧已取消。');
+            return;
+        }
+        if(task.status === 'failed'){
+            setVideoFrameBusy(false);
+            setVideoFrameStatus(task.error || '视频抽帧失败', true);
+            return;
+        }
+        setVideoFrameStatus(task.status === 'running' ? '正在抽取视频帧...' : '任务排队中...');
+        videoFramePollTimer = setTimeout(() => pollVideoFrameTask(taskId, sequence), 650);
+    } catch(error) {
+        if(sequence !== videoFrameOpenSequence) return;
+        setVideoFrameBusy(false);
+        setVideoFrameStatus(error.message || '查询抽帧任务失败', true);
+    }
+}
+async function submitVideoFrameExtraction(){
+    const state = videoFrameEditor;
+    const sourceNode = nodes.find(item => item.id === state?.nodeId);
+    if(!state || !sourceNode || state.busy || !canvas?.id) return;
+    const interval = Number(videoFrameInterval?.value || 1);
+    const threshold = Number(videoFrameThreshold?.value || .3);
+    const maxFrames = Number(videoFrameMaxFrames?.value || 300);
+    if(!Number.isFinite(interval) || interval <= 0 || !Number.isFinite(maxFrames) || maxFrames < 1){
+        setVideoFrameStatus('抽帧参数无效，请检查间隔和最大帧数。', true);
+        return;
+    }
+    try {
+        setVideoFrameBusy(true, '正在提交视频抽帧任务...');
+        const response = await fetch('/api/canvas-video-frame-tasks', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({canvas_id:canvas.id, node_id:sourceNode.id, source_url:state.sourceUrl,
+                strategy:videoFrameStrategy?.value || 'sceneAndInterval', interval_seconds:interval,
+                scene_threshold:threshold, max_frames:Math.round(maxFrames)})
+        });
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '视频抽帧失败'));
+        const result = await response.json();
+        state.taskId = result.task_id || '';
+        if(!state.taskId) throw new Error('视频抽帧任务未返回任务 ID');
+        pollVideoFrameTask(state.taskId, videoFrameOpenSequence);
+    } catch(error) {
+        setVideoFrameBusy(false);
+        setVideoFrameStatus(error.message || '视频抽帧失败', true);
+    }
+}
+async function cancelVideoFrameExtraction(){
+    const state = videoFrameEditor;
+    if(!state?.taskId){ closeVideoFrameExtractor(true); return; }
+    try { await fetch(`/api/canvas-video-frame-tasks/${encodeURIComponent(state.taskId)}/cancel`, {method:'POST'}); } catch(error) {}
+    closeVideoFrameExtractor(true);
+}
+function bindVideoFrameExtractorControls(){
+    videoFrameSubmit?.addEventListener('click', submitVideoFrameExtraction);
+    videoFrameCancel?.addEventListener('click', cancelVideoFrameExtraction);
+    videoFrameStrategy?.addEventListener('change', () => {
+        if(videoFrameEditor && !videoFrameEditor.busy) setVideoFrameStatus('参数已更新，点击视频抽帧开始。');
+    });
+}
+bindVideoFrameExtractorControls();
 function renderSelectionHub(){
     selectionHub.innerHTML = '';
     selectionHub.classList.remove('open');
@@ -15113,6 +15293,7 @@ function renderSelectionHub(){
         return;
     }
     const actions = target.mediaKind === 'video' ? [
+        {id:'extract-video', label:langIsEn() ? 'Extract frames' : '视频抽帧', icon:'images'},
         {id:'trim-video', label:langIsEn() ? 'Trim video' : '视频截取', icon:'scissors'},
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
@@ -15199,6 +15380,10 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'extract-video'){
+        openVideoFrameExtractor(target.nodeId);
+        return;
+    }
     if(action === 'trim-video'){
         openVideoClipEditor(target.nodeId);
         return;
@@ -16529,6 +16714,10 @@ window.addEventListener('paste', e => {
 window.addEventListener('keydown', e => {
     if(!canvas) return;
     const key = String(e.key || '').toLowerCase();
+    if(videoFrameModal?.classList.contains('open')){
+        if(e.key === 'Escape') cancelVideoFrameExtraction();
+        return;
+    }
     if(videoClipModal?.classList.contains('open')){
         if(e.key === 'Escape') closeVideoClipEditor();
         return;

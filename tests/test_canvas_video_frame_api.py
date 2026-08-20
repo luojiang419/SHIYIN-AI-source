@@ -34,6 +34,15 @@ class CanvasVideoFrameApiTests(unittest.TestCase):
         self.assertIn("kind:'derived'", javascript)
         self.assertIn("sourceNode.x + sourceRect.w + 120", javascript)
 
+    def test_group_menu_offers_expansion_and_line_art_transformations(self):
+        javascript = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        self.assertIn("id:'expand-canvas'", javascript)
+        self.assertIn("id:'line-art'", javascript)
+        self.assertIn("function runGroupTransformation", javascript)
+        self.assertIn("将参考视频帧扩展为16:9横屏构图", javascript)
+        self.assertIn("专业电影分镜线稿", javascript)
+        self.assertIn("derivedFromGroupId", javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15105,6 +15105,110 @@ function createVideoFrameGroupFromResult(result, sourceNode){
     selected.add(group.id);
     return group;
 }
+function removeGroupTransformationResults(sourceGroupId, operation=''){
+    const removeGroups = nodes.filter(node => node?.type === 'group' && String(node.derivedFromGroupId || '') === String(sourceGroupId || '')
+        && (!operation || String(node.derivedOperation || '') === operation));
+    const removeIds = new Set(removeGroups.map(group => group.id));
+    removeGroups.forEach(group => (group.items || []).forEach(id => removeIds.add(id)));
+    nodes.filter(node => String(node.derivedFromGroupId || '') === String(sourceGroupId || '')
+        && (!operation || String(node.derivedOperation || '') === operation)).forEach(node => removeIds.add(node.id));
+    if(!removeIds.size) return false;
+    nodes = nodes.filter(node => !removeIds.has(node.id));
+    connections = connections.filter(connection => !removeIds.has(connection.from) && !removeIds.has(connection.to));
+    [...selected].forEach(id => { if(removeIds.has(id)) selected.delete(id); });
+    return true;
+}
+function transformationPrompt(operation){
+    if(operation === 'expand-canvas') return '将参考视频帧扩展为16:9横屏构图，保留原主体、人物动作、镜头景别、光线和视觉风格，使用自然延展的背景补全左右画幅，不裁切主体，不添加文字、水印或新人物。';
+    return '将参考视频帧转换为专业电影分镜线稿：黑白铅笔与墨线质感，保留原构图、人物动作、镜头景别、关键道具和空间关系，画面干净清晰，适合导演分镜稿，不要颜色、文字、水印或无关细节。';
+}
+async function transformStoryboardFrame(frame, operation, providerId, model, index){
+    const payload = {
+        prompt:transformationPrompt(operation),
+        provider_id:resolveImageProviderId(providerId),
+        model:resolveImageModel(model),
+        size:apiImageSize('custom', '2k', '16:9', ''),
+        quality:'high',
+        reference_images:[{url:frame.url, name:frame.name || `frame-${index + 1}.png`, kind:'image'}]
+    };
+    const task = await createCanvasImageTask(payload);
+    const result = await waitCanvasImageTaskResult(task.task_id);
+    const raw = result?.images?.[0] || result?.image_items?.[0] || resultMediaUrls(result)[0];
+    const url = outputUrlValue(raw);
+    if(!url) throw new Error('图像衍生任务没有返回图片');
+    return {url, name:raw && typeof raw === 'object' ? (raw.name || `${operation}-${index + 1}.png`) : `${operation}-${index + 1}.png`, kind:'image'};
+}
+function createStoryboardTransformationGroup(sourceGroup, items, operation){
+    const frames = (items || []).filter(item => item?.url);
+    if(!sourceGroup || !frames.length) return null;
+    const sourceRect = nodeRect(sourceGroup);
+    const cardW = 260, cardH = 336, gap = 24, cols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(frames.length))));
+    const rows = Math.ceil(frames.length / cols);
+    const base = {x:Math.round(sourceGroup.x + sourceRect.w + 120), y:Math.round(sourceGroup.y)};
+    const imageNodes = frames.map((frame, index) => {
+        const col = index % cols, row = Math.floor(index / cols);
+        const node = {
+            id:uid('derived'), type:'image', mediaKind:'image',
+            x:base.x + 24 + col * (cardW + gap), y:base.y + 58 + row * (cardH + gap),
+            w:cardW, h:cardH, url:frame.url, name:frame.name || `${operation}-${index + 1}.png`,
+            derivedFromGroupId:sourceGroup.id, derivedOperation:operation,
+            derivedFromNodeId:sourceGroup.derivedFromNodeId || '', sourceVideoNodeId:sourceGroup.derivedFromNodeId || '',
+            frameIndex:Number(frame.frameIndex ?? index), timestampMs:Number(frame.timestampMs || 0)
+        };
+        nodes.push(node);
+        return node;
+    });
+    const group = {
+        id:uid('grp'), type:'group', x:base.x, y:base.y,
+        w:cols * cardW + (cols - 1) * gap + 48, h:rows * cardH + (rows - 1) * gap + 90,
+        items:imageNodes.map(node => node.id), derivedOperation:operation,
+        derivedFromGroupId:sourceGroup.id, derivedFromNodeId:sourceGroup.derivedFromNodeId || '',
+        derivedFromUrl:sourceGroup.derivedFromUrl || '', frameCount:imageNodes.length,
+        sourceGroupOperation:sourceGroup.derivedOperation || ''
+    };
+    nodes.push(group);
+    connections.push({id:uid('c'), from:sourceGroup.id, to:group.id, kind:'derived', derivedOperation:operation});
+    selected.clear();
+    selected.add(group.id);
+    return group;
+}
+async function runGroupTransformation(operation, groupId){
+    const group = nodes.find(node => node.id === groupId && node.type === 'group');
+    const frames = groupImageItems(group);
+    if(!group || !frames.length || group._transformRunning) return;
+    const providerId = imageApiProviders()[0]?.id || '';
+    const model = allImageModels(providerId)[0] || '';
+    if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型', '生成衍生分镜'); return; }
+    pushUndo();
+    removeGroupTransformationResults(group.id, operation);
+    group._transformRunning = true;
+    render();
+    setStatus(operation === 'expand-canvas' ? '正在扩展画幅...' : '正在生成线稿分镜...');
+    try {
+        const results = [];
+        const concurrency = 3;
+        let cursor = 0;
+        const worker = async () => {
+            while(cursor < frames.length){
+                const index = cursor++;
+                const result = await transformStoryboardFrame(frames[index], operation, providerId, model, index);
+                results[index] = {...result, frameIndex:frames[index].__index ?? index, timestampMs:Number((nodes.find(node => node.id === frames[index].nodeId)?.timestampMs) || 0)};
+                setStatus(`${operation === 'expand-canvas' ? '扩展画幅' : '线稿分镜'} ${index + 1}/${frames.length}`);
+            }
+        };
+        await Promise.all(Array.from({length:Math.min(concurrency, frames.length)}, worker));
+        group._transformRunning = false;
+        createStoryboardTransformationGroup(group, results, operation);
+        render();
+        scheduleSave();
+        setStatus(operation === 'expand-canvas' ? `已生成 ${results.length} 张 16:9 扩展画幅` : `已生成 ${results.length} 张线稿分镜`);
+    } catch(error) {
+        group._transformRunning = false;
+        render();
+        setStatus('Ready');
+        showErrorModal(error.message || '生成衍生分镜失败', '生成衍生分镜');
+    }
+}
 function addVideoClipNodeFromResult(result, sourceNode){
     const sourceRect = nodeRect(sourceNode);
     const clip = {
@@ -15351,11 +15455,18 @@ function renderSelectionHub(){
         anchor = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .image-preview-wrap`);
         if(anchor) target = {kind:'node', mediaKind:mediaKindForNode(node), nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)};
     }
+    if(!target && node.type === 'group' && groupImageItems(node).length){
+        anchor = nodesEl.querySelector(`.group-node[data-id="${CSS.escape(node.id)}"]`);
+        if(anchor) target = {kind:'group', nodeId:node.id, name:'GROUP'};
+    }
     if(!target || !anchor){
         selectedOutputMedia = null;
         return;
     }
-    const actions = target.mediaKind === 'video' ? [
+    const actions = target.kind === 'group' ? [
+        {id:'expand-canvas', label:langIsEn() ? 'Expand canvas' : '扩展画幅', icon:'expand'},
+        {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'}
+    ] : target.mediaKind === 'video' ? [
         {id:'extract-video', label:langIsEn() ? 'Extract frames' : '视频抽帧', icon:'images'},
         {id:'trim-video', label:langIsEn() ? 'Trim video' : '视频截取', icon:'scissors'},
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
@@ -15443,6 +15554,10 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'expand-canvas' || action === 'line-art'){
+        runGroupTransformation(action, target?.nodeId);
+        return;
+    }
     if(action === 'extract-video'){
         openVideoFrameExtractor(target.nodeId);
         return;

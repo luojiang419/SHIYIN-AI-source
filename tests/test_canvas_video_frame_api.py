@@ -26,6 +26,14 @@ class CanvasVideoFrameApiTests(unittest.TestCase):
         for field in ("source_video_url", "source_video_node_id", "extract_run_id", "derived_operation"):
             self.assertIn(f'"{field}"', self.source)
 
+    def test_frontend_creates_right_side_derived_group_and_cleans_old_results(self):
+        javascript = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        self.assertIn("function removeVideoFrameDerivedResults", javascript)
+        self.assertIn("function createVideoFrameGroupFromResult", javascript)
+        self.assertIn("derivedOperation:'video-frame-extraction'", javascript)
+        self.assertIn("kind:'derived'", javascript)
+        self.assertIn("sourceNode.x + sourceRect.w + 120", javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

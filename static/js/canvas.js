@@ -15052,6 +15052,59 @@ function closeVideoClipEditor(){
     if(videoClipSubmit) videoClipSubmit.disabled = false;
     videoClipEditor = null;
 }
+function removeVideoFrameDerivedResults(sourceNodeId){
+    const sourceId = String(sourceNodeId || '');
+    if(!sourceId) return false;
+    const derivedGroups = nodes.filter(node => node?.type === 'group' && (
+        String(node.derivedOperation || '') === 'video-frame-extraction' && String(node.derivedFromNodeId || '') === sourceId
+    ));
+    const removeIds = new Set(derivedGroups.map(group => group.id));
+    derivedGroups.forEach(group => (group.items || []).forEach(id => removeIds.add(id)));
+    nodes.filter(node => String(node?.sourceVideoNodeId || '') === sourceId && node?.derivedOperation === 'video-frame-extraction')
+        .forEach(node => removeIds.add(node.id));
+    if(!removeIds.size) return false;
+    nodes = nodes.filter(node => !removeIds.has(node.id));
+    connections = connections.filter(connection => !removeIds.has(connection.from) && !removeIds.has(connection.to));
+    [...selected].forEach(id => { if(removeIds.has(id)) selected.delete(id); });
+    return true;
+}
+function createVideoFrameGroupFromResult(result, sourceNode){
+    const frames = (result?.frames || []).filter(frame => frame?.url && !isMissingAssetUrl(frame.url));
+    if(!sourceNode || !frames.length) return null;
+    const sourceRect = nodeRect(sourceNode);
+    const cardW = 260, cardH = 336, gap = 24, cols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(frames.length))));
+    const rows = Math.ceil(frames.length / cols);
+    const base = {x:Math.round(sourceNode.x + sourceRect.w + 120), y:Math.round(sourceNode.y)};
+    const imageNodes = frames.map((frame, index) => {
+        const col = index % cols, row = Math.floor(index / cols);
+        const image = {
+            id:uid('frame'), type:'image', mediaKind:'image',
+            x:base.x + 24 + col * (cardW + gap), y:base.y + 58 + row * (cardH + gap),
+            w:cardW, h:cardH, url:frame.url,
+            name:`${sourceNode.name || '视频'} · ${formatVideoClipTime(Number(frame.timestamp || 0))} · ${String(index + 1).padStart(2, '0')}`,
+            natural_w:Number(frame.width || 0), natural_h:Number(frame.height || 0),
+            sourceVideoNodeId:sourceNode.id, sourceVideoUrl:sourceNode.url,
+            extractRunId:result.run_id || '', frameIndex:Number(frame.index ?? index),
+            timestampMs:Number(frame.timestamp_ms || 0), derivedOperation:'video-frame-extraction'
+        };
+        nodes.push(image);
+        return image;
+    });
+    const group = {
+        id:uid('grp'), type:'group', x:base.x, y:base.y,
+        w:cols * cardW + (cols - 1) * gap + 48,
+        h:rows * cardH + (rows - 1) * gap + 90,
+        items:imageNodes.map(image => image.id),
+        derivedOperation:'video-frame-extraction', derivedFromNodeId:sourceNode.id,
+        derivedFromUrl:sourceNode.url, extractRunId:result.run_id || '',
+        strategy:result.strategy || '', frameCount:imageNodes.length
+    };
+    nodes.push(group);
+    connections.push({id:uid('c'), from:sourceNode.id, to:group.id, kind:'derived', derivedOperation:'video-frame-extraction'});
+    selected.clear();
+    selected.add(group.id);
+    return group;
+}
 function addVideoClipNodeFromResult(result, sourceNode){
     const sourceRect = nodeRect(sourceNode);
     const clip = {
@@ -15195,6 +15248,12 @@ async function pollVideoFrameTask(taskId, sequence){
         if(task.status === 'succeeded'){
             videoFrameEditor.busy = false;
             videoFrameEditor.result = task.result || null;
+            const sourceNode = nodes.find(item => item.id === videoFrameEditor.nodeId);
+            if(sourceNode && task.result?.frames?.length){
+                createVideoFrameGroupFromResult(task.result, sourceNode);
+                render();
+                scheduleSave();
+            }
             setVideoFrameBusy(false);
             setVideoFrameProgress(1);
             setVideoFrameStatus(`抽帧完成，共 ${Number(task.result?.frame_count || 0)} 帧。`);
@@ -15231,6 +15290,10 @@ async function submitVideoFrameExtraction(){
         return;
     }
     try {
+        pushUndo();
+        removeVideoFrameDerivedResults(sourceNode.id);
+        render();
+        scheduleSave();
         setVideoFrameBusy(true, '正在提交视频抽帧任务...');
         const response = await fetch('/api/canvas-video-frame-tasks', {
             method:'POST', headers:{'Content-Type':'application/json'},

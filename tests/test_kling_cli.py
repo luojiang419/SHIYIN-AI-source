@@ -390,6 +390,56 @@ class KlingCliTests(unittest.TestCase):
                 parameters={"duration": "8"},
             )
 
+    def test_skillhub_video_reference_uses_public_url_and_parses_text_output(self):
+        calls = []
+        responses = [
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="Task ID / 任务 ID: skill-task-1\nQuery / 查询: node kling.mjs video --task_id skill-task-1\n",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="Task ID / 任务 ID: skill-task-1\nStatus / 状态: succeed\nVideo URL / 视频链接: https://cdn.example/skill.mp4\n",
+                stderr="",
+            ),
+        ]
+
+        def runner(executable, arguments, **kwargs):
+            calls.append((executable, list(arguments)))
+            return responses.pop(0)
+
+        service = KlingCliService(
+            environment=KlingCliEnvironment(
+                node_path="node.exe",
+                kling_path="kling.cmd",
+                entrypoint_path="legacy.js",
+                skill_entrypoint_path="C:/skills/kling.mjs",
+                version="0.1.3",
+            ),
+            runner=runner,
+            sleeper=lambda _: None,
+        )
+        result = service.generate(
+            command="text_to_video",
+            model={"model": "kling-video-v3_0_omni", "arguments": []},
+            prompt="参考视频动作",
+            images=[],
+            videos=["http://64.90.17.178:18080/clip/a/c/c.mp4"],
+            parameters={"duration": "5", "video_refer_type": "feature"},
+            timeout_seconds=30,
+        )
+
+        self.assertEqual(result["generation_id"], "skill-task-1")
+        self.assertEqual(result["url"], "https://cdn.example/skill.mp4")
+        self.assertEqual(calls[0][0], "node.exe")
+        self.assertEqual(calls[0][1][:3], ["C:/skills/kling.mjs", "video", "--no-wait"])
+        self.assertIn("kling-v3-omni", calls[0][1])
+        self.assertIn("--video_refer_type", calls[0][1])
+        self.assertIn("feature", calls[0][1])
+
 
 if __name__ == "__main__":
     unittest.main()

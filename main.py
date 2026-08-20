@@ -383,7 +383,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.183"
+APP_VERSION = "1.0.184"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -15699,6 +15699,11 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             command = "image_to_video" if images else "text_to_video"
             models = capabilities.get(command) or []
             model = next((item for item in models if str(item.get("model") or "") == str(payload.model or "")), None)
+            if payload.videos and environment.skill_ready and not model:
+                model = {
+                    "model": str(payload.model or "kling-v3-omni"),
+                    "arguments": [],
+                }
             if not model:
                 raise HTTPException(
                     status_code=400,
@@ -15723,6 +15728,10 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             for key, value in defaults.items():
                 if key in parameter_names and key not in parameters and value:
                     parameters[key] = value
+            if payload.videos and environment.skill_ready:
+                parameters["video_refer_type"] = str(
+                    (payload.model_parameters or {}).get("video_refer_type") or "feature"
+                ).strip().lower() or "feature"
             invoke = service.submit if submit_only else service.generate
             invoke_kwargs = {
                 "command": command,
@@ -15755,17 +15764,23 @@ async def submit_kling_cli_video(payload: CanvasVideoRequest):
             "model": payload.model,
             "parameters": parameters,
             "image_count": len(payload.images or []),
+            "skill_reference_runtime": bool(payload.videos),
         },
     }
 
 
-async def query_kling_cli_video(generation_id: str, service: Optional[KlingCliService] = None):
+async def query_kling_cli_video(
+    generation_id: str,
+    service: Optional[KlingCliService] = None,
+    *,
+    use_skill: bool = False,
+):
     if service is None:
         environment = await asyncio.to_thread(resolve_kling_cli)
         if not environment.is_ready:
             raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪")
         service = KlingCliService(environment)
-    return await asyncio.to_thread(service.query, generation_id, timeout=120)
+    return await asyncio.to_thread(service.query, generation_id, timeout=120, use_skill=use_skill)
 
 
 async def generate_kling_cli_video(payload: CanvasVideoRequest):
@@ -16383,7 +16398,8 @@ async def query_canvas_video_upstream(task: Dict[str, Any], *, kling_service: Op
             if not environment.is_ready:
                 raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪")
             kling_service = KlingCliService(environment)
-        queried = await query_kling_cli_video(upstream_task_id, kling_service)
+        use_skill = bool((task.get("request") or {}).get("skill_reference_runtime"))
+        queried = await query_kling_cli_video(upstream_task_id, kling_service, use_skill=use_skill)
         status = str(queried.get("status") or "").lower()
         url = str(queried.get("url") or "").strip()
         if url and status in {"", "completed", "partial_completed", "succeed", "succeeded", "success", "done"}:
@@ -16607,6 +16623,10 @@ def can_manage_kling_cli(request: Request) -> bool:
 async def kling_cli_capabilities(request: Request):
     can_manage = can_manage_kling_cli(request)
     environment = await asyncio.to_thread(resolve_kling_cli)
+    skill_runtime = {
+        "installed": environment.skill_ready,
+        "version": "1.1.0" if environment.skill_ready else "",
+    }
     if not environment.is_ready:
         return {
             "installed": False,
@@ -16614,6 +16634,7 @@ async def kling_cli_capabilities(request: Request):
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
+            "skill_reference_runtime": skill_runtime,
             "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": environment.error_message,
         }
@@ -16626,6 +16647,7 @@ async def kling_cli_capabilities(request: Request):
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
+            "skill_reference_runtime": skill_runtime,
             "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": str(exc),
         }
@@ -16635,6 +16657,7 @@ async def kling_cli_capabilities(request: Request):
         "generation_enabled": True,
         "can_manage": can_manage,
         "version": environment.version,
+        "skill_reference_runtime": skill_runtime,
         "capabilities": capabilities,
         "error": "",
     }

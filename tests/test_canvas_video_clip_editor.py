@@ -82,6 +82,12 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn("video_reference_message", self.javascript)
         self.assertIn("当前可灵 CLI 尚未提供 element_create 执行命令", self.javascript)
         self.assertIn("if(isKling && videoRefs.length && !Boolean(klingCliState.capabilities?.video_reference_supported))", self.javascript)
+        self.assertIn("let out = outputForNode(node, 460);\n    if(isKling", self.javascript)
+
+    def test_undoing_clip_creation_releases_removed_asset(self):
+        self.assertIn("const previousNodes = nodes", self.javascript)
+        self.assertIn("const removedVideoClipNodes = previousNodes.filter", self.javascript)
+        self.assertIn("queueReleasedVideoClipAssets(removedVideoClipNodes)", self.javascript)
 
 
 if __name__ == "__main__":

@@ -11713,6 +11713,7 @@ async function runVideoNode(nodeId, opts={}){
     const videoRefs = videoRefsOnly(mediaRefs);
     const audioRefs = audioRefsOnly(mediaRefs);
     const persistentVideoTask = isH3 || isKling;
+    let out = outputForNode(node, 460);
     if(isKling && videoRefs.length && !Boolean(klingCliState.capabilities?.video_reference_supported)){
         const message = String(
             klingCliState.capabilities?.video_reference_message
@@ -11728,7 +11729,6 @@ async function runVideoNode(nodeId, opts={}){
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
     if(!prompt){ alert(tr('canvas.videoNeedsPrompt')); return; }
-    let out = outputForNode(node, 460);
     const pendingId = uid('p');
     const canvasVideoTaskId = persistentVideoTask ? `canvas_video_${uid('task')}` : '';
     const run = runSnapshot(node, prompt, refs);
@@ -15262,11 +15262,18 @@ function pushUndo(){
 function performUndo(){
     if(!canvas || !undoStack.length) return;
     const state = undoStack.pop();
+    const previousNodes = nodes;
+    const restoredAssets = new Set((state.nodes || []).map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
+    const removedVideoClipNodes = previousNodes.filter(node => {
+        const asset = ownedVideoClipAsset(node);
+        return asset && !restoredAssets.has(videoClipAssetKey(asset));
+    });
     nodes = state.nodes;
     connections = state.connections;
     selected.clear();
     render();
     scheduleSave();
+    queueReleasedVideoClipAssets(removedVideoClipNodes);
 }
 function cloneNode(n, dx, dy){
     const copy = JSON.parse(JSON.stringify(serializableCanvasNode(n)));

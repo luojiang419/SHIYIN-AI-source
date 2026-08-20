@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -275,3 +276,54 @@ def purge_canvas_video_clips(media_generated_root: str | Path, canvas_id: str) -
     if existed:
         shutil.rmtree(directory)
     return existed
+
+
+def reconcile_video_clip_assets(
+    media_generated_root: str | Path,
+    canvases: Sequence[Mapping[str, Any]],
+    *,
+    min_age_seconds: float = 600,
+) -> int:
+    """Remove old clip files no longer referenced by saved canvas nodes."""
+    root = Path(media_generated_root).resolve()
+    canvases_root = (root / "canvases").resolve()
+    if not canvases_root.is_dir():
+        return 0
+    referenced: set[tuple[str, str]] = set()
+    for canvas in canvases or []:
+        canvas_id = str(canvas.get("id") or "").strip()
+        if not canvas_id:
+            continue
+        for node in canvas.get("nodes") or []:
+            if not isinstance(node, Mapping):
+                continue
+            if str(node.get("assetOwner") or "") != "videoClip":
+                continue
+            clip_canvas_id = str(node.get("clipCanvasId") or canvas_id).strip()
+            clip_id = str(node.get("clipId") or "").strip()
+            if clip_canvas_id and clip_id:
+                referenced.add((clip_canvas_id, clip_id))
+    cutoff = time.time() - max(0.0, float(min_age_seconds))
+    removed = 0
+    for directory in canvases_root.iterdir():
+        if not directory.is_dir():
+            continue
+        canvas_id = directory.name
+        clips_directory = (directory / "video-clips").resolve()
+        if clips_directory.parent != directory or not clips_directory.is_dir():
+            continue
+        for clip_path in clips_directory.glob("*.mp4"):
+            clip_id = clip_path.stem
+            try:
+                if (canvas_id, clip_id) in referenced or clip_path.stat().st_mtime > cutoff:
+                    continue
+                clip_path.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                continue
+        try:
+            clips_directory.rmdir()
+            directory.rmdir()
+        except OSError:
+            pass
+    return removed

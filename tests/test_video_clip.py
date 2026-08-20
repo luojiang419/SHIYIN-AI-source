@@ -1,6 +1,8 @@
 import json
+import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from canvas_core.video_clip import (
     delete_video_clip,
     output_dimensions,
     parse_video_probe,
+    reconcile_video_clip_assets,
     validate_clip_range,
 )
 
@@ -95,6 +98,29 @@ class VideoClipTests(unittest.TestCase):
             with self.assertRaises(VideoClipError):
                 delete_video_clip(root / "generated", "canvas_1", "../source")
 
+    def test_reconcile_removes_old_orphan_and_keeps_referenced_or_recent_clips(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            generated = Path(temp_dir) / "generated"
+            clip_dir = generated / "canvases" / "canvas_1" / "video-clips"
+            clip_dir.mkdir(parents=True)
+            referenced = clip_dir / "clip_keep.mp4"
+            orphan = clip_dir / "clip_orphan.mp4"
+            recent = clip_dir / "clip_recent.mp4"
+            for path in (referenced, orphan, recent):
+                path.write_bytes(b"video")
+            old_time = time.time() - 3600
+            os.utime(orphan, (old_time, old_time))
+            os.utime(referenced, (old_time, old_time))
+            removed = reconcile_video_clip_assets(
+                generated,
+                [{"id": "canvas_1", "nodes": [{"assetOwner": "videoClip", "clipId": "clip_keep"}]}],
+                min_age_seconds=600,
+            )
+            self.assertEqual(removed, 1)
+            self.assertFalse(orphan.exists())
+            self.assertTrue(referenced.exists())
+            self.assertTrue(recent.exists())
+
     def test_backend_exposes_clip_lifecycle_endpoints(self):
         main_source = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
         self.assertIn('@app.get("/api/canvas-tools/video-clip/capabilities")', main_source)
@@ -102,6 +128,7 @@ class VideoClipTests(unittest.TestCase):
         self.assertIn('@app.post("/api/canvas-tools/video-clip/create")', main_source)
         self.assertIn('@app.post("/api/canvas-tools/video-clip/delete")', main_source)
         self.assertIn("purge_canvas_video_clips", main_source)
+        self.assertIn("reconcile_video_clip_assets", main_source)
 
 
 if __name__ == "__main__":

@@ -82,6 +82,7 @@ from canvas_core.video_clip import (
     delete_video_clip,
     probe_video as probe_clip_video,
     purge_canvas_video_clips,
+    reconcile_video_clip_assets,
     resolve_video_clip_tools,
 )
 from canvas_core.kling_cli import (
@@ -374,7 +375,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.180"
+APP_VERSION = "1.0.181"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -415,6 +416,10 @@ async def run_deferred_startup_maintenance():
         ("image_extension_migration", migrate_mislabeled_image_extensions),
         ("work_index", lambda: DATABASE.ensure_work_items_indexed(work_metadata())),
         ("local_upload_index", ensure_local_upload_indexed),
+        ("video_clip_reconciliation", lambda: reconcile_video_clip_assets(
+            os.fspath(OUTPUT_OUTPUT_DIR),
+            DATABASE.list_canvases(include_deleted=None),
+        )),
     )
     failed = False
     try:

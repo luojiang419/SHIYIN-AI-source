@@ -60,6 +60,7 @@ class DeferredBackendMaintenanceTests(unittest.TestCase):
             "migrate_mislabeled_image_extensions",
             "DATABASE.ensure_work_items_indexed",
             "ensure_local_upload_indexed",
+            "reconcile_video_clip_assets",
         ):
             self.assertNotIn(operation, self.startup_body)
         self.assertIn(

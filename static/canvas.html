@@ -366,6 +366,50 @@
                 </div>
             </div>
         </div>
+        <div id="videoClipModal" class="video-clip-modal" aria-hidden="true" onclick="closeVideoClipEditor()">
+            <div class="video-clip-panel" role="dialog" aria-modal="true" aria-labelledby="videoClipTitle" onclick="event.stopPropagation()">
+                <div class="video-clip-head">
+                    <div>
+                        <strong id="videoClipTitle">视频截取</strong>
+                        <span id="videoClipSourceName">--</span>
+                    </div>
+                    <button class="preview-icon-btn" type="button" title="关闭" aria-label="关闭" onclick="closeVideoClipEditor()"><i data-lucide="x"></i></button>
+                </div>
+                <div class="video-clip-preview">
+                    <video id="videoClipPreview" preload="metadata" playsinline disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"></video>
+                    <div id="videoClipLoading" class="video-clip-loading"><i data-lucide="loader-2"></i><span>正在读取视频...</span></div>
+                </div>
+                <div class="video-clip-transport">
+                    <button id="videoClipJumpIn" type="button" title="跳到入点" aria-label="跳到入点"><i data-lucide="skip-back"></i></button>
+                    <button id="videoClipPlay" class="video-clip-play" type="button" title="播放" aria-label="播放"><i data-lucide="play"></i></button>
+                    <button id="videoClipJumpOut" type="button" title="跳到出点" aria-label="跳到出点"><i data-lucide="skip-forward"></i></button>
+                    <span id="videoClipCurrentTime" class="video-clip-current-time">00:00.000</span>
+                </div>
+                <div class="video-clip-timeline-wrap">
+                    <div id="videoClipTimeline" class="video-clip-timeline" role="slider" aria-label="视频截取时间轴" tabindex="0">
+                        <div class="video-clip-track"></div>
+                        <div id="videoClipSelection" class="video-clip-selection"></div>
+                        <div id="videoClipPlayhead" class="video-clip-playhead"></div>
+                        <button id="videoClipInHandle" class="video-clip-handle in" type="button" data-clip-handle="in" aria-label="拖拽入点"><span>I</span></button>
+                        <button id="videoClipOutHandle" class="video-clip-handle out" type="button" data-clip-handle="out" aria-label="拖拽出点"><span>O</span></button>
+                    </div>
+                    <div class="video-clip-time-row">
+                        <span>入点 <b id="videoClipInTime">00:00.000</b></span>
+                        <span>片段 <b id="videoClipDuration">00:00.000</b></span>
+                        <span>出点 <b id="videoClipOutTime">00:00.000</b></span>
+                    </div>
+                </div>
+                <div class="video-clip-settings">
+                    <label for="videoClipResolution"><span>截取分辨率</span><select id="videoClipResolution"><option value="1080p">1080P（推荐）</option><option value="720p">720P</option><option value="original">原始分辨率</option></select></label>
+                    <div id="videoClipOutputMeta" class="video-clip-output-meta">--</div>
+                </div>
+                <div class="video-clip-actions">
+                    <span id="videoClipStatus" class="video-clip-status"></span>
+                    <button class="video-clip-btn secondary" type="button" onclick="closeVideoClipEditor()">取消</button>
+                    <button id="videoClipSubmit" class="video-clip-btn primary" type="button" onclick="submitVideoClip()"><i data-lucide="scissors"></i><span>截取</span></button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.2"></script>

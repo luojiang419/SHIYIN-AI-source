@@ -20,6 +20,14 @@ def _slug(value: str, *, prefix: str) -> str:
     return f"{prefix}_{digest}"
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _selected_frames(manifest: Mapping[str, Any], selected_variant: str) -> tuple[str, list[dict[str, Any]]]:
     storyboard = manifest.get("storyboard") if isinstance(manifest.get("storyboard"), Mapping) else {}
     frames = storyboard.get("frames") if isinstance(storyboard.get("frames"), list) else []
@@ -61,19 +69,23 @@ def materialize_bridge_frames(
         raise BridgePackageError("桥接媒体目录跨越了不兼容的盘符。") from exc
     target.mkdir(parents=True, exist_ok=True)
     result: list[dict[str, Any]] = []
+    checksums = package.manifest.get("checksums") if isinstance(package.manifest.get("checksums"), Mapping) else {}
     for ordinal, frame in enumerate(frames):
         relative = str(frame.get("relative_path") or "").replace("\\", "/")
         source = package.files.get(relative)
         if source is None or not source.is_file():
             raise BridgePackageError(f"桥接图片缺失：{relative}")
         suffix = Path(relative).suffix.lower() or ".png"
-        destination = target / f"frame_{ordinal + 1:04d}{suffix}"
+        checksum = str(checksums.get(relative) or frame.get("sha256") or "").strip().lower() or _sha256(source)
+        stable_slug = _slug(str(frame.get("stable_id") or f"ordinal:{ordinal}"), prefix="frame")
+        destination = target / f"{stable_slug}_{checksum[:16]}{suffix}"
         partial = destination.with_suffix(destination.suffix + ".partial")
         shutil.copyfile(source, partial)
         os.replace(partial, destination)
         result.append({
             **frame,
             "variant": variant,
+            "sha256": checksum,
             "local_path": str(destination),
             "ordinal": ordinal,
         })

@@ -102,6 +102,7 @@ from canvas_core.video_frame_extraction import (
 from canvas_core.bridge_package import BridgePackageError, read_bridge_package, write_bridge_package
 from canvas_core.bridge_media import materialize_bridge_frames
 from canvas_core.bridge_export import build_shiyin_bridge_payload
+from canvas_core.bridge_sync import find_bridge_target, sync_film_bridge_canvas
 from canvas_core.kling_cli import (
     KlingCliError,
     KlingCliService,
@@ -394,7 +395,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.194"
+APP_VERSION = "1.0.195"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -11237,7 +11238,7 @@ async def import_film_bridge_package(
     selected_variant: str = Form(""),
     create_prompt_nodes: bool = Form(True),
 ):
-    """导入 filmstoryboard 标准桥接包；只落盘媒体，节点由前端以现有画布保存协议创建。"""
+    """导入 filmstoryboard 标准桥接包，并按 bridge/frame stable ID 增量更新目标画布。"""
     if not canvas_id.strip():
         raise HTTPException(status_code=400, detail="缺少目标画布。")
     load_canvas(canvas_id)
@@ -11293,6 +11294,16 @@ async def import_film_bridge_package(
             })
             frames.append(safe_frame)
         manifest = package.manifest
+        try:
+            sync_result = sync_film_bridge_canvas(
+                load_canvas(canvas_id),
+                package.manifest,
+                frames,
+                create_prompt_nodes=bool(create_prompt_nodes),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"桥接增量同步失败：{exc}") from exc
+        save_canvas(sync_result["canvas"])
         return {
             "bridge_id": manifest.get("bridge_id"),
             "direction": manifest.get("direction"),
@@ -11303,6 +11314,12 @@ async def import_film_bridge_package(
             "shots": manifest.get("shots") or [],
             "create_prompt_nodes": bool(create_prompt_nodes),
             "selected_variant": frames[0].get("variant") if frames else selected_variant or "original",
+            "canvas_id": canvas_id,
+            "group_id": sync_result["group"].get("id") or "",
+            "frame_count": len(sync_result["image_nodes"]),
+            "prompt_count": len(sync_result["prompt_nodes"]),
+            "sync_mode": sync_result["sync_mode"],
+            "sync_stats": sync_result["stats"],
         }
     finally:
         if package is not None:
@@ -11366,6 +11383,7 @@ async def film_bridge_capabilities(request: Request):
         "schema_version": 2,
         "port": RUNTIME_OPTIONS.port,
         "automatic_receive": True,
+        "incremental_sync": True,
         "file_fallback": True,
     }
 
@@ -11413,12 +11431,14 @@ async def receive_film_bridge_package(
         if package.manifest.get("direction") != "film-to-shiyin":
             raise HTTPException(status_code=400, detail="自动接收只支持 film-to-shiyin 桥接包。")
         storyboard = package.manifest.get("storyboard") or {}
-        source = package.manifest.get("source") or {}
+        bridge_id = str(package.manifest.get("bridge_id") or "").strip()
         if canvas_id.strip():
             canvas = load_canvas(canvas_id)
         else:
-            title = (canvas_title.strip() or str(storyboard.get("board_name") or "film 故事板").strip() or "film 故事板")[:80]
-            canvas = new_canvas(title=title, icon="clapperboard", kind="classic", project=DEFAULT_PROJECT_ID)
+            canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id)
+            if canvas is None:
+                title = (canvas_title.strip() or str(storyboard.get("board_name") or "film 故事板").strip() or "film 故事板")[:80]
+                canvas = new_canvas(title=title, icon="clapperboard", kind="classic", project=DEFAULT_PROJECT_ID)
         try:
             frame_records = await asyncio.to_thread(
                 materialize_bridge_frames,
@@ -11429,63 +11449,26 @@ async def receive_film_bridge_package(
             )
         except BridgePackageError as exc:
             raise HTTPException(status_code=400, detail=f"桥接图片导入失败：{exc}") from exc
-        existing_nodes = list(canvas.get("nodes") or [])
-        right_edge = max((float(node.get("x") or 0) + float(node.get("w") or 280) for node in existing_nodes), default=0)
-        base_x = right_edge + 120 if existing_nodes else 120
-        base_y = min((float(node.get("y") or 120) for node in existing_nodes), default=120)
-        cols = min(3, max(1, math.ceil(math.sqrt(len(frame_records)))))
-        gap_x, gap_y = 290, 250
-        image_nodes = []
+        sync_frames = []
         for index, frame in enumerate(frame_records):
             local_path = str(frame.get("local_path") or "")
             url = media_url_from_path(local_path)
             if not url:
                 raise HTTPException(status_code=500, detail="无法为桥接图片生成访问地址。")
             register_internal_media_object(url, "input", "image", "film-bridge-auto")
-            image_node = {
-                "id": f"img_{uuid.uuid4().hex[:16]}", "type": "image",
-                "x": base_x + 28 + (index % cols) * gap_x,
-                "y": base_y + 66 + (index // cols) * gap_y,
-                "w": 260, "h": 220, "url": url,
-                "name": frame.get("source_name") or f"film_frame_{index + 1:04d}", "mediaKind": "image",
-                "bridgeSource": "filmstoryboard", "bridgeId": package.manifest.get("bridge_id") or "",
-                "bridgeFrameStableId": frame.get("stable_id") or "", "bridgeVariant": frame.get("variant") or "original",
-                "bridgeFrameIndex": int(frame.get("frame_index") or index), "bridgeSlotIndex": int(frame.get("slot_index") or index),
-                "bridgeShotNumber": int(frame.get("shot_number") or 0), "bridgeCaption": frame.get("caption") or "",
-            }
-            existing_nodes.append(image_node)
-            image_nodes.append(image_node)
-        prompt_nodes = []
-        if create_prompt_nodes:
-            for index, shot in enumerate(package.manifest.get("shots") or []):
-                prompt_text = str(shot.get("prompt") or shot.get("visual") or shot.get("content") or "").strip()
-                if not prompt_text:
-                    continue
-                source_image = next((node for node in image_nodes if node.get("bridgeFrameStableId") == shot.get("frame_stable_id")), None)
-                if source_image is None:
-                    source_image = next((node for node in image_nodes if int(node.get("bridgeShotNumber") or 0) == int(shot.get("shot_number") or 0)), None)
-                prompt_node = {
-                    "id": f"prompt_{uuid.uuid4().hex[:16]}", "type": "prompt",
-                    "x": base_x + 28 + cols * gap_x, "y": base_y + 66 + index * 180,
-                    "text": prompt_text, "bridgeSource": "filmstoryboard", "bridgeId": package.manifest.get("bridge_id") or "",
-                    "bridgeShotStableId": shot.get("stable_id") or "", "bridgeFrameStableId": shot.get("frame_stable_id") or "",
-                    "bridgeShotNumber": int(shot.get("shot_number") or 0), "bridgeSourceFrameNodeId": (source_image or {}).get("id") or "",
-                }
-                existing_nodes.append(prompt_node)
-                prompt_nodes.append(prompt_node)
-        rows = max(1, math.ceil(len(image_nodes) / cols))
-        group = {
-            "id": f"grp_{uuid.uuid4().hex[:16]}", "type": "group", "x": base_x, "y": base_y,
-            "w": 28 + cols * gap_x + (340 if prompt_nodes else 0), "h": rows * gap_y + 100,
-            "items": [node["id"] for node in image_nodes], "bridgeSource": "filmstoryboard",
-            "bridgeId": package.manifest.get("bridge_id") or "", "bridgeDirection": "film-to-shiyin",
-            "bridgeBoardId": source.get("board_id") or "", "bridgeBoardName": storyboard.get("board_name") or "",
-            "bridgeSelectedVariant": storyboard.get("selected_variant") or "original", "bridgeFrameCount": len(image_nodes),
-            "bridgePromptNodeIds": [node["id"] for node in prompt_nodes],
-        }
-        existing_nodes.append(group)
-        canvas["nodes"] = existing_nodes
-        canvas["connections"] = list(canvas.get("connections") or [])
+            sync_frames.append({**frame, "url": url})
+        try:
+            sync_result = sync_film_bridge_canvas(
+                canvas,
+                package.manifest,
+                sync_frames,
+                create_prompt_nodes=bool(create_prompt_nodes),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"桥接增量同步失败：{exc}") from exc
+        group = sync_result["group"]
+        image_nodes = sync_result["image_nodes"]
+        prompt_nodes = sync_result["prompt_nodes"]
         save_canvas(canvas)
         return {
             "ok": True,
@@ -11494,6 +11477,8 @@ async def receive_film_bridge_package(
             "group_id": group["id"],
             "frame_count": len(image_nodes),
             "prompt_count": len(prompt_nodes),
+            "sync_mode": sync_result["sync_mode"],
+            "sync_stats": sync_result["stats"],
             "editor_url": f"/static/canvas.html?id={urllib.parse.quote(canvas['id'])}",
         }
     finally:

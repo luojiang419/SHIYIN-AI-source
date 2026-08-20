@@ -1,7 +1,15 @@
 {
-  "version": "1.0.189",
-  "updated_at": "2026-08-19T16:45:00+08:00",
+  "version": "1.0.190",
+  "updated_at": "2026-08-20T16:30:17+08:00",
   "items": [
+    {
+      "type": "fix",
+      "text": "修复上传可灵视频参考片段到公网素材服务器时弹出 OpenSSH 命令行窗口；SSH 建目录、SCP 上传、远端删除和私钥权限处理现在均在 Windows 后台无窗口运行"
+    },
+    {
+      "type": "test",
+      "text": "新增远端素材 Windows CREATE_NO_WINDOW 与外部命令统一入口回归检查"
+    },
     {
       "type": "fix",
       "text": "修复可灵视频参考在安装版中因找不到 SSH 私钥而返回 503；新增数据目录远端素材配置，并在提交 SkillHub 前验证公网视频地址、视频类型和 Range 访问"

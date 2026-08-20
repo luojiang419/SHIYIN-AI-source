@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import subprocess
 from pathlib import Path
 
@@ -9,12 +10,45 @@ from canvas_core.remote_clip_storage import (
     RemoteClipConfig,
     RemoteClipStorageError,
     clip_identity_from_path,
+    default_remote_process_runner,
     delete_video_clip,
     remote_clip_url,
     remote_clip_config,
     upload_video_clip,
     validate_public_clip_url,
 )
+
+
+def test_windows_remote_process_runner_never_opens_console_window(monkeypatch):
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr("canvas_core.remote_clip_storage.os.name", "nt")
+    monkeypatch.setattr("canvas_core.remote_clip_storage.subprocess.run", run)
+
+    default_remote_process_runner(["ssh.exe", "example"])
+
+    assert calls[0][1]["creationflags"] & 0x08000000 == 0x08000000
+
+
+def test_all_remote_clip_processes_share_hidden_runner():
+    import canvas_core.remote_clip_storage as remote_clip_storage
+
+    tree = ast.parse(Path(remote_clip_storage.__file__).read_text(encoding="utf-8"))
+    direct_runs = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "run"
+    ]
+
+    assert len(direct_runs) == 1, "远端素材外部命令必须统一经过隐藏窗口运行器"
 
 
 def test_clip_identity_and_public_url_are_stable():

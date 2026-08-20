@@ -33,6 +33,7 @@ _CLIP_PATH = re.compile(
     re.IGNORECASE,
 )
 _SECURE_KEY_CACHE: dict[str, str] = {}
+_WINDOWS_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,15 @@ class RemoteClipConfig:
 
 
 Runner = Callable[..., subprocess.CompletedProcess]
+
+
+def default_remote_process_runner(
+    args: Sequence[str],
+    **kwargs: object,
+) -> subprocess.CompletedProcess:
+    if os.name == "nt":
+        kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | _WINDOWS_CREATE_NO_WINDOW
+    return subprocess.run(list(args), **kwargs)
 
 
 def _truthy(value: str) -> bool:
@@ -204,7 +214,7 @@ def _secure_key_path(path: str) -> str:
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
     target = Path(tempfile.gettempdir()) / f"shiyin-clip-key-{digest}"
     shutil.copyfile(source, target)
-    result = subprocess.run(
+    result = default_remote_process_runner(
         ["icacls", str(target), "/inheritance:r", "/grant:r", f"{os.getenv('USERNAME') or os.getenv('USER')}:F"],
         capture_output=True,
         check=False,
@@ -257,7 +267,7 @@ def _run_process(
     timeout: int,
     runner: Runner | None = None,
 ) -> subprocess.CompletedProcess:
-    process_runner = runner or subprocess.run
+    process_runner = runner or default_remote_process_runner
     try:
         result = process_runner(
             list(args),

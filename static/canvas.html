@@ -439,6 +439,30 @@
                 </div>
             </div>
         </div>
+        <div id="storyboardTransformModal" class="storyboard-transform-modal" aria-hidden="true" onclick="closeStoryboardTransformPanel()">
+            <div class="storyboard-transform-panel" role="dialog" aria-modal="true" aria-labelledby="storyboardTransformTitle" onclick="event.stopPropagation()">
+                <div class="storyboard-transform-head">
+                    <div>
+                        <strong id="storyboardTransformTitle">生成衍生分镜</strong>
+                        <span id="storyboardTransformSummary">--</span>
+                    </div>
+                    <button class="preview-icon-btn" type="button" title="关闭" aria-label="关闭" onclick="closeStoryboardTransformPanel()"><i data-lucide="x"></i></button>
+                </div>
+                <div class="storyboard-transform-note">选择本次生成使用的平台和模型，默认读取 API 设置中的首选图片生成平台。</div>
+                <div class="storyboard-transform-settings">
+                    <label><span>生成 API 平台</span><select id="storyboardTransformProvider"></select></label>
+                    <label><span>生成模型</span><select id="storyboardTransformModel"></select></label>
+                    <label><span>输出画幅</span><select id="storyboardTransformRatio"><option value="16:9">16:9 横屏</option><option value="1:1">1:1 方形</option><option value="9:16">9:16 竖屏</option></select></label>
+                    <label><span>分辨率</span><select id="storyboardTransformResolution"><option value="1k">1K</option><option value="2k" selected>2K</option><option value="4k">4K</option></select></label>
+                    <label><span>质量</span><select id="storyboardTransformQuality"><option value="auto">自动</option><option value="medium">标准</option><option value="high" selected>高质量</option></select></label>
+                </div>
+                <div id="storyboardTransformStatus" class="storyboard-transform-status"></div>
+                <div class="storyboard-transform-actions">
+                    <button class="video-frame-btn secondary" type="button" onclick="closeStoryboardTransformPanel()">取消</button>
+                    <button id="storyboardTransformSubmit" class="video-frame-btn primary" type="button" onclick="submitStoryboardTransform()"><i data-lucide="wand-sparkles"></i><span>开始生成</span></button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.2"></script>

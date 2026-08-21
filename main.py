@@ -395,7 +395,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.203"
+APP_VERSION = "1.0.204"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -13193,6 +13193,7 @@ async def ai_config():
         "image_models": IMAGE_MODELS,
         "video_models": VIDEO_MODELS,
         "api_providers": providers,
+        "primary_provider_id": get_primary_provider_id(providers),
         "has_api_key": bool(AI_API_KEY),
         "ms_chat_models": MODELSCOPE_CHAT_MODELS,
         "has_ms_key": bool(modelscope_api_key()),
@@ -13203,13 +13204,15 @@ async def ai_config():
 async def runtime_ai_config():
     """普通创作页面使用的无密钥、无地址模型目录。"""
     preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
+    providers = runtime_api_providers()
     return {
         "chat_model": preferred_chat_model,
         "image_model": IMAGE_MODEL,
         "chat_models": CHAT_MODELS,
         "image_models": IMAGE_MODELS,
         "video_models": VIDEO_MODELS,
-        "api_providers": runtime_api_providers(),
+        "api_providers": providers,
+        "primary_provider_id": get_primary_provider_id(providers),
         "ms_chat_models": MODELSCOPE_CHAT_MODELS,
     }
 

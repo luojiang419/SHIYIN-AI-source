@@ -398,6 +398,16 @@ const videoClipDuration = document.getElementById('videoClipDuration');
 const videoClipCurrentTime = document.getElementById('videoClipCurrentTime');
 const videoClipResolution = document.getElementById('videoClipResolution');
 const videoClipOutputMeta = document.getElementById('videoClipOutputMeta');
+const storyboardTransformModal = document.getElementById('storyboardTransformModal');
+const storyboardTransformTitle = document.getElementById('storyboardTransformTitle');
+const storyboardTransformSummary = document.getElementById('storyboardTransformSummary');
+const storyboardTransformProvider = document.getElementById('storyboardTransformProvider');
+const storyboardTransformModel = document.getElementById('storyboardTransformModel');
+const storyboardTransformRatio = document.getElementById('storyboardTransformRatio');
+const storyboardTransformResolution = document.getElementById('storyboardTransformResolution');
+const storyboardTransformQuality = document.getElementById('storyboardTransformQuality');
+const storyboardTransformStatus = document.getElementById('storyboardTransformStatus');
+const storyboardTransformSubmitButton = document.getElementById('storyboardTransformSubmit');
 const videoClipStatus = document.getElementById('videoClipStatus');
 const videoClipSubmit = document.getElementById('videoClipSubmit');
 const videoClipPlay = document.getElementById('videoClipPlay');
@@ -462,6 +472,7 @@ let pendingPurgeCanvasId = null;
 let emojiPickerCanvasId = null;
 let canvasMetaAnchorId = '';
 let expandedPromptSource = null;
+let storyboardTransformState = null;
 function openExpandedPromptEditor(source){
     if(!source || !expandedPromptModal || !expandedPromptTextarea) return;
     expandedPromptSource = source;
@@ -853,6 +864,19 @@ function providerChatModels(providerId){
 function resolveImageProviderId(id){
     const providers = imageApiProviders();
     return providers.find(p => p.id === id)?.id || providers[0]?.id || '';
+}
+function defaultImageGenerationProvider(){
+    const providers = imageApiProviders();
+    return providers.find(provider => provider.primary === true)
+        || providers.find(provider => provider.id === managedProviderId)
+        || providers[0]
+        || null;
+}
+function defaultImageGenerationSelection(){
+    const provider = defaultImageGenerationProvider();
+    const providerId = provider?.id || '';
+    const models = allImageModels(providerId);
+    return {providerId, model:models[0] || ''};
 }
 function providerOptions(selectedId){
     const selected = resolveImageProviderId(selectedId);
@@ -1819,6 +1843,9 @@ async function loadConfig(){
         videoModels = cfg.video_models?.length ? cfg.video_models : DEFAULT_VIDEO_MODELS;
         msChatModels = cfg.ms_chat_models?.length ? cfg.ms_chat_models : msChatModels;
         apiProviders = Array.isArray(cfg.api_providers) && cfg.api_providers.length ? cfg.api_providers : defaultApiProviders();
+        managedProviderId = cfg.primary_provider_id
+            || apiProviders.find(provider => provider.primary === true)?.id
+            || managedProviderId;
         models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
         models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
         runningHubWorkflowCache = {};
@@ -15234,13 +15261,16 @@ function transformationPrompt(operation){
     if(operation === 'expand-canvas') return '将参考视频帧扩展为16:9横屏构图，保留原主体、人物动作、镜头景别、光线和视觉风格，使用自然延展的背景补全左右画幅，不裁切主体，不添加文字、水印或新人物。';
     return '将参考视频帧转换为专业电影分镜线稿：黑白铅笔与墨线质感，保留原构图、人物动作、镜头景别、关键道具和空间关系，画面干净清晰，适合导演分镜稿，不要颜色、文字、水印或无关细节。';
 }
-async function transformStoryboardFrame(frame, operation, providerId, model, index){
+async function transformStoryboardFrame(frame, operation, providerId, model, index, options={}){
+    const ratio = options.ratio || '16:9';
+    const resolution = options.resolution || '2k';
+    const quality = options.quality || 'high';
     const payload = {
         prompt:transformationPrompt(operation),
         provider_id:resolveImageProviderId(providerId),
         model:resolveImageModel(model),
-        size:apiImageSize('custom', '2k', '16:9', ''),
-        quality:'high',
+        size:apiImageSize('custom', resolution, ratio, ''),
+        quality,
         reference_images:[{url:frame.url, name:frame.name || `frame-${index + 1}.png`, kind:'image'}]
     };
     const task = await createCanvasImageTask(payload);
@@ -15295,13 +15325,20 @@ function createStoryboardTransformationGroup(sourceGroup, items, operation){
     selected.add(group.id);
     return group;
 }
-async function runGroupTransformation(operation, groupId){
+async function runGroupTransformation(operation, groupId, options={}){
     const group = nodes.find(node => node.id === groupId && node.type === 'group');
     const frames = groupImageItems(group);
     if(!group || !frames.length || group._transformRunning) return;
-    const providerId = imageApiProviders()[0]?.id || '';
-    const model = allImageModels(providerId)[0] || '';
+    const defaults = defaultImageGenerationSelection();
+    const providerId = resolveImageProviderId(options.providerId || defaults.providerId);
+    const providerModels = allImageModels(providerId);
+    const model = providerModels.includes(options.model) ? options.model : (providerModels[0] || '');
     if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型', '生成衍生分镜'); return; }
+    const transformOptions = {
+        ratio:['16:9','1:1','9:16'].includes(options.ratio) ? options.ratio : '16:9',
+        resolution:['1k','2k','4k'].includes(options.resolution) ? options.resolution : '2k',
+        quality:['auto','medium','high'].includes(options.quality) ? options.quality : 'high'
+    };
     pushUndo();
     removeGroupTransformationResults(group.id, operation);
     group._transformRunning = true;
@@ -15314,7 +15351,7 @@ async function runGroupTransformation(operation, groupId){
         const worker = async () => {
             while(cursor < frames.length){
                 const index = cursor++;
-                const result = await transformStoryboardFrame(frames[index], operation, providerId, model, index);
+                const result = await transformStoryboardFrame(frames[index], operation, providerId, model, index, transformOptions);
                 results[index] = {...result, sourceNodeId:frames[index].nodeId, frameIndex:frames[index].__index ?? index, timestampMs:Number((nodes.find(node => node.id === frames[index].nodeId)?.timestampMs) || 0)};
                 setStatus(`${operation === 'expand-canvas' ? '扩展画幅' : '线稿分镜'} ${index + 1}/${frames.length}`);
             }
@@ -15331,6 +15368,80 @@ async function runGroupTransformation(operation, groupId){
         setStatus('Ready');
         showErrorModal(error.message || '生成衍生分镜失败', '生成衍生分镜');
     }
+}
+function storyboardTransformLabel(operation){
+    return operation === 'expand-canvas' ? '扩展画幅' : '生成线稿分镜';
+}
+function setStoryboardTransformStatus(message='', error=false){
+    if(!storyboardTransformStatus) return;
+    storyboardTransformStatus.textContent = message || '';
+    storyboardTransformStatus.classList.toggle('error', Boolean(error));
+}
+function syncStoryboardTransformModelOptions(preferredModel=''){
+    if(!storyboardTransformProvider || !storyboardTransformModel) return;
+    const providerId = resolveImageProviderId(storyboardTransformProvider.value || '');
+    storyboardTransformProvider.value = providerId;
+    storyboardTransformModel.innerHTML = imageModelOptions(preferredModel, providerId);
+    const models = allImageModels(providerId);
+    const selected = models.includes(preferredModel) ? preferredModel : (models[0] || '');
+    if(selected) storyboardTransformModel.value = selected;
+    storyboardTransformModel.disabled = !models.length;
+    if(storyboardTransformSubmitButton) storyboardTransformSubmitButton.disabled = !providerId || !models.length;
+}
+function openStoryboardTransformPanel(operation, groupId){
+    const group = nodes.find(node => node.id === groupId && node.type === 'group');
+    const frames = groupImageItems(group);
+    if(!group || !frames.length || group._transformRunning) return;
+    const defaults = defaultImageGenerationSelection();
+    storyboardTransformState = {operation, groupId};
+    if(storyboardTransformTitle) storyboardTransformTitle.textContent = storyboardTransformLabel(operation);
+    if(storyboardTransformSummary) storyboardTransformSummary.textContent = `${frames.length} 个视频帧 · 默认使用 API 设置中的首选平台`;
+    if(storyboardTransformProvider){
+        storyboardTransformProvider.innerHTML = providerOptions(defaults.providerId);
+        storyboardTransformProvider.value = defaults.providerId;
+        storyboardTransformProvider.onchange = () => syncStoryboardTransformModelOptions('');
+    }
+    syncStoryboardTransformModelOptions(defaults.model);
+    if(storyboardTransformRatio) storyboardTransformRatio.value = '16:9';
+    if(storyboardTransformResolution) storyboardTransformResolution.value = '2k';
+    if(storyboardTransformQuality) storyboardTransformQuality.value = 'high';
+    setStoryboardTransformStatus(defaults.providerId ? '' : '暂无可用的图片生成 API，请先到 API 设置中配置平台和模型。', !defaults.providerId);
+    storyboardTransformModal?.classList.add('open');
+    storyboardTransformModal?.setAttribute('aria-hidden', 'false');
+    refreshIcons();
+}
+function closeStoryboardTransformPanel(){
+    if(storyboardTransformState && nodes.some(node => node.id === storyboardTransformState.groupId && node._transformRunning)) return;
+    storyboardTransformState = null;
+    storyboardTransformModal?.classList.remove('open');
+    storyboardTransformModal?.setAttribute('aria-hidden', 'true');
+}
+function setStoryboardTransformBusy(busy){
+    [storyboardTransformProvider, storyboardTransformModel, storyboardTransformRatio, storyboardTransformResolution, storyboardTransformQuality]
+        .forEach(element => { if(element) element.disabled = Boolean(busy); });
+    if(storyboardTransformSubmitButton){
+        storyboardTransformSubmitButton.disabled = Boolean(busy);
+        storyboardTransformSubmitButton.innerHTML = busy
+            ? '<i data-lucide="loader-2"></i><span>生成中...</span>'
+            : '<i data-lucide="wand-sparkles"></i><span>开始生成</span>';
+    }
+    refreshIcons();
+}
+async function submitStoryboardTransform(){
+    const state = storyboardTransformState;
+    if(!state || storyboardTransformSubmitButton?.disabled) return;
+    const options = {
+        providerId:storyboardTransformProvider?.value || '',
+        model:storyboardTransformModel?.value || '',
+        ratio:storyboardTransformRatio?.value || '16:9',
+        resolution:storyboardTransformResolution?.value || '2k',
+        quality:storyboardTransformQuality?.value || 'high'
+    };
+    const groupId = state.groupId;
+    closeStoryboardTransformPanel();
+    setStoryboardTransformBusy(true);
+    await runGroupTransformation(state.operation, groupId, options);
+    setStoryboardTransformBusy(false);
 }
 function addVideoClipNodeFromResult(result, sourceNode){
     const sourceRect = nodeRect(sourceNode);
@@ -15683,7 +15794,7 @@ function runMediaQuickAction(action, target){
         return;
     }
     if(action === 'expand-canvas' || action === 'line-art'){
-        runGroupTransformation(action, target?.nodeId);
+        openStoryboardTransformPanel(action, target?.nodeId);
         return;
     }
     if(action === 'extract-video'){

@@ -3540,7 +3540,7 @@ async function persistProviders(options={}){
                 image_generation_endpoint:item.image_generation_endpoint || '',
                 image_edit_endpoint:item.image_edit_endpoint || '',
                 enabled:item.enabled !== false,
-                primary:false,
+                primary:item.primary === true,
                 image_models:item.image_models || [],
                 chat_models:item.chat_models || [],
                 video_models:item.video_models || [],

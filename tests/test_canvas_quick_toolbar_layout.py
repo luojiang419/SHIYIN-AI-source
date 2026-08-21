@@ -43,6 +43,21 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         self.assertIn('"canvas.toolbarCollapse"', self.i18n)
         self.assertIn('"canvas.toolbarExpand"', self.i18n)
 
+    def test_toggle_reverses_the_persisted_node_panel_state(self):
+        toggle = re.search(
+            r"function toggleQuickToolbar\(\)\{(?P<body>.*?)\n\}",
+            self.javascript,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(toggle)
+        body = toggle.group("body")
+        self.assertIn(
+            "localStorage.getItem(QUICK_TOOLBAR_COLLAPSED_KEY) === '1'",
+            body,
+        )
+        self.assertIn("const next = !collapsed;", body)
+        self.assertNotIn("toolbar?.classList.contains('collapsed')", body)
+
     def test_node_panel_has_right_side_toggle_and_collapses_to_one_icon(self):
         self.assertIn('id="toolbarNodePanel" class="toolbar-node-panel"', self.html)
         self.assertIn('id="toolbarNodeItems" class="toolbar-items"', self.html)

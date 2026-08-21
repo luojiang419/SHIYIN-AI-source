@@ -791,8 +791,8 @@ function applyQuickToolbarState(){
     refreshIcons();
 }
 function toggleQuickToolbar(){
-    const toolbar = document.getElementById('quickToolbar');
-    const next = !toolbar?.classList.contains('collapsed');
+    const collapsed = localStorage.getItem(QUICK_TOOLBAR_COLLAPSED_KEY) === '1';
+    const next = !collapsed;
     localStorage.setItem(QUICK_TOOLBAR_COLLAPSED_KEY, next ? '1' : '0');
     applyQuickToolbarState();
 }

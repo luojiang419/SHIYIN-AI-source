@@ -58,6 +58,18 @@ def test_multi_view_shows_four_loading_slots_and_updates_in_grid_order():
     assert ".output-node .output-grid.grid-layout" in MULTI_VIEW_CSS
 
 
+def test_multi_view_output_reuses_standard_thumbnail_grid_and_auto_height():
+    assert "function isMultiViewOutputNode(node)" in CANVAS_JS
+    assert "function normalizedMultiViewOutputWidth(node)" in CANVAS_JS
+    assert "el.classList.remove('sized')" in CANVAS_JS
+    assert "el.style.height = '';" in CANVAS_JS
+    assert "out.w = normalizedMultiViewOutputWidth(out);" in CANVAS_JS
+    assert "delete out.h;" in CANVAS_JS
+    assert "if(node?.type === 'multiView') return null;" in CANVAS_JS
+    assert "out.w = Math.max(Number(out.w || 0), 700);" not in CANVAS_JS
+    assert "out.h = Math.max(Number(out.h || 0), 620);" not in CANVAS_JS
+
+
 def test_multi_view_is_available_from_create_menu_and_has_visual_styles():
     assert 'data-create-type="multi-view"' in SMART_HTML
     assert ".multi-view-input-list" in SPECIAL_CSS

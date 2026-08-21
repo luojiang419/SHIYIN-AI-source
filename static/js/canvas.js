@@ -7409,8 +7409,10 @@ async function runClassicMultiViewNode(nodeId){
     node.multiViewOutputLayout = {type:'grid-split', groupId:uid('multi-view-grid'), cols:3, rows:2};
     const out = outputForNode(node, 780, true);
     if(out){
-        out.w = Math.max(Number(out.w || 0), 700);
-        out.h = Math.max(Number(out.h || 0), 620);
+        // 输出节点使用普通图片生成节点的缩略图规格；清除旧版固定高度，
+        // 让节点高度随当前图片数量自然增长，无需用户拖拽才能看到完整预览。
+        out.w = normalizedMultiViewOutputWidth(out);
+        delete out.h;
         out.images = [];
         out.outputLayout = {...node.multiViewOutputLayout};
         out._pending = Array.from({length:4}, (_, index) => ({
@@ -7675,15 +7677,16 @@ function renderNode(node){
     if(node.type === 'multiView' && (!Number.isFinite(Number(node.h)) || Number(node.h) < 780)) node.h = 780;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
-    const hasFixedSize = Boolean(node.h || size.h);
+    const autoMultiViewOutput = isMultiViewOutputNode(node);
+    const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
     const nodeTypeClass = node.type === 'batchGenerator'
         ? 'batchGenerator-node batch-generator-node generator-node'
         : `${node.type}-node`;
     el.className = `node ${nodeTypeClass} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
-    el.style.width = `${node.w || size.w}px`;
-    if(node.h || size.h) el.style.height = `${node.h || size.h}px`;
+    el.style.width = `${autoMultiViewOutput ? normalizedMultiViewOutputWidth(node) : (node.w || size.w)}px`;
+    if(!autoMultiViewOutput && (node.h || size.h)) el.style.height = `${node.h || size.h}px`;
     el.dataset.id = node.id;
     el.onclick = (e) => {
         e.stopPropagation();
@@ -8044,11 +8047,33 @@ function outputDomKeyForItem(item){
 function outputDomKeyForPending(pending){
     return `pending:${pending?.id || ''}`;
 }
+function isMultiViewOutputNode(node){
+    if(!node || node.type !== 'output') return false;
+    return connections.some(connection => {
+        if(connection.to !== node.id) return false;
+        return nodes.find(candidate => candidate.id === connection.from)?.type === 'multiView';
+    });
+}
+function normalizedMultiViewOutputWidth(node){
+    const fallback = defaultNodeSize('output').w;
+    const width = Number(node?.w);
+    // 三视图输出节点始终落在普通输出节点的可读范围内；历史版本的 700px
+    // 宽度属于布局 bug，自动迁移回标准宽度。较小的用户自定义宽度仍保留。
+    if(!Number.isFinite(width) || width < 360 || width > 520) return fallback;
+    return Math.round(width);
+}
 function refreshOutputNodeContent(node){
     const el = nodesEl.querySelector(`.output-node[data-id="${CSS.escape(node.id)}"]`);
     const body = el?.querySelector('.node-body');
     const grid = body?.querySelector('.output-grid');
     if(!body || !grid) return false;
+    // 三视图输出复用普通图片输出节点的缩略图网格，并保持高度由内容自然撑开。
+    // 旧画布可能保存过 620/780px 的固定高度，这里在增量刷新时也要立即解除。
+    if(isMultiViewOutputNode(node)){
+        el.classList.remove('sized');
+        el.style.width = `${normalizedMultiViewOutputWidth(node)}px`;
+        el.style.height = '';
+    }
     body.onwheel = e => { e.stopPropagation(); };
     const layout = outputGridLayout(node);
     grid.classList.toggle('grid-layout', !!layout);
@@ -14538,7 +14563,9 @@ function outputGridLayout(node){
     if(!images.length && !(node?.type === 'multiView' && node?._pending?.length)) return null;
     const layout = node.outputLayout;
     if(!layout || layout.type !== 'grid-split' || !layout.groupId) return null;
-    if(node?.type === 'multiView') return layout;
+    // 三视图输出节点不再使用跨列/原始比例铺满的专用网格，避免图片按原尺寸撑大节点。
+    // outputLayout 仍保留在数据中用于生成顺序和历史兼容，但渲染复用普通输出缩略图网格。
+    if(node?.type === 'multiView') return null;
     const allMatch = images.every(item => item && typeof item === 'object' && item.grid?.groupId === layout.groupId);
     return allMatch ? layout : null;
 }

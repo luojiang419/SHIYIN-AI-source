@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 INDEX_HTML = ROOT / "static" / "index.html"
 MAIN_PY = ROOT / "main.py"
+STORAGE_BOOTSTRAP_PY = ROOT / "canvas_core" / "storage_bootstrap.py"
 
 
 class VisibleShellStartupTests(unittest.TestCase):
@@ -77,6 +78,14 @@ class DeferredBackendMaintenanceTests(unittest.TestCase):
         self.assertIn("STARTUP_MAINTENANCE_DELAY_SECONDS", self.source)
         self.assertIn("startup_maintenance_public_state()", self.source)
         self.assertIn('"startup_maintenance": startup_maintenance_public_state()', self.source)
+
+    def test_disposable_storage_scan_is_not_run_during_module_import(self):
+        bootstrap = STORAGE_BOOTSTRAP_PY.read_text(encoding="utf-8")
+        self.assertNotIn("MAINTENANCE.run_once()", bootstrap)
+        self.assertIn('(\"disposable_storage\", MAINTENANCE.run_once)', self.source)
+
+    def test_runtime_info_returns_latest_maintenance_report(self):
+        self.assertIn('"maintenance": MAINTENANCE.latest_report()', self.source)
 
 
 if __name__ == "__main__":

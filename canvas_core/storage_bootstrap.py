@@ -13,7 +13,7 @@ ADMIN_DATA_LAYOUT = DataLayout.from_app_paths(APP_PATHS)
 ADMIN_DATA_LAYOUT.ensure()
 
 MAINTENANCE = MaintenanceManager(ADMIN_DATA_LAYOUT)
-MAINTENANCE_REPORT = MAINTENANCE.run_once()
+MAINTENANCE_REPORT = MAINTENANCE.latest_report()
 MAINTENANCE.start()
 
 ADMIN_DATABASE = CanvasDatabase(ADMIN_DATA_LAYOUT.database_file)

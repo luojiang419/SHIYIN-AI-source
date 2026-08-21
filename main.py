@@ -53,7 +53,7 @@ from canvas_core.storage_bootstrap import (
     DATA_LAYOUT,
     DATABASE,
     DWPOSE_MODEL_MANAGER,
-    MAINTENANCE_REPORT,
+    MAINTENANCE,
     MIGRATION_REPORT,
     SECRET_MIGRATION_REPORT,
     SECRET_STORE,
@@ -436,6 +436,7 @@ async def run_deferred_startup_maintenance():
         "steps": {},
     })
     steps = (
+        ("disposable_storage", MAINTENANCE.run_once),
         ("asset_library_migration", migrate_asset_library_into_dirs),
         ("double_extension_migration", migrate_double_extension_uploads),
         ("image_extension_migration", migrate_mislabeled_image_extensions),
@@ -2866,7 +2867,7 @@ def runtime_info():
         "database": DATABASE.pragma_summary(),
         "migration": {key: value for key, value in MIGRATION_REPORT.items() if key != "moves"},
         "secret_migration": SECRET_MIGRATION_REPORT,
-        "maintenance": MAINTENANCE_REPORT,
+        "maintenance": MAINTENANCE.latest_report(),
     }
 
 

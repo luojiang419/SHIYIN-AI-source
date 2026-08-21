@@ -43,6 +43,42 @@ class MaintenanceTests(unittest.TestCase):
             self.assertFalse(stale_temp.exists())
             self.assertTrue((layout.logs / "canvas.log.1").exists())
             self.assertLessEqual(report["cache"]["remaining_bytes"], 8)
+            self.assertEqual(report["status"], "complete")
+            self.assertEqual(manager.latest_report(), report)
+
+    def test_report_is_pending_until_first_background_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_root = root / "app"
+            paths = AppPaths(root, app_root, root / "data", app_root / "web", app_root / "workflows")
+            layout = DataLayout.from_app_paths(paths)
+            layout.ensure()
+            manager = MaintenanceManager(layout)
+
+            report = manager.latest_report()
+
+            self.assertEqual(report["status"], "pending")
+            self.assertEqual(report["completed_at"], 0)
+            report["status"] = "mutated"
+            self.assertEqual(manager.latest_report()["status"], "pending")
+
+    def test_failed_run_is_visible_in_latest_report(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            app_root = root / "app"
+            paths = AppPaths(root, app_root, root / "data", app_root / "web", app_root / "workflows")
+            layout = DataLayout.from_app_paths(paths)
+            layout.ensure()
+            manager = MaintenanceManager(layout)
+            manager._trim_cache = lambda: (_ for _ in ()).throw(OSError("disk unavailable"))
+
+            with self.assertRaisesRegex(OSError, "disk unavailable"):
+                manager.run_once()
+
+            report = manager.latest_report()
+            self.assertEqual(report["status"], "error")
+            self.assertIn("disk unavailable", report["error"])
+            self.assertGreater(report["completed_at"], 0)
 
 
 if __name__ == "__main__":

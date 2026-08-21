@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -25,6 +26,24 @@ class MaintenanceManager:
         self.interval_seconds = max(60, int(interval_seconds))
         self._started = False
         self._lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._last_report: dict[str, Any] = {
+            "status": "pending",
+            "started_at": 0,
+            "completed_at": 0,
+            "cache": {},
+            "temp_removed": 0,
+            "logs_rotated": 0,
+        }
+
+    def latest_report(self) -> dict[str, Any]:
+        with self._state_lock:
+            return copy.deepcopy(self._last_report)
+
+    def _store_report(self, report: dict[str, Any]) -> dict[str, Any]:
+        with self._state_lock:
+            self._last_report = copy.deepcopy(report)
+        return copy.deepcopy(report)
 
     def _cache_limit(self) -> int:
         value = DEFAULT_CACHE_LIMIT
@@ -102,13 +121,38 @@ class MaintenanceManager:
         return rotated
 
     def run_once(self) -> dict[str, Any]:
-        with self._lock:
-            return {
-                "cache": self._trim_cache(),
-                "temp_removed": self._clean_temp(),
-                "logs_rotated": self._rotate_logs(),
+        started_at = 0
+        try:
+            with self._lock:
+                started_at = int(time.time() * 1000)
+                self._store_report({
+                    "status": "running",
+                    "started_at": started_at,
+                    "completed_at": 0,
+                    "cache": {},
+                    "temp_removed": 0,
+                    "logs_rotated": 0,
+                })
+                report = {
+                    "status": "complete",
+                    "started_at": started_at,
+                    "cache": self._trim_cache(),
+                    "temp_removed": self._clean_temp(),
+                    "logs_rotated": self._rotate_logs(),
+                    "completed_at": int(time.time() * 1000),
+                }
+        except Exception as exc:
+            self._store_report({
+                "status": "error",
+                "started_at": started_at,
                 "completed_at": int(time.time() * 1000),
-            }
+                "cache": {},
+                "temp_removed": 0,
+                "logs_rotated": 0,
+                "error": str(exc)[:500],
+            })
+            raise
+        return self._store_report(report)
 
     def start(self) -> None:
         if self._started:

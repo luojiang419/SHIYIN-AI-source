@@ -12,6 +12,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.shared = (STATIC / "js" / "canvas-special-nodes.js").read_text(encoding="utf-8")
         cls.styles = (STATIC / "css" / "canvas-special-nodes.css").read_text(encoding="utf-8")
+        cls.angle_styles = (STATIC / "css" / "canvas-angle-3d.css").read_text(encoding="utf-8")
         cls.pose_replicate_styles = (STATIC / "css" / "pose-replicate-node.css").read_text(encoding="utf-8")
         cls.classic = (STATIC / "js" / "canvas.js").read_text(encoding="utf-8")
         cls.smart = (STATIC / "js" / "smart-canvas.js").read_text(encoding="utf-8")
@@ -246,6 +247,21 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIsNotNone(prompt_body)
         self.assertNotIn("窗户向", prompt_body.group(0))
         self.assertNotIn("画面左", prompt_body.group(0))
+
+    def test_angle_preview_keeps_subject_centered_and_draws_camera_trajectory_with_back_occlusion(self):
+        for marker in (
+            'class="angle-camera-trajectory"',
+            'data-angle-trajectory',
+            'data-angle-sightline',
+            'data-angle-depth',
+            "const depth = Math.cos(radians)",
+            "marker.classList.toggle('is-behind', behind)",
+        ):
+            self.assertIn(marker, self.shared)
+        self.assertIn(".angle-world-3d{position:absolute;inset:0", self.angle_styles)
+        self.assertIn("transform-origin:50% 50%", self.angle_styles)
+        self.assertIn(".angle-subject-3d{transform:translate(-50%,-54%)", self.angle_styles)
+        self.assertIn(".angle-camera-marker.is-behind{z-index:2", self.angle_styles)
 
     def test_paid_image_edits_only_run_from_explicit_buttons_and_keep_one_reference(self):
         self.assertIn("action !== `run-${prefix}`", self.shared)

@@ -417,11 +417,15 @@
                 <div class="angle-orbit angle-viewport-3d" data-angle-orbit aria-label="三维机位视图">
                     <div class="angle-grid-3d"><i class="angle-grid-line grid-x"></i><i class="angle-grid-line grid-y"></i><i class="angle-grid-line grid-z"></i></div>
                     <div class="angle-axis horizontal"></div><div class="angle-axis vertical"></div>
+                    <svg class="angle-camera-trajectory" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                        <ellipse data-angle-trajectory cx="50" cy="50" rx="42" ry="24"></ellipse>
+                        <line data-angle-sightline x1="50" y1="50" x2="50" y2="26"></line>
+                    </svg>
                     <div class="angle-world-3d" data-angle-world>
                         <div class="angle-subject-preview angle-subject-3d"><img data-edit-preview src="${esc(preview)}" alt="角度调整参考" draggable="false" ${preview ? '' : 'hidden'}><i data-lucide="box" data-angle-empty ${preview ? 'hidden' : ''}></i></div>
                         <div class="angle-ground-3d"></div>
                     </div>
-                    <div class="angle-camera-marker" data-angle-marker><i data-lucide="camera"></i></div>
+                    <div class="angle-camera-marker" data-angle-marker><i data-lucide="camera"></i><span class="angle-camera-depth" data-angle-depth>前</span></div>
                     <span class="angle-front-label">正面 0°</span><span class="angle-back-label">背面 180°</span><span class="angle-left-label">左侧 270°</span><span class="angle-right-label">右侧 90°</span>
                 </div>
                 <div class="angle-readout"><strong data-angle-azimuth>水平 ${Math.round(node.angleAzimuth)}° · ${azimuth[1]}</strong><span data-angle-elevation>俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}</span><em>拖拽视图：左右=水平，上下=俯仰</em></div>
@@ -935,12 +939,22 @@
         }
         if(world) world.style.transform = `rotateX(${-Number(node.angleElevation || 0)}deg) rotateY(${signedYaw}deg)`;
         const marker = root.querySelector('[data-angle-marker]');
+        const sightline = root.querySelector('[data-angle-sightline]');
         if(marker){
             const radians = Number(node.angleAzimuth || 0) * Math.PI / 180;
-            const pitchPct = clamp(Number(node.angleElevation || 0), -30, 60) / 90 * 22;
-            marker.style.left = `${50 + Math.sin(radians) * 42}%`;
-            marker.style.top = `${50 - Math.cos(radians) * 34 - pitchPct}%`;
+            const depth = Math.cos(radians);
+            const pitchPct = clamp(Number(node.angleElevation || 0), -30, 60) / 90 * 16;
+            const markerX = 50 + Math.sin(radians) * 42;
+            const markerY = 50 - Math.max(depth, 0) * 24 - pitchPct;
+            marker.style.left = `${markerX}%`;
+            marker.style.top = `${markerY}%`;
             marker.style.transform = `translate(-50%,-50%) rotate(${Math.round(node.angleAzimuth)}deg)`;
+            const behind = depth < -0.08;
+            marker.classList.toggle('is-behind', behind);
+            marker.dataset.depth = behind ? 'back' : 'front';
+            const depthLabel = marker.querySelector('[data-angle-depth]');
+            if(depthLabel) depthLabel.textContent = behind ? '后' : '前';
+            if(sightline){ sightline.setAttribute('x2', markerX.toFixed(2)); sightline.setAttribute('y2', markerY.toFixed(2)); }
         }
         const azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
         const azimuthEl = root.querySelector('[data-angle-azimuth]'), elevationEl = root.querySelector('[data-angle-elevation]');

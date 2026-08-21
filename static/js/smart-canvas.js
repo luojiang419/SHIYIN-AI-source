@@ -8601,9 +8601,18 @@ function smartSpecialInputImage(node, inputRole=''){
     if(inputRole){
         const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && item.inputRole === inputRole);
         const source = connection ? nodes.find(item => item.id === connection.from) : null;
-        return source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') || null : null;
+        return source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') || (source.url ? {...source, kind:'image'} : null) : null;
     }
-    return inputImagesFor(node).find(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image') || null;
+    const connected = inputImagesFor(node).find(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image');
+    if(connected) return connected;
+    const connections = [...(canvas?.connections || [])].filter(item => item.to === node.id).reverse();
+    for(const connection of connections){
+        const source = nodes.find(item => item.id === connection.from);
+        const fallback = source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') : null;
+        if(fallback) return fallback;
+        if(source?.url) return {...source, kind:'image'};
+    }
+    return null;
 }
 async function generateSmartPanorama(node, prompt){
     const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};

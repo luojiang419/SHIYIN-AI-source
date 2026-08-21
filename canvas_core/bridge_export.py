@@ -99,8 +99,17 @@ def build_shiyin_bridge_payload(
             "width": width,
             "height": height,
             "variant": variant,
+            "source_frame_mode": str(node.get("bridgeSourceFrameMode") or node.get("sourceFrameMode") or ""),
+            "derived_operation": str(node.get("derivedOperation") or ""),
             "caption": str(node.get("bridgeCaption") or ""),
-            "metadata": {"source_node_id": str(node.get("id") or ""), "source_group_id": str(source_group.get("id") or "")},
+            "metadata": {
+                "source_node_id": str(node.get("id") or ""),
+                "source_group_id": str(source_group.get("id") or ""),
+                "source_frame_node_id": str(node.get("bridgeSourceFrameNodeId") or ""),
+                "source_frame_stable_id": str(node.get("bridgeSourceFrameStableId") or ""),
+                "source_frame_mode": str(node.get("bridgeSourceFrameMode") or node.get("sourceFrameMode") or ""),
+                "derived_operation": str(node.get("derivedOperation") or ""),
+            },
         })
         files[relative_path] = path
     frame_by_source = {str(node.get("id") or ""): frame for (node, _), frame in zip(image_nodes, frames)}
@@ -146,6 +155,7 @@ def build_shiyin_bridge_payload(
             "selected_variant": selected,
             "variants": variants,
             "frames": frames,
+            "source_frame_mode": str(group.get("bridgeSourceFrameMode") or group.get("sourceFrameMode") or ""),
         },
         "shots": shots,
         "variants": [],

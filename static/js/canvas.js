@@ -7093,7 +7093,12 @@ function classicSpecialInputImage(node, inputRole=''){
         .filter(Boolean)
         .reverse();
     for(const source of sources){
-        const ref = mediaRefsFromNode(source).find(item => item?.url && (item.kind || 'image') === 'image');
+        const refs = [
+            ...mediaRefsFromNode(source),
+            ...(source.type === 'image' && source.url ? [{url:source.url, name:source.name || 'image', kind:'image'}] : []),
+            ...(source.type === 'output' ? (source.images || []).map(item => ({url:outputUrlValue(item), name:outputImageName(outputUrlValue(item)), kind:'image'})) : [])
+        ];
+        const ref = refs.find(item => item?.url && (item.kind || 'image') === 'image');
         if(ref) return ref;
     }
     return null;
@@ -15524,9 +15529,21 @@ function removeGroupTransformationResults(sourceGroupId, operation=''){
     [...selected].forEach(id => { if(removeIds.has(id)) selected.delete(id); });
     return true;
 }
+const LINE_ART_STORYBOARD_RULES = [
+    '这是导演审阅用的专业黑白线稿分镜转换任务。请把参考视频帧转换为专业电影分镜线稿，并重绘为标准电影分镜图，不是照片滤镜，也不是简单边缘检测。',
+    '必须保留镜头叙事与调度：景别、机位、镜头角度、透视、地平线、主体在画面中的位置和大小、人物数量、人物之间的距离与朝向、肢体动作、视线方向、头部朝向、由肢体语言表达的情绪意图、必要道具以及场景空间关系。',
+    '所有人物统一替换为同一套无身份、无外貌、无服装特征的中性分镜人偶：头部是光滑的空白椭圆体，脸部完全留白，不画眼睛、眉毛、鼻子、嘴巴、耳朵、发型、胡须或任何肖像细节；身体由简洁连续的几何体块和圆柱状四肢组成，只用清楚的外轮廓、关节转折和少量结构线表达人体朝向与动作；不表现性别、年龄、种族、肤色、体毛、肌肉、身体曲线或其他可识别外貌。',
+    '人物是无装饰的中性人体模型，不绘制服装或穿搭设计，不出现领口、衣领、袖口、袖子、裤腰、裤脚、裙摆、衣缝、褶皱、口袋、纽扣、拉链、图案、鞋、袜、帽子、眼镜、首饰、包袋或任何可识别服装与配饰；手和脚用简化的几何轮廓表现，不能借助鞋帽、发型或服装差异区分人物。',
+    '不同人物只能通过人数、相对身高或体块尺度、姿态、朝向、画面位置、动作阶段以及与道具的接触关系区分；禁止用脸部、发型、肤色、服装、配饰、性别化身体特征或写实人体细节区分角色。',
+    '人物和场景统一使用白底上的细黑线或深灰线：外轮廓清楚、线宽有轻微变化、关节和遮挡处用少量排线说明层次，不使用实心人物填充、渐变、彩色、照片纹理或写实材质。',
+    '背景采用简洁的电影分镜线稿处理，类似极简摄影棚空间草图：只保留能判断机位、景别、主体位置、前中后景、主要灯架、摄影机和遮挡关系的长轮廓与几何形状；大面积背景用留白或少量平行线概括，跳过细碎纹理、重复支架结构、线缆缠绕、螺丝、按钮、布料纹理、地面颗粒、设备铭牌和无关小物件，避免杂乱线条抢夺人物与动作的视觉焦点。',
+    '移除原始颜色、复杂光影、照片纹理、皮肤细节、品牌标识、水印、字幕、装饰性文字、背景杂物、噪点、压缩伪影和无关小物件。场景只保留理解空间、动作与遮挡关系所必需的建筑轮廓、地面线、门窗、主要家具和关键道具；用简洁线条和少量排线建立前中后景，主体轮廓清楚，画面留白充足。',
+    '禁止添加分镜编号、镜头参数、对白框、箭头、边框、表格或任何文字。最终只输出单张纯黑白分镜画面，不要输出原图对比、彩色元素、灰色照片底、水印或说明。'
+].join(' ');
+
 function transformationPrompt(operation){
     if(operation === 'expand-canvas') return '将参考视频帧扩展为16:9横屏构图，保留原主体、人物动作、镜头景别、光线和视觉风格，使用自然延展的背景补全左右画幅，不裁切主体，不添加文字、水印或新人物。';
-    return '将参考视频帧转换为专业电影分镜线稿：黑白铅笔与墨线质感，保留原构图、人物动作、镜头景别、关键道具和空间关系，画面干净清晰，适合导演分镜稿，不要颜色、文字、水印或无关细节。';
+    return LINE_ART_STORYBOARD_RULES;
 }
 async function transformStoryboardFrame(frame, operation, providerId, model, index, options={}){
     const ratio = options.ratio || '16:9';
@@ -15570,6 +15587,10 @@ function createStoryboardTransformationGroup(sourceGroup, items, operation){
             bridgeSlotIndex:Number(sourceFrameNode?.bridgeSlotIndex ?? frame.frameIndex ?? index),
             bridgeShotNumber:Number(sourceFrameNode?.bridgeShotNumber || 0), bridgeCaption:sourceFrameNode?.bridgeCaption || '',
             bridgeSourceFrameStableId:sourceFrameNode?.bridgeFrameStableId || '',
+            bridgeSourceFrameNodeId:sourceFrameNode?.id || '',
+            bridgeSourceGroupId:sourceGroup.id || '',
+            sourceFrameMode:operation === 'line-art' ? 'lineArt' : 'colorFrame',
+            bridgeSourceFrameMode:operation === 'line-art' ? 'lineArt' : 'colorFrame',
         };
         nodes.push(node);
         return node;
@@ -15585,6 +15606,9 @@ function createStoryboardTransformationGroup(sourceGroup, items, operation){
         bridgeBoardId:sourceGroup.bridgeBoardId || '', bridgeBoardName:sourceGroup.bridgeBoardName || '',
         bridgeSelectedVariant:operation === 'expand-canvas' ? 'expanded-16x9' : operation === 'line-art' ? 'line-art' : 'replicated',
         bridgePromptNodeIds:[...(sourceGroup.bridgePromptNodeIds || [])],
+        sourceFrameMode:operation === 'line-art' ? 'lineArt' : 'colorFrame',
+        bridgeSourceFrameMode:operation === 'line-art' ? 'lineArt' : 'colorFrame',
+        bridgeDerivedFromGroupId:sourceGroup.id || '',
     };
     nodes.push(group);
     connections.push({id:uid('c'), from:sourceGroup.id, to:group.id, kind:'derived', derivedOperation:operation});

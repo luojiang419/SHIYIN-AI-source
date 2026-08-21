@@ -414,13 +414,17 @@
         return `<div class="special-node edit-special angle-special" data-special-node="angle">
             <input class="special-file-input" type="file" accept="image/*" data-special-file="angle" hidden>
             <div class="angle-control-shell">
-                <div class="angle-orbit" data-angle-orbit>
-                    <div class="angle-orbit-ring"></div><div class="angle-axis horizontal"></div><div class="angle-axis vertical"></div>
-                    <div class="angle-subject-preview"><img data-edit-preview src="${esc(preview)}" alt="角度调整参考" draggable="false" ${preview ? '' : 'hidden'}><i data-lucide="box" data-angle-empty ${preview ? 'hidden' : ''}></i></div>
+                <div class="angle-orbit angle-viewport-3d" data-angle-orbit aria-label="三维机位视图">
+                    <div class="angle-grid-3d"><i class="angle-grid-line grid-x"></i><i class="angle-grid-line grid-y"></i><i class="angle-grid-line grid-z"></i></div>
+                    <div class="angle-axis horizontal"></div><div class="angle-axis vertical"></div>
+                    <div class="angle-world-3d" data-angle-world>
+                        <div class="angle-subject-preview angle-subject-3d"><img data-edit-preview src="${esc(preview)}" alt="角度调整参考" draggable="false" ${preview ? '' : 'hidden'}><i data-lucide="box" data-angle-empty ${preview ? 'hidden' : ''}></i></div>
+                        <div class="angle-ground-3d"></div>
+                    </div>
                     <div class="angle-camera-marker" data-angle-marker><i data-lucide="camera"></i></div>
-                    <span class="angle-front-label">正面 0°</span><span class="angle-back-label">背面 180°</span>
+                    <span class="angle-front-label">正面 0°</span><span class="angle-back-label">背面 180°</span><span class="angle-left-label">左侧 270°</span><span class="angle-right-label">右侧 90°</span>
                 </div>
-                <div class="angle-readout"><strong data-angle-azimuth>${Math.round(node.angleAzimuth)}° · ${azimuth[1]}</strong><span data-angle-elevation>${Math.round(node.angleElevation)}° · ${elevation[0]}</span></div>
+                <div class="angle-readout"><strong data-angle-azimuth>水平 ${Math.round(node.angleAzimuth)}° · ${azimuth[1]}</strong><span data-angle-elevation>俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}</span><em>拖拽视图：左右=水平，上下=俯仰</em></div>
             </div>
             <div class="special-toolbar"><button type="button" data-special-action="upload-angle"><i data-lucide="upload"></i><span>导入图片</span></button><span class="special-model-hint"><i data-lucide="cloud-cog"></i>画布默认图片模型</span></div>
             <div class="angle-preset-row">${ANGLE_AZIMUTHS.map(item => `<button type="button" data-angle-preset="${item[0]}" class="${nearestAzimuth(node.angleAzimuth)[0] === item[0] ? 'active' : ''}">${item[0]}°</button>`).join('')}</div>
@@ -922,17 +926,26 @@
         if(intensity) intensity.textContent = `${Math.round(node.relightIntensity)}%`;
     }
     function updateAnglePreview(root, node){
+        const viewport = root.querySelector('[data-angle-orbit]');
+        const world = root.querySelector('[data-angle-world]');
+        const signedYaw = signedAngleAzimuth(node.angleAzimuth);
+        if(viewport){
+            viewport.style.setProperty('--angle-yaw', `${signedYaw}deg`);
+            viewport.style.setProperty('--angle-pitch', `${Math.round(node.angleElevation)}deg`);
+        }
+        if(world) world.style.transform = `rotateX(${-Number(node.angleElevation || 0)}deg) rotateY(${signedYaw}deg)`;
         const marker = root.querySelector('[data-angle-marker]');
         if(marker){
             const radians = Number(node.angleAzimuth || 0) * Math.PI / 180;
+            const pitchPct = clamp(Number(node.angleElevation || 0), -30, 60) / 90 * 22;
             marker.style.left = `${50 + Math.sin(radians) * 42}%`;
-            marker.style.top = `${50 - Math.cos(radians) * 42}%`;
+            marker.style.top = `${50 - Math.cos(radians) * 34 - pitchPct}%`;
             marker.style.transform = `translate(-50%,-50%) rotate(${Math.round(node.angleAzimuth)}deg)`;
         }
         const azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
         const azimuthEl = root.querySelector('[data-angle-azimuth]'), elevationEl = root.querySelector('[data-angle-elevation]');
-        if(azimuthEl) azimuthEl.textContent = `${Math.round(node.angleAzimuth)}° · ${azimuth[1]}`;
-        if(elevationEl) elevationEl.textContent = `${Math.round(node.angleElevation)}° · ${elevation[0]}`;
+        if(azimuthEl) azimuthEl.textContent = `水平 ${Math.round(node.angleAzimuth)}° · ${azimuth[1]}`;
+        if(elevationEl) elevationEl.textContent = `俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}`;
         root.querySelectorAll('[data-angle-preset]').forEach(button => button.classList.toggle('active', Number(button.dataset.anglePreset) === azimuth[0]));
     }
     function updateEditPreview(root, node, options, prefix, source){
@@ -957,10 +970,26 @@
         updateEditPreview(root, node, options, prefix, source);
         notify(options, node, false);
     }
+    function persistEditSource(node, prefix, source){
+        if(!node || !prefix || !source?.url) return false;
+        const values = {
+            [`${prefix}SourceUrl`]:source.url,
+            [`${prefix}SourceName`]:source.name || nameFromUrl(source.url, `${prefix}-source.png`),
+            [`${prefix}SourceWidth`]:Number(source.natural_w || source.width || 0),
+            [`${prefix}SourceHeight`]:Number(source.natural_h || source.height || 0)
+        };
+        let changed = false;
+        Object.entries(values).forEach(([key, value]) => {
+            if(node[key] !== value){ node[key] = value; changed = true; }
+        });
+        return changed;
+    }
     function bindEditNode(root, node, options, prefix){
         if(!root || !node) return;
         if(prefix === 'relight') normalizeRelight(node); else normalizeAngle(node);
         let source = editSource(node, options, prefix);
+        // 上游端口是输入真相；同时把解析到的图片快照写回节点，避免刷新/重绘时只剩空占位。
+        if(persistEditSource(node, prefix, source)) notify(options, node, false);
         const sourceSig = sourceSignature(source), controlSig = editControlSignature(node, prefix), output = outputItem(node);
         if(output?.url && ((node.specialGeneratedSourceSignature && node.specialGeneratedSourceSignature !== sourceSig) || (node.specialGeneratedControlSignature && node.specialGeneratedControlSignature !== controlSig))){
             clearOutputItem(node, options);
@@ -973,7 +1002,7 @@
                 const file = await uploadFile(fileInput.files?.[0]);
                 node[`${prefix}SourceUrl`] = file.url; node[`${prefix}SourceName`] = file.name || `${prefix}-source.png`;
                 node[`${prefix}SourceWidth`] = file.natural_w || 0; node[`${prefix}SourceHeight`] = file.natural_h || 0;
-                clearOutputItem(node, options); source = editSource(node, options, prefix); notify(options, node, true);
+                clearOutputItem(node, options); source = editSource(node, options, prefix); persistEditSource(node, prefix, source); notify(options, node, true);
             } catch(error){ options.toast?.(error.message); }
             finally { fileInput.value = ''; }
         };
@@ -984,7 +1013,7 @@
                 event.stopPropagation(); const key = control.dataset.editField;
                 let value = control.type === 'checkbox' ? control.checked : control.value;
                 if(['relightTemperature','relightIntensity','angleAzimuth','angleElevation'].includes(key)) value = Number(value);
-                node[key] = value; source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+                node[key] = value; source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
         });
         root.querySelectorAll('[data-relight-direction]').forEach(button => {
@@ -992,7 +1021,7 @@
             button.addEventListener('click', event => {
                 event.preventDefault(); event.stopPropagation(); node.relightDirection = button.dataset.relightDirection;
                 root.querySelectorAll('[data-relight-direction]').forEach(item => item.classList.toggle('active', item === button));
-                source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+                source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
         });
         root.querySelectorAll('[data-angle-preset]').forEach(button => {
@@ -1000,20 +1029,27 @@
             button.addEventListener('click', event => {
                 event.preventDefault(); event.stopPropagation(); node.angleAzimuth = Number(button.dataset.anglePreset || 0);
                 const slider = root.querySelector('[data-edit-field="angleAzimuth"]'); if(slider) slider.value = node.angleAzimuth;
-                source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+                source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
         });
         const orbit = root.querySelector('[data-angle-orbit]');
         if(orbit){
-            const updateOrbit = event => {
-                const rect = orbit.getBoundingClientRect(), dx = event.clientX - rect.left - rect.width / 2, dy = event.clientY - rect.top - rect.height / 2;
-                node.angleAzimuth = ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360;
+            const updateOrbit = (event, initial=false) => {
+                if(initial){ orbit.dataset.lastX = String(event.clientX); orbit.dataset.lastY = String(event.clientY); }
+                const lastX = Number(orbit.dataset.lastX || event.clientX), lastY = Number(orbit.dataset.lastY || event.clientY);
+                const deltaX = event.clientX - lastX, deltaY = event.clientY - lastY;
+                if(!initial){
+                    node.angleAzimuth = ((Number(node.angleAzimuth || 0) + deltaX * 0.85) % 360 + 360) % 360;
+                    node.angleElevation = clamp(Number(node.angleElevation || 0) - deltaY * 0.55, -30, 60);
+                    orbit.dataset.lastX = String(event.clientX); orbit.dataset.lastY = String(event.clientY);
+                }
                 const slider = root.querySelector('[data-edit-field="angleAzimuth"]'); if(slider) slider.value = Math.round(node.angleAzimuth);
-                source = editSource(node, options, prefix); markEditChanged(root, node, options, prefix, source);
+                const pitch = root.querySelector('[data-edit-field="angleElevation"]'); if(pitch) pitch.value = Math.round(node.angleElevation);
+                source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             };
-            orbit.addEventListener('pointerdown', event => { if(event.button !== 0) return; event.preventDefault(); event.stopPropagation(); orbit.setPointerCapture?.(event.pointerId); orbit.dataset.dragging = String(event.pointerId); updateOrbit(event); });
+            orbit.addEventListener('pointerdown', event => { if(event.button !== 0) return; event.preventDefault(); event.stopPropagation(); orbit.setPointerCapture?.(event.pointerId); orbit.dataset.dragging = String(event.pointerId); updateOrbit(event, true); });
             orbit.addEventListener('pointermove', event => { if(orbit.dataset.dragging !== String(event.pointerId)) return; event.preventDefault(); event.stopPropagation(); updateOrbit(event); });
-            const finish = event => { if(orbit.dataset.dragging !== String(event.pointerId)) return; orbit.releasePointerCapture?.(event.pointerId); delete orbit.dataset.dragging; event.stopPropagation(); };
+            const finish = event => { if(orbit.dataset.dragging !== String(event.pointerId)) return; orbit.releasePointerCapture?.(event.pointerId); delete orbit.dataset.dragging; delete orbit.dataset.lastX; delete orbit.dataset.lastY; event.stopPropagation(); };
             orbit.addEventListener('pointerup', finish); orbit.addEventListener('pointercancel', finish);
         }
         root.querySelectorAll('[data-special-action]').forEach(button => {
@@ -1024,6 +1060,7 @@
                 if(action !== `run-${prefix}`) return;
                 try {
                     source = editSource(node, options, prefix);
+                    persistEditSource(node, prefix, source);
                     if(!source?.url) throw new Error('请先连接或导入一张图片');
                     if(!options.generateImageEdit) throw new Error('当前画布未配置图片 API 生成能力');
                     node.specialRunning = true; notify(options, node, true);

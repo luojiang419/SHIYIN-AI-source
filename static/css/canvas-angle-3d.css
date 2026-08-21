@@ -1,0 +1,13 @@
+/* 多角度节点：轻量 CSS 透视机位视图。 */
+.angle-viewport-3d{perspective:620px;perspective-origin:50% 46%;overflow:hidden;background:radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--card,#fff) 92%,#6c7a8c 8%),var(--soft,#f5f6f8) 68%);cursor:grab;isolation:isolate}
+.angle-viewport-3d:active{cursor:grabbing}
+.angle-grid-3d{position:absolute;inset:16% 8% 10%;transform:rotateX(58deg) translateZ(-18px);transform-style:preserve-3d;opacity:.7;pointer-events:none;background:repeating-linear-gradient(90deg,transparent 0 20px,color-mix(in srgb,var(--line,#ddd) 72%,transparent) 21px 22px),repeating-linear-gradient(0deg,transparent 0 20px,color-mix(in srgb,var(--line,#ddd) 72%,transparent) 21px 22px);border:1px solid color-mix(in srgb,var(--line,#ddd) 80%,transparent);border-radius:50%}
+.angle-grid-line{position:absolute;display:block;pointer-events:none;background:color-mix(in srgb,var(--line,#ddd) 76%,transparent)}
+.angle-grid-line.grid-x{left:0;right:0;top:50%;height:1px}.angle-grid-line.grid-y{top:0;bottom:0;left:50%;width:1px}.angle-grid-line.grid-z{left:10%;right:10%;top:22%;height:1px;transform:rotate(-26deg)}
+.angle-world-3d{position:absolute;left:50%;top:50%;width:100%;height:100%;transform-style:preserve-3d;transition:transform .12s ease-out;pointer-events:none}
+.angle-subject-3d{transform:translate(-50%,-54%) translateZ(32px) rotateX(calc(var(--angle-pitch,0deg) * -.16)) rotateY(calc(var(--angle-yaw,0deg) * -.18));box-shadow:0 14px 25px rgba(30,35,45,.24),inset 0 0 0 1px rgba(255,255,255,.45);border-radius:18px;background:color-mix(in srgb,var(--card,#fff) 90%,#748196 10%)}
+.angle-subject-3d::after{content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(135deg,rgba(255,255,255,.38),transparent 35% 70%,rgba(22,28,38,.18));mix-blend-mode:soft-light}
+.angle-ground-3d{position:absolute;left:50%;top:66%;width:58%;height:18%;transform:translate(-50%,-50%) rotateX(72deg) translateZ(-12px);border-radius:50%;background:radial-gradient(ellipse,rgba(30,35,45,.24),transparent 68%);filter:blur(2px)}
+.angle-camera-marker{transition:left .12s ease-out,top .12s ease-out,transform .12s ease-out}
+.angle-left-label,.angle-right-label{position:absolute;top:50%;font-size:8px;color:var(--faint,#777);white-space:nowrap;transform:translateY(-50%);pointer-events:none}.angle-left-label{left:4px}.angle-right-label{right:4px}
+.angle-readout em{display:block;font-style:normal;font-size:8px;line-height:1.35;color:var(--faint,#888)}

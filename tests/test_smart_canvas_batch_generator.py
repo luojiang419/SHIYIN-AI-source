@@ -13,7 +13,7 @@ def section(start: str, end: str) -> str:
 
 
 def test_image_and_group_floating_menus_create_a_connected_batch_node():
-    assert "{key:'batch', icon:'layers-3', label:tr('smart.batchProcess')" in JAVASCRIPT
+    assert JAVASCRIPT.count("{key:'batch', icon:'layers-3', label:'批量处理'") == 2
     assert "function createSmartBatchGeneratorNode(sourceNode=null, point=null)" in JAVASCRIPT
     create_body = section("function createSmartBatchGeneratorNode", "const MULTI_VIEW_INPUT_SLOTS")
     assert "specialType:'batch-generator'" in create_body

@@ -16,7 +16,6 @@ const cascadeRunBtn = document.getElementById('cascadeRunBtn');
 const fileInput = document.getElementById('fileInput');
 const apiKindToggle = document.getElementById('apiKindToggle');
 const inputThumbsRow = document.getElementById('inputThumbsRow');
-const SMART_UPLOAD_MAX = 20;
 const SMART_REFERENCE_IMAGE_MAX = 20;
 const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
@@ -1862,7 +1861,7 @@ function smartGroupThumbLayout(node){
     }
     const thumb = Math.round(MEDIA_GROUP_THUMB_BASE * scale);
     const cell = thumb + gap;
-    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+    const cols = Math.max(2, smartMediaGridColumns(count));
     const rows = Math.ceil(count / cols);
     const visibleRows = Math.min(maxVisibleRows, rows);
     const gridW = cols * thumb + (cols - 1) * gap;
@@ -2016,6 +2015,9 @@ function singleImageLayout(image, node, scale){
         };
     }
     return {cols:1, rows:1, width:Math.round(260*scale), height:Math.round(180*scale), thumb:Math.round(96*scale), single:true};
+}
+function smartMediaGridColumns(count){
+    return Math.max(1, Math.ceil(Math.sqrt(Math.max(1, Number(count) || 1) * 4 / 3)));
 }
 function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap=8, maxVisibleRows=MEDIA_GROUP_MAX_VISIBLE_ROWS){
     let best = null;
@@ -2198,7 +2200,7 @@ function smartGroupImageGridLayout(node){
     const PAD = 32;
     const explicitW = Number(node?.w);
     const explicitH = Number(node?.h);
-    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+    const cols = Math.max(2, smartMediaGridColumns(count));
     const rows = Math.ceil(count / cols);
     const visibleRows = Math.min(SMART_GROUP_MAX_VISIBLE_ROWS, rows);
     if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
@@ -2274,7 +2276,7 @@ function imageLayout(images, scale=1, node=null){
         }
         return {cols, rows, visibleRows, width:Math.max(Math.round(226*s), cols * cell + PAD), height:visibleRows * cell - 8 + PAD, thumb};
     }
-    const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+    const cols = Math.max(2, smartMediaGridColumns(count));
     const rows = Math.ceil(count / cols);
     const visibleRows = Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, rows);
     if(Number.isFinite(explicitW) && explicitW > 40 && Number.isFinite(explicitH) && explicitH > 40){
@@ -6777,7 +6779,7 @@ function updateNodeElementDuringResize(node){
         const loadingGrid = body.querySelector('.loading-skeleton');
         if(loadingGrid){
             const count = Math.max(1, Number(node.pending) || 1);
-            const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+    const cols = Math.max(2, smartMediaGridColumns(count));
             const rows = Math.ceil(count / cols);
             loadingGrid.style.width = `${layout.width}px`;
             loadingGrid.style.height = `${layout.height}px`;
@@ -7752,7 +7754,7 @@ function nodeBodyHtml(node, layout){
     if(node.pending && imgs.length === 0){
         const count = Math.max(1, Number(node.pending) || 1);
         if(count <= 1) return `<div class="loading-cell single" style="width:${layout.width}px;height:${layout.height}px"></div>`;
-        const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(count))));
+        const cols = Math.max(2, smartMediaGridColumns(count));
         const rows = Math.ceil(count / cols);
         return `<div class="loading-skeleton" style="grid-template-columns:repeat(${cols}, 1fr);grid-template-rows:repeat(${rows}, 1fr);width:${layout.width}px;height:${layout.height}px;padding:8px;box-sizing:border-box">${Array.from({length:count}).map(() => `<div class="loading-cell"></div>`).join('')}</div>`;
     }
@@ -7846,7 +7848,7 @@ function smartNodeToolbarHtml(node){
     const actions = [
         {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image' || kind === 'video'},
         {key:'multi-view', icon:'panels-top-left', label:'创建三视图', enabled:canEditImage},
-        {key:'batch', icon:'layers-3', label:tr('smart.batchProcess'), enabled:canEditImage},
+        {key:'batch', icon:'layers-3', label:'批量处理', enabled:canEditImage},
         {key:'crop', icon:'crop', label:'裁剪', enabled:canEditImage},
         {key:'outpaint', icon:'expand', label:'扩图', enabled:canEditImage},
         {key:'mask', icon:'brush', label:'遮罩', enabled:canEditImage},
@@ -7923,7 +7925,7 @@ function smartGroupToolbarHtml(node){
     const imageCount = (node.images || []).filter(img => img?.url).length;
     const batchImageCount = smartGroupImageRefs(node).length;
     const actions = [
-        {key:'batch', icon:'layers-3', label:tr('smart.batchProcess'), enabled:batchImageCount > 0},
+        {key:'batch', icon:'layers-3', label:'批量处理', enabled:batchImageCount > 0},
         {key:'arrange', icon:'layout-grid', label:'整理排列', enabled:hasContent},
         {key:'preview', icon:'eye', label:'预览', enabled:imageCount > 0},
         {key:'grid', icon:'grid-3x3', label:'宫格拼接', enabled:imageCount > 1},
@@ -8071,12 +8073,14 @@ function render(){
         const isEmpty = !isSpecial && isImageNode && displayCount === 0 && !node.pending && !isQueued && !isJimengPending;
         const isHistory = isHistoryGroupNode(node);
         const isGroup = isImageNode && displayCount > 1;
+        const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length : (isGroup ? displayCount : 0);
+        const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
         const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
         const html = `<div class="image-node ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
-            <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
+            <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
             ${runTimePillHtml(node)}
@@ -13047,7 +13051,7 @@ function setSmartDropCopyEffect(e, includeAsset=false){
     }
 }
 async function uploadFiles(files){
-    const supported = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile)).slice(0, SMART_UPLOAD_MAX);
+    const supported = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile));
     if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file, file.name || 'media'));
@@ -13091,7 +13095,7 @@ function appendImagesToSmartNode(uploaded, targetId='', opts={}){
 }
 async function handleFiles(files, targetId='', opts={}){
     try {
-        const fileList = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile)).slice(0, SMART_UPLOAD_MAX);
+        const fileList = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile));
         if(!fileList.length) return;
         const uploaded = await uploadFiles(fileList);
         if(!uploaded.length) return;
@@ -13105,7 +13109,7 @@ async function importSmartLocalImages(paths){
     const response = await fetch('/api/ai/import-local-image', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({paths:orderedPaths.slice(0, SMART_UPLOAD_MAX)})
+        body:JSON.stringify({paths:orderedPaths})
     });
     if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.toastUploadFail')));
     const data = await response.json();

@@ -326,6 +326,8 @@ body.smart-prompt-split-resize .prompt-node-llm select { pointer-events:none !im
 .empty-node:hover .node-delete { opacity:1; pointer-events:auto; }
 .empty-node .node-delete:hover { color:#dc2626; background:#fee2e2; }
 .node-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+.node-title-wrap { min-width:0; display:flex; align-items:center; gap:7px; overflow:hidden; }
+.group-image-count { flex:0 0 auto; padding:2px 7px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.02em; text-transform:none; white-space:nowrap; }
 .node-actions { display:flex; align-items:center; gap:6px; }
 .floating-node-actions { position:absolute; right:7px; top:7px; z-index:8; opacity:0; pointer-events:none; transition:opacity .14s ease; }
 .image-node:hover .floating-node-actions { opacity:1; pointer-events:auto; }

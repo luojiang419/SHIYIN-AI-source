@@ -26,7 +26,7 @@ def test_batch_generator_is_a_first_class_image_generator_variant():
 
 
 def test_batch_toolbar_action_is_available_for_image_and_group_targets():
-    assert JAVASCRIPT.count("{id:'batchGenerator', label:tr('canvas.batchProcess'), icon:'layers-3'}") == 2
+    assert JAVASCRIPT.count("{id:'batchGenerator', label:'批量处理', icon:'layers-3'}") == 2
     body = function_body("runMediaQuickAction(action, target)", "startSelectionLink(e, kind)")
     assert "action === 'batchGenerator' && target?.kind === 'group'" in body
     assert "addQuickActionNode(sourceNode, action)" in body

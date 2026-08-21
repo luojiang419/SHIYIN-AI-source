@@ -31,7 +31,7 @@ def test_local_path_drop_is_sorted_in_both_canvases():
     assert "const orderedPaths = sortCanvasMediaByFilename(paths);" in CANVAS_JS
     assert "body:JSON.stringify({paths:orderedPaths})" in CANVAS_JS
     assert "const orderedPaths = sortSmartMediaByFilename(paths);" in SMART_JS
-    assert "body:JSON.stringify({paths:orderedPaths.slice(0, SMART_UPLOAD_MAX)})" in SMART_JS
+    assert "body:JSON.stringify({paths:orderedPaths})" in SMART_JS
 
 
 def test_normal_canvas_bulk_drop_reuses_arrange_layout_before_group_bounds():
@@ -39,7 +39,10 @@ def test_normal_canvas_bulk_drop_reuses_arrange_layout_before_group_bounds():
     layout_end = CANVAS_JS.index("function createGroupForUploadedNodes", layout_start)
     layout_body = CANVAS_JS[layout_start:layout_end]
     assert "render();" in layout_body
-    assert "return arrangeIdsByConnections(list.map(node => node.id));" in layout_body
+    assert "const columns = Math.max(1, Math.ceil(Math.sqrt(list.length * 4 / 3)));" in layout_body
+    assert "const rows = Math.ceil(list.length / columns);" in layout_body
+    assert "colWidths[col] = Math.max" in layout_body
+    assert "rowHeights[row] = Math.max" in layout_body
     assert "const gapX = 280;" not in layout_body
     assert "const gapY = 250;" not in layout_body
 
@@ -60,3 +63,38 @@ def test_shared_arrange_layout_accounts_for_real_node_dimensions():
     assert "rowHeights[row] = Math.max" in arrange_body
     assert "const columnGap = 72;" in arrange_body
     assert "const rowGap = 56;" in arrange_body
+
+
+def test_bulk_import_is_uncapped_and_local_path_import_uses_same_grid_and_group():
+    assert "const CANVAS_UPLOAD_MAX" not in CANVAS_JS
+    assert "const SMART_UPLOAD_MAX" not in SMART_JS
+    assert ".slice(0, CANVAS_UPLOAD_MAX)" not in CANVAS_JS
+    assert ".slice(0, SMART_UPLOAD_MAX)" not in SMART_JS
+    assert "requested = [p for p in requested if str(p or \"\").strip()]" in (
+        (ROOT / "main.py").read_text(encoding="utf-8")
+    )
+    local_start = CANVAS_JS.index("async function createImageCardsFromLocalPaths")
+    local_end = CANVAS_JS.index("async function applyImageDropPayloadToBoard", local_start)
+    local_body = CANVAS_JS[local_start:local_end]
+    assert "layoutUploadedMediaNodes(created, base);" in local_body
+    assert "created.group = createGroupForUploadedNodes(created, base);" in local_body
+
+
+def test_import_grid_has_requested_48_item_shape_and_smart_canvas_uses_same_ratio():
+    layout_start = CANVAS_JS.index("function layoutUploadedMediaNodes(created, base)")
+    layout_end = CANVAS_JS.index("function createGroupForUploadedNodes", layout_start)
+    layout_body = CANVAS_JS[layout_start:layout_end]
+    assert "Math.ceil(Math.sqrt(list.length * 4 / 3))" in layout_body
+    assert "const rows = Math.ceil(list.length / columns);" in layout_body
+    assert "function smartMediaGridColumns(count)" in SMART_JS
+    assert "Math.ceil(Math.sqrt(Math.max(1, Number(count) || 1) * 4 / 3))" in SMART_JS
+
+
+def test_group_headers_show_image_count_next_to_group_title():
+    assert "const groupImageCount = node.type === 'group'" in CANVAS_JS
+    assert "<span class=\"group-image-count\">${groupImageCount}张</span>" in CANVAS_JS
+    assert "<div class=\"node-title-wrap\"><span class=\"node-title\">${displayTitle}</span>${groupCountHtml}" in CANVAS_JS
+    assert ".group-image-count" in (ROOT / "static/css/canvas.css").read_text(encoding="utf-8")
+    assert "const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length" in SMART_JS
+    assert "<span class=\"group-image-count\">${smartGroupImageCount}张</span>" in SMART_JS
+    assert "<div class=\"node-title-wrap\"><div class=\"node-title\">${title}</div>${smartGroupCountHtml}" in SMART_JS

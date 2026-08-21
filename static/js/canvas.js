@@ -5,7 +5,6 @@ function trf(key, values={}){
     return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), tr(key));
 }
 function langIsEn(){ return window.StudioI18n?.lang?.() === 'en'; }
-const CANVAS_UPLOAD_MAX = 20;
 const CANVAS_REFERENCE_IMAGE_MAX = 20;
 function actionFailed(labelKey, detail=''){
     const label = tr(labelKey);
@@ -4676,15 +4675,32 @@ async function importLocalImages(paths){
 function layoutUploadedMediaNodes(created, base){
     const list = [...(created || [])].filter(node => node?.id);
     if(!list.length) return false;
-    if(list.length === 1){
-        list[0].x = Number(base?.x || 0);
-        list[0].y = Number(base?.y || 0);
-        return true;
-    }
-    // Render once so the shared arrange routine can measure each media node's
-    // real width and height instead of relying on a fixed grid gap.
+    // Render once so the grid can measure each media node's real width and height.
     render();
-    return arrangeIdsByConnections(list.map(node => node.id));
+    const rects = list.map(node => ({node, rect:nodeRect(node)}));
+    const columns = Math.max(1, Math.ceil(Math.sqrt(list.length * 4 / 3)));
+    const rows = Math.ceil(list.length / columns);
+    const colWidths = Array(columns).fill(0);
+    const rowHeights = Array(rows).fill(0);
+    rects.forEach(({rect}, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        colWidths[col] = Math.max(colWidths[col], Math.max(220, rect.w));
+        rowHeights[row] = Math.max(rowHeights[row], Math.max(120, rect.h));
+    });
+    const startX = Number.isFinite(Number(base?.x)) ? Number(base.x) : Math.min(...rects.map(({rect}) => rect.x));
+    const startY = Number.isFinite(Number(base?.y)) ? Number(base.y) : Math.min(...rects.map(({rect}) => rect.y));
+    const colX = [];
+    let cursorX = startX;
+    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + 72; });
+    const rowY = [];
+    let cursorY = startY;
+    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + 56; });
+    rects.forEach(({node}, index) => {
+        node.x = Math.round(colX[index % columns]);
+        node.y = Math.round(rowY[Math.floor(index / columns)]);
+    });
+    return true;
 }
 function createGroupForUploadedNodes(created, point){
     const targets = [...(created || [])].filter(n => n?.type === 'image');
@@ -4711,7 +4727,7 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     const supported = sortCanvasMediaByFilename([...files].filter(file => {
         const kind = mediaKindForUpload(file);
         return onlyImages ? kind === 'image' : ['image','video','audio'].includes(kind);
-    })).slice(0, CANVAS_UPLOAD_MAX);
+    }));
     if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file));
@@ -4871,7 +4887,7 @@ async function createImageCardsFromLocalPaths(paths, point){
     if(!ensureCanvas()) return [];
     setStatus(langIsEn() ? 'Importing images...' : '导入图片...');
     try {
-        const files = await importLocalImages((paths || []).slice(0, CANVAS_UPLOAD_MAX));
+        const files = await importLocalImages(paths || []);
         const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
         const created = [];
         files.forEach((file, i) => {
@@ -4879,6 +4895,10 @@ async function createImageCardsFromLocalPaths(paths, point){
             nodes.push(node);
             created.push(node);
         });
+        if(created.length > 1){
+            layoutUploadedMediaNodes(created, base);
+            created.group = createGroupForUploadedNodes(created, base);
+        }
         render();
         scheduleSave();
         setStatus('Ready');
@@ -4908,7 +4928,7 @@ async function applyImageDropPayloadToNode(nodeId, payload){
         return;
     }
     if(payload.type === 'localPaths') {
-        const files = await importLocalImages((payload.localPaths || []).slice(0, CANVAS_UPLOAD_MAX));
+        const files = await importLocalImages(payload.localPaths || []);
         const file = files[0];
         if(file?.url) {
             pushUndo();
@@ -4962,7 +4982,7 @@ async function handleImageNodeDropEvent(e, nodeId, highlightEl){
 }
 async function fillImageNode(nodeId, files, opts={}){
     if(!ensureCanvas()) return;
-    const imgs = [...files].filter(file => ['image','video','audio'].includes(mediaKindForUpload(file))).slice(0, CANVAS_UPLOAD_MAX);
+    const imgs = [...files].filter(file => ['image','video','audio'].includes(mediaKindForUpload(file)));
     if(!imgs.length) return;
     if(opts.group && imgs.length > 1){
         const source = nodes.find(n => n.id === nodeId);
@@ -7735,6 +7755,10 @@ function renderNode(node){
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
+    const groupImageCount = node.type === 'group'
+        ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
+        : 0;
+    const groupCountHtml = node.type === 'group' ? `<span class="group-image-count">${groupImageCount}张</span>` : '';
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
@@ -7742,7 +7766,7 @@ function renderNode(node){
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
         return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
     })() : '';
-    el.innerHTML = `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    el.innerHTML = `<div class="node-head"><div class="node-title-wrap"><span class="node-title">${displayTitle}</span>${groupCountHtml}</div><div style="display:flex;align-items:center;gap:8px">${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
     const body = document.createElement('div');
     body.className = 'node-body';
     if(node.type === 'image') {
@@ -16238,7 +16262,7 @@ function renderSelectionHub(){
         return;
     }
     const actions = target.kind === 'group' ? [
-        {id:'batchGenerator', label:tr('canvas.batchProcess'), icon:'layers-3'},
+        {id:'batchGenerator', label:'批量处理', icon:'layers-3'},
         {id:'expand-canvas', label:langIsEn() ? 'Expand canvas' : '扩展画幅', icon:'expand'},
         {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'},
         {id:'send-to-film', label:langIsEn() ? 'Send to filmstoryboard' : '发送到 filmstoryboard', icon:'send'}
@@ -16252,7 +16276,7 @@ function renderSelectionHub(){
         {id:'edit', label:langIsEn() ? 'Edit' : '编辑', icon:'pencil'},
         {id:'grid', label:tr('canvas.modeGrid'), icon:'grid-3x3'},
         {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
-        {id:'batchGenerator', label:tr('canvas.batchProcess'), icon:'layers-3'},
+        {id:'batchGenerator', label:'批量处理', icon:'layers-3'},
         {id:'video', label:tr('canvas.videoGenerate'), icon:'clapperboard'},
         {id:'panorama', label:langIsEn() ? 'Panorama' : '全景', icon:'scan-line'},
         {id:'angle', label:langIsEn() ? 'Multi-angle' : '多角度', icon:'rotate-3d'},

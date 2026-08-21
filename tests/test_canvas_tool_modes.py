@@ -39,6 +39,18 @@ class CanvasToolModeContractTests(unittest.TestCase):
         self.assertIn("if(e.button === 1)", self.canvas_js)
         self.assertIn("if(e.button !== 0 && e.button !== 1) return", self.smart_js)
 
+    def test_smart_node_toolbar_keeps_gap_and_dismisses_on_canvas_pan(self):
+        self.assertIn("bottom:calc(100% + 10px)", self.smart_css)
+        self.assertIn(".world.smart-node-toolbar-dismissed .smart-node-floating-menu", self.smart_css)
+        self.assertIn("function dismissSmartNodeToolbar()", self.smart_js)
+        self.assertIn("function restoreSmartNodeToolbar()", self.smart_js)
+        pan_start = self.smart_js.index("panState = {button:e.button")
+        pan_context_start = self.smart_js.rfind("if(e.button !== 0 && e.button !== 1) return;", 0, pan_start)
+        self.assertIn("dismissSmartNodeToolbar()", self.smart_js[pan_context_start:pan_start])
+        node_click = self.smart_js.index("el.onclick = e => {")
+        node_click_end = self.smart_js.index("const node = nodeIndex.get(id);", node_click)
+        self.assertIn("restoreSmartNodeToolbar()", self.smart_js[node_click:node_click_end])
+
 
 if __name__ == "__main__":
     unittest.main()

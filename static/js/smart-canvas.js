@@ -99,6 +99,7 @@ let mentionAnchorEl = null;
 let mentionInsertMode = 'token';
 let panState = null;
 let didPan = false;
+let smartNodeToolbarDismissed = false;
 let expandedPromptSource = null;
 function openExpandedPromptEditor(source){
     if(!source || !expandedPromptModal || !expandedPromptTextarea || !expandedPromptRich) return;
@@ -156,6 +157,14 @@ function setSmartCanvasToolMode(mode){
     syncSmartCanvasToolUi();
 }
 syncSmartCanvasToolUi();
+function dismissSmartNodeToolbar(){
+    smartNodeToolbarDismissed = true;
+    world?.classList.add('smart-node-toolbar-dismissed');
+}
+function restoreSmartNodeToolbar(){
+    smartNodeToolbarDismissed = false;
+    world?.classList.remove('smart-node-toolbar-dismissed');
+}
 let portDragState = null;
 let saveTimer = null;
 let apiProviders = [];
@@ -8625,6 +8634,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
         el.onclick = e => {
             e.stopPropagation();
             if(Date.now() < suppressNodeClickUntil) return;
+            restoreSmartNodeToolbar();
             const node = nodeIndex.get(id);
             hideRunTimerForNode(node);
             const alreadySelected = selectedId === id && selectedIds.length === 0 && selectedImage.nodeId === '';
@@ -8649,6 +8659,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
         }, true);
         nodeDrop?.addEventListener('click', e => {
             e.preventDefault(); e.stopPropagation();
+            restoreSmartNodeToolbar();
             hideRunTimerForNode(nodeIndex.get(id));
             selectedId = id;
             selectedIds = [];
@@ -8826,6 +8837,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
                 clearImageClickTimer();
                 imageClickTimer = setTimeout(() => {
                     imageClickTimer = null;
+                restoreSmartNodeToolbar();
                 hideRunTimerForNode(owner);
                 selectedId = id;
                 selectedIds = [];
@@ -16163,6 +16175,7 @@ shell.onmousedown = e => {
     if(e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
     didPan = false;
+    dismissSmartNodeToolbar();
     panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
     shell.classList.add('panning');
 };

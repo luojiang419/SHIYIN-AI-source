@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Resolve next release version and idempotency
+      - name: Resolve source release version and idempotency
         id: version
         shell: pwsh
         env:
@@ -66,13 +66,18 @@ jobs:
             "existing_url=$($existing[0].html_url)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
             exit 0
           }
-          try { $latestTag = (Invoke-RestMethod -Headers $headers -Uri "$api/releases/latest").tag_name }
-          catch { if ($_.Exception.Response.StatusCode -eq 404) { $latestTag = '' } else { throw } }
-          $next = python tools/resolve-release-version.py --latest $latestTag --minimum $env:MINIMUM_VERSION
-          if ($LASTEXITCODE -ne 0 -or $next -notmatch '^\d+\.\d+\.\d+$') { throw "Version resolver returned invalid output: $next" }
+          $sourceVersion = (Get-Content -LiteralPath 'VERSION' -Raw).Trim()
+          if ($sourceVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Source VERSION is invalid: $sourceVersion" }
+          $minimumVersion = [version]($env:MINIMUM_VERSION.TrimStart('v'))
+          if ([version]$sourceVersion -lt $minimumVersion) { throw "Source VERSION $sourceVersion is below minimum $minimumVersion" }
+          $sourceTag = "v$sourceVersion"
+          $sameTag = @($releases | Where-Object { $_.tag_name -eq $sourceTag })
+          if ($sameTag.Count -gt 0) {
+            throw "Source VERSION $sourceVersion already has a published release. Bump VERSION before publishing again."
+          }
           'skip=false' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
-          "version=$next" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
-          "tag=v$next" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "version=$sourceVersion" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "tag=$sourceTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Set up Node.js
         if: steps.version.outputs.skip != 'true'

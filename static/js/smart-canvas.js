@@ -7624,7 +7624,7 @@ function smartNodeToolbarHtml(node){
         {key:'grid', icon:'grid-3x3', label:gridLabel, enabled:canEditImage},
         {key:'download', icon:'download', label:'下载', enabled:true}
     ];
-    return `<div class="smart-node-floating-menu" data-smart-node-menu="1">${actions.map(action => `
+    return `<div class="smart-node-floating-menu smart-node-image-menu" data-smart-node-menu="1">${actions.map(action => `
         <button type="button" data-smart-node-action="${escapeAttr(action.key)}" data-node-id="${escapeAttr(node.id)}" ${action.enabled ? '' : 'disabled'} title="${escapeAttr(action.label)}">
             <i data-lucide="${escapeAttr(action.icon)}"></i><span>${escapeHtml(action.label)}</span>
         </button>`).join('')}</div>`;

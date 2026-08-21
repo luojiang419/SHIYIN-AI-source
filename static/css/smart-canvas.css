@@ -328,11 +328,13 @@ body.smart-prompt-split-resize .prompt-node-llm select { pointer-events:none !im
 .image-node:hover .floating-node-actions { opacity:1; pointer-events:auto; }
 .image-node.dragging .floating-node-actions { opacity:0 !important; pointer-events:none !important; }
 .smart-node-floating-menu { position:absolute; left:50%; top:auto; bottom:calc(100% + 10px); z-index:18; display:inline-flex; align-items:center; gap:4px; height:30px; max-width:min(760px, calc(100vw - 48px)); padding:3px 5px; border-radius:12px; border:1px solid var(--line); background:color-mix(in srgb, var(--panel) 88%, transparent); box-shadow:0 14px 34px var(--shadow); backdrop-filter:blur(18px); transform:translateX(-50%) translateY(3px); opacity:0; pointer-events:none; white-space:nowrap; cursor:default; transition:opacity .14s ease, transform .14s ease; }
+.smart-node-floating-menu.smart-node-image-menu { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); grid-auto-rows:30px; width:min(560px, calc(100vw - 48px)); max-width:min(560px, calc(100vw - 48px)); height:auto; gap:4px; align-items:center; white-space:normal; }
 .image-node.selected .smart-node-floating-menu { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
 .world.smart-multi-selected .smart-node-floating-menu { opacity:0 !important; pointer-events:none !important; }
 .world.smart-node-toolbar-dismissed .smart-node-floating-menu { opacity:0 !important; pointer-events:none !important; }
 .theme-dark .smart-node-floating-menu { background:color-mix(in srgb, var(--panel) 82%, transparent); border-color:rgba(155,146,136,.26); box-shadow:0 16px 38px rgba(0,0,0,.36); }
 .smart-node-floating-menu button { height:24px; min-width:34px; padding:0 9px; border:0; border-radius:9px; display:inline-flex; align-items:center; justify-content:center; gap:5px; background:transparent; color:var(--muted); font-size:10px; line-height:1; font-weight:400; cursor:pointer; transition:background .14s ease, color .14s ease, transform .14s ease; }
+.smart-node-floating-menu.smart-node-image-menu button { width:100%; min-width:0; }
 .smart-node-floating-menu button:hover { background:var(--soft); color:var(--text); transform:translateY(-1px); }
 .smart-node-floating-menu button:disabled { opacity:.36; cursor:not-allowed; transform:none; }
 .smart-node-floating-menu button i,.smart-node-floating-menu button svg { width:12px; height:12px; stroke-width:2.2; flex:0 0 auto; }
@@ -341,6 +343,7 @@ body.smart-node-resize .smart-node-floating-menu,
 .image-node.dragging .smart-node-floating-menu { opacity:0 !important; pointer-events:none !important; }
 @media (max-width: 760px){
     .smart-node-floating-menu { top:auto; bottom:calc(100% + 10px); overflow-x:auto; scrollbar-width:none; }
+    .smart-node-floating-menu.smart-node-image-menu { overflow:visible; }
     .smart-node-floating-menu::-webkit-scrollbar { display:none; }
     .smart-node-floating-menu button span { display:none; }
     .smart-node-floating-menu button { width:30px; padding:0; }

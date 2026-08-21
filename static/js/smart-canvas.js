@@ -1509,7 +1509,7 @@ function createMultiViewNode(point, sourceNode=null){
     const baseY = sourceRect ? sourceRect.y : (point?.y || 0) - 320;
     const node = {
         id:uid('multi-view'), type:'smart-image', specialType:'multi-view',
-        x:baseX, y:baseY, w:700, h:720, title:'创建三视图', images:[],
+        x:baseX, y:baseY, w:700, h:560, title:'创建三视图', images:[],
         multiViewStatus:'idle', multiViewInputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
     nodes.push(node);
@@ -1543,16 +1543,12 @@ function multiViewBodyHtml(node){
     const outputNames = ['三视图+细节横板', '正面视图', '侧面视图', '背面视图'];
     const outputs = (node.images || []).filter(item => item?.url);
     const status = node.multiViewStatus === 'running' ? '生成中…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputs.length >= 4 ? '4 张资产已生成' : '连接图片后点击生成';
-    const groups = [
-        ['模特主体', [['model-front', '模特正面', false], ['model-side', '模特侧面', true], ['model-back', '模特背面', true]]],
-        ['产品角度', [['product-front', '产品正面', false], ['product-side', '产品侧面', false], ['product-back', '产品背面', false]]],
-        ['细节与配饰', [['front-detail', '正面细节', true], ['back-detail', '背面细节', true], ['accessory', '配饰', true]]]
-    ];
-    const slots = groups.map(([groupTitle, groupSlots]) => `<section class="multi-view-input-group"><h4>${escapeHtml(groupTitle)}</h4>${groupSlots.map(([role, label, optional]) => {
+    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-') ? '产品角度' : '细节与配饰';
+    const slots = MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index) => {
         const count = inputs.get(role)?.length || 0;
         const detail = count ? `${count} 张已连接` : (optional ? '可选输入' : '待连接');
-        return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}"><span><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
-    }).join('')}</section>`).join('');
+        return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
+    }).join('');
     const outputPreview = outputs.length ? `<div class="multi-view-output-grid">${outputs.map((item, index) => `<div class="multi-view-output-item"><img src="${escapeAttr(displayMediaUrl(item))}" alt="${escapeAttr(outputNames[index] || '生成结果')}" loading="lazy"><span>${escapeHtml(outputNames[index] || `视图 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
     return `<div class="special-node multi-view-special" data-special-node="multi-view">
         <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 产品 / 细节」分组</small></div><span>9 个输入 · 4 张输出</span></div>
@@ -2103,7 +2099,12 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
-    if(node?.specialType === 'multi-view') return {cols:1, rows:1, width:Math.max(620, Math.round(Number(node.w) || 700)), height:Math.max(600, Math.round(Number(node.h) || 720)), thumb:96, single:true};
+    if(node?.specialType === 'multi-view') {
+        const hasOutputs = (node.images || []).some(item => item?.url);
+        const savedHeight = Number(node.h);
+        const height = !hasOutputs && (!Number.isFinite(savedHeight) || savedHeight === 720) ? 560 : Math.max(hasOutputs ? 600 : 520, savedHeight || 560);
+        return {cols:1, rows:1, width:Math.max(620, Math.round(Number(node.w) || 700)), height, thumb:96, single:true};
+    }
     if(node?.type === 'smart-group'){
         const groupThumbLayout = smartGroupThumbLayout(node);
         if(groupThumbLayout) return groupThumbLayout;
@@ -7909,7 +7910,7 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
             ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="top:${Math.round((index + 1) * 100 / (MULTI_VIEW_INPUT_SLOTS.length + 1))}%" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         return {node, html};

@@ -3070,7 +3070,7 @@ function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
 function addMultiViewNode(point){
     const p = point || defaultPoint(160, 80);
     return addNode({
-        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:720,
+        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:560,
         multiViewStatus:'idle', multiViewError:'', generatedOutputs:[], multiViewRunAt:0
     });
 }
@@ -7257,17 +7257,13 @@ function classicMultiViewPrompt(view, refs, board=false){
 }
 function classicMultiViewBodyHtml(node){
     const inputs = classicMultiViewConnections(node);
-    const groups = [
-        ['模特主体', [['model-front', '模特正面'], ['model-side', '模特侧面'], ['model-back', '模特背面']]],
-        ['产品角度', [['product-front', '产品正面'], ['product-side', '产品侧面'], ['product-back', '产品背面']]],
-        ['细节与配饰', [['front-detail', '正面细节'], ['back-detail', '背面细节'], ['accessory', '配饰']]]
-    ];
-    const slots = groups.map(([groupTitle, groupSlots]) => `<section class="classic-multi-view-input-group"><h4>${escapeHtml(groupTitle)}</h4>${groupSlots.map(([role, label]) => {
+    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-') ? '产品角度' : '细节与配饰';
+    const slots = CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => {
         const count = inputs.get(role)?.length || 0;
         const optional = ['front-detail','back-detail','accessory'].includes(role);
         const state = count ? `${count} 张已连接` : optional ? '可选输入' : role === 'model-side' || role === 'model-back' ? '可用正面扩展' : '待连接';
-        return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}"><span><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
-    }).join('')}</section>`).join('');
+        return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="classic-multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
+    }).join('');
     const outputNames = ['16:9 三视图模卡','正面 9:16','侧面 9:16','背面 9:16'];
     const outputs = (node.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
     const previews = outputs.length ? `<div class="classic-multi-view-output-grid">${outputs.map((url, index) => `<div class="classic-multi-view-output"><img src="${escapeAttr(canvasDisplayMediaUrl(url, ''))}" alt="${escapeAttr(outputNames[index] || `资产 ${index + 1}`)}" draggable="false"><span>${escapeHtml(outputNames[index] || `资产 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
@@ -7533,6 +7529,7 @@ function renderNode(node){
     window.CanvasEcommerceNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
+    if(node.type === 'multiView' && Number(node.h) === 720 && !(node.generatedOutputs || []).length) node.h = 560;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -7761,7 +7758,7 @@ function renderNode(node){
     if(ecommercePorts.length > 1){
         el.insertAdjacentHTML('beforeend', ecommercePorts.map(port => `<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
-        el.insertAdjacentHTML('beforeend', CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="top:${Math.round((index + 1) * 100 / (CLASSIC_MULTI_VIEW_INPUT_SLOTS.length + 1))}%" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
         el.insertAdjacentHTML('beforeend', `<div class="port in pose-role-port" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="port in pose-role-port" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>`);
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
@@ -7953,7 +7950,7 @@ function defaultNodeSize(type){
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
     if(type === 'panorama') return {w:520, h:520};
-    if(type === 'multiView') return {w:700, h:720};
+    if(type === 'multiView') return {w:700, h:560};
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'poseReference') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};

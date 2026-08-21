@@ -82,5 +82,15 @@ def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
 
 
 def test_both_canvas_pages_load_multi_view_layout_overrides():
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.1' in SMART_HTML
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.1' in CANVAS_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.2' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.2' in CANVAS_HTML
+
+
+def test_multi_view_uses_single_column_rows_for_port_alignment():
+    assert "MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index)" in SMART_JS
+    assert "CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index)" in CANVAS_JS
+    assert "style=\"--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px\"" in SMART_JS
+    assert "style=\"--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px\"" in CANVAS_JS
+    assert ".multi-view-input-list,.classic-multi-view-input-list{display:flex;flex-direction:column" in MULTI_VIEW_CSS
+    assert ".smart-special-node.smart-multi-view-node .multi-view-port{top:var(--multi-view-port-top" in MULTI_VIEW_CSS
+    assert ".multiView-node .classic-multi-view-port{top:var(--multi-view-port-top" in MULTI_VIEW_CSS

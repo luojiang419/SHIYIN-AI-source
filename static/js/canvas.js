@@ -1834,7 +1834,21 @@ async function saveCanvas(){
     }
 }
 
-async function loadConfig(){
+function scheduleCanvasConfigSecondary(task){
+    const run = () => {
+        Promise.resolve()
+            .then(task)
+            .then(() => {
+                if(!canvas) return;
+                pruneMissingComfyWorkflows();
+                render();
+            })
+            .catch(error => console.warn('canvas secondary config load failed', error));
+    };
+    if('requestIdleCallback' in window) window.requestIdleCallback(run, {timeout:1200});
+    else setTimeout(run, 0);
+}
+async function loadConfig({deferSecondary=false}={}){
     loadLocalModelLists();
     try {
         const cfg = await fetch('/api/runtime/config').then(r=>r.json());
@@ -1851,10 +1865,13 @@ async function loadConfig(){
         runningHubWorkflowCache = {};
         const rhProvider = apiProviders.find(p => p.id === 'runninghub');
         const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
-        await Promise.all(rhWorkflowIds.map(async workflowId => {
-            try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
-        }));
-        if(apiProviders.some(provider => provider.id === 'minimax-h3')) await loadMiniMaxH3Status();
+        const loadSecondary = async () => {
+            const tasks = rhWorkflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
+            if(apiProviders.some(provider => provider.id === 'minimax-h3')) tasks.push(loadMiniMaxH3Status());
+            await Promise.allSettled(tasks);
+        };
+        if(deferSecondary) scheduleCanvasConfigSecondary(loadSecondary);
+        else await loadSecondary();
     } catch(e) {
         apiProviders = defaultApiProviders();
     }
@@ -2381,8 +2398,6 @@ async function openCanvas(id){
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
-        const touched = await touchCanvasOpened(canvas.id);
-        if(touched?.updated_at) canvas.updated_at = Number(touched.updated_at);
         if((canvas.kind || 'classic') === 'smart'){
             openSmartCanvasPage(canvas.id);
             return;
@@ -2396,8 +2411,6 @@ async function openCanvas(id){
         localCanvasDirty = false;
         resetTransientRunState(nodes);
         sanitizeConnections();
-        pruneMissingComfyWorkflows();
-        await refreshMissingCanvasAssets();
         selected.clear();
         setCanvasMode(true);
         renderCanvasList();
@@ -2408,6 +2421,15 @@ async function openCanvas(id){
         resumeTopazVideoTasks();
         startCanvasRemotePolling();
         setStatus('Ready');
+        const openedCanvasId = canvas.id;
+        void touchCanvasOpened(openedCanvasId).then(touched => {
+            if(canvas?.id !== openedCanvasId || !touched?.updated_at) return;
+            canvas.updated_at = Number(touched.updated_at);
+            lastCanvasUpdatedAt = Math.max(lastCanvasUpdatedAt, canvas.updated_at);
+        });
+        void refreshMissingCanvasAssets(openedCanvasId).then(() => {
+            if(canvas?.id === openedCanvasId) render();
+        });
     } catch(e) {
         setStatus(tr('canvas.openFailed'));
         console.error(e);
@@ -2484,16 +2506,21 @@ function canvasLocalAssetUrls(){
     });
     return [...urls];
 }
-async function refreshMissingCanvasAssets(){
-    missingAssetUrls.clear();
+async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
+    const targetCanvasId = String(expectedCanvasId || '');
     const urls = canvasLocalAssetUrls();
-    if(!urls.length) return;
+    if(!urls.length){
+        if(canvas?.id === targetCanvasId) missingAssetUrls.clear();
+        return;
+    }
     try {
         const data = await fetch('/api/canvas-assets/check', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({urls})
         }).then(r => r.json());
+        if(canvas?.id !== targetCanvasId) return;
+        missingAssetUrls.clear();
         const exists = data.exists || {};
         Object.entries(exists).forEach(([url, ok]) => { if(!ok) missingAssetUrls.add(url); });
     } catch(e) {
@@ -17911,12 +17938,16 @@ window.onload = async () => {
     initOutputCompareEvents();
     initOutputPreviewZoomEvents();
     applyViewport();
-    await loadConfig();
-    pruneMissingComfyWorkflows();
     // 编辑器页只负责打开单个画布：必须带 ?id；没有 id 就回到独立的选画布页面。
     const openId = new URLSearchParams(window.location.search).get('id');
     if(openId){
+        const configTask = loadConfig({deferSecondary:true});
         await openCanvas(openId);
+        void configTask.then(() => {
+            if(canvas?.id !== openId) return;
+            pruneMissingComfyWorkflows();
+            render();
+        });
     } else {
         window.location.replace(canvasListUrlForProject(rememberedCanvasListProject()));
     }

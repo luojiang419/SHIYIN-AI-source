@@ -4609,24 +4609,44 @@ function bindDynamicParams(){
         };
     });
 }
-async function loadConfig(){
+function scheduleSmartConfigSecondary(task){
+    const run = () => {
+        Promise.resolve()
+            .then(task)
+            .then(() => {
+                if(!canvas) return;
+                sanitizeSmartApiSelection(settings);
+                updateProviderModels();
+                syncApiKindToggleVisibility();
+                render();
+            })
+            .catch(error => console.warn('smart canvas secondary config load failed', error));
+    };
+    if('requestIdleCallback' in window) window.requestIdleCallback(run, {timeout:1200});
+    else setTimeout(run, 0);
+}
+async function loadConfig({deferSecondary=false}={}){
     try {
         const cfg = await fetch('/api/runtime/config').then(r => r.json());
         apiProviders = Array.isArray(cfg.api_providers) ? cfg.api_providers : [];
-        if(apiProviders.some(provider => provider.id === 'kling-cli')) await loadSmartKlingCapabilities();
-        if(apiProviders.some(provider => provider.id === 'minimax-h3')) await loadSmartMiniMaxH3Status();
-        // 提供商配置已就绪即先渲染参数面板，避免等工作流/RunningHub 预取完成后参数才「突然刷新出来」。
         sanitizeSmartApiSelection(settings);
         updateProviderModels();
         runningHubWorkflowCache = {};
         const rhProvider = apiProviders.find(p => p.id === 'runninghub');
         const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
-        await Promise.all(rhWorkflowIds.map(async workflowId => {
-            try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
-        }));
+        const loadSecondary = async () => {
+            const tasks = rhWorkflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
+            if(apiProviders.some(provider => provider.id === 'kling-cli')) tasks.push(loadSmartKlingCapabilities());
+            if(apiProviders.some(provider => provider.id === 'minimax-h3')) tasks.push(loadSmartMiniMaxH3Status());
+            await Promise.allSettled(tasks);
+        };
         lastConfigRefreshAt = Date.now();
-        sanitizeSmartApiSelection(settings);
-        updateProviderModels();
+        if(deferSecondary) scheduleSmartConfigSecondary(loadSecondary);
+        else {
+            await loadSecondary();
+            sanitizeSmartApiSelection(settings);
+            updateProviderModels();
+        }
     } catch(e) {
         toast(tr('smart.toastApiSettingsFail'));
     }
@@ -18452,19 +18472,37 @@ window.addEventListener('studio-lang-change', () => {
     if(promptTemplatePanel?.classList?.contains('open')) renderPromptTemplatePanel();
     render();
 });
+let smartSecondaryStartupScheduled = false;
+function scheduleSmartSecondaryStartup(){
+    if(smartSecondaryStartupScheduled) return;
+    smartSecondaryStartupScheduled = true;
+    const run = () => {
+        Promise.allSettled([
+            loadSmartShortcutSettings(),
+            loadPromptTemplates(),
+            loadAssetLibrary()
+        ]).catch(() => {});
+    };
+    if('requestIdleCallback' in window) window.requestIdleCallback(run, {timeout:1500});
+    else setTimeout(run, 0);
+}
 window.onload = async () => {
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light');
-    await loadSmartShortcutSettings();
+    loadSmartShortcutLocalFallback();
     loadPromptPresets();
     loadPromptTemplateGroups();
     loadPromptTemplateOverrides();
-    await loadPromptTemplates();
     if(window.StudioI18n) window.StudioI18n.apply();
     if(window.lucide) lucide.createIcons();
     connectAssetLibrarySyncSocket();
-    await loadConfig();
-    await loadAssetLibrary();
+    const configTask = loadConfig({deferSecondary:true});
     await loadCanvas();
-    syncApiKindToggleVisibility();
-    render();
+    void configTask.then(() => {
+        if(!canvas) return;
+        sanitizeSmartApiSelection(settings);
+        updateProviderModels();
+        syncApiKindToggleVisibility();
+        render();
+    });
+    scheduleSmartSecondaryStartup();
 };

@@ -38,13 +38,34 @@ class SecurityTests(unittest.TestCase):
         self.assertNotIn("仅当前 Windows 用户可读取".encode("utf-8"), protected)
         self.assertEqual(protector.unprotect(protected), "仅当前 Windows 用户可读取")
 
-    def test_desktop_bootstrap_token_is_single_use(self):
+    def test_desktop_bootstrap_token_allows_two_immediate_replays(self):
         with tempfile.TemporaryDirectory() as root:
             database = self.make_database(root)
             auth = AuthManager(database, desktop_token="desktop-once")
             desktop_session, desktop = auth.consume_desktop_token("desktop-once")
             self.assertEqual(desktop.client_type, "desktop")
             self.assertIsNotNone(auth.authenticate(desktop_session))
+            for _ in range(2):
+                replay_session, replay_identity = auth.consume_desktop_token("desktop-once")
+                self.assertEqual(replay_identity.client_type, "desktop")
+                self.assertIsNotNone(auth.authenticate(replay_session))
+            with self.assertRaises(PermissionError):
+                auth.consume_desktop_token("desktop-once")
+
+    def test_desktop_bootstrap_token_rejects_wrong_or_expired_replay(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = self.make_database(root)
+            clock = [100.0]
+            auth = AuthManager(
+                database,
+                desktop_token="desktop-once",
+                desktop_replay_window_seconds=15.0,
+                clock=lambda: clock[0],
+            )
+            with self.assertRaises(PermissionError):
+                auth.consume_desktop_token("wrong-token")
+            auth.consume_desktop_token("desktop-once")
+            clock[0] += 15.1
             with self.assertRaises(PermissionError):
                 auth.consume_desktop_token("desktop-once")
 

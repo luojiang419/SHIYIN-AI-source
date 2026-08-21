@@ -400,7 +400,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.231"
+APP_VERSION = "1.0.232"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -2647,15 +2647,36 @@ def admin_account_resource_file(
     return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
 
 
+DESKTOP_BOOTSTRAP_RESPONSE_HEADERS = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+}
+
+
 @app.get("/api/auth/bootstrap")
-def desktop_bootstrap(token: str = ""):
+def desktop_bootstrap(request: Request, token: str = ""):
+    if not is_loopback_address(request_remote_address(request)):
+        raise HTTPException(
+            status_code=403,
+            detail="桌面启动令牌只能在安装软件的本机使用",
+            headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS,
+        )
+
+    existing_identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
+    if existing_identity and existing_identity.is_admin:
+        return RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
+
     try:
         AUTH_MANAGER.consume_desktop_token(token)
     except PermissionError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=401,
+            detail=str(exc),
+            headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS,
+        ) from exc
     identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
     session_token = ACCOUNT_STORE.create_session(identity, ttl_seconds=12 * 60 * 60)
-    response = RedirectResponse("/", status_code=303)
+    response = RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
     response.set_cookie(
         ACCOUNT_SESSION_COOKIE,
         session_token,

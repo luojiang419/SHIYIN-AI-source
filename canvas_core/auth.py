@@ -4,13 +4,16 @@ import hashlib
 import hmac
 import secrets
 import threading
+import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from .database import CanvasDatabase
 
 
 SESSION_COOKIE = "canvas_session"
+DESKTOP_TOKEN_REPLAY_WINDOW_SECONDS = 15.0
+DESKTOP_TOKEN_REPLAY_LIMIT = 2
 
 
 def token_hash(token: str) -> str:
@@ -34,8 +37,23 @@ class AuthIdentity:
 
 
 class AuthManager:
-    def __init__(self, _database: CanvasDatabase, desktop_token: str = "") -> None:
-        self._desktop_token = str(desktop_token or "")
+    def __init__(
+        self,
+        _database: CanvasDatabase,
+        desktop_token: str = "",
+        *,
+        desktop_replay_window_seconds: float = DESKTOP_TOKEN_REPLAY_WINDOW_SECONDS,
+        desktop_replay_limit: int = DESKTOP_TOKEN_REPLAY_LIMIT,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        raw_desktop_token = str(desktop_token or "")
+        self._desktop_token_hash = token_hash(raw_desktop_token) if raw_desktop_token else ""
+        self._consumed_desktop_token_hash = ""
+        self._desktop_token_consumed_at = 0.0
+        self._desktop_token_replays_remaining = 0
+        self._desktop_replay_window_seconds = max(0.0, float(desktop_replay_window_seconds))
+        self._desktop_replay_limit = max(0, int(desktop_replay_limit))
+        self._clock = clock
         self._runtime_sessions: dict[str, AuthIdentity] = {}
         self._lock = threading.RLock()
 
@@ -44,11 +62,28 @@ class AuthManager:
         return secrets.token_urlsafe(32)
 
     def consume_desktop_token(self, supplied: str) -> tuple[str, AuthIdentity]:
+        supplied_hash = token_hash(str(supplied or ""))
         with self._lock:
-            expected = self._desktop_token
-            if not expected or not hmac.compare_digest(expected, str(supplied or "")):
+            now = self._clock()
+            first_exchange = bool(self._desktop_token_hash) and hmac.compare_digest(
+                self._desktop_token_hash,
+                supplied_hash,
+            )
+            replay_exchange = (
+                bool(self._consumed_desktop_token_hash)
+                and self._desktop_token_replays_remaining > 0
+                and 0.0 <= now - self._desktop_token_consumed_at <= self._desktop_replay_window_seconds
+                and hmac.compare_digest(self._consumed_desktop_token_hash, supplied_hash)
+            )
+            if not first_exchange and not replay_exchange:
                 raise PermissionError("桌面启动令牌无效或已使用")
-            self._desktop_token = ""
+            if first_exchange:
+                self._desktop_token_hash = ""
+                self._consumed_desktop_token_hash = supplied_hash
+                self._desktop_token_consumed_at = now
+                self._desktop_token_replays_remaining = self._desktop_replay_limit
+            else:
+                self._desktop_token_replays_remaining -= 1
             token = self.new_token()
             identity = AuthIdentity("desktop-runtime", "Canvas 桌面端", "desktop", False)
             self._runtime_sessions[token_hash(token)] = identity

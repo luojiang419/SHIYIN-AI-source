@@ -779,11 +779,13 @@ function applyQuickToolbarState(){
     const toolbar = document.getElementById('quickToolbar');
     if(!toolbar) return;
     const collapsed = localStorage.getItem(QUICK_TOOLBAR_COLLAPSED_KEY) === '1';
-    toolbar.classList.toggle('collapsed', collapsed);
-    const btn = toolbar.querySelector('.toolbar-toggle');
+    const nodePanel = document.getElementById('toolbarNodePanel') || toolbar;
+    nodePanel.classList.toggle('collapsed', collapsed);
+    const btn = nodePanel.querySelector('.toolbar-toggle');
     if(btn){
         btn.title = collapsed ? tr('canvas.toolbarExpand') : tr('canvas.toolbarCollapse');
         btn.setAttribute('aria-label', btn.title);
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
         const label = btn.querySelector('.toolbar-toggle-label');
         if(label) label.textContent = collapsed ? tr('canvas.toolbarExpandShort') : tr('canvas.toolbarCollapseShort');
     }

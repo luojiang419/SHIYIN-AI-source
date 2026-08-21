@@ -43,6 +43,15 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         self.assertIn('"canvas.toolbarCollapse"', self.i18n)
         self.assertIn('"canvas.toolbarExpand"', self.i18n)
 
+    def test_node_panel_has_right_side_toggle_and_collapses_to_one_icon(self):
+        self.assertIn('id="toolbarNodePanel" class="toolbar-node-panel"', self.html)
+        self.assertIn('id="toolbarNodeItems" class="toolbar-items"', self.html)
+        self.assertIn('aria-controls="toolbarNodeItems"', self.html)
+        self.assertIn('.toolbar-node-panel.collapsed .toolbar-items { display:none; }', self.styles)
+        self.assertIn('.toolbar-node-panel.collapsed .toolbar-toggle-label { display:none; }', self.styles)
+        self.assertIn("nodePanel.classList.toggle('collapsed', collapsed);", self.javascript)
+        self.assertIn("btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');", self.javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

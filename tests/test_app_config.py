@@ -15,6 +15,7 @@ class AppConfigTests(unittest.TestCase):
             self.assertEqual(settings["close_behavior"], "ask_on_close")
             self.assertEqual(settings["generated_output_dir"], "")
             self.assertEqual(settings["topaz_video_install_dir"], "")
+            self.assertEqual(settings["shortcut_bindings"], {})
 
     def test_close_behavior_update_preserves_runtime_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -59,6 +60,21 @@ class AppConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 update_app_settings(Path(tmp), generated_output_dir="relative/output")
+
+    def test_shortcut_bindings_are_persisted_and_can_disable_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = update_app_settings(
+                Path(tmp),
+                shortcut_bindings={"canvas.undo": "Alt+Z", "canvas.toggleAssets": ""},
+            )
+            self.assertEqual(saved["shortcut_bindings"]["canvas.undo"], "Alt+Z")
+            self.assertEqual(saved["shortcut_bindings"]["canvas.toggleAssets"], "")
+            self.assertEqual(read_app_config(Path(tmp))["shortcut_bindings"], saved["shortcut_bindings"])
+
+    def test_shortcut_bindings_reject_invalid_action_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "动作标识"):
+                update_app_settings(Path(tmp), shortcut_bindings={"bad action": "Ctrl+K"})
 
     def test_topaz_install_directory_can_be_saved_and_reset(self):
         with tempfile.TemporaryDirectory() as tmp:

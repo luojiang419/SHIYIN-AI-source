@@ -400,7 +400,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.227"
+APP_VERSION = "1.0.228"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -2473,6 +2473,7 @@ class AppSettingsUpdateRequest(BaseModel):
     close_behavior: Optional[str] = None
     generated_output_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
+    shortcut_bindings: Optional[Dict[str, str]] = None
 
 
 @app.get("/pair")
@@ -2730,6 +2731,7 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "generated_output_effective_dir": effective_directory,
         "generated_output_uses_default": not bool(custom_directory),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
+        "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
         "runtime_mode": RUNTIME_OPTIONS.mode,
     }
 
@@ -2762,6 +2764,7 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             close_behavior=payload.close_behavior,
             generated_output_dir=payload.generated_output_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
+            shortcut_bindings=payload.shortcut_bindings,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

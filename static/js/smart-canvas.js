@@ -26,6 +26,7 @@ const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const smartLogList = document.getElementById('smartLogList');
 const smartShortcutModal = document.getElementById('smartShortcutModal');
+const smartShortcutList = document.getElementById('smartShortcutList');
 const smartWorkflowToggle = document.getElementById('smartWorkflowToggle');
 const smartWorkflowTransferModal = document.getElementById('smartWorkflowTransferModal');
 const smartWorkflowTransferSub = document.getElementById('smartWorkflowTransferSub');
@@ -83,10 +84,9 @@ let selectedImage = {nodeId:'', index:-1};
 let dragState = null;
 let loopInsertPreview = null;
 let selectionState = null;
-let isRKeyDown = false;
 let smartCanvasToolMode = 'select';
-let isSpaceKeyDown = false;
-let isControlKeyDown = false;
+let smartTemporaryToolMode = '';
+let smartTemporaryToolCode = '';
 let selectionJustFinished = false;
 let resizeState = null;
 let llmInstructionResizeState = null;
@@ -141,8 +141,9 @@ expandedPromptRich?.addEventListener('input', () => {
     expandedPromptModal?.addEventListener(type, event => event.stopPropagation());
 });
 function activeSmartCanvasTool(event=null){
-    const temporaryTool = Boolean(event?.ctrlKey || isControlKeyDown || isSpaceKeyDown);
-    return temporaryTool ? (smartCanvasToolMode === 'select' ? 'pan' : 'select') : smartCanvasToolMode;
+    if(smartTemporaryToolMode === 'select') return 'select';
+    if(smartTemporaryToolMode === 'invert') return smartCanvasToolMode === 'select' ? 'pan' : 'select';
+    return smartCanvasToolMode;
 }
 function syncSmartCanvasToolUi(){
     const activeTool = activeSmartCanvasTool();
@@ -246,6 +247,7 @@ let lastImagePasteAt = 0;
 let lastNodePasteAt = 0;
 let suppressNodeClickUntil = 0;
 let textSelectionGuard = null;
+let smartShortcutOverrides = {};
 const UNDO_LIMIT = 40;
 const UNDO_BYTE_LIMIT = 16 * 1024 * 1024;
 const SMART_NODE_MEDIA_LIMIT = 96;
@@ -253,6 +255,8 @@ const SMART_HISTORY_MEDIA_LIMIT = 48;
 const SMART_GENERATION_LOG_LIMIT = 120;
 const undoStack = [];
 let undoStackBytes = 0;
+const redoStack = [];
+let redoStackBytes = 0;
 let undoSuppressed = false;
 let pendingUndoSnapshot = null;
 let runningHubWorkflowCache = {};
@@ -294,6 +298,7 @@ function commitPendingUndo(){
     if(pendingUndoSnapshot){
         appendUndoSnapshot(pendingUndoSnapshot);
         pendingUndoSnapshot = null;
+        clearRedoStack();
     }
 }
 function discardPendingUndo(){ pendingUndoSnapshot = null; }
@@ -316,11 +321,22 @@ function pushUndo(){
     if(undoSuppressed) return;
     if(!canvas) return;
     appendUndoSnapshot(snapshotForUndo());
+    clearRedoStack();
 }
-function performUndo(){
-    if(!undoStack.length){ toast(tr('smart.toastNoUndo')); return; }
-    const snap = undoStack.pop();
-    undoStackBytes = Math.max(0, undoStackBytes - Number(snap?._bytes || 0));
+function clearRedoStack(){
+    redoStack.length = 0;
+    redoStackBytes = 0;
+}
+function appendRedoSnapshot(snapshot){
+    if(!snapshot) return;
+    redoStack.push(snapshot);
+    redoStackBytes += Number(snapshot._bytes || 0);
+    while(redoStack.length > 1 && (redoStack.length > UNDO_LIMIT || redoStackBytes > UNDO_BYTE_LIMIT)){
+        const removed = redoStack.shift();
+        redoStackBytes = Math.max(0, redoStackBytes - Number(removed?._bytes || 0));
+    }
+}
+function restoreCanvasSnapshot(snap){
     undoSuppressed = true;
     nodes = snap.nodes;
     if(canvas) canvas.connections = snap.connections;
@@ -332,7 +348,22 @@ function performUndo(){
     render();
     scheduleSave();
     undoSuppressed = false;
+}
+function performUndo(){
+    if(!undoStack.length){ toast(tr('smart.toastNoUndo')); return; }
+    appendRedoSnapshot(snapshotForUndo());
+    const snap = undoStack.pop();
+    undoStackBytes = Math.max(0, undoStackBytes - Number(snap?._bytes || 0));
+    restoreCanvasSnapshot(snap);
     toast(tr('smart.toastUndone'));
+}
+function performRedo(){
+    if(!redoStack.length){ toast('没有可恢复的操作'); return; }
+    appendUndoSnapshot(snapshotForUndo());
+    const snap = redoStack.pop();
+    redoStackBytes = Math.max(0, redoStackBytes - Number(snap?._bytes || 0));
+    restoreCanvasSnapshot(snap);
+    toast('已恢复');
 }
 let comfyWorkflowCache = {};
 let cropState = null;
@@ -7490,11 +7521,219 @@ function closeSmartCanvasLog(){
     smartLogModal.classList.remove('open');
 }
 function openSmartCanvasShortcuts(){
+    renderSmartShortcutGuide();
     smartShortcutModal?.classList.add('open');
     refreshIcons();
 }
 function closeSmartCanvasShortcuts(){
     smartShortcutModal?.classList.remove('open');
+}
+function applySmartShortcutOverrides(value, {persistLocal=true}={}){
+    if(!window.ShortcutActions) return;
+    smartShortcutOverrides = window.ShortcutActions.sanitizeOverrides(value);
+    if(persistLocal){
+        try { localStorage.setItem(window.ShortcutActions.storageKey, JSON.stringify(smartShortcutOverrides)); } catch(e) {}
+    }
+    renderSmartShortcutGuide();
+}
+function loadSmartShortcutLocalFallback(){
+    if(!window.ShortcutActions) return;
+    try { applySmartShortcutOverrides(JSON.parse(localStorage.getItem(window.ShortcutActions.storageKey) || '{}'), {persistLocal:false}); }
+    catch(e) { applySmartShortcutOverrides({}, {persistLocal:false}); }
+}
+async function loadSmartShortcutSettings(){
+    loadSmartShortcutLocalFallback();
+    try {
+        const response = await fetch('/api/app-settings', {cache:'no-store'});
+        const data = await response.json().catch(() => ({}));
+        if(response.ok) applySmartShortcutOverrides(data.shortcut_bindings || {});
+    } catch(e) {}
+}
+function renderSmartShortcutGuide(){
+    if(!smartShortcutList || !window.ShortcutActions) return;
+    const resolved = window.ShortcutActions.resolvedBindings(smartShortcutOverrides);
+    const assigned = window.ShortcutActions.actions.filter(action => resolved[action.id]);
+    smartShortcutList.replaceChildren();
+    assigned.forEach(action => {
+        const item = document.createElement('div');
+        item.className = 'shortcut-item';
+        const keys = document.createElement('span');
+        keys.className = 'shortcut-keys';
+        String(resolved[action.id]).split('+').forEach(part => {
+            const key = document.createElement('kbd');
+            key.textContent = part;
+            keys.appendChild(key);
+        });
+        const label = document.createElement('span');
+        label.textContent = action.name;
+        item.append(keys, label);
+        smartShortcutList.appendChild(item);
+    });
+}
+function smartShortcutBlockedOverlayAction(){
+    if(smartLogModal?.classList.contains('open')) return 'canvas.toggleLogs';
+    if(smartShortcutModal?.classList.contains('open')) return 'canvas.toggleShortcuts';
+    if(smartWorkflowTransferModal?.classList.contains('open')) return 'canvas.toggleWorkflow';
+    if(createMenu?.classList.contains('open')) return 'canvas.createMenu';
+    if(expandedPromptModal?.classList.contains('open') || promptPresetPanel?.classList.contains('open') || promptTemplatePanel?.classList.contains('open')) return '__blocked__';
+    return '';
+}
+function deleteSelectedSmartNodes(){
+    const ids = selectedNodeIds();
+    if(!ids.length) return false;
+    pushUndo();
+    ids.forEach(id => { undoSuppressed = true; deleteNode(id); undoSuppressed = false; });
+    render();
+    scheduleSave();
+    return true;
+}
+function selectAllSmartNodes(){
+    const ids = nodes.filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID).map(node => node.id);
+    if(!ids.length) return false;
+    savePromptDraftForCurrent();
+    selectedId = '';
+    selectedIds = ids;
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    updateComposer();
+    return true;
+}
+function clearSmartShortcutSelection(){
+    if(!selectedNodeIds().length) return false;
+    clearSelection();
+    render();
+    updateComposer();
+    return true;
+}
+function openCreateMenuAtViewportCenter(){
+    if(createMenu?.classList.contains('open')){ closeCreateMenu(); return; }
+    const rect = shell.getBoundingClientRect();
+    openCreateMenu({clientX:rect.left + shell.clientWidth / 2, clientY:rect.top + shell.clientHeight / 2});
+}
+function runSelectedSmartShortcutAction(actionId){
+    const node = selectedNode();
+    if(!node){ toast('请先选择一个节点'); return false; }
+    const groupActionMap = {
+        'selected.preview':'preview', 'selected.download':'download', 'selected.grid':'grid',
+        'selected.batch':'batch', 'selected.arrangeGroup':'arrange'
+    };
+    if(isSmartGroupNode(node) && groupActionMap[actionId]){
+        runSmartGroupToolbarAction(node.id, groupActionMap[actionId]);
+        return true;
+    }
+    if(actionId === 'selected.multiView'){
+        createMultiViewNode(null, node);
+        return true;
+    }
+    const nodeActionMap = {
+        'selected.preview':'preview', 'selected.download':'download', 'selected.duplicateMedia':'canvas',
+        'selected.crop':'crop', 'selected.outpaint':'outpaint', 'selected.mask':'mask',
+        'selected.brush':'brush', 'selected.grid':'grid', 'selected.batch':'batch'
+    };
+    const action = nodeActionMap[actionId];
+    if(!action){ toast('当前节点不支持该快捷操作'); return false; }
+    runSmartNodeToolbarAction(node.id, action);
+    return true;
+}
+function runSmartEditorShortcutAction(actionId){
+    if(!imageEditModal?.classList.contains('open')) return false;
+    if(actionId === 'editor.previous'){
+        if(!seekPreviewVideoFrames(-1)) navigatePreviewImage(-1);
+        return true;
+    }
+    if(actionId === 'editor.next'){
+        if(!seekPreviewVideoFrames(1)) navigatePreviewImage(1);
+        return true;
+    }
+    if(actionId === 'editor.close'){ closeImageEditor(); return true; }
+    if(actionId === 'editor.apply'){ applyImageEdit(); return true; }
+    if(actionId === 'editor.download'){ downloadPreviewImage(); return true; }
+    if(actionId === 'editor.downloadAll'){ downloadPreviewGroup(); return true; }
+    if(actionId === 'editor.compare'){ togglePreviewCompare(); return true; }
+    if(actionId === 'editor.panorama'){ togglePanoramaPreview(); return true; }
+    if(actionId === 'editor.exportPanorama'){ exportPanoramaFrame(); return true; }
+    if(actionId === 'editor.undoDrawing'){ undoEditDrawing(); return true; }
+    if(actionId === 'editor.redoDrawing'){ redoEditDrawing(); return true; }
+    if(actionId === 'editor.clearDrawing'){ clearEditDrawing(); return true; }
+    if(actionId === 'editor.videoFirstFrame'){ exportVideoFrame('first'); return true; }
+    if(actionId === 'editor.videoCurrentFrame'){ exportVideoFrame('current'); return true; }
+    if(actionId === 'editor.videoLastFrame'){ exportVideoFrame('last'); return true; }
+    return false;
+}
+function runSmartCanvasShortcutAction(actionId){
+    if(actionId.startsWith('create.')){
+        const nodeTypeMap = {
+            'create.image':'image', 'create.group':'group', 'create.prompt':'prompt', 'create.loop':'loop',
+            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'pose-reference',
+            'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate', 'create.relight':'relight',
+            'create.multiView':'multi-view', 'create.batch':'batch'
+        };
+        createNodeFromMenu(nodeTypeMap[actionId], viewportCenter());
+        return true;
+    }
+    if(actionId.startsWith('selected.')) return runSelectedSmartShortcutAction(actionId);
+    if(actionId === 'canvas.run'){ runGeneration(); return true; }
+    if(actionId === 'canvas.runCascade'){
+        const node = selectedNode();
+        const loopId = resolveSmartCascadeLoop(node?.id)?.node?.id || '';
+        if(loopId && smartCascadeIsLoopRunning(loopId)) requestSmartCascadeStop(loopId);
+        else runSmartCascade();
+        return true;
+    }
+    if(actionId === 'canvas.undo'){ performUndo(); return true; }
+    if(actionId === 'canvas.redo'){ performRedo(); return true; }
+    if(actionId === 'canvas.copy'){
+        if(window.getSelection?.().toString()) return false;
+        copySelectedNodes();
+        return true;
+    }
+    if(actionId === 'canvas.paste'){
+        const requestedAt = Date.now();
+        setTimeout(() => {
+            if(lastImagePasteAt >= requestedAt || lastNodePasteAt >= requestedAt) return;
+            if(nodeClipboard?.nodes?.length) pasteNodes();
+        }, 90);
+        return 'allow-default';
+    }
+    if(actionId === 'canvas.delete') return deleteSelectedSmartNodes();
+    if(actionId === 'canvas.selectAll') return selectAllSmartNodes();
+    if(actionId === 'canvas.clearSelection') return clearSmartShortcutSelection();
+    if(actionId === 'canvas.group'){ groupSelectedNodes(); return true; }
+    if(actionId === 'canvas.ungroup'){
+        const ids = selectedNodeIds();
+        return ids.map(id => ungroupNode(id)).some(Boolean);
+    }
+    if(actionId === 'canvas.arrange'){ arrangeSelectedSmartNodes(); return true; }
+    if(actionId === 'canvas.createMenu'){ openCreateMenuAtViewportCenter(); return true; }
+    if(actionId === 'canvas.toolSelect'){ setSmartCanvasToolMode('select'); return true; }
+    if(actionId === 'canvas.toolPan'){ setSmartCanvasToolMode('pan'); return true; }
+    if(actionId === 'canvas.fitAll'){ fitAllNodesViewport(); return true; }
+    if(actionId === 'canvas.overview'){ toggleZoomPreview(); return true; }
+    if(actionId === 'canvas.toggleAssets'){ toggleAssetLibrary(); return true; }
+    if(actionId === 'canvas.toggleLogs'){
+        if(smartLogModal?.classList.contains('open')) closeSmartCanvasLog(); else openSmartCanvasLog();
+        return true;
+    }
+    if(actionId === 'canvas.toggleShortcuts'){
+        if(smartShortcutModal?.classList.contains('open')) closeSmartCanvasShortcuts(); else openSmartCanvasShortcuts();
+        return true;
+    }
+    if(actionId === 'canvas.toggleWorkflow'){
+        if(smartWorkflowTransferModal?.classList.contains('open')) closeSmartWorkflowTransferModal(); else openSmartWorkflowTransferModal();
+        return true;
+    }
+    if(actionId === 'canvas.promptPresets'){
+        const node = selectedNode();
+        openPromptPresetPanel(node?.type === 'smart-prompt' ? node.id : '');
+        return true;
+    }
+    if(actionId === 'canvas.promptTemplates'){
+        const node = selectedNode();
+        const nodeId = node?.type === 'smart-prompt' ? node.id : '';
+        openPromptTemplatePanel(nodeId, '', {target:nodeId ? 'node' : 'composer'});
+        return true;
+    }
+    return false;
 }
 function promptNodeBodyHtml(node){
     node.llmProvider = resolveChatProviderId(node.llmProvider || '');
@@ -16733,8 +16972,8 @@ function addCreatedNodeToMenuGroup(node){
         scheduleSave();
     }
 }
-function createNodeFromMenu(type){
-    const p = createMenuPoint || viewportCenter();
+function createNodeFromMenu(type, point=null){
+    const p = point || createMenuPoint || viewportCenter();
     const groupId = createMenuGroupId;
     closeCreateMenu();
     if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
@@ -16744,6 +16983,7 @@ function createNodeFromMenu(type){
     if(type === 'pose-replicate') return createPoseReplicateNode(p);
     if(type === 'relight') return createRelightNode(p);
     if(type === 'multi-view') return createMultiViewNode(p);
+    if(type === 'batch') return createSmartBatchGeneratorNode(null, p);
     let created = null;
     if(type === 'h3-video') created = createH3VideoNode(p);
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
@@ -16775,7 +17015,7 @@ shell.onmousedown = e => {
     if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(e.target.closest('.image-node,.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
-    if(e.button === 0 && isRKeyDown){
+    if(e.button === 0 && smartTemporaryToolMode === 'select'){
         e.preventDefault();
         didPan = false;
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
@@ -16797,7 +17037,7 @@ shell.onmousedown = e => {
     shell.classList.add('panning');
 };
 shell.oncontextmenu = e => {
-    if((e.ctrlKey || e.metaKey) || isRKeyDown){
+    if((e.ctrlKey || e.metaKey) || smartTemporaryToolMode === 'select'){
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -17360,99 +17600,39 @@ window.addEventListener('paste', e => {
     }
 });
 window.addEventListener('keydown', e => {
-    const key = String(e.key || '').toLowerCase();
     if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }
-    if(e.key === 'Control' && !isEditableTarget(e.target)){
-        isControlKeyDown = true;
+    if(isEditableTarget(e.target) || !window.ShortcutActions) return;
+    if(e.repeat) return;
+    if(imageEditModal?.classList.contains('open')){
+        const editorAction = window.ShortcutActions.findAction(e, 'editor', smartShortcutOverrides);
+        if(editorAction && runSmartEditorShortcutAction(editorAction.id)) e.preventDefault();
+        return;
+    }
+    const holdAction = window.ShortcutActions.findAction(e, 'canvas', smartShortcutOverrides, {hold:true});
+    if(holdAction){
+        smartTemporaryToolMode = holdAction.id === 'canvas.temporarySelect' ? 'select' : 'invert';
+        smartTemporaryToolCode = e.code || '';
+        e.preventDefault();
         syncSmartCanvasToolUi();
-    }
-    if(e.key === ' ' && !isEditableTarget(e.target)){
-        e.preventDefault();
-        isSpaceKeyDown = true;
-        syncSmartCanvasToolUi();
-    }
-    if(key === 'r' && !isEditableTarget(e.target)) isRKeyDown = true;
-    if(imageEditModal.classList.contains('open') && imageEditMode === 'preview' && !isEditableTarget(e.target)){
-        if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
-            e.preventDefault();
-            if(!seekPreviewVideoFrames(e.key === 'ArrowLeft' ? -1 : 1)){
-                navigatePreviewImage(e.key === 'ArrowLeft' ? -1 : 1);
-            }
-            return;
-        }
-    }
-    if(!e.ctrlKey && !e.metaKey && !e.altKey && !isEditableTarget(e.target)){
-        if(key === 'z'){
-            if(e.repeat) return;
-            e.preventDefault();
-            toggleZoomPreview();
-            return;
-        }
-        if(key === 'a'){
-            if(e.repeat) return;
-            e.preventDefault();
-            toggleAssetLibrary();
-            return;
-        }
-    }
-    if((e.ctrlKey || e.metaKey) && key === 'c' && !isEditableTarget(e.target)){
-        const selectionText = window.getSelection?.().toString() || '';
-        if(selectionText) return;
-        e.preventDefault();
-        copySelectedNodes();
         return;
     }
-    if((e.ctrlKey || e.metaKey) && key === 'v' && !isEditableTarget(e.target) && nodeClipboard?.nodes?.length){
-        const requestedAt = Date.now();
-        setTimeout(() => {
-            if(lastImagePasteAt >= requestedAt) return;
-            if(lastNodePasteAt >= requestedAt) return;
-            pasteNodes();
-        }, 90);
-    }
-    if(e.key === 'Escape' && imageEditModal.classList.contains('open')){
-        closeImageEditor();
-        return;
-    }
-    if((e.ctrlKey || e.metaKey) && key === 'z' && !isEditableTarget(e.target)){
-        e.preventDefault();
-        performUndo();
-        return;
-    }
-    if((e.key === 'Delete' || e.key === 'Backspace') && (selectedId || selectedIds.length) && !isEditableTarget(e.target)){
-        e.preventDefault();
-        const ids = selectedIds.length ? selectedIds.slice() : [selectedId];
-        pushUndo();
-        ids.forEach(id => { undoSuppressed = true; deleteNode(id); undoSuppressed = false; });
-        render();
-        scheduleSave();
-    }
-    if((e.ctrlKey || e.metaKey) && e.shiftKey && key === 'g' && !isEditableTarget(e.target)){
-        e.preventDefault();
-        const ids = selectedIds.length ? selectedIds.slice() : (selectedId ? [selectedId] : []);
-        const ok = ids.map(id => ungroupNode(id)).some(Boolean);
-        if(ok) return;
-    }
-    if((e.ctrlKey || e.metaKey) && key === 'g' && !e.shiftKey && !isEditableTarget(e.target)){
-        e.preventDefault();
-        groupSelectedNodes();
-    }
+    const action = window.ShortcutActions.findAction(e, 'canvas', smartShortcutOverrides);
+    if(!action) return;
+    const blockedAction = smartShortcutBlockedOverlayAction();
+    if(blockedAction && blockedAction !== action.id) return;
+    const result = runSmartCanvasShortcutAction(action.id);
+    if(result && result !== 'allow-default') e.preventDefault();
 });
 window.addEventListener('keyup', e => {
-    if(String(e.key || '').toLowerCase() === 'r') isRKeyDown = false;
-    if(e.key === 'Control'){
-        isControlKeyDown = false;
-        syncSmartCanvasToolUi();
-    }
-    if(e.key === ' '){
-        isSpaceKeyDown = false;
+    if(smartTemporaryToolCode && e.code === smartTemporaryToolCode){
+        smartTemporaryToolCode = '';
+        smartTemporaryToolMode = '';
         syncSmartCanvasToolUi();
     }
 });
 window.addEventListener('blur', () => {
-    isRKeyDown = false;
-    isSpaceKeyDown = false;
-    isControlKeyDown = false;
+    smartTemporaryToolCode = '';
+    smartTemporaryToolMode = '';
     syncSmartCanvasToolUi();
 });
 engineSelect.onchange = () => {
@@ -18220,6 +18400,16 @@ try {
         if(event.data?.type === 'canvas_updated' || (event.data?.type === 'entity.changed' && event.data.topic === 'canvas')) handleCanvasUpdatedMessage(event.data);
     };
 } catch(e) {}
+try {
+    const shortcutChannel = new BroadcastChannel(window.ShortcutActions?.channelName || 'shiyin-shortcuts');
+    shortcutChannel.onmessage = event => {
+        if(event.data?.type === 'shortcut-bindings:changed') applySmartShortcutOverrides(event.data.bindings || {});
+    };
+} catch(e) {}
+window.addEventListener('storage', event => {
+    if(!window.ShortcutActions || event.key !== window.ShortcutActions.storageKey) return;
+    try { applySmartShortcutOverrides(JSON.parse(event.newValue || '{}'), {persistLocal:false}); } catch(e) {}
+});
 window.addEventListener('focus', () => {
     if(Date.now() - lastConfigRefreshAt > 1200) refreshSmartConfigFromSettings();
 });
@@ -18231,6 +18421,7 @@ window.addEventListener('message', event => {
     if(event.data?.type === 'asset_library_updated' || (event.data?.type === 'entity.changed' && event.data.topic === 'asset')) handleAssetLibraryUpdatedMessage(event.data);
     if(event.data?.type === 'canvas_updated' || (event.data?.type === 'entity.changed' && event.data.topic === 'canvas')) handleCanvasUpdatedMessage(event.data);
     if(event.data?.type === 'entity.changed' && event.data.topic === 'platform') refreshSmartConfigFromSettings();
+    if(event.data?.type === 'shortcut-bindings:changed') applySmartShortcutOverrides(event.data.bindings || {});
     if(event.data?.type === 'studio-lang' && window.StudioI18n) {
         window.StudioI18n.set(event.data.lang || 'zh');
     }
@@ -18263,6 +18454,7 @@ window.addEventListener('studio-lang-change', () => {
 });
 window.onload = async () => {
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light');
+    await loadSmartShortcutSettings();
     loadPromptPresets();
     loadPromptTemplateGroups();
     loadPromptTemplateOverrides();

@@ -11,7 +11,29 @@ DEFAULT_CLOSE_BEHAVIOR = "ask_on_close"
 CLOSE_BEHAVIORS = frozenset({DEFAULT_CLOSE_BEHAVIOR, "minimize_to_tray", "exit"})
 DEFAULT_GENERATED_OUTPUT_DIR = ""
 DEFAULT_TOPAZ_VIDEO_INSTALL_DIR = ""
+DEFAULT_SHORTCUT_BINDINGS: dict[str, str] = {}
 _CONFIG_LOCK = RLock()
+
+
+def _normalize_shortcut_bindings(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("快捷键设置必须是对象")
+    if len(value) > 200:
+        raise ValueError("快捷键设置数量不能超过 200 项")
+    result: dict[str, str] = {}
+    for raw_action, raw_binding in value.items():
+        action = str(raw_action or "").strip()
+        if not action or len(action) > 80 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for ch in action):
+            raise ValueError("快捷键动作标识不合法")
+        if not isinstance(raw_binding, str):
+            raise ValueError(f"快捷键 {action} 必须是字符串")
+        binding = raw_binding.strip()
+        if len(binding) > 64:
+            raise ValueError(f"快捷键 {action} 过长")
+        result[action] = binding
+    return result
 
 
 def _config_path(data_root: str | Path) -> Path:
@@ -26,6 +48,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
                 "close_behavior": DEFAULT_CLOSE_BEHAVIOR,
                 "generated_output_dir": DEFAULT_GENERATED_OUTPUT_DIR,
                 "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
+                "shortcut_bindings": DEFAULT_SHORTCUT_BINDINGS.copy(),
             }
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -37,6 +60,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         value["close_behavior"] = behavior if behavior in CLOSE_BEHAVIORS else DEFAULT_CLOSE_BEHAVIOR
         value["generated_output_dir"] = str(value.get("generated_output_dir") or "").strip()
         value["topaz_video_install_dir"] = str(value.get("topaz_video_install_dir") or "").strip()
+        value["shortcut_bindings"] = _normalize_shortcut_bindings(value.get("shortcut_bindings"))
         return value
 
 
@@ -46,8 +70,9 @@ def update_app_settings(
     close_behavior: str | None = None,
     generated_output_dir: str | None = None,
     topaz_video_install_dir: str | None = None,
+    shortcut_bindings: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and topaz_video_install_dir is None:
+    if close_behavior is None and generated_output_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -67,6 +92,8 @@ def update_app_settings(
             if directory and not Path(directory).expanduser().is_absolute():
                 raise ValueError("Topaz Video AI 安装目录必须是绝对路径")
             value["topaz_video_install_dir"] = directory
+        if shortcut_bindings is not None:
+            value["shortcut_bindings"] = _normalize_shortcut_bindings(shortcut_bindings)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
         temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

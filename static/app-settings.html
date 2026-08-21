@@ -21,7 +21,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.08.19.topaz-video.1">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.08.21.shortcuts.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -78,6 +78,36 @@
                 <p id="generatedOutputHint"></p>
             </div>
             <p class="app-settings-note" data-i18n="appSettings.generatedOutputNaming">生成成功后自动保存副本，文件名格式为 SHIYIN-000001-YYYYMMDD。</p>
+        </section>
+
+        <section class="app-settings-card app-settings-shortcuts-card" aria-labelledby="shortcutSettingsTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>KEYBOARD</span>
+                    <h2 id="shortcutSettingsTitle">快捷键设置</h2>
+                </div>
+                <strong id="shortcutSaveStatus" role="status"></strong>
+            </div>
+            <div class="app-settings-shortcut-toolbar">
+                <label class="app-settings-shortcut-search">
+                    <span>搜索功能</span>
+                    <input id="shortcutSearch" type="search" placeholder="输入节点或功能名称" autocomplete="off">
+                </label>
+                <label>
+                    <span>功能分类</span>
+                    <select id="shortcutCategory">
+                        <option value="">全部分类</option>
+                    </select>
+                </label>
+                <button id="resetAllShortcuts" type="button" class="secondary">全部恢复默认</button>
+            </div>
+            <div class="app-settings-shortcut-summary">
+                <span id="shortcutSummary">正在加载快捷键…</span>
+                <span>点击按键区域后直接按下新的组合键</span>
+            </div>
+            <div id="shortcutConflict" class="app-settings-shortcut-conflict" role="alert" hidden></div>
+            <div id="shortcutList" class="app-settings-shortcut-list" aria-live="polite"></div>
+            <p class="app-settings-note">快捷键会立即保存。可使用单键或 Ctrl / Shift / Alt 组合键；输入文字时不会触发画布命令。</p>
         </section>
 
         <section class="app-settings-card" aria-labelledby="topazVideoTitle">
@@ -167,6 +197,7 @@
             <p class="app-settings-note">更新源固定为公开 GitHub Release；下载完成后可选择立即更新或下次启动更新。</p>
         </section>
     </main>
-    <script src="/static/js/app-settings.js?v=2026.08.19.topaz-video.1"></script>
+    <script src="/static/js/shortcut-actions.js?v=2026.08.21.shortcuts.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.08.21.shortcuts.1"></script>
 </body>
 </html>

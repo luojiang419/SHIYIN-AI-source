@@ -33,12 +33,23 @@
     const topazVersion = document.getElementById('topazVersion');
     const topazSignature = document.getElementById('topazSignature');
     const topazInstallHint = document.getElementById('topazInstallHint');
+    const shortcutSaveStatus = document.getElementById('shortcutSaveStatus');
+    const shortcutSearch = document.getElementById('shortcutSearch');
+    const shortcutCategory = document.getElementById('shortcutCategory');
+    const resetAllShortcuts = document.getElementById('resetAllShortcuts');
+    const shortcutSummary = document.getElementById('shortcutSummary');
+    const shortcutConflict = document.getElementById('shortcutConflict');
+    const shortcutList = document.getElementById('shortcutList');
     let currentBehavior = 'ask_on_close';
     let currentOutputDirectory = '';
     let statusTimer = null;
     let updateRequestSequence = 0;
     let lastOrphanPreview = [];
     let currentTopazDirectory = '';
+    let shortcutOverrides = {};
+    let shortcutRecordingId = '';
+    let shortcutSaveSequence = 0;
+    let shortcutStatusTimer = null;
 
     const t = key => window.StudioI18n?.t?.(key) || key;
 
@@ -65,6 +76,194 @@
         if(!topazStatus) return;
         topazStatus.textContent = message;
         topazStatus.classList.toggle('error', isError);
+    }
+
+    function showShortcutStatus(message, isError=false){
+        if(!shortcutSaveStatus) return;
+        clearTimeout(shortcutStatusTimer);
+        shortcutSaveStatus.textContent = message;
+        shortcutSaveStatus.classList.toggle('error', isError);
+        if(message && !isError) shortcutStatusTimer = setTimeout(() => { shortcutSaveStatus.textContent = ''; }, 2400);
+    }
+
+    function showShortcutConflict(message=''){
+        if(!shortcutConflict) return;
+        shortcutConflict.hidden = !message;
+        shortcutConflict.textContent = message;
+    }
+
+    function shortcutBindingParts(binding){
+        return String(binding || '').split('+').filter(Boolean);
+    }
+
+    function renderShortcutBinding(button, binding, recording){
+        button.replaceChildren();
+        button.classList.toggle('recording', recording);
+        button.setAttribute('aria-pressed', recording ? 'true' : 'false');
+        button.title = recording ? '正在录制，点击可取消' : '点击后录入新的快捷键';
+        if(recording){
+            const label = document.createElement('span');
+            label.className = 'unassigned';
+            label.textContent = '请按下新的组合键…';
+            button.appendChild(label);
+            return;
+        }
+        const parts = shortcutBindingParts(binding);
+        if(!parts.length){
+            const label = document.createElement('span');
+            label.className = 'unassigned';
+            label.textContent = '未设置';
+            button.appendChild(label);
+            return;
+        }
+        parts.forEach(part => {
+            const key = document.createElement('kbd');
+            key.textContent = part;
+            button.appendChild(key);
+        });
+    }
+
+    function populateShortcutCategories(){
+        if(!shortcutCategory || shortcutCategory.options.length > 1 || !window.ShortcutActions) return;
+        [...new Set(window.ShortcutActions.actions.map(action => action.category))].forEach(category => {
+            const option = document.createElement('option');
+            option.value = category;
+            option.textContent = category;
+            shortcutCategory.appendChild(option);
+        });
+    }
+
+    function renderShortcutSettings(){
+        if(!shortcutList || !window.ShortcutActions) return;
+        populateShortcutCategories();
+        const query = String(shortcutSearch?.value || '').trim().toLowerCase();
+        const category = shortcutCategory?.value || '';
+        const resolved = window.ShortcutActions.resolvedBindings(shortcutOverrides);
+        const visible = window.ShortcutActions.actions.filter(action => {
+            if(category && action.category !== category) return false;
+            if(!query) return true;
+            return `${action.name} ${action.id} ${action.category}`.toLowerCase().includes(query);
+        });
+        const customized = Object.keys(shortcutOverrides).length;
+        const disabled = Object.values(resolved).filter(binding => !binding).length;
+        if(shortcutSummary) shortcutSummary.textContent = `${window.ShortcutActions.actions.length} 项功能 · ${customized} 项自定义 · ${disabled} 项未分配`;
+        shortcutList.replaceChildren();
+        if(!visible.length){
+            const empty = document.createElement('div');
+            empty.className = 'app-settings-shortcut-empty';
+            empty.textContent = '没有符合条件的快捷键';
+            shortcutList.appendChild(empty);
+            return;
+        }
+        const categories = [...new Set(visible.map(action => action.category))];
+        categories.forEach(groupName => {
+            const group = document.createElement('section');
+            group.className = 'app-settings-shortcut-group';
+            const heading = document.createElement('h3');
+            heading.textContent = `${groupName} · ${visible.filter(action => action.category === groupName).length}`;
+            group.appendChild(heading);
+            visible.filter(action => action.category === groupName).forEach(action => {
+                const row = document.createElement('div');
+                row.className = 'app-settings-shortcut-row';
+                row.dataset.actionId = action.id;
+                const copy = document.createElement('div');
+                copy.className = 'app-settings-shortcut-copy';
+                const name = document.createElement('b');
+                name.textContent = action.name;
+                const id = document.createElement('small');
+                id.textContent = action.id;
+                copy.append(name, id);
+                const binding = document.createElement('button');
+                binding.type = 'button';
+                binding.className = 'app-settings-shortcut-binding';
+                binding.dataset.shortcutRecord = action.id;
+                renderShortcutBinding(binding, resolved[action.id], shortcutRecordingId === action.id);
+                const clear = document.createElement('button');
+                clear.type = 'button';
+                clear.className = 'app-settings-shortcut-icon-btn';
+                clear.dataset.shortcutClear = action.id;
+                clear.title = '清空快捷键';
+                clear.setAttribute('aria-label', `清空${action.name}快捷键`);
+                clear.textContent = '×';
+                clear.disabled = !resolved[action.id];
+                const reset = document.createElement('button');
+                reset.type = 'button';
+                reset.className = 'app-settings-shortcut-icon-btn';
+                reset.dataset.shortcutReset = action.id;
+                reset.title = '恢复默认快捷键';
+                reset.setAttribute('aria-label', `恢复${action.name}默认快捷键`);
+                reset.textContent = '↺';
+                reset.disabled = !Object.prototype.hasOwnProperty.call(shortcutOverrides, action.id);
+                row.append(copy, binding, clear, reset);
+                group.appendChild(row);
+            });
+            shortcutList.appendChild(group);
+        });
+    }
+
+    function broadcastShortcutSettings(){
+        if(!window.ShortcutActions) return;
+        const payload = JSON.stringify(shortcutOverrides);
+        try { localStorage.setItem(window.ShortcutActions.storageKey, payload); } catch(e) {}
+        try {
+            const channel = new BroadcastChannel(window.ShortcutActions.channelName);
+            channel.postMessage({type:'shortcut-bindings:changed', bindings:shortcutOverrides});
+            channel.close();
+        } catch(e) {}
+        try { window.parent?.postMessage({type:'shortcut-bindings:changed', bindings:shortcutOverrides}, location.origin); } catch(e) {}
+    }
+
+    function applyShortcutSettings(data){
+        shortcutOverrides = window.ShortcutActions?.sanitizeOverrides(data?.shortcut_bindings) || {};
+        shortcutRecordingId = '';
+        showShortcutConflict('');
+        renderShortcutSettings();
+        broadcastShortcutSettings();
+    }
+
+    async function saveShortcutSettings(nextOverrides, successMessage='已保存'){
+        const previous = shortcutOverrides;
+        const sequence = ++shortcutSaveSequence;
+        shortcutOverrides = window.ShortcutActions.sanitizeOverrides(nextOverrides);
+        shortcutRecordingId = '';
+        showShortcutConflict('');
+        renderShortcutSettings();
+        showShortcutStatus('保存中…');
+        try {
+            const data = await saveSettings({shortcut_bindings:shortcutOverrides});
+            if(sequence !== shortcutSaveSequence) return;
+            shortcutOverrides = window.ShortcutActions.sanitizeOverrides(data.shortcut_bindings);
+            renderShortcutSettings();
+            broadcastShortcutSettings();
+            showShortcutStatus(successMessage);
+        } catch(error) {
+            if(sequence !== shortcutSaveSequence) return;
+            shortcutOverrides = previous;
+            renderShortcutSettings();
+            showShortcutStatus(`保存失败：${error.message}`, true);
+        }
+    }
+
+    function setShortcutBinding(actionId, binding){
+        const action = window.ShortcutActions?.get(actionId);
+        if(!action) return;
+        const validation = window.ShortcutActions.validate(binding, {allowModifierOnly:Boolean(action.hold)});
+        if(!validation.ok){
+            showShortcutConflict(validation.error);
+            showShortcutStatus('快捷键不可用', true);
+            return;
+        }
+        const conflictActions = window.ShortcutActions.conflicts(shortcutOverrides, actionId, validation.binding);
+        if(conflictActions.length){
+            const names = conflictActions.map(item => `“${item.name}”`).join('、');
+            showShortcutConflict(`${validation.binding} 已用于${names}，请先修改冲突项。`);
+            showShortcutStatus('存在快捷键冲突', true);
+            return;
+        }
+        const next = {...shortcutOverrides};
+        if(validation.binding === window.ShortcutActions.canonicalize(action.defaultBinding)) delete next[actionId];
+        else next[actionId] = validation.binding;
+        saveShortcutSettings(next);
     }
 
     function setTopazBusy(busy){
@@ -298,6 +497,7 @@
     async function loadSettings(){
         options.disabled = true;
         setOutputBusy(true);
+        applyShortcutSettings({shortcut_bindings:{}});
         try {
             const data = await requestSettings('/api/app-settings', {cache:'no-store'});
             currentBehavior = closeBehaviorFromServer(data.close_behavior);
@@ -305,6 +505,7 @@
             updateCloseBehaviorNote();
             applyOutputSettings(data);
             applyTopazSettings(data);
+            applyShortcutSettings(data);
         } catch(error) {
             showStatus(`${t('appSettings.loadFailed')}：${error.message}`, true);
         } finally {
@@ -414,6 +615,44 @@
     chooseTopazInstall?.addEventListener('click', chooseTopazDirectory);
     resetTopazInstall?.addEventListener('click', resetTopazDirectory);
     checkTopazInstall?.addEventListener('click', checkTopazCapabilities);
+    shortcutSearch?.addEventListener('input', renderShortcutSettings);
+    shortcutCategory?.addEventListener('change', renderShortcutSettings);
+    shortcutList?.addEventListener('click', event => {
+        const record = event.target.closest('[data-shortcut-record]');
+        if(record){
+            const actionId = record.dataset.shortcutRecord || '';
+            shortcutRecordingId = shortcutRecordingId === actionId ? '' : actionId;
+            showShortcutConflict('');
+            showShortcutStatus(shortcutRecordingId ? '等待按键…' : '已取消录制');
+            renderShortcutSettings();
+            return;
+        }
+        const clear = event.target.closest('[data-shortcut-clear]');
+        if(clear){
+            const actionId = clear.dataset.shortcutClear || '';
+            saveShortcutSettings({...shortcutOverrides, [actionId]:''}, '已清空');
+            return;
+        }
+        const reset = event.target.closest('[data-shortcut-reset]');
+        if(reset){
+            const next = {...shortcutOverrides};
+            delete next[reset.dataset.shortcutReset || ''];
+            saveShortcutSettings(next, '已恢复默认');
+        }
+    });
+    resetAllShortcuts?.addEventListener('click', () => {
+        if(!Object.keys(shortcutOverrides).length){ showShortcutStatus('当前已是默认设置'); return; }
+        if(confirm('确认将所有快捷键恢复为默认设置？')) saveShortcutSettings({}, '已全部恢复默认');
+    });
+    window.addEventListener('keydown', event => {
+        if(!shortcutRecordingId || !window.ShortcutActions || event.repeat) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const action = window.ShortcutActions.get(shortcutRecordingId);
+        const binding = window.ShortcutActions.fromEvent(event, {allowModifierOnly:Boolean(action?.hold)});
+        if(!binding){ showShortcutConflict('请同时或依次按下修饰键与一个普通按键。'); return; }
+        setShortcutBinding(shortcutRecordingId, binding);
+    }, true);
     window.addEventListener('message', event => {
         if(event.origin && event.origin !== location.origin) return;
         if(event.data?.type === 'studio-language') window.StudioI18n?.set?.(event.data.lang,{sync:false});

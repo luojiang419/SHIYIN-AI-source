@@ -297,6 +297,8 @@ const linksEl = document.getElementById('links');
 const linkControlsEl = document.getElementById('linkControls');
 const dropOverlay = document.getElementById('dropOverlay');
 const createMenu = document.getElementById('createMenu');
+const canvasArrangeMenuBtn = document.getElementById('canvasArrangeMenuBtn');
+const canvasArrangeMenuDivider = createMenu?.querySelector('.canvas-arrange-menu-divider');
 const ecommerceMenuHost = createMenu?.querySelector('[data-ecommerce-menu-host]');
 const ecommerceMenuTrigger = ecommerceMenuHost?.querySelector('.menu-submenu-trigger');
 const ecommerceSubmenu = ecommerceMenuHost?.querySelector('.create-submenu');
@@ -3766,6 +3768,9 @@ function addOutputNode(point){
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
     closeLinkCreateMenu();
+    const canArrangeSelection = selected.size > 1;
+    if(canvasArrangeMenuBtn) canvasArrangeMenuBtn.hidden = !canArrangeSelection;
+    if(canvasArrangeMenuDivider) canvasArrangeMenuDivider.hidden = !canArrangeSelection;
     const viewportMargin = 10;
     createMenu.classList.remove('create-menu-two-column');
     createMenu.style.left = `${clientX}px`;
@@ -16956,6 +16961,13 @@ canvasArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
     arrangeSelectedCanvasNodes();
+});
+canvasArrangeMenuBtn?.addEventListener('mousedown', e => e.stopPropagation());
+canvasArrangeMenuBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    arrangeSelectedCanvasNodes();
+    closeCreateMenu();
 });
 function isZoomPreviewIgnoredTarget(target){
     return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #promptTemplateModal, #imageEditModal, #outputLightbox');

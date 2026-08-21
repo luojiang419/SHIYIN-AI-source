@@ -1528,7 +1528,7 @@ function createSmartBatchGeneratorNode(sourceNode=null, point=null){
     const sourceSettings = sourceNode ? smartSettingsForNode(sourceNode) : settings;
     const node = {
         id:uid('batch'), type:'smart-image', specialType:'batch-generator',
-        x:baseX, y:baseY, w:440, h:520, title:tr('smart.batchProcess'), images:[],
+        x:baseX, y:baseY, w:440, h:520, title:'批量处理', images:[],
         batchPrompt:'', batchStatus:'idle', batchError:'',
         runSettings:settingsForStorage({...normalizeSmartMultiViewSettings(sourceSettings), ratio:'source', count:1}),
         scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
@@ -8057,7 +8057,7 @@ function render(){
         const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
         const slotLoading = generationSlots.some(slot => slot.status === 'loading');
         const slotFailed = generationSlots.some(slot => slot.status === 'error');
-        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? tr('smart.batchProcess') : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(layoutImages, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -12857,6 +12857,13 @@ function isSupportedUploadFile(file){
     return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/')
         || /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
 }
+const SMART_MEDIA_FILENAME_COLLATOR = new Intl.Collator('zh-CN', {numeric:true, sensitivity:'base'});
+function sortSmartMediaByFilename(items, nameOf=item => item?.name || item?.webkitRelativePath || item?.url || item || ''){
+    return [...(items || [])]
+        .map((item, index) => ({item, index, name:String(nameOf(item) || '')}))
+        .sort((a, b) => SMART_MEDIA_FILENAME_COLLATOR.compare(a.name, b.name) || a.index - b.index)
+        .map(entry => entry.item);
+}
 function dataTransferItemEntry(item){
     try { return item?.webkitGetAsEntry?.() || null; } catch { return null; }
 }
@@ -12882,7 +12889,7 @@ async function uploadFilesFromDataTransfer(dataTransfer){
     const raw = entries.length
         ? (await Promise.all(entries.map(filesFromEntry))).flat()
         : [...(dataTransfer?.files || [])];
-    return raw.filter(isSupportedUploadFile);
+    return sortSmartMediaByFilename(raw.filter(isSupportedUploadFile));
 }
 function uploadTitleForItems(items, fallback='Upload'){
     const list = [...(items || [])];
@@ -12909,7 +12916,7 @@ const SMART_IMAGE_DROP_TEXT_TYPES = [
 ];
 const SMART_IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|image\/.+|text\/(?:uri-list|html|plain|x-moz-url|x-file-url)|downloadurl|public\.(?:file-url|url)|uniformresourcelocator|filenamew?)$|application\/x-qt-(?:windows-mime|image)|application\/x-moz-file|com\.eagle/i;
 function smartImageFilesFromDataTransfer(dataTransfer){
-    return [...(dataTransfer?.files || [])].filter(isSupportedUploadFile);
+    return sortSmartMediaByFilename([...(dataTransfer?.files || [])].filter(isSupportedUploadFile));
 }
 async function smartResponseErrorMessage(response, fallback='请求失败'){
     try {
@@ -13040,7 +13047,7 @@ function setSmartDropCopyEffect(e, includeAsset=false){
     }
 }
 async function uploadFiles(files){
-    const supported = [...(files || [])].filter(isSupportedUploadFile).slice(0, SMART_UPLOAD_MAX);
+    const supported = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile)).slice(0, SMART_UPLOAD_MAX);
     if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file, file.name || 'media'));
@@ -13048,10 +13055,8 @@ async function uploadFiles(files){
         if(!r.ok) throw new Error((await r.text()) || tr('smart.toastUploadFail'));
         return r.json();
     });
-    return (data.files || []).map((file, index) => ({
-        ...file,
-        kind:file.kind || mediaKindForFile(supported[index])
-    }));
+    const uploaded = (data.files || []).map((file, index) => ({file:{...file, kind:file.kind || mediaKindForFile(supported[index])}, source:supported[index]}));
+    return sortSmartMediaByFilename(uploaded, entry => entry.source?.name || entry.file?.name || '').map(entry => entry.file);
 }
 function appendImagesToSmartNode(uploaded, targetId='', opts={}){
     const images = [...(uploaded || [])].filter(file => file?.url);
@@ -13086,7 +13091,7 @@ function appendImagesToSmartNode(uploaded, targetId='', opts={}){
 }
 async function handleFiles(files, targetId='', opts={}){
     try {
-        const fileList = [...(files || [])].filter(isSupportedUploadFile).slice(0, SMART_UPLOAD_MAX);
+        const fileList = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile)).slice(0, SMART_UPLOAD_MAX);
         if(!fileList.length) return;
         const uploaded = await uploadFiles(fileList);
         if(!uploaded.length) return;
@@ -13096,14 +13101,15 @@ async function handleFiles(files, targetId='', opts={}){
 }
 async function importSmartLocalImages(paths){
     if(!paths?.length) return [];
+    const orderedPaths = sortSmartMediaByFilename(paths);
     const response = await fetch('/api/ai/import-local-image', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({paths:(paths || []).slice(0, SMART_UPLOAD_MAX)})
+        body:JSON.stringify({paths:orderedPaths.slice(0, SMART_UPLOAD_MAX)})
     });
     if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.toastUploadFail')));
     const data = await response.json();
-    return data.files || [];
+    return sortSmartMediaByFilename(data.files || []);
 }
 async function handleSmartImageDropPayload(payload, targetId='', opts={}){
     try {

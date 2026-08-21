@@ -20,6 +20,8 @@ def test_batch_generator_is_a_first_class_image_generator_variant():
     assert "'batchGenerator-node batch-generator-node generator-node'" in JAVASCRIPT
     assert "node.type === 'generator' || node.type === 'batchGenerator'" in JAVASCRIPT
     assert '"canvas.batchProcess"' in I18N
+    assert "type:'batchGenerator', x:p.x, y:p.y, title:'批量处理'" in JAVASCRIPT
+    assert "node.type === 'batchGenerator' ? '批量处理'" in JAVASCRIPT
     assert ".batch-process-hint" in STYLES
 
 

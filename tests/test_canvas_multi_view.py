@@ -134,8 +134,8 @@ def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
 def test_both_canvas_pages_load_multi_view_layout_overrides():
     assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.1' in SMART_HTML
     assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.1' in CANVAS_HTML
-    assert 'canvas.js?v=2026.08.21.multi-view-five-assets.1' in CANVAS_HTML
-    assert 'smart-canvas.js?v=2026.08.21.multi-view-five-assets.1' in SMART_HTML
+    assert 'canvas.js?v=2026.08.21.multi-file-arrange.1' in CANVAS_HTML
+    assert 'smart-canvas.js?v=2026.08.21.multi-file-arrange.1' in SMART_HTML
 
 
 def test_classic_multi_view_keeps_results_only_in_output_node_and_locks_controls_visible():

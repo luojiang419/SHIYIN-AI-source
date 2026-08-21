@@ -17,6 +17,8 @@ def test_image_and_group_floating_menus_create_a_connected_batch_node():
     assert "function createSmartBatchGeneratorNode(sourceNode=null, point=null)" in JAVASCRIPT
     create_body = section("function createSmartBatchGeneratorNode", "const MULTI_VIEW_INPUT_SLOTS")
     assert "specialType:'batch-generator'" in create_body
+    assert "title:'批量处理'" in create_body
+    assert "node.specialType === 'batch-generator' ? '批量处理'" in JAVASCRIPT
     assert "connectInputNode(sourceNode.id, node.id)" in create_body
     assert "sourceRect.x + sourceRect.width + 120" in create_body
 

@@ -2908,7 +2908,7 @@ function addBatchGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
     const selection = defaultImageGenerationSelection();
     return addNode({
-        id:uid('batch'), type:'batchGenerator', x:p.x, y:p.y,
+        id:uid('batch'), type:'batchGenerator', x:p.x, y:p.y, title:'批量处理',
         apiProvider:selection.providerId, model:selection.model,
         prompt:'', ratio:'source', resolution:'2k', quality:'auto',
         customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'',
@@ -4337,6 +4337,13 @@ function isSupportedUploadFile(file){
     return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/')
         || /\.(png|jpe?g|webp|gif|bmp|avif|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
 }
+const CANVAS_MEDIA_FILENAME_COLLATOR = new Intl.Collator('zh-CN', {numeric:true, sensitivity:'base'});
+function sortCanvasMediaByFilename(items, nameOf=item => item?.name || item?.webkitRelativePath || item?.url || item || ''){
+    return [...(items || [])]
+        .map((item, index) => ({item, index, name:String(nameOf(item) || '')}))
+        .sort((a, b) => CANVAS_MEDIA_FILENAME_COLLATOR.compare(a.name, b.name) || a.index - b.index)
+        .map(entry => entry.item);
+}
 function dataTransferItemEntry(item){
     try { return item?.webkitGetAsEntry?.() || null; } catch { return null; }
 }
@@ -4362,7 +4369,7 @@ async function uploadFilesFromDataTransfer(dataTransfer){
     const raw = entries.length
         ? (await Promise.all(entries.map(filesFromEntry))).flat()
         : [...(dataTransfer?.files || [])];
-    return raw.filter(isSupportedUploadFile);
+    return sortCanvasMediaByFilename(raw.filter(isSupportedUploadFile));
 }
 function isAudioUrl(url){
     return /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(canvasOriginalMediaUrl(url));
@@ -4628,7 +4635,7 @@ function isLocalImageDropValue(value){
     return (isWindowsPath || isPosixPath) && IMAGE_DROP_EXT_RE.test(clean);
 }
 function imageFilesFromDataTransfer(dataTransfer){
-    return [...(dataTransfer?.files || [])].filter(isSupportedUploadFile);
+    return sortCanvasMediaByFilename([...(dataTransfer?.files || [])].filter(isSupportedUploadFile));
 }
 function localImagePathsFromDataTransfer(dataTransfer){
     return uniqueValues(dropTextCandidates(dataTransfer).filter(isLocalImageDropValue));
@@ -4656,26 +4663,28 @@ async function resolveImageDropPayload(dataTransfer){
 }
 async function importLocalImages(paths){
     if(!paths?.length) return [];
+    const orderedPaths = sortCanvasMediaByFilename(paths);
     const response = await fetch('/api/ai/import-local-image', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({paths})
+        body:JSON.stringify({paths:orderedPaths})
     });
     if(!response.ok) throw new Error(await responseErrorMessage(response, langIsEn() ? 'Local image import failed' : '导入本地图片失败'));
     const data = await response.json();
-    return data.files || [];
+    return sortCanvasMediaByFilename(data.files || []);
 }
 function layoutUploadedMediaNodes(created, base){
-    const list = [...(created || [])];
-    if(!list.length) return;
-    const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(list.length))));
-    const gapX = 280;
-    const gapY = 250;
-    const startX = base.x - ((cols - 1) * gapX) / 2;
-    list.forEach((node, i) => {
-        node.x = startX + (i % cols) * gapX;
-        node.y = base.y + Math.floor(i / cols) * gapY;
-    });
+    const list = [...(created || [])].filter(node => node?.id);
+    if(!list.length) return false;
+    if(list.length === 1){
+        list[0].x = Number(base?.x || 0);
+        list[0].y = Number(base?.y || 0);
+        return true;
+    }
+    // Render once so the shared arrange routine can measure each media node's
+    // real width and height instead of relying on a fixed grid gap.
+    render();
+    return arrangeIdsByConnections(list.map(node => node.id));
 }
 function createGroupForUploadedNodes(created, point){
     const targets = [...(created || [])].filter(n => n?.type === 'image');
@@ -4699,18 +4708,19 @@ function createGroupForUploadedNodes(created, point){
 }
 async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     if(!ensureCanvas()) return;
-    const supported = [...files].filter(file => {
+    const supported = sortCanvasMediaByFilename([...files].filter(file => {
         const kind = mediaKindForUpload(file);
         return onlyImages ? kind === 'image' : ['image','video','audio'].includes(kind);
-    }).slice(0, CANVAS_UPLOAD_MAX);
+    })).slice(0, CANVAS_UPLOAD_MAX);
     if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file));
     const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
     const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     const created = [];
-    (data.files || []).forEach((file, i) => {
-        const kind = file.kind || mediaKindForUpload(supported[i]);
+    const uploaded = sortCanvasMediaByFilename((data.files || []).map((file, index) => ({file, source:supported[index]})), entry => entry.source?.name || entry.file?.name || '');
+    uploaded.forEach(({file, source}, i) => {
+        const kind = file.kind || mediaKindForUpload(source);
         const node = {
             id:uid('img'),
             type:'image',
@@ -7723,7 +7733,7 @@ function renderNode(node){
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
-    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? tr('canvas.batchProcess') : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus

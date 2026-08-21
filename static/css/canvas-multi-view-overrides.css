@@ -38,3 +38,11 @@
 .selection-hub{width:min(520px,calc(100vw - 32px));justify-content:flex-start;align-items:center;row-gap:5px}
 .selection-hub .media-quick-btn{flex:1 1 112px;min-width:96px}
 @media(max-width:760px){.smart-node-floating-menu.smart-node-image-menu{grid-template-columns:repeat(2,minmax(88px,1fr));width:min(300px,calc(100vw - 32px));max-width:min(300px,calc(100vw - 32px))}.selection-hub .media-quick-btn{flex-basis:86px;min-width:78px}}
+
+/* 三视图生成参数：与图片生成节点共用控件语言，画幅由四类固定输出决定。 */
+.classic-multi-view-settings,.multi-view-settings{margin-top:auto;padding:9px 4px 7px;border-top:1px solid color-mix(in srgb,var(--line,#ddd) 72%,transparent)}
+.classic-multi-view-settings .gen-settings-row,.multi-view-settings .gen-settings-row{display:flex;align-items:center;gap:7px;margin:0 0 7px}
+.classic-multi-view-settings .gen-settings-row:last-child,.multi-view-settings .gen-settings-row:last-child{margin-bottom:0}
+.classic-multi-view-settings select,.multi-view-settings select{min-width:0;flex:1;height:31px;font-size:9px}
+.classic-multi-view-settings select[data-multi-view-model],.multi-view-settings select[data-multi-view-model]{flex:1.65}
+.classic-multi-view-fixed-output,.multi-view-fixed-output{margin-left:auto;color:var(--faint,#777);font-size:8px;font-weight:800;white-space:nowrap}

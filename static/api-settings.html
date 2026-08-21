@@ -25,7 +25,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.30.1782781876">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.07.31.recommend-panel.1">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.08.21.provider-priority.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -42,6 +42,7 @@
             <div class="layout">
                 <aside class="sidebar">
                     <div class="side-section-title" data-i18n="api.providersTitle">平台列表</div>
+                    <div class="provider-order-hint">拖拽调整生成优先级；靠前配置无效时自动顺延</div>
                     <div id="providerList" class="provider-list"></div>
                     <button class="add-btn" type="button" onclick="addProvider()"><i data-lucide="plus" class="w-4 h-4"></i><span data-i18n="api.addProvider">新增平台</span></button>
                     <button class="api-link-btn" type="button" onclick="openRecommendApi()"><i data-lucide="sparkles" class="w-4 h-4"></i><span data-i18n="api.recommendApi">推荐API</span></button>
@@ -518,6 +519,6 @@
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=2026.08.13.minimax-h3.1"></script>
+    <script src="/static/js/api-settings.js?v=2026.08.21.provider-priority.1"></script>
 </body>
 </html>

@@ -1509,7 +1509,8 @@ function createMultiViewNode(point, sourceNode=null){
     const baseY = sourceRect ? sourceRect.y : (point?.y || 0) - 320;
     const node = {
         id:uid('multi-view'), type:'smart-image', specialType:'multi-view',
-        x:baseX, y:baseY, w:700, h:680, title:'创建三视图', images:[],
+        x:baseX, y:baseY, w:700, h:780, title:'创建三视图', images:[],
+        runSettings:settingsForStorage(normalizeSmartMultiViewSettings(sourceNode ? smartSettingsForNode(sourceNode) : settings)),
         multiViewStatus:'idle', multiViewInputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
     nodes.push(node);
@@ -1567,6 +1568,7 @@ function multiViewConnections(node){
     return result;
 }
 function multiViewBodyHtml(node){
+    const runSettings = smartMultiViewSettingsForNode(node);
     const inputs = multiViewConnections(node);
     const outputNames = ['三视图+细节横板', '正面视图', '侧面视图', '背面视图'];
     const outputs = (node.images || []).filter(item => item?.url);
@@ -1582,6 +1584,21 @@ function multiViewBodyHtml(node){
         <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
         <div class="multi-view-input-list">${slots}</div>
         ${outputPreview}
+        <div class="multi-view-settings gen-settings">
+            <div class="gen-settings-row">
+                <select class="select-lite" data-multi-view-provider aria-label="图片生成平台">${smartMultiViewProviderOptions(runSettings.provider_id)}</select>
+                <select class="select-lite" data-multi-view-model aria-label="图片生成模型">${smartMultiViewModelOptions(runSettings.provider_id, runSettings.model)}</select>
+            </div>
+            <div class="gen-settings-row">
+                <select class="select-lite" data-multi-view-resolution aria-label="分辨率">
+                    ${['1k','2k','4k'].map(value => `<option value="${value}" ${runSettings.resolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}
+                </select>
+                <select class="select-lite" data-multi-view-quality aria-label="生成质量">
+                    ${['auto','low','medium','high'].map(value => `<option value="${value}" ${runSettings.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}
+                </select>
+                <span class="multi-view-fixed-output">固定输出 1×16:9 + 3×9:16</span>
+            </div>
+        </div>
         <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
     </div>`;
 }
@@ -2130,9 +2147,9 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'multi-view') {
         const hasOutputs = (node.images || []).some(item => item?.url);
         const savedHeight = Number(node.h);
-        const height = !hasOutputs && (!Number.isFinite(savedHeight) || savedHeight === 560 || savedHeight === 720)
-            ? 680
-            : Math.max(hasOutputs ? 720 : 680, savedHeight || 680);
+        const height = !hasOutputs && (!Number.isFinite(savedHeight) || [560, 680, 720].includes(savedHeight))
+            ? 780
+            : Math.max(780, savedHeight || 780);
         return {cols:1, rows:1, width:Math.max(620, Math.round(Number(node.w) || 700)), height, thumb:96, single:true};
     }
     if(node?.type === 'smart-group'){
@@ -2481,7 +2498,7 @@ function toggleZoomPreview(){
     else enterZoomPreview();
 }
 function imageProviders(){
-    return (apiProviders || []).filter(p => p.enabled !== false && (p.image_models || []).length);
+    return (apiProviders || []).filter(p => p.enabled !== false && p.image_generation_ready !== false && (p.image_models || []).length);
 }
 function volcengineProvider(){
     return (apiProviders || []).find(p => p.id === 'volcengine' && p.enabled !== false) || {
@@ -2625,7 +2642,35 @@ function videoProviderPlatform(providerId){
 }
 function providerImageModels(providerId){
     if(providerId === 'volcengine') return volcengineProvider().image_models || [];
-    return (apiProviders || []).find(p => p.id === providerId)?.image_models || [];
+    return imageProviders().find(p => p.id === providerId)?.image_models || [];
+}
+function smartMultiViewProviderOptions(selectedId=''){
+    const providers = imageProviders();
+    if(!providers.length) return '<option value="" selected disabled>暂无有效图片平台</option>';
+    const selected = providers.some(provider => provider.id === selectedId) ? selectedId : providers[0].id;
+    return providers.map(provider => `<option value="${escapeAttr(provider.id)}" ${provider.id === selected ? 'selected' : ''}>${escapeHtml(provider.name || provider.id)}</option>`).join('');
+}
+function smartMultiViewModelOptions(providerId='', selectedModel=''){
+    const models = providerImageModels(providerId);
+    if(!models.length) return '<option value="" selected disabled>暂无图片模型</option>';
+    const selected = models.includes(selectedModel) ? selectedModel : models[0];
+    return models.map(model => `<option value="${escapeAttr(model)}" ${model === selected ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
+}
+function normalizeSmartMultiViewSettings(source={}){
+    const next = {...cloneSmartSettings(canvasDefaultSmartSettings || initialSmartSettings), ...cloneSmartSettings(source || {})};
+    next.engine = 'api';
+    next.apiKind = 'image';
+    sanitizeSmartApiSelection(next);
+    next.resolution = ['1k','2k','4k'].includes(String(next.resolution || '').toLowerCase()) ? String(next.resolution).toLowerCase() : '2k';
+    next.quality = ['auto','low','medium','high'].includes(String(next.quality || '').toLowerCase()) ? String(next.quality).toLowerCase() : 'high';
+    next.count = 1;
+    return next;
+}
+function smartMultiViewSettingsForNode(node){
+    const current = node?.runSettings && Object.keys(node.runSettings).length ? node.runSettings : smartSettingsForNode(node);
+    const normalized = normalizeSmartMultiViewSettings(current);
+    if(node) node.runSettings = settingsForStorage(normalized);
+    return normalized;
 }
 // 即梦图生图（挂了参考图）不支持 3.0/3.1，此时从模型下拉里隐藏它们。
 const JIMENG_IMAGE2IMAGE_UNSUPPORTED = ['3.0', '3.1'];
@@ -2706,9 +2751,11 @@ function sanitizeSmartApiSelection(target=settings){
         return target;
     }
     clearVolcengineSelectionOutsideVolcengine(target);
-    if(target.provider_id){
+    if((target.engine || 'api') === 'api' && (target.apiKind || 'image') !== 'video'){
+        const providers = imageProviders();
+        if(!providers.some(provider => provider.id === target.provider_id)) target.provider_id = providers[0]?.id || '';
         const models = providerImageModels(target.provider_id);
-        if(models.length && !models.includes(target.model)) target.model = models[0] || '';
+        target.model = models.includes(target.model) ? target.model : (models[0] || '');
     }
     if((target.engine || 'api') === 'api' && (target.apiKind || 'image') !== 'video'){
         const allowAuto = isGptImageAutoSizeModel(target.model);
@@ -8677,7 +8724,7 @@ async function generateSmartMultiView(node){
     if(!node || node.specialType !== 'multi-view' || node.multiViewStatus === 'running') return;
     const refs = multiViewInputRefs(node);
     if(!refs.modelAny && !refs.productAny){ toast('请至少连接一张模特或产品图片'); return; }
-    const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
+    const base = smartMultiViewSettingsForNode(node);
     if(!base.provider_id || !base.model){ toast('请先在 API 设置中配置图片生成模型'); return; }
     const startedAt = nowMs();
     node.multiViewStatus = 'running'; node.images = [];
@@ -8690,6 +8737,13 @@ async function generateSmartMultiView(node){
         const submitted = await runApiGeneration(multiViewPromptFor(view, refs, board, viewRefs), viewRefs, runSettings);
         const taskId = submitted?.taskIds?.[0];
         if(!taskId) throw new Error(`${board ? '三视图横板' : `${view}视图`}任务创建失败`);
+        if(submitted.providerId){
+            node.runSettings = settingsForStorage(normalizeSmartMultiViewSettings({
+                ...node.runSettings,
+                provider_id:submitted.providerId,
+                model:submitted.model || node.runSettings?.model,
+            }));
+        }
         const result = await pollSmartCanvasTask(taskId);
         const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
         const url = typeof raw === 'string' ? raw : raw?.url || '';
@@ -8809,6 +8863,27 @@ function bindSmartSpecialNode(el, node){
             event.preventDefault(); event.stopPropagation();
             generateSmartMultiView(node);
         });
+        const provider = el.querySelector('[data-multi-view-provider]');
+        const model = el.querySelector('[data-multi-view-model]');
+        const resolution = el.querySelector('[data-multi-view-resolution]');
+        const quality = el.querySelector('[data-multi-view-quality]');
+        [provider, model, resolution, quality].filter(Boolean).forEach(control => {
+            control.addEventListener('mousedown', event => event.stopPropagation());
+            control.addEventListener('click', event => event.stopPropagation());
+        });
+        const updateSettings = (patch, rerender=false) => {
+            node.runSettings = settingsForStorage(normalizeSmartMultiViewSettings({...smartMultiViewSettingsForNode(node), ...patch}));
+            if(rerender) render();
+            scheduleSave();
+        };
+        provider?.addEventListener('change', event => {
+            event.stopPropagation();
+            const providerId = event.target.value;
+            updateSettings({provider_id:providerId, model:providerImageModels(providerId)[0] || ''}, true);
+        });
+        model?.addEventListener('change', event => { event.stopPropagation(); updateSettings({model:event.target.value}); });
+        resolution?.addEventListener('change', event => { event.stopPropagation(); updateSettings({resolution:event.target.value}); });
+        quality?.addEventListener('change', event => { event.stopPropagation(); updateSettings({quality:event.target.value}); });
         return;
     }
     if(!api || !node?.specialType) return;
@@ -15360,7 +15435,13 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
         if(!r.ok) throw new Error(await r.text());
         return r.json();
     })));
-    return {taskIds:tasks.map(task => task.task_id).filter(Boolean), count, providerId:payload.provider_id, model:payload.model};
+    return {
+        taskIds:tasks.map(task => task.task_id).filter(Boolean),
+        count,
+        providerId:tasks[0]?.provider_id || payload.provider_id,
+        model:tasks[0]?.model || payload.model,
+        fallbackUsed:tasks.some(task => task.fallback_used === true),
+    };
 }
 async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     const ref = selectedRunningHubRef(runSettings);

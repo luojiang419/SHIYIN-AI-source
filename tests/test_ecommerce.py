@@ -2000,8 +2000,9 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("saveProviders({render:false, auto:true})", self.api_javascript)
 
     def test_all_generation_pages_use_enabled_provider_model_lists_without_id_blacklists(self):
-        self.assertIn("p.enabled !== false && (p.image_models || []).length", self.canvas_javascript)
-        self.assertIn("p.enabled !== false && (p.image_models || []).length", self.smart_canvas_javascript)
+        readiness_filter = "p.enabled !== false && p.image_generation_ready !== false && (p.image_models || []).length"
+        self.assertIn(readiness_filter, self.canvas_javascript)
+        self.assertIn(readiness_filter, self.smart_canvas_javascript)
         self.assertIn("p.enabled !== false && (p.image_models || []).length", self.gpt_chat_html)
         for source in (self.canvas_javascript, self.smart_canvas_javascript):
             self.assertNotRegex(source, r"p\.id\s*!==\s*'(?:modelscope|volcengine)'.*image_models")

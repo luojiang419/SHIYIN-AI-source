@@ -395,7 +395,7 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.213"
+APP_VERSION = "1.0.214"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -1845,6 +1845,81 @@ def save_api_providers(providers):
         ADMIN_DATABASE.save_providers(providers)
     publish_entity_changed("platform", "global")
 
+
+def executable_is_available(value: str) -> bool:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return False
+    return bool(os.path.isfile(candidate) or shutil.which(candidate))
+
+
+def image_generation_readiness(provider: Dict[str, Any]) -> Dict[str, Any]:
+    """只做提交前的本地配置预检，不向上游发送探测请求。"""
+    provider = provider or {}
+    provider_id = str(provider.get("id") or "").strip().lower()
+    if not provider.get("enabled", True):
+        return {"ready": False, "reason": "平台已禁用"}
+    if not list(provider.get("image_models") or []):
+        return {"ready": False, "reason": "未配置图片模型"}
+    if is_codex_provider(provider):
+        ready = executable_is_available(codex_cli_executable())
+        return {"ready": ready, "reason": "" if ready else "未找到 Codex CLI"}
+    if is_jimeng_provider(provider):
+        ready = executable_is_available(jimeng_cli_executable())
+        return {"ready": ready, "reason": "" if ready else "未找到即梦 CLI"}
+    base_url = str(provider.get("base_url") or "").strip()
+    if not base_url:
+        return {"ready": False, "reason": "未配置请求地址"}
+    if is_runninghub_provider(provider):
+        has_key = bool(runninghub_wallet_key_value() or provider_env_key_value(provider_id))
+    else:
+        has_key = bool(provider_env_key_value(provider_id))
+    hostname = urllib.parse.urlsplit(base_url).hostname or ""
+    if not has_key and not (hostname and is_loopback_address(hostname)):
+        return {"ready": False, "reason": "未配置 API Key"}
+    return {"ready": True, "reason": ""}
+
+
+def resolve_image_generation_selection(
+    provider_id: str = "",
+    model: str = "",
+    providers: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """按已保存顺序选择图片平台；指定项无效时从其后开始顺延并最终环回。"""
+    ordered = list(providers if providers is not None else load_api_providers())
+    requested_id = str(provider_id or "").strip().lower()
+    requested_index = next(
+        (index for index, item in enumerate(ordered) if str(item.get("id") or "").strip().lower() == requested_id),
+        -1,
+    )
+    candidates = ordered[requested_index:] + ordered[:requested_index] if requested_index >= 0 else ordered
+    skipped = []
+    for provider in candidates:
+        readiness = image_generation_readiness(provider)
+        if not readiness["ready"]:
+            skipped.append({
+                "provider_id": str(provider.get("id") or ""),
+                "reason": readiness["reason"],
+            })
+            continue
+        image_models = list(provider.get("image_models") or [])
+        requested_model = str(model or "").strip()
+        resolved_model = requested_model if requested_model in image_models else image_models[0]
+        selected_id = str(provider.get("id") or "")
+        return {
+            "provider": provider,
+            "provider_id": selected_id,
+            "model": resolved_model,
+            "requested_provider_id": requested_id,
+            "fallback_used": bool(requested_id and selected_id != requested_id),
+            "skipped": skipped,
+        }
+    reasons = "；".join(
+        f"{item['provider_id'] or '未命名平台'}：{item['reason']}" for item in skipped
+    ) or "没有可用平台"
+    raise HTTPException(status_code=400, detail=f"没有有效的图片生成配置。{reasons}")
+
+
 def public_provider(provider):
     if provider.get("id") == "runninghub":
         try:
@@ -1858,6 +1933,11 @@ def public_provider(provider):
         "key_preview": mask_secret(key),
         "key_env": provider_key_env(provider["id"]),
     }
+    readiness = image_generation_readiness(provider)
+    item.update({
+        "image_generation_ready": readiness["ready"],
+        "image_generation_unavailable_reason": readiness["reason"],
+    })
     if provider.get("id") == "runninghub":
         wallet_key = runninghub_wallet_key_value()
         item.update({
@@ -1899,15 +1979,23 @@ RUNTIME_PROVIDER_FIELDS = (
     "ms_defaults_version",
     "rh_apps",
     "rh_workflows",
+    "image_generation_ready",
+    "image_generation_unavailable_reason",
 )
 
 
 def runtime_api_provider(provider: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    item = {
         field: provider.get(field)
         for field in RUNTIME_PROVIDER_FIELDS
         if field in provider
     }
+    readiness = image_generation_readiness(provider)
+    item.update({
+        "image_generation_ready": readiness["ready"],
+        "image_generation_unavailable_reason": readiness["reason"],
+    })
+    return item
 
 
 def runtime_api_providers() -> List[Dict[str, Any]]:
@@ -1918,14 +2006,11 @@ def runtime_api_providers() -> List[Dict[str, Any]]:
     ]
 
 def get_primary_provider_id(providers=None):
-    """返回当前首选 provider 的 id；优先 primary=True 的，否则取第一个非 modelscope 的，再次取第一个。"""
+    """返回列表中第一个启用的平台；API 设置页的持久化顺序就是优先级。"""
     providers = providers if providers is not None else load_api_providers()
-    primary = next((p for p in providers if p.get("primary") and p.get("enabled", True)), None)
-    if primary:
-        return primary["id"]
-    non_ms = next((p for p in providers if p["id"] != "modelscope" and p.get("enabled", True)), None)
-    if non_ms:
-        return non_ms["id"]
+    first_enabled = next((p for p in providers if p.get("enabled", True)), None)
+    if first_enabled:
+        return first_enabled["id"]
     return providers[0]["id"] if providers else "modelscope"
 
 def get_api_provider(provider_id="comfly"):
@@ -13234,8 +13319,6 @@ async def runtime_providers():
 async def save_providers(payload: List[ApiProviderPayload]):
     providers = []
     env_updates = {}
-    # 收集每个 item 的 primary 字段
-    raw_primary_flags = [bool(getattr(item, "primary", False)) for item in payload]
     for item in payload:
         provider = normalize_provider(item.dict(exclude={"api_key"}))
         if provider["id"] == "runninghub":
@@ -13278,12 +13361,10 @@ async def save_providers(payload: List[ApiProviderPayload]):
             provider["protocol"] = "volcengine"
     if not providers:
         raise HTTPException(status_code=400, detail="至少保留一个 API 平台")
-    # 强制最多一个 primary（取最后被标记的；都没标记则保持原样不强制）
-    primary_indices = [i for i, flag in enumerate(raw_primary_flags) if flag]
-    if primary_indices:
-        winner = primary_indices[-1]
-        for i, p in enumerate(providers):
-            p["primary"] = (i == winner)
+    # 列表顺序就是优先级；同步 primary 供旧调用方兼容。
+    first_enabled_index = next((i for i, provider in enumerate(providers) if provider.get("enabled", True)), 0)
+    for i, provider in enumerate(providers):
+        provider["primary"] = (i == first_enabled_index)
     save_api_providers(providers)
     if env_updates:
         update_env_values(env_updates)
@@ -14081,10 +14162,11 @@ async def execute_ai_image_batch(
     }
 
 async def build_online_image_result(payload: OnlineImageRequest):
+    selection = resolve_image_generation_selection(payload.provider_id, payload.model)
     batch = await execute_ai_image_batch(
         prompt=payload.prompt,
-        provider_id=payload.provider_id,
-        model=payload.model,
+        provider_id=selection["provider_id"],
+        model=selection["model"],
         size=payload.size,
         quality=payload.quality,
         references=[ref.dict() for ref in payload.reference_images if ref.url],
@@ -15409,6 +15491,11 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
 
 @app.post("/api/canvas-image-tasks")
 async def create_canvas_image_task(payload: OnlineImageRequest):
+    selection = resolve_image_generation_selection(payload.provider_id, payload.model)
+    resolved_payload = payload.copy(update={
+        "provider_id": selection["provider_id"],
+        "model": selection["model"],
+    })
     task_id = f"canvas_img_{uuid.uuid4().hex}"
     with CANVAS_TASK_LOCK:
         CANVAS_TASKS[task_id] = {
@@ -15419,8 +15506,11 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
             "updated_at": time.time(),
             "result": None,
             "error": "",
-            "provider_id": payload.provider_id,
-            "model": payload.model,
+            "provider_id": selection["provider_id"],
+            "model": selection["model"],
+            "requested_provider_id": selection["requested_provider_id"],
+            "fallback_used": selection["fallback_used"],
+            "fallback_skipped": selection["skipped"],
             "_account_id": current_account_id(),
         }
         prune_current_account_tasks_locked(
@@ -15428,8 +15518,16 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
             {"queued", "running", "jimeng_pending", "recovery_pending"},
             CANVAS_TASK_MEMORY_LIMIT,
         )
-    asyncio.create_task(run_canvas_image_task(task_id, payload))
-    return {"task_id": task_id, "status": "queued"}
+    asyncio.create_task(run_canvas_image_task(task_id, resolved_payload))
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "provider_id": selection["provider_id"],
+        "model": selection["model"],
+        "requested_provider_id": selection["requested_provider_id"],
+        "fallback_used": selection["fallback_used"],
+        "fallback_skipped": selection["skipped"],
+    }
 
 @app.get("/api/canvas-image-tasks/{task_id}")
 async def get_canvas_image_task(task_id: str):

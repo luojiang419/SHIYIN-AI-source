@@ -2243,29 +2243,22 @@ async function saveRecommendedApi(index){
     if(ok) setStatus(trf('api.recommendSaved', {name:api.name}));
 }
 function sortedProviders(){
-    const order = ['local-vision', 'shiying', 'grsai', 'modelscope', 'runninghub', 'volcengine', 'lingjing', 'codex'];
-    return visibleProviders().sort((a, b) => {
-        const ai = order.indexOf(a.id);
-        const bi = order.indexOf(b.id);
-        if(ai === -1 && bi === -1) return 0;
-        if(ai === -1) return 1;
-        if(bi === -1) return -1;
-        return ai - bi;
-    });
+    return visibleProviders();
 }
 function providerDragAttrs(item){
-    if(isFixedProvider(item)) return '';
     const id = escapeAttr(item.id);
     return ` draggable="true" data-provider-id="${id}" ondragstart="handleProviderDragStart(event,'${id}')" ondragover="handleProviderDragOver(event,'${id}')" ondrop="handleProviderDrop(event,'${id}')" ondragend="handleProviderDragEnd()"`;
 }
 function renderProviderList(){
-    providerList.innerHTML = sortedProviders().map(item => {
+    providerList.innerHTML = sortedProviders().map((item, priorityIndex) => {
         const active = item.id === selectedId ? 'active' : '';
         const stateClass = item.enabled === false ? 'is-disabled' : (item.has_key || item.has_wallet_key ? 'has-key' : 'missing-key');
         const protocolLabel = item.id === 'local-vision' ? 'VISION' : item.id === 'runninghub' ? 'RH' : String(item.protocol || 'openai').toUpperCase();
+        const sortMeta = `<span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span><span class="provider-priority" title="生成优先级">${priorityIndex + 1}</span>`;
         if(item.id === 'modelscope'){
             return `
-                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
+                <button class="provider-card provider-card-banner provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
+                    ${sortMeta}
                     <span class="provider-banner-inner">
                         <span class="provider-logo-wrap">
                             <img src="/static/images/modelscope.gif" alt="ModelScope" class="ms-icon-light">
@@ -2279,7 +2272,8 @@ function renderProviderList(){
         }
         if(item.id === 'runninghub'){
             return `
-                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
+                <button class="provider-card provider-card-banner provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
+                    ${sortMeta}
                     <span class="provider-banner-inner">
                         <span class="provider-logo-wrap">
                             <img src="/static/images/RunningHub-B.png" alt="RunningHub" class="runninghub-icon ms-icon-light">
@@ -2293,7 +2287,8 @@ function renderProviderList(){
         }
         if(item.id === 'volcengine'){
             return `
-                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
+                <button class="provider-card provider-card-banner provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
+                    ${sortMeta}
                     <span class="provider-banner-inner">
                         <span class="provider-logo-wrap">
                             <img src="/static/images/volcengine-theme-light.svg" alt="火山引擎" class="volcengine-icon ms-icon-light">
@@ -2307,7 +2302,8 @@ function renderProviderList(){
         }
         if(item.id === 'lingjing'){
             return `
-                <button class="provider-card provider-card-banner ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')">
+                <button class="provider-card provider-card-banner provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
+                    ${sortMeta}
                     <span class="provider-banner-inner">
                         <span class="provider-logo-wrap">
                             <img src="/static/images/lingjing.png" alt="灵境API" class="lingjing-icon ms-icon-light">
@@ -2321,7 +2317,7 @@ function renderProviderList(){
         }
         return `
             <button class="provider-card provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
-                <span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span>
+                ${sortMeta}
                 <span class="provider-mark"><i data-lucide="${item.id === 'local-vision' ? 'scan-eye' : item.has_key ? 'key-round' : 'key'}" class="w-4 h-4"></i></span>
                 <span class="provider-info">
                     <div class="provider-name">${escapeHtml(item.name || item.id)}</div>
@@ -2338,7 +2334,7 @@ function renderProviderList(){
 }
 function handleProviderDragStart(event, id){
     const item = providers.find(provider => provider.id === id);
-    if(!item || isFixedProvider(item)){
+    if(!item){
         event.preventDefault();
         return;
     }
@@ -2348,7 +2344,7 @@ function handleProviderDragStart(event, id){
     event.dataTransfer.setData('text/plain', id);
 }
 function handleProviderDragOver(event, id){
-    if(!providerDragId || providerDragId === id || isFixedProvider(id)) return;
+    if(!providerDragId || providerDragId === id) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     providerList?.querySelectorAll('.provider-card-drop-target').forEach(el => el.classList.remove('provider-card-drop-target'));
@@ -2359,13 +2355,17 @@ function handleProviderDrop(event, targetId){
     providerList?.querySelectorAll('.provider-card-drop-target').forEach(el => el.classList.remove('provider-card-drop-target'));
     const sourceId = providerDragId || event.dataTransfer.getData('text/plain');
     providerDragId = '';
-    if(!sourceId || sourceId === targetId || isFixedProvider(sourceId) || isFixedProvider(targetId)) return;
+    if(!sourceId || sourceId === targetId) return;
     const sourceIndex = providers.findIndex(item => item.id === sourceId);
     const targetIndex = providers.findIndex(item => item.id === targetId);
     if(sourceIndex < 0 || targetIndex < 0) return;
     const [moved] = providers.splice(sourceIndex, 1);
-    const adjustedTargetIndex = providers.findIndex(item => item.id === targetId);
-    providers.splice(adjustedTargetIndex, 0, moved);
+    const targetAfterRemoval = providers.findIndex(item => item.id === targetId);
+    const targetRect = event.currentTarget.getBoundingClientRect();
+    const insertAfter = event.clientY > targetRect.top + targetRect.height / 2;
+    providers.splice(targetAfterRemoval + (insertAfter ? 1 : 0), 0, moved);
+    const firstEnabledIndex = providers.findIndex(item => item.enabled !== false);
+    providers.forEach((item, index) => { item.primary = index === Math.max(0, firstEnabledIndex); });
     renderProviderList();
     saveProviders();
 }
@@ -3525,6 +3525,8 @@ async function persistProviders(options={}){
         alert(tr('api.duplicateId'));
         return false;
     }
+    const firstEnabledIndex = providers.findIndex(item => item.enabled !== false);
+    providers.forEach((item, index) => { item.primary = index === Math.max(0, firstEnabledIndex); });
     setStatus(tr('api.saving'));
     try {
         const res = await fetch('/api/providers', {

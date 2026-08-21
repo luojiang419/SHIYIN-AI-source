@@ -837,7 +837,7 @@ function normalizeProviderId(value){
 }
 function imageApiProviders(){
     const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.enabled !== false && (p.image_models || []).length);
+        .filter(p => p.enabled !== false && p.image_generation_ready !== false && (p.image_models || []).length);
     return providers;
 }
 function providerById(id){
@@ -869,10 +869,7 @@ function resolveImageProviderId(id){
 }
 function defaultImageGenerationProvider(){
     const providers = imageApiProviders();
-    return providers.find(provider => provider.primary === true)
-        || providers.find(provider => provider.id === managedProviderId)
-        || providers[0]
-        || null;
+    return providers[0] || null;
 }
 function defaultImageGenerationSelection(){
     const provider = defaultImageGenerationProvider();
@@ -888,7 +885,7 @@ function providerOptions(selectedId){
 }
 function providerImageModels(providerId){
     // 不走 providerById（会 fallback 到第一个 provider，造成串台），直接查精确匹配
-    const provider = apiProviders.find(p => p.id === providerId);
+    const provider = imageApiProviders().find(p => p.id === providerId);
     return uniqueModels(provider?.image_models || []);
 }
 function sanitizeImageNodeProviderModel(node){
@@ -2900,9 +2897,9 @@ function addLLMNode(point){
 }
 function addGeneratorNode(point){
     const p = point || defaultPoint(120, 0);
-    const providers = imageApiProviders();
-    const providerId = providers.find(provider => provider.id === 'shiying')?.id || providers[0]?.id || '';
-    const model = allImageModels(providerId)[0] || '';
+    const selection = defaultImageGenerationSelection();
+    const providerId = selection.providerId;
+    const model = selection.model;
     return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, prompt:'', ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
 }
 function addMsGenNode(point){
@@ -3091,8 +3088,10 @@ function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
 }
 function addMultiViewNode(point){
     const p = point || defaultPoint(160, 80);
+    const selection = defaultImageGenerationSelection();
     return addNode({
-        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:680,
+        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:780,
+        apiProvider:selection.providerId, model:selection.model, resolution:'2k', quality:'high',
         multiViewStatus:'idle', multiViewError:'', generatedOutputs:[], multiViewRunAt:0
     });
 }
@@ -7327,6 +7326,7 @@ function classicMultiViewPrompt(view, refs, board=false, referencePlan=[]){
     return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、站姿以及上装和下装的版型连续；输入的上装参考只能用于上装，输入的下装参考只能用于下装，缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展，不能改变颜色、材质、纹理、轮廓或服装层次。输出单张9:16竖屏资产图，不拼图，不添加文字。`;
 }
 function classicMultiViewBodyHtml(node){
+    sanitizeClassicMultiViewSettings(node);
     const inputs = classicMultiViewConnections(node);
     const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰';
     const slots = CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => {
@@ -7342,17 +7342,40 @@ function classicMultiViewBodyHtml(node){
         <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
         <div class="classic-multi-view-input-list">${slots}</div>
         ${previews}
+        <div class="classic-multi-view-settings gen-settings">
+            <div class="gen-settings-row">
+                <select class="select-lite" data-multi-view-provider aria-label="图片生成平台">${providerOptions(node.apiProvider)}</select>
+                <select class="select-lite" data-multi-view-model aria-label="图片生成模型">${imageModelOptions(node.model, node.apiProvider)}</select>
+            </div>
+            <div class="gen-settings-row">
+                <select class="select-lite compact-select" data-multi-view-resolution aria-label="分辨率">
+                    ${['1k','2k','4k'].map(value => `<option value="${value}" ${node.resolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}
+                </select>
+                <select class="select-lite compact-select" data-multi-view-quality aria-label="生成质量">
+                    ${['auto','low','medium','high'].map(value => `<option value="${value}" ${node.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}
+                </select>
+                <span class="classic-multi-view-fixed-output">固定输出 1×16:9 + 3×9:16</span>
+            </div>
+        </div>
         <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span><button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
     </div>`;
+}
+function sanitizeClassicMultiViewSettings(node){
+    if(!node || node.type !== 'multiView') return;
+    node.apiProvider = resolveImageProviderId(node.apiProvider || '');
+    const models = providerImageModels(node.apiProvider);
+    node.model = models.includes(String(node.model || '')) ? String(node.model || '') : (models[0] || '');
+    node.resolution = ['1k','2k','4k'].includes(String(node.resolution || '').toLowerCase()) ? String(node.resolution).toLowerCase() : '2k';
+    node.quality = ['auto','low','medium','high'].includes(String(node.quality || '').toLowerCase()) ? String(node.quality).toLowerCase() : 'high';
 }
 async function runClassicMultiViewNode(nodeId){
     const node = nodes.find(item => item.id === nodeId && item.type === 'multiView');
     if(!node || node.multiViewStatus === 'running') return;
     const refs = classicMultiViewInputRefs(node);
     if(!refs.modelAny && !refs.productAny){ showErrorModal('请至少连接一张模特或产品图片','创建三视图'); return; }
-    const selection = defaultImageGenerationSelection();
-    const providerId = resolveImageProviderId(node.apiProvider || selection.providerId);
-    const model = resolveImageModel(node.model || selection.model);
+    sanitizeClassicMultiViewSettings(node);
+    const providerId = node.apiProvider;
+    const model = node.model;
     if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型','创建三视图'); return; }
     const resolution = node.resolution || '2k';
     const quality = normalizedImageQuality(node.quality || 'high');
@@ -7376,6 +7399,10 @@ async function runClassicMultiViewNode(nodeId){
         if(quality) payload.quality = quality;
         const task = await createCanvasImageTask(payload);
         if(!task?.task_id) throw new Error(`${board ? '三视图模卡' : `${view}视图`}任务创建失败`);
+        if(task.provider_id){
+            node.apiProvider = task.provider_id;
+            node.model = task.model || node.model;
+        }
         const result = await waitCanvasImageTaskResult(task.task_id);
         const raw = (result.images || [])[0];
         const url = outputUrlValue(raw);
@@ -7592,7 +7619,7 @@ function renderNode(node){
     window.CanvasEcommerceNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
-    if(node.type === 'multiView' && [560, 720].includes(Number(node.h)) && !(node.generatedOutputs || []).length) node.h = 680;
+    if(node.type === 'multiView' && [560, 680, 720].includes(Number(node.h)) && !(node.generatedOutputs || []).length) node.h = 780;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -7851,6 +7878,24 @@ function renderNode(node){
         event.stopPropagation();
         runClassicMultiViewNode(node.id);
     });
+    const multiViewProvider = el.querySelector('[data-multi-view-provider]');
+    const multiViewModel = el.querySelector('[data-multi-view-model]');
+    const multiViewResolution = el.querySelector('[data-multi-view-resolution]');
+    const multiViewQuality = el.querySelector('[data-multi-view-quality]');
+    [multiViewProvider, multiViewModel, multiViewResolution, multiViewQuality].filter(Boolean).forEach(control => {
+        control.addEventListener('mousedown', event => event.stopPropagation());
+        control.addEventListener('click', event => event.stopPropagation());
+    });
+    multiViewProvider?.addEventListener('change', event => {
+        event.stopPropagation();
+        node.apiProvider = event.target.value;
+        node.model = providerImageModels(node.apiProvider)[0] || '';
+        render();
+        scheduleSave();
+    });
+    multiViewModel?.addEventListener('change', event => { event.stopPropagation(); node.model = event.target.value; scheduleSave(); });
+    multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
+    multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
     if(['panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     return el;
@@ -8013,7 +8058,7 @@ function defaultNodeSize(type){
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
     if(type === 'panorama') return {w:520, h:520};
-    if(type === 'multiView') return {w:700, h:680};
+    if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'poseReference') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};

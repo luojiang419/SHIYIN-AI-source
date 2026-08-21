@@ -1079,6 +1079,13 @@ html.studio-theme-dark body .action-btn.primary-btn:hover {
     color:var(--bg);
 }
 
+.provider-order-hint {
+    margin:-4px 0 8px;
+    color:var(--faint);
+    font-size:10.5px;
+    line-height:1.45;
+}
+
 body.studio-theme-dark .model-row,
 body.studio-theme-dark .rh-config-card,
 html.studio-theme-dark body .model-row,
@@ -5266,8 +5273,32 @@ html.studio-theme-dark body .recommend-account-invite {
 }
 
 .provider-card-sortable {
-    grid-template-columns:14px 30px minmax(0,1fr) auto !important;
+    grid-template-columns:14px 20px 30px minmax(0,1fr) auto !important;
     cursor:grab !important;
+}
+
+.provider-card-banner.provider-card-sortable {
+    display:grid !important;
+    grid-template-columns:14px 20px minmax(0,1fr) !important;
+    justify-content:stretch !important;
+}
+
+.provider-card-banner.provider-card-sortable .provider-banner-inner {
+    min-width:0;
+}
+
+.provider-priority {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:18px;
+    height:18px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    color:var(--muted);
+    background:var(--soft);
+    font-size:10px;
+    font-variant-numeric:tabular-nums;
 }
 
 .provider-card-sortable:active {

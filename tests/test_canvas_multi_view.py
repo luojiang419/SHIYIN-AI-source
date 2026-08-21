@@ -14,6 +14,7 @@ def test_image_toolbar_exposes_multi_view_action_and_creates_node():
     assert "{key:'multi-view', icon:'panels-top-left', label:'创建三视图'" in SMART_JS
     assert "function createMultiViewNode" in SMART_JS
     assert "createMultiViewNode(null, node)" in SMART_JS
+    assert "sourceNode ? smartSettingsForNode(sourceNode) : settings" in SMART_JS
 
 
 def test_multi_view_has_all_role_ports_and_optional_multi_inputs():
@@ -42,12 +43,21 @@ def test_multi_view_generates_board_and_three_vertical_assets():
     assert "`multi-view-${view}.png`" in SMART_JS
     assert "Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])" in SMART_JS
     assert "customRatio:ratio" in SMART_JS
+    assert "smartMultiViewSettingsForNode(node)" in SMART_JS
+    assert "submitted.providerId" in SMART_JS
 
 
 def test_multi_view_is_available_from_create_menu_and_has_visual_styles():
     assert 'data-create-type="multi-view"' in SMART_HTML
     assert ".multi-view-input-list" in SPECIAL_CSS
     assert ".multi-view-output-grid" in SPECIAL_CSS
+    for setting in [
+        "data-multi-view-provider",
+        "data-multi-view-model",
+        "data-multi-view-resolution",
+        "data-multi-view-quality",
+    ]:
+        assert setting in SMART_JS
 
 
 def test_classic_canvas_image_toolbar_exposes_create_three_views_action():
@@ -69,6 +79,14 @@ def test_classic_canvas_multi_view_node_has_all_ports_and_four_asset_generation(
     assert "classicMultiViewPrompt(view, refs, board, viewRefs)" in CANVAS_JS
     assert "data-multi-view-run" in CANVAS_JS
     assert ".classic-multi-view-output-grid" in SPECIAL_CSS
+    for setting in [
+        "data-multi-view-provider",
+        "data-multi-view-model",
+        "data-multi-view-resolution",
+        "data-multi-view-quality",
+    ]:
+        assert setting in CANVAS_JS
+    assert "sanitizeClassicMultiViewSettings(node)" in CANVAS_JS
 
 
 def test_classic_canvas_multi_view_is_available_from_toolbar_and_create_menu():
@@ -87,10 +105,10 @@ def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
 
 
 def test_both_canvas_pages_load_multi_view_layout_overrides():
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.2' in SMART_HTML
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.2' in CANVAS_HTML
-    assert 'canvas.js?v=2026.08.21.multi-view.5' in CANVAS_HTML
-    assert 'smart-canvas.js?v=2026.08.21.multi-view.3' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-params.1' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-params.1' in CANVAS_HTML
+    assert 'canvas.js?v=2026.08.21.multi-view-params.1' in CANVAS_HTML
+    assert 'smart-canvas.js?v=2026.08.21.multi-view-params.1' in SMART_HTML
 
 
 def test_multi_view_uses_single_column_rows_for_port_alignment():
@@ -127,8 +145,8 @@ def test_multi_view_expands_missing_angles_and_maps_reference_semantics():
     assert "请连接产品正面、产品侧面和产品背面" not in CANVAS_JS
 
 
-def test_multi_view_height_migration_leaves_room_for_twelve_rows():
-    assert "x:baseX, y:baseY, w:700, h:680" in SMART_JS
-    assert "x:p.x, y:p.y, w:700, h:680" in CANVAS_JS
-    assert "savedHeight === 560 || savedHeight === 720" in SMART_JS
-    assert "[560, 720].includes(Number(node.h))" in CANVAS_JS
+def test_multi_view_height_migration_leaves_room_for_twelve_rows_and_parameters():
+    assert "x:baseX, y:baseY, w:700, h:780" in SMART_JS
+    assert "x:p.x, y:p.y, w:700, h:780" in CANVAS_JS
+    assert "[560, 680, 720].includes(savedHeight)" in SMART_JS
+    assert "[560, 680, 720].includes(Number(node.h))" in CANVAS_JS

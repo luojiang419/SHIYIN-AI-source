@@ -19,9 +19,10 @@ class CanvasApiGeneratorDefaultsTests(unittest.TestCase):
             raise AssertionError("未找到 addGeneratorNode 创建函数")
         cls.function_body = match.group("body")
 
-    def test_prefers_existing_shiying_provider(self):
-        self.assertIn("const providers = imageApiProviders()", self.function_body)
-        self.assertIn("providers.find(provider => provider.id === 'shiying')", self.function_body)
+    def test_uses_first_ready_provider_in_saved_order(self):
+        self.assertIn("const selection = defaultImageGenerationSelection()", self.function_body)
+        self.assertIn("const providerId = selection.providerId", self.function_body)
+        self.assertNotIn("provider.id === 'shiying'", self.function_body)
         self.assertNotIn("apiProviders.push", self.function_body)
 
     def test_defaults_to_2k_widescreen(self):

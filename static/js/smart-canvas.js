@@ -22,6 +22,7 @@ const inputPromptPreview = document.getElementById('inputPromptPreview');
 const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
 const smartArrangeBtn = document.getElementById('smartArrangeBtn');
+const smartArrangeMenuBtn = document.getElementById('smartArrangeMenuBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const smartLogList = document.getElementById('smartLogList');
@@ -1519,6 +1520,28 @@ function createMultiViewNode(point, sourceNode=null){
     render(); scheduleSave();
     return node;
 }
+function createSmartBatchGeneratorNode(sourceNode=null, point=null){
+    pushUndo();
+    const sourceRect = sourceNode ? nodeRect(sourceNode) : null;
+    const baseX = sourceRect ? sourceRect.x + sourceRect.width + 120 : (point?.x || 0) - 220;
+    const baseY = sourceRect ? sourceRect.y : (point?.y || 0) - 250;
+    const sourceSettings = sourceNode ? smartSettingsForNode(sourceNode) : settings;
+    const node = {
+        id:uid('batch'), type:'smart-image', specialType:'batch-generator',
+        x:baseX, y:baseY, w:440, h:520, title:tr('smart.batchProcess'), images:[],
+        batchPrompt:'', batchStatus:'idle', batchError:'',
+        runSettings:settingsForStorage({...normalizeSmartMultiViewSettings(sourceSettings), ratio:'source', count:1}),
+        scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+    };
+    nodes.push(node);
+    if(sourceNode?.id) connectInputNode(sourceNode.id, node.id);
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    render();
+    scheduleSave();
+    return node;
+}
 const MULTI_VIEW_INPUT_SLOTS = [
     ['model-front', '模特正面', true], ['model-side', '模特侧面', true], ['model-back', '模特背面', true],
     ['product-upper-front', '上装正面', true], ['product-upper-side', '上装侧面', true], ['product-upper-back', '上装背面', true],
@@ -1571,15 +1594,22 @@ function multiViewBodyHtml(node){
     const runSettings = smartMultiViewSettingsForNode(node);
     const inputs = multiViewConnections(node);
     const outputNames = ['三视图+细节横板', '正面视图', '侧面视图', '背面视图'];
-    const outputs = (node.images || []).filter(item => item?.url);
-    const status = node.multiViewStatus === 'running' ? '生成中…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputs.length >= 4 ? '4 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
+    const outputs = (node.multiViewOutputs || node.images || []).map(item => item?.url ? item : null);
+    const outputCount = outputs.filter(Boolean).length;
+    const status = node.multiViewStatus === 'running' ? `正在生成 ${Math.max(0, 4 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputCount >= 4 ? '4 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
     const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰';
     const slots = MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index) => {
         const count = inputs.get(role)?.length || 0;
         const detail = count ? `${count} 张已连接` : (optional ? '可选输入' : '待连接');
         return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
     }).join('');
-    const outputPreview = outputs.length ? `<div class="multi-view-output-grid">${outputs.map((item, index) => `<div class="multi-view-output-item"><img src="${escapeAttr(displayMediaUrl(item))}" alt="${escapeAttr(outputNames[index] || '生成结果')}" loading="lazy"><span>${escapeHtml(outputNames[index] || `视图 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
+    const outputPreview = outputs.some(Boolean) || node.multiViewStatus === 'running' ? `<div class="multi-view-output-grid">${Array.from({length:4}, (_, index) => {
+        const item = outputs[index];
+        const label = outputNames[index] || `视图 ${index + 1}`;
+        return item
+            ? `<div class="multi-view-output-item"><img src="${escapeAttr(displayMediaUrl(item))}" alt="${escapeAttr(label)}" loading="lazy"><span>${escapeHtml(label)}</span></div>`
+            : `<div class="multi-view-output-item multi-view-output-placeholder">${node.multiViewStatus === 'running' ? '<div class="multi-view-placeholder-spinner"></div>' : '<i data-lucide="circle-alert"></i>'}<span>${escapeHtml(node.multiViewStatus === 'running' ? '正在生成…' : '生成失败')}</span></div>`;
+    }).join('')}</div>` : '';
     return `<div class="special-node multi-view-special" data-special-node="multi-view">
         <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
         <div class="multi-view-input-list">${slots}</div>
@@ -1600,6 +1630,49 @@ function multiViewBodyHtml(node){
             </div>
         </div>
         <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
+    </div>`;
+}
+function smartBatchInputRefs(node){
+    const seen = new Set();
+    return inputNodesFor(node)
+        .flatMap(input => imagesForNode(input))
+        .filter(item => item?.url && mediaKindForItem(item) === 'image')
+        .filter(item => !seen.has(item.url) && seen.add(item.url))
+        .map((item, index) => ({...item, name:item.name || `图${index + 1}`, role:`image_${index + 1}`}));
+}
+function smartBatchPrompt(node){
+    return [inputPromptTextFor(node), String(node?.batchPrompt || '').trim()].filter(Boolean).join('\n\n');
+}
+function smartBatchBodyHtml(node){
+    const runSettings = smartMultiViewSettingsForNode(node);
+    const refs = smartBatchInputRefs(node);
+    const isRunning = node.batchStatus === 'running';
+    const status = isRunning
+        ? `正在并发处理 ${refs.length} 张图片…`
+        : node.batchStatus === 'error'
+            ? (node.batchError || '批处理存在失败项，可在输出节点单独重试')
+            : node.batchStatus === 'done'
+                ? `已完成 ${Number(node.batchCompleted || refs.length)} 张图片`
+                : (refs.length ? `已连接 ${refs.length} 张图片` : tr('smart.batchNeedsImages'));
+    const thumbs = refs.length
+        ? `<div class="smart-batch-input-grid">${refs.map((ref, index) => `<div class="smart-batch-input-thumb" title="${escapeAttr(ref.name || `图片 ${index + 1}`)}">${smartPreviewImgHtml(ref, 256, 'alt="" loading="lazy"')}<span>${index + 1}</span></div>`).join('')}</div>`
+        : `<div class="smart-batch-empty"><i data-lucide="images"></i><span>${escapeHtml(tr('smart.batchNeedsImages'))}</span></div>`;
+    return `<div class="special-node smart-batch-special" data-special-node="batch-generator">
+        <div class="smart-batch-summary"><div><strong>${escapeHtml(tr('smart.batchProcess'))}</strong><small>${escapeHtml(tr('smart.batchHint'))}</small></div><span>${refs.length} 张</span></div>
+        ${thumbs}
+        <div class="smart-batch-settings gen-settings">
+            <div class="gen-settings-row">
+                <select class="select-lite" data-batch-provider aria-label="图片生成平台">${smartMultiViewProviderOptions(runSettings.provider_id)}</select>
+                <select class="select-lite" data-batch-model aria-label="图片生成模型">${smartMultiViewModelOptions(runSettings.provider_id, runSettings.model)}</select>
+            </div>
+            <div class="gen-settings-row">
+                <select class="select-lite" data-batch-resolution aria-label="分辨率">${['1k','2k','4k'].map(value => `<option value="${value}" ${runSettings.resolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select>
+                <select class="select-lite" data-batch-quality aria-label="生成质量">${['auto','low','medium','high'].map(value => `<option value="${value}" ${runSettings.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}</select>
+                <span class="smart-batch-ratio-note">逐图适配比例</span>
+            </div>
+        </div>
+        <label class="smart-batch-prompt"><span>统一处理指令</span><textarea data-batch-prompt placeholder="${escapeAttr(tr('smart.batchPromptPlaceholder'))}">${escapeHtml(node.batchPrompt || '')}</textarea></label>
+        <div class="special-output-row smart-batch-run-row"><span data-batch-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-batch" ${isRunning || !refs.length ? 'disabled' : ''}><i data-lucide="${isRunning ? 'loader-2' : 'layers-3'}"></i><span>${isRunning ? tr('smart.batchProcessing') : tr('smart.batchProcess')}</span></button></div>
     </div>`;
 }
 function smartGroupLayoutSize(node){
@@ -2144,6 +2217,7 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
+    if(node?.specialType === 'batch-generator') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 440)), height:Math.max(470, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'multi-view') {
         const hasOutputs = (node.images || []).some(item => item?.url);
         const savedHeight = Number(node.h);
@@ -2283,51 +2357,59 @@ function moveSmartNodeAtom(node, x, y){
     const dy = Math.round(y - (Number(node.y) || 0));
     translateSmartNodeWithMembers(node, dx, dy);
 }
+function smartArrangeCategory(node){
+    if(isSmartGroupNode(node)) return {rank:0, key:'media'};
+    const type = String(node?.type || '').toLowerCase();
+    const special = String(node?.specialType || '').toLowerCase();
+    if(type === 'smart-prompt' || type === 'smart-loop' || type === 'prompt' || type === 'loop') return {rank:1, key:'prompt'};
+    if(special || ['generator','video','process'].includes(type)) return {rank:2, key:'process'};
+    if(type === 'smart-image' || type === 'image'){
+        const incoming = (canvas?.connections || []).some(conn => conn.to === node.id);
+        const generated = incoming || node.sourceNodeId || node.runAt || node.pendingTasks?.length || node.generationSlots?.length;
+        return generated ? {rank:3, key:'output'} : {rank:0, key:'media'};
+    }
+    return {rank:2, key:'process'};
+}
 function arrangeSmartIdsByConnections(ids){
     const idSet = new Set(smartArrangeAtomicIds(ids));
     const selectedNodes = [...idSet].map(id => nodes.find(n => n.id === id)).filter(Boolean);
     if(selectedNodes.length < 2) return false;
-    const rects = selectedNodes.map(node => ({node, rect:nodeRect(node)}));
+    const rectById = new Map(selectedNodes.map(node => [node.id, nodeRect(node)]));
+    const rects = selectedNodes.map(node => ({node, rect:rectById.get(node.id), category:smartArrangeCategory(node)}));
     const startX = Math.min(...rects.map(item => item.rect.x));
     const startY = Math.min(...rects.map(item => item.rect.y));
-    const internal = (canvas?.connections || []).filter(c => idSet.has(c.from) && idSet.has(c.to));
-    const depth = new Map(selectedNodes.map(node => [node.id, 0]));
-    if(internal.length){
-        const indegree = new Map(selectedNodes.map(node => [node.id, 0]));
-        internal.forEach(c => indegree.set(c.to, (indegree.get(c.to) || 0) + 1));
-        const roots = [...indegree.entries()].filter(([, n]) => n === 0).map(([id]) => id);
-        const queue = roots.length ? roots.slice() : [selectedNodes[0].id];
-        const seen = new Set(queue);
-        while(queue.length){
-            const id = queue.shift();
-            internal.filter(c => c.from === id).forEach(c => {
-                depth.set(c.to, Math.max(depth.get(c.to) || 0, (depth.get(id) || 0) + 1));
-                if(!seen.has(c.to)){
-                    seen.add(c.to);
-                    queue.push(c.to);
-                }
-            });
-        }
-    }
-    const groups = new Map();
-    selectedNodes.forEach(node => {
-        const d = depth.get(node.id) || 0;
-        if(!groups.has(d)) groups.set(d, []);
-        groups.get(d).push(node);
+    const buckets = new Map();
+    rects.forEach(item => {
+        const bucketKey = `${item.category.rank}:${item.category.key}`;
+        if(!buckets.has(bucketKey)) buckets.set(bucketKey, {...item.category, nodes:[]});
+        buckets.get(bucketKey).nodes.push(item);
     });
-    const sortedDepths = [...groups.keys()].sort((a, b) => a - b);
-    let x = startX;
-    sortedDepths.forEach(d => {
-        const col = groups.get(d).slice().sort((a, b) => nodeRect(a).y - nodeRect(b).y || String(a.id).localeCompare(String(b.id)));
-        let y = startY;
-        let maxW = 0;
-        col.forEach(node => {
-            const rect = nodeRect(node);
-            moveSmartNodeAtom(node, x, y);
-            y += Math.max(110, rect.height) + 56;
-            maxW = Math.max(maxW, Math.max(180, rect.width));
+    const orderedBuckets = [...buckets.values()].sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key));
+    const columnGap = 64;
+    const rowGap = 52;
+    const categoryGap = 160;
+    let categoryX = startX;
+    orderedBuckets.forEach(bucket => {
+        const items = bucket.nodes.slice().sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || String(a.node.id).localeCompare(String(b.node.id)));
+        const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+        const rows = Math.ceil(items.length / columns);
+        const colWidths = Array(columns).fill(0);
+        const rowHeights = Array(rows).fill(0);
+        items.forEach((item, index) => {
+            const col = index % columns;
+            const row = Math.floor(index / columns);
+            colWidths[col] = Math.max(colWidths[col], Math.max(180, item.rect.width));
+            rowHeights[row] = Math.max(rowHeights[row], Math.max(110, item.rect.height));
         });
-        x += maxW + 180;
+        const colX = [];
+        let cursorX = categoryX;
+        colWidths.forEach(width => { colX.push(cursorX); cursorX += width + columnGap; });
+        const rowY = [];
+        let cursorY = startY;
+        rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + rowGap; });
+        items.forEach((item, index) => moveSmartNodeAtom(item.node, colX[index % columns], rowY[Math.floor(index / columns)]));
+        const categoryWidth = colWidths.reduce((sum, width) => sum + width, 0) + columnGap * Math.max(0, columns - 1);
+        categoryX += categoryWidth + categoryGap;
     });
     return true;
 }
@@ -7649,6 +7731,7 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'relight') return window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="smart-group-empty">灯光重塑节点加载失败</div>';
     if(node.specialType === 'angle') return window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="smart-group-empty">角度调整节点加载失败</div>';
     if(node.specialType === 'multi-view') return multiViewBodyHtml(node);
+    if(node.specialType === 'batch-generator') return smartBatchBodyHtml(node);
     if(node.type === 'smart-group') return smartGroupBodyHtml(node);
     if(node.type === 'smart-prompt') return promptNodeBodyHtml(node);
     if(node.type === 'smart-loop') return smartLoopBodyHtml(node);
@@ -7763,6 +7846,7 @@ function smartNodeToolbarHtml(node){
     const actions = [
         {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image' || kind === 'video'},
         {key:'multi-view', icon:'panels-top-left', label:'创建三视图', enabled:canEditImage},
+        {key:'batch', icon:'layers-3', label:tr('smart.batchProcess'), enabled:canEditImage},
         {key:'crop', icon:'crop', label:'裁剪', enabled:canEditImage},
         {key:'outpaint', icon:'expand', label:'扩图', enabled:canEditImage},
         {key:'mask', icon:'brush', label:'遮罩', enabled:canEditImage},
@@ -7804,6 +7888,10 @@ function runSmartNodeToolbarAction(nodeId, action){
         createMultiViewNode(null, node);
         return;
     }
+    if(action === 'batch'){
+        createSmartBatchGeneratorNode(node);
+        return;
+    }
     if(action === 'download'){
         downloadPreviewFile(node.images?.[index] || item);
         return;
@@ -7833,7 +7921,9 @@ function smartGroupToolbarHtml(node){
     if(!isSmartGroupNode(node)) return '';
     const hasContent = (node.images || []).some(img => img?.url) || smartGroupMembers(node).length > 0;
     const imageCount = (node.images || []).filter(img => img?.url).length;
+    const batchImageCount = smartGroupImageRefs(node).length;
     const actions = [
+        {key:'batch', icon:'layers-3', label:tr('smart.batchProcess'), enabled:batchImageCount > 0},
         {key:'arrange', icon:'layout-grid', label:'整理排列', enabled:hasContent},
         {key:'preview', icon:'eye', label:'预览', enabled:imageCount > 0},
         {key:'grid', icon:'grid-3x3', label:'宫格拼接', enabled:imageCount > 1},
@@ -7851,6 +7941,11 @@ function runSmartGroupToolbarAction(nodeId, action){
     selectedId = nodeId;
     selectedIds = [];
     selectedImage = {nodeId:'', index:-1};
+    if(action === 'batch'){
+        if(!(group.images || []).some(img => img?.url) && !smartGroupImageRefs(group).length){ toast('分组内没有图片'); return; }
+        createSmartBatchGeneratorNode(group);
+        return;
+    }
     if(action === 'arrange'){
         if(arrangeSmartGroupMembers(group)){ render(); scheduleSave(); toast('已整理分组'); }
         else toast('分组内没有可整理的节点');
@@ -7962,7 +8057,7 @@ function render(){
         const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
         const slotLoading = generationSlots.some(slot => slot.status === 'loading');
         const slotFailed = generationSlots.some(slot => slot.status === 'error');
-        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? tr('smart.batchProcess') : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(layoutImages, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -8656,6 +8751,135 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
+async function smartBatchRunSettingsForRef(baseSettings, ref){
+    let width = Number(ref?.natural_w || ref?.width || ref?.w || 0);
+    let height = Number(ref?.natural_h || ref?.height || ref?.h || 0);
+    if(!(width > 0 && height > 0)){
+        const dimensions = await loadSmartOriginalImageDimensions(ref?.url || '');
+        width = Number(dimensions?.w || 0);
+        height = Number(dimensions?.h || 0);
+    }
+    const divisor = width > 0 && height > 0 ? gcdInt(Math.round(width), Math.round(height)) : 1;
+    const ratio = width > 0 && height > 0 ? `${Math.round(width / divisor)}:${Math.round(height / divisor)}` : '1:1';
+    const [ratioWidth, ratioHeight] = ratio.split(':').map(value => Math.max(1, Number(value) || 1));
+    return {
+        ...cloneSmartSettings(baseSettings),
+        engine:'api', apiKind:'image', count:1,
+        ratio:'custom', customRatio:ratio,
+        customRatioWidth:ratioWidth, customRatioHeight:ratioHeight,
+        customSize:'', customWidth:'', customHeight:''
+    };
+}
+function prepareSmartBatchOutput(node, refs, meta){
+    let output = nodes.find(item => item.id === node.batchOutputNodeId && isSmartImageNode(item) && !item.specialType);
+    if(!output){
+        output = createPendingOutputFromSource(node, refs.length, meta, {selectOutput:true, refs});
+        node.batchOutputNodeId = output.id;
+    } else {
+        const box = pendingBoxSize(refs.length, {sourceNode:node, refs});
+        output.images = [];
+        output.w = box.w;
+        output.h = box.h;
+        output.pending = refs.length;
+        output.runStartedAt = nowMs();
+        delete output.runFinishedAt;
+        delete output.runElapsedMs;
+        attachRunMeta(output, meta);
+        if(!(canvas?.connections || []).some(connection => connection.from === node.id && connection.to === output.id)) connectInputNode(node.id, output.id);
+    }
+    output.title = '批处理结果';
+    output.batchSourceNodeId = node.id;
+    output.generationSlots = refs.map((ref, index) => ({
+        id:uid('generation-slot'), index, status:'loading',
+        sourceRef:{url:ref.url, name:ref.name || `图${index + 1}`}
+    }));
+    output.pendingTasks = [];
+    output.pending = refs.length;
+    output.running = false;
+    output.runTimerHidden = false;
+    return output;
+}
+async function runSmartBatchGenerator(node){
+    if(!node || node.specialType !== 'batch-generator' || node.batchStatus === 'running') return;
+    const refs = smartBatchInputRefs(node);
+    if(!refs.length){ toast(tr('smart.batchNeedsImages')); return; }
+    const prompt = smartBatchPrompt(node) || 'Edit the reference image.';
+    const baseSettings = smartMultiViewSettingsForNode(node);
+    if(!baseSettings.provider_id || !baseSettings.model){ toast(tr('smart.errNoApiModel')); return; }
+    const startedAt = nowMs();
+    const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
+    meta.settings = settingsForStorage(baseSettings);
+    const output = prepareSmartBatchOutput(node, refs, meta);
+    output.runSettings = settingsForStorage(baseSettings);
+    const runLog = {
+        nodeId:node.id, nodeType:'batch-generator', kind:'image',
+        settings:cloneSmartSettings(baseSettings), prompt,
+        refs:refs.map(ref => ({url:ref.url, name:ref.name, kind:'image'})),
+        size:'per-source'
+    };
+    node.batchStatus = 'running';
+    node.batchError = '';
+    node.batchCompleted = 0;
+    render();
+    try {
+        const plans = await Promise.all(refs.map(async (ref, index) => ({
+            index, ref, slot:smartGenerationSlots(output)[index],
+            runSettings:await smartBatchRunSettingsForRef(baseSettings, ref)
+        })));
+        const submissions = await Promise.allSettled(plans.map(async plan => {
+            const submitted = await runApiGeneration(prompt, [plan.ref], plan.runSettings);
+            const taskId = submitted?.taskIds?.[0];
+            if(!taskId) throw new Error(tr('smart.errRunFailed'));
+            return {...plan, taskId, providerId:submitted.providerId, model:submitted.model};
+        }));
+        const tasks = [];
+        submissions.forEach((result, index) => {
+            const plan = plans[index];
+            const slot = smartGenerationSlots(output).find(item => item.id === plan.slot?.id) || smartGenerationSlots(output)[index];
+            if(result.status === 'fulfilled'){
+                const task = {
+                    taskId:result.value.taskId, slotId:slot.id, slotIndex:slot.index, kind:'image',
+                    providerId:result.value.providerId || plan.runSettings.provider_id,
+                    model:result.value.model || plan.runSettings.model,
+                    refs:[{...plan.ref}], prompt, runSettings:settingsForStorage(plan.runSettings)
+                };
+                slot.taskId = task.taskId;
+                tasks.push(task);
+                return;
+            }
+            const error = result.reason?.message || String(result.reason || tr('smart.errRunFailed'));
+            const failedTask = {
+                taskId:`batch-submit-${uid('failed')}`, slotId:slot.id, slotIndex:slot.index,
+                kind:'image', failed:true, error,
+                providerId:plan.runSettings.provider_id, model:plan.runSettings.model,
+                refs:[{...plan.ref}], prompt, runSettings:settingsForStorage(plan.runSettings)
+            };
+            slot.status = 'error';
+            slot.error = error;
+            tasks.push(failedTask);
+        });
+        output.pendingTasks = tasks;
+        output.pending = smartGenerationSlots(output).filter(slot => slot.status === 'loading').length;
+        if(!output.pending) settleSmartGenerationSlots(output, 'image');
+        render();
+        scheduleSave();
+        await saveCanvas();
+        if(tasks.some(task => !task.failed)) await resumeSmartPendingNode(output, {run:runLog, runLogStart:startedAt});
+        const failedSlots = smartGenerationSlots(output).filter(slot => slot.status === 'error');
+        node.batchCompleted = (output.images || []).length;
+        node.batchStatus = failedSlots.length ? 'error' : 'done';
+        node.batchError = failedSlots.length ? `${failedSlots.length}/${refs.length} 张处理失败，可在输出节点重试` : '';
+        addSmartGenerationLog({run:runLog, outputs:output.images || [], runMs:nowMs() - startedAt, error:node.batchError});
+        toast(failedSlots.length ? node.batchError : `批处理完成：${node.batchCompleted} 张`);
+    } catch(error) {
+        node.batchStatus = 'error';
+        node.batchError = error.message || tr('smart.errRunFailed');
+        toast(node.batchError.slice(0, 160));
+    } finally {
+        render();
+        scheduleSave();
+    }
+}
 function multiViewInputRefs(node){
     const inputs = multiViewConnections(node);
     const first = role => inputs.get(role)?.[0] || null;
@@ -8736,9 +8960,9 @@ async function generateSmartMultiView(node){
     const base = smartMultiViewSettingsForNode(node);
     if(!base.provider_id || !base.model){ toast('请先在 API 设置中配置图片生成模型'); return; }
     const startedAt = nowMs();
-    node.multiViewStatus = 'running'; node.images = [];
+    node.multiViewStatus = 'running'; node.images = []; node.multiViewOutputs = [null, null, null, null];
     render(); scheduleSave();
-    const taskFor = async (view, board=false) => {
+    const taskFor = async (view, board=false, index=0) => {
         const viewRefs = multiViewReferencePlan(view, refs, board);
         const ratio = board ? '16:9' : '9:16';
         const [rw, rh] = ratio.split(':').map(value => Number(value));
@@ -8758,10 +8982,15 @@ async function generateSmartMultiView(node){
         const url = typeof raw === 'string' ? raw : raw?.url || '';
         if(!url) throw new Error(`${board ? '三视图横板' : `${view}视图`}没有返回图片`);
         const name = board ? 'multi-view-board.png' : `multi-view-${view}.png`;
-        return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
+        const item = raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
+        item.multiViewIndex = index;
+        node.multiViewOutputs[index] = item;
+        render(); scheduleSave();
+        return item;
     };
     try {
-        const outputs = await Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')]);
+        // 保留旧版任务顺序契约：Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])
+        const outputs = await Promise.all([taskFor('front', true, 0), taskFor('front', false, 1), taskFor('side', false, 2), taskFor('back', false, 3)]);
         node.images = outputs;
         node.multiViewStatus = 'done';
         node.multiViewRunAt = nowMs();
@@ -8867,6 +9096,37 @@ function createSmartPoseOutputNode(sourceNode, item){
 }
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
+    if(node?.specialType === 'batch-generator'){
+        const provider = el.querySelector('[data-batch-provider]');
+        const model = el.querySelector('[data-batch-model]');
+        const resolution = el.querySelector('[data-batch-resolution]');
+        const quality = el.querySelector('[data-batch-quality]');
+        const prompt = el.querySelector('[data-batch-prompt]');
+        [provider, model, resolution, quality, prompt].filter(Boolean).forEach(control => {
+            control.addEventListener('mousedown', event => event.stopPropagation());
+            control.addEventListener('click', event => event.stopPropagation());
+        });
+        const updateSettings = (patch, rerender=false) => {
+            node.runSettings = settingsForStorage({...normalizeSmartMultiViewSettings({...smartMultiViewSettingsForNode(node), ...patch}), ratio:'source', count:1});
+            if(rerender) render();
+            scheduleSave();
+        };
+        provider?.addEventListener('change', event => {
+            event.stopPropagation();
+            const providerId = event.target.value;
+            updateSettings({provider_id:providerId, model:providerImageModels(providerId)[0] || ''}, true);
+        });
+        model?.addEventListener('change', event => { event.stopPropagation(); updateSettings({model:event.target.value}); });
+        resolution?.addEventListener('change', event => { event.stopPropagation(); updateSettings({resolution:event.target.value}); });
+        quality?.addEventListener('change', event => { event.stopPropagation(); updateSettings({quality:event.target.value}); });
+        prompt?.addEventListener('input', event => { event.stopPropagation(); node.batchPrompt = event.target.value; scheduleSave(); });
+        el.querySelector('[data-special-action="run-batch"]')?.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            runSmartBatchGenerator(node);
+        });
+        return;
+    }
     if(node?.specialType === 'multi-view'){
         el.querySelector('[data-special-action="run-multi-view"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
@@ -15754,6 +16014,15 @@ function settleSmartGenerationSlots(node, kind='image'){
     if(!node.runStartedAt) node.runStartedAt = node.runFinishedAt;
     node.runElapsedMs = Math.max(0, node.runFinishedAt - Number(node.runStartedAt || node.runFinishedAt));
     node.runTimerHidden = false;
+    if(node.batchSourceNodeId){
+        const source = nodes.find(item => item.id === node.batchSourceNodeId && item.specialType === 'batch-generator');
+        if(source){
+            const failedCount = slots.filter(slot => slot.status === 'error').length;
+            source.batchCompleted = node.images.length;
+            source.batchStatus = failedCount ? 'error' : 'done';
+            source.batchError = failedCount ? `${failedCount}/${slots.length} 张处理失败，可在输出节点重试` : '';
+        }
+    }
     node.title = node.images.length > 1 ? (kind === 'video' ? 'Videos' : 'Group') : (kind === 'video' ? 'Video' : 'Image');
     if(node.images.length > 1 && (!Number.isFinite(Number(node.scale)) || Number(node.scale) === MEDIA_NODE_DEFAULT_SCALE || Number(node.scale) === MEDIA_GROUP_PREVIOUS_DEFAULT_SCALE)) node.scale = MEDIA_GROUP_DEFAULT_SCALE;
     else node.scale = mediaNodeDefaultScale(node);
@@ -15787,14 +16056,18 @@ async function retrySmartGenerationSlot(nodeId, slotId){
     const previousTask = smartPendingTasks(node).find(item => item.slotId === slotId);
     const retrySettings = {
         ...cloneSmartSettings(node.runSettings || settings),
+        ...cloneSmartSettings(previousTask?.runSettings || {}),
         engine:'api',
         apiKind:'image',
         provider_id:previousTask?.providerId || node.runSettings?.provider_id || settings.provider_id,
         model:previousTask?.model || node.runSettings?.model || settings.model,
         count:1
     };
-    const prompt = String(node.runModelPrompt || node.runPrompt || '').trim();
-    const refs = (node.runInputRefs || node.runPromptRefs || []).filter(ref => ref?.url).map(ref => ({...ref}));
+    const prompt = String(previousTask?.prompt || node.runModelPrompt || node.runPrompt || '').trim();
+    const taskRefs = Array.isArray(previousTask?.refs) && previousTask.refs.length
+        ? previousTask.refs
+        : (node.runInputRefs || node.runPromptRefs || []);
+    const refs = taskRefs.filter(ref => ref?.url).map(ref => ({...ref}));
     if(!prompt && smartRunNeedsPrompt(retrySettings)){
         toast(tr('smart.toastNeedPrompt'));
         return;
@@ -16419,6 +16692,7 @@ function openCreateMenu(event, options={}){
     if(!createMenu) return;
     createMenuPoint = screenToWorld(event);
     createMenuGroupId = options.groupId || '';
+    if(smartArrangeMenuBtn) smartArrangeMenuBtn.hidden = selectedNodeIds().length < 2;
     const w = 500;
     const h = 330;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
@@ -16510,15 +16784,23 @@ shell.oncontextmenu = e => {
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     e.preventDefault();
     e.stopPropagation();
+    const selected = new Set(selectedNodeIds());
+    const nodeEl = e.target.closest('.image-node');
+    if(nodeEl?.dataset?.id && selected.size > 1 && selected.has(nodeEl.dataset.id)){
+        openCreateMenu(e, {selectionOnly:true});
+        return;
+    }
     const groupEl = e.target.closest('.image-node.smart-group-node');
     if(groupEl?.dataset?.id){
-        selectedId = groupEl.dataset.id;
-        selectedIds = [];
-        selectedImage = {nodeId:'', index:-1};
+        if(!(selected.size > 1 && selected.has(groupEl.dataset.id))){
+            selectedId = groupEl.dataset.id;
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+        }
         openCreateMenu(e, {groupId:groupEl.dataset.id});
         return;
     }
-    if(e.target.closest('.image-node')) return;
+    if(nodeEl) return;
     openCreateMenu(e);
 };
 shell.ondblclick = e => {
@@ -16548,6 +16830,13 @@ smartArrangeBtn?.addEventListener('mousedown', e => e.stopPropagation());
 smartArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
+    arrangeSelectedSmartNodes();
+});
+smartArrangeMenuBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartArrangeMenuBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeCreateMenu();
     arrangeSelectedSmartNodes();
 });
 window.onmousemove = e => {
@@ -16652,8 +16941,8 @@ window.onmousemove = e => {
         if(!node) return;
         const dx = (e.clientX - resizeState.startX) / viewport.scale;
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
-        const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
-        const minH = node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+        const minW = node.specialType === 'multi-view' ? 620 : node.specialType === 'batch-generator' ? 400 : node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
+        const minH = node.specialType === 'multi-view' ? 780 : node.specialType === 'batch-generator' ? 470 : node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。

@@ -47,6 +47,17 @@ def test_multi_view_generates_board_and_three_vertical_assets():
     assert "submitted.providerId" in SMART_JS
 
 
+def test_multi_view_shows_four_loading_slots_and_updates_in_grid_order():
+    for source in (SMART_JS, CANVAS_JS):
+        assert "Array.from({length:4" in source
+        assert "multiViewOutputs" in source
+    assert "正在生成…" in SMART_JS
+    assert "out._pending = Array.from({length:4" in CANVAS_JS
+    assert "outputLayout = {...node.multiViewOutputLayout}" in CANVAS_JS
+    assert "type:'grid-split'" in CANVAS_JS
+    assert ".output-node .output-grid.grid-layout" in MULTI_VIEW_CSS
+
+
 def test_multi_view_is_available_from_create_menu_and_has_visual_styles():
     assert 'data-create-type="multi-view"' in SMART_HTML
     assert ".multi-view-input-list" in SPECIAL_CSS
@@ -105,10 +116,22 @@ def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
 
 
 def test_both_canvas_pages_load_multi_view_layout_overrides():
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-params.1' in SMART_HTML
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-params.1' in CANVAS_HTML
-    assert 'canvas.js?v=2026.08.21.multi-view-params.1' in CANVAS_HTML
-    assert 'smart-canvas.js?v=2026.08.21.multi-view-params.1' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-node-layout.1' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-node-layout.1' in CANVAS_HTML
+    assert 'canvas.js?v=2026.08.21.multi-view-node-layout.1' in CANVAS_HTML
+    assert 'smart-canvas.js?v=2026.08.21.multi-view-node-layout.1' in SMART_HTML
+
+
+def test_classic_multi_view_keeps_results_only_in_output_node_and_locks_controls_visible():
+    body_start = CANVAS_JS.index("function classicMultiViewBodyHtml")
+    body_end = CANVAS_JS.index("function sanitizeClassicMultiViewSettings", body_start)
+    body = CANVAS_JS[body_start:body_end]
+    assert "classic-multi-view-output-grid" not in body
+    assert "4 张资产已在右侧输出节点中生成" in body
+    assert ".multiView-node.sized .classic-multi-view-run-row" in MULTI_VIEW_CSS
+    assert ".multiView-node.sized .classic-multi-view-input-list" in MULTI_VIEW_CSS
+    assert "resizeNode.node.type === 'multiView' ? (min.h || 780)" in CANVAS_JS
+    assert "node.specialType === 'multi-view' ? 780" in SMART_JS
 
 
 def test_multi_view_uses_single_column_rows_for_port_alignment():
@@ -149,4 +172,4 @@ def test_multi_view_height_migration_leaves_room_for_twelve_rows_and_parameters(
     assert "x:baseX, y:baseY, w:700, h:780" in SMART_JS
     assert "x:p.x, y:p.y, w:700, h:780" in CANVAS_JS
     assert "[560, 680, 720].includes(savedHeight)" in SMART_JS
-    assert "[560, 680, 720].includes(Number(node.h))" in CANVAS_JS
+    assert "Number(node.h) < 780" in CANVAS_JS

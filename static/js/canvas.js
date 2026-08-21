@@ -889,7 +889,7 @@ function providerImageModels(providerId){
     return uniqueModels(provider?.image_models || []);
 }
 function sanitizeImageNodeProviderModel(node){
-    if(!node || node.type !== 'generator') return;
+    if(!node || !['generator','batchGenerator'].includes(node.type)) return;
     node.apiProvider = resolveImageProviderId(node.apiProvider || '');
     const models = providerImageModels(node.apiProvider);
     if(!models.length) node.model = '';
@@ -2902,6 +2902,17 @@ function addGeneratorNode(point){
     const model = selection.model;
     return addNode({id:uid('gen'), type:'generator', x:p.x, y:p.y, apiProvider:providerId, model, prompt:'', ratio:'wide', resolution:'2k', customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'', customWidth:'', customHeight:'', inputs:[]});
 }
+function addBatchGeneratorNode(point){
+    const p = point || defaultPoint(120, 0);
+    const selection = defaultImageGenerationSelection();
+    return addNode({
+        id:uid('batch'), type:'batchGenerator', x:p.x, y:p.y,
+        apiProvider:selection.providerId, model:selection.model,
+        prompt:'', ratio:'source', resolution:'2k', quality:'auto',
+        customRatio:'', customSize:'', customRatioWidth:'', customRatioHeight:'',
+        customWidth:'', customHeight:'', inputs:[]
+    });
+}
 function addMsGenNode(point){
     const p = point || defaultPoint(140, 0);
     return addNode({
@@ -4251,6 +4262,7 @@ function createNodeByType(type, point){
     if(type === 'group') return addGroupNode(point);
     if(type === 'llm') return addLLMNode(point);
     if(type === 'generator') return addGeneratorNode(point);
+    if(type === 'batchGenerator') return addBatchGeneratorNode(point);
     if(type === 'video') return addVideoNode(point);
     if(type === 'topazVideo') return addTopazVideoNode(point);
     if(type === 'h3-video') return addH3VideoNode(point);
@@ -4274,6 +4286,7 @@ function menuAdd(type){
     if(type === 'loop') addLoopNode(menuPoint);
     if(type === 'llm') addLLMNode(menuPoint);
     if(type === 'generator') addGeneratorNode(menuPoint);
+    if(type === 'batchGenerator') addBatchGeneratorNode(menuPoint);
     if(type === 'video') addVideoNode(menuPoint);
     if(type === 'topazVideo') addTopazVideoNode(menuPoint);
     if(type === 'h3-video') addH3VideoNode(menuPoint);
@@ -7017,18 +7030,25 @@ function pendingPreviewSizeForRun(node, options={}){
     }
     return pendingPreviewSizeFromRefs(options.refs || []);
 }
-function pendingOutputStyle(pending){
+function pendingOutputStyle(pending, useGridLayout=false){
     const size = normalizedPendingPreviewSize(pending?.previewSize);
-    if(!size) return '';
-    return ` style="aspect-ratio:${Math.max(1, size.w)}/${Math.max(1, size.h)}"`;
+    const grid = useGridLayout ? pending?.grid : null;
+    const styles = [];
+    if(size && !grid) styles.push(`aspect-ratio:${Math.max(1, size.w)}/${Math.max(1, size.h)}`);
+    if(grid){
+        styles.push(`grid-row:${Number(grid.row || 0) + 1}`);
+        styles.push(`grid-column:${Number(grid.col || 0) + 1} / span ${Math.max(1, Number(grid.w || 1))}`);
+        styles.push(`aspect-ratio:${Math.max(1, Number(grid.ratioW || grid.w || 1))}/${Math.max(1, Number(grid.ratioH || grid.h || 1))}`);
+    }
+    return styles.length ? ` style="${styles.join(';')}"` : '';
 }
-function renderPendingOutput(pending){
+function renderPendingOutput(pending, useGridLayout=false){
     if(pending?.failed){
         const taskId = pending.recoverTaskId || '';
         const querying = Boolean(pending.querying);
         const msg = pending.error || tr('canvas.generationFailed');
         const sub = taskId ? `任务 ID：${escapeHtml(taskId)}` : '没有任务 ID，无法查询';
-        return `<div class="output-img-wrap loading-wrap recoverable" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending)}>
+        return `<div class="output-img-wrap loading-wrap recoverable" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending, useGridLayout)}>
             <span class="output-time-pill failed">失败</span>
             <div class="output-recover-state">
                 <i data-lucide="refresh-cw" class="${querying ? 'spinning' : ''}"></i>
@@ -7039,7 +7059,7 @@ function renderPendingOutput(pending){
             <button class="output-del" title="${tr('common.delete')}">×</button>
         </div>`;
     }
-    return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending)}><span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span><div class="output-spinner"></div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending, useGridLayout)}><span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span><div class="output-spinner"></div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
 }
 function captureOutputScrolls(){
     const state = new Map();
@@ -7339,14 +7359,11 @@ function classicMultiViewBodyHtml(node){
         const state = count ? `${count} 张已连接` : '可选输入';
         return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="classic-multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
     }).join('');
-    const outputNames = ['16:9 三视图模卡','正面 9:16','侧面 9:16','背面 9:16'];
-    const outputs = (node.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
-    const previews = outputs.length ? `<div class="classic-multi-view-output-grid">${outputs.map((url, index) => `<div class="classic-multi-view-output"><img src="${escapeAttr(canvasDisplayMediaUrl(url, ''))}" alt="${escapeAttr(outputNames[index] || `资产 ${index + 1}`)}" draggable="false"><span>${escapeHtml(outputNames[index] || `资产 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
-    const status = node.multiViewStatus === 'running' ? '正在并行生成 4 张资产…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败') : outputs.length ? '已生成 4 张资产，可从右侧输出端继续连接' : '连接任意一张模特或产品图片后点击生成';
+    const outputCount = (node.multiViewOutputs || node.generatedOutputs || []).map(outputUrlValue).filter(Boolean).length;
+    const status = node.multiViewStatus === 'running' ? `正在输出端生成 ${Math.max(0, 4 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，请重试') : outputCount >= 4 ? '4 张资产已在右侧输出节点中生成' : '连接任意一张模特或产品图片后点击生成';
     return `<div class="classic-multi-view-special">
         <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
         <div class="classic-multi-view-input-list">${slots}</div>
-        ${previews}
         <div class="classic-multi-view-settings gen-settings">
             <div class="gen-settings-row">
                 <select class="select-lite" data-multi-view-provider aria-label="图片生成平台">${providerOptions(node.apiProvider)}</select>
@@ -7388,10 +7405,27 @@ async function runClassicMultiViewNode(nodeId){
     node.multiViewStatus = 'running';
     node.multiViewError = '';
     node.generatedOutputs = [];
-    const out = outputForNode(node, 780);
+    node.multiViewOutputs = [null, null, null, null];
+    node.multiViewOutputLayout = {type:'grid-split', groupId:uid('multi-view-grid'), cols:3, rows:2};
+    const out = outputForNode(node, 780, true);
+    if(out){
+        out.w = Math.max(Number(out.w || 0), 700);
+        out.h = Math.max(Number(out.h || 0), 620);
+        out.images = [];
+        out.outputLayout = {...node.multiViewOutputLayout};
+        out._pending = Array.from({length:4}, (_, index) => ({
+            id:uid('multi-view-pending'), startedAt, multiViewIndex:index,
+            previewSize:index === 0 ? {w:16,h:9} : {w:9,h:16},
+            canvasTaskType:'multi-view-image', providerId, model,
+            multiViewLayout:{...node.multiViewOutputLayout},
+            run:{node:{id:node.id,type:'multiView'}},
+            grid:index === 0 ? {row:0,col:0,w:3,h:1,ratioW:16,ratioH:9} : {row:1,col:index - 1,w:1,h:1,ratioW:9,ratioH:16}
+        }));
+    }
     render();
     scheduleSave();
-    const taskFor = async (view, board=false) => {
+    const pendingForIndex = index => out?._pending?.find(item => item.multiViewIndex === index);
+    const taskFor = async (view, board=false, index=0) => {
         const viewRefs = classicMultiViewReferencePlan(view, refs, board);
         const ratio = board ? '16:9' : '9:16';
         const payload = {
@@ -7408,17 +7442,30 @@ async function runClassicMultiViewNode(nodeId){
             node.apiProvider = task.provider_id;
             node.model = task.model || node.model;
         }
+        const pending = pendingForIndex(index);
+        if(pending) pending.canvasTaskId = task.task_id;
+        refreshRunNodes(node, out);
         const result = await waitCanvasImageTaskResult(task.task_id);
         const raw = (result.images || [])[0];
         const url = outputUrlValue(raw);
         if(!url) throw new Error(`${board ? '三视图模卡' : `${view}视图`}没有返回图片`);
         const name = board ? 'multi-view-board.png' : `multi-view-${view}.png`;
-        return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
+        const item = raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
+        item.multiViewIndex = index;
+        item.grid = index === 0 ? {row:0,col:0,w:3,h:1,ratioW:16,ratioH:9,groupId:node.multiViewOutputLayout.groupId} : {row:1,col:index - 1,w:1,h:1,ratioW:9,ratioH:16,groupId:node.multiViewOutputLayout.groupId};
+        if(pending){
+            out._pending = (out._pending || []).filter(entry => entry.id !== pending.id);
+            appendOutputImages(out, [item], null, [], node.multiViewOutputLayout);
+        }
+        node.multiViewOutputs[index] = item;
+        refreshRunNodes(node, out);
+        scheduleSave();
+        return item;
     };
     try {
-        const outputs = await Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')]);
+        // 保留旧版任务顺序契约：Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])
+        const outputs = await Promise.all([taskFor('front', true, 0), taskFor('front', false, 1), taskFor('side', false, 2), taskFor('back', false, 3)]);
         mergeGeneratedOutputs(node, outputs, false);
-        if(out) appendOutputImagesWithoutDuplicates(out, outputs);
         node.multiViewStatus = 'done';
         node.multiViewRunAt = nowMs();
         node.multiViewElapsedMs = node.multiViewRunAt - startedAt;
@@ -7429,6 +7476,7 @@ async function runClassicMultiViewNode(nodeId){
         scheduleSave();
         setStatus('三视图已生成 4 张资产');
     } catch(error){
+        if(out) out._pending = [];
         node.multiViewStatus = 'error';
         node.multiViewError = error.message || '三视图生成失败';
         node.runStatus = 'failed';
@@ -7624,11 +7672,14 @@ function renderNode(node){
     window.CanvasEcommerceNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
-    if(node.type === 'multiView' && [560, 680, 720].includes(Number(node.h)) && !(node.generatedOutputs || []).length) node.h = 780;
+    if(node.type === 'multiView' && (!Number.isFinite(Number(node.h)) || Number(node.h) < 780)) node.h = 780;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
-    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    const nodeTypeClass = node.type === 'batchGenerator'
+        ? 'batchGenerator-node batch-generator-node generator-node'
+        : `${node.type}-node`;
+    el.className = `node ${nodeTypeClass} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${node.w || size.w}px`;
@@ -7650,10 +7701,10 @@ function renderNode(node){
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
-    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? tr('canvas.batchProcess') : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -7810,7 +7861,7 @@ function renderNode(node){
         body.innerHTML = `<div class="text-[11px] text-gray-400">${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}</div>`;
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
-    if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
+    if(node.type === 'generator' || node.type === 'batchGenerator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'msgen') body.innerHTML = '<div class="muted-note">旧版 ModelScope 专用生成已移除，请改用图片生成节点。</div>';
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
     if(node.type === 'topazVideo') body.appendChild(renderTopazVideoBody(node));
@@ -7848,8 +7899,8 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const ecommercePorts = window.CanvasEcommerceNodes?.inputPorts?.(node.type) || [];
-    const canInput = ecommercePorts.length > 0 || ['generator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
+    const canInput = ecommercePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
     if(ecommercePorts.length > 1){
         el.insertAdjacentHTML('beforeend', ecommercePorts.map(port => `<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
@@ -8003,14 +8054,15 @@ function refreshOutputNodeContent(node){
     grid.classList.toggle('grid-layout', !!layout);
     if(layout) grid.style.setProperty('--grid-cols', String(Math.max(1, Number(layout.cols || 1))));
     else grid.style.removeProperty('--grid-cols');
+    const layoutForNode = outputGridLayout(node);
     const items = [
-        ...(node.images || []).map(item => ({
+        ...(node.images || []).slice().sort((a, b) => Number(a?.multiViewIndex ?? 999) - Number(b?.multiViewIndex ?? 999)).map(item => ({
             key:outputDomKeyForItem(item),
-            html:renderOutputMedia(item, !!layout)
+            html:renderOutputMedia(item, !!layoutForNode)
         })),
-        ...(node._pending || []).map(p => ({
+        ...(node._pending || []).slice().sort((a, b) => Number(a?.multiViewIndex ?? 999) - Number(b?.multiViewIndex ?? 999)).map(p => ({
             key:outputDomKeyForPending(p),
-            html:renderPendingOutput(p)
+            html:renderPendingOutput(p, !!layoutForNode)
         }))
     ];
     const wanted = new Set(items.map(item => item.key));
@@ -8053,7 +8105,7 @@ function defaultNodeSize(type){
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
-    if(type === 'generator') return {w:380, h:0};
+    if(type === 'generator' || type === 'batchGenerator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
     if(type === 'topazVideo') return {w:400, h:0};
@@ -9873,10 +9925,25 @@ function bindGeneratorInlinePrompt(wrap, node){
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
+    const isBatch = node.type === 'batchGenerator';
     const inputSources = generatorSources(node);
     const ordered = orderedSources(node, inputSources);
     const mediaInputs = ordered.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
+    const batchImageCount = mediaInputs.reduce((total, source) => total + imageRefsOnly(source.refs || []).length, 0);
+    const countControlHtml = isBatch
+        ? `<div class="batch-input-count" title="${escapeAttr(tr('canvas.batchProcessHint'))}"><strong>${batchImageCount}</strong><span>${escapeHtml(tr('canvas.batchImageCount'))}</span></div>`
+        : `<div class="gen-count-row">
+            <div class="gen-stepper">
+                <button class="gen-step-btn" data-step="-1" type="button" title="${tr('canvas.decrease')}" aria-label="${tr('canvas.decreaseCount')}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
+                <input class="gen-count-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${Math.max(1, Math.min(8, Number(node.count || 1)))}">
+                <button class="gen-step-btn" data-step="1" type="button" title="${tr('canvas.increase')}" aria-label="${tr('canvas.increaseCount')}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
+            </div>
+        </div>`;
+    const defaultRunLabel = node.running ? tr('canvas.generating') : tr('canvas.imageGenerateAction');
+    const runLabel = isBatch
+        ? (node.running ? tr('canvas.batchProcessing') : tr('canvas.batchProcess'))
+        : defaultRunLabel;
     sanitizeImageNodeProviderModel(node);
     normalizeApiNodeSizeChoice(node);
     wrap.innerHTML = `
@@ -9915,13 +9982,7 @@ function renderGeneratorBody(node){
                     <option value="medium">Q med</option>
                     <option value="high">Q high</option>
                 </select>
-                <div class="gen-count-row">
-                    <div class="gen-stepper">
-                        <button class="gen-step-btn" data-step="-1" type="button" title="${tr('canvas.decrease')}" aria-label="${tr('canvas.decreaseCount')}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
-                        <input class="gen-count-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${Math.max(1, Math.min(8, Number(node.count || 1)))}">
-                        <button class="gen-step-btn" data-step="1" type="button" title="${tr('canvas.increase')}" aria-label="${tr('canvas.increaseCount')}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
-                    </div>
-                </div>
+                ${countControlHtml}
             </div>
             <div class="gen-settings-row custom-ratio-row" style="display:none">
                 <label class="field">
@@ -9945,10 +10006,11 @@ function renderGeneratorBody(node){
                 <button class="secondary-btn fit-size-btn" type="button" style="height:32px;align-self:flex-end;padding:0 10px;font-size:11px">${tr('canvas.fitImageSize')}</button>
             </div>
         </div>
+        ${isBatch ? `<div class="batch-process-hint"><i data-lucide="layers-3"></i><span>${escapeHtml(tr('canvas.batchProcessHint'))}</span></div>` : ''}
         ${generatorInlinePromptHtml(node, promptInputs.length)}
         <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.imageGenerateAction')}</button>
-            ${cascadeBtnHtml(node)}
+            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="${isBatch ? 'layers-3' : 'zap'}" class="w-4 h-4"></i>${runLabel}</button>
+            ${isBatch ? '' : cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
     `;
@@ -10162,23 +10224,25 @@ function renderGeneratorBody(node){
     }
     syncSizeControls();
     const countInput = wrap.querySelector('.gen-count-input');
-    countInput.onmousedown = e => e.stopPropagation();
-    countInput.onclick = e => e.stopPropagation();
-    countInput.oninput = e => {
-        const value = Math.max(1, Math.min(8, Number(e.target.value) || 1));
-        node.count = value;
-        scheduleSave();
-    };
-    countInput.onblur = e => { e.target.value = String(Math.max(1, Math.min(8, Number(node.count || 1)))); };
-    wrap.querySelectorAll('[data-step]').forEach(btn => {
-        btn.onclick = e => {
-            e.stopPropagation();
-            const next = Math.max(1, Math.min(8, Number(node.count || 1) + Number(btn.dataset.step || 0)));
-            node.count = next;
-            countInput.value = String(next);
+    if(countInput){
+        countInput.onmousedown = e => e.stopPropagation();
+        countInput.onclick = e => e.stopPropagation();
+        countInput.oninput = e => {
+            const value = Math.max(1, Math.min(8, Number(e.target.value) || 1));
+            node.count = value;
             scheduleSave();
         };
-    });
+        countInput.onblur = e => { e.target.value = String(Math.max(1, Math.min(8, Number(node.count || 1)))); };
+        wrap.querySelectorAll('[data-step]').forEach(btn => {
+            btn.onclick = e => {
+                e.stopPropagation();
+                const next = Math.max(1, Math.min(8, Number(node.count || 1) + Number(btn.dataset.step || 0)));
+                node.count = next;
+                countInput.value = String(next);
+                scheduleSave();
+            };
+        });
+    }
     const list = wrap.querySelector('.input-list');
     renderImageInputList(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
@@ -11706,9 +11770,9 @@ function updateComfyField(node, input, event){
     scheduleSave();
 }
 
-const CANVAS_GENERATOR_TYPES = ['generator','video','topazVideo','rh','ecom-compose','ecom-video'];
-const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'ecom-compose','multiView'];
-const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'topazVideo','ecom-compose','ecom-video','multiView'];
+const CANVAS_GENERATOR_TYPES = ['generator','batchGenerator','video','topazVideo','rh','ecom-compose','ecom-video'];
+const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'batchGenerator','ecom-compose','multiView'];
+const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'batchGenerator','topazVideo','ecom-compose','ecom-video','multiView'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -11735,8 +11799,8 @@ function shouldCreateOutputForNode(node){
     if(hasExplicitOutputConnection(node.id)) return true;
     return !hasDownstreamGenerator(node.id);
 }
-function outputForNode(node, dx=460){
-    if(!node || !shouldCreateOutputForNode(node)) return null;
+function outputForNode(node, dx=460, force=false){
+    if(!node || (!force && !shouldCreateOutputForNode(node))) return null;
     let out = connections
         .filter(c => c.from === node.id)
         .map(c => nodes.find(n => n.id === c.to))
@@ -11960,7 +12024,7 @@ function refreshGeneratorInputViews(){
             .map(src => ({...src, refs:imageRefsOnly(src.refs || [])}))
             .filter(src => src.refs?.length);
         renderPromptPreview(el.querySelector('.prompt-list'), sources.filter(src => src.prompt && !src.refs?.length));
-        if(gen.type === 'generator') renderImageInputList(el.querySelector('.input-list'), gen, imageInputs);
+        if(gen.type === 'generator' || gen.type === 'batchGenerator') renderImageInputList(el.querySelector('.input-list'), gen, imageInputs);
         if(gen.type === 'msgen') renderImageInputList(el.querySelector('.ms-img-list'), gen, imageInputs);
         if(gen.type === 'comfy') renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         if(gen.type === 'ltxDirector'){
@@ -12064,6 +12128,107 @@ async function runGenerator(genId, opts={}){
         if(remainingPending.some(p => p.failed && p.recoverTaskId) && !removableIds.length) return;
         if(opts.cascade) throw err;
         showErrorModal(err.message || tr('canvas.generationFailed'), tr('canvas.apiFailed'));
+    }
+}
+function batchGeneratorImageRefs(node){
+    const seen = new Set();
+    return orderedSources(node, generatorSources(node))
+        .flatMap(source => source.refs || [])
+        .filter(ref => ref?.url && mediaKindForRef(ref) === 'image')
+        .filter(ref => {
+            const key = String(ref.url || '');
+            if(!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+}
+async function batchGeneratorSizeForRef(node, ref){
+    if((node.ratio || 'square') !== 'source') return generatorSizeForRun(node, [ref]);
+    try {
+        const dims = await getImageDimensions(ref.url);
+        const parts = ratioPartsFromDimensions(dims.width, dims.height);
+        return apiImageSize('source', node.resolution || defaultApiImageResolution(node.model), `${parts.width}:${parts.height}`, node.customSize || '');
+    } catch(_) {
+        return apiImageSize('square', node.resolution || defaultApiImageResolution(node.model), '', node.customSize || '');
+    }
+}
+async function runBatchGenerator(genId, opts={}){
+    const gen = nodes.find(node => node.id === genId && node.type === 'batchGenerator');
+    if(!gen || (gen.running && !opts.cascade)) return;
+    const cascadeTargetId = cascadeTargetIdFromOptions(opts);
+    const refs = batchGeneratorImageRefs(gen);
+    if(!refs.length){
+        if(opts.cascade) throw new Error(tr('canvas.batchNeedsImages'));
+        showErrorModal(tr('canvas.batchNeedsImages'), tr('canvas.batchProcess'));
+        return;
+    }
+    const sources = orderedSources(gen, generatorSources(gen));
+    const batchPrompt = combinedGeneratorPrompt(gen, sources) || 'Edit the reference image.';
+    const providerId = resolveImageProviderId(gen.apiProvider || 'comfly');
+    const model = resolveImageModel(gen.model);
+    const quality = normalizedImageQuality(gen.quality);
+    const startedAt = nowMs();
+    const out = outputForNode(gen, 460, true);
+    const plans = await Promise.all(refs.map(async (ref, index) => {
+        const requestSize = await batchGeneratorSizeForRef(gen, ref);
+        const run = runSnapshot(gen, batchPrompt, [ref]);
+        run.taskLabel = `${tr('canvas.batchProcess')} ${index + 1}/${refs.length}`;
+        const payload = {prompt:batchPrompt, provider_id:providerId, model, size:requestSize, reference_images:[ref]};
+        if(quality) payload.quality = quality;
+        const pendingId = uid('p');
+        const pending = makePendingForRun(pendingId, run, gen, {refs:[ref], requestSize, cascadeTargetId}, {
+            canvasTaskType:'online-image', providerId, model, appendGenerated:true,
+            batchIndex:index, batchTotal:refs.length, sourceRef:{url:ref.url, name:ref.name || `image-${index + 1}`}
+        });
+        return {index, ref, run, payload, pendingId, pending};
+    }));
+    out._pending = [...(out._pending || []), ...plans.map(plan => plan.pending)];
+    gen.running = true;
+    gen.runStatus = 'running';
+    gen.runError = '';
+    refreshRunNodes(gen, out);
+    scheduleSave();
+    try {
+        const submissions = await Promise.allSettled(plans.map(plan => createCanvasImageTask(plan.payload, {cascadeTargetId})));
+        const accepted = [];
+        submissions.forEach((result, index) => {
+            const plan = plans[index];
+            const pending = pendingById(out, plan.pendingId);
+            if(result.status === 'fulfilled' && result.value?.task_id){
+                if(pending) pending.canvasTaskId = result.value.task_id;
+                accepted.push({...plan, taskId:result.value.task_id});
+                return;
+            }
+            if(pending){
+                pending.failed = true;
+                pending.canvasTaskStatus = 'failed';
+                pending.error = result.status === 'rejected'
+                    ? (result.reason?.message || String(result.reason || tr('canvas.generationFailed')))
+                    : tr('canvas.generationFailed');
+            }
+        });
+        refreshRunNodes(gen, out);
+        scheduleSave();
+        await saveCanvas();
+        const statuses = await Promise.all(accepted.map(plan => pollCanvasImageTask(plan.taskId, {cascadeTargetId})));
+        const failedCount = (plans.length - accepted.length)
+            + statuses.filter(status => status !== 'succeeded').length;
+        gen.running = false;
+        gen.runStatus = failedCount ? 'failed' : 'done';
+        gen.runError = failedCount ? `${failedCount}/${plans.length} ${tr('canvas.failed')}` : '';
+        refreshRunNodes(gen, out);
+        scheduleSave();
+        if(statuses.includes('aborted')) throw cascadeAbortError(cascadeStopMessage());
+        if(opts.cascade && failedCount) throw new Error(gen.runError || tr('canvas.generationFailed'));
+        if(failedCount && !accepted.length) showErrorModal(gen.runError || tr('canvas.generationFailed'), tr('canvas.batchProcess'));
+    } catch(error) {
+        gen.running = false;
+        gen.runStatus = 'failed';
+        gen.runError = error.message || String(error);
+        refreshRunNodes(gen, out);
+        scheduleSave();
+        if(opts.cascade) throw error;
+        if(!isCascadeAbortError(error)) showErrorModal(gen.runError, tr('canvas.batchProcess'));
     }
 }
 async function runGeneratorLegacy(genId, opts={}){
@@ -13202,6 +13367,7 @@ function bindCascadeButtons(wrap, nodeId){
 function runCascadeNodeByType(node, opts={}){
     const runOpts = {cascade:true, ...opts};
     if(node.type === 'generator') return runGenerator(node.id, runOpts);
+    if(node.type === 'batchGenerator') return runBatchGenerator(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
     if(node.type === 'topazVideo') return runTopazVideoNode(node.id, runOpts);
@@ -13239,7 +13405,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','msgen','comfy','ltxDirector','llm','video','rh','ecom-compose','ecom-video'];
+    return ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','rh','ecom-compose','ecom-video'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -13478,6 +13644,7 @@ async function runOneCascadePass(order, options={}){
         refreshNodes([id]);
         try {
             if(node.type === 'generator') await runGenerator(id, {cascade:true, cascadeTargetId:targetId});
+            else if(node.type === 'batchGenerator') await runBatchGenerator(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'llm') await runLLMNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'video' || node.type === 'ecom-video') await runVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'topazVideo') await runTopazVideoNode(id, {cascade:true, cascadeTargetId:targetId});
@@ -13755,7 +13922,7 @@ function runTaskLabel(run){
     if(run?.taskLabel) return run.taskLabel;
     if(run?.nodeType === 'comfy') return comfyRunLabel(node);
     if(run?.nodeType === 'ltxDirector') return '本地生成已停用';
-    if(run?.nodeType === 'generator') return node.model || 'API Image';
+    if(run?.nodeType === 'generator' || run?.nodeType === 'batchGenerator') return node.model || 'API Image';
     if(run?.nodeType === 'video') return node.model || 'Video';
     if(run?.nodeType === 'topazVideo') return `Topaz ${node.model || 'Video AI'}`;
     if(run?.nodeType === 'msgen') return node.msCustomModel || node.msgenModel || 'Modelscope';
@@ -13774,7 +13941,7 @@ function requestMetaFromResult(result={}){
 }
 function runPlatformLabel(run){
     const node = run?.node || {};
-    if(run?.nodeType === 'generator') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'API';
+    if(run?.nodeType === 'generator' || run?.nodeType === 'batchGenerator') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'API';
     if(run?.nodeType === 'msgen') return 'Modelscope';
     if(run?.nodeType === 'video') return providerById(node.apiProvider || 'comfly')?.name || node.apiProvider || 'Video';
     if(run?.nodeType === 'topazVideo') return 'Topaz Video AI';
@@ -14141,12 +14308,32 @@ function completeCanvasImageTask(taskId, result){
         run: pending.run || {},
     };
     meta.run.request = requestMetaFromResult(result);
+    const gen = nodes.find(n => n.id === meta.run?.node?.id);
     const images = result.images || [];
     out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
-    const gen = nodes.find(n => n.id === meta.run?.node?.id);
+    if(pending.multiViewIndex != null){
+        const raw = images[0];
+        const url = outputUrlValue(raw);
+        if(url){
+            const grid = pending.multiViewIndex === 0
+                ? {row:0,col:0,w:3,h:1,ratioW:16,ratioH:9,groupId:pending.multiViewLayout?.groupId}
+                : {row:1,col:pending.multiViewIndex - 1,w:1,h:1,ratioW:9,ratioH:16,groupId:pending.multiViewLayout?.groupId};
+            const item = raw && typeof raw === 'object' ? {...raw, url, kind:'image', multiViewIndex:pending.multiViewIndex, grid} : {url, kind:'image', multiViewIndex:pending.multiViewIndex, grid};
+            appendOutputImages(out, [item], meta.run?.refs?.[0], [meta], pending.multiViewLayout || out.outputLayout);
+            if(gen) gen.multiViewOutputs = gen.multiViewOutputs || [null, null, null, null];
+            if(gen) gen.multiViewOutputs[pending.multiViewIndex] = item;
+        }
+    } else {
+        appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
+    }
     if(gen){
-        mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
+        if(pending.multiViewIndex == null) mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
+        else if(!(out._pending || []).some(item => item.multiViewIndex != null)) {
+            mergeGeneratedOutputs(gen, (gen.multiViewOutputs || []).filter(Boolean), false);
+            gen.multiViewStatus = 'done';
+        } else {
+            gen.multiViewStatus = 'running';
+        }
         gen.runStatus = 'done';
         gen.runError = '';
         gen.running = false;
@@ -14173,6 +14360,7 @@ function failCanvasImageTask(taskId, message, taskData={}){
         if(gen){
             gen.runStatus = 'failed';
             gen.runError = pending.error;
+            if(pending.multiViewIndex != null){ gen.multiViewStatus = 'error'; gen.multiViewError = pending.error; }
             if(pending?.cascadeTargetId) gen._cascadeFailed = true;
             gen.running = false;
         }
@@ -14185,6 +14373,7 @@ function failCanvasImageTask(taskId, message, taskData={}){
     if(gen){
         gen.runStatus = 'failed';
         gen.runError = message || tr('canvas.generationFailed');
+        if(pending.multiViewIndex != null){ gen.multiViewStatus = 'error'; gen.multiViewError = gen.runError; }
         if(pending?.cascadeTargetId) gen._cascadeFailed = true;
         gen.running = false;
     }
@@ -14195,7 +14384,7 @@ function failCanvasImageTask(taskId, message, taskData={}){
 function resumeCanvasImageTasks(){
     nodes.filter(n => n.type === 'output').forEach(out => {
         (out._pending || []).forEach(p => {
-            if(p.canvasTaskType === 'online-image' && p.canvasTaskId && !p.failed) pollCanvasImageTask(p.canvasTaskId, {cascadeTargetId:p.cascadeTargetId || ''});
+            if((p.canvasTaskType === 'online-image' || p.canvasTaskType === 'multi-view-image') && p.canvasTaskId && !p.failed) pollCanvasImageTask(p.canvasTaskId, {cascadeTargetId:p.cascadeTargetId || ''});
         });
     });
 }
@@ -14326,7 +14515,7 @@ function renderOutputMedia(item, useGridLayout=false){
     const meta = item && typeof item === 'object' ? item : {};
     const kind = mediaKindForOutputItem(item);
     const grid = useGridLayout ? (meta.grid || null) : null;
-    const gridStyle = grid ? ` style="grid-row:${Number(grid.row || 0) + 1};grid-column:${Number(grid.col || 0) + 1};aspect-ratio:${Math.max(1, Number(grid.w || 1))}/${Math.max(1, Number(grid.h || 1))}"` : '';
+    const gridStyle = grid ? ` style="grid-row:${Number(grid.row || 0) + 1};grid-column:${Number(grid.col || 0) + 1} / span ${Math.max(1, Number(grid.w || 1))};aspect-ratio:${Math.max(1, Number(grid.ratioW || grid.w || 1))}/${Math.max(1, Number(grid.ratioH || grid.h || 1))}"` : '';
     const timePill = meta.runMs && !meta.viewed ? `<span class="output-time-pill">${formatRunDuration(meta.runMs)}</span>` : '';
     if(isMissingAssetUrl(url)){
         return `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${gridStyle}>${missingAssetHtml(url, true)}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
@@ -14346,9 +14535,10 @@ function renderOutputMedia(item, useGridLayout=false){
 }
 function outputGridLayout(node){
     const images = node?.images || [];
-    if(!images.length || node?._pending?.length) return null;
+    if(!images.length && !(node?.type === 'multiView' && node?._pending?.length)) return null;
     const layout = node.outputLayout;
     if(!layout || layout.type !== 'grid-split' || !layout.groupId) return null;
+    if(node?.type === 'multiView') return layout;
     const allMatch = images.every(item => item && typeof item === 'object' && item.grid?.groupId === layout.groupId);
     return allMatch ? layout : null;
 }
@@ -14356,7 +14546,10 @@ function renderOutputGrid(node, pendingHtml=''){
     const layout = outputGridLayout(node);
     const gridClass = layout ? 'output-grid grid-layout' : 'output-grid';
     const style = layout ? ` style="--grid-cols:${Math.max(1, Number(layout.cols || 1))}"` : '';
-    return `<div class="${gridClass}"${style}>${(node.images || []).map(item => renderOutputMedia(item, !!layout)).join('')}${pendingHtml}</div>`;
+    const images = (node.images || []).slice().sort((a, b) => Number(a?.multiViewIndex ?? 999) - Number(b?.multiViewIndex ?? 999));
+    const pending = (node._pending || []).slice().sort((a, b) => Number(a?.multiViewIndex ?? 999) - Number(b?.multiViewIndex ?? 999));
+    const pendingMarkup = pending.length ? pending.map(item => renderPendingOutput(item, !!layout)).join('') : pendingHtml;
+    return `<div class="${gridClass}"${style}>${images.map(item => renderOutputMedia(item, !!layout)).join('')}${pendingMarkup}</div>`;
 }
 function outputImageName(url){
     const clean = (url || '').split('?')[0];
@@ -14398,7 +14591,7 @@ function appendOutputImages(out, images, compareRef, metas=[], layout=null){
     const list = (images || []).filter(Boolean);
     if(!out || !list.length) return;
     if(layout?.type === 'grid-split'){
-        out.images = [];
+        if(out.outputLayout?.groupId !== layout.groupId) out.images = [];
         out.outputLayout = layout;
     } else if(out.outputLayout) {
         delete out.outputLayout;
@@ -14409,6 +14602,8 @@ function appendOutputImages(out, images, compareRef, metas=[], layout=null){
         const item = {url:outputUrlValue(url), viewed:false, runMs:meta.runMs || 0, run:meta.run || null};
         if(source.name) item.name = source.name;
         if(source.kind || source.mediaKind) item.kind = source.kind || source.mediaKind;
+        if(source.multiViewIndex != null) item.multiViewIndex = source.multiViewIndex;
+        if(source.grid) item.grid = source.grid;
         if(meta.kind) item.kind = meta.kind;
         if(meta.grid) item.grid = meta.grid;
         return item;
@@ -15989,6 +16184,7 @@ function renderSelectionHub(){
         return;
     }
     const actions = target.kind === 'group' ? [
+        {id:'batchGenerator', label:tr('canvas.batchProcess'), icon:'layers-3'},
         {id:'expand-canvas', label:langIsEn() ? 'Expand canvas' : '扩展画幅', icon:'expand'},
         {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'},
         {id:'send-to-film', label:langIsEn() ? 'Send to filmstoryboard' : '发送到 filmstoryboard', icon:'send'}
@@ -16002,6 +16198,7 @@ function renderSelectionHub(){
         {id:'edit', label:langIsEn() ? 'Edit' : '编辑', icon:'pencil'},
         {id:'grid', label:tr('canvas.modeGrid'), icon:'grid-3x3'},
         {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
+        {id:'batchGenerator', label:tr('canvas.batchProcess'), icon:'layers-3'},
         {id:'video', label:tr('canvas.videoGenerate'), icon:'clapperboard'},
         {id:'panorama', label:langIsEn() ? 'Panorama' : '全景', icon:'scan-line'},
         {id:'angle', label:langIsEn() ? 'Multi-angle' : '多角度', icon:'rotate-3d'},
@@ -16084,6 +16281,12 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'batchGenerator' && target?.kind === 'group'){
+        if(!sourceNode) return;
+        pushUndo();
+        addQuickActionNode(sourceNode, action);
+        return;
+    }
     if(action === 'send-to-film'){
         exportFilmBridgeGroup(target?.nodeId);
         return;
@@ -16595,7 +16798,8 @@ function onNodeResize(e){
     if(!resizeNode) return;
     const min = defaultNodeSize(resizeNode.node.type);
     const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
-    const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
+    const minHeight = resizeNode.node.type === 'multiView' ? (min.h || 780) : 96;
+    const nextH = Math.max(minHeight, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
     resizeNode.node.w = Math.round(nextW);
     resizeNode.node.h = Math.round(nextH);
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
@@ -16863,51 +17067,53 @@ function moveCanvasNodeAtom(node, x, y){
     const dy = Math.round(y - (Number(node.y) || 0));
     translateCanvasNodeWithMembers(node, dx, dy);
 }
+function canvasArrangeCategory(node){
+    const type = String(node?.type || '').toLowerCase();
+    if(type === 'output' || type.endsWith('-output')) return {rank:3, key:'output'};
+    if(['prompt','promptgroup','loop','llm'].includes(type)) return {rank:1, key:'prompt'};
+    if(['image','group'].includes(type)) return {rank:0, key:'media'};
+    return {rank:2, key:'process'};
+}
 function arrangeIdsByConnections(ids){
     const idSet = new Set(canvasArrangeAtomicIds(ids));
     const selectedNodes = [...idSet].map(id => nodes.find(n => n.id === id)).filter(Boolean);
     if(selectedNodes.length < 2) return false;
-    const rects = selectedNodes.map(n => ({node:n, rect:nodeRect(n)}));
+    const rectById = new Map(selectedNodes.map(n => [n.id, nodeRect(n)]));
+    const rects = selectedNodes.map(n => ({node:n, rect:rectById.get(n.id), category:canvasArrangeCategory(n)}));
     const startX = Math.min(...rects.map(item => item.rect.x));
     const startY = Math.min(...rects.map(item => item.rect.y));
-    const internal = connections.filter(c => idSet.has(c.from) && idSet.has(c.to));
-    const depth = new Map(selectedNodes.map(n => [n.id, 0]));
-    if(internal.length){
-        const indegree = new Map(selectedNodes.map(n => [n.id, 0]));
-        internal.forEach(c => indegree.set(c.to, (indegree.get(c.to) || 0) + 1));
-        const roots = [...indegree.entries()].filter(([, n]) => n === 0).map(([id]) => id);
-        const queue = roots.length ? roots.slice() : [selectedNodes[0].id];
-        const seen = new Set(queue);
-        while(queue.length){
-            const id = queue.shift();
-            internal.filter(c => c.from === id).forEach(c => {
-                depth.set(c.to, Math.max(depth.get(c.to) || 0, (depth.get(id) || 0) + 1));
-                if(!seen.has(c.to)){
-                    seen.add(c.to);
-                    queue.push(c.to);
-                }
-            });
-        }
-    }
-    const groups = new Map();
-    selectedNodes.forEach(n => {
-        const d = depth.get(n.id) || 0;
-        if(!groups.has(d)) groups.set(d, []);
-        groups.get(d).push(n);
+    const buckets = new Map();
+    rects.forEach(item => {
+        const bucketKey = `${item.category.rank}:${item.category.key}`;
+        if(!buckets.has(bucketKey)) buckets.set(bucketKey, {...item.category, nodes:[]});
+        buckets.get(bucketKey).nodes.push(item);
     });
-    const sortedDepths = [...groups.keys()].sort((a, b) => a - b);
-    let x = startX;
-    sortedDepths.forEach(d => {
-        const col = groups.get(d).slice().sort((a, b) => nodeRect(a).y - nodeRect(b).y || String(a.id).localeCompare(String(b.id)));
-        let y = startY;
-        let maxW = 0;
-        col.forEach(n => {
-            const r = nodeRect(n);
-            moveCanvasNodeAtom(n, x, y);
-            y += Math.max(120, r.h) + 56;
-            maxW = Math.max(maxW, Math.max(220, r.w));
+    const orderedBuckets = [...buckets.values()].sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key));
+    const columnGap = 72;
+    const rowGap = 56;
+    const categoryGap = 180;
+    let categoryX = startX;
+    orderedBuckets.forEach(bucket => {
+        const items = bucket.nodes.slice().sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || String(a.node.id).localeCompare(String(b.node.id)));
+        const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+        const rows = Math.ceil(items.length / columns);
+        const colWidths = Array(columns).fill(0);
+        const rowHeights = Array(rows).fill(0);
+        items.forEach((item, index) => {
+            const col = index % columns;
+            const row = Math.floor(index / columns);
+            colWidths[col] = Math.max(colWidths[col], Math.max(220, item.rect.w));
+            rowHeights[row] = Math.max(rowHeights[row], Math.max(120, item.rect.h));
         });
-        x += maxW + 180;
+        const colX = [];
+        let cursorX = categoryX;
+        colWidths.forEach(width => { colX.push(cursorX); cursorX += width + columnGap; });
+        const rowY = [];
+        let cursorY = startY;
+        rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + rowGap; });
+        items.forEach((item, index) => moveCanvasNodeAtom(item.node, colX[index % columns], rowY[Math.floor(index / columns)]));
+        const categoryWidth = colWidths.reduce((sum, width) => sum + width, 0) + columnGap * Math.max(0, columns - 1);
+        categoryX += categoryWidth + categoryGap;
     });
     return true;
 }
@@ -17358,6 +17564,13 @@ board.oncontextmenu = e => {
     if((e.ctrlKey || e.metaKey) || isRKeyDown){
         e.preventDefault();
         e.stopPropagation();
+        return;
+    }
+    const selectedNodeEl = e.target.closest?.('.node[data-id]');
+    if(selectedNodeEl?.dataset?.id && selected.size > 1 && selected.has(selectedNodeEl.dataset.id)){
+        e.preventDefault();
+        e.stopPropagation();
+        openCreateMenu(e.clientX, e.clientY);
         return;
     }
     if(e.target !== board && e.target !== world && e.target !== nodesEl && e.target !== linksEl) return;

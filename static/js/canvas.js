@@ -3058,6 +3058,22 @@ function addAngleNode(point){
         angleSubject:'person', anglePreserve:true, angleNotes:''
     });
 }
+const CLASSIC_MULTI_VIEW_INPUT_SLOTS = [
+    ['model-front','模特正面'], ['model-side','模特侧面'], ['model-back','模特背面'],
+    ['product-front','产品正面'], ['product-side','产品侧面'], ['product-back','产品背面'],
+    ['front-detail','正面细节'], ['back-detail','背面细节'], ['accessory','配饰']
+];
+const CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES = new Set(['front-detail','back-detail','accessory']);
+function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
+    return nodes.find(item => item.id === nodeId)?.type === 'multiView' && CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole);
+}
+function addMultiViewNode(point){
+    const p = point || defaultPoint(160, 80);
+    return addNode({
+        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:720,
+        multiViewStatus:'idle', multiViewError:'', generatedOutputs:[], multiViewRunAt:0
+    });
+}
 function addBlenderDirectorNode(point){
     const p = point || defaultPoint(200, 0);
     const node = addNode({
@@ -4198,7 +4214,7 @@ function createLinkedNode(type){
     const toId = state.originKind === 'out' ? created.id : origin.id;
     const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
     if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
-        if(inputRole) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+        if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
         connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
         syncLatestGeneratedOutputToConnection(fromId, toId);
         syncGeneratorInputs();
@@ -4218,6 +4234,7 @@ function createNodeByType(type, point){
     if(type === 'topazVideo') return addTopazVideoNode(point);
     if(type === 'h3-video') return addH3VideoNode(point);
     if(type === 'panorama') return addPanoramaNode(point);
+    if(type === 'multiView' || type === 'multi-view') return addMultiViewNode(point);
     if(type === 'poseReference') return addPoseReferenceNode(point);
     if(type === 'dwpose') return addDWPoseNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
@@ -4240,6 +4257,7 @@ function menuAdd(type){
     if(type === 'topazVideo') addTopazVideoNode(menuPoint);
     if(type === 'h3-video') addH3VideoNode(menuPoint);
     if(type === 'panorama') addPanoramaNode(menuPoint);
+    if(type === 'multiView') addMultiViewNode(menuPoint);
     if(type === 'poseReference') addPoseReferenceNode(menuPoint);
     if(type === 'dwpose') addDWPoseNode(menuPoint);
     if(type === 'poseReplicate') addPoseReplicateNode(menuPoint);
@@ -7199,6 +7217,131 @@ function createClassicPoseOutputNode(sourceNode, item){
     scheduleSave();
     return out;
 }
+function classicMultiViewConnections(node){
+    const grouped = new Map(CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role]) => [role, []]));
+    connections.filter(connection => connection.to === node.id).forEach(connection => {
+        const role = connection.inputRole || '';
+        if(!grouped.has(role)) return;
+        const source = nodes.find(item => item.id === connection.from);
+        mediaRefsFromNode(source)
+            .filter(ref => ref?.url && (ref.kind || mediaKindForRef(ref)) === 'image')
+            .forEach(ref => grouped.get(role).push({...ref, kind:'image'}));
+    });
+    return grouped;
+}
+function classicMultiViewInputRefs(node){
+    const inputs = classicMultiViewConnections(node);
+    const first = role => inputs.get(role)?.[0] || null;
+    const all = role => (inputs.get(role) || []).filter(item => item?.url);
+    const modelFront = first('model-front');
+    return {
+        modelFront,
+        modelSide:first('model-side') || modelFront,
+        modelBack:first('model-back') || modelFront,
+        productFront:first('product-front'),
+        productSide:first('product-side'),
+        productBack:first('product-back'),
+        frontDetails:all('front-detail'),
+        backDetails:all('back-detail'),
+        accessories:all('accessory')
+    };
+}
+function classicMultiViewPrompt(view, refs, board=false){
+    const common = '写实高级质感，统一中性棚拍光，纯白背景，主体身份与服装、产品结构严格一致，无遮挡、无透视畸变、无文字、无LOGO、无水印。';
+    if(board){
+        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}左侧排列同一模特穿着同一产品的正面、侧面、背面全身视图，人物五官、发型、体型、服装版型完全一致；右上展示头部正面、俯视、后脑勺、轮廓、正侧脸和3/4侧脸；右下展示面料、剪裁、五官、鞋子和配饰细节。信息分区清晰，排版整齐，比例统一，不添加说明文字。`;
+    }
+    const angle = view === 'front' ? '正面' : view === 'side' ? '侧面' : '背面';
+    const detailRefs = view === 'back' ? refs.backDetails : refs.frontDetails;
+    return `生成${angle}全身视图。${common}保持模特五官、发型、体型、站姿和服装版型连续；产品材质、颜色、纹理、轮廓与该角度参考严格一致。${detailRefs.length ? '准确采用细节参考中的材质、剪裁与装饰。' : ''}输出单张9:16竖屏资产图，不拼图，不添加文字。`;
+}
+function classicMultiViewBodyHtml(node){
+    const inputs = classicMultiViewConnections(node);
+    const slots = CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label]) => {
+        const count = inputs.get(role)?.length || 0;
+        const optional = ['front-detail','back-detail','accessory'].includes(role);
+        const state = count ? `${count} 张` : optional ? '可为空/可多张' : role === 'model-side' || role === 'model-back' ? '可用正面扩展' : '待连接';
+        return `<div class="classic-multi-view-slot"><span>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
+    }).join('');
+    const outputNames = ['16:9 三视图模卡','正面 9:16','侧面 9:16','背面 9:16'];
+    const outputs = (node.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
+    const previews = outputs.length ? `<div class="classic-multi-view-output-grid">${outputs.map((url, index) => `<div class="classic-multi-view-output"><img src="${escapeAttr(canvasDisplayMediaUrl(url, ''))}" alt="${escapeAttr(outputNames[index] || `资产 ${index + 1}`)}" draggable="false"><span>${escapeHtml(outputNames[index] || `资产 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
+    const status = node.multiViewStatus === 'running' ? '正在并行生成 4 张资产…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败') : outputs.length ? '已生成 4 张资产，可从右侧输出端继续连接' : '连接图片到左侧对应端口';
+    return `<div class="classic-multi-view-special">
+        <div class="classic-multi-view-summary"><strong>多视图节点</strong><span>主体与产品按角度自动配对</span></div>
+        <div class="classic-multi-view-input-list">${slots}</div>
+        ${previews}
+        <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span><button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
+    </div>`;
+}
+async function runClassicMultiViewNode(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'multiView');
+    if(!node || node.multiViewStatus === 'running') return;
+    const refs = classicMultiViewInputRefs(node);
+    if(!refs.modelFront){ showErrorModal('请至少连接模特正面','创建三视图'); return; }
+    if(!refs.productFront || !refs.productSide || !refs.productBack){ showErrorModal('请连接产品正面、产品侧面和产品背面','创建三视图'); return; }
+    const selection = defaultImageGenerationSelection();
+    const providerId = resolveImageProviderId(node.apiProvider || selection.providerId);
+    const model = resolveImageModel(node.model || selection.model);
+    if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型','创建三视图'); return; }
+    const resolution = node.resolution || '2k';
+    const quality = normalizedImageQuality(node.quality || 'high');
+    const allRefs = [refs.modelFront, refs.modelSide, refs.modelBack, refs.productFront, refs.productSide, refs.productBack, ...refs.frontDetails, ...refs.backDetails, ...refs.accessories].filter(item => item?.url);
+    const startedAt = nowMs();
+    node.multiViewStatus = 'running';
+    node.multiViewError = '';
+    node.generatedOutputs = [];
+    const out = outputForNode(node, 780);
+    render();
+    scheduleSave();
+    const taskFor = async (view, board=false) => {
+        const viewRefs = board ? allRefs : [
+            view === 'front' ? refs.modelFront : view === 'side' ? refs.modelSide : refs.modelBack,
+            view === 'front' ? refs.productFront : view === 'side' ? refs.productSide : refs.productBack,
+            ...(view === 'back' ? refs.backDetails : refs.frontDetails),
+            ...refs.accessories
+        ].filter(item => item?.url);
+        const ratio = board ? '16:9' : '9:16';
+        const payload = {
+            prompt:classicMultiViewPrompt(view, refs, board),
+            provider_id:providerId,
+            model,
+            size:apiImageSize('custom', resolution, ratio),
+            reference_images:viewRefs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+        };
+        if(quality) payload.quality = quality;
+        const task = await createCanvasImageTask(payload);
+        if(!task?.task_id) throw new Error(`${board ? '三视图模卡' : `${view}视图`}任务创建失败`);
+        const result = await waitCanvasImageTaskResult(task.task_id);
+        const raw = (result.images || [])[0];
+        const url = outputUrlValue(raw);
+        if(!url) throw new Error(`${board ? '三视图模卡' : `${view}视图`}没有返回图片`);
+        const name = board ? 'multi-view-board.png' : `multi-view-${view}.png`;
+        return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
+    };
+    try {
+        const outputs = await Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')]);
+        mergeGeneratedOutputs(node, outputs, false);
+        if(out) appendOutputImagesWithoutDuplicates(out, outputs);
+        node.multiViewStatus = 'done';
+        node.multiViewRunAt = nowMs();
+        node.multiViewElapsedMs = node.multiViewRunAt - startedAt;
+        node.runStatus = 'done';
+        selected.clear();
+        selected.add(node.id);
+        render();
+        scheduleSave();
+        setStatus('三视图已生成 4 张资产');
+    } catch(error){
+        node.multiViewStatus = 'error';
+        node.multiViewError = error.message || '三视图生成失败';
+        node.runStatus = 'failed';
+        node.runError = node.multiViewError;
+        render();
+        scheduleSave();
+        showErrorModal(node.multiViewError,'创建三视图');
+    }
+}
 function bindClassicSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(!api) return;
@@ -7410,7 +7553,7 @@ function renderNode(node){
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
-    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
     const showStatus = ['generator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video'].includes(node.type) && node.runStatus
@@ -7578,6 +7721,7 @@ function renderNode(node){
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
+    if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
     if(node.type === 'poseReference') body.innerHTML = window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="muted-note">姿势参考节点加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="muted-note">一键复刻节点加载失败</div>';
@@ -7607,10 +7751,12 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const ecommercePorts = window.CanvasEcommerceNodes?.inputPorts?.(node.type) || [];
-    const canInput = ecommercePorts.length > 0 || ['generator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
+    const canInput = ecommercePorts.length > 0 || ['generator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
     if(ecommercePorts.length > 1){
         el.insertAdjacentHTML('beforeend', ecommercePorts.map(port => `<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" title="${escapeAttr(port.title)}"></div>`).join(''));
+    } else if(node.type === 'multiView'){
+        el.insertAdjacentHTML('beforeend', CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" style="top:${Math.round((index + 1) * 100 / (CLASSIC_MULTI_VIEW_INPUT_SLOTS.length + 1))}%" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
         el.insertAdjacentHTML('beforeend', `<div class="port in pose-role-port" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="port in pose-role-port" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>`);
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
@@ -7634,6 +7780,11 @@ function renderNode(node){
     if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'out'); };
     el.querySelectorAll('.port.in').forEach(inp => {
         inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in', inp.dataset.inputRole || ''); };
+    });
+    el.querySelector('[data-multi-view-run]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        runClassicMultiViewNode(node.id);
     });
     if(['panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
@@ -7797,6 +7948,7 @@ function defaultNodeSize(type){
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
     if(type === 'panorama') return {w:520, h:520};
+    if(type === 'multiView') return {w:700, h:720};
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'poseReference') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};
@@ -11440,8 +11592,8 @@ function updateComfyField(node, input, event){
 }
 
 const CANVAS_GENERATOR_TYPES = ['generator','video','topazVideo','rh','ecom-compose','ecom-video'];
-const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'ecom-compose'];
-const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'topazVideo','ecom-compose','ecom-video'];
+const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'ecom-compose','multiView'];
+const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'topazVideo','ecom-compose','ecom-video','multiView'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -15719,6 +15871,7 @@ function renderSelectionHub(){
         {id:'video', label:tr('canvas.videoGenerate'), icon:'clapperboard'},
         {id:'panorama', label:langIsEn() ? 'Panorama' : '全景', icon:'scan-line'},
         {id:'angle', label:langIsEn() ? 'Multi-angle' : '多角度', icon:'rotate-3d'},
+        {id:'multi-view', label:langIsEn() ? 'Create three views' : '创建三视图', icon:'panels-top-left'},
         {id:'relight', label:langIsEn() ? 'Relight' : '灯光', icon:'sun-medium'},
         {id:'dwpose', label:langIsEn() ? 'Extract Pose' : '动作提取', icon:'person-standing'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
@@ -15782,7 +15935,10 @@ function addQuickActionNode(source, type){
     const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
     const created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
     if(!created) return null;
-    if(canConnect(source.id, created.id) && !connections.some(connection => connection.from === source.id && connection.to === created.id)){
+    const inputRole = type === 'multi-view' ? 'model-front' : '';
+    if(inputRole && canConnect(source.id, created.id, inputRole) && !connections.some(connection => connection.from === source.id && connection.to === created.id && connection.inputRole === inputRole)){
+        connections.push({id:uid('c'), from:source.id, to:created.id, inputRole});
+    } else if(!inputRole && canConnect(source.id, created.id) && !connections.some(connection => connection.from === source.id && connection.to === created.id)){
         connections.push({id:uid('c'), from:source.id, to:created.id});
     }
     selected.clear();
@@ -16342,7 +16498,7 @@ function startLink(e, originId, originKind, originRole=''){
             if(canConnect(fromId, toId, inputRole)){
                 if(!connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
                     pushUndo();
-                    if(inputRole) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+                    if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
                     connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
                     syncLatestGeneratedOutputToConnection(fromId, toId);
                 }
@@ -16415,6 +16571,16 @@ function canConnect(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    if(to.type === 'multiView'){
+        if(!CLASSIC_MULTI_VIEW_INPUT_SLOTS.some(([role]) => role === inputRole)) return false;
+        return ['image','group','output','panorama','dwpose','poseReference','poseReplicate','relight','angle','generator','rh','multiView'].includes(from.type)
+            && !wouldCreateGeneratorCycle(fromId, toId);
+    }
+    if(from.type === 'multiView'){
+        if(to.type === 'output') return true;
+        if(to.type === 'loop') return Boolean(to.imageInput);
+        return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
+    }
     if(to.type === 'ecom-compose'){
         if(!['ecom-model','ecom-product','ecom-scene','ecom-pose'].includes(inputRole)) return false;
         const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','poseReference','poseReplicate','relight','angle','generator','rh'];

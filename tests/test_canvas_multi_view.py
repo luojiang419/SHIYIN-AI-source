@@ -4,6 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SMART_JS = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
 SMART_HTML = (ROOT / "static/smart-canvas.html").read_text(encoding="utf-8")
+CANVAS_JS = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
+CANVAS_HTML = (ROOT / "static/canvas.html").read_text(encoding="utf-8")
 SPECIAL_CSS = (ROOT / "static/css/canvas-special-nodes.css").read_text(encoding="utf-8")
 
 
@@ -42,3 +44,26 @@ def test_multi_view_is_available_from_create_menu_and_has_visual_styles():
     assert 'data-create-type="multi-view"' in SMART_HTML
     assert ".multi-view-input-list" in SPECIAL_CSS
     assert ".multi-view-output-grid" in SPECIAL_CSS
+
+
+def test_classic_canvas_image_toolbar_exposes_create_three_views_action():
+    assert "{id:'multi-view', label:langIsEn() ? 'Create three views' : '创建三视图'" in CANVAS_JS
+    assert "type === 'multiView' || type === 'multi-view'" in CANVAS_JS
+    assert "const inputRole = type === 'multi-view' ? 'model-front' : ''" in CANVAS_JS
+
+
+def test_classic_canvas_multi_view_node_has_all_ports_and_four_asset_generation():
+    assert "const CLASSIC_MULTI_VIEW_INPUT_SLOTS" in CANVAS_JS
+    for role in [
+        "model-front", "model-side", "model-back", "product-front", "product-side", "product-back",
+        "front-detail", "back-detail", "accessory",
+    ]:
+        assert role in CANVAS_JS
+    assert "Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])" in CANVAS_JS
+    assert "classicMultiViewPrompt(view, refs, board)" in CANVAS_JS
+    assert "data-multi-view-run" in CANVAS_JS
+    assert ".classic-multi-view-output-grid" in SPECIAL_CSS
+
+
+def test_classic_canvas_multi_view_is_available_from_toolbar_and_create_menu():
+    assert "menuAdd('multiView')" in CANVAS_HTML

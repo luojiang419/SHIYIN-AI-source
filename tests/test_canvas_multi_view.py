@@ -21,9 +21,12 @@ def test_multi_view_has_all_role_ports_and_optional_multi_inputs():
         ("model-front", "模特正面"),
         ("model-side", "模特侧面"),
         ("model-back", "模特背面"),
-        ("product-front", "产品正面"),
-        ("product-side", "产品侧面"),
-        ("product-back", "产品背面"),
+        ("product-upper-front", "上装正面"),
+        ("product-upper-side", "上装侧面"),
+        ("product-upper-back", "上装背面"),
+        ("product-lower-front", "下装正面"),
+        ("product-lower-side", "下装侧面"),
+        ("product-lower-back", "下装背面"),
         ("front-detail", "正面细节"),
         ("back-detail", "背面细节"),
         ("accessory", "配饰"),
@@ -56,12 +59,14 @@ def test_classic_canvas_image_toolbar_exposes_create_three_views_action():
 def test_classic_canvas_multi_view_node_has_all_ports_and_four_asset_generation():
     assert "const CLASSIC_MULTI_VIEW_INPUT_SLOTS" in CANVAS_JS
     for role in [
-        "model-front", "model-side", "model-back", "product-front", "product-side", "product-back",
+        "model-front", "model-side", "model-back",
+        "product-upper-front", "product-upper-side", "product-upper-back",
+        "product-lower-front", "product-lower-side", "product-lower-back",
         "front-detail", "back-detail", "accessory",
     ]:
         assert role in CANVAS_JS
     assert "Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])" in CANVAS_JS
-    assert "classicMultiViewPrompt(view, refs, board)" in CANVAS_JS
+    assert "classicMultiViewPrompt(view, refs, board, viewRefs)" in CANVAS_JS
     assert "data-multi-view-run" in CANVAS_JS
     assert ".classic-multi-view-output-grid" in SPECIAL_CSS
 
@@ -84,6 +89,8 @@ def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
 def test_both_canvas_pages_load_multi_view_layout_overrides():
     assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.2' in SMART_HTML
     assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.2' in CANVAS_HTML
+    assert 'canvas.js?v=2026.08.21.multi-view.5' in CANVAS_HTML
+    assert 'smart-canvas.js?v=2026.08.21.multi-view.3' in SMART_HTML
 
 
 def test_multi_view_uses_single_column_rows_for_port_alignment():
@@ -94,3 +101,34 @@ def test_multi_view_uses_single_column_rows_for_port_alignment():
     assert ".multi-view-input-list,.classic-multi-view-input-list{display:flex;flex-direction:column" in MULTI_VIEW_CSS
     assert ".smart-special-node.smart-multi-view-node .multi-view-port{top:var(--multi-view-port-top" in MULTI_VIEW_CSS
     assert ".multiView-node .classic-multi-view-port{top:var(--multi-view-port-top" in MULTI_VIEW_CSS
+
+
+def test_multi_view_product_slots_are_split_by_garment_and_angle():
+    assert "<span>12 个输入 · 4 张输出</span>" in SMART_JS
+    assert "<span>12 个输入 · 4 张输出</span>" in CANVAS_JS
+    assert "role.startsWith('product-upper-') ? '上装'" in SMART_JS
+    assert "role.startsWith('product-lower-') ? '下装'" in SMART_JS
+    assert "role.startsWith('product-upper-') ? '上装'" in CANVAS_JS
+    assert "role.startsWith('product-lower-') ? '下装'" in CANVAS_JS
+    assert "['product-front', ['product-upper-front', 'product-lower-front']]" in SMART_JS
+    assert "['product-side', ['product-upper-side', 'product-lower-side']]" in CANVAS_JS
+
+
+def test_multi_view_expands_missing_angles_and_maps_reference_semantics():
+    for source in (SMART_JS, CANVAS_JS):
+        assert "productAny:Object.values(products).find(Boolean) || null" in source
+        assert "请至少连接一张模特或产品图片" in source
+        assert "参考图对应关系（必须严格遵守，按提交顺序）" in source
+        assert "reference_id:role" in source
+        assert "输入的上装参考只能用于上装" in source
+        assert "输入的下装参考只能用于下装" in source
+        assert "缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展" in source
+    assert "请连接产品正面、产品侧面和产品背面" not in SMART_JS
+    assert "请连接产品正面、产品侧面和产品背面" not in CANVAS_JS
+
+
+def test_multi_view_height_migration_leaves_room_for_twelve_rows():
+    assert "x:baseX, y:baseY, w:700, h:680" in SMART_JS
+    assert "x:p.x, y:p.y, w:700, h:680" in CANVAS_JS
+    assert "savedHeight === 560 || savedHeight === 720" in SMART_JS
+    assert "[560, 720].includes(Number(node.h))" in CANVAS_JS

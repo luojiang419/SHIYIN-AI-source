@@ -3060,17 +3060,39 @@ function addAngleNode(point){
 }
 const CLASSIC_MULTI_VIEW_INPUT_SLOTS = [
     ['model-front','模特正面'], ['model-side','模特侧面'], ['model-back','模特背面'],
-    ['product-front','产品正面'], ['product-side','产品侧面'], ['product-back','产品背面'],
+    ['product-upper-front','上装正面'], ['product-upper-side','上装侧面'], ['product-upper-back','上装背面'],
+    ['product-lower-front','下装正面'], ['product-lower-side','下装侧面'], ['product-lower-back','下装背面'],
     ['front-detail','正面细节'], ['back-detail','背面细节'], ['accessory','配饰']
 ];
+const CLASSIC_MULTI_VIEW_LEGACY_ROLE_ALIASES = new Map([
+    ['product-front', ['product-upper-front', 'product-lower-front']],
+    ['product-side', ['product-upper-side', 'product-lower-side']],
+    ['product-back', ['product-upper-back', 'product-lower-back']]
+]);
 const CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES = new Set(['front-detail','back-detail','accessory']);
+function classicMultiViewRoleTargets(role){
+    if(CLASSIC_MULTI_VIEW_INPUT_SLOTS.some(item => item[0] === role)) return [role];
+    return CLASSIC_MULTI_VIEW_LEGACY_ROLE_ALIASES.get(role) || [];
+}
+function migrateClassicMultiViewConnections(list=connections){
+    let changed = false;
+    const next = [];
+    (list || []).forEach(connection => {
+        const target = nodes.find(item => item.id === connection.to);
+        const roles = target?.type === 'multiView' ? CLASSIC_MULTI_VIEW_LEGACY_ROLE_ALIASES.get(connection.inputRole || '') : null;
+        if(!roles?.length){ next.push(connection); return; }
+        changed = true;
+        roles.forEach((role, index) => next.push({...connection, ...(index ? {id:uid('c')} : {}), inputRole:role}));
+    });
+    return changed ? next : list;
+}
 function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
     return nodes.find(item => item.id === nodeId)?.type === 'multiView' && CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole);
 }
 function addMultiViewNode(point){
     const p = point || defaultPoint(160, 80);
     return addNode({
-        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:560,
+        id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:680,
         multiViewStatus:'idle', multiViewError:'', generatedOutputs:[], multiViewRunAt:0
     });
 }
@@ -7220,12 +7242,12 @@ function createClassicPoseOutputNode(sourceNode, item){
 function classicMultiViewConnections(node){
     const grouped = new Map(CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role]) => [role, []]));
     connections.filter(connection => connection.to === node.id).forEach(connection => {
-        const role = connection.inputRole || '';
-        if(!grouped.has(role)) return;
+        const roles = classicMultiViewRoleTargets(connection.inputRole || '');
+        if(!roles.length) return;
         const source = nodes.find(item => item.id === connection.from);
         mediaRefsFromNode(source)
             .filter(ref => ref?.url && (ref.kind || mediaKindForRef(ref)) === 'image')
-            .forEach(ref => grouped.get(role).push({...ref, kind:'image'}));
+            .forEach(ref => roles.forEach(role => grouped.get(role)?.push({...ref, kind:'image'})));
     });
     return grouped;
 }
@@ -7233,43 +7255,91 @@ function classicMultiViewInputRefs(node){
     const inputs = classicMultiViewConnections(node);
     const first = role => inputs.get(role)?.[0] || null;
     const all = role => (inputs.get(role) || []).filter(item => item?.url);
-    const modelFront = first('model-front');
+    const modelAny = first('model-front') || first('model-side') || first('model-back');
+    const modelFront = first('model-front') || modelAny;
+    const modelSide = first('model-side') || modelAny;
+    const modelBack = first('model-back') || modelAny;
+    const products = Object.fromEntries(CLASSIC_MULTI_VIEW_INPUT_SLOTS
+        .filter(([role]) => role.startsWith('product-'))
+        .map(([role]) => [role, first(role)]));
     return {
-        modelFront,
-        modelSide:first('model-side') || modelFront,
-        modelBack:first('model-back') || modelFront,
-        productFront:first('product-front'),
-        productSide:first('product-side'),
-        productBack:first('product-back'),
+        modelAny, modelFront, modelSide, modelBack,
+        modelFrontRole:first('model-front') ? 'model-front' : first('model-side') ? 'model-side' : 'model-back',
+        modelSideRole:first('model-side') ? 'model-side' : first('model-front') ? 'model-front' : 'model-back',
+        modelBackRole:first('model-back') ? 'model-back' : first('model-front') ? 'model-front' : 'model-side',
+        products,
+        productAny:Object.values(products).find(Boolean) || null,
         frontDetails:all('front-detail'),
         backDetails:all('back-detail'),
         accessories:all('accessory')
     };
 }
-function classicMultiViewPrompt(view, refs, board=false){
-    const common = '写实高级质感，统一中性棚拍光，纯白背景，主体身份与服装、产品结构严格一致，无遮挡、无透视畸变、无文字、无LOGO、无水印。';
+function classicMultiViewRoleLabel(role){
+    return CLASSIC_MULTI_VIEW_INPUT_SLOTS.find(item => item[0] === role)?.[1] || role;
+}
+function classicMultiViewReferencePlan(view, refs, board=false){
+    const angle = view === 'side' ? 'side' : view === 'back' ? 'back' : 'front';
+    const angleLabel = angle === 'front' ? '正面' : angle === 'side' ? '侧面' : '背面';
+    const plan = [];
+    const byUrl = new Map();
+    const push = (item, role, instruction) => {
+        if(!item?.url) return;
+        const label = classicMultiViewRoleLabel(role);
+        const existing = byUrl.get(item.url);
+        if(existing){
+            if(!existing.label.includes(label)) existing.label += ` / ${label}`;
+            existing.instruction += `；${instruction}`;
+            return;
+        }
+        const entry = {...item, kind:'image', role, reference_id:role, label, instruction, name:item.name || label};
+        byUrl.set(item.url, entry);
+        plan.push(entry);
+    };
+    const modelRole = angle === 'front' ? refs.modelFrontRole : angle === 'side' ? refs.modelSideRole : refs.modelBackRole;
+    push(angle === 'front' ? refs.modelFront : angle === 'side' ? refs.modelSide : refs.modelBack, modelRole, `作为${angleLabel}人物身份与姿态主参考；缺失角度由此图自然扩展`);
+    Object.entries(refs.products || {}).forEach(([role, item]) => {
+        push(item, role, `作为${classicMultiViewRoleLabel(role)}的结构、材质、颜色和版型参考；不得把它误当作其他服装部位`);
+    });
+    const detailRefs = angle === 'back' ? refs.backDetails : refs.frontDetails;
+    detailRefs.forEach(item => push(item, angle === 'back' ? 'back-detail' : 'front-detail', `作为${angleLabel}细节与装饰参考`));
+    refs.accessories.forEach(item => push(item, 'accessory', '作为配饰细节参考'));
     if(board){
-        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}左侧排列同一模特穿着同一产品的正面、侧面、背面全身视图，人物五官、发型、体型、服装版型完全一致；右上展示头部正面、俯视、后脑勺、轮廓、正侧脸和3/4侧脸；右下展示面料、剪裁、五官、鞋子和配饰细节。信息分区清晰，排版整齐，比例统一，不添加说明文字。`;
+        push(refs.modelFront, 'model-front', '用于设定板中的人物正面');
+        push(refs.modelSide, 'model-side', '用于设定板中的人物侧面');
+        push(refs.modelBack, 'model-back', '用于设定板中的人物背面');
     }
+    return plan;
+}
+function classicMultiViewPrompt(view, refs, board=false, referencePlan=[]){
     const angle = view === 'front' ? '正面' : view === 'side' ? '侧面' : '背面';
-    const detailRefs = view === 'back' ? refs.backDetails : refs.frontDetails;
-    return `生成${angle}全身视图。${common}保持模特五官、发型、体型、站姿和服装版型连续；产品材质、颜色、纹理、轮廓与该角度参考严格一致。${detailRefs.length ? '准确采用细节参考中的材质、剪裁与装饰。' : ''}输出单张9:16竖屏资产图，不拼图，不添加文字。`;
+    const common = '写实高级质感，统一中性棚拍光，纯白背景，无遮挡、无透视畸变、无文字、无LOGO、无水印。';
+    const sourceRule = refs.modelAny && refs.productAny
+        ? '同时保持模特身份与服装、产品结构严格一致。'
+        : refs.modelAny
+            ? '未提供独立产品图，只根据模特参考中可见的服装外观扩展服装三视图，不新增不存在的服装层次。'
+            : '未提供模特图，只根据产品参考生成产品视图，可使用中性无脸展示方式，不虚构人物身份。';
+    const mapping = referencePlan.length
+        ? `参考图对应关系（必须严格遵守，按提交顺序）：${referencePlan.map((ref, index) => `参考图${index + 1}「${ref.label}」${ref.instruction}`).join('；')}。`
+        : '没有可用参考图时不要凭空添加主体或产品。';
+    if(board){
+        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}${sourceRule}${mapping}左侧排列同一主体的正面、侧面、背面视图；右上展示头部多角度；右下展示上装、下装、面料、剪裁、鞋子与配饰细节特写。信息分区清晰，排版整齐，比例统一，不添加说明文字。`;
+    }
+    return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、站姿以及上装和下装的版型连续；输入的上装参考只能用于上装，输入的下装参考只能用于下装，缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展，不能改变颜色、材质、纹理、轮廓或服装层次。输出单张9:16竖屏资产图，不拼图，不添加文字。`;
 }
 function classicMultiViewBodyHtml(node){
     const inputs = classicMultiViewConnections(node);
-    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-') ? '产品角度' : '细节与配饰';
+    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰';
     const slots = CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => {
         const count = inputs.get(role)?.length || 0;
-        const optional = ['front-detail','back-detail','accessory'].includes(role);
-        const state = count ? `${count} 张已连接` : optional ? '可选输入' : role === 'model-side' || role === 'model-back' ? '可用正面扩展' : '待连接';
-        return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="classic-multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
+        const state = count ? `${count} 张已连接` : '可选输入';
+        return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="classic-multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
     }).join('');
     const outputNames = ['16:9 三视图模卡','正面 9:16','侧面 9:16','背面 9:16'];
     const outputs = (node.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
     const previews = outputs.length ? `<div class="classic-multi-view-output-grid">${outputs.map((url, index) => `<div class="classic-multi-view-output"><img src="${escapeAttr(canvasDisplayMediaUrl(url, ''))}" alt="${escapeAttr(outputNames[index] || `资产 ${index + 1}`)}" draggable="false"><span>${escapeHtml(outputNames[index] || `资产 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
-    const status = node.multiViewStatus === 'running' ? '正在并行生成 4 张资产…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败') : outputs.length ? '已生成 4 张资产，可从右侧输出端继续连接' : '连接图片到左侧对应端口';
+    const status = node.multiViewStatus === 'running' ? '正在并行生成 4 张资产…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败') : outputs.length ? '已生成 4 张资产，可从右侧输出端继续连接' : '连接任意一张模特或产品图片后点击生成';
     return `<div class="classic-multi-view-special">
-        <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 产品 / 细节」分组</small></div><span>9 个输入 · 4 张输出</span></div>
+        <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
         <div class="classic-multi-view-input-list">${slots}</div>
         ${previews}
         <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span><button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
@@ -7279,15 +7349,13 @@ async function runClassicMultiViewNode(nodeId){
     const node = nodes.find(item => item.id === nodeId && item.type === 'multiView');
     if(!node || node.multiViewStatus === 'running') return;
     const refs = classicMultiViewInputRefs(node);
-    if(!refs.modelFront){ showErrorModal('请至少连接模特正面','创建三视图'); return; }
-    if(!refs.productFront || !refs.productSide || !refs.productBack){ showErrorModal('请连接产品正面、产品侧面和产品背面','创建三视图'); return; }
+    if(!refs.modelAny && !refs.productAny){ showErrorModal('请至少连接一张模特或产品图片','创建三视图'); return; }
     const selection = defaultImageGenerationSelection();
     const providerId = resolveImageProviderId(node.apiProvider || selection.providerId);
     const model = resolveImageModel(node.model || selection.model);
     if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型','创建三视图'); return; }
     const resolution = node.resolution || '2k';
     const quality = normalizedImageQuality(node.quality || 'high');
-    const allRefs = [refs.modelFront, refs.modelSide, refs.modelBack, refs.productFront, refs.productSide, refs.productBack, ...refs.frontDetails, ...refs.backDetails, ...refs.accessories].filter(item => item?.url);
     const startedAt = nowMs();
     node.multiViewStatus = 'running';
     node.multiViewError = '';
@@ -7296,15 +7364,10 @@ async function runClassicMultiViewNode(nodeId){
     render();
     scheduleSave();
     const taskFor = async (view, board=false) => {
-        const viewRefs = board ? allRefs : [
-            view === 'front' ? refs.modelFront : view === 'side' ? refs.modelSide : refs.modelBack,
-            view === 'front' ? refs.productFront : view === 'side' ? refs.productSide : refs.productBack,
-            ...(view === 'back' ? refs.backDetails : refs.frontDetails),
-            ...refs.accessories
-        ].filter(item => item?.url);
+        const viewRefs = classicMultiViewReferencePlan(view, refs, board);
         const ratio = board ? '16:9' : '9:16';
         const payload = {
-            prompt:classicMultiViewPrompt(view, refs, board),
+            prompt:classicMultiViewPrompt(view, refs, board, viewRefs),
             provider_id:providerId,
             model,
             size:apiImageSize('custom', resolution, ratio),
@@ -7529,7 +7592,7 @@ function renderNode(node){
     window.CanvasEcommerceNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
-    if(node.type === 'multiView' && Number(node.h) === 720 && !(node.generatedOutputs || []).length) node.h = 560;
+    if(node.type === 'multiView' && [560, 720].includes(Number(node.h)) && !(node.generatedOutputs || []).length) node.h = 680;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const hasFixedSize = Boolean(node.h || size.h);
@@ -7950,7 +8013,7 @@ function defaultNodeSize(type){
     if(type === 'ltxDirector') return {w:1000, h:800};
     if(type === 'output') return {w:460, h:0};
     if(type === 'panorama') return {w:520, h:520};
-    if(type === 'multiView') return {w:700, h:560};
+    if(type === 'multiView') return {w:700, h:680};
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'poseReference') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};
@@ -16643,7 +16706,11 @@ function canConnect(fromId, toId, inputRole=''){
     return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','poseReference','relight','angle'].includes(from.type);
 }
 function sanitizeConnections(){
-    connections = (connections || []).filter(c => canConnect(c.from, c.to, c.inputRole || ''));
+    const source = connections || [];
+    const migrated = migrateClassicMultiViewConnections(source);
+    const changed = migrated !== source;
+    connections = migrated.filter(c => canConnect(c.from, c.to, c.inputRole || ''));
+    if(changed) scheduleSave();
 }
 function endDrag(event=null){
     const hadContentDrag = Boolean(dragNode || resizeNode || llmPaneDrag || knifeChanged || tempLink);

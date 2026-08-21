@@ -1509,7 +1509,7 @@ function createMultiViewNode(point, sourceNode=null){
     const baseY = sourceRect ? sourceRect.y : (point?.y || 0) - 320;
     const node = {
         id:uid('multi-view'), type:'smart-image', specialType:'multi-view',
-        x:baseX, y:baseY, w:700, h:560, title:'创建三视图', images:[],
+        x:baseX, y:baseY, w:700, h:680, title:'创建三视图', images:[],
         multiViewStatus:'idle', multiViewInputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
     nodes.push(node);
@@ -1519,22 +1519,50 @@ function createMultiViewNode(point, sourceNode=null){
     return node;
 }
 const MULTI_VIEW_INPUT_SLOTS = [
-    ['model-front', '模特正面', false], ['model-side', '模特侧面', true], ['model-back', '模特背面', true],
-    ['product-front', '产品正面', false], ['product-side', '产品侧面', false], ['product-back', '产品背面', false],
+    ['model-front', '模特正面', true], ['model-side', '模特侧面', true], ['model-back', '模特背面', true],
+    ['product-upper-front', '上装正面', true], ['product-upper-side', '上装侧面', true], ['product-upper-back', '上装背面', true],
+    ['product-lower-front', '下装正面', true], ['product-lower-side', '下装侧面', true], ['product-lower-back', '下装背面', true],
     ['front-detail', '正面细节', true], ['back-detail', '背面细节', true], ['accessory', '配饰', true]
 ];
+const MULTI_VIEW_LEGACY_ROLE_ALIASES = new Map([
+    ['product-front', ['product-upper-front', 'product-lower-front']],
+    ['product-side', ['product-upper-side', 'product-lower-side']],
+    ['product-back', ['product-upper-back', 'product-lower-back']]
+]);
 const MULTI_VIEW_MULTI_INPUT_ROLES = new Set(['front-detail', 'back-detail', 'accessory']);
+function multiViewRoleTargets(role){
+    if(MULTI_VIEW_INPUT_SLOTS.some(item => item[0] === role)) return [role];
+    return MULTI_VIEW_LEGACY_ROLE_ALIASES.get(role) || [];
+}
+function migrateSmartMultiViewConnections(){
+    if(!canvas || !Array.isArray(canvas.connections)) return false;
+    let changed = false;
+    const next = [];
+    canvas.connections.forEach(connection => {
+        const target = nodes.find(item => item.id === connection.to);
+        const roles = target?.specialType === 'multi-view' && (connection.kind || 'flow') === 'input'
+            ? MULTI_VIEW_LEGACY_ROLE_ALIASES.get(connection.inputRole || '')
+            : null;
+        if(!roles?.length){ next.push(connection); return; }
+        changed = true;
+        roles.forEach((role, index) => next.push({...connection, ...(index ? {id:uid('c')} : {}), inputRole:role}));
+    });
+    if(changed) canvas.connections = next;
+    return changed;
+}
 function multiViewRoleRatio(role){
-    const index = MULTI_VIEW_INPUT_SLOTS.findIndex(item => item[0] === role);
+    const index = MULTI_VIEW_INPUT_SLOTS.findIndex(item => item[0] === (multiViewRoleTargets(role)[0] || role));
     return index >= 0 ? (index + 1) / (MULTI_VIEW_INPUT_SLOTS.length + 1) : 0.5;
 }
 function multiViewConnections(node){
     const result = new Map(MULTI_VIEW_INPUT_SLOTS.map(([role]) => [role, []]));
     (canvas?.connections || []).filter(conn => conn.to === node?.id && (conn.kind || 'flow') === 'input').forEach(conn => {
-        if(!result.has(conn.inputRole)) return;
+        const roles = multiViewRoleTargets(conn.inputRole || '');
         const source = nodes.find(item => item.id === conn.from);
         if(!source) return;
-        imagesForNode(source).filter(item => item?.url && mediaKindForItem(item) === 'image').forEach(item => result.get(conn.inputRole).push(item));
+        imagesForNode(source).filter(item => item?.url && mediaKindForItem(item) === 'image').forEach(item => {
+            roles.forEach(role => result.get(role)?.push(item));
+        });
     });
     return result;
 }
@@ -1542,8 +1570,8 @@ function multiViewBodyHtml(node){
     const inputs = multiViewConnections(node);
     const outputNames = ['三视图+细节横板', '正面视图', '侧面视图', '背面视图'];
     const outputs = (node.images || []).filter(item => item?.url);
-    const status = node.multiViewStatus === 'running' ? '生成中…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputs.length >= 4 ? '4 张资产已生成' : '连接图片后点击生成';
-    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-') ? '产品角度' : '细节与配饰';
+    const status = node.multiViewStatus === 'running' ? '生成中…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputs.length >= 4 ? '4 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
+    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰';
     const slots = MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index) => {
         const count = inputs.get(role)?.length || 0;
         const detail = count ? `${count} 张已连接` : (optional ? '可选输入' : '待连接');
@@ -1551,7 +1579,7 @@ function multiViewBodyHtml(node){
     }).join('');
     const outputPreview = outputs.length ? `<div class="multi-view-output-grid">${outputs.map((item, index) => `<div class="multi-view-output-item"><img src="${escapeAttr(displayMediaUrl(item))}" alt="${escapeAttr(outputNames[index] || '生成结果')}" loading="lazy"><span>${escapeHtml(outputNames[index] || `视图 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
     return `<div class="special-node multi-view-special" data-special-node="multi-view">
-        <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 产品 / 细节」分组</small></div><span>9 个输入 · 4 张输出</span></div>
+        <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
         <div class="multi-view-input-list">${slots}</div>
         ${outputPreview}
         <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
@@ -2102,7 +2130,9 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'multi-view') {
         const hasOutputs = (node.images || []).some(item => item?.url);
         const savedHeight = Number(node.h);
-        const height = !hasOutputs && (!Number.isFinite(savedHeight) || savedHeight === 720) ? 560 : Math.max(hasOutputs ? 600 : 520, savedHeight || 560);
+        const height = !hasOutputs && (!Number.isFinite(savedHeight) || savedHeight === 560 || savedHeight === 720)
+            ? 680
+            : Math.max(hasOutputs ? 720 : 680, savedHeight || 680);
         return {cols:1, rows:1, width:Math.max(620, Math.round(Number(node.w) || 700)), height, thumb:96, single:true};
     }
     if(node?.type === 'smart-group'){
@@ -5486,6 +5516,7 @@ function applyMergedServerCanvas(serverCanvas){
     const nodeIds = new Set(mergedNodes.map(n => n.id));
     nodes = mergedNodes;
     canvas.connections = mergeSmartConnections(canvas.connections, serverCanvas.connections, nodeIds);
+    const migratedMultiViewConnections = migrateSmartMultiViewConnections();
     const cleanedState = clearCompletedNodeBusyStates();
     const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
     canvas.updated_at = Number(serverCanvas.updated_at || canvas.updated_at || 0);
@@ -5496,7 +5527,7 @@ function applyMergedServerCanvas(serverCanvas){
     }
     render();
     if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
-    if(cleanedState || recoveredLoopOutputs) scheduleSave();
+    if(cleanedState || recoveredLoopOutputs || migratedMultiViewConnections) scheduleSave();
     resumeSmartPendingTasks();
     resumeJimengPendingNodes();
     return true;
@@ -6130,6 +6161,7 @@ async function loadCanvas(){
         });
         migrateSmartGroupImageMembers();
         canvas.connections = Array.isArray(canvas.connections) ? canvas.connections : [];
+        const migratedMultiViewConnections = migrateSmartMultiViewConnections();
         nodes.forEach(n => {
             if(n.specialType === 'multi-view' && n.multiViewStatus === 'running' && !(n.multiViewPendingTasks || []).length){
                 n.multiViewStatus = 'idle';
@@ -6163,7 +6195,7 @@ async function loadCanvas(){
         updateProviderModels();
         applyViewport();
         render();
-        if(prunedRuntimeCollections || cleanedDetachedInputs || cleanedCompletedState || recoveredLoopOutputs || hiddenCompletedTimers) scheduleSave();
+        if(prunedRuntimeCollections || cleanedDetachedInputs || cleanedCompletedState || recoveredLoopOutputs || hiddenCompletedTimers || migratedMultiViewConnections) scheduleSave();
         resumeSmartPendingTasks();
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
@@ -8572,43 +8604,90 @@ function multiViewInputRefs(node){
     const inputs = multiViewConnections(node);
     const first = role => inputs.get(role)?.[0] || null;
     const all = role => (inputs.get(role) || []).filter(item => item?.url);
-    const modelFront = first('model-front');
-    const modelSide = first('model-side') || modelFront;
-    const modelBack = first('model-back') || modelFront;
+    const modelAny = first('model-front') || first('model-side') || first('model-back');
+    const modelFront = first('model-front') || modelAny;
+    const modelSide = first('model-side') || modelAny;
+    const modelBack = first('model-back') || modelAny;
+    const products = Object.fromEntries(MULTI_VIEW_INPUT_SLOTS
+        .filter(([role]) => role.startsWith('product-'))
+        .map(([role]) => [role, first(role)]));
     return {
-        modelFront, modelSide, modelBack,
-        productFront:first('product-front'), productSide:first('product-side'), productBack:first('product-back'),
+        modelAny, modelFront, modelSide, modelBack,
+        modelFrontRole:first('model-front') ? 'model-front' : first('model-side') ? 'model-side' : 'model-back',
+        modelSideRole:first('model-side') ? 'model-side' : first('model-front') ? 'model-front' : 'model-back',
+        modelBackRole:first('model-back') ? 'model-back' : first('model-front') ? 'model-front' : 'model-side',
+        products,
+        productAny:Object.values(products).find(Boolean) || null,
         frontDetails:all('front-detail'), backDetails:all('back-detail'), accessories:all('accessory')
     };
 }
-function multiViewPromptFor(view, refs, board=false){
-    const subject = view === 'front' ? refs.modelFront : view === 'side' ? refs.modelSide : view === 'back' ? refs.modelBack : refs.modelFront;
-    const product = view === 'front' ? refs.productFront : view === 'side' ? refs.productSide : view === 'back' ? refs.productBack : null;
-    const detailRefs = view === 'back' ? refs.backDetails : refs.frontDetails;
-    const common = '写实高级质感，统一中性棚拍光，纯白背景，主体身份与服装/产品结构严格一致，无遮挡、无文字、无LOGO、无水印。';
+function multiViewRoleLabel(role){
+    return MULTI_VIEW_INPUT_SLOTS.find(item => item[0] === role)?.[1] || role;
+}
+function multiViewReferencePlan(view, refs, board=false){
+    const angle = view === 'side' ? 'side' : view === 'back' ? 'back' : 'front';
+    const angleLabel = angle === 'front' ? '正面' : angle === 'side' ? '侧面' : '背面';
+    const plan = [];
+    const byUrl = new Map();
+    const push = (item, role, instruction) => {
+        if(!item?.url) return;
+        const label = multiViewRoleLabel(role);
+        const existing = byUrl.get(item.url);
+        if(existing){
+            if(!existing.label.includes(label)) existing.label += ` / ${label}`;
+            existing.instruction += `；${instruction}`;
+            return;
+        }
+        const entry = {...item, kind:'image', role, reference_id:role, label, instruction, name:item.name || label};
+        byUrl.set(item.url, entry);
+        plan.push(entry);
+    };
+    const modelRole = angle === 'front' ? refs.modelFrontRole : angle === 'side' ? refs.modelSideRole : refs.modelBackRole;
+    push(angle === 'front' ? refs.modelFront : angle === 'side' ? refs.modelSide : refs.modelBack, modelRole, `作为${angleLabel}人物身份与姿态主参考；缺失角度由此图自然扩展`);
+    Object.entries(refs.products || {}).forEach(([role, item]) => {
+        push(item, role, `作为${multiViewRoleLabel(role)}的结构、材质、颜色和版型参考；不得把它误当作其他服装部位`);
+    });
+    const detailRefs = angle === 'back' ? refs.backDetails : refs.frontDetails;
+    detailRefs.forEach(item => push(item, angle === 'back' ? 'back-detail' : 'front-detail', `作为${angleLabel}细节与装饰参考`));
+    refs.accessories.forEach(item => push(item, 'accessory', '作为配饰细节参考'));
     if(board){
-        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}左侧排列同一模特穿着同一产品的正面、侧面、背面全身视图；右上展示头部多角度；右下展示服装面料、剪裁、五官、鞋子与配饰细节特写。画面分区清晰、排版整齐、比例统一，不要添加任何说明文字。`;
+        push(refs.modelFront, 'model-front', '用于设定板中的人物正面');
+        push(refs.modelSide, 'model-side', '用于设定板中的人物侧面');
+        push(refs.modelBack, 'model-back', '用于设定板中的人物背面');
     }
+    return plan;
+}
+function multiViewPromptFor(view, refs, board=false, referencePlan=[]){
     const angle = view === 'front' ? '正面' : view === 'side' ? '侧面' : '背面';
-    return `生成${angle}全身视图，${common}保持模特五官、发型、体型、姿态和服装版型连续；产品的材质、颜色、纹理、轮廓与该角度参考完全一致。${detailRefs.length ? '参考细节图中的材质与配饰，细节清晰。' : ''}输出单张9:16竖屏图，不要拼图，不要文字。`;
+    const common = '写实高级质感，统一中性棚拍光，纯白背景，无遮挡、无文字、无LOGO、无水印。';
+    const sourceRule = refs.modelAny && refs.productAny
+        ? '同时保持模特身份与服装/产品结构严格一致。'
+        : refs.modelAny
+            ? '未提供独立产品图，只根据模特参考中可见的服装外观扩展服装三视图，不新增不存在的服装层次。'
+            : '未提供模特图，只根据产品参考生成产品视图，可使用中性无脸展示方式，不虚构人物身份。';
+    const mapping = referencePlan.length
+        ? `参考图对应关系（必须严格遵守，按提交顺序）：${referencePlan.map((ref, index) => `参考图${index + 1}「${ref.label}」${ref.instruction}`).join('；')}。`
+        : '没有可用参考图时不要凭空添加主体或产品。';
+    if(board){
+        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}${sourceRule}${mapping}左侧排列同一主体的正面、侧面、背面视图；右上展示头部多角度；右下展示上装、下装、面料、剪裁、鞋子与配饰细节特写。画面分区清晰、排版整齐、比例统一，不添加任何说明文字。`;
+    }
+    return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、姿态以及上装和下装的版型连续；输入的上装参考只能用于上装，输入的下装参考只能用于下装，缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展，不能改变颜色、材质、纹理、轮廓或服装层次。输出单张9:16竖屏图，不拼图，不添加文字。`;
 }
 async function generateSmartMultiView(node){
     if(!node || node.specialType !== 'multi-view' || node.multiViewStatus === 'running') return;
     const refs = multiViewInputRefs(node);
-    if(!refs.modelFront) { toast('请至少连接模特正面'); return; }
-    if(!refs.productFront || !refs.productSide || !refs.productBack){ toast('请连接产品正面、侧面和背面'); return; }
+    if(!refs.modelAny && !refs.productAny){ toast('请至少连接一张模特或产品图片'); return; }
     const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
     if(!base.provider_id || !base.model){ toast('请先在 API 设置中配置图片生成模型'); return; }
     const startedAt = nowMs();
     node.multiViewStatus = 'running'; node.images = [];
     render(); scheduleSave();
-    const allRefs = [refs.modelFront, refs.modelSide, refs.modelBack, refs.productFront, refs.productSide, refs.productBack, ...refs.frontDetails, ...refs.backDetails, ...refs.accessories].filter(item => item?.url);
     const taskFor = async (view, board=false) => {
-        const viewRefs = board ? allRefs : [view === 'front' ? refs.modelFront : view === 'side' ? refs.modelSide : refs.modelBack, view === 'front' ? refs.productFront : view === 'side' ? refs.productSide : refs.productBack, ...(view === 'back' ? refs.backDetails : refs.frontDetails), ...refs.accessories].filter(item => item?.url);
+        const viewRefs = multiViewReferencePlan(view, refs, board);
         const ratio = board ? '16:9' : '9:16';
         const [rw, rh] = ratio.split(':').map(value => Number(value));
         const runSettings = {...base, engine:'api', apiKind:'image', ratio:'custom', resolution:base.resolution || '2k', customRatio:ratio, customRatioWidth:rw, customRatioHeight:rh, customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1};
-        const submitted = await runApiGeneration(multiViewPromptFor(view, refs, board), viewRefs.map(item => ({...item, kind:'image'})), runSettings);
+        const submitted = await runApiGeneration(multiViewPromptFor(view, refs, board, viewRefs), viewRefs, runSettings);
         const taskId = submitted?.taskIds?.[0];
         if(!taskId) throw new Error(`${board ? '三视图横板' : `${view}视图`}任务创建失败`);
         const result = await pollSmartCanvasTask(taskId);

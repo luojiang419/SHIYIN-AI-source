@@ -101,6 +101,8 @@ from canvas_core.video_frame_extraction import (
 )
 from canvas_core.bridge_package import BridgePackageError, read_bridge_package, write_bridge_package
 from canvas_core.bridge_media import materialize_bridge_frames
+from canvas_core.bridge_direct import DirectBridgeError, materialize_direct_bridge_frames
+from canvas_core.bridge_manifest import BridgeManifestError, validate_manifest
 from canvas_core.bridge_export import build_shiyin_bridge_payload
 from canvas_core.bridge_sync import find_bridge_target, sync_film_bridge_canvas
 from canvas_core.kling_cli import (
@@ -213,6 +215,7 @@ PUBLIC_HTTP_PATHS = {
     "/api/runtime/shutdown",
     "/api/canvas-bridges/film/capabilities",
     "/api/canvas-bridges/film/receive",
+    "/api/canvas-bridges/film/receive-direct",
 }
 
 ADMIN_ONLY_HTTP_PATHS = {
@@ -395,7 +398,9 @@ STARTUP_MAINTENANCE_STATE = {
     "finished_at": 0.0,
     "steps": {},
 }
-APP_VERSION = "1.0.215"
+ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
+ACTIVE_CANVAS_ID = ""
+APP_VERSION = "1.0.216"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -11461,7 +11466,17 @@ def require_film_bridge_loopback(request: Request) -> None:
 
 @app.get("/api/canvas-bridges/film/capabilities")
 async def film_bridge_capabilities(request: Request):
+    global ACTIVE_CANVAS_ID
     require_film_bridge_loopback(request)
+    active_id = str(ACTIVE_CANVAS_ID or ACTIVE_CANVAS_BY_ACCOUNT.get(current_account_id()) or "").strip()
+    active_canvas = None
+    if active_id:
+        try:
+            active_canvas = load_canvas(active_id)
+        except HTTPException:
+            ACTIVE_CANVAS_BY_ACCOUNT.pop(current_account_id(), None)
+            ACTIVE_CANVAS_ID = ""
+            active_id = ""
     return {
         "app": "shiyin-ai",
         "schema": "shiyin-film-bridge",
@@ -11470,6 +11485,123 @@ async def film_bridge_capabilities(request: Request):
         "automatic_receive": True,
         "incremental_sync": True,
         "file_fallback": True,
+        "direct_receive": True,
+        "active_canvas_id": active_canvas.get("id") if active_canvas else "",
+        "active_canvas_title": active_canvas.get("title") if active_canvas else "",
+    }
+
+
+@app.post("/api/canvas-bridges/film/receive-direct")
+async def receive_film_bridge_direct(
+    request: Request,
+    manifest: str = Form(...),
+    frames: List[UploadFile] = File(default=[]),
+    canvas_id: str = Form(""),
+    canvas_title: str = Form(""),
+    create_prompt_nodes: bool = Form(False),
+):
+    """本机直接接收 filmstoryboard 图片数据，不生成或读取桥接压缩包。"""
+    global ACTIVE_CANVAS_ID
+    require_film_bridge_loopback(request)
+    try:
+        manifest_value = json.loads(manifest)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="直接桥接 manifest 不是有效 JSON。") from exc
+    if not isinstance(manifest_value, dict):
+        raise HTTPException(status_code=400, detail="直接桥接 manifest 必须是对象。")
+    bridge_id = str(manifest_value.get("bridge_id") or "").strip()
+    if not bridge_id or manifest_value.get("direction") != "film-to-shiyin":
+        raise HTTPException(status_code=400, detail="直接桥接只支持 film-to-shiyin manifest。")
+    storyboard = manifest_value.get("storyboard") if isinstance(manifest_value.get("storyboard"), dict) else {}
+    selected_variant = str(storyboard.get("selected_variant") or "original").strip()
+    uploads: dict[str, bytes] = {}
+    total = 0
+    max_file_bytes = 100 * 1024 * 1024
+    max_total_bytes = 2 * 1024 * 1024 * 1024
+    for upload in frames:
+        name = str(upload.filename or "").replace("\\", "/")
+        if not name or name in uploads or name.startswith("/") or "/../" in f"/{name}":
+            raise HTTPException(status_code=400, detail=f"直接桥接文件名无效：{name or '空文件名'}")
+        content = await upload.read()
+        if not content:
+            raise HTTPException(status_code=400, detail=f"直接桥接图片为空：{name}")
+        if len(content) > max_file_bytes:
+            raise HTTPException(status_code=413, detail=f"直接桥接单张图片不能超过 100MB：{name}")
+        total += len(content)
+        if total > max_total_bytes:
+            raise HTTPException(status_code=413, detail="直接桥接图片总大小不能超过 2GB。")
+        uploads[name] = content
+    if not uploads:
+        raise HTTPException(status_code=400, detail="直接桥接没有上传图片。")
+    try:
+        normalized_manifest = validate_manifest(manifest_value)
+        if normalized_manifest.get("direction") != "film-to-shiyin":
+            raise DirectBridgeError("直接桥接只支持 film-to-shiyin manifest。")
+    except (BridgeManifestError, DirectBridgeError) as exc:
+        raise HTTPException(status_code=400, detail=f"直接桥接 manifest 校验失败：{exc}") from exc
+    requested_id = str(canvas_id or "").strip()
+    if requested_id:
+        canvas = load_canvas(requested_id)
+    else:
+        active_id = str(ACTIVE_CANVAS_ID or ACTIVE_CANVAS_BY_ACCOUNT.get(current_account_id()) or "").strip()
+        canvas = None
+        if active_id:
+            try:
+                canvas = load_canvas(active_id)
+            except HTTPException:
+                ACTIVE_CANVAS_BY_ACCOUNT.pop(current_account_id(), None)
+                active_id = ""
+        if canvas is None:
+            canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id)
+        if canvas is None:
+            title = (canvas_title.strip() or str(storyboard.get("board_name") or "film 故事板").strip() or "film 故事板")[:80]
+            canvas = new_canvas(title=title, icon="clapperboard", kind="classic", project=DEFAULT_PROJECT_ID)
+    try:
+        frame_records = await asyncio.to_thread(
+            materialize_direct_bridge_frames,
+            normalized_manifest,
+            uploads,
+            os.fspath(OUTPUT_INPUT_DIR),
+            canvas["id"],
+            selected_variant=selected_variant,
+        )
+    except DirectBridgeError as exc:
+        raise HTTPException(status_code=400, detail=f"直接桥接图片校验失败：{exc}") from exc
+    sync_frames = []
+    for index, frame in enumerate(frame_records):
+        local_path = str(frame.get("local_path") or "")
+        url = media_url_from_path(local_path)
+        if not url:
+            raise HTTPException(status_code=500, detail="无法为直接桥接图片生成访问地址。")
+        register_internal_media_object(url, "input", "image", "film-bridge-direct")
+        sync_frames.append({
+            **frame,
+            "url": url,
+            "name": frame.get("source_name") or f"film_frame_{index + 1:04d}{Path(local_path).suffix.lower() or '.png'}",
+        })
+    try:
+        sync_result = sync_film_bridge_canvas(
+            canvas,
+            normalized_manifest,
+            sync_frames,
+            create_prompt_nodes=bool(create_prompt_nodes),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"直接桥接增量同步失败：{exc}") from exc
+    save_canvas(canvas)
+    ACTIVE_CANVAS_ID = canvas["id"]
+    ACTIVE_CANVAS_BY_ACCOUNT[current_account_id()] = canvas["id"]
+    return {
+        "ok": True,
+        "transport": "direct-multipart",
+        "canvas_id": canvas["id"],
+        "canvas_title": canvas.get("title") or "",
+        "group_id": sync_result["group"]["id"],
+        "frame_count": len(sync_result["image_nodes"]),
+        "prompt_count": len(sync_result["prompt_nodes"]),
+        "sync_mode": sync_result["sync_mode"],
+        "sync_stats": sync_result["stats"],
+        "editor_url": f"/static/canvas.html?id={urllib.parse.quote(canvas['id'])}",
     }
 
 
@@ -17860,6 +17992,9 @@ async def get_canvas(canvas_id: str):
 @app.post("/api/canvases/{canvas_id}/touch")
 async def touch_canvas(canvas_id: str):
     canvas = load_canvas(canvas_id)
+    global ACTIVE_CANVAS_ID
+    ACTIVE_CANVAS_ID = canvas["id"]
+    ACTIVE_CANVAS_BY_ACCOUNT[current_account_id()] = canvas["id"]
     save_canvas(canvas)
     return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}
 

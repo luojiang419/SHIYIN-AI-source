@@ -126,6 +126,7 @@ def _frame(frame: Mapping[str, Any], index: int) -> dict[str, Any]:
         "caption": _text(frame.get("caption"), "caption", max_length=8000),
         "sha256": _text(frame.get("sha256"), "sha256", max_length=128),
         "metadata": copy.deepcopy(frame.get("metadata") if isinstance(frame.get("metadata"), Mapping) else {}),
+        "upload_name": safe_relative_path(frame.get("upload_name"), f"frames[{index}].upload_name") if frame.get("upload_name") else "",
     }
 
 

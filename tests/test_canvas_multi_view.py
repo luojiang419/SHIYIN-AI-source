@@ -38,21 +38,24 @@ def test_multi_view_has_all_role_ports_and_optional_multi_inputs():
     assert "front-detail', 'back-detail', 'accessory" in SMART_JS
 
 
-def test_multi_view_generates_board_and_three_vertical_assets():
+def test_multi_view_generates_board_detail_and_three_vertical_assets():
     assert "multi-view-board.png" in SMART_JS
+    assert "multi-view-detail.png" in SMART_JS
     assert "`multi-view-${view}.png`" in SMART_JS
-    assert "Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])" in SMART_JS
+    assert "Promise.all([taskFor('front', 'board', 0), taskFor('detail', 'detail', 1), taskFor('front', 'view', 2), taskFor('side', 'view', 3), taskFor('back', 'view', 4)])" in SMART_JS
+    assert "outputKind === 'board' ? '16:9' : outputKind === 'detail' ? '3:4' : '9:16'" in SMART_JS
     assert "customRatio:ratio" in SMART_JS
     assert "smartMultiViewSettingsForNode(node)" in SMART_JS
     assert "submitted.providerId" in SMART_JS
 
 
-def test_multi_view_shows_four_loading_slots_and_updates_in_grid_order():
+def test_multi_view_shows_five_loading_slots_and_updates_in_grid_order():
     for source in (SMART_JS, CANVAS_JS):
-        assert "Array.from({length:4" in source
+        assert "length:5" in source
         assert "multiViewOutputs" in source
     assert "正在生成…" in SMART_JS
-    assert "out._pending = Array.from({length:4" in CANVAS_JS
+    assert "out._pending = Array.from({length:5" in CANVAS_JS
+    assert "index === 1 ? {w:3,h:4}" in CANVAS_JS
     assert "outputLayout = {...node.multiViewOutputLayout}" in CANVAS_JS
     assert "type:'grid-split'" in CANVAS_JS
     assert ".output-node .output-grid.grid-layout" in MULTI_VIEW_CSS
@@ -89,7 +92,7 @@ def test_classic_canvas_image_toolbar_exposes_create_three_views_action():
     assert "const inputRole = type === 'multi-view' ? 'model-front' : ''" in CANVAS_JS
 
 
-def test_classic_canvas_multi_view_node_has_all_ports_and_four_asset_generation():
+def test_classic_canvas_multi_view_node_has_all_ports_and_five_asset_generation():
     assert "const CLASSIC_MULTI_VIEW_INPUT_SLOTS" in CANVAS_JS
     for role in [
         "model-front", "model-side", "model-back",
@@ -98,8 +101,9 @@ def test_classic_canvas_multi_view_node_has_all_ports_and_four_asset_generation(
         "front-detail", "back-detail", "accessory",
     ]:
         assert role in CANVAS_JS
-    assert "Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])" in CANVAS_JS
-    assert "classicMultiViewPrompt(view, refs, board, viewRefs)" in CANVAS_JS
+    assert "Promise.all([taskFor('front', 'board', 0), taskFor('detail', 'detail', 1), taskFor('front', 'view', 2), taskFor('side', 'view', 3), taskFor('back', 'view', 4)])" in CANVAS_JS
+    assert "classicMultiViewPrompt(view, refs, outputKind, viewRefs)" in CANVAS_JS
+    assert "multi-view-detail.png" in CANVAS_JS
     assert "data-multi-view-run" in CANVAS_JS
     assert ".classic-multi-view-output-grid" in SPECIAL_CSS
     for setting in [
@@ -128,10 +132,10 @@ def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
 
 
 def test_both_canvas_pages_load_multi_view_layout_overrides():
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-node-layout.1' in SMART_HTML
-    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-node-layout.1' in CANVAS_HTML
-    assert 'canvas.js?v=2026.08.21.multi-view-node-layout.1' in CANVAS_HTML
-    assert 'smart-canvas.js?v=2026.08.21.multi-view-node-layout.1' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.1' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.1' in CANVAS_HTML
+    assert 'canvas.js?v=2026.08.21.multi-view-five-assets.1' in CANVAS_HTML
+    assert 'smart-canvas.js?v=2026.08.21.multi-view-five-assets.1' in SMART_HTML
 
 
 def test_classic_multi_view_keeps_results_only_in_output_node_and_locks_controls_visible():
@@ -139,7 +143,7 @@ def test_classic_multi_view_keeps_results_only_in_output_node_and_locks_controls
     body_end = CANVAS_JS.index("function sanitizeClassicMultiViewSettings", body_start)
     body = CANVAS_JS[body_start:body_end]
     assert "classic-multi-view-output-grid" not in body
-    assert "4 张资产已在右侧输出节点中生成" in body
+    assert "5 张资产已在右侧输出节点中生成" in body
     assert ".multiView-node.sized .classic-multi-view-run-row" in MULTI_VIEW_CSS
     assert ".multiView-node.sized .classic-multi-view-input-list" in MULTI_VIEW_CSS
     assert "resizeNode.node.type === 'multiView' ? (min.h || 780)" in CANVAS_JS
@@ -157,8 +161,8 @@ def test_multi_view_uses_single_column_rows_for_port_alignment():
 
 
 def test_multi_view_product_slots_are_split_by_garment_and_angle():
-    assert "<span>12 个输入 · 4 张输出</span>" in SMART_JS
-    assert "<span>12 个输入 · 4 张输出</span>" in CANVAS_JS
+    assert "<span>12 个输入 · 5 张输出</span>" in SMART_JS
+    assert "<span>12 个输入 · 5 张输出</span>" in CANVAS_JS
     assert "role.startsWith('product-upper-') ? '上装'" in SMART_JS
     assert "role.startsWith('product-lower-') ? '下装'" in SMART_JS
     assert "role.startsWith('product-upper-') ? '上装'" in CANVAS_JS
@@ -173,11 +177,33 @@ def test_multi_view_expands_missing_angles_and_maps_reference_semantics():
         assert "请至少连接一张模特或产品图片" in source
         assert "参考图对应关系（必须严格遵守，按提交顺序）" in source
         assert "reference_id:role" in source
-        assert "输入的上装参考只能用于上装" in source
-        assert "输入的下装参考只能用于下装" in source
-        assert "缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展" in source
+        assert "上装参考仅用于上装" in source
+        assert "下装参考仅用于下装" in source
+        assert "缺失部位与缺失角度根据已提供图片自然延展" in source
     assert "请连接产品正面、产品侧面和产品背面" not in SMART_JS
     assert "请连接产品正面、产品侧面和产品背面" not in CANVAS_JS
+
+
+def test_multi_view_board_contains_only_three_views_and_detail_is_separate():
+    for source, prompt_function, next_function in [
+        (SMART_JS, "function multiViewPromptFor", "async function generateSmartMultiView"),
+        (CANVAS_JS, "function classicMultiViewPrompt", "function classicMultiViewGridForIndex"),
+    ]:
+        prompt_body = source[source.index(prompt_function):source.index(next_function, source.index(prompt_function))]
+        assert "if(outputKind === 'board')" in prompt_body
+        assert "正面全身、标准侧面全身、背面全身三幅照片" in prompt_body
+        assert "if(outputKind === 'detail')" in prompt_body
+        assert "竖向三列四行的专业写实细节摄影板" in prompt_body
+        assert "面料织纹、剪裁车线、腰头、口袋、鞋子、包袋与配饰" in prompt_body
+        assert "右上展示头部多角度" not in prompt_body
+        assert "右下展示上装" not in prompt_body
+        assert "生成一张16:9" not in prompt_body
+        assert "单张9:16" not in prompt_body
+
+    assert "['纯三视图横板', '独立细节图', '正面视图', '侧面视图', '背面视图']" in SMART_JS
+    assert "1×16:9 + 1×3:4 + 3×9:16" in SMART_JS
+    assert "1×16:9 + 1×3:4 + 3×9:16" in CANVAS_JS
+    assert ".multi-view-output-item:nth-child(2) img{aspect-ratio:3/4}" in MULTI_VIEW_CSS
 
 
 def test_multi_view_height_migration_leaves_room_for_twelve_rows_and_parameters():

@@ -7303,9 +7303,11 @@ function classicMultiViewInputRefs(node){
 function classicMultiViewRoleLabel(role){
     return CLASSIC_MULTI_VIEW_INPUT_SLOTS.find(item => item[0] === role)?.[1] || role;
 }
-function classicMultiViewReferencePlan(view, refs, board=false){
+function classicMultiViewReferencePlan(view, refs, outputKind='view'){
     const angle = view === 'side' ? 'side' : view === 'back' ? 'back' : 'front';
     const angleLabel = angle === 'front' ? '正面' : angle === 'side' ? '侧面' : '背面';
+    const isBoard = outputKind === 'board';
+    const isDetail = outputKind === 'detail';
     const plan = [];
     const byUrl = new Map();
     const push = (item, role, instruction) => {
@@ -7321,36 +7323,50 @@ function classicMultiViewReferencePlan(view, refs, board=false){
         byUrl.set(item.url, entry);
         plan.push(entry);
     };
-    const modelRole = angle === 'front' ? refs.modelFrontRole : angle === 'side' ? refs.modelSideRole : refs.modelBackRole;
-    push(angle === 'front' ? refs.modelFront : angle === 'side' ? refs.modelSide : refs.modelBack, modelRole, `作为${angleLabel}人物身份与姿态主参考；缺失角度由此图自然扩展`);
-    Object.entries(refs.products || {}).forEach(([role, item]) => {
-        push(item, role, `作为${classicMultiViewRoleLabel(role)}的结构、材质、颜色和版型参考；不得把它误当作其他服装部位`);
-    });
-    const detailRefs = angle === 'back' ? refs.backDetails : refs.frontDetails;
-    detailRefs.forEach(item => push(item, angle === 'back' ? 'back-detail' : 'front-detail', `作为${angleLabel}细节与装饰参考`));
-    refs.accessories.forEach(item => push(item, 'accessory', '作为配饰细节参考'));
-    if(board){
-        push(refs.modelFront, 'model-front', '用于设定板中的人物正面');
-        push(refs.modelSide, 'model-side', '用于设定板中的人物侧面');
-        push(refs.modelBack, 'model-back', '用于设定板中的人物背面');
+    if(isBoard || isDetail){
+        push(refs.modelFront, 'model-front', `作为${isBoard ? '三视图横板' : '细节板'}中的人物正面与身份参考`);
+        push(refs.modelSide, 'model-side', `作为${isBoard ? '三视图横板' : '细节板'}中的人物侧面与轮廓参考`);
+        push(refs.modelBack, 'model-back', `作为${isBoard ? '三视图横板' : '细节板'}中的人物背面与发型参考`);
+    } else {
+        const modelRole = angle === 'front' ? refs.modelFrontRole : angle === 'side' ? refs.modelSideRole : refs.modelBackRole;
+        push(angle === 'front' ? refs.modelFront : angle === 'side' ? refs.modelSide : refs.modelBack, modelRole, `作为${angleLabel}人物身份与姿态主参考；缺失角度由此图自然扩展`);
     }
+    Object.entries(refs.products || {}).forEach(([role, item]) => {
+        push(item, role, `仅作为${classicMultiViewRoleLabel(role)}的结构、材质、颜色和版型参考`);
+    });
+    const detailGroups = isBoard || isDetail
+        ? [['front-detail', refs.frontDetails], ['back-detail', refs.backDetails]]
+        : [[angle === 'back' ? 'back-detail' : 'front-detail', angle === 'back' ? refs.backDetails : refs.frontDetails]];
+    detailGroups.forEach(([role, items]) => items.forEach(item => push(item, role, `作为${classicMultiViewRoleLabel(role)}与装饰参考`)));
+    refs.accessories.forEach(item => push(item, 'accessory', '作为配饰细节参考'));
     return plan;
 }
-function classicMultiViewPrompt(view, refs, board=false, referencePlan=[]){
+function classicMultiViewPrompt(view, refs, outputKind='view', referencePlan=[]){
     const angle = view === 'front' ? '正面' : view === 'side' ? '侧面' : '背面';
-    const common = '写实高级质感，统一中性棚拍光，纯白背景，无遮挡、无透视畸变、无文字、无LOGO、无水印。';
+    const common = '写实高级棚拍质感，统一中性柔光与自然阴影衰减，纯白无缝背景，主体完整清晰，画面保持干净的纯视觉摄影内容。';
     const sourceRule = refs.modelAny && refs.productAny
         ? '同时保持模特身份与服装、产品结构严格一致。'
         : refs.modelAny
-            ? '未提供独立产品图，只根据模特参考中可见的服装外观扩展服装三视图，不新增不存在的服装层次。'
-            : '未提供模特图，只根据产品参考生成产品视图，可使用中性无脸展示方式，不虚构人物身份。';
+            ? '服装结构仅取自模特参考中真实可见的外观与层次。'
+            : '根据产品参考生成中性无脸展示，主体身份保持匿名。';
     const mapping = referencePlan.length
         ? `参考图对应关系（必须严格遵守，按提交顺序）：${referencePlan.map((ref, index) => `参考图${index + 1}「${ref.label}」${ref.instruction}`).join('；')}。`
-        : '没有可用参考图时不要凭空添加主体或产品。';
-    if(board){
-        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}${sourceRule}${mapping}左侧排列同一主体的正面、侧面、背面视图；右上展示头部多角度；右下展示上装、下装、面料、剪裁、鞋子与配饰细节特写。信息分区清晰，排版整齐，比例统一，不添加说明文字。`;
+        : '画面仅呈现输入中已有的主体或产品。';
+    if(outputKind === 'board'){
+        return `生成一张横向三栏专业写实棚拍板。${common}${sourceRule}${mapping}画面从左到右严格由同一主体的正面全身、标准侧面全身、背面全身三幅照片组成，三幅均从头到脚完整入镜，人物身份、发型、体型、服装、鞋子和配饰完全一致；三栏等宽，主体等比例、同高度、脚底对齐，留白均匀，适合作为角色与产品三视图资产。`;
     }
-    return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、站姿以及上装和下装的版型连续；输入的上装参考只能用于上装，输入的下装参考只能用于下装，缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展，不能改变颜色、材质、纹理、轮廓或服装层次。输出单张9:16竖屏资产图，不拼图，不添加文字。`;
+    if(outputKind === 'detail'){
+        const identityDetails = refs.modelAny
+            ? '前三格依次呈现同一人物的面部正面、侧面轮廓与背面发型，身份、发色和妆容保持一致。'
+            : '前三格依次呈现同一产品的正面整体、侧面轮廓与背面整体，结构和比例保持一致。';
+        return `生成一张竖向三列四行的专业写实细节摄影板。${common}${sourceRule}${mapping}${identityDetails}其余格子从输入中实际存在的内容选择代表性特写，清晰呈现领口、纽扣或拉链、面料织纹、剪裁车线、腰头、口袋、鞋子、包袋与配饰；每格只聚焦一个细节，构图规整、焦点准确、材质真实，所有细节与三视图中的主体和服装保持一致。`;
+    }
+    return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、站姿以及上装和下装的版型连续；上装参考仅用于上装，下装参考仅用于下装，缺失部位与缺失角度根据已提供图片自然延展并保持颜色、材质、纹理、轮廓和服装层次一致。输出单张竖版全身资产图，人物从头到脚完整入镜并居中展示。`;
+}
+function classicMultiViewGridForIndex(index, groupId=''){
+    if(index === 0) return {row:0,col:0,w:4,h:1,ratioW:16,ratioH:9,groupId};
+    if(index === 1) return {row:1,col:0,w:1,h:1,ratioW:3,ratioH:4,groupId};
+    return {row:1,col:index - 1,w:1,h:1,ratioW:9,ratioH:16,groupId};
 }
 function classicMultiViewBodyHtml(node){
     sanitizeClassicMultiViewSettings(node);
@@ -7362,9 +7378,9 @@ function classicMultiViewBodyHtml(node){
         return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="classic-multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
     }).join('');
     const outputCount = (node.multiViewOutputs || node.generatedOutputs || []).map(outputUrlValue).filter(Boolean).length;
-    const status = node.multiViewStatus === 'running' ? `正在输出端生成 ${Math.max(0, 4 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，请重试') : outputCount >= 4 ? '4 张资产已在右侧输出节点中生成' : '连接任意一张模特或产品图片后点击生成';
+    const status = node.multiViewStatus === 'running' ? `正在输出端生成 ${Math.max(0, 5 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，请重试') : outputCount >= 5 ? '5 张资产已在右侧输出节点中生成' : '连接任意一张模特或产品图片后点击生成';
     return `<div class="classic-multi-view-special">
-        <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
+        <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 5 张输出</span></div>
         <div class="classic-multi-view-input-list">${slots}</div>
         <div class="classic-multi-view-settings gen-settings">
             <div class="gen-settings-row">
@@ -7378,7 +7394,7 @@ function classicMultiViewBodyHtml(node){
                 <select class="select-lite compact-select" data-multi-view-quality aria-label="生成质量">
                     ${['auto','low','medium','high'].map(value => `<option value="${value}" ${node.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}
                 </select>
-                <span class="classic-multi-view-fixed-output">固定输出 1×16:9 + 3×9:16</span>
+                <span class="classic-multi-view-fixed-output">固定输出 1×16:9 + 1×3:4 + 3×9:16</span>
             </div>
         </div>
         <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span><button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
@@ -7407,8 +7423,8 @@ async function runClassicMultiViewNode(nodeId){
     node.multiViewStatus = 'running';
     node.multiViewError = '';
     node.generatedOutputs = [];
-    node.multiViewOutputs = [null, null, null, null];
-    node.multiViewOutputLayout = {type:'grid-split', groupId:uid('multi-view-grid'), cols:3, rows:2};
+    node.multiViewOutputs = [null, null, null, null, null];
+    node.multiViewOutputLayout = {type:'grid-split', groupId:uid('multi-view-grid'), cols:4, rows:2};
     const out = outputForNode(node, 780, true);
     if(out){
         // 输出节点使用普通图片生成节点的缩略图规格；清除旧版固定高度，
@@ -7417,23 +7433,24 @@ async function runClassicMultiViewNode(nodeId){
         delete out.h;
         out.images = [];
         out.outputLayout = {...node.multiViewOutputLayout};
-        out._pending = Array.from({length:4}, (_, index) => ({
+        out._pending = Array.from({length:5}, (_, index) => ({
             id:uid('multi-view-pending'), startedAt, multiViewIndex:index,
-            previewSize:index === 0 ? {w:16,h:9} : {w:9,h:16},
+            previewSize:index === 0 ? {w:16,h:9} : index === 1 ? {w:3,h:4} : {w:9,h:16},
             canvasTaskType:'multi-view-image', providerId, model,
             multiViewLayout:{...node.multiViewOutputLayout},
             run:{node:{id:node.id,type:'multiView'}},
-            grid:index === 0 ? {row:0,col:0,w:3,h:1,ratioW:16,ratioH:9} : {row:1,col:index - 1,w:1,h:1,ratioW:9,ratioH:16}
+            grid:classicMultiViewGridForIndex(index)
         }));
     }
     render();
     scheduleSave();
     const pendingForIndex = index => out?._pending?.find(item => item.multiViewIndex === index);
-    const taskFor = async (view, board=false, index=0) => {
-        const viewRefs = classicMultiViewReferencePlan(view, refs, board);
-        const ratio = board ? '16:9' : '9:16';
+    const taskFor = async (view, outputKind='view', index=0) => {
+        const viewRefs = classicMultiViewReferencePlan(view, refs, outputKind);
+        const ratio = outputKind === 'board' ? '16:9' : outputKind === 'detail' ? '3:4' : '9:16';
+        const taskLabel = outputKind === 'board' ? '三视图横板' : outputKind === 'detail' ? '独立细节图' : `${view}视图`;
         const payload = {
-            prompt:classicMultiViewPrompt(view, refs, board, viewRefs),
+            prompt:classicMultiViewPrompt(view, refs, outputKind, viewRefs),
             provider_id:providerId,
             model,
             size:apiImageSize('custom', resolution, ratio),
@@ -7441,7 +7458,7 @@ async function runClassicMultiViewNode(nodeId){
         };
         if(quality) payload.quality = quality;
         const task = await createCanvasImageTask(payload);
-        if(!task?.task_id) throw new Error(`${board ? '三视图模卡' : `${view}视图`}任务创建失败`);
+        if(!task?.task_id) throw new Error(`${taskLabel}任务创建失败`);
         if(task.provider_id){
             node.apiProvider = task.provider_id;
             node.model = task.model || node.model;
@@ -7452,11 +7469,11 @@ async function runClassicMultiViewNode(nodeId){
         const result = await waitCanvasImageTaskResult(task.task_id);
         const raw = (result.images || [])[0];
         const url = outputUrlValue(raw);
-        if(!url) throw new Error(`${board ? '三视图模卡' : `${view}视图`}没有返回图片`);
-        const name = board ? 'multi-view-board.png' : `multi-view-${view}.png`;
+        if(!url) throw new Error(`${taskLabel}没有返回图片`);
+        const name = outputKind === 'board' ? 'multi-view-board.png' : outputKind === 'detail' ? 'multi-view-detail.png' : `multi-view-${view}.png`;
         const item = raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
         item.multiViewIndex = index;
-        item.grid = index === 0 ? {row:0,col:0,w:3,h:1,ratioW:16,ratioH:9,groupId:node.multiViewOutputLayout.groupId} : {row:1,col:index - 1,w:1,h:1,ratioW:9,ratioH:16,groupId:node.multiViewOutputLayout.groupId};
+        item.grid = classicMultiViewGridForIndex(index, node.multiViewOutputLayout.groupId);
         if(pending){
             out._pending = (out._pending || []).filter(entry => entry.id !== pending.id);
             appendOutputImages(out, [item], null, [], node.multiViewOutputLayout);
@@ -7467,8 +7484,8 @@ async function runClassicMultiViewNode(nodeId){
         return item;
     };
     try {
-        // 保留旧版任务顺序契约：Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])
-        const outputs = await Promise.all([taskFor('front', true, 0), taskFor('front', false, 1), taskFor('side', false, 2), taskFor('back', false, 3)]);
+        // 固定资产顺序：纯三视图横板、独立细节图、正面、侧面、背面。
+        const outputs = await Promise.all([taskFor('front', 'board', 0), taskFor('detail', 'detail', 1), taskFor('front', 'view', 2), taskFor('side', 'view', 3), taskFor('back', 'view', 4)]);
         mergeGeneratedOutputs(node, outputs, false);
         node.multiViewStatus = 'done';
         node.multiViewRunAt = nowMs();
@@ -7478,7 +7495,7 @@ async function runClassicMultiViewNode(nodeId){
         selected.add(node.id);
         render();
         scheduleSave();
-        setStatus('三视图已生成 4 张资产');
+        setStatus('三视图已生成 5 张资产');
     } catch(error){
         if(out) out._pending = [];
         node.multiViewStatus = 'error';
@@ -14342,12 +14359,10 @@ function completeCanvasImageTask(taskId, result){
         const raw = images[0];
         const url = outputUrlValue(raw);
         if(url){
-            const grid = pending.multiViewIndex === 0
-                ? {row:0,col:0,w:3,h:1,ratioW:16,ratioH:9,groupId:pending.multiViewLayout?.groupId}
-                : {row:1,col:pending.multiViewIndex - 1,w:1,h:1,ratioW:9,ratioH:16,groupId:pending.multiViewLayout?.groupId};
+            const grid = classicMultiViewGridForIndex(pending.multiViewIndex, pending.multiViewLayout?.groupId);
             const item = raw && typeof raw === 'object' ? {...raw, url, kind:'image', multiViewIndex:pending.multiViewIndex, grid} : {url, kind:'image', multiViewIndex:pending.multiViewIndex, grid};
             appendOutputImages(out, [item], meta.run?.refs?.[0], [meta], pending.multiViewLayout || out.outputLayout);
-            if(gen) gen.multiViewOutputs = gen.multiViewOutputs || [null, null, null, null];
+            if(gen) gen.multiViewOutputs = gen.multiViewOutputs || [null, null, null, null, null];
             if(gen) gen.multiViewOutputs[pending.multiViewIndex] = item;
         }
     } else {

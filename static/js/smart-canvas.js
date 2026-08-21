@@ -1593,17 +1593,17 @@ function multiViewConnections(node){
 function multiViewBodyHtml(node){
     const runSettings = smartMultiViewSettingsForNode(node);
     const inputs = multiViewConnections(node);
-    const outputNames = ['三视图+细节横板', '正面视图', '侧面视图', '背面视图'];
+    const outputNames = ['纯三视图横板', '独立细节图', '正面视图', '侧面视图', '背面视图'];
     const outputs = (node.multiViewOutputs || node.images || []).map(item => item?.url ? item : null);
     const outputCount = outputs.filter(Boolean).length;
-    const status = node.multiViewStatus === 'running' ? `正在生成 ${Math.max(0, 4 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputCount >= 4 ? '4 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
+    const status = node.multiViewStatus === 'running' ? `正在生成 ${Math.max(0, 5 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputCount >= 5 ? '5 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
     const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰';
     const slots = MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index) => {
         const count = inputs.get(role)?.length || 0;
         const detail = count ? `${count} 张已连接` : (optional ? '可选输入' : '待连接');
         return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
     }).join('');
-    const outputPreview = outputs.some(Boolean) || node.multiViewStatus === 'running' ? `<div class="multi-view-output-grid">${Array.from({length:4}, (_, index) => {
+    const outputPreview = outputs.some(Boolean) || node.multiViewStatus === 'running' ? `<div class="multi-view-output-grid">${Array.from({length:5}, (_, index) => {
         const item = outputs[index];
         const label = outputNames[index] || `视图 ${index + 1}`;
         return item
@@ -1611,7 +1611,7 @@ function multiViewBodyHtml(node){
             : `<div class="multi-view-output-item multi-view-output-placeholder">${node.multiViewStatus === 'running' ? '<div class="multi-view-placeholder-spinner"></div>' : '<i data-lucide="circle-alert"></i>'}<span>${escapeHtml(node.multiViewStatus === 'running' ? '正在生成…' : '生成失败')}</span></div>`;
     }).join('')}</div>` : '';
     return `<div class="special-node multi-view-special" data-special-node="multi-view">
-        <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 4 张输出</span></div>
+        <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 5 张输出</span></div>
         <div class="multi-view-input-list">${slots}</div>
         ${outputPreview}
         <div class="multi-view-settings gen-settings">
@@ -1626,7 +1626,7 @@ function multiViewBodyHtml(node){
                 <select class="select-lite" data-multi-view-quality aria-label="生成质量">
                     ${['auto','low','medium','high'].map(value => `<option value="${value}" ${runSettings.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}
                 </select>
-                <span class="multi-view-fixed-output">固定输出 1×16:9 + 3×9:16</span>
+                <span class="multi-view-fixed-output">固定输出 1×16:9 + 1×3:4 + 3×9:16</span>
             </div>
         </div>
         <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
@@ -8904,9 +8904,11 @@ function multiViewInputRefs(node){
 function multiViewRoleLabel(role){
     return MULTI_VIEW_INPUT_SLOTS.find(item => item[0] === role)?.[1] || role;
 }
-function multiViewReferencePlan(view, refs, board=false){
+function multiViewReferencePlan(view, refs, outputKind='view'){
     const angle = view === 'side' ? 'side' : view === 'back' ? 'back' : 'front';
     const angleLabel = angle === 'front' ? '正面' : angle === 'side' ? '侧面' : '背面';
+    const isBoard = outputKind === 'board';
+    const isDetail = outputKind === 'detail';
     const plan = [];
     const byUrl = new Map();
     const push = (item, role, instruction) => {
@@ -8922,36 +8924,45 @@ function multiViewReferencePlan(view, refs, board=false){
         byUrl.set(item.url, entry);
         plan.push(entry);
     };
-    const modelRole = angle === 'front' ? refs.modelFrontRole : angle === 'side' ? refs.modelSideRole : refs.modelBackRole;
-    push(angle === 'front' ? refs.modelFront : angle === 'side' ? refs.modelSide : refs.modelBack, modelRole, `作为${angleLabel}人物身份与姿态主参考；缺失角度由此图自然扩展`);
-    Object.entries(refs.products || {}).forEach(([role, item]) => {
-        push(item, role, `作为${multiViewRoleLabel(role)}的结构、材质、颜色和版型参考；不得把它误当作其他服装部位`);
-    });
-    const detailRefs = angle === 'back' ? refs.backDetails : refs.frontDetails;
-    detailRefs.forEach(item => push(item, angle === 'back' ? 'back-detail' : 'front-detail', `作为${angleLabel}细节与装饰参考`));
-    refs.accessories.forEach(item => push(item, 'accessory', '作为配饰细节参考'));
-    if(board){
-        push(refs.modelFront, 'model-front', '用于设定板中的人物正面');
-        push(refs.modelSide, 'model-side', '用于设定板中的人物侧面');
-        push(refs.modelBack, 'model-back', '用于设定板中的人物背面');
+    if(isBoard || isDetail){
+        push(refs.modelFront, 'model-front', `作为${isBoard ? '三视图横板' : '细节板'}中的人物正面与身份参考`);
+        push(refs.modelSide, 'model-side', `作为${isBoard ? '三视图横板' : '细节板'}中的人物侧面与轮廓参考`);
+        push(refs.modelBack, 'model-back', `作为${isBoard ? '三视图横板' : '细节板'}中的人物背面与发型参考`);
+    } else {
+        const modelRole = angle === 'front' ? refs.modelFrontRole : angle === 'side' ? refs.modelSideRole : refs.modelBackRole;
+        push(angle === 'front' ? refs.modelFront : angle === 'side' ? refs.modelSide : refs.modelBack, modelRole, `作为${angleLabel}人物身份与姿态主参考；缺失角度由此图自然扩展`);
     }
+    Object.entries(refs.products || {}).forEach(([role, item]) => {
+        push(item, role, `仅作为${multiViewRoleLabel(role)}的结构、材质、颜色和版型参考`);
+    });
+    const detailGroups = isBoard || isDetail
+        ? [['front-detail', refs.frontDetails], ['back-detail', refs.backDetails]]
+        : [[angle === 'back' ? 'back-detail' : 'front-detail', angle === 'back' ? refs.backDetails : refs.frontDetails]];
+    detailGroups.forEach(([role, items]) => items.forEach(item => push(item, role, `作为${multiViewRoleLabel(role)}与装饰参考`)));
+    refs.accessories.forEach(item => push(item, 'accessory', '作为配饰细节参考'));
     return plan;
 }
-function multiViewPromptFor(view, refs, board=false, referencePlan=[]){
+function multiViewPromptFor(view, refs, outputKind='view', referencePlan=[]){
     const angle = view === 'front' ? '正面' : view === 'side' ? '侧面' : '背面';
-    const common = '写实高级质感，统一中性棚拍光，纯白背景，无遮挡、无文字、无LOGO、无水印。';
+    const common = '写实高级棚拍质感，统一中性柔光与自然阴影衰减，纯白无缝背景，主体完整清晰，画面保持干净的纯视觉摄影内容。';
     const sourceRule = refs.modelAny && refs.productAny
         ? '同时保持模特身份与服装/产品结构严格一致。'
         : refs.modelAny
-            ? '未提供独立产品图，只根据模特参考中可见的服装外观扩展服装三视图，不新增不存在的服装层次。'
-            : '未提供模特图，只根据产品参考生成产品视图，可使用中性无脸展示方式，不虚构人物身份。';
+            ? '服装结构仅取自模特参考中真实可见的外观与层次。'
+            : '根据产品参考生成中性无脸展示，主体身份保持匿名。';
     const mapping = referencePlan.length
         ? `参考图对应关系（必须严格遵守，按提交顺序）：${referencePlan.map((ref, index) => `参考图${index + 1}「${ref.label}」${ref.instruction}`).join('；')}。`
-        : '没有可用参考图时不要凭空添加主体或产品。';
-    if(board){
-        return `生成一张16:9横屏专业角色与产品三视图设定板。${common}${sourceRule}${mapping}左侧排列同一主体的正面、侧面、背面视图；右上展示头部多角度；右下展示上装、下装、面料、剪裁、鞋子与配饰细节特写。画面分区清晰、排版整齐、比例统一，不添加任何说明文字。`;
+        : '画面仅呈现输入中已有的主体或产品。';
+    if(outputKind === 'board'){
+        return `生成一张横向三栏专业写实棚拍板。${common}${sourceRule}${mapping}画面从左到右严格由同一主体的正面全身、标准侧面全身、背面全身三幅照片组成，三幅均从头到脚完整入镜，人物身份、发型、体型、服装、鞋子和配饰完全一致；三栏等宽，主体等比例、同高度、脚底对齐，留白均匀，适合作为角色与产品三视图资产。`;
     }
-    return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、姿态以及上装和下装的版型连续；输入的上装参考只能用于上装，输入的下装参考只能用于下装，缺失的上装或下装部位以及侧面或背面根据已提供图片自然扩展，不能改变颜色、材质、纹理、轮廓或服装层次。输出单张9:16竖屏图，不拼图，不添加文字。`;
+    if(outputKind === 'detail'){
+        const identityDetails = refs.modelAny
+            ? '前三格依次呈现同一人物的面部正面、侧面轮廓与背面发型，身份、发色和妆容保持一致。'
+            : '前三格依次呈现同一产品的正面整体、侧面轮廓与背面整体，结构和比例保持一致。';
+        return `生成一张竖向三列四行的专业写实细节摄影板。${common}${sourceRule}${mapping}${identityDetails}其余格子从输入中实际存在的内容选择代表性特写，清晰呈现领口、纽扣或拉链、面料织纹、剪裁车线、腰头、口袋、鞋子、包袋与配饰；每格只聚焦一个细节，构图规整、焦点准确、材质真实，所有细节与三视图中的主体和服装保持一致。`;
+    }
+    return `生成${angle}全身视图。${common}${sourceRule}${mapping}保持人物五官、发型、体型、姿态以及上装和下装的版型连续；上装参考仅用于上装，下装参考仅用于下装，缺失部位与缺失角度根据已提供图片自然延展并保持颜色、材质、纹理、轮廓和服装层次一致。输出单张竖版全身资产图，人物从头到脚完整入镜并居中展示。`;
 }
 async function generateSmartMultiView(node){
     if(!node || node.specialType !== 'multi-view' || node.multiViewStatus === 'running') return;
@@ -8960,16 +8971,17 @@ async function generateSmartMultiView(node){
     const base = smartMultiViewSettingsForNode(node);
     if(!base.provider_id || !base.model){ toast('请先在 API 设置中配置图片生成模型'); return; }
     const startedAt = nowMs();
-    node.multiViewStatus = 'running'; node.images = []; node.multiViewOutputs = [null, null, null, null];
+    node.multiViewStatus = 'running'; node.images = []; node.multiViewOutputs = [null, null, null, null, null];
     render(); scheduleSave();
-    const taskFor = async (view, board=false, index=0) => {
-        const viewRefs = multiViewReferencePlan(view, refs, board);
-        const ratio = board ? '16:9' : '9:16';
+    const taskFor = async (view, outputKind='view', index=0) => {
+        const viewRefs = multiViewReferencePlan(view, refs, outputKind);
+        const ratio = outputKind === 'board' ? '16:9' : outputKind === 'detail' ? '3:4' : '9:16';
+        const taskLabel = outputKind === 'board' ? '三视图横板' : outputKind === 'detail' ? '独立细节图' : `${view}视图`;
         const [rw, rh] = ratio.split(':').map(value => Number(value));
         const runSettings = {...base, engine:'api', apiKind:'image', ratio:'custom', resolution:base.resolution || '2k', customRatio:ratio, customRatioWidth:rw, customRatioHeight:rh, customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1};
-        const submitted = await runApiGeneration(multiViewPromptFor(view, refs, board, viewRefs), viewRefs, runSettings);
+        const submitted = await runApiGeneration(multiViewPromptFor(view, refs, outputKind, viewRefs), viewRefs, runSettings);
         const taskId = submitted?.taskIds?.[0];
-        if(!taskId) throw new Error(`${board ? '三视图横板' : `${view}视图`}任务创建失败`);
+        if(!taskId) throw new Error(`${taskLabel}任务创建失败`);
         if(submitted.providerId){
             node.runSettings = settingsForStorage(normalizeSmartMultiViewSettings({
                 ...node.runSettings,
@@ -8980,8 +8992,8 @@ async function generateSmartMultiView(node){
         const result = await pollSmartCanvasTask(taskId);
         const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
         const url = typeof raw === 'string' ? raw : raw?.url || '';
-        if(!url) throw new Error(`${board ? '三视图横板' : `${view}视图`}没有返回图片`);
-        const name = board ? 'multi-view-board.png' : `multi-view-${view}.png`;
+        if(!url) throw new Error(`${taskLabel}没有返回图片`);
+        const name = outputKind === 'board' ? 'multi-view-board.png' : outputKind === 'detail' ? 'multi-view-detail.png' : `multi-view-${view}.png`;
         const item = raw && typeof raw === 'object' ? {...raw, url, name:raw.name || name, kind:'image'} : {url, name, kind:'image'};
         item.multiViewIndex = index;
         node.multiViewOutputs[index] = item;
@@ -8989,15 +9001,15 @@ async function generateSmartMultiView(node){
         return item;
     };
     try {
-        // 保留旧版任务顺序契约：Promise.all([taskFor('front', true), taskFor('front'), taskFor('side'), taskFor('back')])
-        const outputs = await Promise.all([taskFor('front', true, 0), taskFor('front', false, 1), taskFor('side', false, 2), taskFor('back', false, 3)]);
+        // 固定资产顺序：纯三视图横板、独立细节图、正面、侧面、背面。
+        const outputs = await Promise.all([taskFor('front', 'board', 0), taskFor('detail', 'detail', 1), taskFor('front', 'view', 2), taskFor('side', 'view', 3), taskFor('back', 'view', 4)]);
         node.images = outputs;
         node.multiViewStatus = 'done';
         node.multiViewRunAt = nowMs();
         node.multiViewElapsedMs = node.multiViewRunAt - startedAt;
         selectedId = node.id; selectedIds = []; selectedImage = {nodeId:node.id, index:0};
         render(); scheduleSave();
-        toast('三视图已生成 4 张资产');
+        toast('三视图已生成 5 张资产');
     } catch(error){
         node.multiViewStatus = 'error';
         node.multiViewError = error.message || '三视图生成失败';

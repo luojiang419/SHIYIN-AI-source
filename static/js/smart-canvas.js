@@ -1543,14 +1543,19 @@ function multiViewBodyHtml(node){
     const outputNames = ['三视图+细节横板', '正面视图', '侧面视图', '背面视图'];
     const outputs = (node.images || []).filter(item => item?.url);
     const status = node.multiViewStatus === 'running' ? '生成中…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputs.length >= 4 ? '4 张资产已生成' : '连接图片后点击生成';
-    const slots = MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional]) => {
+    const groups = [
+        ['模特主体', [['model-front', '模特正面', false], ['model-side', '模特侧面', true], ['model-back', '模特背面', true]]],
+        ['产品角度', [['product-front', '产品正面', false], ['product-side', '产品侧面', false], ['product-back', '产品背面', false]]],
+        ['细节与配饰', [['front-detail', '正面细节', true], ['back-detail', '背面细节', true], ['accessory', '配饰', true]]]
+    ];
+    const slots = groups.map(([groupTitle, groupSlots]) => `<section class="multi-view-input-group"><h4>${escapeHtml(groupTitle)}</h4>${groupSlots.map(([role, label, optional]) => {
         const count = inputs.get(role)?.length || 0;
-        const detail = count ? `${count} 张已连接` : (optional ? '可选' : '待连接');
-        return `<div class="multi-view-slot-row"><span>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
-    }).join('');
+        const detail = count ? `${count} 张已连接` : (optional ? '可选输入' : '待连接');
+        return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}"><span><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
+    }).join('')}</section>`).join('');
     const outputPreview = outputs.length ? `<div class="multi-view-output-grid">${outputs.map((item, index) => `<div class="multi-view-output-item"><img src="${escapeAttr(displayMediaUrl(item))}" alt="${escapeAttr(outputNames[index] || '生成结果')}" loading="lazy"><span>${escapeHtml(outputNames[index] || `视图 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
     return `<div class="special-node multi-view-special" data-special-node="multi-view">
-        <div class="multi-view-summary"><strong>多视图节点</strong><span>主体与产品按角度自动配对</span></div>
+        <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 产品 / 细节」分组</small></div><span>9 个输入 · 4 张输出</span></div>
         <div class="multi-view-input-list">${slots}</div>
         ${outputPreview}
         <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
@@ -7904,7 +7909,7 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
             ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" style="top:${Math.round((index + 1) * 100 / (MULTI_VIEW_INPUT_SLOTS.length + 1))}%" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="top:${Math.round((index + 1) * 100 / (MULTI_VIEW_INPUT_SLOTS.length + 1))}%" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         return {node, html};

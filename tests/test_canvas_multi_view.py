@@ -7,6 +7,7 @@ SMART_HTML = (ROOT / "static/smart-canvas.html").read_text(encoding="utf-8")
 CANVAS_JS = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
 CANVAS_HTML = (ROOT / "static/canvas.html").read_text(encoding="utf-8")
 SPECIAL_CSS = (ROOT / "static/css/canvas-special-nodes.css").read_text(encoding="utf-8")
+MULTI_VIEW_CSS = (ROOT / "static/css/canvas-multi-view-overrides.css").read_text(encoding="utf-8")
 
 
 def test_image_toolbar_exposes_multi_view_action_and_creates_node():
@@ -67,3 +68,19 @@ def test_classic_canvas_multi_view_node_has_all_ports_and_four_asset_generation(
 
 def test_classic_canvas_multi_view_is_available_from_toolbar_and_create_menu():
     assert "menuAdd('multiView')" in CANVAS_HTML
+
+
+def test_multi_view_ports_have_explicit_labels_and_grouped_layout_overrides():
+    assert 'aria-label="${escapeAttr(`输入端口：${label}`)}"' in SMART_JS
+    assert 'aria-label="${escapeAttr(`输入端口：${label}`)}"' in CANVAS_JS
+    assert 'data-input-role="${escapeAttr(role)}"' in SMART_JS
+    assert 'data-input-role="${escapeAttr(role)}"' in CANVAS_JS
+    assert ".multi-view-input-group" in MULTI_VIEW_CSS
+    assert ".classic-multi-view-input-group" in MULTI_VIEW_CSS
+    assert ".smart-special-node.smart-multi-view-node .multi-view-port::before" in MULTI_VIEW_CSS
+    assert ".multi-view-run-row" in MULTI_VIEW_CSS
+
+
+def test_both_canvas_pages_load_multi_view_layout_overrides():
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.1' in SMART_HTML
+    assert 'canvas-multi-view-overrides.css?v=2026.08.21.multi-view.1' in CANVAS_HTML

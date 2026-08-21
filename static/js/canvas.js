@@ -7257,18 +7257,23 @@ function classicMultiViewPrompt(view, refs, board=false){
 }
 function classicMultiViewBodyHtml(node){
     const inputs = classicMultiViewConnections(node);
-    const slots = CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label]) => {
+    const groups = [
+        ['模特主体', [['model-front', '模特正面'], ['model-side', '模特侧面'], ['model-back', '模特背面']]],
+        ['产品角度', [['product-front', '产品正面'], ['product-side', '产品侧面'], ['product-back', '产品背面']]],
+        ['细节与配饰', [['front-detail', '正面细节'], ['back-detail', '背面细节'], ['accessory', '配饰']]]
+    ];
+    const slots = groups.map(([groupTitle, groupSlots]) => `<section class="classic-multi-view-input-group"><h4>${escapeHtml(groupTitle)}</h4>${groupSlots.map(([role, label]) => {
         const count = inputs.get(role)?.length || 0;
         const optional = ['front-detail','back-detail','accessory'].includes(role);
-        const state = count ? `${count} 张` : optional ? '可为空/可多张' : role === 'model-side' || role === 'model-back' ? '可用正面扩展' : '待连接';
-        return `<div class="classic-multi-view-slot"><span>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
-    }).join('');
+        const state = count ? `${count} 张已连接` : optional ? '可选输入' : role === 'model-side' || role === 'model-back' ? '可用正面扩展' : '待连接';
+        return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}"><span><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i>${escapeHtml(label)}</span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
+    }).join('')}</section>`).join('');
     const outputNames = ['16:9 三视图模卡','正面 9:16','侧面 9:16','背面 9:16'];
     const outputs = (node.generatedOutputs || []).map(outputUrlValue).filter(Boolean);
     const previews = outputs.length ? `<div class="classic-multi-view-output-grid">${outputs.map((url, index) => `<div class="classic-multi-view-output"><img src="${escapeAttr(canvasDisplayMediaUrl(url, ''))}" alt="${escapeAttr(outputNames[index] || `资产 ${index + 1}`)}" draggable="false"><span>${escapeHtml(outputNames[index] || `资产 ${index + 1}`)}</span></div>`).join('')}</div>` : '';
     const status = node.multiViewStatus === 'running' ? '正在并行生成 4 张资产…' : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败') : outputs.length ? '已生成 4 张资产，可从右侧输出端继续连接' : '连接图片到左侧对应端口';
     return `<div class="classic-multi-view-special">
-        <div class="classic-multi-view-summary"><strong>多视图节点</strong><span>主体与产品按角度自动配对</span></div>
+        <div class="classic-multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 产品 / 细节」分组</small></div><span>9 个输入 · 4 张输出</span></div>
         <div class="classic-multi-view-input-list">${slots}</div>
         ${previews}
         <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span><button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
@@ -7756,7 +7761,7 @@ function renderNode(node){
     if(ecommercePorts.length > 1){
         el.insertAdjacentHTML('beforeend', ecommercePorts.map(port => `<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
-        el.insertAdjacentHTML('beforeend', CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" style="top:${Math.round((index + 1) * 100 / (CLASSIC_MULTI_VIEW_INPUT_SLOTS.length + 1))}%" title="连接${escapeAttr(label)}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="top:${Math.round((index + 1) * 100 / (CLASSIC_MULTI_VIEW_INPUT_SLOTS.length + 1))}%" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
         el.insertAdjacentHTML('beforeend', `<div class="port in pose-role-port" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="port in pose-role-port" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>`);
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);

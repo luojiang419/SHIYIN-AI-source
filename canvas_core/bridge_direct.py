@@ -77,7 +77,7 @@ def materialize_direct_bridge_frames(
         if width <= 0 or height <= 0:
             raise DirectBridgeError(f"桥接图片尺寸无效：{upload_name}")
         suffix = Path(upload_name).suffix.lower() or ".png"
-        if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
             suffix = ".png"
         destination = target / f"{_slug(str(frame.get('stable_id') or f'ordinal:{ordinal}'), 'frame')}_{checksum[:16]}{suffix}"
         partial = destination.with_suffix(destination.suffix + ".partial")

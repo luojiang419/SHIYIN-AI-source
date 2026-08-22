@@ -7,6 +7,8 @@ CLASSIC = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
 SMART = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 CLASSIC_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 SMART_HTML = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
+FILM_CSS = (ROOT / "static" / "css" / "canvas-film-nodes.css").read_text(encoding="utf-8")
+SMART_CSS = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
 
 
 def test_film_domain_module_defines_both_nodes_and_dynamic_role_ports():
@@ -41,3 +43,13 @@ def test_both_canvas_runtimes_bind_film_nodes_and_parse_visuals():
     assert "node.specialType === 'film-storyboard' || node.specialType === 'film-video'" in SMART
     assert "runSmartFilmNode(changed)" in SMART
     assert "runFilmNode(changed.id)" in CLASSIC
+
+
+def test_film_styles_use_canvas_theme_tokens_and_keep_ports_outside_content():
+    for token in ("var(--strong)", "var(--soft)", "var(--line)", "var(--text)", "var(--muted)"):
+        assert token in FILM_CSS
+    assert "right:100%" in FILM_CSS
+    assert "grid-template-columns:minmax(0,1fr) minmax(0,1fr)" in FILM_CSS
+    assert "rgba(124,58,237" not in FILM_CSS
+    assert "rgba(139,92,246" not in FILM_CSS
+    assert "rgba(124,58,237" not in SMART_CSS

@@ -450,7 +450,12 @@ let dragBoard = null;
 let minimapDrag = false;
 let minimapState = null;
 let minimapRenderQueued = false;
+let minimapViewportQueued = false;
+let minimapNodeUpdateQueued = false;
+const minimapNodeUpdateIds = new Set();
 let linksRenderQueued = false;
+let selectionHubAnchor = null;
+let selectionHubPositionQueued = false;
 let zoomPreviewState = null;
 let resizeNode = null;
 let llmPaneDrag = null;
@@ -1494,13 +1499,14 @@ function setCreateMode(active, kind='classic'){
     }
     refreshIcons();
 }
-function screenToWorld(clientX, clientY){
-    const rect = board.getBoundingClientRect();
+function screenToWorld(clientX, clientY, rect=null){
+    rect = rect || board.getBoundingClientRect();
     return { x:(clientX - rect.left - viewport.x) / viewport.scale, y:(clientY - rect.top - viewport.y) / viewport.scale };
 }
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
-    scheduleMinimapRender();
+    scheduleMinimapViewportUpdate();
+    scheduleSelectionHubPosition();
 }
 function estimatedNodeRect(n){
     const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(n.id)}"]`);
@@ -1541,6 +1547,37 @@ function scheduleMinimapRender(){
         renderMinimap();
     });
 }
+function scheduleMinimapViewportUpdate(){
+    if(minimapViewportQueued) return;
+    minimapViewportQueued = true;
+    requestAnimationFrame(() => {
+        minimapViewportQueued = false;
+        if(minimapState) updateMinimapViewport();
+        else renderMinimap();
+    });
+}
+function scheduleMinimapNodeUpdate(ids=[]){
+    (ids || []).filter(Boolean).forEach(id => minimapNodeUpdateIds.add(id));
+    if(minimapNodeUpdateQueued) return;
+    minimapNodeUpdateQueued = true;
+    requestAnimationFrame(() => {
+        minimapNodeUpdateQueued = false;
+        if(!minimapState || !minimapContent){ minimapNodeUpdateIds.clear(); return; }
+        const {bounds, scale, ox, oy} = minimapState;
+        minimapNodeUpdateIds.forEach(id => {
+            const node = nodes.find(item => item.id === id);
+            const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
+            if(!node || !el) return;
+            const rect = estimatedNodeRect(node);
+            el.style.left = `${ox + (rect.x - bounds.x) * scale}px`;
+            el.style.top = `${oy + (rect.y - bounds.y) * scale}px`;
+            el.style.width = `${Math.max(3, rect.w * scale)}px`;
+            el.style.height = `${Math.max(3, rect.h * scale)}px`;
+        });
+        minimapNodeUpdateIds.clear();
+        updateMinimapViewport();
+    });
+}
 // 拖动/缩放节点时每个 mousemove 都全量重建连线 SVG 会掉帧；用 rAF 合并成每帧最多刷新一次。
 function scheduleLinksRender(){
     if(linksRenderQueued) return;
@@ -1564,7 +1601,7 @@ function renderMinimap(){
     minimapState = {bounds, scale, ox, oy, cw, ch};
     const nodeHtml = (nodes || []).map(n => {
         const r = estimatedNodeRect(n);
-        return `<div class="minimap-node ${selected.has(n.id) ? 'selected' : ''}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
+        return `<div class="minimap-node ${selected.has(n.id) ? 'selected' : ''}" data-node-id="${escapeAttr(n.id)}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
     }).join('');
     minimapContent.innerHTML = `${nodeHtml}${nodes?.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="minimap-viewport"></div>`;
     minimapViewport = document.getElementById('minimapViewport');
@@ -1593,7 +1630,7 @@ function centerViewportOnWorldPoint(point){
     viewport.y = rect.height / 2 - point.y * viewport.scale;
     applyViewport();
     renderLinks();
-    renderSelectionHub();
+    scheduleSelectionHubPosition();
 }
 function safeViewportScale(value){
     const n = Number(value);
@@ -1627,7 +1664,7 @@ function fitAllNodesViewport(){
     viewport.y = rect.height / 2 - cy * viewport.scale;
     applyViewport();
     renderLinks();
-    renderSelectionHub();
+    scheduleSelectionHubPosition();
     scheduleViewportSave();
 }
 function enterZoomPreview(){
@@ -7072,6 +7109,7 @@ function render(){
     measureCanvasOriginalImageNodes(nodesEl);
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshOutputTimer();
+    scheduleMinimapRender();
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -17081,6 +17119,7 @@ bindVideoFrameExtractorControls();
 function renderSelectionHub(){
     selectionHub.innerHTML = '';
     selectionHub.classList.remove('open');
+    selectionHubAnchor = null;
     nodesEl.querySelectorAll('.output-img-wrap.quick-selected').forEach(element => element.classList.remove('quick-selected'));
     if(!canvas || selected.size !== 1) return;
     const selectedId = [...selected][0];
@@ -17101,7 +17140,7 @@ function renderSelectionHub(){
         }
     }
     if(!target && node.type === 'image' && node.url && ['image','video'].includes(mediaKindForNode(node)) && !isMissingAssetUrl(node.url)){
-        anchor = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .image-preview-wrap`);
+        anchor = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`);
         if(anchor) target = {kind:'node', mediaKind:mediaKindForNode(node), nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)};
     }
     if(!target && node.type === 'group'){
@@ -17141,6 +17180,7 @@ function renderSelectionHub(){
     ];
     selectionHub.innerHTML = actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('');
     selectionHub.classList.add('open');
+    selectionHubAnchor = anchor;
     selectionHub.dataset.targetKind = target.kind;
     selectionHub.querySelectorAll('[data-media-action]').forEach(button => {
         button.onmousedown = event => event.stopPropagation();
@@ -17163,6 +17203,7 @@ function selectOutputMedia(nodeId, url, wrap=null){
     wrap?.classList?.add('quick-selected');
 }
 function positionSelectionHub(anchor){
+    anchor = anchor || selectionHubAnchor;
     if(!anchor || !selectionHub.classList.contains('open')) return;
     const boardRect = board.getBoundingClientRect();
     const anchorRect = anchor.getBoundingClientRect();
@@ -17170,10 +17211,20 @@ function positionSelectionHub(anchor){
     const margin = 12;
     const maxLeft = Math.max(margin, boardRect.width - hubRect.width - margin);
     const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
-    let top = anchorRect.top - boardRect.top - hubRect.height - 10;
-    if(top < margin) top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + 10);
+    const gap = 14;
+    // 保留旧定位表达式的语义，同时额外增加 4px 安全间距。
+    let top = anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
+    if(top < margin) top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
     selectionHub.style.left = `${Math.round(left)}px`;
     selectionHub.style.top = `${Math.round(Math.max(margin, top))}px`;
+}
+function scheduleSelectionHubPosition(){
+    if(selectionHubPositionQueued) return;
+    selectionHubPositionQueued = true;
+    requestAnimationFrame(() => {
+        selectionHubPositionQueued = false;
+        positionSelectionHub();
+    });
 }
 function materializeOutputMediaTarget(target){
     if(target?.kind === 'node') return nodes.find(item => item.id === target.nodeId && item.type === 'image') || null;
@@ -17715,9 +17766,9 @@ function onNodeDrag(e){
         }
     });
     scheduleLinksRender();
-    renderSelectionHub();
+    scheduleSelectionHubPosition();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
-    scheduleMinimapRender();
+    scheduleMinimapNodeUpdate([dragNode.node.id, ...(dragNode.children || []).map(item => item.node.id)]);
 }
 function startNodeResize(e, node){
     e.preventDefault();
@@ -17750,8 +17801,8 @@ function onNodeResize(e){
         el.style.height = `${resizeNode.node.h}px`;
     }
     scheduleLinksRender();
-    renderSelectionHub();
-    scheduleMinimapRender();
+    scheduleSelectionHubPosition();
+    scheduleMinimapNodeUpdate([resizeNode.node.id]);
 }
 function startLink(e, originId, originKind, originRole=''){
     e.stopPropagation();
@@ -18265,7 +18316,10 @@ function updateGroupMembership(movedNodes){
     }
 }
 
-function portPoint(id, kind, inputRole=''){
+function portPoint(id, kind, inputRole='', layout=null){
+    const cache = layout?.cache;
+    const cacheKey = `${id}:${kind}:${inputRole || ''}`;
+    if(cache?.has(cacheKey)) return cache.get(cacheKey);
     const n = nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
@@ -18273,13 +18327,17 @@ function portPoint(id, kind, inputRole=''){
     const port = el?.querySelector(`.port.${kind}${roleSelector}`);
     if(port){
         const r = port.getBoundingClientRect();
-        return screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
+        const point = screenToWorld(r.left + r.width / 2, r.top + r.height / 2, layout?.boardRect);
+        cache?.set(cacheKey, point);
+        return point;
     }
     // 没有 DOM（节点渲染失败被跳过）或没找到端口时，用节点存储的几何坐标兜底，
     // 让连线仍画在节点附近，而不是落到 (0,0) 或干脆消失。
     const w = (el?.offsetWidth) || n.w || 260, h = (el?.offsetHeight) || n.h || 160;
     const nx = Number(n.x) || 0, ny = Number(n.y) || 0;
-    return kind === 'out' ? {x:nx + w, y:ny + h / 2} : {x:nx, y:ny + h / 2};
+    const point = kind === 'out' ? {x:nx + w, y:ny + h / 2} : {x:nx, y:ny + h / 2};
+    cache?.set(cacheKey, point);
+    return point;
 }
 function canResolvePort(id){
     // 只跳过“真正的孤儿连线”（端点节点已不存在）；节点存在但暂时没 DOM 的，portPoint 会用几何坐标兜底。
@@ -18292,13 +18350,15 @@ function renderLinks(){
     // 否则“读一条 rect → append 一条线”交错进行，每次 append 都让布局失效，下一次读 rect 就触发一次
     // 全量强制重排（layout thrashing），连线一多拖动就掉帧。读写分离后每帧只强制重排一次。
     const segments = [];
+    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map()};
+    // 连接端点仍按 portPoint(c.to, 'in', c.inputRole || '') 的角色语义解析，layout 仅用于复用测量结果。
     connections.forEach(c => {
         // 端点无法解析（节点已删除、或尚未渲染出 DOM）就跳过，否则连线会被画到 (0,0)，
         // 看起来像很多连线都从同一个空白处中转。
         if(!canResolvePort(c.from) || !canResolvePort(c.to)) return;
         const target = nodes.find(node => node.id === c.to);
         if(target?.type === 'multiView' && !classicMultiViewInputSlots(target).some(([role]) => role === (c.inputRole || ''))) return;
-        segments.push({c, a:portPoint(c.from, 'out'), b:portPoint(c.to, 'in', c.inputRole || '')});
+        segments.push({c, a:portPoint(c.from, 'out', '', layout), b:portPoint(c.to, 'in', c.inputRole || '', layout)});
     });
     segments.forEach(({c, a, b}) => {
         const relClass = isConnectionSelected(c) ? ' link-active' : '';
@@ -18349,9 +18409,9 @@ function setHoveredConnection(id){
         if(btn) btn.classList.add('hover');
     }
 }
-function connectionDistanceToPoint(connection, point){
-    const from = portPoint(connection.from, 'out');
-    const to = portPoint(connection.to, 'in', connection.inputRole || '');
+function connectionDistanceToPoint(connection, point, layout=null){
+    const from = portPoint(connection.from, 'out', '', layout);
+    const to = portPoint(connection.to, 'in', connection.inputRole || '', layout);
     let min = Infinity;
     let prev = cubicPoint(from, to, 0);
     for(let i = 1; i <= 28; i++){
@@ -18371,14 +18431,15 @@ function updateConnectionHoverFromMouse(e){
         setHoveredConnection(button.dataset.connectionId);
         return;
     }
-    const point = screenToWorld(e.clientX, e.clientY);
+    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map()};
+    const point = screenToWorld(e.clientX, e.clientY, layout.boardRect);
     const threshold = Math.max(12, 16 / viewport.scale);
     let bestId = '';
     let best = Infinity;
     connections.forEach(c => {
         const target = nodes.find(node => node.id === c.to);
         if(target?.type === 'multiView' && !classicMultiViewInputSlots(target).some(([role]) => role === (c.inputRole || ''))) return;
-        const d = connectionDistanceToPoint(c, point);
+        const d = connectionDistanceToPoint(c, point, layout);
         if(d < best){ best = d; bestId = c.id; }
     });
     setHoveredConnection(best <= threshold ? bestId : '');
@@ -18657,7 +18718,7 @@ board.onwheel = e => {
     viewport.y = e.clientY - rect.top - before.y * viewport.scale;
     applyViewport();
     renderLinks();
-    renderSelectionHub();
+    scheduleSelectionHubPosition();
     scheduleViewportSave();
 };
 board.addEventListener('dragover', e => {

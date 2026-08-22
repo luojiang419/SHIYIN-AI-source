@@ -227,6 +227,10 @@ let suppressImageClickUntil = 0;
 let lastMouseWorld = null;
 let lastConfigRefreshAt = 0;
 let smartMinimapState = null;
+let smartMinimapRenderQueued = false;
+let smartMinimapViewportQueued = false;
+let smartMinimapNodeUpdateQueued = false;
+const smartMinimapNodeUpdateIds = new Set();
 let smartMinimapDrag = false;
 let zoomPreviewState = null;
 let runTimerInterval = null;
@@ -2644,7 +2648,7 @@ function applyViewport(){
     world.classList.toggle('canvas-scaled', Math.abs(viewport.scale - 1) > 0.001);
     shell.style.backgroundSize = '24px 24px';
     shell.style.backgroundPosition = '0 0';
-    renderMinimap();
+    scheduleSmartMinimapViewportUpdate();
 }
 function screenToWorld(event){
     const rect = shell.getBoundingClientRect();
@@ -2684,13 +2688,61 @@ function renderMinimap(){
         width:Math.max(4, r.width * scale),
         height:Math.max(4, r.height * scale)
     });
-    const nodeHtml = rects.slice(0, -1).map(r => {
+    const nodeHtml = rects.slice(0, -1).map((r, index) => {
         const p = project(r);
-        return `<div class="minimap-node" style="left:${p.left}px;top:${p.top}px;width:${p.width}px;height:${p.height}px"></div>`;
+        const node = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID)[index];
+        return `<div class="minimap-node" data-node-id="${escapeAttr(node?.id || '')}" style="left:${p.left}px;top:${p.top}px;width:${p.width}px;height:${p.height}px"></div>`;
     }).join('');
     const view = project({x:viewX, y:viewY, width:viewW, height:viewH});
     minimapContent.innerHTML = `${nodeHtml}<div id="minimapViewport" class="smart-minimap-viewport" style="left:${view.left}px;top:${view.top}px;width:${view.width}px;height:${view.height}px"></div>`;
     minimapViewport = document.getElementById('minimapViewport');
+}
+function scheduleSmartMinimapRender(){
+    if(smartMinimapRenderQueued) return;
+    smartMinimapRenderQueued = true;
+    requestAnimationFrame(() => {
+        smartMinimapRenderQueued = false;
+        renderMinimap();
+    });
+}
+function scheduleSmartMinimapViewportUpdate(){
+    if(smartMinimapViewportQueued) return;
+    smartMinimapViewportQueued = true;
+    requestAnimationFrame(() => {
+        smartMinimapViewportQueued = false;
+        if(!smartMinimapState || !minimapViewport){ scheduleSmartMinimapRender(); return; }
+        const viewW = shell.clientWidth / viewport.scale;
+        const viewH = shell.clientHeight / viewport.scale;
+        const viewX = -viewport.x / viewport.scale;
+        const viewY = -viewport.y / viewport.scale;
+        const {minX, minY, scale, offsetX, offsetY} = smartMinimapState;
+        minimapViewport.style.left = `${offsetX + (viewX - minX) * scale}px`;
+        minimapViewport.style.top = `${offsetY + (viewY - minY) * scale}px`;
+        minimapViewport.style.width = `${Math.max(4, viewW * scale)}px`;
+        minimapViewport.style.height = `${Math.max(4, viewH * scale)}px`;
+    });
+}
+function scheduleSmartMinimapNodeUpdate(ids=[]){
+    (ids || []).filter(Boolean).forEach(id => smartMinimapNodeUpdateIds.add(id));
+    if(smartMinimapNodeUpdateQueued) return;
+    smartMinimapNodeUpdateQueued = true;
+    requestAnimationFrame(() => {
+        smartMinimapNodeUpdateQueued = false;
+        if(!smartMinimapState || !minimapContent){ smartMinimapNodeUpdateIds.clear(); return; }
+        const {minX, minY, scale, offsetX, offsetY} = smartMinimapState;
+        smartMinimapNodeUpdateIds.forEach(id => {
+            const node = nodes.find(item => item.id === id && item.id !== SMART_LOG_PREVIEW_NODE_ID);
+            const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
+            if(!node || !el) return;
+            const rect = nodeRect(node);
+            el.style.left = `${offsetX + (rect.x - minX) * scale}px`;
+            el.style.top = `${offsetY + (rect.y - minY) * scale}px`;
+            el.style.width = `${Math.max(4, rect.width * scale)}px`;
+            el.style.height = `${Math.max(4, rect.height * scale)}px`;
+        });
+        smartMinimapNodeUpdateIds.clear();
+        scheduleSmartMinimapViewportUpdate();
+    });
 }
 function minimapEventToWorld(event){
     if(!smartMinimapState) renderMinimap();
@@ -6980,7 +7032,7 @@ function scheduleInteractionLayerRefresh(){
     interactionLayerRaf = requestAnimationFrame(() => {
         interactionLayerRaf = 0;
         refreshConnectionLayer();
-        renderMinimap();
+        scheduleSmartMinimapNodeUpdate((dragState?.group || [{id:dragState?.id}]).map(item => item?.id));
     });
 }
 function moveNodeElementsDuringDrag(){
@@ -7060,6 +7112,7 @@ function updateNodeElementDuringResize(node){
     }
     const active = selectedNode();
     if(active?.id === node.id) positionComposerForNode(active);
+    scheduleSmartMinimapNodeUpdate([node.id]);
     scheduleInteractionLayerRefresh();
 }
 function syncSmartGroupMemberElements(group){
@@ -8610,7 +8663,7 @@ function render(){
     bindNodeEvents(nodeIndex);
     bindConnectionEvents();
     updateComposer();
-    renderMinimap();
+    scheduleSmartMinimapRender();
     if(window.lucide) lucide.createIcons();
     bindSmartPreviewImageFallbacks(world);
     syncSmartSelectedImageResolution(world);
@@ -8651,7 +8704,7 @@ function render(){
     bindNodeEvents();
     bindConnectionEvents();
     updateComposer();
-    renderMinimap();
+    scheduleSmartMinimapRender();
     if(window.lucide) lucide.createIcons();
     measureSmartNodeImages();
     refreshRunTimerPills();
@@ -18338,6 +18391,7 @@ window.onmouseup = e => {
         dragState = null;
         scheduleSave();
         scheduleConnectionLayerRefresh();
+        scheduleSmartMinimapRender();
     }
 };
 shell.addEventListener('wheel', e => {

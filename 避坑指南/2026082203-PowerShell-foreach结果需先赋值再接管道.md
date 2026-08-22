@@ -21,3 +21,11 @@ $probeResults | Format-Table -AutoSize
 ```
 
 如果只需流式输出，也可以用 `$ports | ForEach-Object { ... } | Format-Table`。
+
+## Git 上游修订参数也要加引号
+
+PowerShell 会把未加引号的 `@{upstream}` 当成哈希表字面量，导致 `git rev-parse @{upstream}` 在 Git 启动前就解析失败。应写成：
+
+```powershell
+git rev-parse '@{upstream}'
+```

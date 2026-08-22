@@ -59,9 +59,9 @@ def test_shared_arrange_layout_accounts_for_real_node_dimensions():
     arrange_end = CANVAS_JS.index("function arrangeSelectedCanvasNodes", arrange_start)
     arrange_body = CANVAS_JS[arrange_start:arrange_end]
     assert "const rectById = new Map" in arrange_body
-    assert "colWidths[col] = Math.max" in arrange_body
-    assert "rowHeights[row] = Math.max" in arrange_body
-    assert "const columnGap = 72;" in arrange_body
+    assert "const layerWidth = Math.max" in arrange_body
+    assert "let layerY = startY" in arrange_body
+    assert "const columnGap = 180;" in arrange_body
     assert "const rowGap = 56;" in arrange_body
 
 

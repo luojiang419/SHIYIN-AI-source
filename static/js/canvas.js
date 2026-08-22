@@ -18200,13 +18200,6 @@ function moveCanvasNodeAtom(node, x, y){
     const dy = Math.round(y - (Number(node.y) || 0));
     translateCanvasNodeWithMembers(node, dx, dy);
 }
-function canvasArrangeCategory(node){
-    const type = String(node?.type || '').toLowerCase();
-    if(type === 'output' || type.endsWith('-output')) return {rank:3, key:'output'};
-    if(['prompt','promptgroup','loop','llm'].includes(type)) return {rank:1, key:'prompt'};
-    if(['image','group'].includes(type)) return {rank:0, key:'media'};
-    return {rank:2, key:'process'};
-}
 function canvasArrangeFlowComponents(ids){
     const atomicIds = [...new Set((ids || []).filter(id => nodes.some(node => node.id === id)))];
     if(!atomicIds.length) return [];
@@ -18265,43 +18258,69 @@ function arrangeIdsByConnections(ids){
     const selectedNodes = [...idSet].map(id => nodes.find(n => n.id === id)).filter(Boolean);
     if(selectedNodes.length < 2) return false;
     const rectById = new Map(selectedNodes.map(n => [n.id, nodeRect(n)]));
-    const rects = selectedNodes.map(n => ({node:n, rect:rectById.get(n.id), category:canvasArrangeCategory(n)}));
-    const startX = Number.isFinite(Number(options.originX)) ? Number(options.originX) : Math.min(...rects.map(item => item.rect.x));
-    const startY = Number.isFinite(Number(options.originY)) ? Number(options.originY) : Math.min(...rects.map(item => item.rect.y));
-    const buckets = new Map();
-    rects.forEach(item => {
-        const bucketKey = `${item.category.rank}:${item.category.key}`;
-        if(!buckets.has(bucketKey)) buckets.set(bucketKey, {...item.category, nodes:[]});
-        buckets.get(bucketKey).nodes.push(item);
+    const startX = Number.isFinite(Number(options.originX)) ? Number(options.originX) : Math.min(...selectedNodes.map(node => rectById.get(node.id).x));
+    const startY = Number.isFinite(Number(options.originY)) ? Number(options.originY) : Math.min(...selectedNodes.map(node => rectById.get(node.id).y));
+    const scopeById = new Map();
+    nodes.filter(node => node.type === 'group' || node.type === 'promptGroup').forEach(group => {
+        if(!idSet.has(group.id)) return;
+        (group.items || []).forEach(itemId => { if(idSet.has(itemId)) scopeById.set(itemId, group.id); });
     });
-    const orderedBuckets = [...buckets.values()].sort((a, b) => a.rank - b.rank || a.key.localeCompare(b.key));
-    const columnGap = 72;
-    const rowGap = 56;
-    const categoryGap = 180;
-    let categoryX = startX;
-    orderedBuckets.forEach(bucket => {
-        const items = bucket.nodes.slice().sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || String(a.node.id).localeCompare(String(b.node.id)));
-        // 输入端媒体节点少量时采用纵向单列，避免三张图被压成一行；四张图固定为 2×2，更多数量继续按平方根自动适配。
-        // 兼容旧布局契约：const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
-        const columns = bucket.key === 'media' && items.length <= 3 ? 1 : bucket.key === 'media' && items.length === 4 ? 2 : Math.max(1, Math.ceil(Math.sqrt(items.length)));
-        const rows = Math.ceil(items.length / columns);
-        const colWidths = Array(columns).fill(0);
-        const rowHeights = Array(rows).fill(0);
-        items.forEach((item, index) => {
-            const col = index % columns;
-            const row = Math.floor(index / columns);
-            colWidths[col] = Math.max(colWidths[col], Math.max(220, item.rect.w));
-            rowHeights[row] = Math.max(rowHeights[row], Math.max(120, item.rect.h));
+    const canonicalId = id => scopeById.get(id) || id;
+    const outgoing = new Map(selectedNodes.map(node => [node.id, new Set()]));
+    const incoming = new Map(selectedNodes.map(node => [node.id, new Set()]));
+    connections.forEach(connection => {
+        const from = canonicalId(connection.from);
+        const to = canonicalId(connection.to);
+        if(from === to || !idSet.has(from) || !idSet.has(to)) return;
+        if(outgoing.get(from)?.has(to)) return;
+        outgoing.get(from)?.add(to);
+        incoming.get(to)?.add(from);
+    });
+    const compareIds = (a, b) => {
+        const ra = rectById.get(a) || {y:0,x:0};
+        const rb = rectById.get(b) || {y:0,x:0};
+        return ra.y - rb.y || ra.x - rb.x || String(a).localeCompare(String(b));
+    };
+    const indegree = new Map(selectedNodes.map(node => [node.id, incoming.get(node.id)?.size || 0]));
+    const levels = new Map(selectedNodes.map(node => [node.id, 0]));
+    const queue = selectedNodes.map(node => node.id).filter(id => indegree.get(id) === 0).sort(compareIds);
+    const processed = new Set();
+    while(queue.length){
+        const current = queue.shift();
+        processed.add(current);
+        (outgoing.get(current) || []).forEach(next => {
+            levels.set(next, Math.max(levels.get(next) || 0, (levels.get(current) || 0) + 1));
+            indegree.set(next, (indegree.get(next) || 0) - 1);
+            if(indegree.get(next) === 0){
+                queue.push(next);
+                queue.sort(compareIds);
+            }
         });
-        const colX = [];
-        let cursorX = categoryX;
-        colWidths.forEach(width => { colX.push(cursorX); cursorX += width + columnGap; });
-        const rowY = [];
-        let cursorY = startY;
-        rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + rowGap; });
-        items.forEach((item, index) => moveCanvasNodeAtom(item.node, colX[index % columns], rowY[Math.floor(index / columns)]));
-        const categoryWidth = colWidths.reduce((sum, width) => sum + width, 0) + columnGap * Math.max(0, columns - 1);
-        categoryX += categoryWidth + categoryGap;
+    }
+    // 异常循环连接没有拓扑起点时仍然要完成布局，循环节点放在已解析层级之后并保持稳定顺序。
+    const unresolved = selectedNodes.map(node => node.id).filter(id => !processed.has(id)).sort(compareIds);
+    if(unresolved.length){
+        const fallbackLevel = Math.max(0, ...levels.values()) + 1;
+        unresolved.forEach(id => levels.set(id, Math.max(levels.get(id) || 0, fallbackLevel)));
+    }
+    const layers = new Map();
+    selectedNodes.forEach(node => {
+        const level = levels.get(node.id) || 0;
+        if(!layers.has(level)) layers.set(level, []);
+        layers.get(level).push(node);
+    });
+    const columnGap = 180;
+    const rowGap = 56;
+    let layerX = startX;
+    [...layers.keys()].sort((a, b) => a - b).forEach(level => {
+        const items = layers.get(level).sort((a, b) => compareIds(a.id, b.id));
+        const layerWidth = Math.max(...items.map(item => Math.max(220, rectById.get(item.id)?.w || 0)));
+        let layerY = startY;
+        items.forEach(item => {
+            moveCanvasNodeAtom(item, layerX, layerY);
+            layerY += Math.max(120, rectById.get(item.id)?.h || 0) + rowGap;
+        });
+        layerX += layerWidth + columnGap;
     });
     return true;
 }

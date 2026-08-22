@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SHIYIN AI",
-  "version": "1.0.260",
+  "version": "1.0.261",
   "identifier": "com.hero8152.canvas.desktop",
   "build": {
     "frontendDist": "../desktop-placeholder"

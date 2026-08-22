@@ -214,6 +214,7 @@ app = FastAPI()
 PUBLIC_HTTP_PATHS = {
     "/login",
     "/favicon.ico",
+    "/media-cache-sw.js",
     "/api/health",
     "/api/account/login",
     "/api/account/register",
@@ -406,7 +407,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.260"
+APP_VERSION = "1.0.261"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -11221,6 +11222,16 @@ async def login_page(request: Request):
 async def admin_page(request: Request):
     require_admin(request)
     return FileResponse(os.path.join(STATIC_DIR, "admin.html"), media_type="text/html")
+
+
+@app.get("/media-cache-sw.js")
+def media_cache_service_worker():
+    """浏览器生成图片缓存 Service Worker，必须从根路径提供才能接管 /output 和 /assets。"""
+    return FileResponse(
+        os.path.join(STATIC_DIR, "media-cache-sw.js"),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
 
 
 def account_file_response(root: Path, relative_path: str):

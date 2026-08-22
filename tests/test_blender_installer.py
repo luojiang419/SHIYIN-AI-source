@@ -16,6 +16,15 @@ class BlenderInstallerTests(unittest.TestCase):
         ).read_text(encoding="utf-8-sig")
         cls.build_script = (root / "tools" / "build-installer.ps1").read_text(encoding="utf-8")
         cls.smoke = (root / "tools" / "smoke-installer-progress.ps1").read_text(encoding="utf-8")
+        cls.process_cleanup = (root / "tools" / "stop-shiyin-processes.ps1").read_text(encoding="utf-8")
+
+    def test_installer_cleans_orphaned_processes_from_selected_install_root(self):
+        self.assertIn("PrepareToInstall(var NeedsRestart: Boolean)", self.iss)
+        self.assertIn("stop-shiyin-processes.ps1", self.iss)
+        self.assertIn("-PortableRoot", self.iss)
+        self.assertIn("canvas-backend\\canvas-backend.exe", self.process_cleanup)
+        self.assertIn("Get-CimInstance Win32_Process", self.process_cleanup)
+        self.assertIn("StringComparison]::OrdinalIgnoreCase", self.process_cleanup)
 
     def test_installer_has_optional_blender_plugin_page(self):
         self.assertIn("BlenderPluginPage := CreateInputOptionPage(", self.iss)

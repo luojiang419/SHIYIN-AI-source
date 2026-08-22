@@ -46,6 +46,7 @@ Source: "..\dist\installer-stage\app\*"; DestDir: "{app}\app"; Flags: ignorevers
 Source: "..\dist\installer-stage\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\installer-stage\README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\tools\blender-addon\windows\Install-SHIYINBlenderAddon.ps1"; Flags: dontcopy
+Source: "..\tools\stop-shiyin-processes.ps1"; Flags: dontcopy
 
 [Icons]
 Name: "{commonprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -181,6 +182,42 @@ function InitializeSetup(): Boolean;
 begin
   UpdateProgressFile := ExpandConstant('{param:UPDATEPROGRESS|}');
   Result := True;
+end;
+
+function StopRunningShiyinProcesses(): Boolean;
+var
+  PowerShellPath: String;
+  HelperPath: String;
+  Parameters: String;
+  ResultCode: Integer;
+begin
+  Result := True;
+  HelperPath := ExpandConstant('{tmp}\stop-shiyin-processes.ps1');
+  try
+    ExtractTemporaryFile('stop-shiyin-processes.ps1');
+  except
+    Log('Unable to extract SHIYIN AI process cleanup helper: ' + GetExceptionMessage);
+    Result := False;
+    exit;
+  end;
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    HelperPath + '" -PortableRoot "' + ExpandConstant('{app}') + '"';
+  ResultCode := -1;
+  if (not Exec(PowerShellPath, Parameters, '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+  begin
+    Log(Format('SHIYIN AI process cleanup failed, exit code %d.', [ResultCode]));
+    Result := False;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  NeedsRestart := False;
+  Result := '';
+  if not StopRunningShiyinProcesses() then
+    Result := 'Unable to close the old SHIYIN AI process. End SHIYIN AI.exe or app\\backend\\canvas-backend\\canvas-backend.exe in Task Manager and retry.';
 end;
 
 function BlenderPluginRequested(): Boolean;

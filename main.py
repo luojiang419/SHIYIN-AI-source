@@ -407,7 +407,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.265"
+APP_VERSION = "1.0.266"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4323,12 +4323,13 @@ def canvas_path(canvas_id):
         raise HTTPException(status_code=400, detail="无效的画布 ID")
     return cleaned
 
-def save_canvas(canvas, actor_id=""):
+def save_canvas(canvas, actor_id="", broadcast=True):
     canvas["updated_at"] = now_ms()
     with CANVAS_LOCK:
         canvas_path(canvas["id"])
         DATABASE.save_canvas(canvas, touch=False)
-    publish_entity_changed("canvas", canvas["id"], int(canvas.get("revision") or 0), actor_id, int(canvas.get("updated_at") or 0))
+    if broadcast:
+        publish_entity_changed("canvas", canvas["id"], int(canvas.get("revision") or 0), actor_id, int(canvas.get("updated_at") or 0))
 
 def normalize_canvas_kind(kind="classic"):
     return "smart" if str(kind or "").strip().lower() == "smart" else "classic"
@@ -18194,7 +18195,7 @@ async def touch_canvas(canvas_id: str):
     global ACTIVE_CANVAS_ID
     ACTIVE_CANVAS_ID = canvas["id"]
     ACTIVE_CANVAS_BY_ACCOUNT[current_account_id()] = canvas["id"]
-    save_canvas(canvas)
+    save_canvas(canvas, broadcast=False)
     return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}
 
 @app.get("/api/canvas-assets")

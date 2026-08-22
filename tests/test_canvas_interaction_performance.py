@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CANVAS_JS = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
 SMART_CANVAS_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+FOCUS_GUARD_JS = (ROOT / "static" / "js" / "focus-guard.js").read_text(encoding="utf-8")
+MAIN_PY = (ROOT / "main.py").read_text(encoding="utf-8")
 
 
 def body(source: str, signature: str, end_marker: str) -> str:
@@ -131,6 +133,33 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("backdrop-filter:none", hidden)
         selected = css[css.index(".image-node.selected .smart-node-floating-menu"):css.index(".world.smart-multi-selected")]
         self.assertIn("backdrop-filter:blur(18px)", selected)
+
+    def test_remote_canvas_sync_skips_timestamp_only_redraws(self):
+        smart_apply = body(SMART_CANVAS_JS, "function applyMergedServerCanvas", "async function mergeReloadCanvasNow")
+        classic_apply = body(CANVAS_JS, "function applyRemoteCanvasData", "function resetTransientRunState")
+        self.assertIn("smartCanvasRenderFingerprint", smart_apply)
+        self.assertIn("if(beforeFingerprint !== afterFingerprint) render();", smart_apply)
+        self.assertIn("classicCanvasRenderFingerprint", classic_apply)
+        self.assertIn("const contentChanged = beforeFingerprint !== afterFingerprint;", classic_apply)
+        self.assertEqual(classic_apply.count("render();"), 2)
+        self.assertNotIn("refreshMissingCanvasAssets().then(() => render())", classic_apply)
+
+    def test_remote_sync_does_not_cancel_local_text_save(self):
+        handler = body(CANVAS_JS, "function handleCanvasUpdatedMessage", "async function returnToCanvasManager")
+        self.assertIn("if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain)", handler)
+        self.assertNotIn("localCanvasDirty = false;", handler)
+        smart_reload = body(SMART_CANVAS_JS, "async function mergeReloadCanvasNow", "function scheduleCanvasMergeReload")
+        self.assertIn("smartCanvasTextInputActive()", smart_reload)
+
+    def test_touch_only_updates_do_not_broadcast_canvas_event(self):
+        touch = body(MAIN_PY, "@app.post(\"/api/canvases/{canvas_id}/touch\")", "@app.get(\"/api/canvas-assets\")")
+        self.assertIn("save_canvas(canvas, broadcast=False)", touch)
+
+    def test_replaced_text_editor_restores_unsaved_draft(self):
+        restore = body(FOCUS_GUARD_JS, "function restore(snapshot)", "function shouldDeferDomUpdate")
+        self.assertIn("if(replaced && snapshot.textEditable)", restore)
+        self.assertIn("target.value = snapshot.value;", restore)
+        self.assertIn("target.dispatchEvent(new Event('input', {bubbles:true}))", restore)
 
 
 if __name__ == "__main__":

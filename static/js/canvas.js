@@ -2569,8 +2569,8 @@ async function openCanvas(id){
             canvas.updated_at = Number(touched.updated_at);
             lastCanvasUpdatedAt = Math.max(lastCanvasUpdatedAt, canvas.updated_at);
         });
-        void refreshMissingCanvasAssets(openedCanvasId).then(() => {
-            if(canvas?.id === openedCanvasId) render();
+        void refreshMissingCanvasAssets(openedCanvasId).then(assetsChanged => {
+            if(assetsChanged && canvas?.id === openedCanvasId) render();
         });
     } catch(e) {
         setStatus(tr('canvas.openFailed'));
@@ -2578,6 +2578,23 @@ async function openCanvas(id){
         // 打开失败（id 无效/已删除）：回到选画布页面，避免停在空白编辑器。
         window.location.replace(canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject()));
     }
+}
+function classicCanvasRenderFingerprint(value={}){
+    try {
+        return JSON.stringify({
+            title: value.canvas?.title || '',
+            icon: value.canvas?.icon || '',
+            kind: value.canvas?.kind || '',
+            nodes: Array.isArray(value.nodes) ? value.nodes : [],
+            connections: Array.isArray(value.connections) ? value.connections : [],
+            viewport: value.viewport || {}
+        });
+    } catch(e) {
+        return '';
+    }
+}
+function classicCanvasTextInputActive(){
+    return Boolean(window.StudioFocusGuard?.isTextEditable?.(document.activeElement));
 }
 function applyRemoteCanvasData(remote){
     if(!remote || !canvas || remote.id !== canvas.id) return;
@@ -2588,6 +2605,7 @@ function applyRemoteCanvasData(remote){
     }
     applyingRemoteCanvas = true;
     try {
+        const beforeFingerprint = classicCanvasRenderFingerprint({canvas, nodes, connections, viewport});
         resetCascadeRuntimeState();
         const localViewport = localViewportForCanvas(canvas.id, viewport || remote.viewport || {x:0, y:0, scale:1});
         const localSelectedIds = new Set(selected);
@@ -2602,10 +2620,14 @@ function applyRemoteCanvasData(remote){
         resetTransientRunState(nodes);
         sanitizeConnections();
         pruneMissingComfyWorkflows();
-        refreshMissingCanvasAssets().then(() => render());
+        const afterFingerprint = classicCanvasRenderFingerprint({canvas, nodes, connections, viewport});
+        const contentChanged = beforeFingerprint !== afterFingerprint;
+        refreshMissingCanvasAssets().then(assetsChanged => {
+            if(assetsChanged && !contentChanged && canvas?.id === remote.id) render();
+        });
         selected = new Set([...localSelectedIds].filter(id => nodes.some(node => node.id === id)));
         renderCanvasList();
-        render();
+        if(contentChanged) render();
         resumeCanvasImageTasks();
         resumeCanvasVideoTasks();
         resumeTopazVideoTasks();
@@ -2650,10 +2672,13 @@ function canvasLocalAssetUrls(){
 }
 async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
     const targetCanvasId = String(expectedCanvasId || '');
+    const previousMissing = new Set(missingAssetUrls);
+    const hasChanged = () => previousMissing.size !== missingAssetUrls.size
+        || [...previousMissing].some(url => !missingAssetUrls.has(url));
     const urls = canvasLocalAssetUrls();
     if(!urls.length){
         if(canvas?.id === targetCanvasId) missingAssetUrls.clear();
-        return;
+        return hasChanged();
     }
     try {
         const data = await fetch('/api/canvas-assets/check', {
@@ -2665,12 +2690,19 @@ async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
         missingAssetUrls.clear();
         const exists = data.exists || {};
         Object.entries(exists).forEach(([url, ok]) => { if(!ok) missingAssetUrls.add(url); });
+        return hasChanged();
     } catch(e) {
         console.warn('canvas asset check failed', e);
+        return false;
     }
 }
 async function syncRemoteCanvasNow(){
     if(!canvas) return;
+    if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain || classicCanvasTextInputActive()){
+        clearTimeout(remoteSyncTimer);
+        remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 800);
+        return;
+    }
     try {
         const res = await fetch(`/api/canvases/${canvas.id}`);
         if(!res.ok) throw new Error(tr('canvas.openFailed'));
@@ -2722,9 +2754,11 @@ function handleCanvasUpdatedMessage(data){
     if(remoteCanvasId !== canvas.id && remoteCanvasId !== 'global') return;
     const remoteUpdatedAt = Number(data.updated_at || 0);
     if(remoteUpdatedAt && remoteUpdatedAt <= Number(lastCanvasUpdatedAt || 0)) return;
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    localCanvasDirty = false;
+    if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain){
+        clearTimeout(remoteSyncTimer);
+        remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1000);
+        return;
+    }
     clearTimeout(remoteSyncTimer);
     remoteSyncTimer = setTimeout(syncRemoteCanvasNow, savingCanvasNow ? 700 : 120);
     setStatus('Syncing...');

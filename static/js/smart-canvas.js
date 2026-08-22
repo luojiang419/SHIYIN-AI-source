@@ -6107,8 +6107,26 @@ function mergeSmartConnections(localConns, remoteConns, nodeIds){
     });
     return out;
 }
+function smartCanvasRenderFingerprint(value={}){
+    try {
+        return JSON.stringify({
+            title: value.title || '',
+            icon: value.icon || '',
+            kind: value.kind || '',
+            nodes: Array.isArray(value.nodes) ? value.nodes : [],
+            connections: Array.isArray(value.connections) ? value.connections : [],
+            viewport: value.viewport || {}
+        });
+    } catch(e) {
+        return '';
+    }
+}
+function smartCanvasTextInputActive(){
+    return Boolean(window.StudioFocusGuard?.isTextEditable?.(document.activeElement));
+}
 function applyMergedServerCanvas(serverCanvas){
     if(!serverCanvas || !canvas) return false;
+    const beforeFingerprint = smartCanvasRenderFingerprint({...canvas, nodes, connections: canvas.connections});
     const remoteNodes = (Array.isArray(serverCanvas.nodes) ? serverCanvas.nodes : []).map(normalizeLegacySmartNode).filter(Boolean);
     const mergedNodes = mergeSmartNodeLists(nodes, remoteNodes);
     const nodeIds = new Set(mergedNodes.map(n => n.id));
@@ -6123,7 +6141,8 @@ function applyMergedServerCanvas(serverCanvas){
         const titleEl = document.getElementById('smartTitle');
         if(titleEl) titleEl.textContent = canvas.title;
     }
-    render();
+    const afterFingerprint = smartCanvasRenderFingerprint({...canvas, nodes, connections: canvas.connections});
+    if(beforeFingerprint !== afterFingerprint) render();
     if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
     if(cleanedState || recoveredLoopOutputs || migratedMultiViewConnections) scheduleSave();
     resumeSmartPendingTasks();
@@ -6133,9 +6152,9 @@ function applyMergedServerCanvas(serverCanvas){
 }
 async function mergeReloadCanvasNow(){
     if(!canvasId) return;
-    if(dragState || selectionState){
+    if(dragState || selectionState || canvasSyncInFlight || saveTimer || saveIdleHandle || smartCanvasTextInputActive()){
         // 用户正在拖拽/框选，稍后再合并，别打断操作
-        scheduleCanvasMergeReload(600);
+        scheduleCanvasMergeReload(800);
         return;
     }
     try {

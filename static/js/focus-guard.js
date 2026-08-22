@@ -65,6 +65,8 @@
             selectionStart,
             selectionEnd,
             value:typeof el.value === 'string' ? el.value : '',
+            contentHtml:el.isContentEditable ? el.innerHTML : null,
+            textEditable:isTextEditable(el),
             requestedAt:Date.now(),
         };
     }
@@ -87,6 +89,17 @@
         if(!target) return false;
         const active = document.activeElement;
         if(active && active !== document.body && active !== document.documentElement && active !== target && isEditable(active)) return false;
+        const replaced = target !== snapshot.element && !snapshot.element?.isConnected;
+        let restoredDraft = false;
+        if(replaced && snapshot.textEditable){
+            if(typeof target.value === 'string' && target.value !== snapshot.value){
+                target.value = snapshot.value;
+                restoredDraft = true;
+            } else if(target.isContentEditable && snapshot.contentHtml != null && target.innerHTML !== snapshot.contentHtml){
+                target.innerHTML = snapshot.contentHtml;
+                restoredDraft = true;
+            }
+        }
         try { target.focus({preventScroll:true}); } catch(e) { try { target.focus(); } catch(_) {} }
         if(typeof target.setSelectionRange === 'function') {
             const end = Number(target.value?.length || 0);
@@ -94,6 +107,7 @@
             const finish = Number.isFinite(snapshot.selectionEnd) ? Math.min(snapshot.selectionEnd, end) : start;
             try { target.setSelectionRange(start, finish); } catch(e) {}
         }
+        if(restoredDraft) target.dispatchEvent(new Event('input', {bubbles:true}));
         return document.activeElement === target;
     }
 

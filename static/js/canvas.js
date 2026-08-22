@@ -451,6 +451,10 @@ let videoFrameOpenSequence = 0;
 let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
 let dragNode = null;
+// 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
+let classicRenderMutation = null;
+let canvasMutationBatchDepth = 0;
+let canvasMutationBatchDirty = false;
 let dragBoard = null;
 let minimapDrag = false;
 let minimapState = null;
@@ -1838,6 +1842,59 @@ function serializableCanvasNode(node){
     if(copy.poseStatus === 'running') copy.poseStatus = 'idle';
     return copy;
 }
+function beginCanvasMutationBatch(){
+    canvasMutationBatchDepth += 1;
+}
+function endCanvasMutationBatch(){
+    canvasMutationBatchDepth = Math.max(0, canvasMutationBatchDepth - 1);
+    if(canvasMutationBatchDepth || !canvasMutationBatchDirty) return;
+    canvasMutationBatchDirty = false;
+    render();
+    scheduleSave();
+}
+function queueClassicRenderMutation(mutation={}){
+    const merge = (key) => new Set([...(classicRenderMutation?.[key] || []), ...(mutation[key] || [])].filter(Boolean));
+    classicRenderMutation = {
+        createdIds:merge('createdIds'),
+        removeIds:merge('removeIds'),
+        replaceIds:merge('replaceIds')
+    };
+}
+function renderClassicMutation(mutation){
+    const createdIds = mutation?.createdIds || new Set();
+    const removeIds = mutation?.removeIds || new Set();
+    const replaceIds = mutation?.replaceIds || new Set();
+    canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    removeIds.forEach(id => {
+        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
+    });
+    createdIds.forEach(id => {
+        const node = canvasNodeIndex.get(id);
+        if(!node) return;
+        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        if(current) current.remove();
+        try { nodesEl.appendChild(renderNode(node)); }
+        catch(error){ console.error('[canvas] incremental node render failed:', id, error); }
+    });
+    replaceIds.forEach(id => {
+        if(createdIds.has(id)) return;
+        const node = canvasNodeIndex.get(id);
+        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        if(!node || !current) return;
+        try {
+            const fresh = renderNode(node);
+            if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
+            current.replaceWith(fresh);
+        } catch(error){ console.error('[canvas] incremental node refresh failed:', id, error); }
+    });
+    refreshSelectionVisuals();
+    refreshGeometryAfterLayout();
+    refreshIcons();
+    bindCanvasPreviewImageFallbacks(nodesEl);
+    syncCanvasSelectedImageResolution(nodesEl);
+    scheduleMinimapRender();
+}
 function serializableCanvasNodes(list=nodes){
     return (list || []).map(serializableCanvasNode);
 }
@@ -2938,6 +2995,10 @@ function canvasListUrlForProject(projectId){
 function addNode(node){
     if(!ensureCanvas()) return;
     nodes.push(node);
+    if(canvasMutationBatchDepth){
+        canvasMutationBatchDirty = true;
+        return node;
+    }
     render();
     scheduleSave();
     return node;
@@ -3116,47 +3177,49 @@ function createEcommerceWorkflow(point){
     if(!ensureCanvas()) return null;
     const base = point || defaultPoint(0,0);
     pushUndo();
-    const model = addEcommerceNode('ecom-model',{x:base.x,y:base.y});
-    const product = addEcommerceNode('ecom-product',{x:base.x,y:base.y + 470});
-    const scene = addEcommerceNode('ecom-scene',{x:base.x + 430,y:base.y});
-    const compose = addEcommerceNode('ecom-compose',{x:base.x + 430,y:base.y + 470});
-    const video = addEcommerceNode('ecom-video',{x:base.x + 980,y:base.y + 470});
-    if(!model || !product || !scene || !compose || !video) return null;
-    connections.push(
-        {id:uid('c'),from:model.id,to:compose.id,inputRole:'ecom-model'},
-        {id:uid('c'),from:product.id,to:compose.id,inputRole:'ecom-product'},
-        {id:uid('c'),from:scene.id,to:compose.id,inputRole:'ecom-scene'},
-        {id:uid('c'),from:compose.id,to:video.id},
-    );
-    selected.clear();
-    [model,product,scene,compose,video].forEach(node => selected.add(node.id));
-    syncGeneratorInputs();
-    render();
-    scheduleSave();
-    setStatus('已创建电商工作流：模特 / 商品 / 场景 → A+ 图合成 → 电商视频');
-    return {model,product,scene,compose,video};
+    beginCanvasMutationBatch();
+    try {
+        const model = addEcommerceNode('ecom-model',{x:base.x,y:base.y});
+        const product = addEcommerceNode('ecom-product',{x:base.x,y:base.y + 470});
+        const scene = addEcommerceNode('ecom-scene',{x:base.x + 430,y:base.y});
+        const compose = addEcommerceNode('ecom-compose',{x:base.x + 430,y:base.y + 470});
+        const video = addEcommerceNode('ecom-video',{x:base.x + 980,y:base.y + 470});
+        if(!model || !product || !scene || !compose || !video) return null;
+        connections.push(
+            {id:uid('c'),from:model.id,to:compose.id,inputRole:'ecom-model'},
+            {id:uid('c'),from:product.id,to:compose.id,inputRole:'ecom-product'},
+            {id:uid('c'),from:scene.id,to:compose.id,inputRole:'ecom-scene'},
+            {id:uid('c'),from:compose.id,to:video.id},
+        );
+        selected.clear();
+        [model,product,scene,compose,video].forEach(node => selected.add(node.id));
+        syncGeneratorInputs();
+        setStatus('已创建电商工作流：模特 / 商品 / 场景 → A+ 图合成 → 电商视频');
+        return {model,product,scene,compose,video};
+    } finally { endCanvasMutationBatch(); }
 }
 function createFilmWorkflow(point){
     if(!ensureCanvas()) return null;
     const base = point || defaultPoint(0,0);
     pushUndo();
-    const storyboard = addFilmNode('film-storyboard',{x:base.x,y:base.y});
-    const storyboardOutput = addOutputNode({x:base.x + 620,y:base.y});
-    const video = addFilmNode('film-video',{x:base.x + 1240,y:base.y});
-    const videoOutput = addOutputNode({x:base.x + 1860,y:base.y});
-    if(!storyboard || !storyboardOutput || !video || !videoOutput) return null;
-    connections.push(
-        {id:uid('c'),from:storyboard.id,to:storyboardOutput.id},
-        {id:uid('c'),from:storyboardOutput.id,to:video.id,inputRole:'storyboard'},
-        {id:uid('c'),from:video.id,to:videoOutput.id}
-    );
-    selected.clear();
-    [storyboard,storyboardOutput,video,videoOutput].forEach(node => selected.add(node.id));
-    syncGeneratorInputs();
-    render();
-    scheduleSave();
-    setStatus('已创建影视工作流：分镜合成 → 分镜输出 → 生成视频 → 视频输出');
-    return {storyboard,storyboardOutput,video,videoOutput};
+    beginCanvasMutationBatch();
+    try {
+        const storyboard = addFilmNode('film-storyboard',{x:base.x,y:base.y});
+        const storyboardOutput = addOutputNode({x:base.x + 620,y:base.y});
+        const video = addFilmNode('film-video',{x:base.x + 1240,y:base.y});
+        const videoOutput = addOutputNode({x:base.x + 1860,y:base.y});
+        if(!storyboard || !storyboardOutput || !video || !videoOutput) return null;
+        connections.push(
+            {id:uid('c'),from:storyboard.id,to:storyboardOutput.id},
+            {id:uid('c'),from:storyboardOutput.id,to:video.id,inputRole:'storyboard'},
+            {id:uid('c'),from:video.id,to:videoOutput.id}
+        );
+        selected.clear();
+        [storyboard,storyboardOutput,video,videoOutput].forEach(node => selected.add(node.id));
+        syncGeneratorInputs();
+        setStatus('已创建影视工作流：分镜合成 → 分镜输出 → 生成视频 → 视频输出');
+        return {storyboard,storyboardOutput,video,videoOutput};
+    } finally { endCanvasMutationBatch(); }
 }
 function addH3VideoNode(point){
     const node = addVideoNode(point);
@@ -7159,6 +7222,12 @@ function render(){
         window.StudioFocusGuard.deferDomUpdate('canvas-render', render);
         return;
     }
+    if(classicRenderMutation){
+        const mutation = classicRenderMutation;
+        classicRenderMutation = null;
+        renderClassicMutation(mutation);
+        return;
+    }
     const perfEnd = window.CanvasPerformance?.start?.('classic.render', {nodes:nodes.length, connections:connections.length});
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
     nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
@@ -7210,8 +7279,8 @@ function registerClassicCanvasPerfFixture(){
         if(!canvas) throw new Error('请先打开一个画布');
         const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
         const previous = {nodes:clone(nodes), connections:clone(connections), selected:[...selected]};
-        const total = Math.max(20, Math.min(2000, Number(options.nodes || 500)));
-        const edgeCount = Math.max(0, Math.min(5000, Number(options.connections || 1000)));
+        const total = Math.max(20, Math.min(10000, Number(options.nodes || 500)));
+        const edgeCount = Math.max(0, Math.min(20000, Number(options.connections || 1000)));
         const columns = Math.max(1, Math.ceil(Math.sqrt(total)));
         nodes = Array.from({length:total}, (_, index) => ({
             id:`perf-image-${index}`,
@@ -14847,6 +14916,7 @@ function deleteNode(id, event){
     nodes = nodes.filter(n => n.id !== id);
     connections = connections.filter(c => c.from !== id && c.to !== id);
     selected.delete(id);
+    queueClassicRenderMutation({removeIds:[id]});
     render();
     scheduleSave();
     queueReleasedVideoClipAssets(deletingNode ? [deletingNode] : []);
@@ -17779,6 +17849,7 @@ function duplicateNodesForAltDrag(node, preserveConnections=false){
             connections.push(conn);
         }
     });
+    queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
     return copy;
 }
 function copySelectedNodes(){
@@ -17826,6 +17897,7 @@ function pasteNodes(){
     copies.forEach(c => selected.add(c.id));
     sanitizeConnections();
     syncGeneratorInputs();
+    queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
     render();
     scheduleSave();
 }
@@ -19382,6 +19454,7 @@ function deleteSelectedNodes(){
     nodes = nodes.filter(n => !toDelete.has(n.id));
     connections = connections.filter(c => !toDelete.has(c.from) && !toDelete.has(c.to));
     selected.clear();
+    queueClassicRenderMutation({removeIds:[...toDelete]});
     render();
     scheduleSave();
     queueReleasedVideoClipAssets(deletingNodes);

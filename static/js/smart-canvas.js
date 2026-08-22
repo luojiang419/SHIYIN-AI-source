@@ -83,6 +83,8 @@ let selectedId = '';
 let selectedIds = [];
 let selectedImage = {nodeId:'', index:-1};
 let dragState = null;
+// 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
+let smartRenderMutation = null;
 let loopInsertPreview = null;
 let selectionState = null;
 let smartCanvasToolMode = 'select';
@@ -6960,6 +6962,7 @@ function pasteNodes(){
     selectedId = copies.length === 1 ? copies[0].id : '';
     selectedIds = copies.length > 1 ? copies.map(n => n.id) : [];
     selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({createdIds:copies.map(item => item.id)});
     render();
     scheduleSave();
 }
@@ -6989,7 +6992,7 @@ function pasteAssetsFromInbox(){
     items.forEach((it, i) => {
         const r = Math.floor(i / cols), c = i % cols;
         const p = {x: startX + c * cell, y: startY + r * cell};
-        const node = createImageNodeAt(p, [assetNodeImageFromItem(it)], {skipUndo:true, select:false});
+        const node = createImageNodeAt(p, [assetNodeImageFromItem(it)], {skipUndo:true, select:false, deferRender:true, deferSave:true});
         if(node) created.push(node.id);
     });
     selectedId = created.length === 1 ? created[0] : '';
@@ -6997,6 +7000,7 @@ function pasteAssetsFromInbox(){
     selectedImage = {nodeId:'', index:-1};
     lastNodePasteAt = Date.now();
     try { localStorage.removeItem(SMART_CANVAS_ASSET_INBOX_KEY); } catch(e){}
+    queueSmartRenderMutation({createdIds:created});
     render();
     scheduleSave();
     toast(`已粘贴 ${created.length} 个素材到画布`);
@@ -7054,6 +7058,7 @@ function duplicateForAltDrag(node, preserveConnections=false){
     selectedIds = [];
     selectedImage = {nodeId:'', index:-1};
     const dragCopy = copies.find(c => c.id === idMap.get(node.id)) || copies[0];
+    queueSmartRenderMutation({createdIds:copies.map(item => item.id)});
     render();
     scheduleSave();
     return dragCopy;
@@ -8001,6 +8006,7 @@ function deleteSelectedSmartNodes(){
     if(deleteIds.has(selectedId)) selectedId = '';
     selectedIds = selectedIds.filter(id => !deleteIds.has(id));
     if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({removeIds:[...deleteIds]});
     render();
     scheduleSave();
     return true;
@@ -8717,11 +8723,21 @@ function rememberInlineVideoActivations(nodeIndex=new Map(nodes.map(node => [nod
         if(image && mediaKindForItem(image) === 'video') image._inlineVideoActive = true;
     });
 }
+function queueSmartRenderMutation(mutation={}){
+    const merge = key => new Set([...(smartRenderMutation?.[key] || []), ...(mutation[key] || [])].filter(Boolean));
+    smartRenderMutation = {
+        createdIds:merge('createdIds'),
+        removeIds:merge('removeIds'),
+        replaceIds:merge('replaceIds')
+    };
+}
 function render(){
     if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(world)) {
         window.StudioFocusGuard.deferDomUpdate('smart-canvas-render', render);
         return;
     }
+    const mutation = smartRenderMutation;
+    smartRenderMutation = null;
     const perfEnd = window.CanvasPerformance?.start?.('smart.render', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
     world.classList.toggle('smart-large-scene', nodes.length > 200);
@@ -8740,9 +8756,12 @@ function render(){
     const reusableNodes = new Map();
     world.querySelectorAll('.image-node').forEach(el => {
         const node = nodeIndex.get(el.dataset.id);
-        if(smartNodeHasLiveMedia(node)) reusableNodes.set(node.id, el);
+        if(!mutation?.removeIds?.has(el.dataset.id) && !mutation?.replaceIds?.has(el.dataset.id) && smartNodeHasLiveMedia(node)) reusableNodes.set(node.id, el);
     });
-    const nodeHtmlEntries = nodes
+    const renderSourceNodes = mutation
+        ? nodes.filter(node => mutation.createdIds.has(node.id) || mutation.replaceIds.has(node.id))
+        : nodes;
+    const nodeHtmlEntries = renderSourceNodes
         .filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID)
         // 分组节点先渲染（DOM 靠前→层级在下），作为成员的背板；成员渲染在后、盖在分组之上，
         // 否则缩小分组把成员挪进卡片区域时会被分组卡片背景遮住而“消失”。
@@ -8799,6 +8818,12 @@ function render(){
     });
     const keepEls = new Set();
     reusableNodes.forEach(el => keepEls.add(el));
+    if(mutation){
+        world.querySelectorAll('.image-node').forEach(el => {
+            const id = el.dataset.id || '';
+            if(!mutation.removeIds.has(id) && !mutation.replaceIds.has(id)) keepEls.add(el);
+        });
+    }
     if(composerEl) keepEls.add(composerEl);
     [...world.childNodes].forEach(child => {
         if(!keepEls.has(child)) child.remove();
@@ -8818,8 +8843,9 @@ function render(){
         }
     });
     restoreMediaPlaybackStates(mediaStates);
-    bindNodeEvents(nodeIndex);
+    bindNodeEvents(nodeIndex, mutation ? new Set(nodeHtmlEntries.map(entry => entry.node.id)) : null);
     bindConnectionEvents();
+    if(mutation) syncSelectionUi();
     updateComposer();
     scheduleSmartMinimapRender();
     if(window.lucide) lucide.createIcons();
@@ -8874,8 +8900,8 @@ function registerSmartCanvasPerfFixture(){
         if(!canvas) throw new Error('请先打开一个智能画布');
         const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
         const previous = {nodes:clone(nodes), connections:clone(canvas.connections || []), selectedId, selectedIds:[...selectedIds]};
-        const total = Math.max(20, Math.min(2000, Number(options.nodes || 500)));
-        const edgeCount = Math.max(0, Math.min(5000, Number(options.connections || 1000)));
+        const total = Math.max(20, Math.min(10000, Number(options.nodes || 500)));
+        const edgeCount = Math.max(0, Math.min(20000, Number(options.connections || 1000)));
         const columns = Math.max(1, Math.ceil(Math.sqrt(total)));
         nodes = Array.from({length:total}, (_, index) => ({
             id:`perf-smart-${index}`,
@@ -10471,8 +10497,11 @@ function bindSmartSpecialNode(el, node){
     if(node.specialType === 'relight') api.bindRelight(el, node, options);
     if(node.specialType === 'angle') api.bindAngle(el, node, options);
 }
-function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
-    world.querySelectorAll('.image-node').forEach(el => {
+function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), nodeIds=null){
+    const elements = nodeIds
+        ? [...nodeIds].map(id => world.querySelector(`.image-node[data-id="${CSS.escape(id)}"]`)).filter(Boolean)
+        : [...world.querySelectorAll('.image-node')];
+    elements.forEach(el => {
         const id = el.dataset.id;
         const nodeForControls = nodeIndex.get(id);
         const titleEl = el.querySelector('.node-title');
@@ -10948,6 +10977,7 @@ function deleteNode(id){
     if(selectedId === id) selectedId = '';
     selectedIds = selectedIds.filter(selected => !deleteIds.has(selected));
     if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({removeIds:[...deleteIds]});
     render();
     scheduleSave();
 }

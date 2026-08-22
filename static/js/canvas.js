@@ -8264,6 +8264,15 @@ function filmNodeProviderOptions(node){
 function filmNodeModelOptions(node){
     return videoModelOptionsForNode(node);
 }
+function filmNodeImageProviderOptions(node){
+    return providerOptions(node.apiProvider || defaultImageGenerationSelection().providerId);
+}
+function filmNodeImageModelOptions(node){
+    const providerId=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
+    const models=providerImageModels(providerId);
+    const selected=node.model && models.includes(node.model) ? node.model : (models[0] || node.model || '');
+    return [...new Set([selected,...models].filter(Boolean))].map(model => `<option value="${escapeHtml(model)}" ${model===selected?'selected':''}>${escapeHtml(model)}</option>`).join('');
+}
 function bindClassicFilmNode(el,node){
     const api=window.CanvasFilmNodes;
     if(!api) return;
@@ -8271,7 +8280,10 @@ function bindClassicFilmNode(el,node){
         assets:classicFilmAssets,
         providerOptions:filmNodeProviderOptions,
         modelOptions:filmNodeModelOptions,
+        imageProviderOptions:filmNodeImageProviderOptions,
+        imageModelOptions:filmNodeImageModelOptions,
         defaultModel:provider => providerVideoModels(provider)[0] || 'veo3-fast',
+        defaultImageModel:provider => providerImageModels(resolveImageProviderId(provider))[0] || '',
         provider:node.apiProvider,
         model:node.model,
         visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
@@ -8292,7 +8304,8 @@ async function runFilmNode(nodeId, opts={}){
     node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out);
     try {
         if(node.type === 'film-storyboard'){
-            const payload={prompt:built.prompt,provider_id:resolveImageProviderId(node.apiProvider || 'comfly'),model:resolveImageModel(node.model),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high'};
+            const imageProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
+            const payload={prompt:built.prompt,provider_id:imageProvider,model:resolveImageModel(node.model || providerImageModels(imageProvider)[0]),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high'};
             const task=await createCanvasImageTask(payload);
             const result=await waitCanvasImageTaskResult(task.task_id);
             const images=result.images || result.image_items || [];
@@ -11027,7 +11040,12 @@ function klingVideoSettingsHtml(node){
     }
     node.modelParameters = node.modelParameters && typeof node.modelParameters === 'object' ? node.modelParameters : {};
     const fields = (model.arguments || []).filter(argument => argument.name && argument.name !== 'prompt').map(argument => {
-        const allowed_values = Array.isArray(argument.allowed_values) ? argument.allowed_values : [];
+        let allowed_values = Array.isArray(argument.allowed_values) ? argument.allowed_values : [];
+        // 可灵 CLI 的视频时长能力为 3–15 秒；旧能力缓存可能只返回 5/15，
+        // 这里补齐完整选项，避免画布被缓存的能力列表限制。
+        if(String(argument.name).toLowerCase() === 'duration'){
+            allowed_values = [...new Set([...allowed_values.map(value => String(value)), ...Array.from({length:13},(_,index)=>String(index + 3))])];
+        }
         const stored = node.modelParameters[argument.name];
         const value = stored == null || stored === '' ? String(argument.default || '') : String(stored);
         if(node.modelParameters[argument.name] == null && value !== '') node.modelParameters[argument.name] = value;

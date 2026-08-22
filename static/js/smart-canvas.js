@@ -1479,6 +1479,13 @@ function filmSmartModelOptions(node){
     const selected=node.model || models[0] || '';
     return [...new Set([selected,...models].filter(Boolean))].map(model => `<option value="${escapeAttr(model)}" ${model===selected?'selected':''}>${escapeHtml(model)}</option>`).join('');
 }
+function filmSmartImageProviderOptions(node){
+    return smartMultiViewProviderOptions(node.apiProvider || imageProviders()[0]?.id || '');
+}
+function filmSmartImageModelOptions(node){
+    const providerId=node.apiProvider || imageProviders()[0]?.id || '';
+    return smartMultiViewModelOptions(providerId,node.model || '');
+}
 function createFilmNode(type, point){
     const api=window.CanvasFilmNodes;
     if(!api?.isType?.(type)) return null;
@@ -1490,6 +1497,8 @@ function createFilmNode(type, point){
         runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'video',videoProvider:videoApiProviders()[0]?.id || 'comfly',videoModel:providerVideoModels(videoApiProviders()[0]?.id || 'comfly')[0] || 'veo3-fast',videoDuration:5,videoAspect:'16:9',videoResolution:'',videoMultimodal:false,videoUseFrameRoles:false}),
     } : {
         specialType:'film-storyboard', title:'分镜合成', w:520, h:0,
+        apiProvider:imageProviders()[0]?.id || '',
+        model:providerImageModels(imageProviders()[0]?.id || '')[0] || '',
         runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'image',ratio:'16:9',resolution:'2k',quality:'high',count:1}),
     });
     node.id=uid(type === 'film-video' ? 'film-video' : 'film-storyboard');
@@ -1506,7 +1515,9 @@ async function runSmartFilmNode(node){
     node.running=true; node.runError=''; render();
     try {
         if(node.specialType === 'film-storyboard'){
-            const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || settingsForNodeRun.ratio || '16:9',resolution:node.resolution || settingsForNodeRun.resolution || '2k',quality:node.quality || settingsForNodeRun.quality || 'high',count:1,provider_id:settingsForNodeRun.provider_id || imageProviders()[0]?.id || '',model:settingsForNodeRun.model || providerImageModels(settingsForNodeRun.provider_id || imageProviders()[0]?.id || '')[0] || ''};
+            const imageProvider=node.apiProvider || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
+            const imageModels=providerImageModels(imageProvider);
+            const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || settingsForNodeRun.ratio || '16:9',resolution:node.resolution || settingsForNodeRun.resolution || '2k',quality:node.quality || settingsForNodeRun.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
             const created=await runApiGeneration(built.prompt,built.refs,imageSettings);
             const results=await Promise.all((created.taskIds || []).map(taskId => pollSmartCanvasTask(taskId)));
             const images=results.flatMap(result => (result?.image_items || result?.images || resultMediaUrls(result) || [])).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'image'}:{url:item,kind:'image'}).filter(item=>item.url);
@@ -3167,7 +3178,7 @@ function renderVideoModelControl(models){
 }
 function renderVideoDurationControl(){
     const v = Math.max(1, Math.min(60, Number(settings.videoDuration) || 5));
-    const quick = [3, 4, 5, 6, 8, 10, 12, 15];
+    const quick = Array.from({length:13}, (_, index) => index + 3);
     return `<div class="smart-control duration-control" title="${escapeHtml(tr('smart.videoDurationTip'))}">
         <button class="smart-pill" type="button"><i data-lucide="timer"></i><span>${v}s</span></button>
         <div class="smart-popover compact-popover">
@@ -10017,7 +10028,10 @@ function bindSmartSpecialNode(el, node){
             assets:filmSmartAssets,
             providerOptions:filmSmartProviderOptions,
             modelOptions:filmSmartModelOptions,
+            imageProviderOptions:filmSmartImageProviderOptions,
+            imageModelOptions:filmSmartImageModelOptions,
             defaultModel:provider => providerVideoModels(provider)[0] || 'veo3-fast',
+            defaultImageModel:provider => providerImageModels(provider)[0] || '',
             provider:node.apiProvider || node.runSettings?.videoProvider || '',
             model:node.model || node.runSettings?.videoModel || '',
             visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),

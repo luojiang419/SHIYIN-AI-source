@@ -163,14 +163,18 @@
         normalize(node);
         const action = node.type === 'film-storyboard' ? '生成分镜图' : '生成视频';
         const parseText = node.type === 'film-storyboard' ? '解析画面' : '解析动作';
-        const providerOptions = options.providerOptions ? options.providerOptions(node) : '';
-        const modelOptions = options.modelOptions ? options.modelOptions(node) : '';
+        const providerOptions = node.type === 'film-storyboard'
+            ? (options.imageProviderOptions || options.providerOptions)?.(node) || ''
+            : options.providerOptions?.(node) || '';
+        const modelOptions = node.type === 'film-storyboard'
+            ? (options.imageModelOptions || options.modelOptions)?.(node) || ''
+            : options.modelOptions?.(node) || '';
         return `<div class="film-node-panel ${node.type}">
             <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span><button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button></div>
             <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
             ${promptHtml(node)}
             <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中…' : action}</button></div>
-            ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}
+            ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}
             <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
             ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
         </div>`;
@@ -214,14 +218,16 @@
     }
     async function parseScene(node, options={}){
         const assets=options.assets?.(node)||[];
-        const refs=assetList(node,assets).filter(item=>item.url && (item.kind || 'image') === 'image').map(item=>item.url);
+        const mappedRefs=assetList(node,assets).filter(item=>item.url && (item.kind || 'image') === 'image').slice(0,20);
+        const refs=mappedRefs.map(item=>item.url);
         if(!refs.length) throw new Error(node.type==='film-video'?'请先连接分镜图或演员参考图':'请先连接线稿分镜');
+        const manifest=mappedRefs.map((item,index)=>`图${index+1}=${item.roleLabel || '参考资产'}`).join('；');
         const message=node.type==='film-video'
-            ? '请解析这些影视参考图中的人物动作、身体朝向、视线、镜头景别、镜头运动和动作节奏。只输出一段可直接用于视频生成的中文动作描述，不要解释。'
-            : '请解析这张线稿分镜，输出可直接用于图像生成的中文画面描述，包含景别、构图、人物位置、动作、视线、场景、光线和镜头方向。只输出描述，不要解释。';
+            ? `你将收到一组已按顺序编号的影视资产（${manifest}）。请先解析其中的分镜图，再结合演员、服装和道具参考，预测镜头运镜、人物动作先后、身体朝向、视线、节奏与互动关系。输出一段可直接用于视频生成的中文动作描述，明确镜头运动和关键动作触发时机；不要解释分析过程。`
+            : `你将收到一组已按顺序编号的影视资产（${manifest}），其中演员、场景和线稿分镜必须在同一次综合解析中互相校验。请输出一段可直接用于图像生成的中文画面描述：明确每张图对应的角色/场景/分镜关系、人物身份与动作、道具位置、构图角度、光线和环境，并要求画面构图严格参照线稿分镜图；不要解释分析过程。`;
         const provider=options.visionProvider?.(node) || node.visionProvider || '';
         const model=options.visionModel?.(node) || node.visionModel || '';
-        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,8),videos:[],provider,model,system_prompt:'你是影视分镜与动作分析助手。输出简洁、准确、可执行的中文生成提示词。'})});
+        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),videos:[],provider,model,system_prompt:'你是影视分镜与动作分析助手。输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。'})});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.detail || '视觉解析失败');
         node.prompt=String(data.text || '').trim();
@@ -237,7 +243,10 @@
             control.addEventListener(eventName,event=>{
                 const key=control.dataset.filmField;
                 node[key]=key==='duration'?clamp(control.value,1,60):control.value;
-                if(key==='apiProvider') node.model=options.defaultModel?.(control.value,node) || '';
+                if(key==='apiProvider'){
+                    const getDefault=node.type === 'film-storyboard' ? options.defaultImageModel : options.defaultModel;
+                    node.model=getDefault?.(control.value,node) || '';
+                }
                 notify(options,node,key==='apiProvider' || key==='model');
                 event.stopPropagation();
             });

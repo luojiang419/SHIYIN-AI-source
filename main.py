@@ -17975,7 +17975,9 @@ async def canvas_llm(payload: CanvasLLMRequest):
     if image_inputs or video_inputs:
         content_parts = [{"type": "text", "text": payload.message}]
         ok_imgs = 0
-        for img in image_inputs[:8]:
+        # 影视分镜综合解析需要同时接收演员、场景、线稿等资产；保留最多 20 张，
+        # 与两种画布的影视节点参考图上限一致，避免后端再次截断映射关系。
+        for img in image_inputs[:20]:
             if not img or not isinstance(img, str):
                 continue
             ref_url = media_reference_to_url(img, max_image_size=1024)

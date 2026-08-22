@@ -406,7 +406,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.253"
+APP_VERSION = "1.0.254"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -637,6 +637,7 @@ MINIMAX_H3_LEGACY_PUBLIC_BASE_URLS = {
 MINIMAX_H3_DEFAULT_BASE_URL = MINIMAX_H3_ENV_BASE_URL or MINIMAX_H3_LOCAL_BASE_URL
 MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
 KLING_CLI_PLACEHOLDER_VIDEO_MODELS = ["可灵（连接后选择模型）"]
+KLING_VIDEO_3_0_OMNI_MODEL = "kling-v3-omni"
 MINIMAX_H3_DEFAULT_RESOLUTION = "0.2MP 16:9 - 608x352"
 MINIMAX_H3_RESOLUTION_PRESETS = (
     "0.2MP 21:9 - 672x288", "0.3MP 21:9 - 896x384", "0.5MP 21:9 - 1120x480",
@@ -16394,12 +16395,24 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             ]
             command = "image_to_video" if images else "text_to_video"
             models = capabilities.get(command) or []
-            model = next((item for item in models if str(item.get("model") or "") == str(payload.model or "")), None)
+            requested_model = str(payload.model or "").strip()
+            model = next((item for item in models if str(item.get("model") or "") == requested_model), None)
+            if not model and requested_model == KLING_VIDEO_3_0_OMNI_MODEL:
+                # 前端使用稳定的 3.0 Omni 标识作为默认值；CLI 能力列表中的 model
+                # 才是最终必须传给可灵的真实请求名称（不同 CLI 版本可能带 v3_0 等后缀）。
+                def is_omni_30(item):
+                    text = " ".join(
+                        str(item.get(key) or "") for key in ("model", "alias", "description")
+                    ).lower()
+                    return "omni" in text and re.search(r"(?:v|video)?[\s._-]*3(?:[\s._-]*0)?", text)
+
+                model = next((item for item in models if is_omni_30(item)), None)
             if not model:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"当前可灵账号的 {command} 能力中不存在模型：{payload.model or '(empty)'}，请刷新模型列表后重选",
+                    detail=f"当前可灵账号的 {command} 能力中不存在模型：{requested_model or '(empty)'}，请刷新模型列表后重选",
                 )
+            actual_model_name = str(model.get("model") or "").strip()
             parameter_names = {
                 str(item.get("name") or "")
                 for item in (model.get("arguments") or [])
@@ -16430,6 +16443,7 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             if not submit_only:
                 invoke_kwargs["timeout_seconds"] = VIDEO_POLL_TIMEOUT
             result = await asyncio.to_thread(invoke, **invoke_kwargs)
+            result["model"] = actual_model_name
     except HTTPException:
         raise
     except KlingCliError as exc:
@@ -16447,7 +16461,7 @@ async def submit_kling_cli_video(payload: CanvasVideoRequest):
         "request": {
             "provider_id": "kling-cli",
             "command": command,
-            "model": payload.model,
+            "model": result.get("model") or payload.model,
             "parameters": parameters,
             "image_count": len(payload.images or []),
         },
@@ -16480,7 +16494,7 @@ async def generate_kling_cli_video(payload: CanvasVideoRequest):
         "request": {
             "provider_id": "kling-cli",
                 "command": command,
-                "model": payload.model,
+                "model": result.get("model") or payload.model,
                 "parameters": parameters,
                 "image_count": len(payload.images or []),
         },

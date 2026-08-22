@@ -1528,9 +1528,18 @@ function filmSmartProviderOptions(node){
     return providers.map(provider => `<option value="${escapeAttr(provider.id)}" ${provider.id===selected?'selected':''}>${escapeHtml(provider.name || provider.id)}</option>`).join('');
 }
 function filmSmartModelOptions(node){
-    const models=providerVideoModels(node.apiProvider || videoApiProviders()[0]?.id || 'comfly');
-    const selected=node.model || models[0] || '';
+    const providerId=node.apiProvider || videoApiProviders()[0]?.id || 'comfly';
+    const models=providerVideoModels(providerId);
+    const preferred = providerId === 'kling-cli'
+        ? smartKlingModelsForMode(smartKlingModeForRefs(filmSmartAssets(node))).find(item => isSmartKlingOmni30Model(item?.model) || isSmartKlingOmni30Model(item?.alias) || isSmartKlingOmni30Model(item?.description))?.model
+        : '';
+    if(providerId === 'kling-cli' && smartKlingCliState.loaded && isSmartKlingOmni30Model(node.model) && preferred) node.model = preferred;
+    const selected=node.model || preferred || models[0] || '';
     return [...new Set([selected,...models].filter(Boolean))].map(model => `<option value="${escapeAttr(model)}" ${model===selected?'selected':''}>${escapeHtml(model)}</option>`).join('');
+}
+function isSmartKlingOmni30Model(value){
+    const text=String(value || '').trim().toLowerCase();
+    return Boolean(text && /omni/.test(text) && /(?:v|video)?[\s._-]*3(?:[\s._-]*0)?/.test(text));
 }
 function filmSmartImageProviderOptions(node){
     return smartMultiViewProviderOptions(filmSmartImageProviderId(node));
@@ -1545,10 +1554,13 @@ function createFilmNode(type, point){
     if(!api?.isType?.(type)) return null;
     pushUndo();
     const p=point || viewportCenter();
+    const preferredVideoProvider=videoApiProviders().find(provider => provider.id === 'kling-cli');
+    const videoProviderId=preferredVideoProvider?.id || videoApiProviders()[0]?.id || 'comfly';
+    const videoModel=videoProviderId === 'kling-cli' ? 'kling-v3-omni' : (providerVideoModels(videoProviderId)[0] || 'veo3-fast');
     const node=api.createNode(type,{x:(p.x || 0)-260,y:(p.y || 0)-220},type === 'film-video' ? {
         specialType:'film-video', title:'生成视频', w:520, h:0,
-        apiProvider:videoApiProviders()[0]?.id || 'comfly', model:providerVideoModels(videoApiProviders()[0]?.id || 'comfly')[0] || 'veo3-fast',
-        runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'video',videoProvider:videoApiProviders()[0]?.id || 'comfly',videoModel:providerVideoModels(videoApiProviders()[0]?.id || 'comfly')[0] || 'veo3-fast',videoDuration:5,videoAspect:'16:9',videoResolution:'',videoMultimodal:false,videoUseFrameRoles:false}),
+        apiProvider:videoProviderId, model:videoModel,
+        runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'video',videoProvider:videoProviderId,videoModel,videoDuration:5,videoAspect:'16:9',videoResolution:'',videoMultimodal:false,videoUseFrameRoles:false}),
     } : {
         specialType:'film-storyboard', title:'分镜合成', w:520, h:0,
         apiProvider:imageProviders()[0]?.id || '',
@@ -16980,6 +16992,10 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             }
             const mode = smartKlingModeForRefs(refs);
             const available = smartKlingModelsForMode(mode);
+            if(runSettings.videoModel === 'kling-v3-omni'){
+                const preferred = available.find(item => isSmartKlingOmni30Model(item?.model) || isSmartKlingOmni30Model(item?.alias) || isSmartKlingOmni30Model(item?.description))?.model;
+                if(preferred) runSettings.videoModel = preferred;
+            }
             if(!available.some(item => item.model === runSettings.videoModel)){
                 const label = mode === 'image_to_video' ? '图生视频' : '文生视频';
                 throw new Error(`当前可灵账号的${label}能力中不存在模型：${runSettings.videoModel}，请重新选择模型。`);

@@ -748,6 +748,8 @@ const DEFAULT_VIDEO_MODELS = [
     // Agnes
     'agnes-video-v2.0'
 ];
+// 影视制作节点默认使用可灵视频 3.0 Omni；提交时会再按账号能力列表换成真实 CLI model。
+const KLING_VIDEO_3_0_OMNI_MODEL = 'kling-v3-omni';
 
 function uid(prefix='n'){ return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`; }
 function loadLocalViewportMap(){
@@ -929,13 +931,24 @@ function providerVideoModels(providerId){
     const provider = apiProviders.find(p => p.id === providerId);
     return uniqueModels(provider?.video_models || []);
 }
+function isKlingOmni30Model(value){
+    const text = String(value || '').trim().toLowerCase();
+    return Boolean(text && /omni/.test(text) && /(?:v|video)?[\s._-]*3(?:[\s._-]*0)?/.test(text));
+}
+function preferredKlingOmniModel(node){
+    const models = klingModelsForNode(node);
+    return models.find(item => isKlingOmni30Model(item?.model) || isKlingOmni30Model(item?.alias) || isKlingOmni30Model(item?.description))?.model
+        || KLING_VIDEO_3_0_OMNI_MODEL;
+}
 function sanitizeVideoNodeProviderModel(node){
     if(!node || !['video','ecom-video'].includes(node.type)) return;
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
     if(node.apiProvider === 'kling-cli'){
         const models = klingModelsForNode(node);
-        if(models.length && !models.some(item => item.model === node.model)) node.model = models[0].model;
-        if(!node.model || node.model === '可灵（连接后选择模型）') node.model = models[0]?.model || '';
+        const requestedOmni = isKlingOmni30Model(node.model) || node.model === KLING_VIDEO_3_0_OMNI_MODEL;
+        const preferred = models.find(item => isKlingOmni30Model(item?.model) || isKlingOmni30Model(item?.alias) || isKlingOmni30Model(item?.description))?.model || '';
+        if(models.length && !models.some(item => item.model === node.model)) node.model = requestedOmni ? (preferred || node.model) : models[0].model;
+        if(!node.model || node.model === '可灵（连接后选择模型）') node.model = requestedOmni ? (preferred || KLING_VIDEO_3_0_OMNI_MODEL) : (models[0]?.model || '');
         return;
     }
     const models = providerVideoModels(node.apiProvider);
@@ -3046,17 +3059,19 @@ function addFilmNode(type, point){
     if(!api?.isType?.(type)) return null;
     const p = point || defaultPoint(type === 'film-video' ? 180 : 120, 0);
     const imageDefaults = defaultImageGenerationSelection();
-    const videoProviderId = videoApiProviders()[0]?.id || 'comfly';
+    const preferredVideoProvider = videoApiProviders().find(provider => provider.id === 'kling-cli');
+    const videoProviderId = preferredVideoProvider?.id || videoApiProviders()[0]?.id || 'comfly';
     const videoModels = providerVideoModels(videoProviderId);
     const node = api.createNode(type, p, type === 'film-video' ? {
         apiProvider:videoProviderId,
-        model:videoModels[0] || videoModels[0] || DEFAULT_VIDEO_MODELS[0],
+        model:videoProviderId === 'kling-cli' ? preferredKlingOmniModel({type:'film-video', inputs:[], apiProvider:'kling-cli'}) : (videoModels[0] || DEFAULT_VIDEO_MODELS[0]),
     } : {
         apiProvider:imageDefaults.providerId,
         model:imageDefaults.model,
     });
     if(!node) return null;
     node.id = uid(type === 'film-video' ? 'film-video' : 'film-storyboard');
+    if(type === 'film-video' && node.apiProvider === 'kling-cli') ensureKlingCapabilities();
     return addNode(node);
 }
 function addEcommerceNode(type, point){
@@ -8405,6 +8420,7 @@ function filmNodeProviderOptions(node){
 }
 function filmNodeModelOptions(node){
     if(isKlingVideoNode(node)) ensureKlingCapabilities();
+    if(isKlingVideoNode(node) && klingCliState.loaded && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
     return videoModelOptionsForNode(node);
 }
 function filmNodeImageProviderOptions(node){
@@ -8472,7 +8488,9 @@ async function runFilmNode(nodeId, opts={}){
             if(!images.length) throw new Error('分镜合成没有返回图片');
             mergeGeneratedOutputs(node,images,false); out._pending=(out._pending || []).filter(item => !pendingIds.includes(item.id)); appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
         } else {
-            const payload={prompt:built.prompt,provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),model:node.model || 'veo3-fast',duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
+            const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
+            if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
+            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
             const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));

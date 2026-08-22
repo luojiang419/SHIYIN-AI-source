@@ -139,6 +139,14 @@ def test_film_variants_use_their_parent_generation_model_sources():
     assert "if(isKlingVideoNode(node)) ensureKlingCapabilities();" in CLASSIC
 
 
+def test_classic_film_video_defaults_to_kling_video_3_0_omni_and_resolves_real_model():
+    assert "const KLING_VIDEO_3_0_OMNI_MODEL = 'kling-v3-omni';" in CLASSIC
+    assert "videoApiProviders().find(provider => provider.id === 'kling-cli')" in CLASSIC
+    assert "preferredKlingOmniModel" in CLASSIC
+    assert "if(providerId === 'kling-cli' && isKlingOmni30Model(node.model))" in CLASSIC
+    assert "result.get(\"model\") or payload.model" in MAIN
+
+
 def test_classic_film_render_passes_image_model_sources_for_storyboard_node():
     compact_classic = " ".join(CLASSIC.split())
     assert "imageProviderOptions:filmNodeImageProviderOptions" in compact_classic

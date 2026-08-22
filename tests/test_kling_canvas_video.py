@@ -163,6 +163,51 @@ class KlingCanvasVideoTests(unittest.TestCase):
         self.assertEqual(captured["model"]["model"], "kling-image-video")
         self.assertEqual(result["videos"], ["/assets/output/kling-image.mp4"])
 
+    def test_kling_omni_default_alias_submits_capability_model_name(self):
+        environment = KlingCliEnvironment(
+            node_path="node.exe",
+            npm_path="npm.cmd",
+            kling_path="kling.cmd",
+            entrypoint_path="cli.js",
+            version="0.1.3",
+        )
+        captured = {}
+
+        class FakeService:
+            def __init__(self, environment):
+                self.environment = environment
+
+            def capabilities(self):
+                return {
+                    "text_to_video": [
+                        {"model": "kling-video-v3_0-omni", "alias": "VIDEO 3.0 Omni", "arguments": []}
+                    ],
+                    "image_to_video": [],
+                }
+
+            def generate(self, **kwargs):
+                captured.update(kwargs)
+                return {"generation_id": "generation-omni-1", "url": "https://cdn.example/omni.mp4"}
+
+        payload = self.main.CanvasVideoRequest(
+            prompt="镜头缓慢推进",
+            provider_id="kling-cli",
+            model="kling-v3-omni",
+        )
+        with (
+            patch.object(self.main, "resolve_kling_cli", return_value=environment),
+            patch.object(self.main, "KlingCliService", FakeService),
+            patch.object(
+                self.main,
+                "save_remote_video_to_output",
+                new=AsyncMock(return_value="/assets/output/kling-omni.mp4"),
+            ),
+        ):
+            result = asyncio.run(self.main.generate_kling_cli_video(payload))
+
+        self.assertEqual(captured["model"]["model"], "kling-video-v3_0-omni")
+        self.assertEqual(result["request"]["model"], "kling-video-v3_0-omni")
+
     def test_kling_video_reference_is_rejected_before_cli_or_upload(self):
         payload = self.main.CanvasVideoRequest(
             prompt="参考视频的节奏生成新镜头",

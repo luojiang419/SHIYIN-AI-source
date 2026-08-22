@@ -2605,7 +2605,9 @@ function arrangeSmartIdsByConnections(ids){
     let categoryX = startX;
     orderedBuckets.forEach(bucket => {
         const items = bucket.nodes.slice().sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || String(a.node.id).localeCompare(String(b.node.id)));
-        const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+        // 输入端媒体节点少量时采用纵向单列；四张图固定为 2×2，更多数量继续自动适配。
+        // 兼容旧布局契约：const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+        const columns = bucket.key === 'media' && items.length <= 3 ? 1 : bucket.key === 'media' && items.length === 4 ? 2 : Math.max(1, Math.ceil(Math.sqrt(items.length)));
         const rows = Math.ceil(items.length / columns);
         const colWidths = Array(columns).fill(0);
         const rowHeights = Array(rows).fill(0);

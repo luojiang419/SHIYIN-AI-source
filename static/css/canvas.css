@@ -1081,6 +1081,11 @@ body.theme-dark .error-title { color:#fca5a5; }
 .video-frame-transport button svg { width:14px; height:14px; }
 .video-frame-current-time { min-width:82px; color:var(--text); font-family:"JetBrains Mono",monospace; font-size:11px; font-weight:800; font-variant-numeric:tabular-nums; }
 .video-frame-key-hint { color:var(--faint); font-size:10px; font-weight:700; }
+.video-frame-timeline-wrap { display:flex; flex-direction:column; gap:8px; }
+.video-frame-timeline { position:relative; height:28px; margin:0 10px; touch-action:none; user-select:none; cursor:pointer; outline:none; }
+.video-frame-track { position:absolute; inset:10px 0 9px; border:1px solid var(--line-2); border-radius:4px; background:repeating-linear-gradient(90deg,var(--soft) 0,var(--soft) 23px,var(--soft-2) 24px); }
+.video-frame-playhead { position:absolute; top:4px; bottom:3px; left:0; width:10px; transform:translateX(-5px); border-radius:3px; background:#e05252; pointer-events:none; z-index:2; box-shadow:0 2px 8px var(--shadow); }
+.video-frame-playhead::before { content:""; position:absolute; top:-1px; left:50%; width:8px; height:8px; transform:translateX(-50%); border-radius:50%; background:#e05252; }
 .video-frame-metadata { min-height:18px; color:var(--faint); font-size:10px; font-weight:750; }
 .video-frame-settings { display:grid; grid-template-columns:1.5fr 1fr 1fr 1fr; gap:10px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--soft); }
 .video-frame-settings label { display:flex; flex-direction:column; gap:6px; color:var(--muted); font-size:10px; font-weight:850; }

@@ -446,6 +446,12 @@
                     <span id="videoFrameCurrentTime" class="video-frame-current-time">00:00.000</span>
                     <span class="video-frame-key-hint">空格播放/暂停 · ←/→ 单帧移动</span>
                 </div>
+                <div class="video-frame-timeline-wrap">
+                    <div id="videoFrameTimeline" class="video-frame-timeline" role="slider" aria-label="拖拽播放光标" tabindex="0">
+                        <div class="video-frame-track"></div>
+                        <div id="videoFramePlayhead" class="video-frame-playhead" aria-hidden="true"></div>
+                    </div>
+                </div>
                 <div id="videoFrameMetadata" class="video-frame-metadata">--</div>
                 <div class="video-frame-settings">
                     <label><span>抽帧方法</span><select id="videoFrameStrategy"></select></label>

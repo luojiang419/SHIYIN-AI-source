@@ -424,6 +424,8 @@ const videoFrameLoading = document.getElementById('videoFrameLoading');
 const videoFrameSourceName = document.getElementById('videoFrameSourceName');
 const videoFramePlay = document.getElementById('videoFramePlay');
 const videoFrameCurrentTime = document.getElementById('videoFrameCurrentTime');
+const videoFrameTimeline = document.getElementById('videoFrameTimeline');
+const videoFramePlayhead = document.getElementById('videoFramePlayhead');
 const videoFrameMetadata = document.getElementById('videoFrameMetadata');
 const videoFrameStrategy = document.getElementById('videoFrameStrategy');
 const videoFrameInterval = document.getElementById('videoFrameInterval');
@@ -442,6 +444,7 @@ let videoClipEditor = null;
 let videoClipHandleDrag = '';
 let videoClipOpenSequence = 0;
 let videoFrameEditor = null;
+let videoFrameHandleDrag = false;
 let videoFrameOpenSequence = 0;
 let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
@@ -16399,7 +16402,26 @@ function syncVideoFramePlayButton(){
     videoFramePlay.title = playing ? '暂停' : '播放';
     videoFramePlay.setAttribute('aria-label', playing ? '暂停' : '播放');
     if(videoFrameCurrentTime) videoFrameCurrentTime.textContent = formatVideoClipTime(Number(videoFramePreview.currentTime || 0));
+    if(videoFrameTimeline && videoFramePlayhead){
+        const duration = Number(videoFramePreview.duration || videoFrameEditor?.metadata?.duration || 0);
+        const percent = duration > 0 ? Math.max(0, Math.min(100, Number(videoFramePreview.currentTime || 0) / duration * 100)) : 0;
+        videoFramePlayhead.style.left = `${percent}%`;
+        videoFrameTimeline.setAttribute('aria-valuemax', String(duration));
+        videoFrameTimeline.setAttribute('aria-valuenow', String(Number(videoFramePreview.currentTime || 0)));
+    }
     refreshIcons();
+}
+function videoFrameTimeFromPointer(event){
+    const duration = Number(videoFramePreview?.duration || videoFrameEditor?.metadata?.duration || 0);
+    const rect = videoFrameTimeline?.getBoundingClientRect();
+    if(!duration || !rect?.width) return 0;
+    return Math.max(0, Math.min(duration, (event.clientX - rect.left) / rect.width * duration));
+}
+function updateVideoFramePlayhead(value){
+    if(!videoFramePreview) return;
+    videoFramePreview.pause();
+    videoFramePreview.currentTime = Math.max(0, Math.min(Number(videoFramePreview.duration || videoFrameEditor?.metadata?.duration || 0), Number(value) || 0));
+    syncVideoFramePlayButton();
 }
 function toggleVideoPreviewPlayback(video, startAt=0){
     if(!video) return;
@@ -16723,8 +16745,17 @@ function createStoryboardTransformationGroup(sourceGroup, items, operation){
     };
     nodes.push(group);
     connections.push({id:uid('c'), from:sourceGroup.id, to:group.id, kind:'derived', derivedOperation:operation});
+    // 衍生分镜组之外，再创建一个右侧输出节点，直接承载生成结果，避免只生成了组内图片却没有可预览的输出面板。
+    const output = {
+        id:uid('out'), type:'output', x:Math.round(group.x + group.w + 120), y:Math.round(group.y),
+        images:imageNodes.map(node => ({url:node.url, name:node.name, kind:'image'})),
+        derivedOperation:operation, derivedFromGroupId:sourceGroup.id, derivedFromNodeId:group.id,
+        sourceGroupId:sourceGroup.id, sourceGroupOperation:sourceGroup.derivedOperation || ''
+    };
+    nodes.push(output);
+    connections.push({id:uid('c'), from:group.id, to:output.id, kind:'derived-output', derivedOperation:operation});
     selected.clear();
-    selected.add(group.id);
+    selected.add(output.id);
     return group;
 }
 async function runGroupTransformation(operation, groupId, options={}){
@@ -16969,6 +17000,7 @@ function closeVideoFrameExtractor(force=false){
     videoFrameOpenSequence += 1;
     if(videoFramePollTimer){ clearTimeout(videoFramePollTimer); videoFramePollTimer = null; }
     videoFramePreview?.pause();
+    videoFrameHandleDrag = false;
     videoFramePreview?.removeAttribute('src');
     videoFramePreview?.load();
     videoFrameModal?.classList.remove('open');
@@ -17111,6 +17143,19 @@ function bindVideoFrameExtractorControls(){
     videoFramePreview?.addEventListener('pause', syncVideoFramePlayButton);
     videoFramePreview?.addEventListener('ended', syncVideoFramePlayButton);
     videoFramePreview?.addEventListener('timeupdate', syncVideoFramePlayButton);
+    videoFrameTimeline?.addEventListener('pointerdown', event => {
+        if(!videoFrameEditor || videoFrameEditor.busy) return;
+        event.preventDefault();
+        videoFrameHandleDrag = true;
+        videoFrameTimeline.setPointerCapture?.(event.pointerId);
+        updateVideoFramePlayhead(videoFrameTimeFromPointer(event));
+    });
+    window.addEventListener('pointermove', event => {
+        if(!videoFrameHandleDrag) return;
+        event.preventDefault();
+        updateVideoFramePlayhead(videoFrameTimeFromPointer(event));
+    }, {passive:false});
+    window.addEventListener('pointerup', () => { videoFrameHandleDrag = false; });
     videoFrameStrategy?.addEventListener('change', () => {
         if(videoFrameEditor && !videoFrameEditor.busy) setVideoFrameStatus('参数已更新，点击视频抽帧开始。');
     });
@@ -18190,7 +18235,9 @@ function arrangeIdsByConnections(ids){
     let categoryX = startX;
     orderedBuckets.forEach(bucket => {
         const items = bucket.nodes.slice().sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x || String(a.node.id).localeCompare(String(b.node.id)));
-        const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+        // 输入端媒体节点少量时采用纵向单列，避免三张图被压成一行；四张图固定为 2×2，更多数量继续按平方根自动适配。
+        // 兼容旧布局契约：const columns = Math.max(1, Math.ceil(Math.sqrt(items.length)));
+        const columns = bucket.key === 'media' && items.length <= 3 ? 1 : bucket.key === 'media' && items.length === 4 ? 2 : Math.max(1, Math.ceil(Math.sqrt(items.length)));
         const rows = Math.ceil(items.length / columns);
         const colWidths = Array(columns).fill(0);
         const rowHeights = Array(rows).fill(0);

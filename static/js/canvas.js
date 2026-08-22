@@ -422,6 +422,8 @@ const videoFrameModal = document.getElementById('videoFrameModal');
 const videoFramePreview = document.getElementById('videoFramePreview');
 const videoFrameLoading = document.getElementById('videoFrameLoading');
 const videoFrameSourceName = document.getElementById('videoFrameSourceName');
+const videoFramePlay = document.getElementById('videoFramePlay');
+const videoFrameCurrentTime = document.getElementById('videoFrameCurrentTime');
 const videoFrameMetadata = document.getElementById('videoFrameMetadata');
 const videoFrameStrategy = document.getElementById('videoFrameStrategy');
 const videoFrameInterval = document.getElementById('videoFrameInterval');
@@ -16328,9 +16330,10 @@ function setVideoClipBusy(busy, message=''){
     if(videoClipEditor) videoClipEditor.busy = Boolean(busy);
     if(videoClipSubmit){
         videoClipSubmit.disabled = Boolean(busy);
+        const screenshot = videoClipEditor?.mode === 'screenshot';
         videoClipSubmit.innerHTML = busy
-            ? '<i data-lucide="loader-2"></i><span>截取中...</span>'
-            : '<i data-lucide="scissors"></i><span>截取</span>';
+            ? `<i data-lucide="loader-2"></i><span>${screenshot ? '截图中...' : '截取中...'}</span>`
+            : `<i data-lucide="${screenshot ? 'camera' : 'scissors'}"></i><span>${screenshot ? '截图' : '截取'}</span>`;
     }
     if(message) setVideoClipStatus(message);
     refreshIcons();
@@ -16342,6 +16345,30 @@ function syncVideoClipPlayButton(){
     videoClipPlay.title = playing ? '暂停' : '播放';
     videoClipPlay.setAttribute('aria-label', playing ? '暂停' : '播放');
     refreshIcons();
+}
+function videoPreviewFrameStep(video, fps, direction){
+    if(!video) return;
+    const rate = Number(fps || 0);
+    const step = rate > 0 ? 1 / rate : 1 / 25;
+    const duration = Number.isFinite(video.duration) ? video.duration : Infinity;
+    video.pause?.();
+    video.currentTime = Math.max(0, Math.min(duration, Number(video.currentTime || 0) + (direction < 0 ? -step : step)));
+}
+function syncVideoFramePlayButton(){
+    if(!videoFramePlay || !videoFramePreview) return;
+    const playing = !videoFramePreview.paused && !videoFramePreview.ended;
+    videoFramePlay.innerHTML = `<i data-lucide="${playing ? 'pause' : 'play'}"></i>`;
+    videoFramePlay.title = playing ? '暂停' : '播放';
+    videoFramePlay.setAttribute('aria-label', playing ? '暂停' : '播放');
+    if(videoFrameCurrentTime) videoFrameCurrentTime.textContent = formatVideoClipTime(Number(videoFramePreview.currentTime || 0));
+    refreshIcons();
+}
+function toggleVideoPreviewPlayback(video, startAt=0){
+    if(!video) return;
+    if(video.paused){
+        if(video.ended || (Number.isFinite(video.duration) && video.currentTime >= video.duration)) video.currentTime = startAt;
+        video.play?.().catch(() => {});
+    } else video.pause?.();
 }
 function syncVideoClipEditorUi(){
     const state = videoClipEditor;
@@ -16375,6 +16402,11 @@ function videoClipTimeFromPointer(event){
 function updateVideoClipHandle(kind, value){
     const state = videoClipEditor;
     if(!state?.duration) return;
+    if(kind === 'playhead'){
+        if(videoClipPreview) videoClipPreview.currentTime = Math.max(0, Math.min(state.duration, value));
+        syncVideoClipEditorUi();
+        return;
+    }
     const gap = Math.max(0.04, state.fps ? 1 / state.fps : 0.04);
     if(kind === 'in') state.start = Math.max(0, Math.min(value, state.end - gap));
     else state.end = Math.min(state.duration, Math.max(value, state.start + gap));
@@ -16390,7 +16422,7 @@ function bindVideoClipEditorControls(){
         videoClipPreview.currentTime = videoClipTimeFromPointer(event);
         syncVideoClipEditorUi();
     });
-    [videoClipInHandle, videoClipOutHandle].forEach(handle => handle?.addEventListener('pointerdown', event => {
+    [videoClipInHandle, videoClipOutHandle, videoClipPlayhead].forEach(handle => handle?.addEventListener('pointerdown', event => {
         event.preventDefault();
         event.stopPropagation();
         videoClipHandleDrag = handle.dataset.clipHandle || '';
@@ -16436,17 +16468,24 @@ function bindVideoClipEditorControls(){
     videoClipTimeline.addEventListener('keydown', event => {
         if(!videoClipEditor || !['ArrowLeft','ArrowRight'].includes(event.key)) return;
         event.preventDefault();
+        event.stopPropagation();
         const direction = event.key === 'ArrowRight' ? 1 : -1;
-        const step = videoClipEditor.fps ? 1 / videoClipEditor.fps : 0.04;
-        videoClipPreview.currentTime = Math.max(0, Math.min(videoClipEditor.duration, videoClipPreview.currentTime + direction * step));
+        videoPreviewFrameStep(videoClipPreview, videoClipEditor.fps, direction);
         syncVideoClipEditorUi();
     });
 }
-async function openVideoClipEditor(nodeId){
+function openVideoClipEditor(nodeId){
+    return openVideoClipEditorMode(nodeId, 'clip');
+}
+async function openVideoClipEditorMode(nodeId, mode='clip'){
     const node = nodes.find(item => item.id === nodeId);
     if(!node || node.type !== 'image' || mediaKindForNode(node) !== 'video' || !node.url) return;
     const sequence = ++videoClipOpenSequence;
-    videoClipEditor = {nodeId:node.id, sourceUrl:node.url, duration:0, width:0, height:0, fps:0, audio:false, start:0, end:0, busy:false};
+    const screenshot = mode === 'screenshot';
+    videoClipEditor = {nodeId:node.id, sourceUrl:node.url, duration:0, width:0, height:0, fps:0, audio:false, start:0, end:0, busy:false, mode:screenshot ? 'screenshot' : 'clip'};
+    videoClipModal?.classList.toggle('screenshot-mode', screenshot);
+    const title = document.getElementById('videoClipTitle');
+    if(title) title.textContent = screenshot ? '视频截图' : '视频截取';
     videoClipSourceName.textContent = node.name || outputImageName(node.url) || '视频';
     videoClipResolution.value = '1080p';
     setVideoClipStatus('');
@@ -16489,9 +16528,13 @@ function closeVideoClipEditor(){
     videoClipPreview?.removeAttribute('src');
     videoClipPreview?.load();
     videoClipModal?.classList.remove('open');
+    videoClipModal?.classList.remove('screenshot-mode');
     videoClipModal?.setAttribute('aria-hidden', 'true');
     if(videoClipSubmit) videoClipSubmit.disabled = false;
     videoClipEditor = null;
+}
+function openVideoScreenshotEditor(nodeId){
+    return openVideoClipEditorMode(nodeId, 'screenshot');
 }
 function removeVideoFrameDerivedResults(sourceNodeId){
     const sourceId = String(sourceNodeId || '');
@@ -16784,10 +16827,55 @@ function addVideoClipNodeFromResult(result, sourceNode){
     scheduleSave();
     return clip;
 }
+async function captureVideoScreenshot(state, sourceNode){
+    const video = videoClipPreview;
+    const width = Number(video?.videoWidth || state.width || 0);
+    const height = Number(video?.videoHeight || state.height || 0);
+    if(!video || width < 1 || height < 1) throw new Error('视频画面尚未准备好，请稍候再试');
+    const canvasEl = document.createElement('canvas');
+    canvasEl.width = width;
+    canvasEl.height = height;
+    const context = canvasEl.getContext('2d');
+    if(!context) throw new Error('无法创建截图画布');
+    context.drawImage(video, 0, 0, width, height);
+    const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
+    if(!blob) throw new Error('无法生成截图图片');
+    const base = String(sourceNode.name || outputImageName(sourceNode.url) || 'video').replace(/\.[^.]+$/, '');
+    const file = await uploadCroppedBlob(blob, `${base}_frame_${Math.round(Number(video.currentTime || 0) * 1000)}.png`);
+    if(!file?.url) throw new Error('截图上传失败');
+    const sourceRect = nodeRect(sourceNode);
+    const image = {
+        id:uid('img'), type:'image', mediaKind:'image',
+        x:Math.round(sourceNode.x + sourceRect.w + 90), y:Math.round(sourceNode.y),
+        url:file.url, name:file.name || `${base} · ${formatVideoClipTime(video.currentTime)}.png`,
+        natural_w:width, natural_h:height, sourceVideoNodeId:sourceNode.id, sourceVideoUrl:sourceNode.url,
+        screenshotTimestampMs:Math.round(Number(video.currentTime || 0) * 1000), derivedOperation:'video-screenshot'
+    };
+    nodes.push(image);
+    selected.clear();
+    selected.add(image.id);
+    render();
+    scheduleSave();
+    return image;
+}
 async function submitVideoClip(){
     const state = videoClipEditor;
     const sourceNode = nodes.find(item => item.id === state?.nodeId);
     if(!state || !sourceNode || state.busy || !canvas?.id) return;
+    if(state.mode === 'screenshot'){
+        try {
+            setVideoClipBusy(true, '正在截取当前画面并保存为图片...');
+            pushUndo();
+            await captureVideoScreenshot(state, sourceNode);
+            state.busy = false;
+            closeVideoClipEditor();
+            setStatus('已生成视频截图图片节点');
+        } catch(error) {
+            setVideoClipBusy(false);
+            setVideoClipStatus(error.message || '视频截图失败', true);
+        }
+        return;
+    }
     try {
         setVideoClipBusy(true, '正在截取并保存到当前画布...');
         const response = await fetch('/api/canvas-tools/video-clip/create', {
@@ -16848,6 +16936,7 @@ function closeVideoFrameExtractor(force=false){
     videoFrameModal?.classList.remove('open');
     videoFrameModal?.setAttribute('aria-hidden', 'true');
     videoFrameEditor = null;
+    syncVideoFramePlayButton();
     setVideoFrameBusy(false);
     setVideoFrameStatus('');
 }
@@ -16859,7 +16948,7 @@ async function openVideoFrameExtractor(nodeId){
     const sequence = videoFrameOpenSequence;
     videoFrameEditor = {nodeId:node.id, sourceUrl:node.url, busy:false, taskId:'', result:null};
     if(videoFrameSourceName) videoFrameSourceName.textContent = node.name || outputImageName(node.url) || '视频';
-    if(videoFramePreview){ videoFramePreview.src = node.url; videoFramePreview.load(); }
+    if(videoFramePreview){ videoFramePreview.src = canvasDisplayMediaUrl(node.url, node.name || 'video.mp4'); videoFramePreview.load(); }
     if(videoFrameLoading) videoFrameLoading.classList.remove('hidden');
     if(videoFrameProgress) videoFrameProgress.hidden = true;
     if(videoFrameSubmit) videoFrameSubmit.disabled = false;
@@ -16979,6 +17068,11 @@ async function cancelVideoFrameExtraction(){
 function bindVideoFrameExtractorControls(){
     videoFrameSubmit?.addEventListener('click', submitVideoFrameExtraction);
     videoFrameCancel?.addEventListener('click', cancelVideoFrameExtraction);
+    videoFramePlay?.addEventListener('click', () => toggleVideoPreviewPlayback(videoFramePreview, 0));
+    videoFramePreview?.addEventListener('play', syncVideoFramePlayButton);
+    videoFramePreview?.addEventListener('pause', syncVideoFramePlayButton);
+    videoFramePreview?.addEventListener('ended', syncVideoFramePlayButton);
+    videoFramePreview?.addEventListener('timeupdate', syncVideoFramePlayButton);
     videoFrameStrategy?.addEventListener('change', () => {
         if(videoFrameEditor && !videoFrameEditor.busy) setVideoFrameStatus('参数已更新，点击视频抽帧开始。');
     });
@@ -17027,6 +17121,7 @@ function renderSelectionHub(){
     ] : target.mediaKind === 'video' ? [
         {id:'extract-video', label:langIsEn() ? 'Extract frames' : '视频抽帧', icon:'images'},
         {id:'trim-video', label:langIsEn() ? 'Trim video' : '视频截取', icon:'scissors'},
+        {id:'screenshot-video', label:langIsEn() ? 'Screenshot' : '截图', icon:'camera'},
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
     ] : [
@@ -17143,6 +17238,10 @@ function runMediaQuickAction(action, target){
     }
     if(action === 'trim-video'){
         openVideoClipEditor(target.nodeId);
+        return;
+    }
+    if(action === 'screenshot-video'){
+        openVideoScreenshotEditor(target.nodeId);
         return;
     }
     if(action === 'preview'){
@@ -18628,10 +18727,25 @@ window.addEventListener('keydown', e => {
     const key = String(e.key || '').toLowerCase();
     if(videoFrameModal?.classList.contains('open')){
         if(e.key === 'Escape') cancelVideoFrameExtraction();
+        else if(!isEditableTarget(e.target) && (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')){
+            e.preventDefault();
+            if(e.key === ' ') toggleVideoPreviewPlayback(videoFramePreview, 0);
+            else videoPreviewFrameStep(videoFramePreview, videoFrameEditor?.metadata?.fps || videoFrameEditor?.metadata?.frame_rate, e.key === 'ArrowRight' ? 1 : -1);
+            syncVideoFramePlayButton();
+        }
         return;
     }
     if(videoClipModal?.classList.contains('open')){
         if(e.key === 'Escape') closeVideoClipEditor();
+        else if(!isEditableTarget(e.target) && (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')){
+            e.preventDefault();
+            if(e.key === ' ') toggleVideoPreviewPlayback(videoClipPreview, videoClipEditor?.start || 0);
+            else {
+                videoPreviewFrameStep(videoClipPreview, videoClipEditor?.fps, e.key === 'ArrowRight' ? 1 : -1);
+                syncVideoClipEditorUi();
+            }
+            return;
+        }
         return;
     }
     if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }

@@ -407,7 +407,7 @@
                     <div id="videoClipTimeline" class="video-clip-timeline" role="slider" aria-label="视频截取时间轴" tabindex="0">
                         <div class="video-clip-track"></div>
                         <div id="videoClipSelection" class="video-clip-selection"></div>
-                        <div id="videoClipPlayhead" class="video-clip-playhead"></div>
+                        <div id="videoClipPlayhead" class="video-clip-playhead" data-clip-handle="playhead" role="slider" aria-label="拖拽播放光标"></div>
                         <button id="videoClipInHandle" class="video-clip-handle in" type="button" data-clip-handle="in" aria-label="拖拽入点"><span>I</span></button>
                         <button id="videoClipOutHandle" class="video-clip-handle out" type="button" data-clip-handle="out" aria-label="拖拽出点"><span>O</span></button>
                     </div>
@@ -440,6 +440,11 @@
                 <div class="video-frame-preview">
                     <video id="videoFramePreview" preload="metadata" playsinline muted controlslist="nodownload noplaybackrate noremoteplayback"></video>
                     <div id="videoFrameLoading" class="video-frame-loading"><i data-lucide="loader-2"></i><span>正在读取视频...</span></div>
+                </div>
+                <div class="video-frame-transport" aria-label="视频预览控制">
+                    <button id="videoFramePlay" type="button" title="播放" aria-label="播放"><i data-lucide="play"></i></button>
+                    <span id="videoFrameCurrentTime" class="video-frame-current-time">00:00.000</span>
+                    <span class="video-frame-key-hint">空格播放/暂停 · ←/→ 单帧移动</span>
                 </div>
                 <div id="videoFrameMetadata" class="video-frame-metadata">--</div>
                 <div class="video-frame-settings">

@@ -8472,7 +8472,7 @@ async function runFilmNode(nodeId, opts={}){
             if(!images.length) throw new Error('分镜合成没有返回图片');
             mergeGeneratedOutputs(node,images,false); out._pending=(out._pending || []).filter(item => !pendingIds.includes(item.id)); appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
         } else {
-            const payload={prompt:built.prompt,provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),model:node.model || 'veo3-fast',duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '720p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
+            const payload={prompt:built.prompt,provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),model:node.model || 'veo3-fast',duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
             const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));

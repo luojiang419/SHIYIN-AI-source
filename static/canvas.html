@@ -32,6 +32,7 @@
     <link rel="stylesheet" href="/static/css/canvas-topaz-node.css?v=2026.08.19.topaz-video.1">
     <link rel="stylesheet" href="/static/css/pose-reference-editor.css?v=2026.08.18.pose-reference.4">
     <link rel="stylesheet" href="/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2">
+    <link rel="stylesheet" href="/static/css/canvas-film-nodes.css?v=2026.08.22.film-nodes.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1">
 </head>
 <body>
@@ -59,6 +60,8 @@
                         <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i><span>LLM</span></button>
                         <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                         <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
+                        <button class="tool-btn" onclick="addFilmNode('film-storyboard')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>分镜合成</span></button>
+                        <button class="tool-btn" onclick="addFilmNode('film-video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视视频</span></button>
                         <button class="tool-btn" onclick="addTopazVideoNode()"><i data-lucide="scan-up" class="w-4 h-4"></i><span>Topaz 高清</span></button>
                         <button class="tool-btn" onclick="addPanoramaNode()"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
                     </div>
@@ -97,6 +100,13 @@
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
+                <div class="menu-submenu-host" data-film-menu-host>
+                    <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视制作</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
+                    <div class="create-submenu" role="menu" aria-label="影视制作节点">
+                        <button class="menu-btn" type="button" onclick="menuAdd('film-storyboard')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>分镜合成</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('film-video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>生成视频</span></button>
+                    </div>
+                </div>
                 <button class="menu-btn" onclick="menuAdd('topazVideo')"><i data-lucide="scan-up" class="w-4 h-4"></i><span>Topaz 高清放大</span></button>
                 <button class="menu-btn" onclick="menuAdd('panorama')"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
                 <button class="menu-btn" onclick="menuAdd('multiView')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>创建三视图</span></button>
@@ -476,6 +486,7 @@
     <script src="/static/js/canvas-special-nodes.js?v=2026.08.18.pose-reference.2&rev=20260821.3"></script>
     <script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>
+    <script src="/static/js/canvas-film-nodes.js?v=2026.08.22.film-nodes.1"></script>
     <script src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
     <script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260822.3"></script>
 </body>

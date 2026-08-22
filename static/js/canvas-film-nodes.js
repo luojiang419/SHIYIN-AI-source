@@ -1,0 +1,258 @@
+(function(){
+    'use strict';
+
+    const TYPES = ['film-storyboard','film-video'];
+    const ROLE_ORDER = {
+        'film-storyboard': ['actor','scene','sketch'],
+        'film-video': ['storyboard','actor','outfit','prop'],
+    };
+    const TITLES = {
+        'film-storyboard':'分镜合成',
+        'film-video':'生成视频',
+    };
+    const SIZES = {
+        'film-storyboard': {w:520,h:0},
+        'film-video': {w:520,h:0},
+    };
+    const MODEL_RULES = {
+        default: {id:'default', name:'通用', prefix:'图', template:'{ref}是{role}', maxImages:20},
+        jimeng: {id:'jimeng', name:'即梦', prefix:'图', template:'{ref}是{role}', maxImages:12},
+        kling: {id:'kling', name:'可灵', prefix:'图片', template:'{ref}对应{role}', maxImages:12},
+        minimax: {id:'minimax', name:'MiniMax H3', prefix:'Picture ', template:'<Picture {index}> is {role}', maxImages:9},
+    };
+
+    function esc(value){
+        return String(value == null ? '' : value)
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+    function clamp(value,min,max){ return Math.max(min,Math.min(max,Number(value) || min)); }
+    function isType(type){ return TYPES.includes(type); }
+    function title(type){ return TITLES[type] || ''; }
+    function size(type){ return SIZES[type] || {w:520,h:0}; }
+    function isGenerator(type){ return isType(type); }
+    function canOutput(type){ return isType(type); }
+
+    function actorLabel(index, noun='演员'){
+        return `${noun}${String.fromCharCode(65 + Math.max(0, Number(index) || 0))}`;
+    }
+    function normalize(node){
+        if(!node || !isType(node.type)) return node;
+        node.actorCount = clamp(node.actorCount || 1, 1, 8);
+        node.prompt = String(node.prompt || '');
+        node.running = Boolean(node.running);
+        node.runError = String(node.runError || '');
+        node.generatedOutputs = Array.isArray(node.generatedOutputs) ? node.generatedOutputs : [];
+        node.visionProvider = String(node.visionProvider || '');
+        node.visionModel = String(node.visionModel || '');
+        if(node.type === 'film-storyboard'){
+            node.aspectRatio = node.aspectRatio || '16:9';
+            node.resolution = node.resolution || '2k';
+            node.quality = node.quality || 'high';
+        } else {
+            node.duration = clamp(node.duration || 5, 1, 60);
+            node.aspectRatio = node.aspectRatio || '16:9';
+            node.resolution = String(node.resolution || '');
+            node.apiProvider = String(node.apiProvider || '');
+            node.model = String(node.model || '');
+            node.enhancePrompt = node.enhancePrompt !== false;
+            node.multimodal = Boolean(node.multimodal);
+            node.useFrameRoles = Boolean(node.useFrameRoles);
+        }
+        return node;
+    }
+    function createNode(type, point={}, defaults={}){
+        if(!isType(type)) return null;
+        const node = normalize({
+            id:'', type, x:Number(point.x || 0), y:Number(point.y || 0), actorCount:1,
+            prompt:'', inputs:[], generatedOutputs:[], running:false, runError:'', ...defaults,
+        });
+        return node;
+    }
+    function inputPorts(nodeOrType){
+        const node = typeof nodeOrType === 'string' ? {type:nodeOrType,actorCount:1} : normalize(nodeOrType || {});
+        const count = Number(node.actorCount || 1);
+        if(node.type === 'film-storyboard'){
+            return [
+                ...Array.from({length:count}, (_,i) => ({role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}参考图`})),
+                {role:'scene',label:'场景',title:'连接场景参考图'},
+                {role:'sketch',label:'线稿分镜',title:'连接线稿分镜参考图'},
+            ];
+        }
+        if(node.type === 'film-video'){
+            return [
+                {role:'storyboard',label:'分镜图',title:'连接分镜图或首帧参考'},
+                ...Array.from({length:count}, (_,i) => ({role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}主体参考图`})),
+                ...Array.from({length:count}, (_,i) => ({role:`outfit-${i}`,label:`服装${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}服装参考图`})),
+                ...Array.from({length:count}, (_,i) => ({role:`prop-${i}`,label:`道具${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}道具参考图`})),
+            ];
+        }
+        return [];
+    }
+    function roleLabel(node, role){
+        const match = String(role || '').match(/^(actor|outfit|prop)-(\d+)$/);
+        if(match){
+            const index = Number(match[2]);
+            if(match[1] === 'actor') return actorLabel(index, node.type === 'film-video' ? '演员' : '模特');
+            if(match[1] === 'outfit') return `服装${String.fromCharCode(65 + index)}`;
+            return `道具${String.fromCharCode(65 + index)}`;
+        }
+        return node.type === 'film-storyboard'
+            ? ({scene:'场景图',sketch:'分镜参考图'}[role] || role)
+            : ({storyboard:'分镜图'}[role] || role);
+    }
+    function modelRule(provider='', model=''){
+        const text = `${provider} ${model}`.toLowerCase();
+        if(text.includes('minimax') || text.includes('h3')) return MODEL_RULES.minimax;
+        if(text.includes('kling') || text.includes('可灵')) return MODEL_RULES.kling;
+        if(text.includes('jimeng') || text.includes('即梦') || text.includes('seedance')) return MODEL_RULES.jimeng;
+        return MODEL_RULES.default;
+    }
+    function assetList(node, assets=[]){
+        normalize(node);
+        const refs = [];
+        const byRole = new Map();
+        (assets || []).forEach(item => {
+            const role = String(item?.role || item?.inputRole || '');
+            const list = byRole.get(role) || [];
+            const ref = item?.ref || item;
+            if(ref?.url) list.push({...ref, role});
+            byRole.set(role, list);
+        });
+        inputPorts(node).forEach(port => {
+            (byRole.get(port.role) || []).forEach(ref => refs.push({...ref, inputRole:port.role, roleLabel:roleLabel(node, port.role)}));
+        });
+        return refs;
+    }
+    function mapping(node, assets=[], options={}){
+        const rule = modelRule(node.apiProvider || options.provider, node.model || options.model);
+        const refs = assetList(node, assets).slice(0, rule.maxImages);
+        const lines = refs.map((ref,index) => {
+            const n = index + 1;
+            const refLabel = rule.id === 'minimax' ? `${n}` : `${rule.prefix}${n}`;
+            return rule.template.replace('{index}',String(n)).replace('{ref}',refLabel).replace('{role}',ref.roleLabel || roleLabel(node,ref.inputRole));
+        });
+        return {rule, refs, lines, text:lines.join(rule.id === 'minimax' ? '; ' : '，')};
+    }
+    function buildPrompt(node, assets=[], options={}){
+        const map = mapping(node, assets, options);
+        const prompt = String(node.prompt || '').trim();
+        const prefix = map.text ? `资产映射：${map.text}。` : '';
+        return {prompt:[prefix,prompt].filter(Boolean).join('\n'), refs:map.refs, map};
+    }
+    function itemPreview(item){
+        if(!item?.url) return '<i data-lucide="image"></i>';
+        const url = esc(item.url);
+        return `<img src="${url}" alt="" loading="lazy">`;
+    }
+    function mappingHtml(node, assets=[], options={}){
+        const map = mapping(node, assets, options);
+        if(!map.refs.length) return '<div class="film-empty-note">连接资产后会自动建立图像映射</div>';
+        return `<div class="film-mapping-list">${map.refs.map((ref,index) => `<span class="film-mapping-chip"><b>${esc(map.rule.id === 'minimax' ? `<Picture ${index+1}>` : `${map.rule.prefix}${index+1}`)}</b><i>${itemPreview(ref)}</i><em>${esc(ref.roleLabel || '')}</em></span>`).join('')}</div>`;
+    }
+    function promptHtml(node){
+        return `<label class="film-prompt-field"><span>生成需求</span><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea></label>`;
+    }
+    function bodyHtml(node, options={}){
+        normalize(node);
+        const action = node.type === 'film-storyboard' ? '生成分镜图' : '生成视频';
+        const parseText = node.type === 'film-storyboard' ? '解析画面' : '解析动作';
+        const providerOptions = options.providerOptions ? options.providerOptions(node) : '';
+        const modelOptions = options.modelOptions ? options.modelOptions(node) : '';
+        return `<div class="film-node-panel ${node.type}">
+            <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span><button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button></div>
+            <div class="film-port-summary">${inputPorts(node).map(port => `<span>${esc(port.label)}</span>`).join('')}</div>
+            ${promptHtml(node)}
+            <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中…' : action}</button></div>
+            ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}
+            <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
+            ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
+        </div>`;
+    }
+    function notify(options,node,render=false){ options.onChange?.(node,{render}); }
+    function insertAtCursor(input,text){
+        const start=Number.isFinite(input.selectionStart)?input.selectionStart:input.value.length;
+        const end=Number.isFinite(input.selectionEnd)?input.selectionEnd:start;
+        input.value=input.value.slice(0,start)+text+input.value.slice(end);
+        const cursor=start+text.length;
+        input.setSelectionRange(cursor,cursor);
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    function bindMentionMenu(root,input,node,options){
+        let menu=root.querySelector('.film-mention-menu');
+        let mentionStart=-1;
+        if(!menu){ menu=document.createElement('div'); menu.className='film-mention-menu'; root.appendChild(menu); }
+        const close=()=>{menu.classList.remove('open');menu.innerHTML='';};
+        const open=()=>{
+            mentionStart=input.value.lastIndexOf('@');
+            const built=buildPrompt(node,options.assets?.(node)||[],options);
+            const refs=built.map.refs;
+            if(!refs.length) return;
+            menu.innerHTML=refs.map((ref,index)=>`<button type="button" data-film-mention-index="${index}"><b>${esc(built.map.rule.id==='minimax'?`<Picture ${index+1}>`:`${built.map.rule.prefix}${index+1}`)}</b><span>${esc(ref.roleLabel || '')}</span></button>`).join('');
+            menu.classList.add('open');
+            menu.querySelectorAll('[data-film-mention-index]').forEach(button=>button.addEventListener('mousedown',event=>{
+                event.preventDefault(); event.stopPropagation();
+                const index=Number(button.dataset.filmMentionIndex); const map=built.map;
+                const token=map.rule.id==='minimax'?`<Picture ${index+1}>`:`${map.rule.prefix}${index+1}`;
+                const start=mentionStart >= 0 ? mentionStart : input.selectionStart;
+                input.setSelectionRange(start,input.selectionEnd);
+                insertAtCursor(input,token); close();
+            }));
+        };
+        input.addEventListener('input',()=>{
+            node.prompt=input.value; notify(options,node,false);
+            if(input.value.slice(-1)==='@') open(); else if(!input.value.includes('@')) close();
+        });
+        input.addEventListener('keydown',event=>{ if(event.key==='Escape') close(); });
+        root.addEventListener('mousedown',event=>{ if(!event.target.closest('.film-mention-menu') && event.target!==input) close(); });
+    }
+    async function parseScene(node, options={}){
+        const assets=options.assets?.(node)||[];
+        const refs=assetList(node,assets).filter(item=>item.url && (item.kind || 'image') === 'image').map(item=>item.url);
+        if(!refs.length) throw new Error(node.type==='film-video'?'请先连接分镜图或演员参考图':'请先连接线稿分镜');
+        const message=node.type==='film-video'
+            ? '请解析这些影视参考图中的人物动作、身体朝向、视线、镜头景别、镜头运动和动作节奏。只输出一段可直接用于视频生成的中文动作描述，不要解释。'
+            : '请解析这张线稿分镜，输出可直接用于图像生成的中文画面描述，包含景别、构图、人物位置、动作、视线、场景、光线和镜头方向。只输出描述，不要解释。';
+        const provider=options.visionProvider?.(node) || node.visionProvider || '';
+        const model=options.visionModel?.(node) || node.visionModel || '';
+        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,8),videos:[],provider,model,system_prompt:'你是影视分镜与动作分析助手。输出简洁、准确、可执行的中文生成提示词。'})});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.detail || '视觉解析失败');
+        node.prompt=String(data.text || '').trim();
+        return node.prompt;
+    }
+    function bind(root,node,options={}){
+        normalize(node);
+        const prompt=root.querySelector('[data-film-field="prompt"]');
+        if(prompt) bindMentionMenu(root,prompt,node,options);
+        root.querySelectorAll('[data-film-field]').forEach(control=>{
+            if(control===prompt) return;
+            const eventName=control.matches('input')?'input':'change';
+            control.addEventListener(eventName,event=>{
+                const key=control.dataset.filmField;
+                node[key]=key==='duration'?clamp(control.value,1,60):control.value;
+                if(key==='apiProvider') node.model=options.defaultModel?.(control.value,node) || '';
+                notify(options,node,key==='apiProvider' || key==='model');
+                event.stopPropagation();
+            });
+        });
+        root.querySelector('[data-film-action="add-actor"]')?.addEventListener('click',event=>{
+            event.preventDefault(); event.stopPropagation();
+            node.actorCount=clamp((node.actorCount||1)+1,1,8); notify(options,node,true);
+        });
+        root.querySelector('[data-film-action="parse"]')?.addEventListener('click',async event=>{
+            event.preventDefault(); event.stopPropagation();
+            const button=event.currentTarget; button.disabled=true;
+            try { await parseScene(node,options); notify(options,node,true); }
+            catch(error){ node.runError=error.message || '视觉解析失败'; options.toast?.(node.runError); notify(options,node,true); }
+            finally { button.disabled=false; }
+        });
+        root.querySelector('[data-film-action="run"]')?.addEventListener('click',event=>{
+            event.preventDefault(); event.stopPropagation(); options.run?.(node);
+        });
+        const rule=modelRule(node.apiProvider || options.provider,node.model || options.model);
+        const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
+    }
+
+    window.CanvasFilmNodes={TYPES,MODEL_RULES,isType,isGenerator,canOutput,title,size,normalize,createNode,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,bodyHtml,bind,parseScene};
+})();

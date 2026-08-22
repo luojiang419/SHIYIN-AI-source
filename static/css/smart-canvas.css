@@ -1399,3 +1399,4 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .smart-group-summary i,.smart-group-summary svg { width:13px; height:13px; }
 .smart-group-empty { flex:1 1 auto; min-height:74px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--faint); font-size:10px; font-weight:700; text-align:center; border-radius:10px; border:1px dashed var(--line); background:var(--soft); }
 .smart-group-empty i,.smart-group-empty svg { width:14px; height:14px; }
+.film-create-card{cursor:default}.film-create-actions{display:flex;gap:6px;margin-top:8px}.film-create-actions button{border:1px solid rgba(124,58,237,.25);background:rgba(124,58,237,.08);color:inherit;border-radius:7px;padding:5px 7px;cursor:pointer;font-size:11px}.film-create-actions button:hover{background:rgba(124,58,237,.18)}

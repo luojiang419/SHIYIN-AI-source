@@ -16301,6 +16301,7 @@ function renderSelectionHub(){
     ] : [
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
         {id:'edit', label:langIsEn() ? 'Edit' : '编辑', icon:'pencil'},
+        {id:'crop', label:langIsEn() ? 'Crop' : '裁切', icon:'crop'},
         {id:'grid', label:tr('canvas.modeGrid'), icon:'grid-3x3'},
         {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
         {id:'batchGenerator', label:'批量处理', icon:'layers-3'},
@@ -16416,10 +16417,10 @@ function runMediaQuickAction(action, target){
         downloadUrl(target.url, outputDownloadName(target.url)).catch(error => alert(error.message || '下载失败'));
         return;
     }
-    if(target?.kind === 'output' || !['edit','grid'].includes(action)) pushUndo();
+    if(target?.kind === 'output' || !['edit','crop','grid'].includes(action)) pushUndo();
     const image = materializeOutputMediaTarget(target);
     if(!image) return;
-    if(action === 'edit' || action === 'grid'){
+    if(action === 'edit' || action === 'crop' || action === 'grid'){
         render();
         scheduleSave();
         openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop');

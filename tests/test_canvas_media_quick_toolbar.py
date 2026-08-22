@@ -33,9 +33,26 @@ class CanvasMediaQuickToolbarTests(unittest.TestCase):
         self.assertIn("function addQuickActionNode(source, type)", self.javascript)
         self.assertIn("connections.push({id:uid('c'), from:source.id, to:created.id})", self.javascript)
 
+    def test_image_toolbar_has_a_direct_crop_action_reusing_the_image_editor(self):
+        render = re.search(r"function renderSelectionHub\(\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
+        self.assertIsNotNone(render)
+        body = render.group("body")
+        self.assertEqual(body.count("{id:'crop', label:langIsEn() ? 'Crop' : '裁切', icon:'crop'}"), 1)
+        self.assertLess(body.index("{id:'edit'"), body.index("{id:'crop'"))
+        self.assertLess(body.index("{id:'crop'"), body.index("{id:'grid'"))
+
+        run = re.search(r"function runMediaQuickAction\(action, target\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
+        self.assertIsNotNone(run)
+        run_body = run.group("body")
+        self.assertIn("['edit','crop','grid'].includes(action)", run_body)
+        self.assertIn("action === 'edit' || action === 'crop' || action === 'grid'", run_body)
+        self.assertIn("openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop')", run_body)
+
     def test_toolbar_is_positioned_above_the_selected_media_and_has_visual_state(self):
         self.assertIn("function positionSelectionHub(anchor)", self.javascript)
         self.assertIn("anchorRect.top - boardRect.top - hubRect.height - 10", self.javascript)
+        self.assertIn("max-width:calc(100vw - 32px)", self.styles)
+        self.assertIn("flex-wrap:wrap", self.styles)
         self.assertIn(".media-quick-btn {", self.styles)
         self.assertIn(".output-img-wrap.quick-selected img", self.styles)
 

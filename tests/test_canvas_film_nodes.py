@@ -20,6 +20,25 @@ def test_film_domain_module_defines_both_nodes_and_dynamic_role_ports():
     assert "data-film-action=\"add-actor\"" in FILM
 
 
+def test_film_video_ports_are_grouped_per_actor_and_support_inherited_count():
+    assert "function effectiveActorCount(node)" in FILM
+    assert "node?.autoActorCount || 0" in FILM
+    actor_group = "{role:`actor-${i}`,label:actorLabel(i,'演员')"
+    outfit_group = "{role:`outfit-${i}`,label:`服装${String.fromCharCode(65+i)}`"
+    prop_group = "{role:`prop-${i}`,label:`道具${String.fromCharCode(65+i)}`"
+    assert FILM.index(actor_group) < FILM.index(outfit_group) < FILM.index(prop_group)
+    assert ".map((port,index) => inputSlotHtml" in FILM
+
+
+def test_film_canvases_trace_storyboard_actor_assets_for_reuse():
+    assert "function classicFilmInheritedActorAssets(node)" in CLASSIC
+    assert "classicFilmStoryboardAncestors(connection.from)" in CLASSIC
+    assert "function smartFilmInheritedActorAssets(node)" in SMART
+    assert "smartFilmStoryboardAncestors(connection.from)" in SMART
+    assert "autoReuse:true" in CLASSIC
+    assert "autoReuse:true" in SMART
+
+
 def test_film_mapping_has_model_specific_rules_and_at_insertion():
     for marker in ("MODEL_RULES", "jimeng", "kling", "minimax", "<Picture {index}>", "资产映射："):
         assert marker in FILM

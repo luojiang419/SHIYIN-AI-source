@@ -69,9 +69,14 @@
         });
         return node;
     }
+    function effectiveActorCount(node){
+        const explicit = clamp(node?.actorCount || 1, 1, 8);
+        const inherited = clamp(node?.autoActorCount || 0, 0, 8);
+        return Math.max(explicit, inherited);
+    }
     function inputPorts(nodeOrType){
         const node = typeof nodeOrType === 'string' ? {type:nodeOrType,actorCount:1} : normalize(nodeOrType || {});
-        const count = Number(node.actorCount || 1);
+        const count = effectiveActorCount(node);
         if(node.type === 'film-storyboard'){
             return [
                 ...Array.from({length:count}, (_,i) => ({role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}参考图`})),
@@ -82,9 +87,11 @@
         if(node.type === 'film-video'){
             return [
                 {role:'storyboard',label:'分镜图',title:'连接分镜图或首帧参考'},
-                ...Array.from({length:count}, (_,i) => ({role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}主体参考图`})),
-                ...Array.from({length:count}, (_,i) => ({role:`outfit-${i}`,label:`服装${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}服装参考图`})),
-                ...Array.from({length:count}, (_,i) => ({role:`prop-${i}`,label:`道具${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}道具参考图`})),
+                ...Array.from({length:count}, (_,i) => [
+                    {role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}主体参考图`},
+                    {role:`outfit-${i}`,label:`服装${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}服装参考图`},
+                    {role:`prop-${i}`,label:`道具${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}道具参考图`},
+                ]).flat(),
             ];
         }
         return [];
@@ -270,5 +277,5 @@
         const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
     }
 
-    window.CanvasFilmNodes={TYPES,MODEL_RULES,isType,isGenerator,canOutput,title,size,normalize,createNode,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,bodyHtml,bind,parseScene};
+    window.CanvasFilmNodes={TYPES,MODEL_RULES,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,bodyHtml,bind,parseScene};
 })();

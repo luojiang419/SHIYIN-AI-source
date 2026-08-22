@@ -7078,6 +7078,7 @@ function render(){
     window.CanvasSpecialNodes?.disposePanoramasIn?.(nodesEl);
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
+    syncClassicFilmAutoReuse();
     const reusableMediaNodes = new Map();
     nodesEl.querySelectorAll('.node').forEach(el => {
         const node = nodes.find(n => n.id === el.dataset.id);
@@ -8297,12 +8298,57 @@ function bindClassicEcommerceNode(el,node){
         },
     });
 }
+function classicFilmStoryboardAncestors(sourceId, seen=new Set()){
+    if(!sourceId || seen.has(sourceId)) return [];
+    seen.add(sourceId);
+    const source = nodes.find(item => item.id === sourceId);
+    if(!source) return [];
+    if(source.type === 'film-storyboard') return [source];
+    // 分镜合成通常先连到 output，再由 output 连到生成视频；只沿影视输出链回溯，避免跨普通节点复用资产。
+    if(source.type !== 'output') return [];
+    return connections.filter(connection => connection.to === source.id)
+        .flatMap(connection => classicFilmStoryboardAncestors(connection.from, seen));
+}
+function classicFilmInheritedActorAssets(node){
+    if(!node || node.type !== 'film-video') return [];
+    const storyboardConnections = connections.filter(connection => connection.to === node.id && connection.inputRole === 'storyboard');
+    const storyboardNodes = new Map();
+    storyboardConnections.forEach(connection => classicFilmStoryboardAncestors(connection.from).forEach(item => storyboardNodes.set(item.id, item)));
+    const inherited = [];
+    storyboardNodes.forEach(storyboard => {
+        connections.filter(connection => connection.to === storyboard.id && /^actor-\d+$/.test(connection.inputRole || '')).forEach(connection => {
+            const index = Number(String(connection.inputRole).split('-')[1]);
+            const source = nodes.find(item => item.id === connection.from);
+            mediaRefsFromNode(source).forEach(ref => inherited.push({ref, role:`actor-${index}`, autoReuse:true}));
+        });
+    });
+    return inherited;
+}
+function syncClassicFilmAutoReuse(){
+    nodes.filter(node => node.type === 'film-video').forEach(node => {
+        const inherited = classicFilmInheritedActorAssets(node);
+        const maxInherited = inherited.reduce((max, item) => {
+            const match = String(item.role || '').match(/^actor-(\d+)$/);
+            return match ? Math.max(max, Number(match[1]) + 1) : max;
+        }, 0);
+        node.autoActorCount = maxInherited;
+    });
+}
 function classicFilmAssets(node){
     if(!node || !window.CanvasFilmNodes) return [];
-    return connections.filter(c => c.to === node.id).flatMap(connection => {
+    const direct = connections.filter(c => c.to === node.id).flatMap(connection => {
         const source = nodes.find(item => item.id === connection.from);
         return mediaRefsFromNode(source).map(ref => ({ref, role:connection.inputRole || ''}));
     });
+    if(node.type !== 'film-video') return direct;
+    const allInherited = classicFilmInheritedActorAssets(node);
+    node.autoActorCount = allInherited.reduce((max, item) => {
+        const match = String(item.role || '').match(/^actor-(\d+)$/);
+        return match ? Math.max(max, Number(match[1]) + 1) : max;
+    }, 0);
+    const connectedActorRoles = new Set(direct.filter(item => /^actor-\d+$/.test(item.role || '') && item.ref?.url).map(item => item.role));
+    const inherited = allInherited.filter(item => !connectedActorRoles.has(item.role));
+    return [...direct, ...inherited];
 }
 function filmNodeProviderOptions(node){
     return videoProviderOptions(node.apiProvider || videoApiProviders()[0]?.id || 'comfly');

@@ -1468,9 +1468,51 @@ function createH3VideoNode(point){
 }
 function filmSmartAssets(node){
     if(!node || !window.CanvasFilmNodes) return [];
-    return (canvas?.connections || []).filter(connection => connection.to === node.id).flatMap(connection => {
+    const direct = (canvas?.connections || []).filter(connection => connection.to === node.id).flatMap(connection => {
         const source=nodes.find(item => item.id === connection.from);
         return imagesForNode(source).map(ref => ({ref,role:connection.inputRole || ''}));
+    });
+    if(node.specialType !== 'film-video') return direct;
+    const allInherited = smartFilmInheritedActorAssets(node);
+    node.autoActorCount = allInherited.reduce((max,item) => {
+        const match=String(item.role || '').match(/^actor-(\d+)$/);
+        return match ? Math.max(max,Number(match[1])+1) : max;
+    },0);
+    const inherited = allInherited;
+    const connectedActorRoles = new Set(direct.filter(item => /^actor-\d+$/.test(item.role || '') && item.ref?.url).map(item => item.role));
+    return [...direct, ...inherited.filter(item => !connectedActorRoles.has(item.role))];
+}
+function smartFilmStoryboardAncestors(sourceId, seen=new Set()){
+    if(!sourceId || seen.has(sourceId)) return [];
+    seen.add(sourceId);
+    const source=nodes.find(item => item.id === sourceId);
+    if(!source) return [];
+    if(source.specialType === 'film-storyboard') return [source];
+    return [];
+}
+function smartFilmInheritedActorAssets(node){
+    if(!node || node.specialType !== 'film-video') return [];
+    const storyboardConnections=(canvas?.connections || []).filter(connection => connection.to === node.id && connection.inputRole === 'storyboard');
+    const storyboards=new Map();
+    storyboardConnections.forEach(connection => smartFilmStoryboardAncestors(connection.from).forEach(item => storyboards.set(item.id,item)));
+    const inherited=[];
+    storyboards.forEach(storyboard => {
+        (canvas?.connections || []).filter(connection => connection.to === storyboard.id && connection.inputRole && /^actor-\d+$/.test(connection.inputRole)).forEach(connection => {
+            const index=Number(String(connection.inputRole).split('-')[1]);
+            const source=nodes.find(item => item.id === connection.from);
+            imagesForNode(source).forEach(ref => inherited.push({ref,role:`actor-${index}`,autoReuse:true}));
+        });
+    });
+    return inherited;
+}
+function syncSmartFilmAutoReuse(){
+    nodes.filter(node => node.specialType === 'film-video').forEach(node => {
+        const inherited=smartFilmInheritedActorAssets(node);
+        const maxInherited=inherited.reduce((max,item) => {
+            const match=String(item.role || '').match(/^actor-(\d+)$/);
+            return match ? Math.max(max,Number(match[1])+1) : max;
+        },0);
+        node.autoActorCount=maxInherited;
     });
 }
 function filmSmartImageProviderId(node){
@@ -8573,6 +8615,7 @@ function render(){
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
     window.CanvasSpecialNodes?.disposePanoramasIn?.(world);
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
+    syncSmartFilmAutoReuse();
     const nodeIndex = new Map(nodes.map(node => [node.id, node]));
     rememberInlineVideoActivations(nodeIndex);
     world.classList.toggle('smart-multi-selected', selectedNodeIds().length > 1);

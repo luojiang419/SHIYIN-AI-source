@@ -131,3 +131,49 @@ def test_classic_building_input_signature_invalidates_stale_confirmations():
     prompt_handler = CANVAS_JS[CANVAS_JS.index("const buildingPrompt = el.querySelector"):]
     prompt_handler = prompt_handler[:prompt_handler.index("const multiViewProvider")]
     assert "node.buildingInputSignature = ''" not in prompt_handler
+
+
+def test_smart_building_flow_calls_planner_and_extracts_connected_prompt():
+    assert "async function requestSmartBuildingPlan(node, refs, connectedPrompt)" in SMART_JS
+    assert "fetch('/api/building-multi-view/plan'" in SMART_JS
+    assert "inline_prompt:String(node.buildingPrompt || '').trim()" in SMART_JS
+    assert "connected_prompt:String(connectedPrompt || '').trim()" in SMART_JS
+    assert "function smartBuildingConnectedPrompt(node)" in SMART_JS
+    assert "inputRole === 'building-prompt'" in SMART_JS
+    assert "buildingSource:'input'" in SMART_JS
+
+
+def test_smart_building_flow_has_two_confirmation_gates_and_output_node():
+    for text in [
+        "async function handleSmartBuildingAction(node, action)",
+        "action === 'confirm-sketch'",
+        "action === 'regenerate-sketch'",
+        "action === 'confirm-front'",
+        "action === 'regenerate-front'",
+        "action === 'retry-missing'",
+        "smartBuildingSetStage(node, 'awaiting-sketch-confirmation')",
+        "smartBuildingSetStage(node, 'awaiting-front-confirmation')",
+        "function smartBuildingEnsureOutputNode(node)",
+        "buildingOutputNodeId",
+        "buildingMultiViewOutput",
+    ]:
+        assert text in SMART_JS
+    assert "data-building-action" in SMART_JS
+    assert ".building-multi-view-output .generation-slot-grid" in CSS
+
+
+def test_smart_building_only_generates_missing_views_concurrently_and_keeps_successes():
+    assert "const targets = SMART_BUILDING_REAL_VIEW_KEYS.filter" in SMART_JS
+    assert "if(!targets.length)" in SMART_JS
+    assert "Promise.allSettled(targets.map(view => generateSmartBuildingView" in SMART_JS
+    assert "成功结果已保留" in SMART_JS
+    assert "smartBuildingCompleteRun(node, startedAt)" in SMART_JS
+    assert "status:item ? 'success' : error ? 'error' : active.has(view) ? 'loading' : 'waiting'" in SMART_JS
+
+
+def test_smart_building_input_signature_invalidates_stale_confirmations_and_busy_controls():
+    assert "function smartBuildingInputSignature(node" in SMART_JS
+    assert "smartBuildingAssertInputStable(node)" in SMART_JS
+    assert "建筑参考图或提示词在生成过程中发生变化" in SMART_JS
+    assert "const buildingControlDisabled = buildingBusy ? 'disabled' : '';" in SMART_JS
+    assert "node.buildingPlan = null;" in SMART_JS

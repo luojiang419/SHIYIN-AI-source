@@ -9480,6 +9480,8 @@ function smartBuildingCurrentInputMatches(node){
     const signature = smartBuildingInputSignature(node);
     if(!node.buildingInputSignature || signature === node.buildingInputSignature) return true;
     node.buildingPlan = null;
+    node.buildingPendingTasks = [];
+    node.buildingActiveViews = [];
     smartBuildingSetStage(node, 'idle', '建筑输入已变化，请重新开始生成');
     smartBuildingSyncOutputs(node);
     render();
@@ -9569,7 +9571,9 @@ async function resumeSmartBuildingNodePending(node){
             smartBuildingRemovePendingTask(node, task.taskId);
             return item;
         } catch(error){
-            node.buildingErrors = {...(node.buildingErrors || {}), [task.view]:error.message || `建筑${task.view}视图恢复失败`};
+            const message = error.message || `建筑${task.view}视图恢复失败`;
+            if(/输入.*变化|重新开始生成/.test(message)) smartBuildingRemovePendingTask(node, task.taskId);
+            node.buildingErrors = {...(node.buildingErrors || {}), [task.view]:message};
             throw error;
         } finally {
             node.buildingActiveViews = (node.buildingActiveViews || []).filter(view => view !== task.view);
@@ -9634,6 +9638,13 @@ async function completeSmartBuildingMissingViews(node, inputRefs, startedAt=0){
     return settled;
 }
 async function runSmartBuildingNode(node){
+    if(Array.isArray(node.buildingPendingTasks) && node.buildingPendingTasks.length){
+        await resumeSmartBuildingNodePending(node);
+        if(node.buildingPendingTasks.length){
+            toast('已有建筑任务正在恢复，请稍后再开始新的规划');
+            return;
+        }
+    }
     const inputRefs = smartBuildingInputRefs(node);
     const connectedPrompt = smartBuildingConnectedPrompt(node);
     const hasReference = SMART_BUILDING_VIEW_KEYS.some(view => smartBuildingItemUrl(inputRefs[view]));

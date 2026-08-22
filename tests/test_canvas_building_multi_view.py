@@ -194,3 +194,5 @@ def test_smart_building_retry_never_submits_duplicate_while_task_is_recovering()
     assert "await resumeSmartBuildingNodePending(node);" in SMART_JS
     assert "建筑任务仍在恢复中，请稍后再次点击“重试缺失视图”" in SMART_JS
     assert "stage === BUILDING_STAGES.PARTIAL || stage === BUILDING_STAGES.ERROR" in SHARED_JS
+    assert "已有建筑任务正在恢复，请稍后再开始新的规划" in SMART_JS
+    assert "node.buildingPendingTasks = [];" in SMART_JS

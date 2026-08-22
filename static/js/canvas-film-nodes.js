@@ -49,10 +49,12 @@
             node.aspectRatio = node.aspectRatio || '16:9';
             node.resolution = node.resolution || '2k';
             node.quality = node.quality || 'high';
+            node.count = clamp(node.count || 1, 1, 4);
         } else {
             node.duration = clamp(node.duration || 5, 1, 60);
             node.aspectRatio = node.aspectRatio || '16:9';
-            node.resolution = String(node.resolution || '');
+            // 空值会触发部分平台的高分辨率默认值，影视节点默认锁定为 720P。
+            node.resolution = String(node.resolution || '720p');
             node.apiProvider = String(node.apiProvider || '');
             node.model = String(node.model || '');
             node.enhancePrompt = node.enhancePrompt !== false;
@@ -189,7 +191,7 @@
             <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
             ${promptHtml(node)}
             <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
-            ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}
+            ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label><label>分辨率<select data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P（推荐）</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
             ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
         </div>`;
     }
@@ -288,7 +290,9 @@
             const eventName=control.matches('input')?'input':'change';
             control.addEventListener(eventName,event=>{
                 const key=control.dataset.filmField;
-                node[key]=key==='duration'?clamp(control.value,1,60):control.value;
+                node[key]=key==='duration'
+                    ? clamp(control.value,1,60)
+                    : key==='count' ? clamp(control.value,1,4) : control.value;
                 if(key==='apiProvider'){
                     const getDefault=node.type === 'film-storyboard' ? options.defaultImageModel : options.defaultModel;
                     node.model=getDefault?.(control.value,node) || '';

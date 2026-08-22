@@ -343,6 +343,7 @@ const outputResolution = document.getElementById('outputResolution');
 const outputDownloadBtn = document.getElementById('outputDownloadBtn');
 const outputDownloadAllBtn = document.getElementById('outputDownloadAllBtn');
 const outputLightboxVideo = document.getElementById('outputLightboxVideo');
+const videoLightboxActions = document.getElementById('videoLightboxActions');
 const outputPromptPanel = document.getElementById('outputPromptPanel');
 const outputPromptText = document.getElementById('outputPromptText');
 const outputCopyPromptBtn = document.getElementById('outputCopyPromptBtn');
@@ -3100,6 +3101,28 @@ function createEcommerceWorkflow(point){
     setStatus('已创建电商工作流：模特 / 商品 / 场景 → A+ 图合成 → 电商视频');
     return {model,product,scene,compose,video};
 }
+function createFilmWorkflow(point){
+    if(!ensureCanvas()) return null;
+    const base = point || defaultPoint(0,0);
+    pushUndo();
+    const storyboard = addFilmNode('film-storyboard',{x:base.x,y:base.y});
+    const storyboardOutput = addOutputNode({x:base.x + 620,y:base.y});
+    const video = addFilmNode('film-video',{x:base.x + 1240,y:base.y});
+    const videoOutput = addOutputNode({x:base.x + 1860,y:base.y});
+    if(!storyboard || !storyboardOutput || !video || !videoOutput) return null;
+    connections.push(
+        {id:uid('c'),from:storyboard.id,to:storyboardOutput.id},
+        {id:uid('c'),from:storyboardOutput.id,to:video.id,inputRole:'storyboard'},
+        {id:uid('c'),from:video.id,to:videoOutput.id}
+    );
+    selected.clear();
+    [storyboard,storyboardOutput,video,videoOutput].forEach(node => selected.add(node.id));
+    syncGeneratorInputs();
+    render();
+    scheduleSave();
+    setStatus('已创建影视工作流：分镜合成 → 分镜输出 → 生成视频 → 视频输出');
+    return {storyboard,storyboardOutput,video,videoOutput};
+}
 function addH3VideoNode(point){
     const node = addVideoNode(point);
     if(!node) return node;
@@ -4432,6 +4455,12 @@ function menuCreateEcommerceWorkflow(){
     return createEcommerceWorkflow(point);
 }
 window.menuCreateEcommerceWorkflow = menuCreateEcommerceWorkflow;
+function menuCreateFilmWorkflow(){
+    const point = menuPoint ? {...menuPoint} : defaultPoint(0,0);
+    closeCreateMenu();
+    return createFilmWorkflow(point);
+}
+window.menuCreateFilmWorkflow = menuCreateFilmWorkflow;
 function positionFilmSubmenu(){
     if(!filmMenuHost || !filmSubmenu || !filmMenuTrigger) return;
     const margin=10, gap=8, rect=filmMenuTrigger.getBoundingClientRect(), sub=filmSubmenu.getBoundingClientRect();
@@ -4441,8 +4470,25 @@ function positionFilmSubmenu(){
     filmSubmenu.style.left=`${Math.max(margin,Math.min(window.innerWidth-width-margin,flip ? rect.left-width-gap : rect.right+gap))}px`;
     filmSubmenu.style.top=`${Math.max(margin,Math.min(window.innerHeight-height-margin,rect.top-8))}px`;
 }
+function closeCanvasSubmenu(host, submenu, trigger){
+    host?.classList.remove('submenu-open','submenu-flip');
+    submenu?.classList.remove('submenu-open');
+    trigger?.setAttribute('aria-expanded','false');
+}
+function closeInactiveCanvasSubmenus(event){
+    if(!createMenu?.classList.contains('open')) return;
+    const target = event.target;
+    const inFilm = Boolean((filmMenuHost && filmMenuHost.contains(target)) || (filmSubmenu && filmSubmenu.contains(target)));
+    const inEcommerce = Boolean((ecommerceMenuHost && ecommerceMenuHost.contains(target)) || (ecommerceSubmenu && ecommerceSubmenu.contains(target)));
+    if(inFilm && !inEcommerce) closeCanvasSubmenu(ecommerceMenuHost,ecommerceSubmenu,ecommerceMenuTrigger);
+    if(inEcommerce && !inFilm) closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
+}
+document.addEventListener('pointerover', closeInactiveCanvasSubmenus, true);
 if(ecommerceMenuTrigger){
     const setEcommerceSubmenuOpen = open => {
+        if(open){
+            closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
+        }
         ecommerceMenuHost.classList.toggle('submenu-open',open);
         ecommerceSubmenu?.classList.toggle('submenu-open',open);
         ecommerceMenuTrigger.setAttribute('aria-expanded',open ? 'true' : 'false');
@@ -4459,6 +4505,9 @@ if(ecommerceMenuTrigger){
 }
 if(filmMenuTrigger){
     const setFilmSubmenuOpen = open => {
+        if(open){
+            closeCanvasSubmenu(ecommerceMenuHost,ecommerceSubmenu,ecommerceMenuTrigger);
+        }
         filmMenuHost.classList.toggle('submenu-open',open);
         filmSubmenu?.classList.toggle('submenu-open',open);
         filmMenuTrigger.setAttribute('aria-expanded',open ? 'true' : 'false');
@@ -8401,36 +8450,41 @@ async function runFilmNode(nodeId, opts={}){
     const refs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `图${index+1}`}));
     const out=outputForNode(node,560,true);
     const run=runSnapshot(node,built.prompt,refs);
-    const pendingId=uid('p');
-    const pending=makePendingForRun(pendingId,run,node,{refs});
-    out._pending=[...(out._pending || []),pending];
+    const storyboardCount = node.type === 'film-storyboard'
+        ? Math.max(1, Math.min(4, Number(node.count || 1)))
+        : 1;
+    const pendingIds = Array.from({length:storyboardCount}, () => uid('p'));
+    const pendings = pendingIds.map(id => makePendingForRun(id,run,node,{refs}));
+    const pending = pendings[0];
+    if(pendings.length === 1) out._pending=[...(out._pending || []),pending];
+    else out._pending=[...(out._pending || []),...pendings];
     node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out); scheduleSave();
     try {
         if(node.type === 'film-storyboard'){
             const imageProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
             const payload={prompt:built.prompt,provider_id:imageProvider,model:resolveImageModel(node.model || providerImageModels(imageProvider)[0]),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high'};
-            pending.previewSize=pendingPreviewSizeFromSizeString(payload.size);
-            const task=await createCanvasImageTask(payload);
-            pending.canvasTaskId=task.task_id; refreshRunNodes(node,out); scheduleSave();
-            const result=await waitCanvasImageTaskResult(task.task_id);
-            const images=result.images || result.image_items || [];
+            pendings.forEach(pending => { pending.previewSize=pendingPreviewSizeFromSizeString(payload.size); });
+            const tasks=await Promise.all(pendings.map(() => createCanvasImageTask(payload)));
+            tasks.forEach((task,index) => { pendings[index].canvasTaskId=task.task_id; if(index === 0) pending.canvasTaskId=task.task_id; });
+            refreshRunNodes(node,out); scheduleSave();
+            const results=await Promise.all(tasks.map(task => waitCanvasImageTaskResult(task.task_id)));
+            const images=results.flatMap(result => result.images || result.image_items || []);
             if(!images.length) throw new Error('分镜合成没有返回图片');
-            mergeGeneratedOutputs(node,images,false); out._pending=(out._pending || []).filter(item=>item.id !== pendingId); appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
+            mergeGeneratedOutputs(node,images,false); out._pending=(out._pending || []).filter(item => !pendingIds.includes(item.id)); appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
         } else {
-            const payload={prompt:built.prompt,provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),model:node.model || 'veo3-fast',duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
+            const payload={prompt:built.prompt,provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),model:node.model || 'veo3-fast',duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '720p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
             const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));
             if(!outputs.length) throw new Error('视频生成没有返回结果');
-            mergeGeneratedOutputs(node,outputs,false); out._pending=(out._pending || []).filter(item=>item.id !== pendingId); appendOutputImagesWithoutDuplicates(out,outputs); node.runStatus='done'; setStatus(`视频生成完成，共 ${outputs.length} 个结果`);
+            mergeGeneratedOutputs(node,outputs,false); out._pending=(out._pending || []).filter(item => !pendingIds.includes(item.id)); appendOutputImagesWithoutDuplicates(out,outputs); node.runStatus='done'; setStatus(`视频生成完成，共 ${outputs.length} 个结果`);
         }
         node.runError='';
         node.runStatus=classicFilmHasActiveRun(node,out) ? 'running' : 'done';
         scheduleSave();
     } catch(error){
         const message=error.message || String(error);
-        const livePending=pendingById(out,pendingId);
-        if(livePending){ livePending.failed=true; livePending.error=message; }
+        pendingIds.map(id => pendingById(out,id)).filter(Boolean).forEach(livePending => { livePending.failed=true; livePending.error=message; });
         node.runStatus=classicFilmHasActiveRun(node,out) ? 'running' : 'failed';
         node.runError=message; if(!opts.cascade) showErrorModal(node.runError,'影视制作失败'); else throw error;
     } finally {
@@ -16081,6 +16135,35 @@ function resetOutputPreviewZoom(){
     outputPreview.classList.remove('panning');
     applyOutputPreviewZoom();
 }
+function materializeVideoLightboxActionNode(){
+    const current = currentOutputLightboxOutId ? nodes.find(node => node.id === currentOutputLightboxOutId) : null;
+    if(current && current.type === 'image' && mediaKindForNode(current) === 'video') return current;
+    if(!current || current.type !== 'output' || !currentOutputLightboxUrl) return null;
+    const image = materializeOutputMediaTarget({kind:'output',nodeId:current.id,url:currentOutputLightboxUrl,name:outputDownloadName(currentOutputLightboxUrl)});
+    if(image){ render(); scheduleSave(); }
+    return image;
+}
+function runVideoLightboxAction(action){
+    const url = currentOutputLightboxUrl;
+    if(!url) return;
+    if(action === 'download'){
+        downloadUrl(url, outputDownloadName(url)).catch(error => alert(error.message || '下载失败'));
+        return;
+    }
+    const source = materializeVideoLightboxActionNode();
+    if(!source) return;
+    closeOutputLightbox();
+    runMediaQuickAction(action,{kind:'node',nodeId:source.id,url:source.url,name:source.name || outputDownloadName(source.url)});
+}
+function bindVideoLightboxActions(){
+    videoLightboxActions?.querySelectorAll('[data-video-lightbox-action]').forEach(button => {
+        button.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            runVideoLightboxAction(button.dataset.videoLightboxAction || '');
+        };
+    });
+}
 function initOutputPreviewZoomEvents(){
     outputPreview.addEventListener('wheel', e => {
         if(outputLightboxVideo.style.display === 'block') return;
@@ -16179,6 +16262,10 @@ function openOutputLightbox(url, out){
         };
     }
     const videoMode = mediaKindForOutputItem(meta && Object.keys(meta).length ? {...meta, url} : url) === 'video';
+    if(videoLightboxActions){
+        videoLightboxActions.hidden = !videoMode;
+        if(videoMode) bindVideoLightboxActions();
+    }
     outputLightboxImg.style.display = videoMode ? 'none' : 'block';
     outputLightboxVideo.style.display = videoMode ? 'block' : 'none';
     outputCompareResult.style.display = videoMode ? 'none' : 'block';
@@ -16231,6 +16318,7 @@ function closeOutputLightbox(){
     outputLightboxImg.src = '';
     outputLightboxVideo.pause();
     outputLightboxVideo.src = '';
+    if(videoLightboxActions) videoLightboxActions.hidden = true;
     outputLightboxVideo.style.display = 'none';
     outputLightboxImg.style.display = 'block';
     outputCompareResult.style.display = 'block';
@@ -16251,7 +16339,11 @@ function closeOutputLightbox(){
 }
 function groupSelectedImages(){
     if(!ensureCanvas()) return;
-    const targets = [...selected].map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'image' || n?.type === 'prompt');
+    // Ctrl/Cmd+G 应覆盖当前选中的整条节点流，而不只是图片和提示词。
+    // 组节点本身不作为子项，避免产生循环嵌套；其余节点均参与边界计算和整体移动。
+    const targets = [...selected]
+        .map(id => nodes.find(n => n.id === id))
+        .filter(n => n && n.type !== 'group' && n.type !== 'promptGroup');
     let group;
     pushUndo();
     if(targets.length){

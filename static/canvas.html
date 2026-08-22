@@ -103,6 +103,8 @@
                 <div class="menu-submenu-host" data-film-menu-host>
                     <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视制作</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
                     <div class="create-submenu" role="menu" aria-label="影视制作节点">
+                        <button class="menu-btn film-workflow-create" type="button" onclick="menuCreateFilmWorkflow()"><i data-lucide="workflow" class="w-4 h-4"></i><span>创建影视工作流</span></button>
+                        <div class="menu-divider"></div>
                         <button class="menu-btn" type="button" onclick="menuAdd('film-storyboard')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>分镜合成</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('film-video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>生成视频</span></button>
                     </div>
@@ -186,6 +188,13 @@
                         <button id="outputDownloadAllBtn" class="preview-icon-btn" type="button" title="下载全部图片" aria-label="下载全部图片" data-i18n-title="canvas.outputDownloadAllImages" style="display:none"><i data-lucide="archive" class="w-4 h-4"></i></button>
                         <button class="preview-icon-btn" type="button" title="关闭" aria-label="关闭" onclick="closeOutputLightbox()" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
                     </div>
+                </div>
+                <div id="videoLightboxActions" class="video-lightbox-actions" hidden aria-label="视频节点功能">
+                    <span class="video-lightbox-actions-label">视频节点</span>
+                    <button type="button" data-video-lightbox-action="extract-video"><i data-lucide="images"></i><span>视频抽帧</span></button>
+                    <button type="button" data-video-lightbox-action="trim-video"><i data-lucide="scissors"></i><span>视频截取</span></button>
+                    <button type="button" data-video-lightbox-action="screenshot-video"><i data-lucide="camera"></i><span>截图</span></button>
+                    <button type="button" data-video-lightbox-action="download"><i data-lucide="download"></i><span>下载</span></button>
                 </div>
             </div>
             <div id="outputPromptPanel" class="output-prompt-panel">

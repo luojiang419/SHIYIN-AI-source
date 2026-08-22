@@ -153,6 +153,12 @@
     function promptHtml(node){
         return `<label class="film-prompt-field"><span>生成需求</span><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea></label>`;
     }
+    function inputSlotHtml(node, port, options={}){
+        const assets = options.assets?.(node) || [];
+        const count = assets.filter(item => String(item?.role || item?.inputRole || '') === port.role && item?.url).length;
+        const state = count ? `${count} 张已连接` : '可选输入';
+        return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${count ? 'has-input' : ''}">${esc(state)}</b></div>`;
+    }
     function bodyHtml(node, options={}){
         normalize(node);
         const action = node.type === 'film-storyboard' ? '生成分镜图' : '生成视频';
@@ -161,7 +167,7 @@
         const modelOptions = options.modelOptions ? options.modelOptions(node) : '';
         return `<div class="film-node-panel ${node.type}">
             <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span><button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button></div>
-            <div class="film-port-summary">${inputPorts(node).map(port => `<span>${esc(port.label)}</span>`).join('')}</div>
+            <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
             ${promptHtml(node)}
             <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中…' : action}</button></div>
             ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}

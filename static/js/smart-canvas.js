@@ -2454,6 +2454,43 @@ function nodeRect(node){
     const layout = imageLayout(node.images || [], nodeScale(node), node);
     return {x:node.x || 0, y:node.y || 0, width:layout.width, height:layout.height};
 }
+const SMART_NODE_LAYOUT_GAP = 72;
+const SMART_NODE_LAYOUT_ROW_GAP = 52;
+function smartRectsOverlap(a, b){
+    return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+function smartFreeNodePoint(source, created, direction='downstream'){
+    const sourceRect = nodeRect(source);
+    const targetRect = nodeRect(created);
+    const width = Math.max(1, targetRect.width);
+    const height = Math.max(1, targetRect.height);
+    const xBase = direction === 'upstream'
+        ? sourceRect.x - width - SMART_NODE_LAYOUT_GAP
+        : sourceRect.x + sourceRect.width + SMART_NODE_LAYOUT_GAP;
+    const rowStep = Math.max(sourceRect.height, height) + SMART_NODE_LAYOUT_ROW_GAP;
+    const rowOffsets = [0];
+    for(let i=1; i<=12; i++) rowOffsets.push(i, -i);
+    const excludedId = created?.id;
+    for(let column=0; column<24; column++){
+        const x = direction === 'upstream'
+            ? xBase - column * (width + SMART_NODE_LAYOUT_GAP)
+            : xBase + column * (width + SMART_NODE_LAYOUT_GAP);
+        for(const rowOffset of rowOffsets){
+            const candidate = {x, y:sourceRect.y + rowOffset * rowStep, width, height};
+            const blocked = nodes.some(node => {
+                if(node.id === excludedId) return false;
+                return smartRectsOverlap(candidate, nodeRect(node));
+            });
+            if(!blocked) return {x:Math.round(candidate.x), y:Math.round(candidate.y)};
+        }
+    }
+    return {x:Math.round(xBase), y:Math.round(sourceRect.y)};
+}
+function positionSmartNodeRelative(created, source, direction='downstream'){
+    if(!created || !source) return;
+    const point = smartFreeNodePoint(source, created, direction);
+    moveSmartNodeAtom(created, point.x, point.y);
+}
 function connectedSmartClusterIds(seedId){
     const ids = new Set(nodes.map(n => n.id));
     if(!ids.has(seedId)) return [];
@@ -9052,6 +9089,8 @@ function handlePortDrop(drag, e){
     undoSuppressed = true;
     const newNode = createImageNodeAt(p, [], {select:true, skipUndo:true});
     undoSuppressed = false;
+    const sourceNode = nodes.find(node => node.id === drag.fromId);
+    positionSmartNodeRelative(newNode, sourceNode, drag.fromPort === 'out' ? 'downstream' : 'upstream');
     const fromId = drag.fromPort === 'out' ? drag.fromId : newNode.id;
     const toId = drag.fromPort === 'out' ? newNode.id : drag.fromId;
     connectInputNode(fromId, toId);

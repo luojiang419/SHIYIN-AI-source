@@ -45,10 +45,15 @@ def test_both_canvas_runtimes_bind_film_nodes_and_parse_visuals():
     assert "runFilmNode(changed.id)" in CLASSIC
 
 
-def test_film_styles_use_canvas_theme_tokens_and_keep_ports_outside_content():
+def test_film_input_slots_match_three_view_layout_and_keep_labels_inside_content():
     for token in ("var(--strong)", "var(--soft)", "var(--line)", "var(--text)", "var(--muted)"):
         assert token in FILM_CSS
-    assert "right:100%" in FILM_CSS
+    assert "film-input-list" in FILM
+    assert "film-input-row" in FILM
+    assert "top:calc(125px + var(--film-port-index) * 36px)" in FILM_CSS
+    assert "top:calc(74px + var(--film-port-index) * 36px)" in FILM_CSS
+    assert "right:100%" not in FILM_CSS
+    assert ".film-input-row strong" in FILM_CSS
     assert "grid-template-columns:minmax(0,1fr) minmax(0,1fr)" in FILM_CSS
     assert "rgba(124,58,237" not in FILM_CSS
     assert "rgba(139,92,246" not in FILM_CSS

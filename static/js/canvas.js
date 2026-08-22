@@ -4322,6 +4322,7 @@ function createLinkedNode(type){
     pushUndo();
     const created = createNodeByType(type, state.point);
     if(!created) return;
+    positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');
     const fromId = state.originKind === 'out' ? origin.id : created.id;
     const toId = state.originKind === 'out' ? created.id : origin.id;
     const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
@@ -16972,6 +16973,7 @@ function addQuickActionNode(source, type){
     const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
     const created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
     if(!created) return null;
+    positionCanvasNodeRelative(created, source, 'downstream');
     const inputRole = type === 'multi-view' ? 'model-front' : '';
     if(inputRole && canConnect(source.id, created.id, inputRole) && !connections.some(connection => connection.from === source.id && connection.to === created.id && connection.inputRole === inputRole)){
         connections.push({id:uid('c'), from:source.id, to:created.id, inputRole});
@@ -17738,6 +17740,43 @@ function nodeRect(n){
     const w = el?.offsetWidth || n.w || 260;
     const h = el?.offsetHeight || n.h || 200;
     return {x:n.x, y:n.y, w, h, cx:n.x + w/2, cy:n.y + h/2};
+}
+const CANVAS_NODE_LAYOUT_GAP = 72;
+const CANVAS_NODE_LAYOUT_ROW_GAP = 56;
+function canvasRectsOverlap(a, b){
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+function canvasFreeNodePoint(source, created, direction='downstream'){
+    const sourceRect = nodeRect(source);
+    const targetRect = nodeRect(created);
+    const width = Math.max(1, targetRect.w);
+    const height = Math.max(1, targetRect.h);
+    const xBase = direction === 'upstream'
+        ? sourceRect.x - width - CANVAS_NODE_LAYOUT_GAP
+        : sourceRect.x + sourceRect.w + CANVAS_NODE_LAYOUT_GAP;
+    const rowStep = Math.max(sourceRect.h, height) + CANVAS_NODE_LAYOUT_ROW_GAP;
+    const rowOffsets = [0];
+    for(let i=1; i<=12; i++) rowOffsets.push(i, -i);
+    const excludedId = created?.id;
+    for(let column=0; column<24; column++){
+        const x = direction === 'upstream'
+            ? xBase - column * (width + CANVAS_NODE_LAYOUT_GAP)
+            : xBase + column * (width + CANVAS_NODE_LAYOUT_GAP);
+        for(const rowOffset of rowOffsets){
+            const candidate = {x, y:sourceRect.y + rowOffset * rowStep, w:width, h:height};
+            const blocked = nodes.some(node => {
+                if(node.id === excludedId) return false;
+                return canvasRectsOverlap(candidate, nodeRect(node));
+            });
+            if(!blocked) return {x:Math.round(candidate.x), y:Math.round(candidate.y)};
+        }
+    }
+    return {x:Math.round(xBase), y:Math.round(sourceRect.y)};
+}
+function positionCanvasNodeRelative(created, source, direction='downstream'){
+    if(!created || !source) return;
+    const point = canvasFreeNodePoint(source, created, direction);
+    moveCanvasNodeAtom(created, point.x, point.y);
 }
 function connectedClusterIds(seedId){
     const ids = new Set(nodes.map(n => n.id));

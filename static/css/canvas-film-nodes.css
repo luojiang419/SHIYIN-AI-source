@@ -71,26 +71,64 @@
 .film-run-button:hover {
     filter:brightness(.94);
 }
-.film-port-summary {
+.film-input-list {
     display:flex;
-    flex-wrap:wrap;
+    flex-direction:column;
     gap:6px;
     min-width:0;
     padding:0 2px;
 }
-.film-port-summary span,
+.film-input-row,
 .film-mapping-chip {
     min-width:0;
     border:1px solid var(--line);
-    border-radius:999px;
+    border-radius:9px;
     background:var(--soft);
     color:var(--muted);
     font-size:10px;
     line-height:1.25;
 }
-.film-port-summary span {
-    padding:4px 8px;
+.film-input-row {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    min-height:30px;
+    padding:0 9px;
+}
+.film-input-row > span {
+    display:flex;
+    align-items:center;
+    gap:6px;
+    min-width:0;
+}
+.film-input-row strong {
+    min-width:0;
+    overflow:hidden;
+    color:var(--text);
+    font-size:10px;
+    font-weight:800;
+    text-overflow:ellipsis;
     white-space:nowrap;
+}
+.film-input-row svg,
+.film-input-row i {
+    width:13px;
+    height:13px;
+    flex:0 0 auto;
+    color:var(--muted);
+}
+.film-input-row b {
+    min-width:0;
+    overflow:hidden;
+    color:var(--faint,#888);
+    font-size:9px;
+    font-weight:700;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.film-input-row b.has-input {
+    color:#258a57;
 }
 .film-prompt-field,
 .film-image-settings label,
@@ -297,54 +335,18 @@ body.theme-dark .film-error {
     white-space:nowrap;
 }
 
-/* 经典画布：端口标签放到节点外侧，避免压住节点内部摘要和按钮。 */
+/* 两种画布都复用创建三视图的圆点端口，文字由节点内部输入槽承载。 */
 .film-storyboard-node .film-role-port,
 .film-video-node .film-role-port {
     left:-29px;
-    top:calc(78px + var(--film-port-index) * 27px);
-}
-.film-storyboard-node .film-role-port::after,
-.film-video-node .film-role-port::after {
-    position:absolute;
-    top:50%;
-    right:100%;
-    left:auto;
-    padding:3px 6px;
-    border:1px solid var(--line);
-    border-radius:7px;
-    background:var(--card-solid, var(--card));
-    color:var(--muted);
-    content:attr(data-role-label);
-    font-size:10px;
-    line-height:1.2;
-    pointer-events:none;
-    transform:translateY(-50%);
-    white-space:nowrap;
+    top:calc(125px + var(--film-port-index) * 36px);
 }
 
-/* 智能画布：端口较小，标签同样固定在节点左侧，不参与正文排版。 */
+/* 智能画布的端口位置与智能创建三视图输入槽保持同一基准。 */
 .smart-film-storyboard-node .film-role-port,
 .smart-film-video-node .film-role-port {
     left:-8px;
-    top:calc(72px + var(--film-port-index) * 25px);
-}
-.smart-film-storyboard-node .film-role-port::after,
-.smart-film-video-node .film-role-port::after {
-    position:absolute;
-    top:50%;
-    right:calc(100% + 6px);
-    left:auto;
-    padding:3px 6px;
-    border:1px solid var(--line);
-    border-radius:7px;
-    background:var(--card-solid, var(--card));
-    color:var(--muted);
-    content:attr(data-role-label);
-    font-size:10px;
-    line-height:1.2;
-    pointer-events:none;
-    transform:translateY(-50%);
-    white-space:nowrap;
+    top:calc(74px + var(--film-port-index) * 36px);
 }
 
 .theme-dark .film-prompt-field textarea,

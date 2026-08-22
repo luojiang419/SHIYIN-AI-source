@@ -28,3 +28,16 @@ def test_context_menu_can_be_opened_from_a_selected_node_in_both_canvases():
     assert "selectedNodeEl?.dataset?.id && selected.size > 1" in CANVAS_JS
     assert "nodeEl?.dataset?.id && selected.size > 1 && selected.has(nodeEl.dataset.id)" in SMART_JS
     assert "smartArrangeMenuBtn.hidden = selectedNodeIds().length < 2" in SMART_JS
+
+
+def test_connected_node_creation_uses_non_overlapping_arranged_spacing_in_both_canvases():
+    assert "const CANVAS_NODE_LAYOUT_GAP = 72;" in CANVAS_JS
+    assert "const CANVAS_NODE_LAYOUT_ROW_GAP = 56;" in CANVAS_JS
+    assert "function canvasFreeNodePoint(source, created, direction='downstream')" in CANVAS_JS
+    assert "positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');" in CANVAS_JS
+    assert "positionCanvasNodeRelative(created, source, 'downstream');" in CANVAS_JS
+
+    assert "const SMART_NODE_LAYOUT_GAP = 72;" in SMART_JS
+    assert "const SMART_NODE_LAYOUT_ROW_GAP = 52;" in SMART_JS
+    assert "function smartFreeNodePoint(source, created, direction='downstream')" in SMART_JS
+    assert "positionSmartNodeRelative(newNode, sourceNode, drag.fromPort === 'out' ? 'downstream' : 'upstream');" in SMART_JS

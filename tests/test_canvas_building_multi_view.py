@@ -67,3 +67,18 @@ def test_shared_script_and_building_styles_are_loaded_by_both_canvases():
     assert ".multi-view-mode-switch" in CSS
     assert ".building-prompt" in CSS
     assert ".classic-building-prompt" in CSS
+
+
+def test_shared_building_prompt_builder_has_all_views_and_photographic_consistency_anchors():
+    for view in ["front", "side", "back", "top"]:
+        assert f"{view}:'" in SHARED_JS
+    assert "buildBuildingPrompt(view, plan={}, referenceRoles=[])" in SHARED_JS
+    assert "buildBuildingPromptSet(plan={}, referenceRoles=[]" in SHARED_JS
+    assert "same exact building" in SHARED_JS
+    assert "full-scale physically constructed building photographed on a real location" in SHARED_JS
+    assert "true material microtexture" in SHARED_JS
+    assert "natural construction tolerances" in SHARED_JS
+    assert "professional architectural design board" in SHARED_JS
+    assert "front elevation, right-side elevation, rear elevation and roof plan" in SHARED_JS
+    assert "only the four line drawings on blank drafting paper" in SHARED_JS
+    assert "rule-of-thirds placement for the ground, sky and surrounding breathing room" in SHARED_JS

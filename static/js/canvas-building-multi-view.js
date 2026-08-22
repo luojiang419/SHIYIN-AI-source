@@ -93,6 +93,66 @@
         return '细节与配饰';
     }
 
+    const BUILDING_VIEW_CAMERAS = Object.freeze({
+        front:'Straight-on front elevation from eye level, camera centered on the primary facade, level verticals, restrained perspective and the complete building visible from foundation to roofline.',
+        side:'Strict right-side elevation from eye level, camera perpendicular to the side facade, level verticals, restrained perspective and the complete building visible from foundation to roofline.',
+        back:'Straight-on rear elevation from eye level, camera centered on the rear facade, level verticals, restrained perspective and the complete building visible from foundation to roofline.',
+        top:'True overhead roof view, camera directly above the building looking vertically downward, showing the complete roof geometry, equipment, drainage and immediate site boundary.'
+    });
+
+    function compactPromptValue(value){
+        const text = Array.isArray(value) ? value.filter(Boolean).join('; ') : String(value || '');
+        return text.replace(/\s+/g, ' ').trim();
+    }
+    function buildingIdentity(plan={}){
+        const fields = [
+            ['type', plan.building_type], ['style and era', plan.style_and_era], ['massing', plan.massing],
+            ['storeys', plan.storeys], ['roof', plan.roof], ['facade and openings', plan.fenestration],
+            ['materials', plan.materials], ['structure', plan.structure], ['exterior equipment', plan.equipment],
+            ['weathering', plan.weathering], ['site', plan.environment], ['lighting', plan.lighting], ['palette', plan.palette]
+        ];
+        const specification = fields.map(([label, value]) => {
+            const text = compactPromptValue(value);
+            return text ? `${label}: ${text}` : '';
+        }).filter(Boolean).join('. ');
+        const preserve = compactPromptValue(plan.must_preserve);
+        const optimized = compactPromptValue(plan.optimized_prompt);
+        return [optimized, specification, preserve ? `Identity anchors that must remain exact: ${preserve}.` : ''].filter(Boolean).join(' ');
+    }
+    function buildingReferenceAnchor(referenceRoles=[]){
+        const labels = referenceRoles.map(role => {
+            const normalized = String(role || '').replace(/^building-/, '');
+            return BUILDING_OUTPUT_SLOTS.find(item => item[0] === normalized)?.[1] || '';
+        }).filter(Boolean);
+        if(!labels.length) return '';
+        return `Treat the attached ${labels.join(', ')} reference image${labels.length > 1 ? 's' : ''} as canonical evidence of one exact building. Preserve all visible geometry, proportions, openings, material boundaries, equipment and weathering across views.`;
+    }
+    function buildBuildingPrompt(view, plan={}, referenceRoles=[]){
+        const target = String(view || '').replace(/^building-/, '');
+        const identity = buildingIdentity(plan);
+        const referenceAnchor = buildingReferenceAnchor(referenceRoles);
+        if(target === 'sketch'){
+            return [
+                'Create one professional architectural design board for a single coherent building, with four clearly separated orthographic drawings: front elevation, right-side elevation, rear elevation and roof plan.',
+                identity,
+                referenceAnchor,
+                'Use precise black technical linework on clean white drafting paper, consistent scale and aligned floor and roof levels across every view. Show doors, windows, structural bays, facade joints, roof edges and fixed exterior equipment as buildable geometry. The board contains only the four line drawings on blank drafting paper; all surfaces and margins remain clean and unmarked.'
+            ].filter(Boolean).join(' ');
+        }
+        const camera = BUILDING_VIEW_CAMERAS[target];
+        if(!camera) throw new Error(`Unsupported building view: ${view}`);
+        return [
+            `Generate the ${target} view of the same exact building.`,
+            camera,
+            identity,
+            referenceAnchor,
+            'Represent a full-scale physically constructed building photographed on a real location. Use physically plausible structure and joints, true material microtexture, natural construction tolerances, subtle surface variation, credible weather exposure and grounded contact shadows. Natural photographic light response, restrained color, documentary location-scout realism and coherent surroundings. Use rule-of-thirds placement for the ground, sky and surrounding breathing room while keeping the required elevation or overhead camera axis exact. Keep facade identity, floor heights, bay spacing, openings, roof profile, materials, equipment and aging continuous with every supplied view.'
+        ].filter(Boolean).join(' ');
+    }
+    function buildBuildingPromptSet(plan={}, referenceRoles=[], views=['sketch','front','side','back','top']){
+        return Object.fromEntries(views.map(view => [view, buildBuildingPrompt(view, plan, referenceRoles)]));
+    }
+
     window.CanvasBuildingMultiView = Object.freeze({
         MODES,
         PERSON_INPUT_SLOTS,
@@ -109,6 +169,9 @@
         isRoleActive,
         isBusy,
         setMode,
-        groupLabel
+        groupLabel,
+        BUILDING_VIEW_CAMERAS,
+        buildBuildingPrompt,
+        buildBuildingPromptSet
     });
 })();

@@ -41,3 +41,15 @@ def test_connected_node_creation_uses_non_overlapping_arranged_spacing_in_both_c
     assert "const SMART_NODE_LAYOUT_ROW_GAP = 52;" in SMART_JS
     assert "function smartFreeNodePoint(source, created, direction='downstream')" in SMART_JS
     assert "positionSmartNodeRelative(newNode, sourceNode, drag.fromPort === 'out' ? 'downstream' : 'upstream');" in SMART_JS
+
+
+def test_auto_created_output_nodes_use_free_position_algorithm():
+    assert "positionCanvasNodeRelative(out, node, 'downstream');" in CANVAS_JS
+    assert "positionCanvasNodeRelative(out, sourceNode, 'downstream');" in CANVAS_JS
+    assert "positionCanvasNodeRelative(output, node, 'downstream');" in CANVAS_JS
+
+    assert "function smartOutputPointForImages(sourceNode, images=[], options={})" in SMART_JS
+    assert "return smartFreeNodePoint(sourceNode, candidate, 'downstream');" in SMART_JS
+    assert "const point = smartFreeNodePoint(sourceNode, output, 'downstream');" in SMART_JS
+    assert "const point = smartFreeNodePoint(rootNode, output, 'downstream');" in SMART_JS
+    assert "const point = smartOutputPointForImages(node, outputImages);" in SMART_JS

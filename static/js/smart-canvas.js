@@ -2508,6 +2508,18 @@ function positionSmartNodeRelative(created, source, direction='downstream'){
     const point = smartFreeNodePoint(source, created, direction);
     moveSmartNodeAtom(created, point.x, point.y);
 }
+function smartOutputPointForImages(sourceNode, images=[], options={}){
+    const candidate = {
+        id:'',
+        type:'smart-image',
+        x:0,
+        y:0,
+        images:Array.isArray(images) ? images : [],
+        w:Number(options.w) || 0,
+        h:Number(options.h) || 0
+    };
+    return smartFreeNodePoint(sourceNode, candidate, 'downstream');
+}
 function connectedSmartClusterIds(seedId){
     const ids = new Set(nodes.map(n => n.id));
     if(!ids.has(seedId)) return [];
@@ -10007,11 +10019,14 @@ function createSmartPoseOutputNode(sourceNode, item){
     if(!output){
         output = {
             id:uid('smart'), type:'smart-image',
-            x:(Number(sourceNode.x) || 0) + Math.max(380, Number(sourceNode.w) || 380) + 120,
-            y:Number(sourceNode.y) || 0,
+            x:0,
+            y:0,
             title:'骨架参考图', images:[], poseReferenceSourceId:sourceNode.id,
             scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
         };
+        const point = smartFreeNodePoint(sourceNode, output, 'downstream');
+        output.x = point.x;
+        output.y = point.y;
         nodes.push(output);
     }
     if(!(canvas?.connections || []).some(connection => connection.from === sourceNode.id && connection.to === output.id)){
@@ -13281,11 +13296,13 @@ async function applyImageGridSplit(){
     const files = await uploadImageBlobs(blobs);
     if(files.length){
         const layout = gridLayoutFromRects(rects);
-        const outputNode = createNode((node.x || 0) + imageLayout(node.images || [], nodeScale(node), node).width + 40, node.y || 0, files.map((file, i) => ({
+        const outputImages = files.map((file, i) => ({
             url:file.url,
             name:file.name,
             grid:{...layout, row:rects[i]?.row || 0, col:rects[i]?.col || 0, w:rects[i]?.w || 1, h:rects[i]?.h || 1}
-        })));
+        }));
+        const point = smartOutputPointForImages(node, outputImages);
+        const outputNode = createNode(point.x, point.y, outputImages);
         outputNode.title = 'Grid';
         closeImageEditor(); render(); scheduleSave();
     }
@@ -15159,22 +15176,15 @@ function outgoingInputConnectionsFor(node){
     return outgoingConnectionsFor(node, ['input']);
 }
 function nextOutputPositionForSource(sourceNode, pendingBox, options={}){
-    const sourceRect = nodeRect(sourceNode);
-    const x = (sourceRect.x || 0) + sourceRect.width + 80;
-    const gap = 28;
-    const outputs = outgoingConnectionsFor(sourceNode, ['input','flow'])
-        .map(conn => nodes.find(n => n.id === conn.to))
-        .filter(n => isSmartImageNode(n))
-        .map(n => nodeRect(n))
-        .filter(rect => Math.abs((rect.x || 0) - x) < Math.max(320, (pendingBox?.w || 260) + 120))
-        .sort((a, b) => (a.y || 0) - (b.y || 0));
-    if(!outputs.length) return {x, y:sourceRect.y || 0};
-    let y = sourceRect.y || 0;
-    for(const rect of outputs){
-        const bottom = (rect.y || 0) + (rect.height || 0) + gap;
-        if(y < bottom) y = bottom;
-    }
-    return {x, y};
+    return smartFreeNodePoint(sourceNode, {
+        id:'',
+        type:'smart-image',
+        x:0,
+        y:0,
+        images:[],
+        w:Number(pendingBox?.w) || 0,
+        h:Number(pendingBox?.h) || 0
+    }, 'downstream');
 }
 function createPendingOutputFromSource(sourceNode, expectedCount, meta, options={}){
     const pendingBox = pendingBoxSize(expectedCount, {sourceNode, refs:options.refs || meta?.promptRefs || []});
@@ -15204,12 +15214,12 @@ function createPendingOutputFromSource(sourceNode, expectedCount, meta, options=
     return output;
 }
 function createParallelLoopOutputNode(templateNode, sourceNode, roundIndex, roundOffset=0){
-    const rect = nodeRect(templateNode);
     const output = cloneSmartNode(templateNode, 0, 0);
     output.id = uid('smart');
     output.type = 'smart-image';
-    output.x = (Number(templateNode.x) || 0) + (Number(rect.width) || 260) + 80;
-    output.y = (Number(templateNode.y) || 0) + roundOffset * ((Number(rect.height) || 180) + 28);
+    const point = smartFreeNodePoint(sourceNode, output, 'downstream');
+    output.x = point.x;
+    output.y = point.y;
     output.title = `Image ${roundIndex}`;
     output.images = [];
     output.pending = 0;
@@ -15265,11 +15275,12 @@ function tagLoopOutputSlot(output, rootNode, loopNode, roundIndex, slotIndex){
     return output;
 }
 function createLoopOutputSlot(rootNode, roundIndex, roundOffset=0, options={}){
-    const rootRect = nodeRect(rootNode);
     const output = cloneSmartNode(rootNode, 0, 0);
     output.id = uid('smart');
     output.type = 'smart-image';
-    output.x = (Number(rootNode.x) || 0) + (Number(rootRect.width) || 260) + 80;
+    const point = smartFreeNodePoint(rootNode, output, 'downstream');
+    output.x = point.x;
+    output.y = point.y;
     output.title = `Image ${roundIndex}`;
     output.images = [];
     output.pending = options.pending ? Math.max(1, Number(options.pending) || 1) : 0;
@@ -15298,14 +15309,6 @@ function createLoopOutputSlot(rootNode, roundIndex, roundOffset=0, options={}){
     delete output.blockedInputRefs;
     delete output.manualInputRefs;
     tagLoopOutputSlot(output, rootNode, options.loopNode || null, roundIndex, options.slotIndex ?? roundOffset);
-    const slots = loopOutputSlotsForRoot(rootNode).map(nodeRect);
-    let y = (Number(rootNode.y) || 0) + roundOffset * ((Number(rootRect.height) || 180) + 28);
-    slots.forEach(rect => {
-        if((Number(rect.x) || 0) >= (Number(output.x) || 0) - 24){
-            y = Math.max(y, (Number(rect.y) || 0) + (Number(rect.height) || 0) + 28);
-        }
-    });
-    output.y = y;
     nodes.push(output);
     addConnection(rootNode.id, output.id, 'flow');
         const runPath = smartCascadePathForCtx(options.ctx || options.runState);
@@ -16910,7 +16913,9 @@ async function runComfyText(node, prompt, pendingNode, meta){
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
     } else {
-        const created = createNode((node.x || 0) + nodeRect(node).width + 40, node.y || 0, out.map((url, i) => ({url, name:`comfy-${i + 1}.png`})));
+        const outputImages = out.map((url, i) => ({url, name:`comfy-${i + 1}.png`}));
+        const point = smartOutputPointForImages(node, outputImages);
+        const created = createNode(point.x, point.y, outputImages);
         attachRunMeta(created, meta);
         addConnection(node.id, created.id);
     }
@@ -16926,7 +16931,9 @@ async function runComfyEnhance(node, refs, pendingNode, meta){
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
     } else {
-        const created = createNode((node.x || 0) + nodeRect(node).width + 40, node.y || 0, out.map((url, i) => ({url, name:`enhance-${i + 1}.png`})));
+        const outputImages = out.map((url, i) => ({url, name:`enhance-${i + 1}.png`}));
+        const point = smartOutputPointForImages(node, outputImages);
+        const created = createNode(point.x, point.y, outputImages);
         attachRunMeta(created, meta);
         addConnection(node.id, created.id);
     }
@@ -16942,7 +16949,9 @@ async function runComfyEdit(node, prompt, refs, pendingNode, meta){
     if(pendingNode){
         finalizePendingNode(pendingNode, out, meta);
     } else {
-        const created = createNode((node.x || 0) + nodeRect(node).width + 40, node.y || 0, out.map((url, i) => ({url, name:`edit-${i + 1}.png`})));
+        const outputImages = out.map((url, i) => ({url, name:`edit-${i + 1}.png`}));
+        const point = smartOutputPointForImages(node, outputImages);
+        const created = createNode(point.x, point.y, outputImages);
         attachRunMeta(created, meta);
         addConnection(node.id, created.id);
     }

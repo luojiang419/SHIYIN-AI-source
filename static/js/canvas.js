@@ -6332,6 +6332,7 @@ function imageEditorOutputNode(sourceNode){
         const p = imageEditorOutputPoint(sourceNode, 0);
         out = {id:uid('out'), type:'output', x:p.x, y:p.y, images:[]};
         nodes.push(out);
+        positionCanvasNodeRelative(out, sourceNode, 'downstream');
     }
     return out;
 }
@@ -7348,6 +7349,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
     };
     pushUndo();
     nodes.push(output);
+    positionCanvasNodeRelative(output, node, 'downstream');
     connections.push({id:uid('c'), from:node.id, to:output.id});
     selected.clear(); selected.add(output.id);
     render(); scheduleSave();
@@ -7385,6 +7387,7 @@ function createClassicPoseOutputNode(sourceNode, item){
             images:[], poseReferenceSourceId:sourceNode.id
         };
         nodes.push(out);
+        positionCanvasNodeRelative(out, sourceNode, 'downstream');
     }
     if(!connections.some(connection => connection.from === sourceNode.id && connection.to === out.id)){
         connections.push({id:uid('c'), from:sourceNode.id, to:out.id});
@@ -12532,6 +12535,7 @@ function outputForNode(node, dx=460, force=false){
     if(!out){
         out = {id:uid('out'), type:'output', x:node.x + dx, y:node.y, images:[]};
         nodes.push(out);
+        positionCanvasNodeRelative(out, node, 'downstream');
         connections.push({id:uid('c'), from:node.id, to:out.id});
     }
     return out;

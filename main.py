@@ -406,7 +406,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.249"
+APP_VERSION = "1.0.250"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -6541,6 +6541,12 @@ def media_preview_cache_paths(path: str, width: int):
 def is_video_preview_file(path: str) -> bool:
     return os.path.splitext(str(path or "").split("?", 1)[0])[1].lower() in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"}
 
+def hidden_subprocess_window_kwargs() -> Dict[str, Any]:
+    """Return Windows-only flags that keep media helper processes out of the user's desktop."""
+    if os.name != "nt":
+        return {}
+    return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+
 def generate_video_preview_image(path: str, width: int) -> Image.Image:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -6556,7 +6562,7 @@ def generate_video_preview_image(path: str, width: int) -> Image.Image:
             "-vf", f"scale='min({width},iw)':-2",
             frame_path,
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, **hidden_subprocess_window_kwargs())
         if proc.returncode != 0 or not os.path.exists(frame_path) or os.path.getsize(frame_path) <= 0:
             raise RuntimeError((proc.stderr or "ffmpeg 未能抽取视频首帧").strip()[:300])
         with Image.open(frame_path) as frame:

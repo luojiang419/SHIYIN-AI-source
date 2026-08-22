@@ -9,6 +9,7 @@ CLASSIC_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 SMART_HTML = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
 FILM_CSS = (ROOT / "static" / "css" / "canvas-film-nodes.css").read_text(encoding="utf-8")
 SMART_CSS = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
+MAIN = (ROOT / "main.py").read_text(encoding="utf-8")
 
 
 def test_film_domain_module_defines_both_nodes_and_dynamic_role_ports():
@@ -56,6 +57,15 @@ def test_film_mapping_is_above_prompt_and_uses_semantic_asset_labels():
     assert "scene:'场景',sketch:'线稿分镜'" in FILM
 
 
+def test_film_video_storyboard_role_only_keeps_latest_connected_reference():
+    marker = "const roleRefs = port.role === 'storyboard'"
+    assert marker in FILM
+    start = FILM.index(marker)
+    body = FILM[start:start + 260]
+    assert ".slice(-1)" in body
+    assert "inputRole:port.role" in body
+
+
 def test_film_input_status_accepts_a_live_connection_without_a_resolved_url():
     assert "options.connected?.(node, port.role)" in FILM
     assert "connected:(target, role) => connections.some" in CLASSIC
@@ -78,6 +88,16 @@ def test_film_runs_create_pending_outputs_before_waiting_for_results():
     assert "output.filmSourceNodeId=node.id" in SMART
     assert "finalizePendingNode(output,images,meta,'image')" in SMART
     assert "status:'error'" in SMART
+
+
+def test_film_runs_allow_parallel_clicks_and_keep_independent_smart_outputs():
+    assert "if(!node) return;" in CLASSIC
+    assert "classicFilmHasActiveRun(node,out)" in CLASSIC
+    assert "if(!node || !window.CanvasFilmNodes) return;" in SMART
+    assert "const smartFilmActiveRuns = new Map();" in SMART
+    assert "const output=createPendingOutputFromSource(node,1,meta" in SMART
+    assert "每次点击都建立独立输出节点" in SMART
+    assert "生成中（可继续）" in FILM
 
 
 def test_both_canvas_entries_expose_secondary_film_menu_and_shared_module():
@@ -131,3 +151,9 @@ def test_film_connected_input_status_has_a_green_indicator_and_connected_label()
     assert "'<span class=\"film-input-status-dot\" aria-hidden=\"true\"></span>已连接'" in FILM
     assert ".film-input-status-dot" in FILM_CSS
     assert "background:#2fbf71" in FILM_CSS
+
+
+def test_video_preview_ffmpeg_uses_hidden_windows_process_flags():
+    assert "def hidden_subprocess_window_kwargs()" in MAIN
+    assert "getattr(subprocess, \"CREATE_NO_WINDOW\", 0x08000000)" in MAIN
+    assert "subprocess.run(cmd, capture_output=True, text=True, timeout=60, **hidden_subprocess_window_kwargs())" in MAIN

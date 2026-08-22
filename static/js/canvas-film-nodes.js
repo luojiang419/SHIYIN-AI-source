@@ -127,7 +127,12 @@
             byRole.set(role, list);
         });
         inputPorts(node).forEach(port => {
-            (byRole.get(port.role) || []).forEach(ref => refs.push({...ref, inputRole:port.role, roleLabel:roleLabel(node, port.role)}));
+            // 分镜合成可能一次返回多张图，但视频节点的“分镜图”输入只代表
+            // 最近一次生成的最后一张分镜，避免把整组抽卡结果全部作为参考图提交。
+            const roleRefs = port.role === 'storyboard'
+                ? (byRole.get(port.role) || []).slice(-1)
+                : (byRole.get(port.role) || []);
+            roleRefs.forEach(ref => refs.push({...ref, inputRole:port.role, roleLabel:roleLabel(node, port.role)}));
         });
         return refs;
     }
@@ -183,7 +188,7 @@
             <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
             <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
             ${promptHtml(node)}
-            <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中…' : action}</button></div>
+            <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
             ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}
             ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
         </div>`;

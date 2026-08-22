@@ -1539,6 +1539,7 @@ function filmSmartImageModelOptions(node){
     const providerId=filmSmartImageProviderId(node);
     return smartMultiViewModelOptions(providerId,node.model || '');
 }
+const smartFilmActiveRuns = new Map();
 function createFilmNode(type, point){
     const api=window.CanvasFilmNodes;
     if(!api?.isType?.(type)) return null;
@@ -1559,7 +1560,7 @@ function createFilmNode(type, point){
     render(); scheduleSave(); return node;
 }
 async function runSmartFilmNode(node){
-    if(!node || !window.CanvasFilmNodes || node.running) return;
+    if(!node || !window.CanvasFilmNodes) return;
     const api=window.CanvasFilmNodes;
     const assets=filmSmartAssets(node);
     const settingsForNodeRun=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
@@ -1567,14 +1568,11 @@ async function runSmartFilmNode(node){
     if(!built.prompt){ toast('请先输入生成需求或连接影视参考资产'); return; }
     const meta=snapshotRunMeta(built.prompt,node.id,built.prompt,built.refs);
     meta.settings=settingsForStorage(settingsForNodeRun);
-    let output=nodes.find(item => item.id === node.filmOutputNodeId && item.type === 'smart-image' && !item.specialType);
-    if(!output){
-        output=createPendingOutputFromSource(node,1,meta,{selectOutput:false,refs:built.refs});
-        node.filmOutputNodeId=output.id;
-    } else {
-        output.images=[]; output.pending=1; output.running=false; output.runStartedAt=nowMs();
-        delete output.runFinishedAt; delete output.runElapsedMs; output.generationSlots=[]; attachRunMeta(output,meta);
-    }
+    const activeRuns=(smartFilmActiveRuns.get(node.id) || 0) + 1;
+    smartFilmActiveRuns.set(node.id,activeRuns);
+    // 每次点击都建立独立输出节点，避免并发任务互相清空或覆盖结果。
+    const output=createPendingOutputFromSource(node,1,meta,{selectOutput:false,refs:built.refs});
+    node.filmOutputNodeId=output.id;
     output.filmSourceNodeId=node.id;
     node.running=true; node.runError=''; render(); scheduleSave();
     try {
@@ -1603,7 +1601,13 @@ async function runSmartFilmNode(node){
         addSmartGenerationLog({run:{node:{id:node.id,type:node.specialType},prompt:built.prompt,refs:built.refs},outputs:[],runMs:output.runElapsedMs,error:node.runError});
         toast(node.runError.slice(0,180));
     }
-    finally { node.running=false; render(); scheduleSave(); }
+    finally {
+        const remaining=Math.max(0,(smartFilmActiveRuns.get(node.id) || 1) - 1);
+        if(remaining) smartFilmActiveRuns.set(node.id,remaining);
+        else smartFilmActiveRuns.delete(node.id);
+        node.running=remaining > 0;
+        render(); scheduleSave();
+    }
 }
 function createPanoramaNode(point){
     pushUndo();

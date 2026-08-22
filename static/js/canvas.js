@@ -8388,9 +8388,13 @@ function bindClassicFilmNode(el,node){
         onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },
     });
 }
+function classicFilmHasActiveRun(node, out){
+    if(!node || !out) return false;
+    return (out._pending || []).some(pending => !pending.failed && pending.run?.node?.id === node.id);
+}
 async function runFilmNode(nodeId, opts={}){
     const node=nodes.find(item => item.id === nodeId && window.CanvasFilmNodes?.isType?.(item.type));
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node) return;
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model});
     if(!built.prompt){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
@@ -8420,13 +8424,19 @@ async function runFilmNode(nodeId, opts={}){
             if(!outputs.length) throw new Error('视频生成没有返回结果');
             mergeGeneratedOutputs(node,outputs,false); out._pending=(out._pending || []).filter(item=>item.id !== pendingId); appendOutputImagesWithoutDuplicates(out,outputs); node.runStatus='done'; setStatus(`视频生成完成，共 ${outputs.length} 个结果`);
         }
-        node.runError=''; scheduleSave();
+        node.runError='';
+        node.runStatus=classicFilmHasActiveRun(node,out) ? 'running' : 'done';
+        scheduleSave();
     } catch(error){
         const message=error.message || String(error);
         const livePending=pendingById(out,pendingId);
         if(livePending){ livePending.failed=true; livePending.error=message; }
-        node.runStatus='failed'; node.runError=message; if(!opts.cascade) showErrorModal(node.runError,'影视制作失败'); else throw error;
-    } finally { node.running=false; refreshRunNodes(node,out); }
+        node.runStatus=classicFilmHasActiveRun(node,out) ? 'running' : 'failed';
+        node.runError=message; if(!opts.cascade) showErrorModal(node.runError,'影视制作失败'); else throw error;
+    } finally {
+        node.running=classicFilmHasActiveRun(node,out);
+        refreshRunNodes(node,out);
+    }
 }
 function renderNode(node){
     window.CanvasEcommerceNodes?.normalize?.(node);

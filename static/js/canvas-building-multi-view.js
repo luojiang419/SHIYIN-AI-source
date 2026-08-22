@@ -51,7 +51,11 @@
         node.multiViewMode = mode(node);
         if(typeof node.buildingPrompt !== 'string') node.buildingPrompt = '';
         if(!Object.values(BUILDING_STAGES).includes(node.buildingStage)) node.buildingStage = BUILDING_STAGES.IDLE;
+        if(!Array.isArray(node.multiViewOutputs)) node.multiViewOutputs = node.multiViewMode === MODES.PERSON && Array.isArray(node.generatedOutputs) ? [...node.generatedOutputs] : [];
         if(!Array.isArray(node.buildingOutputs)) node.buildingOutputs = [];
+        if(!node.buildingPlan || typeof node.buildingPlan !== 'object' || Array.isArray(node.buildingPlan)) node.buildingPlan = null;
+        if(!node.buildingErrors || typeof node.buildingErrors !== 'object' || Array.isArray(node.buildingErrors)) node.buildingErrors = {};
+        if(typeof node.buildingInputSignature !== 'string') node.buildingInputSignature = '';
         return node;
     }
     function inputSlots(nodeOrMode){
@@ -80,6 +84,7 @@
         const normalized = nextMode === MODES.BUILDING ? MODES.BUILDING : MODES.PERSON;
         if(node.multiViewMode === normalized) return false;
         node.multiViewMode = normalized;
+        node.generatedOutputs = normalized === MODES.BUILDING ? [...node.buildingOutputs] : [...node.multiViewOutputs];
         node.multiViewError = '';
         return true;
     }
@@ -152,6 +157,22 @@
     function buildBuildingPromptSet(plan={}, referenceRoles=[], views=['sketch','front','side','back','top']){
         return Object.fromEntries(views.map(view => [view, buildBuildingPrompt(view, plan, referenceRoles)]));
     }
+    function buildingActions(node){
+        normalizeNode(node);
+        const stage = node.buildingStage;
+        if(BUSY_STAGES.has(stage)) return [{action:'busy', label:stage === BUILDING_STAGES.PLANNING ? '需求整合中' : '生成中', icon:'loader-2', disabled:true, primary:true}];
+        if(stage === BUILDING_STAGES.AWAITING_SKETCH) return [
+            {action:'confirm-sketch', label:'确认线稿', icon:'check', primary:true},
+            {action:'regenerate-sketch', label:'重新生成', icon:'refresh-cw', primary:false}
+        ];
+        if(stage === BUILDING_STAGES.AWAITING_FRONT) return [
+            {action:'confirm-front', label:'确认正面', icon:'check', primary:true},
+            {action:'regenerate-front', label:'重新生成', icon:'refresh-cw', primary:false}
+        ];
+        if(stage === BUILDING_STAGES.DONE) return [{action:'done', label:'生成完成', icon:'check-circle-2', disabled:true, primary:true}];
+        if(stage === BUILDING_STAGES.PARTIAL) return [{action:'retry-missing', label:'重试缺失视图', icon:'refresh-cw', primary:true}];
+        return [{action:'run', label:'生成多视图', icon:'sparkles', primary:true}];
+    }
 
     window.CanvasBuildingMultiView = Object.freeze({
         MODES,
@@ -172,6 +193,7 @@
         groupLabel,
         BUILDING_VIEW_CAMERAS,
         buildBuildingPrompt,
-        buildBuildingPromptSet
+        buildBuildingPromptSet,
+        buildingActions
     });
 })();

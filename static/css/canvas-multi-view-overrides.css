@@ -28,6 +28,10 @@
 .multi-view-run-row,.classic-multi-view-run-row{margin-top:auto;min-height:42px;padding:7px 4px 2px;border-top:1px solid color-mix(in srgb,var(--line,#ddd) 72%,transparent);align-items:center}
 .multi-view-run-row>span,.classic-multi-view-run-row>span{font-size:9px}
 .multi-view-run-row .special-primary,.classic-multi-view-run-row .gen-btn{min-width:126px;height:36px;border-radius:11px;font-size:10px;font-weight:900;letter-spacing:.04em;box-shadow:0 8px 18px color-mix(in srgb,var(--strong,#222) 18%,transparent)}
+.building-action-group{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto}
+.classic-multi-view-run-row .building-action-group .gen-btn{width:auto;min-width:104px;padding:0 12px;letter-spacing:0}
+.classic-multi-view-run-row .building-action-group .gen-btn.secondary{border:1px solid var(--line,#ddd);background:var(--soft,#f7f7f7);color:var(--text,#222);box-shadow:none}
+.classic-multi-view-run-row .building-action-group .gen-btn.secondary:hover{border-color:var(--strong,#222)}
 .smart-special-node.smart-multi-view-node .node-body{display:flex;align-items:stretch;justify-content:stretch;height:100%;padding:0 8px 8px}
 .smart-special-node.smart-multi-view-node .multi-view-special{height:100%}
 .multi-view-port{z-index:9}

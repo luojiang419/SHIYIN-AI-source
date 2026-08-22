@@ -3147,8 +3147,8 @@ function addMultiViewNode(point){
     return addNode({
         id:uid('multi-view'), type:'multiView', x:p.x, y:p.y, w:700, h:780,
         apiProvider:selection.providerId, model:selection.model, resolution:'2k', quality:'high',
-        multiViewMode:'person', multiViewStatus:'idle', multiViewError:'', generatedOutputs:[], multiViewRunAt:0,
-        buildingPrompt:'', buildingStage:'idle', buildingOutputs:[]
+        multiViewMode:'person', multiViewStatus:'idle', multiViewError:'', generatedOutputs:[], multiViewOutputs:[], multiViewRunAt:0,
+        buildingPrompt:'', buildingStage:'idle', buildingOutputs:[], buildingPlan:null, buildingErrors:{}, buildingInputSignature:''
     });
 }
 function addBlenderDirectorNode(point){
@@ -7442,10 +7442,234 @@ function classicMultiViewGridForIndex(index, groupId=''){
     if(index === 1) return {row:1,col:0,w:1,h:1,ratioW:3,ratioH:4,groupId};
     return {row:1,col:index - 1,w:1,h:1,ratioW:9,ratioH:16,groupId};
 }
+const CLASSIC_BUILDING_VIEW_KEYS = ['sketch','front','side','back','top'];
+const CLASSIC_BUILDING_ROLE_BY_VIEW = Object.freeze({
+    sketch:'building-sketch', front:'building-front', side:'building-side', back:'building-back', top:'building-top'
+});
+function classicBuildingGridForIndex(index, groupId=''){
+    if(index === 0) return {row:0,col:0,w:4,h:1,ratioW:16,ratioH:9,groupId};
+    return {row:1,col:index - 1,w:1,h:1,ratioW:4,ratioH:3,groupId};
+}
+function classicBuildingInputRefs(node){
+    const inputs = classicMultiViewConnections(node);
+    return Object.fromEntries(CLASSIC_BUILDING_VIEW_KEYS.map(key => [key, inputs.get(CLASSIC_BUILDING_ROLE_BY_VIEW[key])?.[0] || null]));
+}
+function classicBuildingPromptFromSource(source){
+    if(source?.type === 'prompt') return String(source.text || '').trim();
+    if(source?.type === 'promptGroup'){
+        return (source.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'prompt').map(item => String(item.text || '').trim()).filter(Boolean).join('\n\n');
+    }
+    if(source?.type === 'llm') return String(source.outputText || '').trim();
+    return '';
+}
+function classicBuildingConnectedPrompt(node){
+    return connections
+        .filter(connection => connection.to === node.id && connection.inputRole === 'building-prompt')
+        .map(connection => classicBuildingPromptFromSource(nodes.find(item => item.id === connection.from)))
+        .filter(Boolean)
+        .join('\n\n');
+}
+function classicBuildingInputSignature(node, refs=classicBuildingInputRefs(node), connectedPrompt=classicBuildingConnectedPrompt(node)){
+    return JSON.stringify({
+        prompt:String(node?.buildingPrompt || '').trim(),
+        connectedPrompt:String(connectedPrompt || '').trim(),
+        references:CLASSIC_BUILDING_VIEW_KEYS.map(key => [key, outputUrlValue(refs[key])]).filter(([,url]) => url)
+    });
+}
+async function requestClassicBuildingPlan(node, refs, connectedPrompt){
+    const provider = resolveChatProviderId(node.buildingPlanProvider || '');
+    const model = resolveChatModel(node.buildingPlanModel || '', provider);
+    const references = CLASSIC_BUILDING_VIEW_KEYS.map(key => {
+        const url = outputUrlValue(refs[key]);
+        return url ? {role:key, url} : null;
+    }).filter(Boolean);
+    const response = await cascadeFetch('/api/building-multi-view/plan', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+            inline_prompt:String(node.buildingPrompt || '').trim(),
+            connected_prompt:String(connectedPrompt || '').trim(),
+            references,
+            provider,
+            model,
+            ms_model:provider === 'modelscope' ? model : ''
+        })
+    });
+    if(!response.ok) throw new Error(await responseErrorMessage(response, '建筑需求整合失败'));
+    const data = await response.json();
+    if(!data?.plan) throw new Error('建筑需求整合没有返回有效规划');
+    node.buildingPlanProvider = data.provider || provider;
+    node.buildingPlanModel = data.model || model;
+    return data.plan;
+}
+function classicBuildingReferenceItem(ref, view, node){
+    const index = CLASSIC_BUILDING_VIEW_KEYS.indexOf(view);
+    const url = outputUrlValue(ref);
+    if(index < 0 || !url) return null;
+    const source = ref && typeof ref === 'object' ? ref : {};
+    return {
+        ...source,
+        url,
+        name:source.name || `building-${view}-input.png`,
+        kind:'image',
+        buildingView:view,
+        buildingSource:'input',
+        multiViewIndex:index,
+        grid:classicBuildingGridForIndex(index, node.buildingOutputLayout?.groupId || '')
+    };
+}
+function classicBuildingEnsureOutputNode(node, resetPending=false){
+    const out = outputForNode(node, 780, true);
+    if(!out) return null;
+    out.w = normalizedMultiViewOutputWidth(out);
+    delete out.h;
+    out.buildingMultiViewSourceId = node.id;
+    out.outputLayout = {...node.buildingOutputLayout};
+    if(resetPending) out._pending = [];
+    return out;
+}
+function classicBuildingSyncOutputs(node, out=classicBuildingEnsureOutputNode(node)){
+    const groupId = node.buildingOutputLayout?.groupId || '';
+    node.buildingOutputs = Array.from({length:5}, (_, index) => {
+        const item = node.buildingOutputs?.[index];
+        const url = outputUrlValue(item);
+        if(!url) return null;
+        const source = item && typeof item === 'object' ? item : {};
+        return {...source, url, kind:'image', buildingView:CLASSIC_BUILDING_VIEW_KEYS[index], multiViewIndex:index, grid:classicBuildingGridForIndex(index, groupId)};
+    });
+    node.generatedOutputs = node.buildingOutputs.filter(Boolean);
+    if(out){
+        out.outputLayout = {...node.buildingOutputLayout};
+        out.images = node.buildingOutputs.filter(Boolean).map(item => ({...item, viewed:false}));
+    }
+    return out;
+}
+function classicBuildingPrepareOutputs(node, refs){
+    node.buildingOutputLayout = {type:'grid-split', groupId:uid('building-multi-view-grid'), cols:4, rows:2};
+    node.buildingOutputs = Array(5).fill(null);
+    CLASSIC_BUILDING_VIEW_KEYS.forEach((view, index) => {
+        if(refs[view]) node.buildingOutputs[index] = classicBuildingReferenceItem(refs[view], view, node);
+    });
+    return classicBuildingSyncOutputs(node, classicBuildingEnsureOutputNode(node, true));
+}
+function classicBuildingReferencePlan(node, inputRefs, targetView){
+    const refs = [];
+    const seen = new Set();
+    const push = (item, view, instruction) => {
+        const url = outputUrlValue(item);
+        if(!url || seen.has(url) || view === targetView) return;
+        seen.add(url);
+        const label = CLASSIC_BUILDING_MULTI_VIEW_INPUT_SLOTS.find(slot => slot[0] === CLASSIC_BUILDING_ROLE_BY_VIEW[view])?.[1] || view;
+        refs.push({
+            ...(item && typeof item === 'object' ? item : {}), url, kind:'image',
+            role:CLASSIC_BUILDING_ROLE_BY_VIEW[view], reference_id:CLASSIC_BUILDING_ROLE_BY_VIEW[view],
+            label, name:item?.name || `building-${view}.png`, instruction
+        });
+    };
+    if(targetView !== 'front') push(node.buildingOutputs?.[1], 'front', '作为已确认的建筑正面与跨视角几何主锚点');
+    ['front','side','back','top'].forEach(view => push(inputRefs[view], view, `作为同一建筑的${view}视角实景证据`));
+    push(node.buildingOutputs?.[0] || inputRefs.sketch, 'sketch', '作为已确认的体块、层高、开口和屋顶轮廓线稿约束');
+    return refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX);
+}
+function classicBuildingPending(node, out, view, index, startedAt){
+    const pending = {
+        id:uid('building-view-pending'), startedAt, buildingView:view, buildingViewIndex:index,
+        previewSize:view === 'sketch' ? {w:16,h:9} : {w:4,h:3},
+        canvasTaskType:'building-multi-view-image', providerId:node.apiProvider, model:node.model,
+        buildingLayout:{...node.buildingOutputLayout},
+        run:{node:{id:node.id,type:'multiView'}, taskLabel:`建筑${view}视图`},
+        grid:classicBuildingGridForIndex(index, node.buildingOutputLayout?.groupId || '')
+    };
+    out._pending = [...(out._pending || []).filter(item => item.buildingView !== view), pending];
+    return pending;
+}
+async function generateClassicBuildingView(node, inputRefs, view){
+    const index = CLASSIC_BUILDING_VIEW_KEYS.indexOf(view);
+    if(index < 0) throw new Error(`不支持的建筑视图：${view}`);
+    const out = classicBuildingEnsureOutputNode(node);
+    const startedAt = nowMs();
+    const pending = classicBuildingPending(node, out, view, index, startedAt);
+    const referencePlan = classicBuildingReferencePlan(node, inputRefs, view);
+    const referenceRoles = referencePlan.map(item => item.role || item.reference_id || '');
+    const prompt = window.CanvasBuildingMultiView?.buildBuildingPrompt(view, node.buildingPlan || {}, referenceRoles) || '';
+    const payload = {
+        prompt,
+        provider_id:node.apiProvider,
+        model:node.model,
+        size:apiImageSize('custom', node.resolution || '2k', view === 'sketch' ? '16:9' : '4:3'),
+        reference_images:referencePlan
+    };
+    const quality = normalizedImageQuality(node.quality || 'high');
+    if(quality) payload.quality = quality;
+    refreshRunNodes(node, out);
+    scheduleSave();
+    try {
+        const task = await createCanvasImageTask(payload);
+        if(!task?.task_id) throw new Error(`建筑${view}视图任务创建失败`);
+        pending.canvasTaskId = task.task_id;
+        if(task.provider_id){
+            node.apiProvider = task.provider_id;
+            node.model = task.model || node.model;
+        }
+        refreshRunNodes(node, out);
+        scheduleSave();
+        const result = await waitCanvasImageTaskResult(task.task_id);
+        const raw = (result.images || result.image_items || [])[0] || resultMediaUrls(result)[0];
+        const url = outputUrlValue(raw);
+        if(!url) throw new Error(`建筑${view}视图没有返回图片`);
+        const item = raw && typeof raw === 'object'
+            ? {...raw, url, name:raw.name || `building-${view}.png`, kind:'image'}
+            : {url, name:`building-${view}.png`, kind:'image'};
+        item.buildingView = view;
+        item.buildingSource = 'generated';
+        item.multiViewIndex = index;
+        item.grid = classicBuildingGridForIndex(index, node.buildingOutputLayout?.groupId || '');
+        node.buildingOutputs[index] = item;
+        delete node.buildingErrors?.[view];
+        out._pending = (out._pending || []).filter(entry => entry.id !== pending.id);
+        classicBuildingSyncOutputs(node, out);
+        refreshRunNodes(node, out);
+        scheduleSave();
+        return item;
+    } catch(error){
+        out._pending = (out._pending || []).filter(entry => entry.id !== pending.id);
+        node.buildingErrors = {...(node.buildingErrors || {}), [view]:error.message || `建筑${view}视图生成失败`};
+        refreshRunNodes(node, out);
+        scheduleSave();
+        throw error;
+    }
+}
+function classicBuildingSetStage(node, stage, error=''){
+    const busy = ['planning','sketch-generating','front-generating','views-generating'].includes(stage);
+    node.buildingStage = stage;
+    node.multiViewStatus = busy ? 'running' : (stage === 'error' ? 'error' : 'idle');
+    node.multiViewError = error;
+    node.runStatus = stage === 'error' || stage === 'partial' ? 'failed' : (stage === 'done' ? 'done' : busy ? 'running' : '');
+    node.runError = error;
+}
+function classicBuildingStatus(node, outputCount){
+    const stage = node.buildingStage || 'idle';
+    if(stage === 'planning') return '正在整合建筑需求与参考图…';
+    if(stage === 'sketch-generating') return '正在生成待确认的建筑线稿…';
+    if(stage === 'awaiting-sketch-confirmation') return '请确认线稿；确认后才生成实景建筑';
+    if(stage === 'front-generating') return '正在生成待确认的建筑正面…';
+    if(stage === 'awaiting-front-confirmation') return '请确认建筑正面；确认后才并发补齐其他视图';
+    if(stage === 'views-generating') return `正在并发补齐建筑视图，已准备 ${outputCount}/5`;
+    if(stage === 'partial') return node.multiViewError || `部分视图失败，已保留成功结果 ${outputCount}/5`;
+    if(stage === 'done') return outputUrlValue(node.buildingOutputs?.[0]) ? '建筑线稿与四向实景视图已完成' : '四向建筑实景视图已完成，输入原图已复用';
+    if(stage === 'error') return node.multiViewError || '建筑多视图生成失败，请重试';
+    return outputCount ? `建筑资产已准备 ${outputCount}/5` : '连接建筑参考图，或输入建筑需求后点击生成';
+}
+function classicBuildingActionsHtml(node){
+    const actions = window.CanvasBuildingMultiView?.buildingActions(node) || [{action:'run',label:'生成多视图',icon:'sparkles',primary:true}];
+    return `<div class="building-action-group">${actions.map(action => `<button type="button" class="gen-btn ${action.primary ? '' : 'secondary'}" data-building-action="${escapeAttr(action.action)}" ${action.disabled ? 'disabled' : ''}><i data-lucide="${escapeAttr(action.icon)}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
+}
 function classicMultiViewBodyHtml(node){
     normalizeClassicMultiViewNode(node);
     sanitizeClassicMultiViewSettings(node);
     const buildingMode = classicMultiViewMode(node) === 'building';
+    const buildingBusy = buildingMode && window.CanvasBuildingMultiView?.isBusy(node);
+    const buildingControlDisabled = buildingBusy ? 'disabled' : '';
     const inputSlots = classicMultiViewInputSlots(node);
     const inputs = classicMultiViewConnections(node);
     const groupLabel = role => window.CanvasBuildingMultiView?.groupLabel(role) || (role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰');
@@ -7455,35 +7679,38 @@ function classicMultiViewBodyHtml(node){
         const state = count ? (kind === 'prompt' ? '提示词已连接' : `${count} 张已连接`) : '可选输入';
         return `<div class="classic-multi-view-slot" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="classic-multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(state)}</b></div>`;
     }).join('');
-    const activeOutputs = buildingMode ? (node.buildingOutputs || []) : (node.multiViewOutputs || node.generatedOutputs || []);
+    const activeOutputs = buildingMode ? (node.buildingOutputs || []) : (node.multiViewOutputs || []);
     const outputCount = activeOutputs.map(outputUrlValue).filter(Boolean).length;
     const status = buildingMode
-        ? (node.buildingStage === 'error' ? (node.multiViewError || '生成失败，请重试') : outputCount ? `建筑资产已准备 ${outputCount}/5` : '连接建筑参考图，或输入建筑需求后点击生成')
+        ? classicBuildingStatus(node, outputCount)
         : node.multiViewStatus === 'running' ? `正在输出端生成 ${Math.max(0, 5 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，请重试') : outputCount >= 5 ? '5 张资产已在右侧输出节点中生成' : '连接任意一张模特或产品图片后点击生成';
-    const promptEditor = buildingMode ? `<label class="classic-building-prompt"><span>建筑风格需求</span><textarea data-building-prompt placeholder="建筑类型、年代、材质、环境、真实感要求">${escapeHtml(node.buildingPrompt || '')}</textarea></label>` : '';
+    const promptEditor = buildingMode ? `<label class="classic-building-prompt"><span>建筑风格需求</span><textarea data-building-prompt placeholder="建筑类型、年代、材质、环境、真实感要求" ${buildingControlDisabled}>${escapeHtml(node.buildingPrompt || '')}</textarea></label>` : '';
     const summary = buildingMode
         ? '<div><strong>建筑多视图</strong><small>线稿锚定 · 四向建筑勘景资产</small></div><span>6 个输入 · 5 个输出槽</span>'
         : '<div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 5 张输出</span>';
+    const runControls = buildingMode
+        ? classicBuildingActionsHtml(node)
+        : `<button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button>`;
     return `<div class="classic-multi-view-special">
         <div class="classic-multi-view-summary">${summary}</div>
         <div class="classic-multi-view-input-list">${slots}</div>
         ${promptEditor}
         <div class="classic-multi-view-settings gen-settings">
             <div class="gen-settings-row">
-                <select class="select-lite" data-multi-view-provider aria-label="图片生成平台">${providerOptions(node.apiProvider)}</select>
-                <select class="select-lite" data-multi-view-model aria-label="图片生成模型">${imageModelOptions(node.model, node.apiProvider)}</select>
+                <select class="select-lite" data-multi-view-provider aria-label="图片生成平台" ${buildingControlDisabled}>${providerOptions(node.apiProvider)}</select>
+                <select class="select-lite" data-multi-view-model aria-label="图片生成模型" ${buildingControlDisabled}>${imageModelOptions(node.model, node.apiProvider)}</select>
             </div>
             <div class="gen-settings-row">
-                <select class="select-lite compact-select" data-multi-view-resolution aria-label="分辨率">
+                <select class="select-lite compact-select" data-multi-view-resolution aria-label="分辨率" ${buildingControlDisabled}>
                     ${['1k','2k','4k'].map(value => `<option value="${value}" ${node.resolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}
                 </select>
-                <select class="select-lite compact-select" data-multi-view-quality aria-label="生成质量">
+                <select class="select-lite compact-select" data-multi-view-quality aria-label="生成质量" ${buildingControlDisabled}>
                     ${['auto','low','medium','high'].map(value => `<option value="${value}" ${node.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}
                 </select>
                 <span class="classic-multi-view-fixed-output">${buildingMode ? '线稿 + 正 / 侧 / 背 / 顶' : '固定输出 1×16:9 + 1×3:4 + 3×9:16'}</span>
             </div>
         </div>
-        <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span><button type="button" class="gen-btn" data-multi-view-run ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : buildingMode ? '生成多视图' : '生成三视图'}</span></button></div>
+        <div class="classic-multi-view-run-row"><span>${escapeHtml(status)}</span>${runControls}</div>
     </div>`;
 }
 function sanitizeClassicMultiViewSettings(node){
@@ -7495,11 +7722,196 @@ function sanitizeClassicMultiViewSettings(node){
     node.resolution = ['1k','2k','4k'].includes(String(node.resolution || '').toLowerCase()) ? String(node.resolution).toLowerCase() : '2k';
     node.quality = ['auto','low','medium','high'].includes(String(node.quality || '').toLowerCase()) ? String(node.quality).toLowerCase() : 'high';
 }
+function classicBuildingHasImageModel(node){
+    sanitizeClassicMultiViewSettings(node);
+    return Boolean(node.apiProvider && node.model);
+}
+function classicBuildingCurrentInputMatches(node){
+    const signature = classicBuildingInputSignature(node);
+    if(!node.buildingInputSignature || signature === node.buildingInputSignature) return true;
+    node.buildingPlan = null;
+    classicBuildingSetStage(node, 'idle', '建筑输入已变化，请重新开始生成');
+    render();
+    scheduleSave();
+    showErrorModal('建筑参考图或提示词已变化，请重新点击“生成多视图”以建立新的资产规划。','建筑三视图');
+    return false;
+}
+function classicBuildingAssertInputStable(node){
+    if(node.buildingInputSignature && node.buildingInputSignature !== classicBuildingInputSignature(node)){
+        throw new Error('建筑参考图或提示词在生成过程中发生变化；旧结果已保留，请重新开始生成');
+    }
+}
+function classicBuildingCompleteRun(node, startedAt){
+    node.buildingRunAt = nowMs();
+    node.buildingElapsedMs = node.buildingRunAt - Number(startedAt || node.buildingStartedAt || node.buildingRunAt);
+    classicBuildingSetStage(node, 'done');
+    const out = classicBuildingSyncOutputs(node);
+    selected.clear();
+    selected.add(node.id);
+    refreshRunNodes(node, out);
+    scheduleSave();
+    const hasSketch = Boolean(outputUrlValue(node.buildingOutputs?.[0]));
+    setStatus(hasSketch ? '建筑线稿与四向实景视图已完成' : '四向建筑实景视图已完成，输入原图已复用');
+}
+async function completeClassicBuildingMissingViews(node, inputRefs, startedAt=0){
+    const targets = ['front','side','back','top'].filter(view => !outputUrlValue(node.buildingOutputs?.[CLASSIC_BUILDING_VIEW_KEYS.indexOf(view)]));
+    if(!targets.length){
+        classicBuildingCompleteRun(node, startedAt);
+        return [];
+    }
+    if(!classicBuildingHasImageModel(node)) throw new Error('请先在 API 设置中配置图片生成模型');
+    classicBuildingSetStage(node, 'views-generating');
+    refreshRunNodes(node, classicBuildingEnsureOutputNode(node));
+    scheduleSave();
+    const settled = await Promise.allSettled(targets.map(view => generateClassicBuildingView(node, inputRefs, view)));
+    classicBuildingAssertInputStable(node);
+    const failures = settled.map((result, index) => result.status === 'rejected' ? {view:targets[index], error:result.reason} : null).filter(Boolean);
+    if(failures.length){
+        const message = `${failures.length} 个建筑视图生成失败，成功结果已保留`;
+        classicBuildingSetStage(node, 'partial', message);
+        refreshRunNodes(node, classicBuildingSyncOutputs(node));
+        scheduleSave();
+        setStatus(message);
+        return settled;
+    }
+    classicBuildingCompleteRun(node, startedAt);
+    return settled;
+}
+async function runClassicBuildingNode(node){
+    const inputRefs = classicBuildingInputRefs(node);
+    const connectedPrompt = classicBuildingConnectedPrompt(node);
+    const hasReference = CLASSIC_BUILDING_VIEW_KEYS.some(view => outputUrlValue(inputRefs[view]));
+    const hasPrompt = Boolean(String(node.buildingPrompt || '').trim() || connectedPrompt);
+    if(!hasReference && !hasPrompt){
+        showErrorModal('请至少连接一张建筑参考图，或输入建筑风格需求','建筑三视图');
+        return;
+    }
+    const realViews = ['front','side','back','top'].filter(view => outputUrlValue(inputRefs[view]));
+    const missingRealViews = ['front','side','back','top'].filter(view => !outputUrlValue(inputRefs[view]));
+    const needsImageGeneration = !realViews.length || missingRealViews.length > 0;
+    if(needsImageGeneration && !classicBuildingHasImageModel(node)){
+        showErrorModal('请先在 API 设置中配置图片生成模型','建筑三视图');
+        return;
+    }
+    const startedAt = nowMs();
+    node.buildingStartedAt = startedAt;
+    node.buildingErrors = {};
+    node.buildingPlan = null;
+    node.buildingInputSignature = classicBuildingInputSignature(node, inputRefs, connectedPrompt);
+    const out = classicBuildingPrepareOutputs(node, inputRefs);
+    classicBuildingSetStage(node, 'planning');
+    refreshRunNodes(node, out);
+    scheduleSave();
+    try {
+        const plan = await requestClassicBuildingPlan(node, inputRefs, connectedPrompt);
+        if(node.buildingInputSignature !== classicBuildingInputSignature(node)){
+            node.buildingPlan = null;
+            classicBuildingSetStage(node, 'idle', '建筑输入已变化，请重新开始生成');
+            refreshRunNodes(node, out);
+            scheduleSave();
+            return;
+        }
+        node.buildingPlan = plan;
+        if(realViews.length){
+            await completeClassicBuildingMissingViews(node, inputRefs, startedAt);
+            return;
+        }
+        if(inputRefs.sketch){
+            classicBuildingSetStage(node, 'front-generating');
+            refreshRunNodes(node, out);
+            await generateClassicBuildingView(node, inputRefs, 'front');
+            classicBuildingAssertInputStable(node);
+            classicBuildingSetStage(node, 'awaiting-front-confirmation');
+            refreshRunNodes(node, classicBuildingSyncOutputs(node, out));
+            scheduleSave();
+            setStatus('建筑正面已生成，请确认后再补齐其他视图');
+            return;
+        }
+        classicBuildingSetStage(node, 'sketch-generating');
+        refreshRunNodes(node, out);
+        await generateClassicBuildingView(node, inputRefs, 'sketch');
+        classicBuildingAssertInputStable(node);
+        classicBuildingSetStage(node, 'awaiting-sketch-confirmation');
+        refreshRunNodes(node, classicBuildingSyncOutputs(node, out));
+        scheduleSave();
+        setStatus('建筑线稿已生成，请确认后再生成实景建筑');
+    } catch(error){
+        const message = error.message || '建筑多视图生成失败';
+        classicBuildingSetStage(node, 'error', message);
+        const latestOut = classicBuildingEnsureOutputNode(node);
+        if(latestOut) latestOut._pending = (latestOut._pending || []).filter(item => !item.buildingView);
+        refreshRunNodes(node, latestOut);
+        scheduleSave();
+        showErrorModal(message,'建筑三视图');
+    }
+}
+async function handleClassicBuildingAction(nodeId, action){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'multiView');
+    if(!node || classicMultiViewMode(node) !== 'building' || window.CanvasBuildingMultiView?.isBusy(node)) return;
+    if(action === 'run'){
+        await runClassicBuildingNode(node);
+        return;
+    }
+    if(!classicBuildingCurrentInputMatches(node)) return;
+    const inputRefs = classicBuildingInputRefs(node);
+    try {
+        if(action === 'confirm-sketch' || action === 'regenerate-sketch'){
+            if(action === 'regenerate-sketch'){
+                if(!classicBuildingHasImageModel(node)) throw new Error('请先在 API 设置中配置图片生成模型');
+                node.buildingOutputs[0] = null;
+                classicBuildingSetStage(node, 'sketch-generating');
+                refreshRunNodes(node, classicBuildingSyncOutputs(node));
+                await generateClassicBuildingView(node, inputRefs, 'sketch');
+                classicBuildingAssertInputStable(node);
+                classicBuildingSetStage(node, 'awaiting-sketch-confirmation');
+                refreshRunNodes(node, classicBuildingSyncOutputs(node));
+                scheduleSave();
+                return;
+            }
+            if(!outputUrlValue(node.buildingOutputs?.[0])) throw new Error('待确认的建筑线稿不存在，请重新生成');
+            classicBuildingSetStage(node, 'front-generating');
+            refreshRunNodes(node, classicBuildingEnsureOutputNode(node));
+            await generateClassicBuildingView(node, inputRefs, 'front');
+            classicBuildingAssertInputStable(node);
+            classicBuildingSetStage(node, 'awaiting-front-confirmation');
+            refreshRunNodes(node, classicBuildingSyncOutputs(node));
+            scheduleSave();
+            setStatus('建筑正面已生成，请确认后再补齐其他视图');
+            return;
+        }
+        if(action === 'regenerate-front'){
+            if(!classicBuildingHasImageModel(node)) throw new Error('请先在 API 设置中配置图片生成模型');
+            node.buildingOutputs[1] = null;
+            classicBuildingSetStage(node, 'front-generating');
+            refreshRunNodes(node, classicBuildingSyncOutputs(node));
+            await generateClassicBuildingView(node, inputRefs, 'front');
+            classicBuildingAssertInputStable(node);
+            classicBuildingSetStage(node, 'awaiting-front-confirmation');
+            refreshRunNodes(node, classicBuildingSyncOutputs(node));
+            scheduleSave();
+            return;
+        }
+        if(action === 'confirm-front'){
+            if(!outputUrlValue(node.buildingOutputs?.[1])) throw new Error('待确认的建筑正面不存在，请重新生成');
+            await completeClassicBuildingMissingViews(node, inputRefs, node.buildingStartedAt);
+            return;
+        }
+        if(action === 'retry-missing'){
+            await completeClassicBuildingMissingViews(node, inputRefs, node.buildingStartedAt);
+        }
+    } catch(error){
+        const message = error.message || '建筑多视图生成失败';
+        classicBuildingSetStage(node, 'error', message);
+        refreshRunNodes(node, classicBuildingEnsureOutputNode(node));
+        scheduleSave();
+        showErrorModal(message,'建筑三视图');
+    }
+}
 async function runClassicMultiViewNode(nodeId){
     const node = nodes.find(item => item.id === nodeId && item.type === 'multiView');
     if(!node || node.multiViewStatus === 'running') return;
     if(classicMultiViewMode(node) === 'building'){
-        showErrorModal('建筑多视图生成链路正在初始化，请完成当前版本更新后重试','建筑三视图');
+        await runClassicBuildingNode(node);
         return;
     }
     const refs = classicMultiViewInputRefs(node);
@@ -8053,6 +8465,11 @@ function renderNode(node){
         event.stopPropagation();
         runClassicMultiViewNode(node.id);
     });
+    el.querySelectorAll('[data-building-action]').forEach(button => button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        handleClassicBuildingAction(node.id, button.dataset.buildingAction || 'run');
+    }));
     el.querySelectorAll('[data-multi-view-mode]').forEach(button => button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
@@ -8068,6 +8485,8 @@ function renderNode(node){
         event.stopPropagation();
         node.buildingPrompt = event.target.value;
         node.buildingStage = 'idle';
+        node.buildingPlan = null;
+        node.multiViewStatus = 'idle';
         node.multiViewError = '';
         scheduleSave();
     });

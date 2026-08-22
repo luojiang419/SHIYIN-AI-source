@@ -61,7 +61,7 @@ def test_prompt_ports_only_accept_prompt_sources_and_inactive_connections_are_hi
 
 
 def test_shared_script_and_building_styles_are_loaded_by_both_canvases():
-    script = '<script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.2"></script>'
+    script = '<script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>'
     assert script in CANVAS_HTML
     assert script in SMART_HTML
     assert 'canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260822.3' in CANVAS_HTML
@@ -177,3 +177,20 @@ def test_smart_building_input_signature_invalidates_stale_confirmations_and_busy
     assert "建筑参考图或提示词在生成过程中发生变化" in SMART_JS
     assert "const buildingControlDisabled = buildingBusy ? 'disabled' : '';" in SMART_JS
     assert "node.buildingPlan = null;" in SMART_JS
+
+
+def test_smart_building_persists_task_ids_and_resumes_without_resubmitting_api_tasks():
+    assert "buildingPendingTasks" in SHARED_JS
+    assert "pendingTask = {view, taskId" in SMART_JS
+    assert "function resumeSmartBuildingNodePending(node)" in SMART_JS
+    assert "resumeSmartBuildingPendingTasks();" in SMART_JS
+    assert "pollSmartCanvasTask(task.taskId)" in SMART_JS
+    resume_body = SMART_JS[SMART_JS.index("async function resumeSmartBuildingNodePending"):SMART_JS.index("function resumeSmartBuildingPendingTasks", SMART_JS.index("async function resumeSmartBuildingNodePending"))]
+    assert "runApiGeneration" not in resume_body
+    assert "smartBuildingItemFromResult(result, task.view)" in resume_body
+
+
+def test_smart_building_retry_never_submits_duplicate_while_task_is_recovering():
+    assert "await resumeSmartBuildingNodePending(node);" in SMART_JS
+    assert "建筑任务仍在恢复中，请稍后再次点击“重试缺失视图”" in SMART_JS
+    assert "stage === BUILDING_STAGES.PARTIAL || stage === BUILDING_STAGES.ERROR" in SHARED_JS

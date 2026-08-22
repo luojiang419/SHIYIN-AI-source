@@ -1543,7 +1543,7 @@ function createMultiViewNode(point, sourceNode=null){
         x:baseX, y:baseY, w:700, h:780, title:'创建三视图', images:[],
         runSettings:settingsForStorage(normalizeSmartMultiViewSettings(sourceNode ? smartSettingsForNode(sourceNode) : settings)),
         multiViewMode:'person', multiViewStatus:'idle', multiViewInputs:[], multiViewOutputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now(),
-        buildingPrompt:'', buildingStage:'idle', buildingOutputs:[], buildingPlan:null, buildingErrors:{}, buildingInputSignature:'', buildingOutputNodeId:''
+        buildingPrompt:'', buildingStage:'idle', buildingOutputs:[], buildingPlan:null, buildingErrors:{}, buildingPendingTasks:[], buildingInputSignature:'', buildingOutputNodeId:''
     };
     nodes.push(node);
     if(sourceNode?.id) connectInputNode(sourceNode.id, node.id, 'model-front');
@@ -5760,6 +5760,7 @@ function applyMergedServerCanvas(serverCanvas){
     if(typeof scheduleConnectionLayerRefresh === 'function') scheduleConnectionLayerRefresh();
     if(cleanedState || recoveredLoopOutputs || migratedMultiViewConnections) scheduleSave();
     resumeSmartPendingTasks();
+    resumeSmartBuildingPendingTasks();
     resumeJimengPendingNodes();
     return true;
 }
@@ -6428,6 +6429,7 @@ async function loadCanvas(){
         render();
         if(prunedRuntimeCollections || cleanedDetachedInputs || cleanedCompletedState || recoveredLoopOutputs || hiddenCompletedTimers || migratedMultiViewConnections) scheduleSave();
         resumeSmartPendingTasks();
+        resumeSmartBuildingPendingTasks();
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
@@ -9460,6 +9462,20 @@ function smartBuildingAssertInputStable(node){
         throw new Error('建筑参考图或提示词在生成过程中发生变化；旧结果已保留，请重新开始生成');
     }
 }
+function smartBuildingPendingTaskFor(node, view){
+    return (Array.isArray(node?.buildingPendingTasks) ? node.buildingPendingTasks : []).find(task => task?.view === view && task.taskId) || null;
+}
+function smartBuildingRemovePendingTask(node, taskId){
+    node.buildingPendingTasks = (node.buildingPendingTasks || []).filter(task => task.taskId !== taskId);
+}
+function smartBuildingItemFromResult(result, view){
+    const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
+    const url = smartBuildingItemUrl(raw);
+    if(!url) throw new Error(`建筑${view}视图没有返回图片`);
+    return raw && typeof raw === 'object'
+        ? {...raw, url, name:raw.name || `building-${view}.png`, kind:'image'}
+        : {url, name:`building-${view}.png`, kind:'image'};
+}
 function smartBuildingCurrentInputMatches(node){
     const signature = smartBuildingInputSignature(node);
     if(!node.buildingInputSignature || signature === node.buildingInputSignature) return true;
@@ -9490,10 +9506,16 @@ async function generateSmartBuildingView(node, inputRefs, view){
         customRatio:ratio, customRatioWidth:ratioWidth, customRatioHeight:ratioHeight,
         customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1
     };
+    let completed = false;
+    let pendingTask = null;
     try {
         const submitted = await runApiGeneration(prompt, references, runSettings);
         const taskId = submitted?.taskIds?.[0];
         if(!taskId) throw new Error(`建筑${view}视图任务创建失败`);
+        pendingTask = {view, taskId, providerId:submitted.providerId || runSettings.provider_id, model:submitted.model || runSettings.model, startedAt:nowMs(), inputSignature:node.buildingInputSignature};
+        node.buildingPendingTasks = [...(node.buildingPendingTasks || []).filter(task => task.view !== view), pendingTask];
+        smartBuildingSyncOutputs(node, output);
+        render(); scheduleSave();
         if(submitted.providerId){
             node.runSettings = settingsForStorage(normalizeSmartMultiViewSettings({
                 ...node.runSettings,
@@ -9502,17 +9524,14 @@ async function generateSmartBuildingView(node, inputRefs, view){
             }));
         }
         const result = await pollSmartCanvasTask(taskId);
-        const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
-        const url = smartBuildingItemUrl(raw);
-        if(!url) throw new Error(`建筑${view}视图没有返回图片`);
-        const item = raw && typeof raw === 'object'
-            ? {...raw, url, name:raw.name || `building-${view}.png`, kind:'image'}
-            : {url, name:`building-${view}.png`, kind:'image'};
+        const item = smartBuildingItemFromResult(result, view);
         item.buildingView = view;
         item.buildingSource = 'generated';
         item.multiViewIndex = index;
         item.grid = smartBuildingGridForIndex(index, node.buildingOutputLayout?.groupId || '');
         node.buildingOutputs[index] = item;
+        completed = true;
+        if(pendingTask) smartBuildingRemovePendingTask(node, pendingTask.taskId);
         delete node.buildingErrors?.[view];
         return item;
     } catch(error){
@@ -9520,9 +9539,59 @@ async function generateSmartBuildingView(node, inputRefs, view){
         throw error;
     } finally {
         node.buildingActiveViews = (node.buildingActiveViews || []).filter(item => item !== view);
+        if(completed && pendingTask) smartBuildingRemovePendingTask(node, pendingTask.taskId);
         smartBuildingSyncOutputs(node, output);
         render(); scheduleSave();
     }
+}
+async function resumeSmartBuildingNodePending(node){
+    const tasks = Array.isArray(node?.buildingPendingTasks) ? [...node.buildingPendingTasks].filter(task => task?.taskId && task.view) : [];
+    if(!node || !tasks.length) return [];
+    node.buildingActiveViews = [...new Set([...(node.buildingActiveViews || []), ...tasks.map(task => task.view)])];
+    if(tasks.some(task => task.view === 'sketch')) smartBuildingSetStage(node, 'sketch-generating');
+    else if(tasks.some(task => task.view === 'front')) smartBuildingSetStage(node, 'front-generating');
+    else smartBuildingSetStage(node, 'views-generating');
+    smartBuildingSyncOutputs(node);
+    render(); scheduleSave();
+    const settled = await Promise.allSettled(tasks.map(async task => {
+        try {
+            smartBuildingAssertInputStable(node);
+            const result = await pollSmartCanvasTask(task.taskId);
+            smartBuildingAssertInputStable(node);
+            const item = smartBuildingItemFromResult(result, task.view);
+            const index = SMART_BUILDING_VIEW_KEYS.indexOf(task.view);
+            item.buildingView = task.view;
+            item.buildingSource = 'generated';
+            item.multiViewIndex = index;
+            item.grid = smartBuildingGridForIndex(index, node.buildingOutputLayout?.groupId || '');
+            node.buildingOutputs[index] = item;
+            delete node.buildingErrors?.[task.view];
+            smartBuildingRemovePendingTask(node, task.taskId);
+            return item;
+        } catch(error){
+            node.buildingErrors = {...(node.buildingErrors || {}), [task.view]:error.message || `建筑${task.view}视图恢复失败`};
+            throw error;
+        } finally {
+            node.buildingActiveViews = (node.buildingActiveViews || []).filter(view => view !== task.view);
+            smartBuildingSyncOutputs(node);
+            render(); scheduleSave();
+        }
+    }));
+    if((node.buildingPendingTasks || []).length) return settled;
+    const hasErrors = Object.keys(node.buildingErrors || {}).some(view => SMART_BUILDING_VIEW_KEYS.includes(view));
+    if(node.buildingStage === 'sketch-generating') smartBuildingSetStage(node, 'awaiting-sketch-confirmation');
+    else if(node.buildingStage === 'front-generating') smartBuildingSetStage(node, 'awaiting-front-confirmation');
+    else if(node.buildingStage === 'views-generating'){
+        if(hasErrors) smartBuildingSetStage(node, 'partial', '部分视图恢复失败，成功结果已保留');
+        else smartBuildingCompleteRun(node, node.buildingStartedAt);
+    }
+    smartBuildingSyncOutputs(node);
+    render(); scheduleSave();
+    return settled;
+}
+function resumeSmartBuildingPendingTasks(){
+    nodes.filter(node => node?.specialType === 'multi-view' && Array.isArray(node.buildingPendingTasks) && node.buildingPendingTasks.length)
+        .forEach(node => resumeSmartBuildingNodePending(node));
 }
 function smartBuildingCompleteRun(node, startedAt=0){
     node.buildingRunAt = nowMs();
@@ -9536,6 +9605,10 @@ function smartBuildingCompleteRun(node, startedAt=0){
     toast(smartBuildingItemUrl(node.buildingOutputs?.[0]) ? '建筑线稿与四向实景视图已完成' : '四向建筑实景视图已完成，输入原图已复用');
 }
 async function completeSmartBuildingMissingViews(node, inputRefs, startedAt=0){
+    if(Array.isArray(node.buildingPendingTasks) && node.buildingPendingTasks.length){
+        await resumeSmartBuildingNodePending(node);
+        if(node.buildingPendingTasks.length) throw new Error('建筑任务仍在恢复中，请稍后再次点击“重试缺失视图”');
+    }
     const targets = SMART_BUILDING_REAL_VIEW_KEYS.filter(view => !smartBuildingItemUrl(node.buildingOutputs?.[SMART_BUILDING_VIEW_KEYS.indexOf(view)]));
     if(!targets.length){
         smartBuildingCompleteRun(node, startedAt);

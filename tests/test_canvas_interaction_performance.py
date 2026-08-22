@@ -114,6 +114,24 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("structuredClone", classic_copy)
         self.assertIn("structuredClone", smart_copy)
 
+    def test_floating_toolbar_actions_use_incremental_render_and_scoped_icons(self):
+        multi_view = body(SMART_CANVAS_JS, "function createMultiViewNode", "const MULTI_VIEW_INPUT_SLOTS")
+        batch = body(SMART_CANVAS_JS, "function createSmartBatchGeneratorNode", "const MULTI_VIEW_INPUT_SLOTS")
+        self.assertIn("queueSmartRenderMutation({createdIds:[node.id]})", multi_view)
+        self.assertIn("queueSmartRenderMutation({createdIds:[node.id]})", batch)
+        editor = body(SMART_CANVAS_JS, "function openImageEditor", "function closeImageEditor")
+        self.assertIn("refreshIcons(imageEditModal)", editor)
+        render = body(SMART_CANVAS_JS, "function render(){", "function registerSmartCanvasPerfFixture")
+        self.assertIn("refreshIcons(root)", render)
+        self.assertIn("measureSmartNodeImages(nodeIndex, root)", render)
+
+    def test_hidden_smart_toolbar_does_not_apply_backdrop_filter(self):
+        css = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
+        hidden = css[css.index(".smart-node-floating-menu {"):css.index(".smart-node-floating-menu.smart-node-image-menu")]
+        self.assertIn("backdrop-filter:none", hidden)
+        selected = css[css.index(".image-node.selected .smart-node-floating-menu"):css.index(".world.smart-multi-selected")]
+        self.assertIn("backdrop-filter:blur(18px)", selected)
+
 
 if __name__ == "__main__":
     unittest.main()

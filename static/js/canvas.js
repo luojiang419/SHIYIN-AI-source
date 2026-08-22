@@ -1,4 +1,8 @@
-function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
+// 允许高频画布操作只刷新新增区域内的图标，避免 Lucide 每次扫描整页。
+function refreshIcons(root=document){
+    if(!window.lucide) return;
+    window.lucide.createIcons({root:root || document});
+}
 refreshIcons();
 function tr(key){ return window.StudioI18n ? StudioI18n.t(key) : key; }
 function trf(key, values={}){
@@ -7264,7 +7268,7 @@ function render(){
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
-    refreshIcons();
+    refreshIcons(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
@@ -17611,7 +17615,7 @@ function renderSelectionHub(){
         };
     });
     positionSelectionHub(anchor);
-    refreshIcons();
+    refreshIcons(selectionHub);
 }
 function selectOutputMedia(nodeId, url, wrap=null){
     const node = nodes.find(item => item.id === nodeId);

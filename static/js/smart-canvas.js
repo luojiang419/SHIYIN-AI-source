@@ -593,7 +593,11 @@ async function copyTextToClipboard(text){
     } catch(_) {}
     return false;
 }
-function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
+// 图标刷新默认仍兼容全局调用，但高频画布路径传入局部根节点，避免每次操作都扫描整页。
+function refreshIcons(root=document){
+    if(!window.lucide) return;
+    window.lucide.createIcons({root:root || document});
+}
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 const escapeAttr = escapeHtml;
@@ -1742,6 +1746,7 @@ function createMultiViewNode(point, sourceNode=null){
     nodes.push(node);
     if(sourceNode?.id) connectInputNode(sourceNode.id, node.id, 'model-front');
     selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({createdIds:[node.id]});
     render(); scheduleSave();
     return node;
 }
@@ -1763,6 +1768,7 @@ function createSmartBatchGeneratorNode(sourceNode=null, point=null){
     selectedId = node.id;
     selectedIds = [];
     selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({createdIds:[node.id]});
     render();
     scheduleSave();
     return node;
@@ -3657,7 +3663,7 @@ function renderDynamicParams(){
     restoreDynamicParamsScroll(scrollState);
     updatePromptPlaceholder();
     persistActiveSmartSettings();
-    if(window.lucide) lucide.createIcons();
+    refreshIcons();
 }
 function renderApiParams(){
     const providers = imageProviders();
@@ -8667,7 +8673,15 @@ function runSmartGroupToolbarAction(nodeId, action){
         return;
     }
     if(action === 'arrange'){
-        if(arrangeSmartGroupMembers(group)){ render(); scheduleSave(); toast('已整理分组'); }
+        if(arrangeSmartGroupMembers(group)){
+            const affectedIds = [
+                group.id,
+                ...smartGroupMembers(group).map(node => node.id),
+                ...smartGroupCompactMembers(group).map(node => node.id)
+            ];
+            queueSmartRenderMutation({replaceIds:affectedIds});
+            render(); scheduleSave(); toast('已整理分组');
+        }
         else toast('分组内没有可整理的节点');
         return;
     }
@@ -8884,10 +8898,12 @@ function render(){
     // composer 已在 keepEls 中(未被移除),不重排也不影响显示(z-index 固定)。
     if(composerEl && !promptHadFocus) world.appendChild(composerEl);
     world.insertAdjacentHTML('beforeend', renderConnections(nodeIndex));
+    const freshNodeEls = [];
     nodeHtmlEntries.forEach(entry => {
         const fresh = renderedNodeEls.get(entry.node.id);
         if(!fresh) return;
         world.appendChild(fresh);
+        freshNodeEls.push(fresh);
         const reusable = reusableNodes.get(entry.node.id);
         if(reusable){
             transplantSmartMediaElements(reusable, fresh);
@@ -8900,10 +8916,17 @@ function render(){
     if(mutation) syncSelectionUi();
     updateComposer();
     scheduleSmartMinimapRender();
-    if(window.lucide) lucide.createIcons();
-    bindSmartPreviewImageFallbacks(world);
+    if(mutation) freshNodeEls.forEach(root => {
+        refreshIcons(root);
+        bindSmartPreviewImageFallbacks(root);
+    });
+    else {
+        refreshIcons(world);
+        bindSmartPreviewImageFallbacks(world);
+    }
     syncSmartSelectedImageResolution(world);
-    measureSmartNodeImages(nodeIndex);
+    if(mutation) freshNodeEls.forEach(root => measureSmartNodeImages(nodeIndex, root));
+    else measureSmartNodeImages(nodeIndex, world);
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshRunTimerPills();
     perfEnd?.();
@@ -8942,7 +8965,7 @@ function render(){
     bindConnectionEvents();
     updateComposer();
     scheduleSmartMinimapRender();
-    if(window.lucide) lucide.createIcons();
+    refreshIcons(world);
     measureSmartNodeImages();
     refreshRunTimerPills();
 }
@@ -8982,8 +9005,8 @@ function registerSmartCanvasPerfFixture(){
     });
 }
 registerSmartCanvasPerfFixture();
-function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
-    world.querySelectorAll('.image-node img,.image-node video').forEach(imgEl => {
+function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
+    (root || world).querySelectorAll?.('.image-node img,.image-node video').forEach(imgEl => {
         const nodeEl = imgEl.closest('.image-node');
         const itemEl = imgEl.closest('[data-image-index]');
         const containerNode = nodeIndex.get(nodeEl?.dataset.id);
@@ -13337,7 +13360,7 @@ function openImageEditor(nodeId, imageIndex=0){
         delete img.dataset.proxyFallbackTried;
         setImageEditMode('preview');
         updatePreviewNavButtons();
-        refreshIcons();
+        refreshIcons(imageEditModal);
         return;
     }
     // 原图加载失败时的兜底链：依次尝试 download-output 代理、缩略图同款的 media-preview 代理（PIL 渲染，
@@ -13365,7 +13388,7 @@ function openImageEditor(nodeId, imageIndex=0){
         if(!imageEditModeTouched) setImageEditMode('preview');
         else refreshComparePanel();
         if(!panoramaState.enabled) updatePreviewMetaHint();
-        syncImageEditOverflow(); refreshIcons();
+        syncImageEditOverflow(); refreshIcons(imageEditModal);
     };
     img.onerror = () => {
         if(editorFallbackIndex >= editorFallbackUrls.length) return;
@@ -13391,7 +13414,7 @@ function openImageEditor(nodeId, imageIndex=0){
     }
     setImageEditMode('preview');
     updatePreviewNavButtons();
-    refreshIcons();
+    refreshIcons(imageEditModal);
 }
 function closeImageEditor(){
     cleanupSmartLogPreviewNode();
@@ -17968,6 +17991,7 @@ function ungroupNode(groupId){
         selectedIds = [...created.map(n => n.id), ...memberIds].filter(id => nodes.some(n => n.id === id));
         selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
         selectedImage = {nodeId:'', index:-1};
+        queueSmartRenderMutation({createdIds:created.map(n => n.id), removeIds:[groupId], replaceIds:memberIds});
         render();
         scheduleSave();
         return true;
@@ -18011,6 +18035,7 @@ function ungroupNode(groupId){
     selectedIds = created.map(node => node.id);
     selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
     selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({createdIds:created.map(n => n.id), removeIds:[groupId]});
     render();
     scheduleSave();
     return true;
@@ -19627,7 +19652,7 @@ window.onload = async () => {
     loadPromptTemplateGroups();
     loadPromptTemplateOverrides();
     if(window.StudioI18n) window.StudioI18n.apply();
-    if(window.lucide) lucide.createIcons();
+    refreshIcons(document);
     connectAssetLibrarySyncSocket();
     const configTask = loadConfig({deferSecondary:true});
     await loadCanvas();

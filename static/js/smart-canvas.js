@@ -78,6 +78,7 @@ let minimapViewport = document.getElementById('minimapViewport');
 let canvas = null;
 let canvasUsesConnections = true;
 let nodes = [];
+let smartNodeIndex = new Map();
 let selectedId = '';
 let selectedIds = [];
 let selectedImage = {nodeId:'', index:-1};
@@ -168,6 +169,7 @@ function restoreSmartNodeToolbar(){
 }
 let portDragState = null;
 let saveTimer = null;
+let saveIdleHandle = 0;
 let apiProviders = [];
 let smartKlingCliState = {
     loaded:false,
@@ -6747,9 +6749,12 @@ function scheduleSave(delay=450){
         return;
     }
     clearTimeout(saveTimer);
+    if(saveIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(saveIdleHandle); saveIdleHandle = 0; }
     saveTimer = setTimeout(() => {
         saveTimer = null;
-        saveCanvas();
+        const run = () => { saveIdleHandle = 0; saveCanvas(); };
+        if('requestIdleCallback' in window) saveIdleHandle = window.requestIdleCallback(run, {timeout:800});
+        else run();
     }, safeDelay);
 }
 async function saveCanvas(){
@@ -6760,6 +6765,7 @@ async function saveCanvas(){
     }
     clearTimeout(saveTimer);
     saveTimer = null;
+    if(saveIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(saveIdleHandle); saveIdleHandle = 0; }
     saveRequestedWhileInFlight = false;
     trailingSaveDelay = 450;
     canvasSyncInFlight = true;
@@ -6769,21 +6775,24 @@ async function saveCanvas(){
     canvas.viewport = {...viewport};
     const storageCanvas = canvasForStorage();
     try {
+        const serializeEnd = window.CanvasPerformance?.start?.('smart.save.serialize', {nodes:nodes.length, connections:(canvas.connections || []).length});
+        const requestBody = JSON.stringify({
+            title:storageCanvas.title || tr('smart.title'),
+            icon:storageCanvas.icon || 'sparkles',
+            nodes:storageCanvas.nodes || [],
+            connections:storageCanvas.connections || [],
+            viewport:storageCanvas.viewport || {x:0,y:0,scale:1},
+            logs:storageCanvas.logs || [],
+            settings:storageCanvas.settings,
+            base_updated_at:storageCanvas.updated_at || canvas.updated_at || 0,
+            base_revision:storageCanvas.revision || canvas.revision || 0,
+            client_id:smartClientId
+        });
+        serializeEnd?.();
         const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                title:storageCanvas.title || tr('smart.title'),
-                icon:storageCanvas.icon || 'sparkles',
-                nodes:storageCanvas.nodes || [],
-                connections:storageCanvas.connections || [],
-                viewport:storageCanvas.viewport || {x:0,y:0,scale:1},
-                logs:storageCanvas.logs || [],
-                settings:storageCanvas.settings,
-                base_updated_at:storageCanvas.updated_at || canvas.updated_at || 0,
-                base_revision:storageCanvas.revision || canvas.revision || 0,
-                client_id:smartClientId
-            })
+            body:requestBody
         });
         if(res.ok){
             const data = await res.json();
@@ -6831,8 +6840,8 @@ function createNode(x, y, images=[], options={}){
     inheritNodeMetaFromImage(node);
     nodes.push(node);
     if(options.select !== false) selectedId = node.id;
-    render();
-    scheduleSave();
+    if(options.deferRender !== true) render();
+    if(options.deferSave !== true) scheduleSave();
     return node;
 }
 function createPromptNode(x, y, options={}){
@@ -7054,6 +7063,7 @@ function shellPoint(event){
     return {x:event.clientX - rect.left, y:event.clientY - rect.top};
 }
 function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
+    const perfEnd = window.CanvasPerformance?.start?.('smart.renderConnections', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     const conns = (canvas?.connections || []).map((conn, index) => ({...conn, index})).filter(c => nodeIndex.has(c.from) && nodeIndex.has(c.to));
     const cascadeKeys = cascadeConnectionKeys();
     const activeCascadeCount = (smartCascadeRunPath?.states && Object.values(smartCascadeRunPath.states).filter(state => state && state !== 'done').length) || 0;
@@ -7134,17 +7144,21 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         const width = kind === 'input' ? '1.9' : '1.6';
         return `<path class="${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path><path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
     }).join('');
-    return `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`;
+    const result = `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`;
+    perfEnd?.();
+    return result;
 }
 function refreshConnectionLayer(){
+    const perfEnd = window.CanvasPerformance?.start?.('smart.refreshConnectionLayer');
     connectionLayerRaf = 0;
     const oldSvg = world.querySelector('svg.connection-layer');
-    if(!oldSvg) return;
+    if(!oldSvg){ perfEnd?.({skipped:true}); return; }
     const tpl = document.createElement('template');
     tpl.innerHTML = renderConnections().trim();
     const nextSvg = tpl.content.firstElementChild;
     if(nextSvg) oldSvg.replaceWith(nextSvg);
     bindConnectionEvents();
+    perfEnd?.();
 }
 function scheduleConnectionLayerRefresh(){
     if(connectionLayerRaf) return;
@@ -7165,7 +7179,7 @@ function moveNodeElementsDuringDrag(){
     if(!dragState) return;
     const groupItems = dragState.group || [{id:dragState.id}];
     groupItems.map(item => item.id).forEach(id => {
-        const n = nodes.find(x => x.id === id);
+        const n = smartNodeIndex.get(id);
         const el = world.querySelector(`.image-node[data-id="${CSS.escape(id)}"]`);
         if(n && el){
             el.style.left = `${n.x || 0}px`;
@@ -8708,6 +8722,9 @@ function render(){
         window.StudioFocusGuard.deferDomUpdate('smart-canvas-render', render);
         return;
     }
+    const perfEnd = window.CanvasPerformance?.start?.('smart.render', {nodes:nodes.length, connections:(canvas?.connections || []).length});
+    smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    world.classList.toggle('smart-large-scene', nodes.length > 200);
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
     window.CanvasSpecialNodes?.disposePanoramasIn?.(world);
     if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
@@ -8811,6 +8828,7 @@ function render(){
     measureSmartNodeImages(nodeIndex);
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshRunTimerPills();
+    perfEnd?.();
     return;
     world.innerHTML = '';
     if(composerEl) world.appendChild(composerEl);
@@ -8850,6 +8868,42 @@ function render(){
     measureSmartNodeImages();
     refreshRunTimerPills();
 }
+function registerSmartCanvasPerfFixture(){
+    window.CanvasPerformance?.registerFixtureFactory?.('smart', options => {
+        if(!window.CanvasPerformance.enabled) throw new Error('请使用 ?canvasPerf=1 打开性能观测');
+        if(!canvas) throw new Error('请先打开一个智能画布');
+        const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
+        const previous = {nodes:clone(nodes), connections:clone(canvas.connections || []), selectedId, selectedIds:[...selectedIds]};
+        const total = Math.max(20, Math.min(2000, Number(options.nodes || 500)));
+        const edgeCount = Math.max(0, Math.min(5000, Number(options.connections || 1000)));
+        const columns = Math.max(1, Math.ceil(Math.sqrt(total)));
+        nodes = Array.from({length:total}, (_, index) => ({
+            id:`perf-smart-${index}`,
+            type:'smart-image',
+            x:(index % columns) * 240,
+            y:Math.floor(index / columns) * 180,
+            w:200,
+            h:140,
+            images:[]
+        }));
+        canvas.connections = Array.from({length:edgeCount}, (_, index) => {
+            const from = index % Math.max(1, Math.floor(total / 2));
+            const to = Math.floor(total / 2) + (index % Math.max(1, total - Math.floor(total / 2)));
+            return {id:`perf-smart-connection-${index}`, from:`perf-smart-${from}`, to:`perf-smart-${to}`, kind:'flow'};
+        });
+        selectedId = '';
+        selectedIds = [];
+        render();
+        return () => {
+            nodes = previous.nodes;
+            canvas.connections = previous.connections;
+            selectedId = previous.selectedId;
+            selectedIds = previous.selectedIds;
+            render();
+        };
+    });
+}
+registerSmartCanvasPerfFixture();
 function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
     world.querySelectorAll('.image-node img,.image-node video').forEach(imgEl => {
         const nodeEl = imgEl.closest('.image-node');
@@ -8952,8 +9006,8 @@ function ensurePortDragPathElement(){
 }
 function clearPortDragVisual(){
     world.querySelector('path.port-drag-temp')?.remove();
-    world.querySelectorAll('.node-port.is-active').forEach(el => el.classList.remove('is-active'));
-    world.querySelectorAll('.image-node.port-hover').forEach(el => el.classList.remove('port-hover'));
+    if(portDragState?.activePortEl) portDragState.activePortEl.classList.remove('is-active');
+    if(portDragState?.activeNodeEl) portDragState.activeNodeEl.classList.remove('port-hover');
 }
 function bindPromptNodeControls(el, node){
     el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
@@ -9289,8 +9343,9 @@ function bindScrollableText(el){
 }
 function updatePortDragVisual(){
     if(!portDragState) return;
-    const fromNode = nodes.find(n => n.id === portDragState.fromId);
-    if(!fromNode) return;
+    const perfEnd = window.CanvasPerformance?.start?.('smart.updatePortDragVisual');
+    const fromNode = smartNodeIndex.get(portDragState.fromId);
+    if(!fromNode){ perfEnd?.({skipped:true}); return; }
     const fr = nodeRect(fromNode);
     const isOut = portDragState.fromPort === 'out';
     const fx = isOut ? fr.x + fr.width : fr.x;
@@ -9303,14 +9358,20 @@ function updatePortDragVisual(){
     const sign = isOut ? 1 : -1;
     const path = ensurePortDragPathElement();
     if(path) path.setAttribute('d', `M${fx} ${fy} C ${fx + dx * sign} ${fy}, ${tx - dx * sign} ${ty}, ${tx} ${ty}`);
-    world.querySelectorAll('.node-port.is-active').forEach(el => el.classList.remove('is-active'));
-    world.querySelectorAll('.image-node.port-hover').forEach(el => el.classList.remove('port-hover'));
+    if(portDragState.activePortEl) portDragState.activePortEl.classList.remove('is-active');
+    if(portDragState.activeNodeEl) portDragState.activeNodeEl.classList.remove('port-hover');
+    portDragState.activePortEl = null;
+    portDragState.activeNodeEl = null;
     if(portDragState.hoverTargetId){
         const targetNodeEl = world.querySelector(`.image-node[data-id="${portDragState.hoverTargetId}"]`);
         targetNodeEl?.classList.add('port-hover');
         const roleSelector = portDragState.hoverRole ? `[data-input-role="${CSS.escape(portDragState.hoverRole)}"]` : '';
-        targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]${roleSelector}`)?.classList.add('is-active');
+        const targetPortEl = targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]${roleSelector}`);
+        targetPortEl?.classList.add('is-active');
+        portDragState.activeNodeEl = targetNodeEl || null;
+        portDragState.activePortEl = targetPortEl || null;
     }
+    perfEnd?.();
 }
 function handlePortDrop(drag, e){
     const {targetId, targetPort, targetRole, hit} = (() => {
@@ -14298,7 +14359,7 @@ function appendImagesToSmartNode(uploaded, targetId='', opts={}){
         const groupRect = targetGroup ? nodeRect(targetGroup) : null;
         const center = opts.point || (groupRect ? {x:groupRect.x + groupRect.width / 2, y:groupRect.y + groupRect.height / 2} : viewportCenter());
         undoSuppressed = true;
-        node = createImageNodeAt(center, []);
+        node = createImageNodeAt(center, [], {deferRender:true, deferSave:true, skipUndo:true, select:false});
         undoSuppressed = false;
     }
     const previousCount = (node.images || []).length;
@@ -18093,6 +18154,46 @@ smartArrangeMenuBtn?.addEventListener('click', e => {
     closeCreateMenu();
     arrangeSelectedSmartNodes();
 });
+let portDragMoveRaf = 0;
+let portDragLatestEvent = null;
+function processSmartPortDragMove(e){
+    if(!portDragState || !e) return;
+    const perfEnd = window.CanvasPerformance?.start?.('smart.portDragMove');
+    const p = screenToWorld(e);
+    portDragState.currentWorld = p;
+    portDragState.moved = true;
+    const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+    const portEl = hitEl?.closest?.('.node-port');
+    const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
+    let targetId = '', targetPort = '', targetRole = '';
+    if(nodeEl && nodeEl.dataset.id && nodeEl.dataset.id !== portDragState.fromId){
+        targetId = nodeEl.dataset.id;
+        if(portEl){
+            targetPort = portEl.dataset.port;
+            targetRole = portEl.dataset.inputRole || '';
+        } else {
+            const rect = nodeEl.getBoundingClientRect();
+            targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
+        }
+        const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
+        if(!compatible){ targetId = ''; targetPort = ''; targetRole = ''; }
+    }
+    portDragState.hoverTargetId = targetId;
+    portDragState.hoverPort = targetPort;
+    portDragState.hoverRole = targetRole;
+    updatePortDragVisual();
+    perfEnd?.();
+}
+function scheduleSmartPortDragMove(e){
+    portDragLatestEvent = e;
+    if(portDragMoveRaf) return;
+    portDragMoveRaf = requestAnimationFrame(() => {
+        portDragMoveRaf = 0;
+        const latest = portDragLatestEvent;
+        portDragLatestEvent = null;
+        processSmartPortDragMove(latest);
+    });
+}
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);
     if(smartMinimapDrag){
@@ -18102,29 +18203,7 @@ window.onmousemove = e => {
     }
     if(portDragState){
         e.preventDefault();
-        const p = screenToWorld(e);
-        portDragState.currentWorld = p;
-        portDragState.moved = true;
-        const hitEl = document.elementFromPoint(e.clientX, e.clientY);
-        const portEl = hitEl?.closest?.('.node-port');
-        const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
-        let targetId = '', targetPort = '', targetRole = '';
-        if(nodeEl && nodeEl.dataset.id && nodeEl.dataset.id !== portDragState.fromId){
-            targetId = nodeEl.dataset.id;
-            if(portEl){
-                targetPort = portEl.dataset.port;
-                targetRole = portEl.dataset.inputRole || '';
-            } else {
-                const rect = nodeEl.getBoundingClientRect();
-                targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
-            }
-            const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
-            if(!compatible){ targetId = ''; targetPort = ''; targetRole = ''; }
-        }
-        portDragState.hoverTargetId = targetId;
-        portDragState.hoverPort = targetPort;
-        portDragState.hoverRole = targetRole;
-        updatePortDragVisual();
+        scheduleSmartPortDragMove(e);
         return;
     }
     if(promptResizeState){
@@ -18191,7 +18270,7 @@ window.onmousemove = e => {
         return;
     }
     if(resizeState){
-        const node = nodes.find(n => n.id === resizeState.id);
+        const node = smartNodeIndex.get(resizeState.id);
         if(!node) return;
         const dx = (e.clientX - resizeState.startX) / viewport.scale;
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
@@ -18332,7 +18411,7 @@ window.onmousemove = e => {
         return;
     }
     if(!dragState) return;
-    const node = nodes.find(n => n.id === dragState.id);
+    const node = smartNodeIndex.get(dragState.id);
     if(!node) return;
     const moveDx = (e.clientX - dragState.startX) / viewport.scale;
     const moveDy = (e.clientY - dragState.startY) / viewport.scale;
@@ -18392,7 +18471,7 @@ window.onmouseup = e => {
         cropDrag = null;
     }
     if(resizeState){
-        const node = nodes.find(n => n.id === resizeState.id);
+        const node = smartNodeIndex.get(resizeState.id);
         const rect = node ? nodeRect(node) : null;
         const changed = rect && (Math.abs(rect.width - resizeState.startW) > 1 || Math.abs(rect.height - resizeState.startH) > 1);
         if(changed){

@@ -43,10 +43,70 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("canResolvePort(c.from, nodeIndex)", links)
         self.assertNotRegex(links, re.compile(r"nodes\.find\(node => node\.id === c\.to\)"))
 
+    def test_classic_links_keep_dom_elements_between_frames(self):
+        links = body(CANVAS_JS, "function renderLinks(){", "function renderKnifeTrail")
+        self.assertIn("classicLinkDom", links)
+        self.assertIn("classicLinkControlDom", links)
+        self.assertNotIn("linksEl.innerHTML = ''", links)
+        self.assertNotIn("linkControlsEl.innerHTML = ''", links)
+
     def test_classic_hover_does_not_sample_every_connection_on_large_canvases(self):
         hover = body(CANVAS_JS, "function updateConnectionHoverFromMouse(e){", "function isConnectionSelected")
         self.assertIn("e.target?.closest?.('.link-hit')", hover)
         self.assertIn("connections.length > 120", hover)
+
+    def test_classic_port_link_drag_is_frame_coalesced(self):
+        link = body(CANVAS_JS, "function startLink(e, originId", "function nearestPort")
+        self.assertIn("scheduleLinksRender();", link)
+        self.assertNotIn("tempLink.x2 = p.x;\n        tempLink.y2 = p.y;\n        renderLinks();", link)
+
+    def test_smart_port_drag_uses_raf_and_incremental_active_elements(self):
+        drag = body(SMART_CANVAS_JS, "function processSmartPortDragMove(e)", "function scheduleSmartPortDragMove")
+        visual = body(SMART_CANVAS_JS, "function updatePortDragVisual()", "function handlePortDrop")
+        self.assertIn("requestAnimationFrame", SMART_CANVAS_JS[SMART_CANVAS_JS.index("function scheduleSmartPortDragMove"):SMART_CANVAS_JS.index("window.onmousemove")])
+        self.assertIn("activePortEl", visual)
+        self.assertNotIn("querySelectorAll('.node-port.is-active')", visual)
+        self.assertIn("elementFromPoint", drag)
+
+    def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
+        dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")
+        self.assertLess(dragover.index("if(hasOutputMediaDrag"), dragover.index("if(hasImageDropData"))
+        self.assertIn("output-fast", dragover)
+
+    def test_output_drag_preview_is_static_and_not_media_clone(self):
+        preview = body(CANVAS_JS, "function setOutputDragPreview", "function setCanvasOutputDragData")
+        self.assertIn("固定尺寸的静态 ghost", preview)
+        self.assertIn("setDragImage(wrap, 48, 36)", preview)
+        self.assertNotIn("cloneNode()", preview)
+
+    def test_output_and_link_creation_use_node_patch_path(self):
+        output_create = body(CANVAS_JS, "function createMediaCardFromOutput", "function createImageCardFromOutput")
+        link = body(CANVAS_JS, "function startLink(e, originId", "function nearestPort")
+        self.assertIn("patchCanvasNodeCreates([node])", output_create)
+        self.assertIn("patchCanvasNodeCreates([], [toId])", link)
+        self.assertIn("patchCanvasNodeCreates([out])", link)
+        self.assertNotIn("render();", output_create)
+
+    def test_smart_output_drop_does_not_render_empty_node_before_appending_media(self):
+        create_node = body(SMART_CANVAS_JS, "function createNode(x, y", "function createPromptNode")
+        append = body(SMART_CANVAS_JS, "function appendImagesToSmartNode", "async function handleFiles")
+        self.assertIn("options.deferRender !== true", create_node)
+        self.assertIn("deferRender:true", append)
+        self.assertEqual(append.count("render();"), 1)
+
+    def test_large_scene_uses_node_indexes_and_content_visibility_lod(self):
+        self.assertIn("canvasNodeIndex = new Map", CANVAS_JS)
+        self.assertIn("canvas-large-scene", CANVAS_JS)
+        self.assertIn("smartNodeIndex = new Map", SMART_CANVAS_JS)
+        self.assertIn("smart-large-scene", SMART_CANVAS_JS)
+
+    def test_saves_are_idle_coalesced_and_serialization_is_measured(self):
+        classic_save = body(CANVAS_JS, "function scheduleSave()", "function scheduleViewportSave")
+        smart_save = body(SMART_CANVAS_JS, "function scheduleSave(delay=450)", "async function saveCanvas")
+        self.assertIn("requestIdleCallback", classic_save)
+        self.assertIn("requestIdleCallback", smart_save)
+        self.assertIn("classic.save.serialize", CANVAS_JS)
+        self.assertIn("smart.save.serialize", SMART_CANVAS_JS)
 
     def test_copy_paths_use_structured_clone_when_available(self):
         classic_copy = body(CANVAS_JS, "function copySelectedNodes(){", "function clipboardNodeCount")

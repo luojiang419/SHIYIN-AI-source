@@ -777,6 +777,7 @@ video.node-img { object-fit:cover; background:#1a1a1a; }
 .prompt-template-manage-groups i,.prompt-template-manage-groups svg { width:13px !important; height:13px !important; }
 .prompt-template-group-panel { border:1px solid var(--line); border-radius:13px; background:var(--card); padding:9px; display:flex; flex-direction:column; gap:8px; }
 .prompt-template-group-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.smart-group-title-input { width:100%; min-width:0; border:1px solid var(--strong); border-radius:6px; background:var(--panel); color:var(--text); padding:2px 6px; font:inherit; line-height:1.2; outline:none; }
 .prompt-template-group-title strong { display:block; color:var(--text); font-size:12px; line-height:1.2; }
 .prompt-template-group-title span { display:block; margin-top:2px; color:var(--muted); font-size:10px; font-weight:650; }
 .prompt-template-group-tools { display:flex; align-items:center; gap:6px; }

@@ -905,6 +905,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .output-node-menu .menu-btn span { white-space:nowrap; }
 .menu-section-title { padding:7px 10px 4px; color:var(--faint); font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; }
 .menu-divider { height:1px; margin:6px 0; background:var(--line); }
+.canvas-group-title-input { width:100%; min-width:0; border:1px solid var(--strong); border-radius:6px; background:var(--panel); color:var(--text); padding:2px 6px; font:inherit; line-height:1.2; outline:none; }
 .menu-submenu-host { position:relative; }
 .menu-submenu-trigger { justify-content:flex-start; }
 .menu-submenu-trigger .menu-submenu-chevron { width:14px; height:14px; margin-left:auto; transition:transform .16s ease; }

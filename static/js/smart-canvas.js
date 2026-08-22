@@ -6817,7 +6817,15 @@ function pasteAssetsFromInbox(){
 }
 function duplicateForAltDrag(node, preserveConnections=false){
     const ids = (isNodeSelected(node.id) ? selectedNodeIds() : [node.id]);
-    const sourceNodes = ids.map(id => nodes.find(n => n.id === id)).filter(Boolean);
+    const sourceNodes = [];
+    const sourceIds = new Set();
+    const collect = source => {
+        if(!source || sourceIds.has(source.id)) return;
+        sourceIds.add(source.id);
+        sourceNodes.push(source);
+        if(isSmartGroupNode(source)) (source.items || []).map(id => nodes.find(n => n.id === id)).forEach(collect);
+    };
+    ids.map(id => nodes.find(n => n.id === id)).filter(Boolean).forEach(collect);
     if(!sourceNodes.length) return node;
     pushUndo();
     const idMap = new Map();
@@ -6827,17 +6835,19 @@ function duplicateForAltDrag(node, preserveConnections=false){
         return copy;
     });
     copies.forEach(copy => {
+        if(Array.isArray(copy.items)) copy.items = copy.items.map(id => idMap.get(id) || id).filter(Boolean);
         if(Array.isArray(copy.inputNodeIds)){
-            copy.inputNodeIds = preserveConnections
-                ? copy.inputNodeIds.map(id => idMap.get(id) || id).filter(Boolean)
-                : [];
+            copy.inputNodeIds = copy.inputNodeIds
+                .filter(id => preserveConnections || idMap.has(id))
+                .map(id => idMap.get(id) || id).filter(Boolean);
         }
-        if(copy.sourceNodeId) copy.sourceNodeId = preserveConnections ? (idMap.get(copy.sourceNodeId) || copy.sourceNodeId) : '';
+        if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || (preserveConnections ? copy.sourceNodeId : '');
     });
-    if(preserveConnections){
+    const keepInternal = sourceNodes.some(isSmartGroupNode);
+    if(preserveConnections || keepInternal){
         const idSet = new Set(sourceNodes.map(n => n.id));
         const newConnections = (canvas.connections || [])
-            .filter(conn => idSet.has(conn.from) || idSet.has(conn.to))
+            .filter(conn => keepInternal ? (idSet.has(conn.from) && idSet.has(conn.to)) : (idSet.has(conn.from) || idSet.has(conn.to)))
             .map(conn => ({...conn, from:idMap.get(conn.from) || conn.from, to:idMap.get(conn.to) || conn.to}))
             .filter(conn => conn.from && conn.to && conn.from !== conn.to);
         const nextConnections = [...(canvas.connections || [])];
@@ -8416,6 +8426,38 @@ function runSmartGroupToolbarAction(nodeId, action){
         }
         return;
     }
+}
+function renameSmartGroup(group, titleEl){
+    if(!isSmartGroupNode(group) || !titleEl || titleEl.querySelector('input')) return;
+    const previous = String(group.title || '智能分组');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'smart-group-title-input';
+    input.value = previous;
+    input.maxLength = 80;
+    titleEl.textContent = '';
+    titleEl.appendChild(input);
+    let finished = false;
+    const finish = (commit=true) => {
+        if(finished) return;
+        finished = true;
+        const next = commit ? String(input.value || '').trim() : previous;
+        if(commit && next !== previous){
+            pushUndo();
+            group.title = next || '智能分组';
+            render();
+            scheduleSave();
+            toast('已重命名分组');
+        } else titleEl.textContent = next || '智能分组';
+    };
+    input.onkeydown = event => {
+        if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
+        else if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+    };
+    input.onblur = () => finish(true);
+    input.onmousedown = event => event.stopPropagation();
+    input.onclick = event => event.stopPropagation();
+    requestAnimationFrame(() => { input.focus(); input.select(); });
 }
 function nowMs(){ return Date.now(); }
 function formatRunDuration(ms){
@@ -10177,11 +10219,22 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
         const nodeForControls = nodeIndex.get(id);
+        const titleEl = el.querySelector('.node-title');
+        if(nodeForControls?.type === 'smart-group' && titleEl){
+            titleEl.title = '双击重命名分组';
+            titleEl.ondblclick = e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation?.();
+                renameSmartGroup(nodeForControls, titleEl);
+            };
+        }
         if(nodeForControls?.specialType) bindSmartSpecialNode(el, nodeForControls);
         if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-loop') bindLoopNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-group') {
             el.ondblclick = e => {
+                if(e.target.closest?.('.node-title')) return;
                 e.preventDefault();
                 e.stopPropagation();
                 selectedId = id;

@@ -8365,8 +8365,8 @@ function renderNode(node){
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
-    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
-    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
+    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
         : 0;
@@ -8582,9 +8582,20 @@ function renderNode(node){
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
+    const titleEl = el.querySelector('.node-title');
+    if(titleEl && node.type === 'group'){
+        titleEl.title = '双击重命名组';
+        titleEl.ondblclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            renameCanvasGroup(node, titleEl);
+        };
+    }
     el.querySelector('.node-head').onmousedown = e => {
         if(e.button !== 0) return;
         if(isNodeControl(e.target)) return;
+        if(node.type === 'group' && e.target.closest('.node-title')) return;
         if(node.type === 'group' && e.detail >= 2 && groupImageItems(node).length){
             e.preventDefault();
             e.stopPropagation();
@@ -16157,6 +16168,101 @@ function nodeBounds(ids){
     return {x:x1, y:y1, w:x2 - x1, h:y2 - y1};
 }
 
+const CANVAS_GROUP_ARRANGE_PADDING = 24;
+const CANVAS_GROUP_ARRANGE_GAP = 28;
+const CANVAS_GROUP_ARRANGE_HEADER = 58;
+
+// 将普通组内节点按网格重新排列，并让组背景板精确包住整理后的内容。
+// 保留节点当前的阅读顺序（先按原始行、再按原始列），避免整理后内容顺序突变。
+function arrangeCanvasGroupContents(groupId, options={}){
+    const group = nodes.find(node => node.id === groupId && node.type === 'group');
+    if(!group) return false;
+    const members = (group.items || [])
+        .map(id => nodes.find(node => node.id === id))
+        .filter(Boolean);
+    if(!members.length){
+        group.w = Math.max(300, Number(group.w) || 300);
+        group.h = Math.max(180, Number(group.h) || 180);
+        return false;
+    }
+    if(!options.skipUndo) pushUndo();
+    const ordered = members.slice().sort((a, b) => {
+        const ra = nodeRect(a), rb = nodeRect(b);
+        const dy = ra.y - rb.y;
+        return Math.abs(dy) > 24 ? dy : (ra.x - rb.x || String(a.id).localeCompare(String(b.id)));
+    });
+    const columns = Math.max(1, Math.ceil(Math.sqrt(ordered.length)));
+    const rows = Math.ceil(ordered.length / columns);
+    const colWidths = Array(columns).fill(0);
+    const rowHeights = Array(rows).fill(0);
+    ordered.forEach((node, index) => {
+        const rect = nodeRect(node);
+        colWidths[index % columns] = Math.max(colWidths[index % columns], rect.w);
+        rowHeights[Math.floor(index / columns)] = Math.max(rowHeights[Math.floor(index / columns)], rect.h);
+    });
+    const originX = Number(group.x) || 0;
+    const originY = Number(group.y) || 0;
+    const contentX = originX + CANVAS_GROUP_ARRANGE_PADDING;
+    const contentY = originY + CANVAS_GROUP_ARRANGE_HEADER;
+    const colX = [];
+    let cursorX = contentX;
+    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + CANVAS_GROUP_ARRANGE_GAP; });
+    const rowY = [];
+    let cursorY = contentY;
+    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + CANVAS_GROUP_ARRANGE_GAP; });
+    ordered.forEach((node, index) => {
+        moveCanvasNodeAtom(node, colX[index % columns], rowY[Math.floor(index / columns)]);
+    });
+    const contentWidth = colWidths.reduce((sum, width) => sum + width, 0) + CANVAS_GROUP_ARRANGE_GAP * Math.max(0, columns - 1);
+    const contentHeight = rowHeights.reduce((sum, height) => sum + height, 0) + CANVAS_GROUP_ARRANGE_GAP * Math.max(0, rows - 1);
+    group.w = Math.max(300, Math.round(contentWidth + CANVAS_GROUP_ARRANGE_PADDING * 2));
+    group.h = Math.max(180, Math.round(CANVAS_GROUP_ARRANGE_HEADER + contentHeight + CANVAS_GROUP_ARRANGE_PADDING));
+    return true;
+}
+
+function arrangeSelectedCanvasGroup(groupId){
+    if(!groupId) return;
+    if(!arrangeCanvasGroupContents(groupId)) return;
+    render();
+    scheduleSave();
+    setStatus('已整理组内节点');
+}
+
+function renameCanvasGroup(group, titleEl){
+    if(!group || group.type !== 'group' || !titleEl || titleEl.querySelector('input')) return;
+    const previous = String(group.title || 'Group');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'canvas-group-title-input';
+    input.value = previous;
+    input.maxLength = 80;
+    titleEl.textContent = '';
+    titleEl.appendChild(input);
+    let committed = false;
+    const finish = (commit=true) => {
+        if(committed) return;
+        committed = true;
+        const next = commit ? String(input.value || '').trim() : previous;
+        if(commit && next !== previous){
+            pushUndo();
+            group.title = next || 'Group';
+            render();
+            scheduleSave();
+            setStatus('已重命名组');
+            return;
+        }
+        titleEl.textContent = next || 'Group';
+    };
+    input.onkeydown = event => {
+        if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
+        else if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+    };
+    input.onblur = () => finish(true);
+    input.onmousedown = event => event.stopPropagation();
+    input.onclick = event => event.stopPropagation();
+    requestAnimationFrame(() => { input.focus(); input.select(); });
+}
+
 function startSelection(e){
     e.preventDefault();
     e.stopPropagation();
@@ -16904,7 +17010,7 @@ function renderSelectionHub(){
         anchor = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .image-preview-wrap`);
         if(anchor) target = {kind:'node', mediaKind:mediaKindForNode(node), nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)};
     }
-    if(!target && node.type === 'group' && groupImageItems(node).length){
+    if(!target && node.type === 'group'){
         anchor = nodesEl.querySelector(`.group-node[data-id="${CSS.escape(node.id)}"]`);
         if(anchor) target = {kind:'group', nodeId:node.id, name:'GROUP'};
     }
@@ -16913,6 +17019,7 @@ function renderSelectionHub(){
         return;
     }
     const actions = target.kind === 'group' ? [
+        {id:'arrange-group', label:'整理组内节点', icon:'layout-grid'},
         {id:'batchGenerator', label:'批量处理', icon:'layers-3'},
         {id:'expand-canvas', label:langIsEn() ? 'Expand canvas' : '扩展画幅', icon:'expand'},
         {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'},
@@ -17012,6 +17119,10 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'arrange-group' && target?.kind === 'group'){
+        arrangeSelectedCanvasGroup(target.nodeId);
+        return;
+    }
     if(action === 'batchGenerator' && target?.kind === 'group'){
         if(!sourceNode) return;
         pushUndo();
@@ -17129,43 +17240,43 @@ function cloneNode(n, dx, dy){
     return copy;
 }
 function duplicateNodesForAltDrag(node, preserveConnections=false){
-    const copy = cloneNode(node, 0, 0);
-    const sourceIds = new Set([node.id]);
-    const idMap = new Map([[node.id, copy.id]]);
-    const copies = [copy];
-    const isGroup = node.type === 'group' || node.type === 'promptGroup';
-    if(isGroup && node.items?.length){
-        const childCopies = node.items
-            .map(id => nodes.find(n => n.id === id))
-            .filter(Boolean)
-            .map(child => {
-                const childCopy = cloneNode(child, 0, 0);
-                sourceIds.add(child.id);
-                idMap.set(child.id, childCopy.id);
-                copies.push(childCopy);
-                return childCopy;
-            });
-        copy.items = copy.items.map(id => idMap.get(id) || id);
-        nodes.push(...childCopies, copy);
-    } else {
-        nodes.push(copy);
-    }
-    if(preserveConnections){
-        const copiedConnections = (connections || [])
-            .filter(conn => sourceIds.has(conn.from) || sourceIds.has(conn.to))
-            .map(conn => ({
-                ...conn,
-                id:uid('c'),
-                from:idMap.get(conn.from) || conn.from,
-                to:idMap.get(conn.to) || conn.to
-            }))
-            .filter(conn => conn.from && conn.to && conn.from !== conn.to);
-        copiedConnections.forEach(conn => {
-            if(canConnect(conn.from, conn.to, conn.inputRole || '') && !connections.some(c => c.from === conn.from && c.to === conn.to && (c.inputRole || '') === (conn.inputRole || ''))){
-                connections.push(conn);
-            }
-        });
-    }
+    const sourceIds = new Set();
+    const idMap = new Map();
+    const copies = [];
+    const collect = source => {
+        if(!source || sourceIds.has(source.id)) return null;
+        sourceIds.add(source.id);
+        const copy = cloneNode(source, 0, 0);
+        idMap.set(source.id, copy.id);
+        copies.push(copy);
+        if(source.type === 'group' || source.type === 'promptGroup'){
+            copy.items = (source.items || []).map(itemId => {
+                const child = nodes.find(item => item.id === itemId);
+                const childCopy = collect(child);
+                return childCopy?.id || itemId;
+            }).filter(Boolean);
+        }
+        return copy;
+    };
+    const copy = collect(node);
+    if(!copy) return node;
+    nodes.push(...copies);
+    // 组复制必须保留组内连线；Shift 仍可额外复制与组外节点相连的连线。
+    const shouldCopyConnection = conn => {
+        const fromInside = sourceIds.has(conn.from), toInside = sourceIds.has(conn.to);
+        return (node.type === 'group' || node.type === 'promptGroup')
+            ? (preserveConnections ? (fromInside || toInside) : (fromInside && toInside))
+            : (preserveConnections && (fromInside || toInside));
+    };
+    const copiedConnections = (connections || [])
+        .filter(shouldCopyConnection)
+        .map(conn => ({...conn, id:uid('c'), from:idMap.get(conn.from) || conn.from, to:idMap.get(conn.to) || conn.to}))
+        .filter(conn => conn.from && conn.to && conn.from !== conn.to);
+    copiedConnections.forEach(conn => {
+        if(canConnect(conn.from, conn.to, conn.inputRole || '') && !connections.some(c => c.from === conn.from && c.to === conn.to && (c.inputRole || '') === (conn.inputRole || ''))){
+            connections.push(conn);
+        }
+    });
     return copy;
 }
 function copySelectedNodes(){
@@ -17855,14 +17966,67 @@ function canvasArrangeCategory(node){
     if(['image','group'].includes(type)) return {rank:0, key:'media'};
     return {rank:2, key:'process'};
 }
+function canvasArrangeFlowComponents(ids){
+    const atomicIds = [...new Set((ids || []).filter(id => nodes.some(node => node.id === id)))];
+    if(!atomicIds.length) return [];
+    const idSet = new Set(atomicIds);
+    const parentById = new Map(atomicIds.map(id => [id, id]));
+    const find = id => {
+        let current = id;
+        while(parentById.get(current) !== current){
+            parentById.set(current, parentById.get(parentById.get(current)));
+            current = parentById.get(current);
+        }
+        return current;
+    };
+    const union = (a, b) => {
+        const ra = find(a), rb = find(b);
+        if(ra !== rb) parentById.set(rb, ra);
+    };
+    // 选中的是组成员时，连线要提升到所属组，避免同一条流被拆开。
+    const scopeById = new Map();
+    nodes.filter(node => node.type === 'group' || node.type === 'promptGroup').forEach(group => {
+        if(!idSet.has(group.id)) return;
+        scopeById.set(group.id, group.id);
+        (group.items || []).forEach(itemId => { if(idSet.has(itemId)) scopeById.set(itemId, group.id); });
+    });
+    connections.forEach(connection => {
+        const from = scopeById.get(connection.from) || connection.from;
+        const to = scopeById.get(connection.to) || connection.to;
+        if(idSet.has(from) && idSet.has(to)) union(from, to);
+    });
+    const components = new Map();
+    atomicIds.forEach(id => {
+        const root = find(id);
+        if(!components.has(root)) components.set(root, []);
+        components.get(root).push(id);
+    });
+    return [...components.values()].sort((a, b) => {
+        const ra = nodeRect(nodes.find(node => node.id === a[0]));
+        const rb = nodeRect(nodes.find(node => node.id === b[0]));
+        return ra.y - rb.y || ra.x - rb.x;
+    });
+}
+
+function canvasArrangeBounds(ids){
+    const rects = (ids || []).map(id => nodes.find(node => node.id === id)).filter(Boolean).map(nodeRect);
+    if(!rects.length) return null;
+    const x = Math.min(...rects.map(rect => rect.x));
+    const y = Math.min(...rects.map(rect => rect.y));
+    const right = Math.max(...rects.map(rect => rect.x + rect.w));
+    const bottom = Math.max(...rects.map(rect => rect.y + rect.h));
+    return {x, y, w:right - x, h:bottom - y, right, bottom};
+}
+
 function arrangeIdsByConnections(ids){
+    const options = arguments[1] || {};
     const idSet = new Set(canvasArrangeAtomicIds(ids));
     const selectedNodes = [...idSet].map(id => nodes.find(n => n.id === id)).filter(Boolean);
     if(selectedNodes.length < 2) return false;
     const rectById = new Map(selectedNodes.map(n => [n.id, nodeRect(n)]));
     const rects = selectedNodes.map(n => ({node:n, rect:rectById.get(n.id), category:canvasArrangeCategory(n)}));
-    const startX = Math.min(...rects.map(item => item.rect.x));
-    const startY = Math.min(...rects.map(item => item.rect.y));
+    const startX = Number.isFinite(Number(options.originX)) ? Number(options.originX) : Math.min(...rects.map(item => item.rect.x));
+    const startY = Number.isFinite(Number(options.originY)) ? Number(options.originY) : Math.min(...rects.map(item => item.rect.y));
     const buckets = new Map();
     rects.forEach(item => {
         const bucketKey = `${item.category.rank}:${item.category.key}`;
@@ -17904,7 +18068,24 @@ function arrangeSelectedCanvasNodes(){
     const ids = canvasArrangeAtomicIds(explicit.length > 1 ? explicit : connectedClusterIds(explicit[0]));
     if(ids.length < 2) return;
     pushUndo();
-    if(!arrangeIdsByConnections(ids)) return;
+    const components = canvasArrangeFlowComponents(ids);
+    if(!components.length) return;
+    const originalBounds = canvasArrangeBounds(ids);
+    const baseX = originalBounds?.x ?? 0;
+    let nextY = originalBounds?.y ?? 0;
+    let arranged = false;
+    components.forEach(component => {
+        if(component.length < 2){
+            // 单节点组件也要参与整体排布，避免被另一条流覆盖。
+            const node = nodes.find(item => item.id === component[0]);
+            if(node) moveCanvasNodeAtom(node, baseX, nextY);
+        } else if(arrangeIdsByConnections(component, {originX:baseX, originY:nextY})) {
+            arranged = true;
+        }
+        const bounds = canvasArrangeBounds(component);
+        if(bounds) nextY = bounds.bottom + 120;
+    });
+    if(!arranged && components.length < 2) return;
     render();
     scheduleSave();
 }

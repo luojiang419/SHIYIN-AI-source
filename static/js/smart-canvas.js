@@ -1542,7 +1542,8 @@ function createMultiViewNode(point, sourceNode=null){
         id:uid('multi-view'), type:'smart-image', specialType:'multi-view',
         x:baseX, y:baseY, w:700, h:780, title:'创建三视图', images:[],
         runSettings:settingsForStorage(normalizeSmartMultiViewSettings(sourceNode ? smartSettingsForNode(sourceNode) : settings)),
-        multiViewStatus:'idle', multiViewInputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+        multiViewMode:'person', multiViewStatus:'idle', multiViewInputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now(),
+        buildingPrompt:'', buildingStage:'idle', buildingOutputs:[]
     };
     nodes.push(node);
     if(sourceNode?.id) connectInputNode(sourceNode.id, node.id, 'model-front');
@@ -1572,12 +1573,28 @@ function createSmartBatchGeneratorNode(sourceNode=null, point=null){
     scheduleSave();
     return node;
 }
-const MULTI_VIEW_INPUT_SLOTS = [
+const MULTI_VIEW_INPUT_SLOTS = window.CanvasBuildingMultiView?.PERSON_INPUT_SLOTS || [
     ['model-front', '模特正面', true], ['model-side', '模特侧面', true], ['model-back', '模特背面', true],
     ['product-upper-front', '上装正面', true], ['product-upper-side', '上装侧面', true], ['product-upper-back', '上装背面', true],
     ['product-lower-front', '下装正面', true], ['product-lower-side', '下装侧面', true], ['product-lower-back', '下装背面', true],
     ['front-detail', '正面细节', true], ['back-detail', '背面细节', true], ['accessory', '配饰', true]
 ];
+const BUILDING_MULTI_VIEW_INPUT_SLOTS = window.CanvasBuildingMultiView?.BUILDING_INPUT_SLOTS || [
+    ['building-sketch','线稿图','image'], ['building-front','建筑正面','image'], ['building-side','建筑侧视图','image'],
+    ['building-back','建筑背视图','image'], ['building-top','建筑顶视图','image'], ['building-prompt','提示词','prompt']
+];
+const ALL_MULTI_VIEW_INPUT_SLOTS = [...MULTI_VIEW_INPUT_SLOTS, ...BUILDING_MULTI_VIEW_INPUT_SLOTS];
+function smartMultiViewMode(node){
+    return window.CanvasBuildingMultiView?.mode(node) || (node?.multiViewMode === 'building' ? 'building' : 'person');
+}
+function smartMultiViewInputSlots(node){
+    return smartMultiViewMode(node) === 'building' ? BUILDING_MULTI_VIEW_INPUT_SLOTS : MULTI_VIEW_INPUT_SLOTS;
+}
+function normalizeSmartMultiViewNode(node){
+    window.CanvasBuildingMultiView?.normalizeNode(node);
+    if(node && !node.multiViewMode) node.multiViewMode = 'person';
+    return node;
+}
 const MULTI_VIEW_LEGACY_ROLE_ALIASES = new Map([
     ['product-front', ['product-upper-front', 'product-lower-front']],
     ['product-side', ['product-upper-side', 'product-lower-side']],
@@ -1585,7 +1602,7 @@ const MULTI_VIEW_LEGACY_ROLE_ALIASES = new Map([
 ]);
 const MULTI_VIEW_MULTI_INPUT_ROLES = new Set(['front-detail', 'back-detail', 'accessory']);
 function multiViewRoleTargets(role){
-    if(MULTI_VIEW_INPUT_SLOTS.some(item => item[0] === role)) return [role];
+    if(ALL_MULTI_VIEW_INPUT_SLOTS.some(item => item[0] === role)) return [role];
     return MULTI_VIEW_LEGACY_ROLE_ALIASES.get(role) || [];
 }
 function migrateSmartMultiViewConnections(){
@@ -1605,11 +1622,13 @@ function migrateSmartMultiViewConnections(){
     return changed;
 }
 function multiViewRoleRatio(role){
-    const index = MULTI_VIEW_INPUT_SLOTS.findIndex(item => item[0] === (multiViewRoleTargets(role)[0] || role));
-    return index >= 0 ? (index + 1) / (MULTI_VIEW_INPUT_SLOTS.length + 1) : 0.5;
+    const resolvedRole = multiViewRoleTargets(role)[0] || role;
+    const slots = resolvedRole.startsWith('building-') ? BUILDING_MULTI_VIEW_INPUT_SLOTS : MULTI_VIEW_INPUT_SLOTS;
+    const index = slots.findIndex(item => item[0] === resolvedRole);
+    return index >= 0 ? (index + 1) / (slots.length + 1) : 0.5;
 }
 function multiViewConnections(node){
-    const result = new Map(MULTI_VIEW_INPUT_SLOTS.map(([role]) => [role, []]));
+    const result = new Map(smartMultiViewInputSlots(node).map(([role]) => [role, []]));
     (canvas?.connections || []).filter(conn => conn.to === node?.id && (conn.kind || 'flow') === 'input').forEach(conn => {
         const roles = multiViewRoleTargets(conn.inputRole || '');
         const source = nodes.find(item => item.id === conn.from);
@@ -1621,17 +1640,23 @@ function multiViewConnections(node){
     return result;
 }
 function multiViewBodyHtml(node){
+    normalizeSmartMultiViewNode(node);
+    const buildingMode = smartMultiViewMode(node) === 'building';
+    const inputSlots = smartMultiViewInputSlots(node);
     const runSettings = smartMultiViewSettingsForNode(node);
     const inputs = multiViewConnections(node);
-    const outputNames = ['纯三视图横板', '独立细节图', '正面视图', '侧面视图', '背面视图'];
-    const outputs = (node.multiViewOutputs || node.images || []).map(item => item?.url ? item : null);
+    const outputNames = buildingMode ? ['线稿图', '建筑正面', '建筑侧视图', '建筑背视图', '建筑顶视图'] : ['纯三视图横板', '独立细节图', '正面视图', '侧面视图', '背面视图'];
+    const outputs = (buildingMode ? (node.buildingOutputs || []) : (node.multiViewOutputs || node.images || [])).map(item => item?.url ? item : null);
     const outputCount = outputs.filter(Boolean).length;
-    const status = node.multiViewStatus === 'running' ? `正在生成 ${Math.max(0, 5 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputCount >= 5 ? '5 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
-    const groupLabel = role => role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰';
-    const slots = MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index) => {
-        const count = inputs.get(role)?.length || 0;
-        const detail = count ? `${count} 张已连接` : (optional ? '可选输入' : '待连接');
-        return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : optional ? 'circle-dashed' : 'circle-plus'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
+    const status = buildingMode
+        ? (node.buildingStage === 'error' ? (node.multiViewError || '生成失败，可重试') : outputCount ? `建筑资产已准备 ${outputCount}/5` : '连接建筑参考图，或输入建筑需求后点击生成')
+        : node.multiViewStatus === 'running' ? `正在生成 ${Math.max(0, 5 - outputCount)} 张资产…` : node.multiViewStatus === 'error' ? (node.multiViewError || '生成失败，可重试') : outputCount >= 5 ? '5 张资产已生成' : '连接任意一张模特或产品图片后点击生成';
+    const groupLabel = role => window.CanvasBuildingMultiView?.groupLabel(role) || (role.startsWith('model-') ? '模特主体' : role.startsWith('product-upper-') ? '上装' : role.startsWith('product-lower-') ? '下装' : '细节与配饰');
+    const slots = inputSlots.map(([role, label, kind], index) => {
+        const connectionCount = (canvas?.connections || []).filter(connection => connection.to === node.id && connection.inputRole === role && (connection.kind || 'flow') === 'input').length;
+        const count = kind === 'prompt' ? connectionCount : (inputs.get(role)?.length || 0);
+        const detail = count ? (kind === 'prompt' ? '提示词已连接' : `${count} 张已连接`) : '可选输入';
+        return `<div class="multi-view-slot-row" data-input-role="${escapeAttr(role)}" data-port-index="${index}"><span><small class="multi-view-slot-group">${escapeHtml(groupLabel(role))}</small><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${escapeHtml(label)}</strong></span><b class="${count ? 'has-input' : ''}">${escapeHtml(detail)}</b></div>`;
     }).join('');
     const outputPreview = outputs.some(Boolean) || node.multiViewStatus === 'running' ? `<div class="multi-view-output-grid">${Array.from({length:5}, (_, index) => {
         const item = outputs[index];
@@ -1640,9 +1665,14 @@ function multiViewBodyHtml(node){
             ? `<div class="multi-view-output-item"><img src="${escapeAttr(displayMediaUrl(item))}" alt="${escapeAttr(label)}" loading="lazy"><span>${escapeHtml(label)}</span></div>`
             : `<div class="multi-view-output-item multi-view-output-placeholder">${node.multiViewStatus === 'running' ? '<div class="multi-view-placeholder-spinner"></div>' : '<i data-lucide="circle-alert"></i>'}<span>${escapeHtml(node.multiViewStatus === 'running' ? '正在生成…' : '生成失败')}</span></div>`;
     }).join('')}</div>` : '';
+    const promptEditor = buildingMode ? `<label class="building-prompt"><span>建筑风格需求</span><textarea data-building-prompt placeholder="建筑类型、年代、材质、环境、真实感要求">${escapeHtml(node.buildingPrompt || '')}</textarea></label>` : '';
+    const summary = buildingMode
+        ? '<div><strong>建筑多视图</strong><small>线稿锚定 · 四向建筑勘景资产</small></div><span>6 个输入 · 5 个输出槽</span>'
+        : '<div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 5 张输出</span>';
     return `<div class="special-node multi-view-special" data-special-node="multi-view">
-        <div class="multi-view-summary"><div><strong>多视图节点</strong><small>输入端口按「模特 / 上装 / 下装 / 细节」对应</small></div><span>12 个输入 · 5 张输出</span></div>
+        <div class="multi-view-summary">${summary}</div>
         <div class="multi-view-input-list">${slots}</div>
+        ${promptEditor}
         ${outputPreview}
         <div class="multi-view-settings gen-settings">
             <div class="gen-settings-row">
@@ -1656,10 +1686,10 @@ function multiViewBodyHtml(node){
                 <select class="select-lite" data-multi-view-quality aria-label="生成质量">
                     ${['auto','low','medium','high'].map(value => `<option value="${value}" ${runSettings.quality === value ? 'selected' : ''}>Q ${value === 'medium' ? 'med' : value}</option>`).join('')}
                 </select>
-                <span class="multi-view-fixed-output">固定输出 1×16:9 + 1×3:4 + 3×9:16</span>
+                <span class="multi-view-fixed-output">${buildingMode ? '线稿 + 正 / 侧 / 背 / 顶' : '固定输出 1×16:9 + 1×3:4 + 3×9:16'}</span>
             </div>
         </div>
-        <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : '生成三视图'}</span></button></div>
+        <div class="special-output-row multi-view-run-row"><span data-edit-status>${escapeHtml(status)}</span><button type="button" class="special-primary" data-special-action="run-multi-view" ${node.multiViewStatus === 'running' ? 'disabled' : ''}><i data-lucide="${node.multiViewStatus === 'running' ? 'loader-2' : 'sparkles'}"></i><span>${node.multiViewStatus === 'running' ? '生成中' : buildingMode ? '生成多视图' : '生成三视图'}</span></button></div>
     </div>`;
 }
 function smartBatchInputRefs(node){
@@ -6706,6 +6736,8 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
     });
     conns.forEach(conn => {
         const kind = conn.kind || 'flow';
+        const targetNode = nodeIndex.get(conn.to);
+        if(targetNode?.specialType === 'multi-view' && !smartMultiViewInputSlots(targetNode).some(([role]) => role === (conn.inputRole || ''))) return;
         const fromScope = kind === 'history' ? '' : (groupScopeByNodeId.get(conn.from) || '');
         const toScope = kind === 'history' ? '' : (groupScopeByNodeId.get(conn.to) || '');
         // 同一分组内部的连线（成员↔成员、成员↔分组本体）属于内部关系，入组后隐藏，保持整洁。
@@ -8312,6 +8344,7 @@ function render(){
         .slice()
         .sort((a, b) => (isSmartGroupNode(a) ? 0 : 1) - (isSmartGroupNode(b) ? 0 : 1))
         .map(node => {
+        if(node.specialType === 'multi-view') normalizeSmartMultiViewNode(node);
         const imgs = node.images || [];
         const generationSlots = smartGenerationSlots(node);
         const displayCount = generationSlots.length || imgs.length;
@@ -8337,9 +8370,10 @@ function render(){
         const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
+        const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
         const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
         const html = `<div class="image-node ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
-            <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${deleteBtn}</div></div>
+            <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
             ${runTimePillHtml(node)}
@@ -8347,7 +8381,7 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
             ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? MULTI_VIEW_INPUT_SLOTS.map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+            ${node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         return {node, html};
@@ -9229,6 +9263,10 @@ function multiViewPromptFor(view, refs, outputKind='view', referencePlan=[]){
 }
 async function generateSmartMultiView(node){
     if(!node || node.specialType !== 'multi-view' || node.multiViewStatus === 'running') return;
+    if(smartMultiViewMode(node) === 'building'){
+        toast('建筑多视图生成链路正在初始化，请完成当前版本更新后重试');
+        return;
+    }
     const refs = multiViewInputRefs(node);
     if(!refs.modelAny && !refs.productAny){ toast('请至少连接一张模特或产品图片'); return; }
     const base = smartMultiViewSettingsForNode(node);
@@ -9403,6 +9441,24 @@ function bindSmartSpecialNode(el, node){
         return;
     }
     if(node?.specialType === 'multi-view'){
+        el.querySelectorAll('[data-multi-view-mode]').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const nextMode = button.dataset.multiViewMode || 'person';
+            if(smartMultiViewMode(node) === nextMode || window.CanvasBuildingMultiView?.isBusy(node)) return;
+            pushUndo();
+            if(!window.CanvasBuildingMultiView?.setMode(node, nextMode)) return;
+            render();
+            scheduleSave();
+        }));
+        const buildingPrompt = el.querySelector('[data-building-prompt]');
+        buildingPrompt?.addEventListener('input', event => {
+            event.stopPropagation();
+            node.buildingPrompt = event.target.value;
+            node.buildingStage = 'idle';
+            node.multiViewError = '';
+            scheduleSave();
+        });
         el.querySelector('[data-special-action="run-multi-view"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             generateSmartMultiView(node);
@@ -9411,7 +9467,7 @@ function bindSmartSpecialNode(el, node){
         const model = el.querySelector('[data-multi-view-model]');
         const resolution = el.querySelector('[data-multi-view-resolution]');
         const quality = el.querySelector('[data-multi-view-quality]');
-        [provider, model, resolution, quality].filter(Boolean).forEach(control => {
+        [provider, model, resolution, quality, buildingPrompt].filter(Boolean).forEach(control => {
             control.addEventListener('mousedown', event => event.stopPropagation());
             control.addEventListener('click', event => event.stopPropagation());
         });
@@ -13611,8 +13667,11 @@ function connectInputNode(fromId, toId, inputRole=''){
         if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.specialType === 'multi-view'){
-        if(!MULTI_VIEW_INPUT_SLOTS.some(item => item[0] === inputRole)) return false;
-        if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
+        if(!smartMultiViewInputSlots(to).some(item => item[0] === inputRole)) return false;
+        if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
+            const hasPrompt = from.type === 'smart-prompt' || (isSmartGroupNode(from) && promptTextItemsForNode(from).some(Boolean));
+            if(!hasPrompt) return false;
+        } else if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.type === 'smart-loop'){
         const groupImages = isSmartGroupNode(from) ? imagesForNode(from).filter(img => img?.url) : [];

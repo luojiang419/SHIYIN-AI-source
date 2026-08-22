@@ -151,8 +151,10 @@ def test_classic_multi_view_keeps_results_only_in_output_node_and_locks_controls
 
 
 def test_multi_view_uses_single_column_rows_for_port_alignment():
-    assert "MULTI_VIEW_INPUT_SLOTS.map(([role, label, optional], index)" in SMART_JS
-    assert "CLASSIC_MULTI_VIEW_INPUT_SLOTS.map(([role, label], index)" in CANVAS_JS
+    assert "inputSlots.map(([role, label, kind], index)" in SMART_JS
+    assert "inputSlots.map(([role, label, kind], index)" in CANVAS_JS
+    assert "smartMultiViewInputSlots(node).map(([role, label], index)" in SMART_JS
+    assert "classicMultiViewInputSlots(node).map(([role, label], index)" in CANVAS_JS
     assert "style=\"--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px\"" in SMART_JS
     assert "style=\"--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px\"" in CANVAS_JS
     assert ".multi-view-input-list,.classic-multi-view-input-list{display:flex;flex-direction:column" in MULTI_VIEW_CSS

@@ -2684,6 +2684,60 @@ function moveSmartNodeAtom(node, x, y){
     const dy = Math.round(y - (Number(node.y) || 0));
     translateSmartNodeWithMembers(node, dx, dy);
 }
+// 同一拓扑层的节点数量较多时使用近似 4:3 的网格，避免输入节点被排成一条很长的单列。
+// 完全平方数保留正方形（4=2x2、9=3x3），其余数量按更适合画布阅读的宽布局取整。
+function smartArrangeGridShape(count){
+    const total = Math.max(1, Math.floor(Number(count) || 1));
+    const square = Math.sqrt(total);
+    if(Number.isInteger(square)) return {columns:square, rows:square};
+    const columns = Math.max(1, Math.ceil(Math.sqrt(total * 4 / 3)));
+    return {columns, rows:Math.ceil(total / columns)};
+}
+
+function arrangeSmartLayerItems(items, rectById, startX, startY){
+    const ordered = (items || []).filter(Boolean);
+    if(!ordered.length) return {width:0, height:0};
+    // 少量节点保持原有单列排版；只有输入节点明显增多时才切换网格。
+    if(ordered.length < 4){
+        let layerY = startY;
+        let layerWidth = 0;
+        ordered.forEach(item => {
+            const rect = rectById.get(item.id) || nodeRect(item);
+            moveSmartNodeAtom(item, startX, layerY);
+            layerWidth = Math.max(layerWidth, Math.max(180, rect.width || 0));
+            layerY += Math.max(110, rect.height || 0) + 52;
+        });
+        return {width:layerWidth, height:Math.max(0, layerY - startY - 52)};
+    }
+    const shape = smartArrangeGridShape(ordered.length);
+    const columns = Math.max(1, shape.columns);
+    const rows = Math.max(1, shape.rows);
+    const colWidths = Array(columns).fill(0);
+    const rowHeights = Array(rows).fill(0);
+    ordered.forEach((item, index) => {
+        const rect = rectById.get(item.id) || nodeRect(item);
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        colWidths[col] = Math.max(colWidths[col], Math.max(180, rect.width || 0));
+        rowHeights[row] = Math.max(rowHeights[row], Math.max(110, rect.height || 0));
+    });
+    const colGap = 160;
+    const rowGap = 52;
+    const colX = [];
+    let cursorX = startX;
+    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + colGap; });
+    const rowY = [];
+    let cursorY = startY;
+    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + rowGap; });
+    ordered.forEach((item, index) => {
+        moveSmartNodeAtom(item, colX[index % columns], rowY[Math.floor(index / columns)]);
+    });
+    return {
+        width:Math.max(0, colWidths.reduce((sum, width) => sum + width, 0) + colGap * Math.max(0, columns - 1)),
+        height:Math.max(0, rowHeights.reduce((sum, height) => sum + height, 0) + rowGap * Math.max(0, rows - 1))
+    };
+}
+
 function arrangeSmartIdsByConnections(ids){
     const idSet = new Set(smartArrangeAtomicIds(ids));
     const selectedNodes = [...idSet].map(id => nodes.find(n => n.id === id)).filter(Boolean);
@@ -2745,13 +2799,11 @@ function arrangeSmartIdsByConnections(ids){
     let layerX = startX;
     [...layers.keys()].sort((a, b) => a - b).forEach(level => {
         const items = layers.get(level).sort((a, b) => compareIds(a.id, b.id));
+        // 保留原有层宽/起始行的测量语义，网格辅助函数在此基础上扩展列布局。
         const layerWidth = Math.max(...items.map(item => Math.max(180, rectById.get(item.id)?.width || 0)));
         let layerY = startY;
-        items.forEach(item => {
-            moveSmartNodeAtom(item, layerX, layerY);
-            layerY += Math.max(110, rectById.get(item.id)?.height || 0) + rowGap;
-        });
-        layerX += layerWidth + columnGap;
+        const layerLayout = arrangeSmartLayerItems(items, rectById, layerX, startY);
+        layerX += Math.max(layerWidth, layerLayout.width) + columnGap;
     });
     return true;
 }

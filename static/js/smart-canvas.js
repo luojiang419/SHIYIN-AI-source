@@ -1469,6 +1469,12 @@ function filmSmartAssets(node){
         return imagesForNode(source).map(ref => ({ref,role:connection.inputRole || ''}));
     });
 }
+function filmSmartImageProviderId(node){
+    const providers=imageProviders();
+    return providers.some(provider => provider.id === node?.apiProvider)
+        ? node.apiProvider
+        : (providers[0]?.id || '');
+}
 function filmSmartProviderOptions(node){
     const providers=videoApiProviders();
     const selected=node.apiProvider || providers[0]?.id || 'comfly';
@@ -1480,10 +1486,10 @@ function filmSmartModelOptions(node){
     return [...new Set([selected,...models].filter(Boolean))].map(model => `<option value="${escapeAttr(model)}" ${model===selected?'selected':''}>${escapeHtml(model)}</option>`).join('');
 }
 function filmSmartImageProviderOptions(node){
-    return smartMultiViewProviderOptions(node.apiProvider || imageProviders()[0]?.id || '');
+    return smartMultiViewProviderOptions(filmSmartImageProviderId(node));
 }
 function filmSmartImageModelOptions(node){
-    const providerId=node.apiProvider || imageProviders()[0]?.id || '';
+    const providerId=filmSmartImageProviderId(node);
     return smartMultiViewModelOptions(providerId,node.model || '');
 }
 function createFilmNode(type, point){
@@ -1515,7 +1521,7 @@ async function runSmartFilmNode(node){
     node.running=true; node.runError=''; render();
     try {
         if(node.specialType === 'film-storyboard'){
-            const imageProvider=node.apiProvider || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
+            const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
             const imageModels=providerImageModels(imageProvider);
             const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || settingsForNodeRun.ratio || '16:9',resolution:node.resolution || settingsForNodeRun.resolution || '2k',quality:node.quality || settingsForNodeRun.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
             const created=await runApiGeneration(built.prompt,built.refs,imageSettings);
@@ -8148,7 +8154,7 @@ function smartGroupBodyHtml(node){
     </div>`;
 }
 function nodeBodyHtml(node, layout){
-    if(node.specialType === 'film-storyboard' || node.specialType === 'film-video') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
+    if(node.specialType === 'film-storyboard' || node.specialType === 'film-video') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,imageProviderOptions:filmSmartImageProviderOptions,imageModelOptions:filmSmartImageModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
     if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">姿势参考节点加载失败</div>';

@@ -8262,6 +8262,7 @@ function filmNodeProviderOptions(node){
     return videoProviderOptions(node.apiProvider || videoApiProviders()[0]?.id || 'comfly');
 }
 function filmNodeModelOptions(node){
+    if(isKlingVideoNode(node)) ensureKlingCapabilities();
     return videoModelOptionsForNode(node);
 }
 function filmNodeImageProviderOptions(node){

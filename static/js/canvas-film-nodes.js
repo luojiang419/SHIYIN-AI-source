@@ -156,8 +156,9 @@
     function inputSlotHtml(node, port, options={}){
         const assets = options.assets?.(node) || [];
         const count = assets.filter(item => String(item?.role || item?.inputRole || '') === port.role && item?.url).length;
-        const state = count ? `${count} 张已连接` : '可选输入';
-        return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${count ? 'has-input' : ''}">${esc(state)}</b></div>`;
+        const state = count ? '已连接' : '可选输入';
+        const stateHtml = count ? '<span class="film-input-status-dot" aria-hidden="true"></span>已连接' : state;
+        return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${count ? 'has-input' : ''}">${stateHtml}</b></div>`;
     }
     function bodyHtml(node, options={}){
         normalize(node);

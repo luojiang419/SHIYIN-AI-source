@@ -58,3 +58,17 @@ def test_film_input_slots_match_three_view_layout_and_keep_labels_inside_content
     assert "rgba(124,58,237" not in FILM_CSS
     assert "rgba(139,92,246" not in FILM_CSS
     assert "rgba(124,58,237" not in SMART_CSS
+
+
+def test_film_variants_use_their_parent_generation_model_sources():
+    assert "imageProviderOptions:filmSmartImageProviderOptions" in SMART
+    assert "imageModelOptions:filmSmartImageModelOptions" in SMART
+    assert "const imageProvider=filmSmartImageProviderId(node)" in SMART
+    assert "if(isKlingVideoNode(node)) ensureKlingCapabilities();" in CLASSIC
+
+
+def test_film_connected_input_status_has_a_green_indicator_and_connected_label():
+    assert "film-input-status-dot" in FILM
+    assert "'<span class=\"film-input-status-dot\" aria-hidden=\"true\"></span>已连接'" in FILM
+    assert ".film-input-status-dot" in FILM_CSS
+    assert "background:#2fbf71" in FILM_CSS

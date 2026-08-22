@@ -128,7 +128,19 @@
     white-space:nowrap;
 }
 .film-input-row b.has-input {
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
     color:#258a57;
+}
+.film-input-status-dot {
+    display:inline-block;
+    width:6px;
+    height:6px;
+    flex:0 0 auto;
+    border-radius:50%;
+    background:#2fbf71;
+    box-shadow:0 0 0 2px color-mix(in srgb, #2fbf71 18%, transparent), 0 0 7px color-mix(in srgb, #2fbf71 55%, transparent);
 }
 .film-prompt-field,
 .film-image-settings label,

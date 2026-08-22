@@ -86,6 +86,13 @@ def test_film_variants_use_their_parent_generation_model_sources():
     assert "if(isKlingVideoNode(node)) ensureKlingCapabilities();" in CLASSIC
 
 
+def test_classic_film_render_passes_image_model_sources_for_storyboard_node():
+    compact_classic = " ".join(CLASSIC.split())
+    assert "imageProviderOptions:filmNodeImageProviderOptions" in compact_classic
+    assert "imageModelOptions:filmNodeImageModelOptions" in compact_classic
+    assert "const payload={prompt:built.prompt,provider_id:imageProvider" in CLASSIC
+
+
 def test_film_connected_input_status_has_a_green_indicator_and_connected_label():
     assert "film-input-status-dot" in FILM
     assert "'<span class=\"film-input-status-dot\" aria-hidden=\"true\"></span>已连接'" in FILM

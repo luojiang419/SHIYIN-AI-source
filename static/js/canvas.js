@@ -8624,7 +8624,13 @@ function renderNode(node){
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
     if(node.type === 'topazVideo') body.appendChild(renderTopazVideoBody(node));
     if(node.type === 'ecom-video') body.appendChild(renderVideoBody(node));
-    if(window.CanvasFilmNodes?.isType?.(node.type)) body.innerHTML = window.CanvasFilmNodes.bodyHtml(node,{providerOptions:filmNodeProviderOptions,modelOptions:filmNodeModelOptions,assets:classicFilmAssets});
+    if(window.CanvasFilmNodes?.isType?.(node.type)) body.innerHTML = window.CanvasFilmNodes.bodyHtml(node,{
+        providerOptions:filmNodeProviderOptions,
+        modelOptions:filmNodeModelOptions,
+        imageProviderOptions:filmNodeImageProviderOptions,
+        imageModelOptions:filmNodeImageModelOptions,
+        assets:classicFilmAssets
+    });
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';

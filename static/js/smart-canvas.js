@@ -1395,7 +1395,20 @@ function syncSelectionUi(){
     });
     syncSmartSelectedImageResolution(world);
     syncRunButtonState();
-    scheduleConnectionLayerRefresh();
+    syncConnectionSelectionUi();
+}
+function syncConnectionSelectionUi(){
+    const svg = world.querySelector('svg.connection-layer');
+    if(!svg) return;
+    const selected = new Set(selectedNodeIds());
+    const connectionsByIndex = canvas?.connections || [];
+    svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(hit => {
+        const active = String(hit.dataset.connIndex || '').split(',').some(rawIndex => {
+            const connection = connectionsByIndex[Number(rawIndex)];
+            return connection && (selected.has(connection.from) || selected.has(connection.to));
+        });
+        hit.previousElementSibling?.classList.toggle('conn-selected', active);
+    });
 }
 function isNodeSelected(id){
     return selectedId === id || selectedIds.includes(id);
@@ -6897,10 +6910,11 @@ function copySelectedNodes(){
     if(!copiedNodes.length) return;
     const idSet = new Set(copiedNodes.map(n => n.id));
     const copiedConnections = (canvas.connections || []).filter(c => idSet.has(c.from) && idSet.has(c.to));
-    nodeClipboard = {
-        nodes:JSON.parse(JSON.stringify(copiedNodes)),
-        connections:JSON.parse(JSON.stringify(copiedConnections))
+    const clone = value => {
+        try { return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
+        catch { return JSON.parse(JSON.stringify(value)); }
     };
+    nodeClipboard = {nodes:clone(copiedNodes), connections:clone(copiedConnections)};
     toast(`已复制 ${copiedNodes.length} 个节点`);
 }
 function pasteNodes(){
@@ -7958,7 +7972,21 @@ function deleteSelectedSmartNodes(){
     const ids = selectedNodeIds();
     if(!ids.length) return false;
     pushUndo();
-    ids.forEach(id => { undoSuppressed = true; deleteNode(id); undoSuppressed = false; });
+    // 批量删除只做一次集合过滤、一次引用清理和一次渲染；
+    // 逐个调用 deleteNode 会让大画布重复 N 次重建 DOM 和保存请求。
+    const deleteIds = new Set(ids);
+    nodes.forEach(node => {
+        if(isHistoryGroupNode(node) && deleteIds.has(node.historyFor)) deleteIds.add(node.id);
+    });
+    nodes = nodes.filter(node => !deleteIds.has(node.id));
+    if(canvas) canvas.connections = (canvas.connections || []).filter(c => !deleteIds.has(c.from) && !deleteIds.has(c.to));
+    nodes.forEach(node => {
+        if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(inputId => !deleteIds.has(inputId));
+        if(isSmartGroupNode(node) && Array.isArray(node.items)) node.items = node.items.filter(itemId => !deleteIds.has(itemId));
+    });
+    if(deleteIds.has(selectedId)) selectedId = '';
+    selectedIds = selectedIds.filter(id => !deleteIds.has(id));
+    if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
     render();
     scheduleSave();
     return true;
@@ -17725,7 +17753,8 @@ function finishSelection(event){
     selectionState = null;
     selectionJustFinished = true;
     selectionBox.style.display = 'none';
-    render();
+    syncSelectionUi();
+    updateComposer();
     setTimeout(() => { selectionJustFinished = false; }, 0);
 }
 function groupSelectedNodes(){

@@ -16511,7 +16511,8 @@ function startSelection(e){
     e.preventDefault();
     e.stopPropagation();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-    selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY};
+    const startWorld = screenToWorld(e.clientX, e.clientY);
+    selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, sw:startWorld.x, sh:startWorld.y};
     document.body.classList.add('canvas-selecting');
     selectionBox.style.display = 'block';
     updateSelectionBox(e.clientX, e.clientY);
@@ -16530,20 +16531,28 @@ function updateSelectionBox(x, y){
 }
 function finishSelection(){
     if(!selectDrag) return;
-    const rect = selectionBox.getBoundingClientRect();
+    const drag = selectDrag;
+    const endWorld = screenToWorld(drag.x, drag.y);
+    const minX = Math.min(drag.sw, endWorld.x), minY = Math.min(drag.sh, endWorld.y);
+    const maxX = Math.max(drag.sw, endWorld.x), maxY = Math.max(drag.sh, endWorld.y);
     selectionBox.style.display = 'none';
     selectedOutputMedia = null;
     selected.clear();
-    nodesEl.querySelectorAll('.node').forEach(el => {
-        const r = el.getBoundingClientRect();
-        const overlaps = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
-        if(overlaps) selected.add(el.dataset.id);
+    const nodeIndex = new Map(nodes.map(node => [node.id, node]));
+    // 使用画布世界坐标和 offset 尺寸完成框选，避免逐节点读取屏幕矩形触发强制布局。
+    nodesEl.querySelectorAll('.node[data-id]').forEach(el => {
+        const node = nodeIndex.get(el.dataset.id);
+        if(!node) return;
+        const x = Number(node.x) || 0, y = Number(node.y) || 0;
+        const w = el.offsetWidth || Number(node.w) || 260;
+        const h = el.offsetHeight || Number(node.h) || 200;
+        if(x < maxX && x + w > minX && y < maxY && y + h > minY) selected.add(node.id);
     });
     selectDrag = null;
     document.body.classList.remove('canvas-selecting');
     window.onmousemove = null;
     window.onmouseup = null;
-    render();
+    refreshSelectionVisuals();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
 }
 function formatVideoClipTime(seconds){
@@ -17683,10 +17692,11 @@ function copySelectedNodes(){
     if(!toCopy.length) return;
     const ids = new Set(toCopy.map(n => n.id));
     const pickedConnections = (connections || []).filter(c => ids.has(c.from) && ids.has(c.to)).map(c => ({...c}));
-    clipboard = {
-        nodes:JSON.parse(JSON.stringify(serializableCanvasNodes(toCopy))),
-        connections:JSON.parse(JSON.stringify(pickedConnections))
+    const clone = value => {
+        try { return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
+        catch { return JSON.parse(JSON.stringify(value)); }
     };
+    clipboard = {nodes:clone(serializableCanvasNodes(toCopy)), connections:clone(pickedConnections)};
 }
 function clipboardNodeCount(){
     if(Array.isArray(clipboard)) return clipboard.length;
@@ -18587,9 +18597,9 @@ function portPoint(id, kind, inputRole='', layout=null){
     const cache = layout?.cache;
     const cacheKey = `${id}:${kind}:${inputRole || ''}`;
     if(cache?.has(cacheKey)) return cache.get(cacheKey);
-    const n = nodes.find(x => x.id === id);
+    const n = layout?.nodeIndex?.get(id) || nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
-    const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+    const el = layout?.nodeElements?.get(id) || nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
     const roleSelector = inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : '';
     const port = el?.querySelector(`.port.${kind}${roleSelector}`);
     if(port){
@@ -18606,9 +18616,9 @@ function portPoint(id, kind, inputRole='', layout=null){
     cache?.set(cacheKey, point);
     return point;
 }
-function canResolvePort(id){
+function canResolvePort(id, nodeIndex=null){
     // 只跳过“真正的孤儿连线”（端点节点已不存在）；节点存在但暂时没 DOM 的，portPoint 会用几何坐标兜底。
-    return Boolean(nodes.find(x => x.id === id));
+    return nodeIndex ? nodeIndex.has(id) : Boolean(nodes.find(x => x.id === id));
 }
 function renderLinks(){
     linksEl.innerHTML = '';
@@ -18617,13 +18627,16 @@ function renderLinks(){
     // 否则“读一条 rect → append 一条线”交错进行，每次 append 都让布局失效，下一次读 rect 就触发一次
     // 全量强制重排（layout thrashing），连线一多拖动就掉帧。读写分离后每帧只强制重排一次。
     const segments = [];
-    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map()};
+    const nodeIndex = new Map(nodes.map(node => [node.id, node]));
+    const nodeElements = new Map();
+    nodesEl.querySelectorAll('.node[data-id]').forEach(el => nodeElements.set(el.dataset.id, el));
+    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map(), nodeIndex, nodeElements};
     // 连接端点仍按 portPoint(c.to, 'in', c.inputRole || '') 的角色语义解析，layout 仅用于复用测量结果。
     connections.forEach(c => {
         // 端点无法解析（节点已删除、或尚未渲染出 DOM）就跳过，否则连线会被画到 (0,0)，
         // 看起来像很多连线都从同一个空白处中转。
-        if(!canResolvePort(c.from) || !canResolvePort(c.to)) return;
-        const target = nodes.find(node => node.id === c.to);
+        if(!canResolvePort(c.from, nodeIndex) || !canResolvePort(c.to, nodeIndex)) return;
+        const target = nodeIndex.get(c.to);
         if(target?.type === 'multiView' && !classicMultiViewInputSlots(target).some(([role]) => role === (c.inputRole || ''))) return;
         segments.push({c, a:portPoint(c.from, 'out', '', layout), b:portPoint(c.to, 'in', c.inputRole || '', layout)});
     });
@@ -18693,9 +18706,20 @@ function updateConnectionHoverFromMouse(e){
         setHoveredConnection('');
         return;
     }
+    const directPath = e.target?.closest?.('.link-hit');
+    if(directPath?.dataset?.connectionId){
+        setHoveredConnection(directPath.dataset.connectionId);
+        return;
+    }
     const button = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.link-delete');
     if(button?.dataset.connectionId){
         setHoveredConnection(button.dataset.connectionId);
+        return;
+    }
+    // 大画布不再为每个 mousemove 对所有连线做 28 段贝塞尔距离采样；
+    // 连线本身已有透明命中路径，小画布才保留几何兜底。
+    if(connections.length > 120) {
+        setHoveredConnection('');
         return;
     }
     const layout = {boardRect:board.getBoundingClientRect(), cache:new Map()};
@@ -18719,10 +18743,23 @@ function refreshSelectionVisuals(){
         el.classList.toggle('selected', selected.has(el.dataset.id));
     });
     syncCanvasSelectedImageResolution(nodesEl);
-    renderLinks();
+    syncConnectionSelectionVisuals();
     renderSelectionHub();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
     scheduleMinimapRender();
+}
+function syncConnectionSelectionVisuals(){
+    const selectedIds = selected;
+    const connectionById = new Map((connections || []).map(connection => [connection.id, connection]));
+    linksEl.querySelectorAll('.link-hit[data-connection-id]').forEach(hit => {
+        const connection = connectionById.get(hit.dataset.connectionId);
+        const active = Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to)));
+        hit.previousElementSibling?.classList.toggle('link-active', active);
+    });
+    linkControlsEl.querySelectorAll('.link-delete[data-connection-id]').forEach(button => {
+        const connection = connectionById.get(button.dataset.connectionId);
+        button.classList.toggle('visible', Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to))));
+    });
 }
 function pathEl(x1,y1,x2,y2,cls){
     const p = document.createElementNS('http://www.w3.org/2000/svg','path');
@@ -18984,7 +19021,7 @@ board.onwheel = e => {
     viewport.x = e.clientX - rect.left - before.x * viewport.scale;
     viewport.y = e.clientY - rect.top - before.y * viewport.scale;
     applyViewport();
-    renderLinks();
+    scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleViewportSave();
 };

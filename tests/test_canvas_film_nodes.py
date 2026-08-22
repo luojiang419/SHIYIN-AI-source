@@ -42,9 +42,42 @@ def test_film_canvases_trace_storyboard_actor_assets_for_reuse():
 def test_film_mapping_has_model_specific_rules_and_at_insertion():
     for marker in ("MODEL_RULES", "jimeng", "kling", "minimax", "<Picture {index}>", "资产映射："):
         assert marker in FILM
-    assert "input.value.lastIndexOf('@')" in FILM
+    assert "before.match(/@([^\\s@]*)$/)" in FILM
     assert "data-film-mention-index" in FILM
+    assert "event.key==='Enter'" in FILM
+    assert "ref.roleLabel || ref.name || '参考资产'" in FILM
     assert "fetch('/api/canvas-llm'" in FILM
+
+
+def test_film_mapping_is_above_prompt_and_uses_semantic_asset_labels():
+    body = FILM[FILM.index('function bodyHtml'):]
+    assert body.index('data-film-mapping') < body.index('data-film-field="prompt"')
+    assert "ref.roleLabel || '参考资产'" in FILM
+    assert "scene:'场景',sketch:'线稿分镜'" in FILM
+
+
+def test_film_input_status_accepts_a_live_connection_without_a_resolved_url():
+    assert "options.connected?.(node, port.role)" in FILM
+    assert "connected:(target, role) => connections.some" in CLASSIC
+    assert "connected:(target, role) => (canvas?.connections || []).some" in SMART
+
+
+def test_film_aspect_ratio_aliases_do_not_fall_back_to_square_size():
+    assert "'16:9':'wide'" in CLASSIC
+    assert "'9:16':'story'" in CLASSIC
+    assert "'16:9':'wide'" in SMART
+    assert "'9:16':'story'" in SMART
+    assert "size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k')" in CLASSIC
+
+
+def test_film_runs_create_pending_outputs_before_waiting_for_results():
+    assert "const out=outputForNode(node,560,true)" in CLASSIC
+    assert "out._pending=[...(out._pending || []),pending]" in CLASSIC
+    assert "pending.canvasTaskId=task.task_id" in CLASSIC
+    assert "output=createPendingOutputFromSource(node,1,meta" in SMART
+    assert "output.filmSourceNodeId=node.id" in SMART
+    assert "finalizePendingNode(output,images,meta,'image')" in SMART
+    assert "status:'error'" in SMART
 
 
 def test_both_canvas_entries_expose_secondary_film_menu_and_shared_module():

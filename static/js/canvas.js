@@ -1321,7 +1321,8 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', custom
             return `${Math.max(64, width)}x${Math.max(64, height)}`;
         }
     }
-    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
+    const ratioAliases = {'1:1':'square','16:9':'wide','9:16':'story','4:3':'landscape43','3:4':'portrait43'};
+    const ratioKey = ratioValue && (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) ? (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) : 'square';
     return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
 }
 function parseSizePair(value){
@@ -8371,6 +8372,7 @@ function bindClassicFilmNode(el,node){
     if(!api) return;
     api.bind(el,node,{
         assets:classicFilmAssets,
+        connected:(target, role) => connections.some(connection => connection.to === target.id && connection.inputRole === role),
         providerOptions:filmNodeProviderOptions,
         modelOptions:filmNodeModelOptions,
         imageProviderOptions:filmNodeImageProviderOptions,
@@ -8393,28 +8395,37 @@ async function runFilmNode(nodeId, opts={}){
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model});
     if(!built.prompt){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
     const refs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `图${index+1}`}));
-    const out=outputForNode(node,560);
-    node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out);
+    const out=outputForNode(node,560,true);
+    const run=runSnapshot(node,built.prompt,refs);
+    const pendingId=uid('p');
+    const pending=makePendingForRun(pendingId,run,node,{refs});
+    out._pending=[...(out._pending || []),pending];
+    node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out); scheduleSave();
     try {
         if(node.type === 'film-storyboard'){
             const imageProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
             const payload={prompt:built.prompt,provider_id:imageProvider,model:resolveImageModel(node.model || providerImageModels(imageProvider)[0]),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high'};
+            pending.previewSize=pendingPreviewSizeFromSizeString(payload.size);
             const task=await createCanvasImageTask(payload);
+            pending.canvasTaskId=task.task_id; refreshRunNodes(node,out); scheduleSave();
             const result=await waitCanvasImageTaskResult(task.task_id);
             const images=result.images || result.image_items || [];
             if(!images.length) throw new Error('分镜合成没有返回图片');
-            mergeGeneratedOutputs(node,images,false); if(out) appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
+            mergeGeneratedOutputs(node,images,false); out._pending=(out._pending || []).filter(item=>item.id !== pendingId); appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
         } else {
             const payload={prompt:built.prompt,provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),model:node.model || 'veo3-fast',duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
             const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));
             if(!outputs.length) throw new Error('视频生成没有返回结果');
-            mergeGeneratedOutputs(node,outputs,false); if(out) appendOutputImagesWithoutDuplicates(out,outputs); node.runStatus='done'; setStatus(`视频生成完成，共 ${outputs.length} 个结果`);
+            mergeGeneratedOutputs(node,outputs,false); out._pending=(out._pending || []).filter(item=>item.id !== pendingId); appendOutputImagesWithoutDuplicates(out,outputs); node.runStatus='done'; setStatus(`视频生成完成，共 ${outputs.length} 个结果`);
         }
         node.runError=''; scheduleSave();
     } catch(error){
-        node.runStatus='failed'; node.runError=error.message || String(error); if(!opts.cascade) showErrorModal(node.runError,'影视制作失败'); else throw error;
+        const message=error.message || String(error);
+        const livePending=pendingById(out,pendingId);
+        if(livePending){ livePending.failed=true; livePending.error=message; }
+        node.runStatus='failed'; node.runError=message; if(!opts.cascade) showErrorModal(node.runError,'影视制作失败'); else throw error;
     } finally { node.running=false; refreshRunNodes(node,out); }
 }
 function renderNode(node){

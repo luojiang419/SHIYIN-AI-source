@@ -334,6 +334,11 @@ body.theme-dark .film-error {
     background:var(--soft-2, var(--soft));
     border-color:var(--line-2);
 }
+.film-mention-menu button.is-active {
+    background:var(--soft-2, var(--soft));
+    border-color:var(--strong);
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--strong) 18%, transparent);
+}
 .film-mention-menu b {
     color:var(--strong);
     font-size:10px;

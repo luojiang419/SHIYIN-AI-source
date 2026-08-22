@@ -105,7 +105,7 @@
             return `道具${String.fromCharCode(65 + index)}`;
         }
         return node.type === 'film-storyboard'
-            ? ({scene:'场景图',sketch:'分镜参考图'}[role] || role)
+            ? ({scene:'场景',sketch:'线稿分镜'}[role] || role)
             : ({storyboard:'分镜图'}[role] || role);
     }
     function modelRule(provider='', model=''){
@@ -155,7 +155,7 @@
     function mappingHtml(node, assets=[], options={}){
         const map = mapping(node, assets, options);
         if(!map.refs.length) return '<div class="film-empty-note">连接资产后会自动建立图像映射</div>';
-        return `<div class="film-mapping-list">${map.refs.map((ref,index) => `<span class="film-mapping-chip"><b>${esc(map.rule.id === 'minimax' ? `<Picture ${index+1}>` : `${map.rule.prefix}${index+1}`)}</b><i>${itemPreview(ref)}</i><em>${esc(ref.roleLabel || '')}</em></span>`).join('')}</div>`;
+        return `<div class="film-mapping-list">${map.refs.map(ref => `<span class="film-mapping-chip"><b>${esc(ref.roleLabel || '参考资产')}</b><i>${itemPreview(ref)}</i><em>${esc(ref.name || '已连接')}</em></span>`).join('')}</div>`;
     }
     function promptHtml(node){
         return `<label class="film-prompt-field"><span>生成需求</span><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea></label>`;
@@ -163,9 +163,10 @@
     function inputSlotHtml(node, port, options={}){
         const assets = options.assets?.(node) || [];
         const count = assets.filter(item => String(item?.role || item?.inputRole || '') === port.role && item?.url).length;
-        const state = count ? '已连接' : '可选输入';
-        const stateHtml = count ? '<span class="film-input-status-dot" aria-hidden="true"></span>已连接' : state;
-        return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${count ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${count ? 'has-input' : ''}">${stateHtml}</b></div>`;
+        const connected = Boolean(count || options.connected?.(node, port.role));
+        const state = connected ? '已连接' : '可选输入';
+        const stateHtml = connected ? '<span class="film-input-status-dot" aria-hidden="true"></span>已连接' : state;
+        return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${connected ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${connected ? 'has-input' : ''}">${stateHtml}</b></div>`;
     }
     function bodyHtml(node, options={}){
         normalize(node);
@@ -180,10 +181,10 @@
         return `<div class="film-node-panel ${node.type}">
             <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span><button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button></div>
             <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
+            <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
             ${promptHtml(node)}
             <div class="film-node-actions"><button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button><button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中…' : action}</button></div>
             ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label></div>`}
-            <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
             ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
         </div>`;
     }
@@ -199,29 +200,61 @@
     function bindMentionMenu(root,input,node,options){
         let menu=root.querySelector('.film-mention-menu');
         let mentionStart=-1;
+        let activeIndex=0;
+        let currentRefs=[];
         if(!menu){ menu=document.createElement('div'); menu.className='film-mention-menu'; root.appendChild(menu); }
-        const close=()=>{menu.classList.remove('open');menu.innerHTML='';};
-        const open=()=>{
-            mentionStart=input.value.lastIndexOf('@');
+        const close=()=>{menu.classList.remove('open');menu.innerHTML='';mentionStart=-1;currentRefs=[];activeIndex=0;};
+        const mentionState=()=>{
+            const cursor=Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
+            const before=input.value.slice(0,cursor);
+            const match=before.match(/@([^\s@]*)$/);
+            if(!match) return null;
+            return {start:cursor-match[0].length,query:match[1] || ''};
+        };
+        const choose=index=>{
+            const ref=currentRefs[index];
+            if(!ref) return;
+            const start=mentionStart >= 0 ? mentionStart : input.selectionStart;
+            const end=Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
+            input.setSelectionRange(start,end);
+            insertAtCursor(input,ref.roleLabel || ref.name || '参考资产');
+            close();
+        };
+        const renderMenu=()=>{
             const built=buildPrompt(node,options.assets?.(node)||[],options);
-            const refs=built.map.refs;
-            if(!refs.length) return;
-            menu.innerHTML=refs.map((ref,index)=>`<button type="button" data-film-mention-index="${index}"><b>${esc(built.map.rule.id==='minimax'?`<Picture ${index+1}>`:`${built.map.rule.prefix}${index+1}`)}</b><span>${esc(ref.roleLabel || '')}</span></button>`).join('');
+            const state=mentionState();
+            if(!state || !built.map.refs.length){ close(); return; }
+            mentionStart=state.start;
+            const query=state.query.toLocaleLowerCase();
+            currentRefs=built.map.refs.filter(ref=>{
+                const haystack=`${ref.roleLabel || ''} ${ref.name || ''}`.toLocaleLowerCase();
+                return !query || haystack.includes(query);
+            });
+            if(!currentRefs.length){ close(); return; }
+            activeIndex=Math.min(activeIndex,currentRefs.length-1);
+            menu.innerHTML=currentRefs.map((ref,index)=>`<button type="button" class="${index===activeIndex?'is-active':''}" data-film-mention-index="${index}"><b>${esc(ref.roleLabel || '参考资产')}</b><span>${esc(ref.name || '已连接')}</span></button>`).join('');
             menu.classList.add('open');
             menu.querySelectorAll('[data-film-mention-index]').forEach(button=>button.addEventListener('mousedown',event=>{
                 event.preventDefault(); event.stopPropagation();
-                const index=Number(button.dataset.filmMentionIndex); const map=built.map;
-                const token=map.rule.id==='minimax'?`<Picture ${index+1}>`:`${map.rule.prefix}${index+1}`;
-                const start=mentionStart >= 0 ? mentionStart : input.selectionStart;
-                input.setSelectionRange(start,input.selectionEnd);
-                insertAtCursor(input,token); close();
+                choose(Number(button.dataset.filmMentionIndex));
             }));
         };
         input.addEventListener('input',()=>{
             node.prompt=input.value; notify(options,node,false);
-            if(input.value.slice(-1)==='@') open(); else if(!input.value.includes('@')) close();
+            if(mentionState()) renderMenu(); else close();
         });
-        input.addEventListener('keydown',event=>{ if(event.key==='Escape') close(); });
+        input.addEventListener('keydown',event=>{
+            if(!menu.classList.contains('open')){ if(event.key==='Escape') close(); return; }
+            if(event.key==='ArrowDown' || event.key==='ArrowUp'){
+                event.preventDefault();
+                activeIndex=(activeIndex + (event.key==='ArrowDown' ? 1 : currentRefs.length - 1)) % currentRefs.length;
+                renderMenu();
+            } else if(event.key==='Enter'){
+                event.preventDefault(); choose(activeIndex);
+            } else if(event.key==='Escape'){
+                event.preventDefault(); close();
+            }
+        });
         root.addEventListener('mousedown',event=>{ if(!event.target.closest('.film-mention-menu') && event.target!==input) close(); });
     }
     async function parseScene(node, options={}){

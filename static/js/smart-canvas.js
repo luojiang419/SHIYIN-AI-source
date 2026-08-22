@@ -1488,6 +1488,7 @@ function smartFilmStoryboardAncestors(sourceId, seen=new Set()){
     const source=nodes.find(item => item.id === sourceId);
     if(!source) return [];
     if(source.specialType === 'film-storyboard') return [source];
+    if(source.filmSourceNodeId) return smartFilmStoryboardAncestors(source.filmSourceNodeId,seen);
     return [];
 }
 function smartFilmInheritedActorAssets(node){
@@ -1564,7 +1565,18 @@ async function runSmartFilmNode(node){
     const settingsForNodeRun=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
     const built=api.buildPrompt({...node,apiProvider:node.apiProvider || settingsForNodeRun.videoProvider || settingsForNodeRun.provider_id,model:node.model || settingsForNodeRun.videoModel || settingsForNodeRun.model},assets,{provider:node.apiProvider,model:node.model});
     if(!built.prompt){ toast('请先输入生成需求或连接影视参考资产'); return; }
-    node.running=true; node.runError=''; render();
+    const meta=snapshotRunMeta(built.prompt,node.id,built.prompt,built.refs);
+    meta.settings=settingsForStorage(settingsForNodeRun);
+    let output=nodes.find(item => item.id === node.filmOutputNodeId && item.type === 'smart-image' && !item.specialType);
+    if(!output){
+        output=createPendingOutputFromSource(node,1,meta,{selectOutput:false,refs:built.refs});
+        node.filmOutputNodeId=output.id;
+    } else {
+        output.images=[]; output.pending=1; output.running=false; output.runStartedAt=nowMs();
+        delete output.runFinishedAt; delete output.runElapsedMs; output.generationSlots=[]; attachRunMeta(output,meta);
+    }
+    output.filmSourceNodeId=node.id;
+    node.running=true; node.runError=''; render(); scheduleSave();
     try {
         if(node.specialType === 'film-storyboard'){
             const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
@@ -1574,15 +1586,23 @@ async function runSmartFilmNode(node){
             const results=await Promise.all((created.taskIds || []).map(taskId => pollSmartCanvasTask(taskId)));
             const images=results.flatMap(result => (result?.image_items || result?.images || resultMediaUrls(result) || [])).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'image'}:{url:item,kind:'image'}).filter(item=>item.url);
             if(!images.length) throw new Error('分镜合成没有返回图片');
-            node.images=images; node.w=0; node.h=0;
+            node.images=images; finalizePendingNode(output,images,meta,'image');
         } else {
             const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || ''};
             const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings);
-            node.images=(urls || []).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'video'}:{url:item,kind:'video'}).filter(item=>item.url);
-            if(!node.images.length) throw new Error('视频生成没有返回结果');
+            const images=(urls || []).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'video'}:{url:item,kind:'video'}).filter(item=>item.url);
+            if(!images.length) throw new Error('视频生成没有返回结果');
+            node.images=images; finalizePendingNode(output,images,meta,'video');
         }
         node.runError=''; addSmartGenerationLog({run:{node:{id:node.id,type:node.specialType},prompt:built.prompt,refs:built.refs},outputs:node.images,runMs:0});
-    } catch(error){ node.runError=error.message || String(error); toast(node.runError.slice(0,180)); }
+    } catch(error){
+        node.runError=error.message || String(error);
+        output.images=[]; output.pending=0; output.running=false; output.runFinishedAt=nowMs();
+        output.runElapsedMs=Math.max(0,output.runFinishedAt - Number(output.runStartedAt || output.runFinishedAt));
+        output.generationSlots=[{id:uid('generation-slot'),index:0,status:'error',error:node.runError}];
+        addSmartGenerationLog({run:{node:{id:node.id,type:node.specialType},prompt:built.prompt,refs:built.refs},outputs:[],runMs:output.runElapsedMs,error:node.runError});
+        toast(node.runError.slice(0,180));
+    }
     finally { node.running=false; render(); scheduleSave(); }
 }
 function createPanoramaNode(point){
@@ -3433,7 +3453,8 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
             return `${Math.max(64, width)}x${Math.max(64, height)}`;
         }
     }
-    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
+    const ratioAliases = {'1:1':'square','16:9':'wide','9:16':'story','4:3':'landscape43','3:4':'portrait43'};
+    const ratioKey = ratioValue && (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) ? (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) : 'square';
     return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
 }
 function normalizeApiSizeSettings(prefix=''){
@@ -10200,6 +10221,7 @@ function bindSmartSpecialNode(el, node){
     if(node?.specialType === 'film-storyboard' || node?.specialType === 'film-video'){
         window.CanvasFilmNodes?.bind(el,node,{
             assets:filmSmartAssets,
+            connected:(target, role) => (canvas?.connections || []).some(connection => connection.to === target.id && connection.inputRole === role),
             providerOptions:filmSmartProviderOptions,
             modelOptions:filmSmartModelOptions,
             imageProviderOptions:filmSmartImageProviderOptions,

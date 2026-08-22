@@ -1,6 +1,6 @@
 [package]
 name = "canvas-desktop"
-version = "1.0.248"
+version = "1.0.249"
 description = "SHIYIN AI Windows portable desktop host"
 authors = ["SHIYIN AI contributors"]
 edition = "2021"

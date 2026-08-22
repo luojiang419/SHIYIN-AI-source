@@ -1470,17 +1470,24 @@ function filmSmartAssets(node){
     if(!node || !window.CanvasFilmNodes) return [];
     const direct = (canvas?.connections || []).filter(connection => connection.to === node.id).flatMap(connection => {
         const source=nodes.find(item => item.id === connection.from);
-        return imagesForNode(source).map(ref => ({ref,role:connection.inputRole || ''}));
+        const inputRole=connection.inputRole || '';
+        return imagesForNode(source).map(ref => ({
+            ref,
+            role:inputRole,
+            inputRole,
+            sourceRole:String(ref?.role || ref?.reference_type || ''),
+            isProductDetail:String(ref?.role || ref?.reference_type || '').toLowerCase() === 'detail',
+        }));
     });
     if(node.specialType !== 'film-video') return direct;
-    const allInherited = smartFilmInheritedActorAssets(node);
+    const allInherited = smartFilmInheritedAssets(node);
     node.autoActorCount = allInherited.reduce((max,item) => {
         const match=String(item.role || '').match(/^actor-(\d+)$/);
         return match ? Math.max(max,Number(match[1])+1) : max;
     },0);
     const inherited = allInherited;
-    const connectedActorRoles = new Set(direct.filter(item => /^actor-\d+$/.test(item.role || '') && item.ref?.url).map(item => item.role));
-    return [...direct, ...inherited.filter(item => !connectedActorRoles.has(item.role))];
+    const connectedFilmRoles = new Set(direct.filter(item => /^(actor|outfit|prop)-\d+$/.test(item.role || '') && item.ref?.url).map(item => item.role));
+    return [...direct, ...inherited.filter(item => !connectedFilmRoles.has(item.role))];
 }
 function smartFilmStoryboardAncestors(sourceId, seen=new Set()){
     if(!sourceId || seen.has(sourceId)) return [];
@@ -1491,24 +1498,35 @@ function smartFilmStoryboardAncestors(sourceId, seen=new Set()){
     if(source.filmSourceNodeId) return smartFilmStoryboardAncestors(source.filmSourceNodeId,seen);
     return [];
 }
-function smartFilmInheritedActorAssets(node){
+function smartFilmInheritedAssets(node){
     if(!node || node.specialType !== 'film-video') return [];
     const storyboardConnections=(canvas?.connections || []).filter(connection => connection.to === node.id && connection.inputRole === 'storyboard');
     const storyboards=new Map();
     storyboardConnections.forEach(connection => smartFilmStoryboardAncestors(connection.from).forEach(item => storyboards.set(item.id,item)));
     const inherited=[];
     storyboards.forEach(storyboard => {
-        (canvas?.connections || []).filter(connection => connection.to === storyboard.id && connection.inputRole && /^actor-\d+$/.test(connection.inputRole)).forEach(connection => {
-            const index=Number(String(connection.inputRole).split('-')[1]);
+        (canvas?.connections || []).filter(connection => connection.to === storyboard.id && connection.inputRole && /^(actor|outfit|prop)-\d+$/.test(connection.inputRole)).forEach(connection => {
+            const inputRole=String(connection.inputRole);
             const source=nodes.find(item => item.id === connection.from);
-            imagesForNode(source).forEach(ref => inherited.push({ref,role:`actor-${index}`,autoReuse:true}));
+            imagesForNode(source).forEach(ref => inherited.push({
+                ref,
+                role:inputRole,
+                inputRole,
+                sourceRole:String(ref?.role || ref?.reference_type || ''),
+                isProductDetail:String(ref?.role || ref?.reference_type || '').toLowerCase() === 'detail',
+                autoReuse:true,
+            }));
         });
     });
     return inherited;
 }
+function smartFilmInheritedActorAssets(node){
+    // 兼容旧调用名；现在同时复用演员、服装与道具资产。
+    return smartFilmInheritedAssets(node);
+}
 function syncSmartFilmAutoReuse(){
     nodes.filter(node => node.specialType === 'film-video').forEach(node => {
-        const inherited=smartFilmInheritedActorAssets(node);
+        const inherited=smartFilmInheritedAssets(node);
         const maxInherited=inherited.reduce((max,item) => {
             const match=String(item.role || '').match(/^actor-(\d+)$/);
             return match ? Math.max(max,Number(match[1])+1) : max;

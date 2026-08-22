@@ -3,7 +3,7 @@
 
     const TYPES = ['film-storyboard','film-video'];
     const ROLE_ORDER = {
-        'film-storyboard': ['actor','scene','sketch'],
+        'film-storyboard': ['actor','outfit','prop','scene','sketch'],
         'film-video': ['storyboard','actor','outfit','prop'],
     };
     const TITLES = {
@@ -76,12 +76,20 @@
         const inherited = clamp(node?.autoActorCount || 0, 0, 8);
         return Math.max(explicit, inherited);
     }
+    function actorAssetPorts(i, noun='演员'){
+        const actor = actorLabel(i,noun);
+        return [
+            {role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actor}主体参考图`},
+            {role:`outfit-${i}`,label:`服装${String.fromCharCode(65+i)}`,title:`连接${actor}服装参考图`},
+            {role:`prop-${i}`,label:`道具${String.fromCharCode(65+i)}`,title:`连接${actor}道具参考图`},
+        ];
+    }
     function inputPorts(nodeOrType){
         const node = typeof nodeOrType === 'string' ? {type:nodeOrType,actorCount:1} : normalize(nodeOrType || {});
         const count = effectiveActorCount(node);
         if(node.type === 'film-storyboard'){
             return [
-                ...Array.from({length:count}, (_,i) => ({role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}参考图`})),
+                ...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat(),
                 {role:'scene',label:'场景',title:'连接场景参考图'},
                 {role:'sketch',label:'线稿分镜',title:'连接线稿分镜参考图'},
             ];
@@ -89,26 +97,25 @@
         if(node.type === 'film-video'){
             return [
                 {role:'storyboard',label:'分镜图',title:'连接分镜图或首帧参考'},
-                ...Array.from({length:count}, (_,i) => [
-                    {role:`actor-${i}`,label:actorLabel(i,'演员'),title:`连接${actorLabel(i,'演员')}主体参考图`},
-                    {role:`outfit-${i}`,label:`服装${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}服装参考图`},
-                    {role:`prop-${i}`,label:`道具${String.fromCharCode(65+i)}`,title:`连接${actorLabel(i,'演员')}道具参考图`},
-                ]).flat(),
+                ...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat(),
             ];
         }
         return [];
     }
-    function roleLabel(node, role){
+    function roleLabel(node, role, asset={}){
         const match = String(role || '').match(/^(actor|outfit|prop)-(\d+)$/);
+        const isProductDetail = String(asset?.sourceRole || asset?.reference_type || '').toLowerCase() === 'detail'
+            || asset?.isProductDetail === true;
+        const withProductDetail = label => isProductDetail ? `${label}产品细节` : label;
         if(match){
             const index = Number(match[2]);
-            if(match[1] === 'actor') return actorLabel(index, node.type === 'film-video' ? '演员' : '模特');
-            if(match[1] === 'outfit') return `服装${String.fromCharCode(65 + index)}`;
-            return `道具${String.fromCharCode(65 + index)}`;
+            if(match[1] === 'actor') return withProductDetail(actorLabel(index,'演员'));
+            if(match[1] === 'outfit') return withProductDetail(`服装${String.fromCharCode(65 + index)}`);
+            return withProductDetail(`道具${String.fromCharCode(65 + index)}`);
         }
-        return node.type === 'film-storyboard'
+        return withProductDetail(node.type === 'film-storyboard'
             ? ({scene:'场景',sketch:'线稿分镜'}[role] || role)
-            : ({storyboard:'分镜图'}[role] || role);
+            : ({storyboard:'分镜图'}[role] || role));
     }
     function modelRule(provider='', model=''){
         const text = `${provider} ${model}`.toLowerCase();
@@ -125,7 +132,7 @@
             const role = String(item?.role || item?.inputRole || '');
             const list = byRole.get(role) || [];
             const ref = item?.ref || item;
-            if(ref?.url) list.push({...ref, role});
+            if(ref?.url) list.push({...ref, role, sourceRole:String(item?.sourceRole || ref?.sourceRole || ref?.role || ref?.reference_type || '')});
             byRole.set(role, list);
         });
         inputPorts(node).forEach(port => {
@@ -134,7 +141,7 @@
             const roleRefs = port.role === 'storyboard'
                 ? (byRole.get(port.role) || []).slice(-1)
                 : (byRole.get(port.role) || []);
-            roleRefs.forEach(ref => refs.push({...ref, inputRole:port.role, roleLabel:roleLabel(node, port.role)}));
+            roleRefs.forEach(ref => refs.push({...ref, inputRole:port.role, roleLabel:roleLabel(node, port.role, ref)}));
         });
         return refs;
     }
@@ -151,7 +158,8 @@
     function buildPrompt(node, assets=[], options={}){
         const map = mapping(node, assets, options);
         const prompt = String(node.prompt || '').trim();
-        const prefix = map.text ? `资产映射：${map.text}。` : '';
+        const hasProductDetail = map.refs.some(ref => ref.sourceRole === 'detail' || ref.isProductDetail === true);
+        const prefix = map.text ? `资产映射：${map.text}。${hasProductDetail ? '产品主图与产品细节均为同一产品的证据，生成时必须优先保持产品结构、材质、颜色、Logo和文字真实一致。' : ''}` : '';
         return {prompt:[prefix,prompt].filter(Boolean).join('\n'), refs:map.refs, map};
     }
     function itemPreview(item){

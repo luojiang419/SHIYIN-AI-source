@@ -31,6 +31,33 @@ def test_film_video_ports_are_grouped_per_actor_and_support_inherited_count():
     assert ".map((port,index) => inputSlotHtml" in FILM
 
 
+def test_film_storyboard_ports_match_video_actor_groups_and_keep_scene_sketch_last():
+    assert "'film-storyboard': ['actor','outfit','prop','scene','sketch']" in FILM
+    assert "...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat()" in FILM
+    assert "{role:'scene',label:'场景'" in FILM
+    assert "{role:'sketch',label:'线稿分镜'" in FILM
+
+
+def test_film_product_detail_mapping_is_preserved_for_realistic_storyboards():
+    assert "sourceRole:String(item?.sourceRole || ref?.sourceRole || ref?.role || ref?.reference_type || '')" in FILM
+    assert "${label}产品细节" in FILM
+    assert "产品主图与产品细节均为同一产品的证据" in FILM
+    assert "isProductDetail:String(ref?.role || ref?.reference_type || '').toLowerCase() === 'detail'" in CLASSIC
+
+
+def test_film_video_reuses_storyboard_actor_outfit_and_prop_assets_downstream():
+    assert "function classicFilmInheritedAssets(node)" in CLASSIC
+    assert "function smartFilmInheritedAssets(node)" in SMART
+    for source in (CLASSIC, SMART):
+        assert "/^(actor|outfit|prop)-\\d+$/.test(connection.inputRole" in source
+        assert "autoReuse:true" in source
+        assert "connectedFilmRoles" in source
+
+
+def test_classic_film_accepts_ecommerce_product_sources_for_outfit_and_prop_ports():
+    assert "'ecom-model','ecom-product','ecom-scene','ecom-compose'" in CLASSIC
+
+
 def test_film_canvases_trace_storyboard_actor_assets_for_reuse():
     assert "function classicFilmInheritedActorAssets(node)" in CLASSIC
     assert "classicFilmStoryboardAncestors(connection.from)" in CLASSIC

@@ -102,6 +102,16 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("smartNodeIndex = new Map", SMART_CANVAS_JS)
         self.assertIn("smart-large-scene", SMART_CANVAS_JS)
 
+    def test_large_scene_lod_does_not_clip_overflow_ports(self):
+        classic_css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
+        smart_css = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
+        self.assertNotRegex(classic_css, r"#nodes\.canvas-large-scene\s*>\s*\.node\s*\{[^}]*content-visibility\s*:\s*auto")
+        self.assertNotRegex(smart_css, r"\.world\.smart-large-scene\s*>\s*\.image-node\s*\{[^}]*content-visibility\s*:\s*auto")
+        classic_node = classic_css.index(".node { position:absolute")
+        smart_node = smart_css.index(".image-node { position:absolute")
+        self.assertIn("overflow:visible", classic_css[classic_node:classic_node + 320])
+        self.assertIn("overflow:visible", smart_css[smart_node:smart_node + 320])
+
     def test_saves_are_idle_coalesced_and_serialization_is_measured(self):
         classic_save = body(CANVAS_JS, "function scheduleSave()", "function scheduleViewportSave")
         smart_save = body(SMART_CANVAS_JS, "function scheduleSave(delay=450)", "async function saveCanvas")

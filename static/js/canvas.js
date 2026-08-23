@@ -235,6 +235,7 @@ function resumeCanvasRouteMedia(){
 function setCanvasRouteActive(active){
     canvasRouteActive = Boolean(active);
     document.documentElement.classList.toggle('studio-route-inactive', !canvasRouteActive);
+    syncClassicParentShortcutListeners();
     if(!canvasRouteActive || document.hidden){
         stopCanvasRemotePolling();
         clearTimeout(remoteSyncTimer);
@@ -270,6 +271,7 @@ window.addEventListener('message', event => {
     }
 });
 window.addEventListener('pagehide', () => {
+    detachClassicParentShortcutListeners();
     stopCanvasRemotePolling();
     pauseCanvasRouteMedia();
 });
@@ -566,6 +568,7 @@ let remoteSyncTimer = null;
 let remoteSyncInterval = null;
 let remoteSyncBusy = false;
 let canvasRouteActive = window.top === window;
+let classicParentShortcutWindow = null;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
 let imageModels = ['gpt-image-2', 'nano-banana-pro'];
@@ -19825,13 +19828,40 @@ function handleClassicShortcutKeyUp(e){
     if(classicHeldShortcutActions.delete(e.code || '')) syncClassicHeldShortcutActions();
     if(e.key === 'Shift') setKnifeMode(false);
 }
-window.addEventListener('keydown', handleClassicShortcutKeyDown);
-window.addEventListener('keyup', handleClassicShortcutKeyUp);
-window.addEventListener('blur', () => {
+function resetClassicShortcutHoldState(){
     classicHeldShortcutActions.clear();
     syncClassicHeldShortcutActions();
     setKnifeMode(false);
-});
+}
+function classicShortcutHostWindow(){
+    if(window.parent === window) return null;
+    try {
+        return window.parent.location.origin === location.origin ? window.parent : null;
+    } catch(e) {
+        return null;
+    }
+}
+function detachClassicParentShortcutListeners(){
+    if(!classicParentShortcutWindow) return;
+    classicParentShortcutWindow.removeEventListener('keydown', handleClassicShortcutKeyDown);
+    classicParentShortcutWindow.removeEventListener('keyup', handleClassicShortcutKeyUp);
+    classicParentShortcutWindow.removeEventListener('blur', resetClassicShortcutHoldState);
+    classicParentShortcutWindow = null;
+}
+function syncClassicParentShortcutListeners(){
+    const host = canvasRouteActive && !document.hidden ? classicShortcutHostWindow() : null;
+    if(host === classicParentShortcutWindow) return;
+    detachClassicParentShortcutListeners();
+    if(!host) return;
+    host.addEventListener('keydown', handleClassicShortcutKeyDown);
+    host.addEventListener('keyup', handleClassicShortcutKeyUp);
+    host.addEventListener('blur', resetClassicShortcutHoldState);
+    classicParentShortcutWindow = host;
+}
+window.addEventListener('keydown', handleClassicShortcutKeyDown);
+window.addEventListener('keyup', handleClassicShortcutKeyUp);
+window.addEventListener('blur', resetClassicShortcutHoldState);
+syncClassicParentShortcutListeners();
 window.addEventListener('blur', () => {
     if(selectDrag){
         selectionBox.style.display = 'none';

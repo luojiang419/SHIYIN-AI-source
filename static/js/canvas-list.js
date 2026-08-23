@@ -467,8 +467,8 @@ function openCanvas(c){
     const project = encodeURIComponent(c.project || currentProjectId || 'default');
     rememberProjectId(c.project || currentProjectId || 'default');
     window.location.href = (c.kind === 'smart')
-        ? `/static/smart-canvas.html?id=${enc}&project=${project}&v=2026.08.14.canvas-neutral-no-blue.1`
-        : `/static/canvas.html?id=${enc}&project=${project}&v=2026.08.14.canvas-neutral-no-blue.1`;
+        ? `/static/smart-canvas.html?id=${enc}&project=${project}&v=2026.08.23.shortcuts-runtime.2`
+        : `/static/canvas.html?id=${enc}&project=${project}&v=2026.08.23.shortcuts-runtime.2`;
 }
 
 /* ===== Card create flow ===== */

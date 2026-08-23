@@ -12,6 +12,8 @@ SMART_HTML = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
 SMART_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 CLASSIC_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 CLASSIC_JS = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+INDEX_HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+CANVAS_LIST_JS = (ROOT / "static" / "js" / "canvas-list.js").read_text(encoding="utf-8")
 
 
 class ShortcutActionRegistryTests(unittest.TestCase):
@@ -85,6 +87,28 @@ class ShortcutActionRegistryTests(unittest.TestCase):
             "create.relight", "create.multiView", "create.batch",
         ):
             self.assertIn(f"'{action_id}'", CLASSIC_JS)
+
+    def test_active_canvas_frames_bridge_shortcuts_from_same_origin_shell(self):
+        for source, prefix in ((CLASSIC_JS, "Classic"), (SMART_JS, "Smart")):
+            parent_window = f"{prefix.lower()}ParentShortcutWindow"
+            self.assertIn(f"sync{prefix}ParentShortcutListeners", source)
+            self.assertIn(f"detach{prefix}ParentShortcutListeners", source)
+            self.assertIn("window.parent.location.origin === location.origin", source)
+            self.assertIn(f"host.addEventListener('keydown', handle{prefix}ShortcutKeyDown)", source)
+            self.assertIn(f"{parent_window}.removeEventListener('keydown', handle{prefix}ShortcutKeyDown)", source)
+
+    def test_shell_focuses_active_frame_and_forwards_shortcut_updates(self):
+        self.assertIn("function focusStudioFrame", INDEX_HTML)
+        self.assertIn("iframe.contentWindow?.focus", INDEX_HTML)
+        self.assertIn("function forwardShortcutSettingsChange", INDEX_HTML)
+        self.assertIn("data.type !== 'shortcut-bindings:changed'", INDEX_HTML)
+        self.assertIn("new BroadcastChannel('shiyin-shortcuts')", INDEX_HTML)
+
+    def test_canvas_navigation_uses_shortcut_runtime_cache_revision(self):
+        self.assertIn("shortcuts-runtime.2", INDEX_HTML)
+        self.assertIn("shortcuts-runtime.2", CANVAS_LIST_JS)
+        self.assertIn("shortcuts-runtime.2", SMART_HTML)
+        self.assertIn("shortcuts-runtime.2", CLASSIC_HTML)
 
 
 if __name__ == "__main__":

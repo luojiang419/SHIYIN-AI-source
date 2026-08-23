@@ -5896,6 +5896,7 @@ let canvasSyncInFlight = false;
 let saveRequestedWhileInFlight = false;
 let trailingSaveDelay = 450;
 let smartRouteActive = window.top === window;
+let smartParentShortcutWindow = null;
 let canvasSyncTimer = null;
 let canvasMetaPollTimer = null;
 let connectionLayerRaf = 0;
@@ -6215,6 +6216,7 @@ function resumeSmartRouteMedia(){
 function setSmartRouteActive(active){
     smartRouteActive = Boolean(active);
     document.documentElement.classList.toggle('studio-route-inactive', !smartRouteActive);
+    syncSmartParentShortcutListeners();
     if(!smartRouteActive || document.hidden){
         stopCanvasMetaPoll();
         stopPanoramaLoop();
@@ -18798,7 +18800,7 @@ window.addEventListener('paste', e => {
         pasteNodes();
     }
 });
-window.addEventListener('keydown', e => {
+function handleSmartShortcutKeyDown(e){
     if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }
     if(isEditableTarget(e.target) || !window.ShortcutActions) return;
     if(e.repeat) return;
@@ -18821,19 +18823,48 @@ window.addEventListener('keydown', e => {
     if(blockedAction && blockedAction !== action.id) return;
     const result = runSmartCanvasShortcutAction(action.id);
     if(result && result !== 'allow-default') e.preventDefault();
-});
-window.addEventListener('keyup', e => {
+}
+function handleSmartShortcutKeyUp(e){
     if(smartTemporaryToolCode && e.code === smartTemporaryToolCode){
         smartTemporaryToolCode = '';
         smartTemporaryToolMode = '';
         syncSmartCanvasToolUi();
     }
-});
-window.addEventListener('blur', () => {
+}
+function resetSmartShortcutHoldState(){
     smartTemporaryToolCode = '';
     smartTemporaryToolMode = '';
     syncSmartCanvasToolUi();
-});
+}
+function smartShortcutHostWindow(){
+    if(window.parent === window) return null;
+    try {
+        return window.parent.location.origin === location.origin ? window.parent : null;
+    } catch(e) {
+        return null;
+    }
+}
+function detachSmartParentShortcutListeners(){
+    if(!smartParentShortcutWindow) return;
+    smartParentShortcutWindow.removeEventListener('keydown', handleSmartShortcutKeyDown);
+    smartParentShortcutWindow.removeEventListener('keyup', handleSmartShortcutKeyUp);
+    smartParentShortcutWindow.removeEventListener('blur', resetSmartShortcutHoldState);
+    smartParentShortcutWindow = null;
+}
+function syncSmartParentShortcutListeners(){
+    const host = smartRouteActive && !document.hidden ? smartShortcutHostWindow() : null;
+    if(host === smartParentShortcutWindow) return;
+    detachSmartParentShortcutListeners();
+    if(!host) return;
+    host.addEventListener('keydown', handleSmartShortcutKeyDown);
+    host.addEventListener('keyup', handleSmartShortcutKeyUp);
+    host.addEventListener('blur', resetSmartShortcutHoldState);
+    smartParentShortcutWindow = host;
+}
+window.addEventListener('keydown', handleSmartShortcutKeyDown);
+window.addEventListener('keyup', handleSmartShortcutKeyUp);
+window.addEventListener('blur', resetSmartShortcutHoldState);
+syncSmartParentShortcutListeners();
 engineSelect.onchange = () => {
     settings.engine = engineSelect.value;
     applyRecentSmartSettingsForCurrentMode();
@@ -19626,6 +19657,7 @@ window.addEventListener('message', event => {
     }
 });
 window.addEventListener('pagehide', () => {
+    detachSmartParentShortcutListeners();
     stopCanvasMetaPoll();
     stopPanoramaLoop();
     pauseSmartRouteMedia();

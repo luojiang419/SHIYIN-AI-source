@@ -47,7 +47,13 @@ class TestCanvasStoryboardTransformPanel:
 
     def test_flux2_klein_4b_uses_tested_prompt_and_source_auto_size(self):
         assert "FLUX2_KLEIN_4B_LINE_ART_PROMPT" in self.javascript
-        assert "faithful style transfer of the same frame" in self.javascript
+        prompt_match = re.search(r"const FLUX2_KLEIN_4B_LINE_ART_PROMPT = '([^']+)';", self.javascript)
+        assert prompt_match
+        prompt = prompt_match.group(1)
+        assert "uniform blank articulated storyboard mannequin" in prompt
+        assert "Remove all hair, facial features" in prompt
+        assert "wedding dress, suit, jewelry, shoes" in prompt
+        assert "clothing silhouette" not in prompt
         assert "function isFlux2Klein4BModel(model='')" in self.javascript
         assert "if(isFlux2Klein4BModel(model)) return 'auto';" in self.javascript
         assert "transformationPrompt(operation, model)" in self.javascript

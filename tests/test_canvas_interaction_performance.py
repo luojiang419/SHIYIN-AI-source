@@ -105,8 +105,10 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
     def test_large_scene_lod_does_not_clip_overflow_ports(self):
         classic_css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         smart_css = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
-        self.assertNotRegex(classic_css, r"#nodes\.canvas-large-scene\s*>\s*\.node\s*\{[^}]*content-visibility\s*:\s*auto")
-        self.assertNotRegex(smart_css, r"\.world\.smart-large-scene\s*>\s*\.image-node\s*\{[^}]*content-visibility\s*:\s*auto")
+        self.assertRegex(classic_css, r"#nodes\.canvas-large-scene\s*>\s*\.node\.canvas-lod-safe\s*>\s*\.node-body\s*\{[^}]*content-visibility\s*:\s*auto")
+        self.assertRegex(smart_css, r"\.world\.smart-large-scene\s*>\s*\.image-node:not\(\.smart-special-node\)\s*>\s*\.node-body\s*\{[^}]*content-visibility\s*:\s*auto")
+        self.assertIn("const canvasLodSafe", CANVAS_JS)
+        self.assertIn("canvasLodSafe ? 'canvas-lod-safe'", CANVAS_JS)
         classic_node = classic_css.index(".node { position:absolute")
         smart_node = smart_css.index(".image-node { position:absolute")
         self.assertIn("overflow:visible", classic_css[classic_node:classic_node + 320])

@@ -8734,10 +8734,16 @@ function renderNode(node){
     const size = defaultNodeSize(node.type);
     const autoMultiViewOutput = isMultiViewOutputNode(node);
     const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
+    // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
+    const canvasLodSafe = ![
+        'panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'
+    ].includes(node.type)
+        && !window.CanvasEcommerceNodes?.isType?.(node.type)
+        && !window.CanvasFilmNodes?.isType?.(node.type);
     const nodeTypeClass = node.type === 'batchGenerator'
         ? 'batchGenerator-node batch-generator-node generator-node'
         : `${node.type}-node`;
-    el.className = `node ${nodeTypeClass} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.className = `node ${nodeTypeClass} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.width = `${autoMultiViewOutput ? normalizedMultiViewOutputWidth(node) : (node.w || size.w)}px`;

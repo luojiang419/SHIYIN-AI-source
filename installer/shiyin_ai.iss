@@ -11,7 +11,8 @@ AppId={{5D7C3DA8-5D77-4C9A-BF1E-0F1A22D6A4A5}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName=D:\Program Files\SHIYIN AI
+DefaultDirName={code:ResolveDefaultInstallDir}
+UsePreviousAppDir=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer
@@ -56,12 +57,70 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+const
+  DefaultInstallDir = 'D:\Program Files\SHIYIN AI';
+  UninstallRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{5D7C3DA8-5D77-4C9A-BF1E-0F1A22D6A4A5}_is1';
+
 var
   UpdateProgressFile: String;
   BlenderPluginPage: TInputOptionWizardPage;
   BlenderDetected: Boolean;
   BlenderDiscoveryText: String;
   BlenderHelperPath: String;
+
+function NormalizeInstallDir(const Value: String): String;
+begin
+  Result := RemoveBackslashUnlessRoot(Trim(Value));
+end;
+
+function IsInstallerTestPath(const Value: String): Boolean;
+var
+  Normalized: String;
+begin
+  Normalized := NormalizeInstallDir(Value);
+  StringChangeEx(Normalized, '/', '\', True);
+  Normalized := Lowercase(Normalized);
+  Result :=
+    (Pos('\.build\installer-updater-e2e', Normalized) > 0) or
+    (Pos('\.build\installer-progress-smoke-', Normalized) > 0);
+end;
+
+function IsExistingInstallDir(const Value: String): Boolean;
+var
+  Candidate: String;
+begin
+  Candidate := NormalizeInstallDir(Value);
+  Result :=
+    (Candidate <> '') and
+    (not IsInstallerTestPath(Candidate)) and
+    (FileExists(AddBackslash(Candidate) + '{#MyAppExeName}') or
+      FileExists(AddBackslash(Candidate) + 'data\database\canvas.db'));
+end;
+
+function ReadRegisteredInstallDir(var Value: String): Boolean;
+begin
+  Result :=
+    RegQueryStringValue(HKLM64, UninstallRegistryKey, 'InstallLocation', Value) or
+    RegQueryStringValue(HKLM32, UninstallRegistryKey, 'InstallLocation', Value) or
+    RegQueryStringValue(HKCU, UninstallRegistryKey, 'InstallLocation', Value);
+end;
+
+function ResolveDefaultInstallDir(Param: String): String;
+var
+  RegisteredDir: String;
+begin
+  Result := DefaultInstallDir;
+  if ReadRegisteredInstallDir(RegisteredDir) then
+  begin
+    if IsExistingInstallDir(RegisteredDir) then
+    begin
+      Result := NormalizeInstallDir(RegisteredDir);
+      Log('复用已验证的 SHIYIN AI 安装目录：' + Result);
+    end
+    else
+      Log('忽略无效或测试安装目录，恢复正式默认目录：' + RegisteredDir);
+  end;
+end;
 
 function ReadTextFileForMessage(const FileName: String): String;
 var

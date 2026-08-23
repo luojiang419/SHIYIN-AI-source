@@ -32,7 +32,7 @@ function Stop-TestProcesses([string]$Root) {
 
 $toInstallerPath = (Resolve-Path -LiteralPath $ToInstaller).Path
 $buildRoot = (Resolve-Path (Join-Path $projectRoot '.build')).Path
-$stage = Join-Path $buildRoot 'installer-updater-e2e'
+$stage = Join-Path $buildRoot 'installer-updater-e2e-isolated'
 $stagePrefix = $buildRoot.TrimEnd('\') + '\'
 if (-not $stage.StartsWith($stagePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid installer test stage path.' }
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
@@ -44,6 +44,7 @@ $helper = Join-Path $installRoot 'data\update\helper\SHIYIN-AI-updater-installer
 $desktopExe = Join-Path $installRoot 'SHIYIN AI.exe'
 $dataRoot = Join-Path $installRoot 'data'
 $pending = Join-Path $dataRoot 'update\pending.json'
+$uninstallKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{5D7C3DA8-5D77-4C9A-BF1E-0F1A22D6A4A5}_is1'
 $smokeShortcutPaths = @(
     (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)) 'SHIYIN AI.lnk'),
     (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)) 'SHIYIN AI.lnk'),
@@ -53,6 +54,10 @@ $smokeShortcutPaths = @(
 $success = $false
 
 try {
+    if (Test-Path -LiteralPath $uninstallKey) {
+        $existingInstall = [string](Get-ItemPropertyValue -LiteralPath $uninstallKey -Name InstallLocation -ErrorAction SilentlyContinue)
+        throw "Installer updater smoke test requires a clean machine and refuses to overwrite an existing SHIYIN AI registration: $existingInstall"
+    }
     $fromInstallerPath = (Resolve-Path -LiteralPath $FromInstaller).Path
     New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
     $logPath = Join-Path $stage 'source-install.log'
@@ -131,6 +136,12 @@ try {
         }
         catch {
             # Keep the smoke-test artifact for diagnosis when shortcut inspection fails.
+        }
+    }
+    if (Test-Path -LiteralPath $uninstallKey) {
+        $registeredInstall = [string](Get-ItemPropertyValue -LiteralPath $uninstallKey -Name InstallLocation -ErrorAction SilentlyContinue)
+        if ($registeredInstall -and [IO.Path]::GetFullPath($registeredInstall).TrimEnd('\') -eq [IO.Path]::GetFullPath($installRoot).TrimEnd('\')) {
+            Remove-Item -LiteralPath $uninstallKey -Recurse -Force
         }
     }
     if ($success -and (Test-Path -LiteralPath $stage)) {

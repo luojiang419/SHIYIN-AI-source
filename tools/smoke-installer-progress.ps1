@@ -34,9 +34,7 @@ $smokeShortcutPaths = @(
 try {
     if (Test-Path -LiteralPath $uninstallKey) {
         $existingInstall = [string](Get-ItemPropertyValue -LiteralPath $uninstallKey -Name InstallLocation -ErrorAction SilentlyContinue)
-        if ($existingInstall -and [IO.Path]::GetFullPath($existingInstall).TrimEnd('\') -ne [IO.Path]::GetFullPath($installRoot).TrimEnd('\')) {
-            throw "Installer smoke test refuses to overwrite an existing SHIYIN AI registration: $existingInstall"
-        }
+        throw "Installer progress smoke test requires a clean machine and refuses to overwrite an existing SHIYIN AI registration: $existingInstall"
     }
     $arguments = @(
         '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL',

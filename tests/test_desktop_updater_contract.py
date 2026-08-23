@@ -18,6 +18,7 @@ INSTALLER_SCRIPT = ROOT / "installer" / "shiyin_ai.iss"
 PUBLISH_SCRIPT = ROOT / "tools" / "publish-release.ps1"
 INSTALLER_SMOKE = ROOT / "tools" / "smoke-installer-updater.ps1"
 INSTALLER_PROGRESS_SMOKE = ROOT / "tools" / "smoke-installer-progress.ps1"
+CACHE_CLEAN_SCRIPT = ROOT / "tools" / "clean-development-cache.ps1"
 UPDATER_PAGE = ROOT / "desktop-placeholder" / "updater.html"
 BROWSER_SMOKE_SERVER = ROOT / "tools" / "browser-smoke-server.ps1"
 BACKEND_SPEC = ROOT / "canvas-backend.spec"
@@ -137,7 +138,14 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('SHIYIN-AI-Setup-$Version.exe', installer_verify)
         self.assertIn('ProductVersion', installer_verify)
         installer = INSTALLER_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn('DefaultDirName=D:\\Program Files\\SHIYIN AI', installer)
+        self.assertIn('DefaultDirName={code:ResolveDefaultInstallDir}', installer)
+        self.assertIn('UsePreviousAppDir=no', installer)
+        self.assertIn("DefaultInstallDir = 'D:\\Program Files\\SHIYIN AI'", installer)
+        self.assertIn('function IsInstallerTestPath', installer)
+        self.assertIn("Pos('\\.build\\installer-updater-e2e', Normalized) > 0", installer)
+        self.assertIn("Pos('\\.build\\installer-progress-smoke-', Normalized) > 0", installer)
+        self.assertIn('function IsExistingInstallDir', installer)
+        self.assertIn("data\\database\\canvas.db", installer)
         self.assertIn('Name: "{app}\\data"; Permissions: users-modify', installer)
         self.assertIn('Name: "{app}\\app"', installer)
         self.assertIn('Name: "{commonprograms}\\{#MyAppName}"', installer)
@@ -157,6 +165,9 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         installer_smoke = INSTALLER_SMOKE.read_text(encoding="utf-8")
         self.assertIn("$FromInstaller", installer_smoke)
         self.assertNotIn("FromZip", installer_smoke)
+        self.assertIn("requires a clean machine", installer_smoke)
+        self.assertIn("Remove-Item -LiteralPath $uninstallKey -Recurse -Force", installer_smoke)
+        self.assertIn('Filter "installer-updater-e2e*"', CACHE_CLEAN_SCRIPT.read_text(encoding="utf-8"))
         progress_smoke = INSTALLER_PROGRESS_SMOKE.read_text(encoding="utf-8")
         self.assertIn("smoke-desktop.ps1", progress_smoke)
         self.assertIn("runtime_health", progress_smoke)

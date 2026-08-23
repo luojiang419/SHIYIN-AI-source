@@ -70,6 +70,8 @@ $releaseSourceStages = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".bu
 $targets += $releaseSourceStages
 $installerProgressSmokeDirs = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -Directory -Filter "installer-progress-smoke-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
 $targets += $installerProgressSmokeDirs
+$installerUpdaterSmokeDirs = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot ".build") -Directory -Filter "installer-updater-e2e*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+$targets += $installerUpdaterSmokeDirs
 $prefix = $projectRoot.TrimEnd('\') + '\'
 foreach ($target in $targets) {
     $fullPath = [System.IO.Path]::GetFullPath($target)

@@ -18812,12 +18812,17 @@ function canvasArrangeBounds(ids){
     return {x, y, w:right - x, h:bottom - y, right, bottom};
 }
 
-// 同一拓扑层的节点数量较多时使用近似 4:3 的网格，避免输入节点被排成一条很长的单列。
-// 完全平方数保留正方形（4=2x2、9=3x3），其余数量按更适合画布阅读的宽布局取整。
+// 同一拓扑层的节点数量较多时使用紧凑网格，避免输入节点被排成一条很长的单列。
+// 优先采用宽高比不超过 2:1 的完整矩形（15=5x3、30=6x5），质数等无法整除时回退到近似 4:3。
 function canvasArrangeGridShape(count){
     const total = Math.max(1, Math.floor(Number(count) || 1));
     const square = Math.sqrt(total);
     if(Number.isInteger(square)) return {columns:square, rows:square};
+    for(let rows=Math.floor(square); rows>=2; rows--){
+        if(total % rows !== 0) continue;
+        const columns = total / rows;
+        if(columns / rows <= 2) return {columns, rows};
+    }
     const columns = Math.max(1, Math.ceil(Math.sqrt(total * 4 / 3)));
     return {columns, rows:Math.ceil(total / columns)};
 }
@@ -18936,6 +18941,33 @@ function arrangeIdsByConnections(ids){
     });
     return true;
 }
+
+// 真正的节点流仍作为独立拓扑分量整理；没有互相连线的节点按类型合批，交给网格布局。
+// 这样一批图片/提示词等孤立同类节点不会被拆成多个单节点分量后纵向堆成超长单列。
+function canvasArrangeLayoutBatches(components){
+    const batches = [];
+    const looseByType = new Map();
+    (components || []).forEach(component => {
+        const ids = [...new Set((component || []).filter(id => nodes.some(node => node.id === id)))];
+        if(!ids.length) return;
+        if(ids.length > 1){
+            batches.push({ids, loose:false});
+            return;
+        }
+        const node = nodes.find(item => item.id === ids[0]);
+        if(!node) return;
+        const typeKey = String(node.type || 'unknown');
+        let batch = looseByType.get(typeKey);
+        if(!batch){
+            batch = {ids:[], loose:true};
+            looseByType.set(typeKey, batch);
+            batches.push(batch);
+        }
+        batch.ids.push(node.id);
+    });
+    return batches;
+}
+
 function arrangeSelectedCanvasNodes(){
     if(!canvas || !selected.size) return;
     const explicit = [...selected].filter(id => nodes.some(n => n.id === id));
@@ -18944,12 +18976,25 @@ function arrangeSelectedCanvasNodes(){
     pushUndo();
     const components = canvasArrangeFlowComponents(ids);
     if(!components.length) return;
+    const batches = canvasArrangeLayoutBatches(components);
+    if(!batches.length) return;
     const originalBounds = canvasArrangeBounds(ids);
     const baseX = originalBounds?.x ?? 0;
     let nextY = originalBounds?.y ?? 0;
     let arranged = false;
-    components.forEach(component => {
-        if(component.length < 2){
+    batches.forEach(batch => {
+        const component = batch.ids;
+        if(batch.loose && component.length > 1){
+            const items = component.map(id => nodes.find(node => node.id === id)).filter(Boolean);
+            const rectById = new Map(items.map(node => [node.id, nodeRect(node)]));
+            items.sort((a, b) => {
+                const ra = rectById.get(a.id) || {y:0,x:0};
+                const rb = rectById.get(b.id) || {y:0,x:0};
+                return ra.y - rb.y || ra.x - rb.x || String(a.id).localeCompare(String(b.id));
+            });
+            arrangeCanvasLayerItems(items, rectById, baseX, nextY);
+            arranged = true;
+        } else if(component.length < 2){
             // 单节点组件也要参与整体排布，避免被另一条流覆盖。
             const node = nodes.find(item => item.id === component[0]);
             if(node) moveCanvasNodeAtom(node, baseX, nextY);
@@ -18959,7 +19004,7 @@ function arrangeSelectedCanvasNodes(){
         const bounds = canvasArrangeBounds(component);
         if(bounds) nextY = bounds.bottom + 120;
     });
-    if(!arranged && components.length < 2) return;
+    if(!arranged && batches.length < 2) return;
     render();
     scheduleSave();
 }

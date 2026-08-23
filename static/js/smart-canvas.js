@@ -2690,12 +2690,17 @@ function moveSmartNodeAtom(node, x, y){
     const dy = Math.round(y - (Number(node.y) || 0));
     translateSmartNodeWithMembers(node, dx, dy);
 }
-// 同一拓扑层的节点数量较多时使用近似 4:3 的网格，避免输入节点被排成一条很长的单列。
-// 完全平方数保留正方形（4=2x2、9=3x3），其余数量按更适合画布阅读的宽布局取整。
+// 同一拓扑层的节点数量较多时使用紧凑网格，避免输入节点被排成一条很长的单列。
+// 优先采用宽高比不超过 2:1 的完整矩形（15=5x3、30=6x5），质数等无法整除时回退到近似 4:3。
 function smartArrangeGridShape(count){
     const total = Math.max(1, Math.floor(Number(count) || 1));
     const square = Math.sqrt(total);
     if(Number.isInteger(square)) return {columns:square, rows:square};
+    for(let rows=Math.floor(square); rows>=2; rows--){
+        if(total % rows !== 0) continue;
+        const columns = total / rows;
+        if(columns / rows <= 2) return {columns, rows};
+    }
     const columns = Math.max(1, Math.ceil(Math.sqrt(total * 4 / 3)));
     return {columns, rows:Math.ceil(total / columns)};
 }

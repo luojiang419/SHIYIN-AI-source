@@ -262,6 +262,7 @@ window.addEventListener('message', event => {
     if(event.data?.type === 'providers-changed'){
         refreshCanvasConfigFromSettings();
     }
+    if(event.data?.type === 'shortcut-bindings:changed') applyClassicShortcutOverrides(event.data.bindings || {});
     if(event.data?.type === 'canvas-focus'){
         // 从其他标签页切换回画布时，重新拉取工作流列表并刷新节点
         refreshCanvasConfigFromSettings();
@@ -390,6 +391,8 @@ function revealCanvasAssetControls(){
 revealCanvasAssetControls();
 const logModal = document.getElementById('logModal');
 const logList = document.getElementById('logList');
+const classicShortcutModal = document.getElementById('classicShortcutModal');
+const classicShortcutList = document.getElementById('classicShortcutList');
 const errorModal = document.getElementById('errorModal');
 const errorTitle = document.getElementById('errorTitle');
 const errorMessage = document.getElementById('errorMessage');
@@ -487,6 +490,8 @@ let isRKeyDown = false;
 let canvasToolMode = 'select';
 let isSpaceKeyDown = false;
 let isControlKeyDown = false;
+let classicShortcutOverrides = {};
+const classicHeldShortcutActions = new Map();
 let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
@@ -526,7 +531,7 @@ expandedPromptTextarea?.addEventListener('input', () => {
     expandedPromptSource.dispatchEvent(new Event('input', {bubbles:true}));
 });
 function activeCanvasTool(event=null){
-    const temporaryTool = Boolean(event?.ctrlKey || isControlKeyDown || isSpaceKeyDown);
+    const temporaryTool = Boolean(isControlKeyDown || isSpaceKeyDown);
     return temporaryTool ? (canvasToolMode === 'select' ? 'pan' : 'select') : canvasToolMode;
 }
 function syncCanvasToolUi(){
@@ -644,6 +649,7 @@ const activeCanvasVideoTaskPolls = new Set();
 let hoveredConnectionId = '';
 let lastMouseBoard = {x: 0, y: 0};
 let undoStack = [];
+let redoStack = [];
 const UNDO_MAX = 30;
 const CANVAS_OUTPUT_MEDIA_LIMIT = 96;
 const CANVAS_GENERATION_LOG_LIMIT = 120;
@@ -2067,6 +2073,19 @@ try {
         }
     };
 } catch(e) { /* 不支持 BroadcastChannel 的旧浏览器忽略 */ }
+try {
+    const shortcutChannel = new BroadcastChannel(window.ShortcutActions?.channelName || 'shiyin-shortcuts');
+    shortcutChannel.onmessage = event => {
+        if(event.data?.type === 'shortcut-bindings:changed') applyClassicShortcutOverrides(event.data.bindings || {});
+    };
+} catch(e) {}
+window.addEventListener('storage', event => {
+    if(!window.ShortcutActions || event.key !== window.ShortcutActions.storageKey) return;
+    try { applyClassicShortcutOverrides(JSON.parse(event.newValue || '{}'), {persistLocal:false}); } catch(e) {}
+});
+window.addEventListener('focus', () => {
+    if(Date.now() - lastClassicShortcutRefreshAt > 1200) loadClassicShortcutSettings();
+});
 function msChatModelOptions(selected){
     // 单一数据源：从 API 设置里 modelscope 平台的 chat_models 取
     const msProvider = apiProviders.find(p => p.id === 'modelscope');
@@ -2437,6 +2456,8 @@ async function createCanvas(){
             return;
         }
         resetCascadeRuntimeState();
+        undoStack.length = 0;
+        redoStack.length = 0;
         canvas = data.canvas;
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
@@ -15285,6 +15306,62 @@ function closeCanvasLog(){
 }
 window.openCanvasLog = openCanvasLog;
 window.closeCanvasLog = closeCanvasLog;
+let lastClassicShortcutRefreshAt = 0;
+function applyClassicShortcutOverrides(value, {persistLocal=true}={}){
+    if(!window.ShortcutActions) return;
+    classicShortcutOverrides = window.ShortcutActions.sanitizeOverrides(value);
+    if(persistLocal){
+        try { localStorage.setItem(window.ShortcutActions.storageKey, JSON.stringify(classicShortcutOverrides)); } catch(e) {}
+    }
+    renderClassicShortcutGuide();
+}
+function loadClassicShortcutLocalFallback(){
+    if(!window.ShortcutActions) return;
+    try { applyClassicShortcutOverrides(JSON.parse(localStorage.getItem(window.ShortcutActions.storageKey) || '{}'), {persistLocal:false}); }
+    catch(e) { applyClassicShortcutOverrides({}, {persistLocal:false}); }
+}
+async function loadClassicShortcutSettings(){
+    loadClassicShortcutLocalFallback();
+    try {
+        const response = await fetch('/api/app-settings', {cache:'no-store'});
+        const data = await response.json().catch(() => ({}));
+        if(response.ok) applyClassicShortcutOverrides(data.shortcut_bindings || {});
+    } catch(e) {}
+    lastClassicShortcutRefreshAt = Date.now();
+}
+function renderClassicShortcutGuide(){
+    if(!classicShortcutList || !window.ShortcutActions) return;
+    const resolved = window.ShortcutActions.resolvedBindings(classicShortcutOverrides);
+    const assigned = window.ShortcutActions.actions.filter(action => resolved[action.id]);
+    classicShortcutList.replaceChildren();
+    assigned.forEach(action => {
+        const item = document.createElement('div');
+        item.className = 'classic-shortcut-item';
+        const keys = document.createElement('span');
+        keys.className = 'classic-shortcut-keys';
+        String(resolved[action.id]).split('+').forEach(part => {
+            const key = document.createElement('kbd');
+            key.textContent = part;
+            keys.appendChild(key);
+        });
+        const label = document.createElement('span');
+        label.textContent = action.name;
+        item.append(keys, label);
+        classicShortcutList.appendChild(item);
+    });
+}
+function openClassicShortcutGuide(){
+    renderClassicShortcutGuide();
+    classicShortcutModal?.classList.add('open');
+    classicShortcutModal?.setAttribute('aria-hidden', 'false');
+    refreshIcons(classicShortcutModal || document);
+}
+function closeClassicShortcutGuide(){
+    classicShortcutModal?.classList.remove('open');
+    classicShortcutModal?.setAttribute('aria-hidden', 'true');
+}
+window.openClassicShortcutGuide = openClassicShortcutGuide;
+window.closeClassicShortcutGuide = closeClassicShortcutGuide;
 function makePending(id, run, task={}){
     return {id, startedAt:nowMs(), run, ...task};
 }
@@ -17866,14 +17943,38 @@ function connectSelectionToGenerator(kind, genId){
     return source.id;
 }
 
+function classicHistorySnapshot(){
+    return {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+}
 function pushUndo(){
     if(!canvas) return;
-    undoStack.push({nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))});
+    undoStack.push(classicHistorySnapshot());
     if(undoStack.length > UNDO_MAX) undoStack.shift();
+    redoStack.length = 0;
 }
 function performUndo(){
     if(!canvas || !undoStack.length) return;
+    redoStack.push(classicHistorySnapshot());
+    if(redoStack.length > UNDO_MAX) redoStack.shift();
     const state = undoStack.pop();
+    const previousNodes = nodes;
+    const restoredAssets = new Set((state.nodes || []).map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
+    const removedVideoClipNodes = previousNodes.filter(node => {
+        const asset = ownedVideoClipAsset(node);
+        return asset && !restoredAssets.has(videoClipAssetKey(asset));
+    });
+    nodes = state.nodes;
+    connections = state.connections;
+    selected.clear();
+    render();
+    scheduleSave();
+    queueReleasedVideoClipAssets(removedVideoClipNodes);
+}
+function performRedo(){
+    if(!canvas || !redoStack.length) return;
+    undoStack.push(classicHistorySnapshot());
+    if(undoStack.length > UNDO_MAX) undoStack.shift();
+    const state = redoStack.pop();
     const previousNodes = nodes;
     const restoredAssets = new Set((state.nodes || []).map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
     const removedVideoClipNodes = previousNodes.filter(node => {
@@ -19264,7 +19365,7 @@ canvasArrangeMenuBtn?.addEventListener('click', e => {
     closeCreateMenu();
 });
 function isZoomPreviewIgnoredTarget(target){
-    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
+    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
 }
 board.addEventListener('mousedown', e => {
     if(!zoomPreviewState || e.button !== 0) return;
@@ -19345,7 +19446,7 @@ board.addEventListener('mouseleave', () => setHoveredConnection(''));
 board.ondblclick = null;
 board.oncontextmenu = e => {
     if(!canvas) return;
-    if((e.ctrlKey || e.metaKey) || isRKeyDown){
+    if(isControlKeyDown || isSpaceKeyDown || isRKeyDown){
         e.preventDefault();
         e.stopPropagation();
         return;
@@ -19454,9 +19555,224 @@ window.addEventListener('paste', e => {
     else if(files.length > 1) uploadImageGroup(files);
     else uploadImages(files);
 });
-window.addEventListener('keydown', e => {
-    if(!canvas) return;
-    const key = String(e.key || '').toLowerCase();
+function classicShortcutSelectionTarget(){
+    if(selected.size !== 1) return null;
+    const nodeId = [...selected][0];
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node) return null;
+    if(selectedOutputMedia?.nodeId === node.id && node.type === 'output'){
+        const url = String(selectedOutputMedia.url || '');
+        if(url) return {kind:'output', nodeId:node.id, url, name:outputImageName(url)};
+    }
+    if(node.type === 'group') return {kind:'group', nodeId:node.id, name:node.title || 'GROUP'};
+    if(node.type === 'image' && node.url) return {kind:'node', mediaKind:mediaKindForNode(node), nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)};
+    return {kind:'node-only', nodeId:node.id};
+}
+function ungroupSelectedCanvasGroups(){
+    const groups = [...selected].map(id => nodes.find(node => node.id === id)).filter(node => node?.type === 'group' || node?.type === 'promptGroup');
+    if(!groups.length) return false;
+    pushUndo();
+    const groupIds = new Set(groups.map(group => group.id));
+    const childIds = groups.flatMap(group => group.items || []).filter(id => nodes.some(node => node.id === id));
+    nodes = nodes.filter(node => !groupIds.has(node.id));
+    connections = connections.filter(connection => !groupIds.has(connection.from) && !groupIds.has(connection.to));
+    selected = new Set(childIds);
+    selectedOutputMedia = null;
+    render();
+    scheduleSave();
+    return true;
+}
+function runClassicSelectedShortcutAction(actionId){
+    const target = classicShortcutSelectionTarget();
+    if(!target){ setStatus('请先选择一个节点'); return false; }
+    if(actionId === 'selected.arrangeGroup' && target.kind === 'group'){ arrangeSelectedCanvasGroup(target.nodeId); return true; }
+    if(actionId === 'selected.batch' && target.kind === 'group'){ runMediaQuickAction('batchGenerator', target); return true; }
+    if(actionId === 'selected.preview'){
+        if(target.kind === 'group') openGroupLightbox(target.nodeId);
+        else if(target.url) runMediaQuickAction('preview', target);
+        else return false;
+        return true;
+    }
+    if(actionId === 'selected.download'){
+        if(target.kind === 'group') downloadGroupNodeImages(target.nodeId);
+        else if(target.url) runMediaQuickAction('download', target);
+        else return false;
+        return true;
+    }
+    if(actionId === 'selected.duplicateMedia'){
+        if(target.kind === 'output'){
+            pushUndo();
+            const image = materializeOutputMediaTarget(target);
+            if(!image) return false;
+            render();
+            scheduleSave();
+        } else {
+            copySelectedNodes();
+            pasteNodes();
+        }
+        return true;
+    }
+    const editModes = {
+        'selected.crop':'crop', 'selected.outpaint':'outpaint', 'selected.mask':'mask',
+        'selected.brush':'brush', 'selected.grid':'grid'
+    };
+    if(editModes[actionId]){
+        if(target.kind === 'output') pushUndo();
+        let image = target.kind === 'output' ? materializeOutputMediaTarget(target) : nodes.find(node => node.id === target.nodeId);
+        if(!image || image.type !== 'image' || mediaKindForNode(image) !== 'image') return false;
+        if(target.kind === 'output'){ render(); scheduleSave(); }
+        openImageEditor(image.id, editModes[actionId]);
+        return true;
+    }
+    const quickActions = {
+        'selected.multiView':'multi-view', 'selected.batch':'batchGenerator'
+    };
+    if(quickActions[actionId]){
+        if(!target.url || target.mediaKind === 'video') return false;
+        runMediaQuickAction(quickActions[actionId], target);
+        return true;
+    }
+    return false;
+}
+function runClassicEditorShortcutAction(actionId){
+    const imageEditorOpen = document.getElementById('imageEditModal')?.classList.contains('open');
+    const lightboxOpen = outputLightbox?.classList.contains('open');
+    const screenshotOpen = videoClipModal?.classList.contains('open') && videoClipEditor?.mode === 'screenshot';
+    if(!imageEditorOpen && !lightboxOpen && !screenshotOpen) return false;
+    if(actionId === 'editor.previous' && lightboxOpen) return navigateOutputLightbox(-1);
+    if(actionId === 'editor.next' && lightboxOpen) return navigateOutputLightbox(1);
+    if(actionId === 'editor.close'){
+        if(imageEditorOpen) closeImageEditor();
+        else if(lightboxOpen) closeOutputLightbox();
+        else closeVideoClipEditor();
+        return true;
+    }
+    if(actionId === 'editor.apply' && imageEditorOpen){ applyImageEdit(); return true; }
+    if(actionId === 'editor.download' && lightboxOpen && currentOutputLightboxUrl){
+        downloadUrl(currentOutputLightboxUrl, outputDownloadName(currentOutputLightboxUrl)).catch(error => alert(error.message || '下载失败'));
+        return true;
+    }
+    if(actionId === 'editor.downloadAll' && lightboxOpen && currentOutputLightboxOutId){
+        const source = nodes.find(node => node.id === currentOutputLightboxOutId);
+        if(source?.type === 'group') downloadGroupNodeImages(source.id);
+        else if(source?.type === 'output') downloadOutputNodeImages(source.id);
+        else return false;
+        return true;
+    }
+    if(actionId === 'editor.compare' && lightboxOpen && currentOutputCompareUrl){ setOutputCompareMode(!outputPreview.classList.contains('compare-mode')); return true; }
+    if(actionId === 'editor.undoDrawing' && imageEditorOpen){ undoEditDrawing(); return true; }
+    if(actionId === 'editor.redoDrawing' && imageEditorOpen){ redoEditDrawing(); return true; }
+    if(actionId === 'editor.clearDrawing' && imageEditorOpen){ clearEditDrawing(); return true; }
+    if(['editor.videoFirstFrame','editor.videoCurrentFrame','editor.videoLastFrame'].includes(actionId) && screenshotOpen){
+        if(actionId === 'editor.videoFirstFrame') videoClipPreview.currentTime = 0;
+        if(actionId === 'editor.videoLastFrame') videoClipPreview.currentTime = Math.max(0, Number(videoClipEditor.duration || 0) - 0.001);
+        submitVideoClip();
+        return true;
+    }
+    return false;
+}
+function classicShortcutBlockedOverlayAction(){
+    if(logModal?.classList.contains('open')) return 'canvas.toggleLogs';
+    if(classicShortcutModal?.classList.contains('open')) return 'canvas.toggleShortcuts';
+    if(workflowTransferModal?.classList.contains('open')) return 'canvas.toggleWorkflow';
+    if(createMenu?.classList.contains('open')) return 'canvas.createMenu';
+    if(promptTemplateModal?.classList.contains('open')) return 'canvas.promptTemplates';
+    if(assetManagerModal?.classList.contains('open') || expandedPromptModal?.classList.contains('open')) return '__blocked__';
+    return '';
+}
+function runClassicCanvasShortcutAction(actionId){
+    if(actionId.startsWith('create.')){
+        const typeMap = {
+            'create.image':'image', 'create.group':'group', 'create.prompt':'prompt', 'create.loop':'loop',
+            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'poseReference',
+            'create.dwpose':'dwpose', 'create.poseReplicate':'poseReplicate', 'create.relight':'relight',
+            'create.multiView':'multiView', 'create.batch':'batchGenerator'
+        };
+        const type = typeMap[actionId];
+        if(!type) return false;
+        pushUndo();
+        const created = createNodeByType(type, defaultPoint());
+        if(!created) return false;
+        selected.clear();
+        selected.add(created.id);
+        render();
+        scheduleSave();
+        return true;
+    }
+    if(actionId.startsWith('selected.')) return runClassicSelectedShortcutAction(actionId);
+    if(actionId === 'canvas.run'){
+        const node = nodes.find(item => selected.has(item.id));
+        if(!node) return false;
+        runCanvasGenerate(node.id);
+        return true;
+    }
+    if(actionId === 'canvas.runCascade'){
+        const node = nodes.find(item => selected.has(item.id));
+        if(!node) return false;
+        runNodeCascade(node.id);
+        return true;
+    }
+    if(actionId === 'canvas.undo'){ performUndo(); return true; }
+    if(actionId === 'canvas.redo'){ performRedo(); return true; }
+    if(actionId === 'canvas.copy'){
+        if(window.getSelection?.().toString()) return false;
+        copySelectedNodes();
+        return true;
+    }
+    if(actionId === 'canvas.paste'){
+        const requestedAt = Date.now();
+        setTimeout(() => {
+            if(lastImagePasteAt >= requestedAt || !clipboardNodeCount()) return;
+            pasteNodes();
+        }, 90);
+        return 'allow-default';
+    }
+    if(actionId === 'canvas.delete'){ if(!selected.size) return false; deleteSelectedNodes(); return true; }
+    if(actionId === 'canvas.selectAll'){
+        selected = new Set(nodes.map(node => node.id));
+        selectedOutputMedia = null;
+        render();
+        return true;
+    }
+    if(actionId === 'canvas.clearSelection'){
+        if(!selected.size) return false;
+        selected.clear();
+        selectedOutputMedia = null;
+        refreshSelectionVisuals();
+        return true;
+    }
+    if(actionId === 'canvas.group'){ groupSelectedImages(); return true; }
+    if(actionId === 'canvas.ungroup') return ungroupSelectedCanvasGroups();
+    if(actionId === 'canvas.arrange'){ arrangeSelectedCanvasNodes(); return true; }
+    if(actionId === 'canvas.createMenu'){
+        if(createMenu?.classList.contains('open')) closeCreateMenu();
+        else openCreateMenu(window.innerWidth / 2, window.innerHeight / 2);
+        return true;
+    }
+    if(actionId === 'canvas.toolSelect'){ setCanvasToolMode('select'); return true; }
+    if(actionId === 'canvas.toolPan'){ setCanvasToolMode('pan'); return true; }
+    if(actionId === 'canvas.fitAll'){ fitAllNodesViewport(); return true; }
+    if(actionId === 'canvas.overview'){ toggleZoomPreview(); return true; }
+    if(actionId === 'canvas.toggleAssets'){ toggleCanvasAssetLibrary(); return true; }
+    if(actionId === 'canvas.toggleLogs'){ logModal?.classList.contains('open') ? closeCanvasLog() : openCanvasLog(); return true; }
+    if(actionId === 'canvas.toggleShortcuts'){ classicShortcutModal?.classList.contains('open') ? closeClassicShortcutGuide() : openClassicShortcutGuide(); return true; }
+    if(actionId === 'canvas.toggleWorkflow'){ workflowTransferModal?.classList.contains('open') ? closeWorkflowTransferModal() : openWorkflowTransferModal(); return true; }
+    if(actionId === 'canvas.promptPresets' || actionId === 'canvas.promptTemplates'){
+        const promptNode = nodes.find(node => selected.has(node.id) && node.type === 'prompt');
+        openPromptTemplateModal(promptNode?.id || '');
+        return true;
+    }
+    return false;
+}
+function syncClassicHeldShortcutActions(){
+    const held = new Set(classicHeldShortcutActions.values());
+    isControlKeyDown = held.has('canvas.temporaryControlTool');
+    isSpaceKeyDown = held.has('canvas.temporaryTool');
+    isRKeyDown = held.has('canvas.temporarySelect');
+    syncCanvasToolUi();
+}
+function handleClassicShortcutKeyDown(e){
+    if(!canvas || !window.ShortcutActions) return false;
     if(videoFrameModal?.classList.contains('open')){
         if(e.key === 'Escape') cancelVideoFrameExtraction();
         else if(!isEditableTarget(e.target) && (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')){
@@ -19465,9 +19781,11 @@ window.addEventListener('keydown', e => {
             else videoPreviewFrameStep(videoFramePreview, videoFrameEditor?.metadata?.fps || videoFrameEditor?.metadata?.frame_rate, e.key === 'ArrowRight' ? 1 : -1);
             syncVideoFramePlayButton();
         }
-        return;
+        return true;
     }
     if(videoClipModal?.classList.contains('open')){
+        const editorAction = window.ShortcutActions.findAction(e, 'editor', classicShortcutOverrides);
+        if(editorAction && runClassicEditorShortcutAction(editorAction.id)){ e.preventDefault(); return true; }
         if(e.key === 'Escape') closeVideoClipEditor();
         else if(!isEditableTarget(e.target) && (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')){
             e.preventDefault();
@@ -19478,96 +19796,40 @@ window.addEventListener('keydown', e => {
             }
             return;
         }
-        return;
+        return true;
     }
-    if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }
-    if(e.key === 'Control' && !isEditableTarget(e.target)){
-        isControlKeyDown = true;
-        syncCanvasToolUi();
+    if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return true; }
+    if(isEditableTarget(e.target) || e.repeat) return false;
+    if(document.getElementById('imageEditModal')?.classList.contains('open') || outputLightbox?.classList.contains('open')){
+        const editorAction = window.ShortcutActions.findAction(e, 'editor', classicShortcutOverrides);
+        if(editorAction && runClassicEditorShortcutAction(editorAction.id)){ e.preventDefault(); return true; }
+        return false;
     }
-    if(e.key === ' ' && !isEditableTarget(e.target)){
+    const holdAction = window.ShortcutActions.findAction(e, 'canvas', classicShortcutOverrides, {hold:true});
+    if(holdAction){
+        classicHeldShortcutActions.set(e.code || holdAction.id, holdAction.id);
+        syncClassicHeldShortcutActions();
         e.preventDefault();
-        isSpaceKeyDown = true;
-        syncCanvasToolUi();
+        return true;
     }
-    if(key === 'r' && !isEditableTarget(e.target)) isRKeyDown = true;
     if(e.key === 'Shift' && !e.altKey && !isEditableTarget(document.activeElement)) setKnifeMode(true);
-    if(e.key === 'Escape' && document.getElementById('imageEditModal').classList.contains('open')) { closeImageEditor(); return; }
-    if(e.key === 'Escape' && promptTemplateModal?.classList.contains('open')) { closePromptTemplateModal(); return; }
-    if(outputLightbox.classList.contains('open') && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')){
-        if(navigateOutputLightbox(e.key === 'ArrowRight' ? 1 : -1)){
-            e.preventDefault();
-            e.stopPropagation();
-        }
-        return;
-    }
-    if(e.key === 'Escape' && outputLightbox.classList.contains('open')) { closeOutputLightbox(); return; }
-    if(!e.ctrlKey && !e.metaKey && !e.altKey && key === 'z' && !isEditableTarget(e.target)
-        && !document.getElementById('imageEditModal')?.classList.contains('open')
-        && !promptTemplateModal?.classList.contains('open')
-        && !outputLightbox.classList.contains('open')
-        && !videoClipModal?.classList.contains('open')
-        && !assetManagerModal?.classList.contains('open')
-        && !workflowTransferModal?.classList.contains('open')
-        && !logModal?.classList.contains('open')){
-        if(e.repeat) return;
-        e.preventDefault();
-        toggleZoomPreview();
-        return;
-    }
-    if((e.ctrlKey || e.metaKey) && key === 'g') { e.preventDefault(); groupSelectedImages(); }
-    if((e.ctrlKey || e.metaKey) && key === 'c') {
-        // 在输入框/可编辑元素里时，让浏览器原生 Ctrl+C 工作
-        const tag = document.activeElement?.tagName;
-        if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-        // 用户在页面任意位置选中了文本时，也不要拦截
-        const sel = window.getSelection && window.getSelection();
-        if(sel && sel.toString().length > 0) return;
-        e.preventDefault();
-        copySelectedNodes();
-    }
-    if((e.ctrlKey || e.metaKey) && key === 'v') {
-        const tag = document.activeElement?.tagName;
-        if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-        if(clipboardNodeCount()) {
-            const pasteRequestedAt = Date.now();
-            setTimeout(() => {
-                if(!canvas) return;
-                if(lastImagePasteAt >= pasteRequestedAt) return;
-                pasteNodes();
-            }, 90);
-        }
-    }
-    if((e.ctrlKey || e.metaKey) && key === 'z') {
-        const tag = document.activeElement?.tagName;
-        if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-        e.preventDefault(); performUndo();
-    }
-    if(e.key === 'Delete' || e.key === 'Backspace') {
-        const tag = document.activeElement?.tagName;
-        if(tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
-        if(selected.size === 0) return;
-        e.preventDefault();
-        deleteSelectedNodes();
-    }
-});
-window.addEventListener('keyup', e => {
-    if(String(e.key || '').toLowerCase() === 'r') isRKeyDown = false;
-    if(e.key === 'Control'){
-        isControlKeyDown = false;
-        syncCanvasToolUi();
-    }
-    if(e.key === ' '){
-        isSpaceKeyDown = false;
-        syncCanvasToolUi();
-    }
+    const action = window.ShortcutActions.findAction(e, 'canvas', classicShortcutOverrides);
+    if(!action) return false;
+    const blockedAction = classicShortcutBlockedOverlayAction();
+    if(blockedAction && blockedAction !== action.id && !(blockedAction === 'canvas.promptTemplates' && action.id === 'canvas.promptPresets')) return false;
+    const result = runClassicCanvasShortcutAction(action.id);
+    if(result && result !== 'allow-default') e.preventDefault();
+    return Boolean(result);
+}
+function handleClassicShortcutKeyUp(e){
+    if(classicHeldShortcutActions.delete(e.code || '')) syncClassicHeldShortcutActions();
     if(e.key === 'Shift') setKnifeMode(false);
-});
+}
+window.addEventListener('keydown', handleClassicShortcutKeyDown);
+window.addEventListener('keyup', handleClassicShortcutKeyUp);
 window.addEventListener('blur', () => {
-    isRKeyDown = false;
-    isSpaceKeyDown = false;
-    isControlKeyDown = false;
-    syncCanvasToolUi();
+    classicHeldShortcutActions.clear();
+    syncClassicHeldShortcutActions();
     setKnifeMode(false);
 });
 window.addEventListener('blur', () => {
@@ -19644,6 +19906,8 @@ function escapeAttr(str){ return escapeHtml(str); }
 
 window.onload = async () => {
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem(CANVAS_THEME_KEY) || 'light');
+    loadClassicShortcutLocalFallback();
+    void loadClassicShortcutSettings();
     applyQuickToolbarState();
     if(window.StudioI18n) StudioI18n.apply();
     document.title = tr('canvas.title');

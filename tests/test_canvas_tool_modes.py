@@ -30,9 +30,10 @@ class CanvasToolModeContractTests(unittest.TestCase):
         self.assertIn("smart-tool-pan", self.smart_css)
 
     def test_both_canvases_support_ctrl_or_space_temporary_inversion(self):
-        self.assertIn("event?.ctrlKey || isControlKeyDown || isSpaceKeyDown", self.canvas_js)
-        self.assertIn("e.key === ' '", self.canvas_js)
-        self.assertIn("!isEditableTarget(e.target)", self.canvas_js)
+        self.assertIn("isControlKeyDown || isSpaceKeyDown", self.canvas_js)
+        self.assertIn("const holdAction = window.ShortcutActions.findAction", self.canvas_js)
+        self.assertIn("classicHeldShortcutActions", self.canvas_js)
+        self.assertIn("isEditableTarget(e.target)", self.canvas_js)
         self.assertIn("ShortcutActions.findAction", self.smart_js)
         self.assertIn("const holdAction = window.ShortcutActions.findAction", self.smart_js)
         self.assertIn("smartTemporaryToolMode", self.smart_js)

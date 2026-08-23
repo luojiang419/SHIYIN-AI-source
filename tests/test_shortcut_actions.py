@@ -10,6 +10,8 @@ SETTINGS_JS = (ROOT / "static" / "js" / "app-settings.js").read_text(encoding="u
 SETTINGS_CSS = (ROOT / "static" / "css" / "app-settings.css").read_text(encoding="utf-8")
 SMART_HTML = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
 SMART_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+CLASSIC_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+CLASSIC_JS = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
 
 
 class ShortcutActionRegistryTests(unittest.TestCase):
@@ -60,6 +62,29 @@ class ShortcutActionRegistryTests(unittest.TestCase):
             "create.relight", "create.multiView", "create.batch",
         ):
             self.assertIn(f"'{action_id}'", SMART_JS)
+
+    def test_classic_canvas_uses_same_saved_shortcut_registry(self):
+        self.assertIn('/static/js/shortcut-actions.js', CLASSIC_HTML)
+        self.assertIn('id="classicShortcutList"', CLASSIC_HTML)
+        for symbol in (
+            "loadClassicShortcutSettings", "applyClassicShortcutOverrides",
+            "runClassicCanvasShortcutAction", "runClassicEditorShortcutAction",
+            "ShortcutActions.findAction", "shortcut-bindings:changed", "performRedo",
+        ):
+            self.assertIn(symbol, CLASSIC_JS)
+
+    def test_classic_canvas_no_longer_dispatches_fixed_default_bindings(self):
+        self.assertNotIn("if((e.ctrlKey || e.metaKey) && key === 'g'", CLASSIC_JS)
+        self.assertNotIn("if(!e.ctrlKey && !e.metaKey && !e.altKey && key === 'z'", CLASSIC_JS)
+        self.assertIn("window.addEventListener('keydown', handleClassicShortcutKeyDown)", CLASSIC_JS)
+
+    def test_classic_canvas_dispatches_all_registered_creation_actions(self):
+        for action_id in (
+            "create.image", "create.group", "create.prompt", "create.loop", "create.h3Video",
+            "create.panorama", "create.poseReference", "create.dwpose", "create.poseReplicate",
+            "create.relight", "create.multiView", "create.batch",
+        ):
+            self.assertIn(f"'{action_id}'", CLASSIC_JS)
 
 
 if __name__ == "__main__":

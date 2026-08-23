@@ -647,13 +647,27 @@ let undoStack = [];
 const UNDO_MAX = 30;
 const CANVAS_OUTPUT_MEDIA_LIMIT = 96;
 const CANVAS_GENERATION_LOG_LIMIT = 120;
-function pruneCanvasRuntimeCollections(){
+function pruneCanvasRuntimeCollections(options={}){
     if(!canvas) return false;
     let changed = false;
+    // 非持久化的在线任务在提交前会先写入占位，但只有真正拿到
+    // canvasTaskId 后才具备重启续查条件。打开画布时，如果这类占位
+    // 被保存下来，后续既没有轮询入口也不会自动完成，最终会永久刷时长。
+    // 仅在加载/创建画布的边界执行清理，避免远端同步期间误删当前正在
+    // 提交中的任务；可恢复失败占位必须保留给用户继续查询。
+    const dropOrphanPending = options.dropOrphanPending === true;
     const logs = Array.isArray(canvas.logs) ? canvas.logs : [];
     if(logs.length > CANVAS_GENERATION_LOG_LIMIT) changed = true;
     canvas.logs = logs.slice(0, CANVAS_GENERATION_LOG_LIMIT);
     (nodes || []).forEach(node => {
+        if(dropOrphanPending && node.type === 'output' && Array.isArray(node._pending)){
+            const pending = node._pending;
+            const retainedPending = pending.filter(item => item?.canvasTaskId || item?.recoverTaskId);
+            if(retainedPending.length !== pending.length){
+                node._pending = retainedPending;
+                changed = true;
+            }
+        }
         if(Array.isArray(node.generatedOutputs) && node.generatedOutputs.length > CANVAS_OUTPUT_MEDIA_LIMIT){
             node.generatedOutputs = node.generatedOutputs.slice(-CANVAS_OUTPUT_MEDIA_LIMIT);
             changed = true;
@@ -1797,7 +1811,31 @@ function scheduleSave(){
 function scheduleViewportSave(){
     saveLocalViewport();
 }
-function refreshOutputTimer(){
+function pruneCompletedOrphanOutputPending(){
+    let changed = false;
+    (nodes || []).filter(node => node?.type === 'output' && Array.isArray(node._pending)).forEach(out => {
+        const pending = out._pending;
+        const retained = pending.filter(item => {
+            if(item?.canvasTaskId || item?.recoverTaskId) return true;
+            const sourceId = item?.run?.node?.id;
+            const source = sourceId ? nodes.find(node => node.id === sourceId) : null;
+            // 直接 API 调用在提交前没有可续查 task id；生成节点已明确完成时，
+            // 这类占位只能是旧状态残留，不能继续显示运行计时。
+            return !(source && source.running !== true && source.runStatus === 'done');
+        });
+        if(retained.length !== pending.length){
+            out._pending = retained;
+            changed = true;
+        }
+    });
+    return changed;
+}
+function refreshOutputTimer(skipOrphanPrune=false){
+    if(!skipOrphanPrune && pruneCompletedOrphanOutputPending()){
+        scheduleSave();
+        (nodes || []).filter(node => node?.type === 'output').forEach(node => refreshOutputNodeContent(node));
+        return;
+    }
     const hasPending = nodes.some(n => n.type === 'output' && (n._pending || []).length);
     if(!canvasRouteActive || document.hidden){
         if(outputTimer) clearInterval(outputTimer);
@@ -2401,7 +2439,7 @@ async function createCanvas(){
         canvas = data.canvas;
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
-        pruneCanvasRuntimeCollections();
+        pruneCanvasRuntimeCollections({dropOrphanPending:true});
         viewport = localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1});
         canvas.viewport = {...viewport};
         resetTransientRunState(nodes);
@@ -2546,7 +2584,7 @@ async function openCanvas(id){
         }
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
-        const prunedRuntimeCollections = pruneCanvasRuntimeCollections();
+        const prunedRuntimeCollections = pruneCanvasRuntimeCollections({dropOrphanPending:true});
         viewport = localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1});
         canvas.viewport = {...viewport};
         lastCanvasUpdatedAt = Number(canvas.updated_at || 0);
@@ -9237,7 +9275,7 @@ function refreshOutputNodeContent(node){
     });
     bindCanvasPreviewImageFallbacks(grid);
     syncCanvasSelectedImageResolution(el);
-    refreshOutputTimer();
+    refreshOutputTimer(true);
     return true;
 }
 function defaultNodeSize(type){

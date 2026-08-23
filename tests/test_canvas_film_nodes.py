@@ -133,6 +133,18 @@ def test_film_runs_create_pending_outputs_before_waiting_for_results():
     assert "status:'error'" in SMART
 
 
+def test_classic_canvas_drops_non_resumable_output_placeholders_when_opening_canvas():
+    assert "function pruneCanvasRuntimeCollections(options={})" in CLASSIC
+    assert "const dropOrphanPending = options.dropOrphanPending === true;" in CLASSIC
+    assert "const retainedPending = pending.filter(item => item?.canvasTaskId || item?.recoverTaskId);" in CLASSIC
+    assert "pruneCanvasRuntimeCollections({dropOrphanPending:true});" in CLASSIC
+    # 远端增量同步不能清理当前正在提交、尚未拿到任务 ID 的占位。
+    assert "pruneCanvasRuntimeCollections();" in CLASSIC
+    assert "function pruneCompletedOrphanOutputPending()" in CLASSIC
+    assert "source.running !== true && source.runStatus === 'done'" in CLASSIC
+    assert "function refreshOutputTimer(skipOrphanPrune=false)" in CLASSIC
+
+
 def test_film_runs_allow_parallel_clicks_and_keep_independent_smart_outputs():
     assert "if(!node) return;" in CLASSIC
     assert "classicFilmHasActiveRun(node,out)" in CLASSIC

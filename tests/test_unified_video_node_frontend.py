@@ -38,6 +38,17 @@ class UnifiedVideoNodeFrontendTests(unittest.TestCase):
         self.assertIn("kling-connection-panel", self.styles)
         self.assertIn(".video-input-actions[hidden] { display:none; }", self.styles)
 
+    def test_kling_defaults_to_video_3_omni_and_does_not_expand_legacy_models(self):
+        self.assertIn("node.model = preferredKlingOmniModel(node);", self.javascript)
+        self.assertIn(
+            "if(normalizedAllowedValues.length && !normalizedAllowedValues.includes(value))",
+            self.javascript,
+        )
+        self.assertNotIn(
+            "Array.from({length:13},(_,index)=>String(index + 3))",
+            self.javascript,
+        )
+
     def test_api_settings_preserves_kling_as_a_fixed_protocol(self):
         self.assertIn('<option value="kling-cli">', self.settings_html)
         self.assertIn("'kling-cli'", self.settings_javascript)

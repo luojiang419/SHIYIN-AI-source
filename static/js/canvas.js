@@ -973,7 +973,8 @@ function sanitizeVideoNodeProviderModel(node){
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
     if(node.apiProvider === 'kling-cli'){
         const models = klingModelsForNode(node);
-        const requestedOmni = isKlingOmni30Model(node.model) || node.model === KLING_VIDEO_3_0_OMNI_MODEL;
+        const missingSelection = !node.model || node.model === '可灵（连接后选择模型）';
+        const requestedOmni = missingSelection || isKlingOmni30Model(node.model) || node.model === KLING_VIDEO_3_0_OMNI_MODEL;
         const preferred = models.find(item => isKlingOmni30Model(item?.model) || isKlingOmni30Model(item?.alias) || isKlingOmni30Model(item?.description))?.model || '';
         if(models.length && !models.some(item => item.model === node.model)) node.model = requestedOmni ? (preferred || node.model) : models[0].model;
         if(!node.model || node.model === '可灵（连接后选择模型）') node.model = requestedOmni ? (preferred || KLING_VIDEO_3_0_OMNI_MODEL) : (models[0]?.model || '');
@@ -11504,15 +11505,19 @@ function klingVideoSettingsHtml(node){
     }
     node.modelParameters = node.modelParameters && typeof node.modelParameters === 'object' ? node.modelParameters : {};
     const fields = (model.arguments || []).filter(argument => argument.name && argument.name !== 'prompt').map(argument => {
-        let allowed_values = Array.isArray(argument.allowed_values) ? argument.allowed_values : [];
-        // 可灵 CLI 的视频时长能力为 3–15 秒；旧能力缓存可能只返回 5/15，
-        // 这里补齐完整选项，避免画布被缓存的能力列表限制。
-        if(String(argument.name).toLowerCase() === 'duration'){
-            allowed_values = [...new Set([...allowed_values.map(value => String(value)), ...Array.from({length:13},(_,index)=>String(index + 3))])];
-        }
+        const allowed_values = Array.isArray(argument.allowed_values) ? argument.allowed_values : [];
         const stored = node.modelParameters[argument.name];
-        const value = stored == null || stored === '' ? String(argument.default || '') : String(stored);
-        if(node.modelParameters[argument.name] == null && value !== '') node.modelParameters[argument.name] = value;
+        let value = stored == null || stored === '' ? String(argument.default || '') : String(stored);
+        const normalizedAllowedValues = allowed_values.map(option => String(option));
+        if(normalizedAllowedValues.length && !normalizedAllowedValues.includes(value)){
+            const declaredDefault = String(argument.default || '');
+            value = normalizedAllowedValues.includes(declaredDefault) ? declaredDefault : normalizedAllowedValues[0];
+        }
+        if(value !== '') node.modelParameters[argument.name] = value;
+        if(argument.name === 'duration' && value !== '') node.duration = Number(value);
+        if(argument.name === 'aspect_ratio' && value !== '') node.aspectRatio = value;
+        if(argument.name === 'resolution' && value !== '') node.resolution = value;
+        if(argument.name === 'enable_audio' && value !== '') node.generateAudio = value === 'true';
         const control = allowed_values.length
             ? `<select class="select-lite" data-kling-parameter="${escapeAttr(argument.name)}">${allowed_values.map(option => `<option value="${escapeHtml(option)}" ${String(option) === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`
             : `<input class="setting-input" data-kling-parameter="${escapeAttr(argument.name)}" value="${escapeAttr(value)}" ${argument.required ? 'required' : ''}>`;
@@ -11588,7 +11593,8 @@ function renderVideoBody(node){
         node.apiProvider = e.target.value;
         node.modelParameters = {};
         if(isKlingVideoNode(node)){
-            node.model = klingModelsForNode(node)[0]?.model || '';
+            // 与影视“生成视频”节点保持一致：可灵 CLI 默认进入支持 3–15 秒的 3.0 Omni。
+            node.model = preferredKlingOmniModel(node);
             ensureKlingCapabilities();
         } else {
             const models = providerVideoModels(node.apiProvider);

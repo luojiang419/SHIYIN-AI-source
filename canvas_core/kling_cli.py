@@ -27,6 +27,21 @@ _SUCCESS_STATUSES = {
     "done",
 }
 _FAILURE_STATUSES = {"failed", "cancelled", "canceled", "error"}
+_KLING_VIDEO_3_MODEL = re.compile(r"^kling-video-v3(?:[._-]?0)(?:$|[._-])", re.IGNORECASE)
+_KLING_VIDEO_3_DURATIONS = tuple(str(value) for value in range(3, 16))
+
+
+def _kling_argument_allowed_values(
+    model_name: str,
+    argument_name: str,
+    allowed_values: Sequence[Any],
+) -> list[str]:
+    values = [_text(value) for value in allowed_values if _text(value)]
+    # 官方 CLI 0.1.3 的 Video 3.0 / 3.0 Omni / 3.0 Turbo 均支持 3–15 秒。
+    # 对服务端旧能力缓存做模型级兼容，但不能放宽仍只支持 5/10 秒的 2.x 模型。
+    if argument_name.lower() == "duration" and _KLING_VIDEO_3_MODEL.search(_text(model_name)):
+        return list(_KLING_VIDEO_3_DURATIONS)
+    return values
 
 
 class KlingCliError(RuntimeError):
@@ -179,7 +194,11 @@ class KlingCliService:
             value = _argument_text(raw_value)
             if not value:
                 continue
-            allowed_values = [_text(item) for item in specs[name].get("allowed_values", []) if _text(item)]
+            allowed_values = _kling_argument_allowed_values(
+                model_name,
+                name,
+                specs[name].get("allowed_values", []),
+            )
             if allowed_values and value not in allowed_values:
                 raise KlingCliError(
                     f"可灵参数 {name} 的值 {value} 不在当前模型允许范围：{', '.join(allowed_values)}"
@@ -377,15 +396,13 @@ def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, Any]:
                         "name": name,
                         "required": raw_argument.get("required") is True,
                         "default": _text(raw_argument.get("default")),
-                        "allowed_values": [
-                            _text(value)
-                            for value in (
-                                raw_argument.get("allowedValues")
-                                or raw_argument.get("allowed_values")
-                                or []
-                            )
-                            if _text(value)
-                        ],
+                        "allowed_values": _kling_argument_allowed_values(
+                            model_name,
+                            name,
+                            raw_argument.get("allowedValues")
+                            or raw_argument.get("allowed_values")
+                            or [],
+                        ),
                         "description": _text(raw_argument.get("description")),
                     }
                 )

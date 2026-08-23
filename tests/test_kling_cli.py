@@ -136,6 +136,47 @@ class KlingCliTests(unittest.TestCase):
         )
         self.assertTrue(capabilities["image_to_video"][0]["inputs"][0]["required"])
 
+    def test_video_3_capabilities_normalize_stale_duration_values_to_three_through_fifteen(self):
+        payload = {
+            "ok": True,
+            "body": {
+                "availableModels": {
+                    "text_to_video": {
+                        "models": [
+                            {
+                                "model": "kling-video-v3_0_omni",
+                                "arguments": [
+                                    {
+                                        "name": "duration",
+                                        "default": "5",
+                                        "allowedValues": ["5", "10"],
+                                    }
+                                ],
+                            },
+                            {
+                                "model": "kling-video-v2_6",
+                                "arguments": [
+                                    {
+                                        "name": "duration",
+                                        "default": "5",
+                                        "allowedValues": ["5", "10"],
+                                    }
+                                ],
+                            },
+                        ]
+                    }
+                }
+            },
+        }
+
+        models = parse_kling_capabilities(payload)["text_to_video"]
+
+        self.assertEqual(
+            models[0]["arguments"][0]["allowed_values"],
+            [str(value) for value in range(3, 16)],
+        )
+        self.assertEqual(models[1]["arguments"][0]["allowed_values"], ["5", "10"])
+
     def test_capabilities_explicitly_keep_video_reference_removed(self):
         payload = {
             "ok": True,
@@ -380,7 +421,7 @@ class KlingCliTests(unittest.TestCase):
             service.generate(
                 command="text_to_video",
                 model={
-                    "model": "kling-video",
+                    "model": "kling-video-v2_6",
                     "arguments": [
                         {"name": "duration", "allowed_values": ["5", "10"]}
                     ],
@@ -389,6 +430,43 @@ class KlingCliTests(unittest.TestCase):
                 images=[],
                 parameters={"duration": "8"},
             )
+
+    def test_video_3_submission_accepts_three_through_fifteen_with_stale_schema(self):
+        calls = []
+
+        def runner(executable, arguments, **kwargs):
+            calls.append(list(arguments))
+            return completed(
+                {"ok": True, "body": {"generationId": "generation-v3-duration"}}
+            )
+
+        service = KlingCliService(
+            environment=KlingCliEnvironment(
+                node_path="node.exe",
+                npm_path="npm.cmd",
+                kling_path="kling.cmd",
+                entrypoint_path="cli.js",
+                version="0.1.3",
+            ),
+            runner=runner,
+        )
+
+        result = service.submit(
+            command="text_to_video",
+            model={
+                "model": "kling-video-v3_0_omni",
+                "arguments": [
+                    {"name": "duration", "allowed_values": ["5", "10"]}
+                ],
+            },
+            prompt="测试六秒镜头",
+            images=[],
+            parameters={"duration": "6"},
+        )
+
+        self.assertEqual(result["generation_id"], "generation-v3-duration")
+        self.assertIn("--duration", calls[0])
+        self.assertIn("6", calls[0])
 
     def test_service_has_no_video_reference_runtime_surface(self):
         self.assertNotIn("skill_entrypoint_path", KlingCliEnvironment.__dataclass_fields__)

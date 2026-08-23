@@ -75,6 +75,7 @@ from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
 from canvas_core.generated_output import export_generated_files
 from canvas_core.image_upload import normalize_image_orientation
+from canvas_core.canvas_placeholder_migration import migrate_orphan_output_pending_once
 from canvas_core.grid_crop import detect_grid
 from canvas_core.video_clip import (
     VideoClipError,
@@ -407,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.271"
+APP_VERSION = "1.0.272"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -499,6 +500,15 @@ async def startup_event():
         await asyncio.to_thread(seed_builtin_local_vision_secret_once)
     except Exception as exc:
         print(f"初始化内置视觉模型失败: {exc}")
+    try:
+        placeholder_cleanup = await asyncio.to_thread(migrate_orphan_output_pending_once, DATABASE, APP_VERSION)
+        if placeholder_cleanup.get("removed"):
+            print(
+                "已清理升级前不可恢复的输出占位："
+                f"{placeholder_cleanup['removed']} 个，涉及 {placeholder_cleanup['canvases']} 个画布"
+            )
+    except Exception as exc:
+        print(f"升级前输出占位清理失败: {exc}")
     try:
         await asyncio.to_thread(load_online_image_tasks_from_disk)
     except Exception as exc:

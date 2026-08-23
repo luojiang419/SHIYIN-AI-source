@@ -91,6 +91,13 @@ def test_film_video_storyboard_role_keeps_all_connected_references_in_port_order
     assert "assetIndex:index + 1" in FILM
 
 
+def test_film_video_only_parses_multiple_shots_from_multiple_storyboard_references():
+    assert "const storyboardRefs=mappedRefs.filter(item=>item.inputRole === 'storyboard');" in FILM
+    assert "const shouldParseMultipleShots=node.type === 'film-video' && storyboardRefs.length > 1;" in FILM
+    assert "演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头" in FILM
+    assert "只按分镜图输入端的多张参考图解析多镜头" in FILM
+
+
 def test_classic_and_smart_film_ports_allow_multiple_reference_connections():
     assert "function classicFilmInputAllowsMultiple(nodeId, inputRole)" in CLASSIC
     assert "!classicFilmInputAllowsMultiple(toId, inputRole)" in CLASSIC

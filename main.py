@@ -407,7 +407,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.268"
+APP_VERSION = "1.0.269"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3635,6 +3635,11 @@ class AIReference(BaseModel):
     url: str = ""
     name: str = ""
     role: str = ""
+    # 影视节点传递的稳定资产映射字段。保留端口角色和 1-n 顺序，
+    # 让可灵 CLI/其他视频适配器在一次请求中仍能还原真实输入关系。
+    asset_index: int = 0
+    input_role: str = ""
+    role_label: str = ""
     reference_id: str = ""
     reference_type: str = ""
     label: str = ""
@@ -3990,6 +3995,7 @@ class CanvasLLMRequest(BaseModel):
     provider: str = "comfly"
     ms_model: str = ""
     images: List[str] = []   # 可以是 /output/*.png、/assets/*.png 本地路径 或 http(s) URL 或 data URL
+    image_labels: List[str] = []  # 与 images 同序的影视资产映射标签
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
 
 class BuildingMultiViewReference(BaseModel):
@@ -16465,6 +16471,15 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
 
 async def submit_kling_cli_video(payload: CanvasVideoRequest):
     result, command, parameters = await invoke_kling_cli_video(payload, submit_only=True)
+    image_mapping = [
+        {
+            "asset_index": int(ref.asset_index or index + 1),
+            "input_role": str(ref.input_role or ""),
+            "role_label": str(ref.role_label or ref.label or ref.name or "参考资产"),
+        }
+        for index, ref in enumerate(payload.images or [])
+        if str(ref.url or "").strip()
+    ]
     return {
         "upstream_task_id": result.get("generation_id"),
         "status": result.get("status") or "submitted",
@@ -16476,6 +16491,7 @@ async def submit_kling_cli_video(payload: CanvasVideoRequest):
             "model": result.get("model") or payload.model,
             "parameters": parameters,
             "image_count": len(payload.images or []),
+            "image_mapping": image_mapping,
         },
     }
 
@@ -16498,6 +16514,15 @@ async def generate_kling_cli_video(payload: CanvasVideoRequest):
     if not remote_url:
         raise HTTPException(status_code=502, detail="可灵任务完成但没有返回视频地址")
     local_url = await save_remote_video_to_output(remote_url, prefix="kling_")
+    image_mapping = [
+        {
+            "asset_index": int(ref.asset_index or index + 1),
+            "input_role": str(ref.input_role or ""),
+            "role_label": str(ref.role_label or ref.label or ref.name or "参考资产"),
+        }
+        for index, ref in enumerate(payload.images or [])
+        if str(ref.url or "").strip()
+    ]
     return {
         "videos": [local_url],
         "task_id": result.get("generation_id"),
@@ -16505,10 +16530,11 @@ async def generate_kling_cli_video(payload: CanvasVideoRequest):
         "raw": result.get("raw"),
         "request": {
             "provider_id": "kling-cli",
-                "command": command,
-                "model": result.get("model") or payload.model,
-                "parameters": parameters,
-                "image_count": len(payload.images or []),
+            "command": command,
+            "model": result.get("model") or payload.model,
+            "parameters": parameters,
+            "image_count": len(payload.images or []),
+            "image_mapping": image_mapping,
         },
     }
 
@@ -16527,6 +16553,15 @@ def canvas_video_task_request_snapshot(payload: CanvasVideoRequest) -> Dict[str,
         "aspect_ratio": str(payload.aspect_ratio or ""),
         "resolution": str(payload.resolution or ""),
         "image_count": len(payload.images or []),
+        "image_mapping": [
+            {
+                "asset_index": int(ref.asset_index or index + 1),
+                "input_role": str(ref.input_role or ""),
+                "role_label": str(ref.role_label or ref.label or ref.name or "参考资产"),
+            }
+            for index, ref in enumerate(payload.images or [])
+            if str(ref.url or "").strip()
+        ],
         "video_count": len(payload.videos or []),
         "audio_count": len(payload.audios or []),
         "model_parameters": dict(payload.model_parameters or {}),
@@ -18009,12 +18044,15 @@ async def canvas_llm(payload: CanvasLLMRequest):
         ok_imgs = 0
         # 影视分镜综合解析需要同时接收演员、场景、线稿等资产；保留最多 20 张，
         # 与两种画布的影视节点参考图上限一致，避免后端再次截断映射关系。
-        for img in image_inputs[:20]:
+        for image_index, img in enumerate(image_inputs[:20]):
             if not img or not isinstance(img, str):
                 continue
             ref_url = media_reference_to_url(img, max_image_size=1024)
             if not ref_url:
                 continue
+            image_labels = payload.image_labels or []
+            if image_index < len(image_labels) and str(image_labels[image_index] or "").strip():
+                content_parts.append({"type": "text", "text": f"参考素材 {image_index + 1} 的资产映射：{str(image_labels[image_index]).strip()}。后续描述必须按此映射引用。"})
             content_parts.append({"type": "image_url", "image_url": {"url": ref_url}})
             ok_imgs += 1
         ok_videos = 0

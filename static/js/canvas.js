@@ -3365,6 +3365,10 @@ function migrateClassicMultiViewConnections(list=connections){
 function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
     return nodes.find(item => item.id === nodeId)?.type === 'multiView' && CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole);
 }
+function classicFilmInputAllowsMultiple(nodeId, inputRole){
+    const target=nodes.find(item => item.id === nodeId);
+    return Boolean(target && (target.type === 'film-storyboard' || target.type === 'film-video') && inputRole);
+}
 function addMultiViewNode(point){
     const p = point || defaultPoint(160, 80);
     const selection = defaultImageGenerationSelection();
@@ -4529,7 +4533,7 @@ function createLinkedNode(type){
     const toId = state.originKind === 'out' ? created.id : origin.id;
     const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
     if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
-        if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+        if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
         connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
         syncLatestGeneratedOutputToConnection(fromId, toId);
         syncGeneratorInputs();
@@ -18297,7 +18301,7 @@ function startLink(e, originId, originKind, originRole=''){
             if(canConnect(fromId, toId, inputRole)){
                 if(!connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
                     pushUndo();
-                    if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+                    if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
                     connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
                     syncLatestGeneratedOutputToConnection(fromId, toId);
                 }

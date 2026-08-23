@@ -163,6 +163,55 @@ class KlingCanvasVideoTests(unittest.TestCase):
         self.assertEqual(captured["model"]["model"], "kling-image-video")
         self.assertEqual(result["videos"], ["/assets/output/kling-image.mp4"])
 
+    def test_kling_generation_submits_all_mapped_reference_images_in_one_request(self):
+        environment = KlingCliEnvironment(
+            node_path="node.exe", npm_path="npm.cmd", kling_path="kling.cmd",
+            entrypoint_path="cli.js", version="0.1.3"
+        )
+        captured = {}
+
+        class FakeService:
+            def __init__(self, environment):
+                self.environment = environment
+
+            def capabilities(self):
+                return {
+                    "text_to_video": [],
+                    "image_to_video": [{"model": "kling-multi", "arguments": []}],
+                }
+
+            def generate(self, **kwargs):
+                captured.update(kwargs)
+                return {"generation_id": "generation-multi-1", "url": "https://cdn.example/multi.mp4"}
+
+        payload = self.main.CanvasVideoRequest(
+            prompt="资产映射：@图1=分镜图，@图2=演员A，@图3=服装A。镜头1，演员A向镜头走近。",
+            provider_id="kling-cli",
+            model="kling-multi",
+            images=[
+                {"url": "https://cdn.example/storyboard.png", "asset_index": 1, "input_role": "storyboard", "role_label": "分镜图"},
+                {"url": "https://cdn.example/actor.png", "asset_index": 2, "input_role": "actor-0", "role_label": "演员A"},
+                {"url": "https://cdn.example/outfit.png", "asset_index": 3, "input_role": "outfit-0", "role_label": "服装A"},
+            ],
+        )
+        with (
+            patch.object(self.main, "resolve_kling_cli", return_value=environment),
+            patch.object(self.main, "KlingCliService", FakeService),
+            patch.object(self.main, "save_remote_video_to_output", new=AsyncMock(return_value="/assets/output/kling-multi.mp4")),
+        ):
+            result = asyncio.run(self.main.generate_kling_cli_video(payload))
+
+        self.assertEqual(len(captured["images"]), 3)
+        self.assertEqual(result["request"]["image_count"], 3)
+        self.assertEqual(
+            result["request"]["image_mapping"],
+            [
+                {"asset_index": 1, "input_role": "storyboard", "role_label": "分镜图"},
+                {"asset_index": 2, "input_role": "actor-0", "role_label": "演员A"},
+                {"asset_index": 3, "input_role": "outfit-0", "role_label": "服装A"},
+            ],
+        )
+
     def test_kling_omni_default_alias_submits_capability_model_name(self):
         environment = KlingCliEnvironment(
             node_path="node.exe",

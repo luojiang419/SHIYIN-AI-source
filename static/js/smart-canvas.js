@@ -14749,7 +14749,8 @@ function addConnection(fromId, toId, kind='flow', inputRole=''){
     const target = nodes.find(node => node.id === toId);
     canvas.connections = canvas.connections || [];
     if(canvas.connections.some(c => c.from === fromId && c.to === toId && (c.kind || 'flow') === kind && (c.inputRole || '') === inputRole)) return;
-    if(inputRole && !(target?.specialType === 'multi-view' && MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole))) {
+    const isFilmInput=Boolean(target && (target.specialType === 'film-storyboard' || target.specialType === 'film-video') && inputRole);
+    if(inputRole && !(target?.specialType === 'multi-view' && MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole)) && !isFilmInput) {
         canvas.connections = canvas.connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
     }
     canvas.connections.push({from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})});

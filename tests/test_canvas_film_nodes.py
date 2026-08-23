@@ -84,13 +84,29 @@ def test_film_mapping_is_above_prompt_and_uses_semantic_asset_labels():
     assert "scene:'场景',sketch:'线稿分镜'" in FILM
 
 
-def test_film_video_storyboard_role_only_keeps_latest_connected_reference():
-    marker = "const roleRefs = port.role === 'storyboard'"
-    assert marker in FILM
-    start = FILM.index(marker)
-    body = FILM[start:start + 260]
-    assert ".slice(-1)" in body
-    assert "inputRole:port.role" in body
+def test_film_video_storyboard_role_keeps_all_connected_references_in_port_order():
+    assert "同一输入端口允许挂接多张参考图" in FILM
+    assert "const roleRefs = byRole.get(port.role) || [];" in FILM
+    assert ".slice(-1)" not in FILM
+    assert "assetIndex:index + 1" in FILM
+
+
+def test_classic_and_smart_film_ports_allow_multiple_reference_connections():
+    assert "function classicFilmInputAllowsMultiple(nodeId, inputRole)" in CLASSIC
+    assert "!classicFilmInputAllowsMultiple(toId, inputRole)" in CLASSIC
+    assert "const isFilmInput=Boolean(target && (target.specialType === 'film-storyboard' || target.specialType === 'film-video') && inputRole);" in SMART
+    assert "&& !isFilmInput" in SMART
+
+
+def test_film_kling_mapping_uses_official_at_reference_and_input_names():
+    assert "template:'@图{index}={role}'" in FILM
+    assert "禁止使用“年轻女性”“模特”“人物”等泛化称谓" in FILM
+    assert "normalizeKlingPrompt" in FILM
+    assert "image_labels" in FILM
+
+
+def test_film_mapping_ui_shows_numeric_order_before_asset_label():
+    assert "<b>${index + 1}. ${esc(ref.roleLabel || '参考资产')}</b>" in FILM
 
 
 def test_film_input_status_accepts_a_live_connection_without_a_resolved_url():

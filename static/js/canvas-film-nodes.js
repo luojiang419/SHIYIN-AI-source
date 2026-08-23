@@ -17,7 +17,9 @@
     const MODEL_RULES = {
         default: {id:'default', name:'通用', prefix:'图', template:'{ref}是{role}', maxImages:20},
         jimeng: {id:'jimeng', name:'即梦', prefix:'图', template:'{ref}是{role}', maxImages:12},
-        kling: {id:'kling', name:'可灵', prefix:'图片', template:'{ref}对应{role}', maxImages:12},
+        // 可灵 3.0 Omni 官方示例使用 @图N / @图片 形式引用素材；编号必须
+        // 与真实输入端口的上传顺序一致，不能再用“参考图2”这种脱离端口的名称。
+        kling: {id:'kling', name:'可灵', prefix:'@图', template:'@图{index}={role}', maxImages:12},
         minimax: {id:'minimax', name:'MiniMax H3', prefix:'Picture ', template:'<Picture {index}> is {role}', maxImages:9},
     };
 
@@ -136,18 +138,22 @@
             byRole.set(role, list);
         });
         inputPorts(node).forEach(port => {
-            // 分镜合成可能一次返回多张图，但视频节点的“分镜图”输入只代表
-            // 最近一次生成的最后一张分镜，避免把整组抽卡结果全部作为参考图提交。
-            const roleRefs = port.role === 'storyboard'
-                ? (byRole.get(port.role) || []).slice(-1)
-                : (byRole.get(port.role) || []);
+            // 同一输入端口允许挂接多张参考图；保持端口顺序，再保持同一端口
+            // 内的真实连线/上传顺序，后续由 mapping() 统一分配 1-n 编号。
+            const roleRefs = byRole.get(port.role) || [];
             roleRefs.forEach(ref => refs.push({...ref, inputRole:port.role, roleLabel:roleLabel(node, port.role, ref)}));
         });
         return refs;
     }
     function mapping(node, assets=[], options={}){
         const rule = modelRule(node.apiProvider || options.provider, node.model || options.model);
-        const refs = assetList(node, assets).slice(0, rule.maxImages);
+        const refs = assetList(node, assets).slice(0, rule.maxImages).map((ref,index) => ({
+            ...ref,
+            assetIndex:index + 1,
+            asset_index:index + 1,
+            input_role:ref.inputRole || '',
+            role_label:ref.roleLabel || roleLabel(node, ref.inputRole),
+        }));
         const lines = refs.map((ref,index) => {
             const n = index + 1;
             const refLabel = rule.id === 'minimax' ? `${n}` : `${rule.prefix}${n}`;
@@ -170,7 +176,7 @@
     function mappingHtml(node, assets=[], options={}){
         const map = mapping(node, assets, options);
         if(!map.refs.length) return '<div class="film-empty-note">连接资产后会自动建立图像映射</div>';
-        return `<div class="film-mapping-list">${map.refs.map(ref => `<span class="film-mapping-chip"><b>${esc(ref.roleLabel || '参考资产')}</b><i>${itemPreview(ref)}</i><em>${esc(ref.name || '已连接')}</em></span>`).join('')}</div>`;
+        return `<div class="film-mapping-list">${map.refs.map((ref,index) => `<span class="film-mapping-chip"><b>${index + 1}. ${esc(ref.roleLabel || '参考资产')}</b><i>${itemPreview(ref)}</i><em>${esc(ref.name || '已连接')}</em></span>`).join('')}</div>`;
     }
     function promptHtml(node){
         return `<label class="film-prompt-field"><span>生成需求</span><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea></label>`;
@@ -232,7 +238,11 @@
             const start=mentionStart >= 0 ? mentionStart : input.selectionStart;
             const end=Number.isFinite(input.selectionStart) ? input.selectionStart : input.value.length;
             input.setSelectionRange(start,end);
-            insertAtCursor(input,ref.roleLabel || ref.name || '参考资产');
+            const built=buildPrompt(node,options.assets?.(node)||[],options);
+            const mention = built.map.rule.id === 'kling'
+                ? `@图${ref.assetIndex || (built.map.refs.indexOf(ref) + 1)}`
+                : (ref.roleLabel || ref.name || '参考资产');
+            insertAtCursor(input,mention);
             close();
         };
         const renderMenu=()=>{
@@ -272,21 +282,39 @@
         });
         root.addEventListener('mousedown',event=>{ if(!event.target.closest('.film-mention-menu') && event.target!==input) close(); });
     }
+    function normalizeKlingPrompt(text, refs=[]){
+        let output=String(text || '').trim();
+        if(!output) return output;
+        // 模型偶尔会把官方 @图N 写成“图N/图片N”，统一修正为可灵可识别的
+        // 引用形式，并将泛化的人物称谓收敛到真实输入端名称。
+        output=output.replace(/@图片(\d+)/g, '@图$1').replace(/(^|[^@])(?:图片|图)(\d+)/g, '$1@图$2');
+        const actors=refs.filter(ref=>/^actor-\d+$/.test(String(ref.inputRole || ''))).map(ref=>ref.roleLabel).filter(Boolean);
+        if(actors.length){
+            const generic=/一位年轻女性|年轻女性|一名女性|女性角色|女主角|女孩|女生|女子|一位年轻男性|年轻男性|一名男性|男性角色|男主角|男孩|男生|模特|人物/g;
+            output=output.replace(generic, actors[0]);
+            if(!output.includes(actors[0])) output=`${actors[0]}：${output}`;
+        }
+        return output;
+    }
     async function parseScene(node, options={}){
         const assets=options.assets?.(node)||[];
-        const mappedRefs=assetList(node,assets).filter(item=>item.url && (item.kind || 'image') === 'image').slice(0,20);
+        const map=mapping(node,assets,options);
+        const mappedRefs=map.refs.filter(item=>item.url && (item.kind || 'image') === 'image').slice(0,20);
         const refs=mappedRefs.map(item=>item.url);
         if(!refs.length) throw new Error(node.type==='film-video'?'请先连接分镜图或演员参考图':'请先连接线稿分镜');
-        const manifest=mappedRefs.map((item,index)=>`图${index+1}=${item.roleLabel || '参考资产'}`).join('；');
+        const isKling=node.type==='film-video' && map.rule.id==='kling';
+        const manifest=mappedRefs.map((item,index)=>`${isKling ? `@图${index+1}` : `图${index+1}`}=${item.roleLabel || '参考资产'}`).join('；');
         const message=node.type==='film-video'
-            ? `你将收到一组已按顺序编号的影视资产（${manifest}）。请先解析其中的分镜图，再结合演员、服装和道具参考，预测镜头运镜、人物动作先后、身体朝向、视线、节奏与互动关系。输出一段可直接用于视频生成的中文动作描述，明确镜头运动和关键动作触发时机；不要解释分析过程。`
+            ? (isKling
+                ? `你将收到按真实影视制作输入端顺序排列的参考资产：${manifest}。请按可灵视频 3.0 Omni 官方提示词习惯输出可直接生成的视频提示词：先交代场景与主体，再按“镜头1、镜头2……”组织连续动作；每个镜头写明时长、景别/视角、主体动作与动作先后、身体朝向和视线、镜头运动（如固定、推进、跟拍、摇移、环绕、拉远）及速度、光线/环境和必要声音。引用素材必须使用 @图N，且每个演员/服装/道具只能使用输入端名称（例如演员A、服装A、道具A），禁止使用“年轻女性”“模特”“人物”等泛化称谓。只输出提示词，不解释分析过程。`
+                : `你将收到一组已按顺序编号的影视资产（${manifest}）。请先解析其中的分镜图，再结合演员、服装和道具参考，预测镜头运镜、人物动作先后、身体朝向、视线、节奏与互动关系。输出一段可直接用于视频生成的中文动作描述，明确镜头运动和关键动作触发时机；不要解释分析过程。`)
             : `你将收到一组已按顺序编号的影视资产（${manifest}），其中演员、场景和线稿分镜必须在同一次综合解析中互相校验。请输出一段可直接用于图像生成的中文画面描述：明确每张图对应的角色/场景/分镜关系、人物身份与动作、道具位置、构图角度、光线和环境，并要求画面构图严格参照线稿分镜图；不要解释分析过程。`;
         const provider=options.visionProvider?.(node) || node.visionProvider || '';
         const model=options.visionModel?.(node) || node.visionModel || '';
-        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),videos:[],provider,model,system_prompt:'你是影视分镜与动作分析助手。输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。'})});
+        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),image_labels:mappedRefs.map((item,index)=>`${isKling ? `@图${index+1}` : `图${index+1}`}=${item.roleLabel || '参考资产'}`),videos:[],provider,model,system_prompt:isKling ? '你是可灵视频 3.0 Omni 提示词导演。严格使用 @图N 引用素材，严格使用输入端资产名称，按镜头编号、时长、景别、动作、运镜、声音输出，预测连续运动而不是静态画面。' : '你是影视分镜与动作分析助手。输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。'})});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.detail || '视觉解析失败');
-        node.prompt=String(data.text || '').trim();
+        node.prompt=isKling ? normalizeKlingPrompt(data.text,mappedRefs) : String(data.text || '').trim();
         return node.prompt;
     }
     function bind(root,node,options={}){

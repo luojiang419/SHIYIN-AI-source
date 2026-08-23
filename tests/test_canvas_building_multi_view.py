@@ -64,7 +64,9 @@ def test_shared_script_and_building_styles_are_loaded_by_both_canvases():
     script = '<script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>'
     assert script in CANVAS_HTML
     assert script in SMART_HTML
-    assert 'canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260822.3' in CANVAS_HTML
+    # 构建缓存版本会随发布日递增，检查固定资源签名和 rev 参数即可，
+    # 避免测试把上一轮发布日期写死后阻断后续模块回归。
+    assert 'canvas.js?v=2026.08.21.bulk-import-grid.1&rev=' in CANVAS_HTML
     assert ".multi-view-mode-switch" in CSS
     assert ".building-prompt" in CSS
     assert ".classic-building-prompt" in CSS

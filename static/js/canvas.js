@@ -4431,7 +4431,13 @@ function groupImageItems(group){
     return (group.items || [])
         .map(id => nodes.find(n => n.id === id))
         .filter(n => n?.type === 'image' && n.url && mediaKindForNode(n) === 'image' && !isMissingAssetUrl(n.url))
-        .map((n, index) => ({url:n.url, name:n.name || outputImageName(n.url) || `image-${index + 1}.png`, kind:'image', nodeId:n.id, __index:index}));
+        .map((n, index) => ({
+            url:n.url,
+            name:n.name || outputImageName(n.url) || `image-${index + 1}.png`,
+            kind:'image', nodeId:n.id, __index:index,
+            natural_w:Number(n.natural_w || n.width || 0),
+            natural_h:Number(n.natural_h || n.height || 0)
+        }));
 }
 function extensionFromNameOrUrl(name='', url=''){
     const source = [name, url].map(value => String(value || '').split('?')[0].split('#')[0]).find(value => /\.[a-z0-9]{2,8}$/i.test(value));
@@ -17221,19 +17227,41 @@ const LINE_ART_STORYBOARD_RULES = [
     '禁止添加分镜编号、镜头参数、对白框、箭头、边框、表格或任何文字。最终只输出单张纯黑白分镜画面，不要输出原图对比、彩色元素、灰色照片底、水印或说明。'
 ].join(' ');
 
-function transformationPrompt(operation){
+const FLUX2_KLEIN_4B_LINE_ART_PROMPT = 'Convert the provided reference image into one clean black-and-white live-action film storyboard drawing. This is a faithful style transfer of the same frame, not a redesign. Preserve exactly the source canvas and crop, camera viewpoint, lens perspective, horizon, composition, subject count, every subject\'s screen position and scale, body pose, hand gesture, head and gaze direction, overlap, clothing silhouette, held props, and background geometry. Render the complete frame on white paper with crisp dark graphite-and-ink contour lines and sparse light-gray hatching. Simplify facial and surface detail while keeping the original action and spatial relationships immediately readable. Return one borderless full-frame storyboard drawing.';
+
+function isFlux2Klein4BModel(model=''){
+    return String(model || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').includes('flux-2-klein-4b');
+}
+
+function transformationPrompt(operation, model=''){
     if(operation === 'expand-canvas') return '将参考视频帧扩展为16:9横屏构图，保留原主体、人物动作、镜头景别、光线和视觉风格，使用自然延展的背景补全左右画幅，不裁切主体，不添加文字、水印或新人物。';
+    if(isFlux2Klein4BModel(model)) return FLUX2_KLEIN_4B_LINE_ART_PROMPT;
     return LINE_ART_STORYBOARD_RULES;
 }
+async function storyboardTransformSize(frame, model, ratio, resolution){
+    if(ratio !== 'source') return apiImageSize('custom', resolution, ratio, '');
+    if(isFlux2Klein4BModel(model)) return 'auto';
+    let width = Number(frame?.natural_w || 0);
+    let height = Number(frame?.natural_h || 0);
+    if((!width || !height) && frame?.url){
+        try {
+            const dimensions = await getImageDimensions(frame.url);
+            width = Number(dimensions?.width || 0);
+            height = Number(dimensions?.height || 0);
+        } catch(_) {}
+    }
+    const ratioParts = width > 0 && height > 0 ? ratioPartsFromDimensions(width, height) : {width:16, height:9};
+    return apiImageSize('custom', resolution, `${ratioParts.width}:${ratioParts.height}`, '');
+}
 async function transformStoryboardFrame(frame, operation, providerId, model, index, options={}){
-    const ratio = options.ratio || '16:9';
+    const ratio = options.ratio || (operation === 'line-art' ? 'source' : '16:9');
     const resolution = options.resolution || '2k';
     const quality = options.quality || 'high';
     const payload = {
-        prompt:transformationPrompt(operation),
+        prompt:transformationPrompt(operation, model),
         provider_id:resolveImageProviderId(providerId),
         model:resolveImageModel(model),
-        size:apiImageSize('custom', resolution, ratio, ''),
+        size:await storyboardTransformSize(frame, model, ratio, resolution),
         quality,
         reference_images:[{url:frame.url, name:frame.name || `frame-${index + 1}.png`, kind:'image'}]
     };
@@ -17315,7 +17343,9 @@ async function runGroupTransformation(operation, groupId, options={}){
     const model = providerModels.includes(options.model) ? options.model : (providerModels[0] || '');
     if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型', '生成衍生分镜'); return; }
     const transformOptions = {
-        ratio:['16:9','1:1','9:16'].includes(options.ratio) ? options.ratio : '16:9',
+        ratio:['source','16:9','1:1','9:16','3:2','2:3'].includes(options.ratio)
+            ? options.ratio
+            : (operation === 'line-art' ? 'source' : '16:9'),
         resolution:['1k','2k','4k'].includes(options.resolution) ? options.resolution : '2k',
         quality:['auto','medium','high'].includes(options.quality) ? options.quality : 'high'
     };
@@ -17382,7 +17412,7 @@ function openStoryboardTransformPanel(operation, groupId){
         storyboardTransformProvider.onchange = () => syncStoryboardTransformModelOptions('');
     }
     syncStoryboardTransformModelOptions(defaults.model);
-    if(storyboardTransformRatio) storyboardTransformRatio.value = '16:9';
+    if(storyboardTransformRatio) storyboardTransformRatio.value = operation === 'line-art' ? 'source' : '16:9';
     if(storyboardTransformResolution) storyboardTransformResolution.value = '2k';
     if(storyboardTransformQuality) storyboardTransformQuality.value = 'high';
     setStoryboardTransformStatus(defaults.providerId ? '' : '暂无可用的图片生成 API，请先到 API 设置中配置平台和模型。', !defaults.providerId);
@@ -17413,7 +17443,7 @@ async function submitStoryboardTransform(){
     const options = {
         providerId:storyboardTransformProvider?.value || '',
         model:storyboardTransformModel?.value || '',
-        ratio:storyboardTransformRatio?.value || '16:9',
+        ratio:storyboardTransformRatio?.value || (state.operation === 'line-art' ? 'source' : '16:9'),
         resolution:storyboardTransformResolution?.value || '2k',
         quality:storyboardTransformQuality?.value || 'high'
     };

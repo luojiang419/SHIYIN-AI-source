@@ -16,7 +16,9 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("application/javascript", response.headers.get("content-type", ""))
         self.assertEqual(response.headers.get("service-worker-allowed"), "/")
-        self.assertIn("shiyin-generated-images-v1", response.text)
+        self.assertEqual(response.headers.get("cache-control"), main.HTML_CACHE_CONTROL)
+        self.assertIn("WORKER_VERSION", response.text)
+        self.assertIn("shiyin-generated-images-", response.text)
         self.assertIn("/api/media-preview", response.text)
         self.assertIn("/output/", response.text)
         self.assertIn("request.destination !== 'image'", response.text)
@@ -33,7 +35,7 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
         )
         for name in pages:
             text = (ROOT / "static" / name).read_text(encoding="utf-8")
-            self.assertIn("/static/js/media-cache-client.js?v=2026.08.22.generated-image-cache.1", text, name)
+            self.assertIn("/static/js/media-cache-client.js?v=", text, name)
 
     def test_cache_worker_has_bounded_versioned_storage_and_network_fallback(self):
         text = (ROOT / "static" / "media-cache-sw.js").read_text(encoding="utf-8")
@@ -42,6 +44,9 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
         self.assertIn("CACHE_PREFIX", text)
         self.assertIn("return Response.error()", text)
         self.assertIn("clear-generated-image-cache", text)
+        self.assertIn("invalidate-generated-image-cache", text)
+        self.assertIn("needsFreshNetwork", text)
+        self.assertIn("cache: 'no-store'", text)
         self.assertIn("content-type", text)
 
 

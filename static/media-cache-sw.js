@@ -1,6 +1,10 @@
 /* SHIYIN-AI generated-image cache service worker. */
-const CACHE_NAME = 'shiyin-generated-images-v1';
 const CACHE_PREFIX = 'shiyin-generated-images-';
+const WORKER_VERSION = (() => {
+    try { return new URL(self.location.href).searchParams.get('v') || 'v2'; }
+    catch (error) { return 'v2'; }
+})();
+const CACHE_NAME = `${CACHE_PREFIX}${WORKER_VERSION}`;
 const MAX_ENTRIES = 500;
 const MAX_BYTES = 512 * 1024 * 1024;
 const DB_NAME = 'shiyin-generated-image-cache';
@@ -20,6 +24,20 @@ function isCacheableRequest(request) {
     if (request.method !== 'GET' || !isSameOrigin(request)) return false;
     if (request.destination && request.destination !== 'image') return false;
     try { return isCacheablePath(new URL(request.url)); } catch (error) { return false; }
+}
+
+function hasContentRevision(url) {
+    return ['rev', 'v', 'hash', 'version'].some(key => Boolean(url.searchParams.get(key)));
+}
+
+function needsFreshNetwork(request) {
+    try {
+        const url = new URL(request.url);
+        // 预览接口和未携带内容修订号的媒体都可能复用同一 URL，刷新时必须优先取服务端最新结果。
+        return url.pathname.startsWith('/api/') || !hasContentRevision(url);
+    } catch (error) {
+        return true;
+    }
 }
 
 function openMetaDb() {
@@ -106,6 +124,19 @@ async function handleImageRequest(request) {
     }
 }
 
+async function networkFirstImageRequest(request) {
+    try {
+        // 绕过浏览器 HTTP 缓存，避免同 URL 的新生成结果被旧响应遮蔽。
+        const response = await fetch(new Request(request, {cache: 'no-store'}));
+        await cacheResponse(request, response);
+        return response;
+    } catch (error) {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(request);
+        return cached || Response.error();
+    }
+}
+
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
     const keys = await caches.keys();
@@ -114,7 +145,10 @@ self.addEventListener('activate', event => event.waitUntil((async () => {
 })()));
 
 self.addEventListener('fetch', event => {
-    if (isCacheableRequest(event.request)) event.respondWith(handleImageRequest(event.request));
+    if (!isCacheableRequest(event.request)) return;
+    event.respondWith(needsFreshNetwork(event.request)
+        ? networkFirstImageRequest(event.request)
+        : handleImageRequest(event.request));
 });
 
 self.addEventListener('message', event => {
@@ -124,6 +158,17 @@ self.addEventListener('message', event => {
             const db = await openMetaDb();
             try { db?.close(); } catch (error) {}
             if (self.indexedDB) indexedDB.deleteDatabase(DB_NAME);
+        })());
+    }
+    if (event.data?.type === 'invalidate-generated-image-cache') {
+        event.waitUntil((async () => {
+            const cache = await caches.open(CACHE_NAME);
+            const urls = Array.isArray(event.data.urls) ? event.data.urls : [];
+            await Promise.all(urls.map(async url => {
+                if (typeof url !== 'string' || !url) return;
+                await cache.delete(url);
+                await deleteMeta(url);
+            }));
         })());
     }
 });

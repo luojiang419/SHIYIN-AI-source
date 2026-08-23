@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.272"
+APP_VERSION = "1.0.273"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -2119,7 +2119,32 @@ os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
 os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
 # static 和内置 workflows 属于只读程序资源，不在运行时创建或改写。
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+HTML_CACHE_CONTROL = "no-store, max-age=0, must-revalidate"
+VERSIONED_STATIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
+UNVERSIONED_STATIC_CACHE_CONTROL = "no-cache, max-age=0, must-revalidate"
+
+
+class VersionedStaticFiles(StaticFiles):
+    """只让带 v 参数的静态资源长缓存，避免直接访问的资源长期滞后。"""
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code < 200 or response.status_code >= 300:
+            return response
+        if path.lower().endswith((".html", ".htm")):
+            response.headers["Cache-Control"] = HTML_CACHE_CONTROL
+            response.headers["Pragma"] = "no-cache"
+            return response
+        raw_query = scope.get("query_string", b"")
+        query = urllib.parse.parse_qs(raw_query.decode("latin-1", errors="ignore"), keep_blank_values=True)
+        response.headers["Cache-Control"] = (
+            VERSIONED_STATIC_CACHE_CONTROL if str(query.get("v", [""])[0]).strip()
+            else UNVERSIONED_STATIC_CACHE_CONTROL
+        )
+        return response
+
+
+app.mount("/static", VersionedStaticFiles(directory=STATIC_DIR), name="static")
 
 # --- Pydantic 模型 ---
 
@@ -2302,7 +2327,7 @@ def static_html_response(filename: str):
     return Response(
         versioned_static_html(html),
         media_type="text/html; charset=utf-8",
-        headers={"Cache-Control": "no-cache"},
+        headers={"Cache-Control": HTML_CACHE_CONTROL, "Pragma": "no-cache"},
     )
 
 STATIC_PROMPT_TEMPLATE_MD = os.path.join(STATIC_DIR, "system-prompts", "infinite-canvas-prompt-templates.md")
@@ -11232,13 +11257,13 @@ async def login_page(request: Request):
     identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
     if identity and (not identity.is_admin or is_loopback_address(request_remote_address(request))):
         return RedirectResponse("/", status_code=303)
-    return FileResponse(os.path.join(STATIC_DIR, "login.html"), media_type="text/html")
+    return static_html_response("login.html")
 
 
 @app.get("/admin")
 async def admin_page(request: Request):
     require_admin(request)
-    return FileResponse(os.path.join(STATIC_DIR, "admin.html"), media_type="text/html")
+    return static_html_response("admin.html")
 
 
 @app.get("/media-cache-sw.js")
@@ -11247,7 +11272,7 @@ def media_cache_service_worker():
     return FileResponse(
         os.path.join(STATIC_DIR, "media-cache-sw.js"),
         media_type="application/javascript",
-        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+        headers={"Cache-Control": HTML_CACHE_CONTROL, "Service-Worker-Allowed": "/"},
     )
 
 

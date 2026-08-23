@@ -1,6 +1,6 @@
 {
-  "version": "1.0.279",
-  "updated_at": "2026-08-23T17:54:22+08:00",
+  "version": "1.0.280",
+  "updated_at": "2026-08-23T18:19:10+08:00",
   "items": [
     {
       "type": "fix",
@@ -12,7 +12,7 @@
     },
     {
       "type": "test",
-      "text": "新增真实 JavaScript 网格形状、孤立节点合批和 9 节点 3×3 坐标回归；全量 706 项测试、42 个子测试及 Tauri 1.0.279 release 构建通过"
+      "text": "新增真实 JavaScript 网格形状、孤立节点合批和 9 节点 3×3 坐标回归；全量 706 项测试、42 个子测试、Tauri 1.0.280 release 宿主及 Windows 完整安装包构建通过"
     },
     {
       "type": "fix",

@@ -1715,13 +1715,18 @@ function createFilmNode(type, point){
         specialType:'film-video', title:'生成视频', w:520, h:0,
         apiProvider:videoProviderId, model:videoModel,
         runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'video',videoProvider:videoProviderId,videoModel,videoDuration:5,videoAspect:'16:9',videoResolution:'',videoMultimodal:false,videoUseFrameRoles:false}),
+    } : type === 'film-line-art' ? {
+        specialType:'film-line-art', title:'生成线稿分镜', w:520, h:0,
+        apiProvider:imageProviders()[0]?.id || '',
+        model:providerImageModels(imageProviders()[0]?.id || '')[0] || '',
+        runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'image',ratio:'source',resolution:'2k',quality:'high',count:1}),
     } : {
         specialType:'film-storyboard', title:'分镜合成', w:520, h:0,
         apiProvider:imageProviders()[0]?.id || '',
         model:providerImageModels(imageProviders()[0]?.id || '')[0] || '',
         runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'image',ratio:'16:9',resolution:'2k',quality:'high',count:1}),
     });
-    node.id=uid(type === 'film-video' ? 'film-video' : 'film-storyboard');
+    node.id=uid(type === 'film-video' ? 'film-video' : type === 'film-line-art' ? 'film-line-art' : 'film-storyboard');
     nodes.push(node); selectedId=node.id; selectedIds=[]; selectedImage={nodeId:'',index:-1};
     render(); scheduleSave(); return node;
 }
@@ -1742,7 +1747,22 @@ async function runSmartFilmNode(node){
     output.filmSourceNodeId=node.id;
     node.running=true; node.runError=''; render(); scheduleSave();
     try {
-        if(node.specialType === 'film-storyboard'){
+        if(node.specialType === 'film-line-art'){
+            const lineRefs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `frame-${index + 1}.png`}));
+            if(!lineRefs.length) throw new Error('请先连接视频帧组、分镜图组或图像输出');
+            const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
+            const imageModels=providerImageModels(imageProvider);
+            const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || 'source',resolution:node.resolution || '2k',quality:node.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
+            const linePrompt=window.CanvasFilmNodes.lineArtPrompt(node);
+            const generated=await Promise.all(lineRefs.map(async(ref,index)=>{
+                const created=await runApiGeneration(linePrompt,[ref],imageSettings);
+                const results=await Promise.all((created.taskIds || []).map(taskId=>pollSmartCanvasTask(taskId)));
+                return results.flatMap(result=>(result?.image_items || result?.images || resultMediaUrls(result) || [])).map(item=>typeof item==='object'?{...item,url:item.url || item.path || '',kind:'image',name:item.name || `line-art-${index + 1}.png`}:{url:item,kind:'image',name:`line-art-${index + 1}.png`}).filter(item=>item.url);
+            }));
+            const images=generated.flat();
+            if(!images.length) throw new Error('生成线稿分镜没有返回图片');
+            node.images=images; finalizePendingNode(output,images,meta,'image');
+        } else if(node.specialType === 'film-storyboard'){
             const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
             const imageModels=providerImageModels(imageProvider);
             const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || settingsForNodeRun.ratio || '16:9',resolution:node.resolution || settingsForNodeRun.resolution || '2k',quality:node.quality || settingsForNodeRun.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
@@ -2609,6 +2629,7 @@ function smartGroupImageGridLayout(node){
 }
 function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'film-storyboard') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(400, Math.round(Number(node.h) || 430)), thumb:96, single:true};
+    if(node?.specialType === 'film-line-art') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(400, Math.round(Number(node.h) || 430)), thumb:96, single:true};
     if(node?.specialType === 'film-video') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(400, Math.round(Number(node.h) || 430)), thumb:96, single:true};
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
@@ -9003,7 +9024,7 @@ function smartGroupBodyHtml(node){
     </div>`;
 }
 function nodeBodyHtml(node, layout){
-    if(node.specialType === 'film-storyboard' || node.specialType === 'film-video') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,imageProviderOptions:filmSmartImageProviderOptions,imageModelOptions:filmSmartImageModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
+    if(node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,imageProviderOptions:filmSmartImageProviderOptions,imageModelOptions:filmSmartImageModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
     if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">姿势参考节点加载失败</div>';
@@ -9401,7 +9422,7 @@ function render(){
         const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
         const slotLoading = generationSlots.some(slot => slot.status === 'loading');
         const slotFailed = generationSlots.some(slot => slot.status === 'error');
-        const title = node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+        const title = node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
         const scale = nodeScale(node);
         const layout = imageLayout(layoutImages, scale, node);
         const isPrompt = node.type === 'smart-prompt';
@@ -9432,7 +9453,7 @@ function render(){
             ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
             <div class="node-hint">${hint}</div>
             ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            ${node.specialType === 'film-storyboard' || node.specialType === 'film-video' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+            ${node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
             <div class="node-port port-out" data-port="out" title="output"></div>
         </div>`;
         return {node, html};
@@ -11066,7 +11087,7 @@ function createSmartPoseOutputNode(sourceNode, item){
 }
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
-    if(node?.specialType === 'film-storyboard' || node?.specialType === 'film-video'){
+    if(node?.specialType === 'film-storyboard' || node?.specialType === 'film-video' || node?.specialType === 'film-line-art'){
         window.CanvasFilmNodes?.bind(el,node,{
             assets:filmSmartAssets,
             connected:(target, role) => (canvas?.connections || []).some(connection => connection.to === target.id && connection.inputRole === role),
@@ -15376,7 +15397,9 @@ function addConnection(fromId, toId, kind='flow', inputRole=''){
     canvas.connections = canvas.connections || [];
     if(canvas.connections.some(c => c.from === fromId && c.to === toId && (c.kind || 'flow') === kind && (c.inputRole || '') === inputRole)) return;
     const isFilmInput=Boolean(target && (target.specialType === 'film-storyboard' || target.specialType === 'film-video') && inputRole);
-    if(inputRole && !(target?.specialType === 'multi-view' && MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole)) && !isFilmInput) {
+    const isLineArtInput=Boolean(target && target.specialType === 'film-line-art' && inputRole);
+    const isFilmInputAny=isFilmInput || isLineArtInput;
+    if(inputRole && !(target?.specialType === 'multi-view' && MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole)) && !isFilmInputAny) {
         canvas.connections = canvas.connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
     }
     canvas.connections.push({from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})});
@@ -15385,7 +15408,7 @@ function connectInputNode(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to || from.id === to.id) return false;
-    if(to.specialType === 'film-storyboard' || to.specialType === 'film-video'){
+    if(to.specialType === 'film-storyboard' || to.specialType === 'film-video' || to.specialType === 'film-line-art'){
         if(!(window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole)) return false;
         if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
@@ -18782,7 +18805,7 @@ function createNodeFromMenu(type, point=null){
     const groupId = createMenuGroupId;
     closeCreateMenu();
     if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
-    if(type === 'film-storyboard' || type === 'film-video') return createFilmNode(type,p);
+    if(type === 'film-storyboard' || type === 'film-video' || type === 'film-line-art') return createFilmNode(type,p);
     if(type === 'panorama') return createPanoramaNode(p);
     if(type === 'pose-reference') return createPoseReferenceNode(p);
     if(type === 'dwpose') return createDWPoseNode(p);

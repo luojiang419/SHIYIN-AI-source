@@ -3634,7 +3634,7 @@ function addFilmNode(type, point){
         model:imageDefaults.model,
     });
     if(!node) return null;
-    node.id = uid(type === 'film-video' ? 'film-video' : 'film-storyboard');
+    node.id = uid(type === 'film-video' ? 'film-video' : type === 'film-line-art' ? 'film-line-art' : 'film-storyboard');
     if(type === 'film-video' && node.apiProvider === 'kling-cli') ensureKlingCapabilities();
     return addNode(node);
 }
@@ -3812,7 +3812,7 @@ function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
 }
 function classicFilmInputAllowsMultiple(nodeId, inputRole){
     const target=nodes.find(item => item.id === nodeId);
-    return Boolean(target && (target.type === 'film-storyboard' || target.type === 'film-video') && inputRole);
+    return Boolean(target && (target.type === 'film-storyboard' || target.type === 'film-video' || target.type === 'film-line-art') && inputRole);
 }
 function addMultiViewNode(point){
     const p = point || defaultPoint(160, 80);
@@ -4603,6 +4603,7 @@ function linkCreateOptions(state){
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
                 {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
+                {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
                 {type:'film-video', label:'影视视频', icon:'clapperboard'},
                 {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-up'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'LLM', icon:'message-square-text'}])
@@ -4631,6 +4632,7 @@ function linkCreateOptions(state){
             {type:'dwpose', label:'动作提取', icon:'person-standing'},
             {type:'relight', label:'灯光重塑', icon:'sun-medium'},
             {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
+            {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
             {type:'film-video', label:'影视视频', icon:'clapperboard'}
         ];
     }
@@ -9159,9 +9161,69 @@ function classicFilmHasActiveRun(node, out){
     if(!node || !out) return false;
     return (out._pending || []).some(pending => !pending.failed && pending.run?.node?.id === node.id);
 }
+async function runFilmLineArtNode(node, opts={}){
+    const api=window.CanvasFilmNodes;
+    const assets=classicFilmAssets(node);
+    const built=api.buildPrompt(node,assets,{provider:node.apiProvider,model:node.model});
+    const frames=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `frame-${index + 1}.png`}));
+    if(!frames.length){
+        if(!opts.cascade) showErrorModal('请先连接视频帧组、分镜图组或图像输出','生成线稿分镜');
+        return;
+    }
+    const defaults=defaultImageGenerationSelection();
+    const providerId=resolveImageProviderId(node.apiProvider || defaults.providerId);
+    const models=allImageModels(providerId);
+    const model=models.includes(node.model) ? node.model : (models[0] || '');
+    if(!providerId || !model){
+        if(!opts.cascade) showErrorModal('请先在 API 设置中配置图片生成模型','生成线稿分镜');
+        return;
+    }
+    const transformOptions={
+        ratio:['source','16:9','1:1','9:16','3:2','2:3'].includes(node.aspectRatio) ? node.aspectRatio : 'source',
+        resolution:['1k','2k','4k'].includes(node.resolution) ? node.resolution : '2k',
+        quality:['auto','medium','high'].includes(node.quality) ? node.quality : 'high',
+        prompt:node.prompt
+    };
+    const out=outputForNode(node,560,true);
+    const run=runSnapshot(node,[transformationPrompt('line-art',model),String(node.prompt || '').trim()].filter(Boolean).join('\n'),frames);
+    const pendingIds=frames.map(() => uid('p'));
+    const pendings=pendingIds.map((id,index)=>makePendingForRun(id,run,node,{refs:[frames[index]]}));
+    out._pending=[...(out._pending || []),...pendings];
+    node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out); scheduleSave();
+    try {
+        const results=[]; let cursor=0;
+        const worker=async()=>{
+            while(cursor < frames.length){
+                const index=cursor++;
+                const result=await transformStoryboardFrame(frames[index],'line-art',providerId,model,index,transformOptions);
+                results[index]=result;
+                const pending=pendings[index];
+                if(pending){ pending.canvasTaskId=result.taskId || ''; pending.previewSize=await storyboardTransformSize(frames[index],model,transformOptions.ratio,transformOptions.resolution); }
+                setStatus(`生成线稿分镜 ${index + 1}/${frames.length}`); refreshRunNodes(node,out); scheduleSave();
+            }
+        };
+        await Promise.all(Array.from({length:Math.min(3,frames.length)},worker));
+        const images=results.filter(Boolean).map(({taskId,...item})=>item);
+        if(!images.length) throw new Error('生成线稿分镜没有返回图片');
+        mergeGeneratedOutputs(node,images,Boolean(opts.cascade));
+        out._pending=(out._pending || []).filter(item=>!pendingIds.includes(item.id));
+        appendOutputImagesWithoutDuplicates(out,images);
+        node.runStatus='done'; node.runError=''; scheduleSave();
+        setStatus(`生成线稿分镜完成，共 ${images.length} 张`);
+    } catch(error){
+        const message=error.message || String(error);
+        pendingIds.map(id=>pendingById(out,id)).filter(Boolean).forEach(pending=>{pending.failed=true;pending.error=message;});
+        node.runStatus='failed'; node.runError=message;
+        if(opts.cascade) throw error;
+        showErrorModal(message,'生成线稿分镜失败');
+    } finally {
+        node.running=classicFilmHasActiveRun(node,out); refreshRunNodes(node,out);
+    }
+}
 async function runFilmNode(nodeId, opts={}){
     const node=nodes.find(item => item.id === nodeId && window.CanvasFilmNodes?.isType?.(item.type));
     if(!node) return;
+    if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model});
     if(!built.prompt){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
@@ -9469,7 +9531,7 @@ function renderNode(node){
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
     const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
-    if(rolePorts.length > 1){
+    if(filmPorts.length || rolePorts.length > 1){
         el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in pose-role-port ${filmPorts.length ? 'film-role-port' : ''}" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
@@ -13408,9 +13470,9 @@ function updateComfyField(node, input, event){
     scheduleSave();
 }
 
-const CANVAS_GENERATOR_TYPES = ['generator','batchGenerator','video','topazVideo','rh','ecom-compose','ecom-video','film-storyboard','film-video'];
-const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'batchGenerator','ecom-compose','film-storyboard','multiView'];
-const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'batchGenerator','topazVideo','ecom-compose','ecom-video','film-storyboard','film-video','multiView'];
+const CANVAS_GENERATOR_TYPES = ['generator','batchGenerator','video','topazVideo','rh','ecom-compose','ecom-video','film-storyboard','film-video','film-line-art'];
+const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'batchGenerator','ecom-compose','film-storyboard','film-line-art','multiView'];
+const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'batchGenerator','topazVideo','ecom-compose','ecom-video','film-storyboard','film-line-art','film-video','multiView'];
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -15012,7 +15074,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'topazVideo') return runTopazVideoNode(node.id, runOpts);
     if(node.type === 'ecom-video') return runVideoNode(node.id, runOpts);
     if(node.type === 'ecom-compose') return runEcommerceComposeNode(node.id, runOpts);
-    if(node.type === 'film-storyboard' || node.type === 'film-video') return runFilmNode(node.id, runOpts);
+    if(node.type === 'film-storyboard' || node.type === 'film-video' || node.type === 'film-line-art') return runFilmNode(node.id, runOpts);
     if(node.type === 'rh') return runRhNode(node.id, runOpts);
     return Promise.resolve();
 }
@@ -17729,7 +17791,7 @@ async function transformStoryboardFrame(frame, operation, providerId, model, ind
     const resolution = options.resolution || '2k';
     const quality = options.quality || 'high';
     const payload = {
-        prompt:transformationPrompt(operation, model),
+        prompt:[transformationPrompt(operation, model),String(options.prompt || '').trim()].filter(Boolean).join('\n'),
         provider_id:resolveImageProviderId(providerId),
         model:resolveImageModel(model),
         size:await storyboardTransformSize(frame, model, ratio, resolution),
@@ -17741,7 +17803,7 @@ async function transformStoryboardFrame(frame, operation, providerId, model, ind
     const raw = result?.images?.[0] || result?.image_items?.[0] || resultMediaUrls(result)[0];
     const url = outputUrlValue(raw);
     if(!url) throw new Error('图像衍生任务没有返回图片');
-    return {url, name:raw && typeof raw === 'object' ? (raw.name || `${operation}-${index + 1}.png`) : `${operation}-${index + 1}.png`, kind:'image'};
+    return {url, name:raw && typeof raw === 'object' ? (raw.name || `${operation}-${index + 1}.png`) : `${operation}-${index + 1}.png`, kind:'image', taskId:task.task_id};
 }
 function createStoryboardTransformationGroup(sourceGroup, items, operation){
     const frames = (items || []).filter(item => item?.url);
@@ -19067,13 +19129,13 @@ function canConnect(fromId, toId, inputRole=''){
         if(to.type === 'loop') return Boolean(to.imageInput);
         return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
     }
-    if(to.type === 'film-storyboard' || to.type === 'film-video'){
+    if(to.type === 'film-storyboard' || to.type === 'film-video' || to.type === 'film-line-art'){
         const valid = (window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole);
         if(!valid) return false;
         return ['image','group','output','panorama','dwpose','poseReference','poseReplicate','relight','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
-    if(from.type === 'film-storyboard' || from.type === 'film-video'){
+    if(from.type === 'film-storyboard' || from.type === 'film-video' || from.type === 'film-line-art'){
         if(to.type === 'output') return true;
         return CANVAS_GENERATOR_TYPES.includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }

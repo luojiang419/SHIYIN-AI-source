@@ -26,6 +26,19 @@
     text-transform:uppercase;
     white-space:nowrap;
 }
+.film-line-art-badge {
+    display:inline-flex;
+    align-items:center;
+    min-height:24px;
+    padding:0 8px;
+    border:1px solid var(--line-2);
+    border-radius:999px;
+    background:var(--soft);
+    color:var(--strong);
+    font-size:10px;
+    font-weight:800;
+    letter-spacing:.04em;
+}
 .film-add-actor,
 .film-parse-button,
 .film-run-button {
@@ -198,6 +211,7 @@
     grid-template-columns:minmax(0,1.25fr) minmax(0,1.25fr) minmax(62px,.65fr) minmax(78px,.8fr);
 }
 .film-image-settings select,
+.film-line-art-settings select,
 .film-video-settings select,
 .film-video-settings input {
     display:block;

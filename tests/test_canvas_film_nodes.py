@@ -21,6 +21,30 @@ def test_film_domain_module_defines_both_nodes_and_dynamic_role_ports():
     assert "data-film-action=\"add-actor\"" in FILM
 
 
+def test_line_art_storyboard_node_is_a_first_class_film_node_with_settings():
+    assert "const LINE_ART_TYPE = 'film-line-art';" in FILM
+    assert "'film-line-art':'生成线稿分镜'" in FILM
+    assert "{role:'source',label:'视频帧 / 分镜组'" in FILM
+    assert "film-line-art-settings" in FILM
+    assert "data-film-field=\"quality\"" in FILM
+    assert "function lineArtPrompt(node)" in FILM
+
+
+def test_line_art_storyboard_node_is_registered_in_both_film_creation_menus():
+    assert "menuAdd('film-line-art')" in CLASSIC_HTML
+    assert "data-create-type=\"film-line-art\"" in SMART_HTML
+    assert "{type:'film-line-art', label:'生成线稿分镜'" in CLASSIC
+    assert "type === 'film-line-art'" in SMART
+
+
+def test_line_art_storyboard_node_has_classic_and_smart_execution_branches():
+    assert "async function runFilmLineArtNode(node, opts={})" in CLASSIC
+    assert "if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);" in CLASSIC
+    assert "if(node.specialType === 'film-line-art')" in SMART
+    assert "window.CanvasFilmNodes.lineArtPrompt(node)" in SMART
+    assert "if(filmPorts.length || rolePorts.length > 1)" in CLASSIC
+
+
 def test_film_video_ports_are_grouped_per_actor_and_support_inherited_count():
     assert "function effectiveActorCount(node)" in FILM
     assert "node?.autoActorCount || 0" in FILM

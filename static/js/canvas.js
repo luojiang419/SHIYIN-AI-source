@@ -576,6 +576,12 @@ let localCanvasDirty = false;
 let savingCanvasNow = false;
 let saveCanvasAgain = false;
 let localCanvasSaveSequence = 0;
+const CLASSIC_SAVE_QUEUE_ENABLED = true;
+const CLASSIC_IDLE_MEDIA_ENABLED = true;
+let classicIdleMediaMeasureHandle = 0;
+const classicIdleMediaMeasureRoots = new Set();
+let classicIdleIconHandle = 0;
+const classicIdleIconRoots = new Set();
 let flushingVideoClipDeletions = false;
 const pendingVideoClipDeletions = new Map();
 const savedVideoClipSequencesByCanvas = new Map();
@@ -2256,7 +2262,7 @@ function renderClassicMutation(mutation){
     rebuildCanvasDomIndexes();
     refreshSelectionVisuals();
     refreshGeometryAfterLayout();
-    refreshIcons();
+    scheduleClassicIdleIconRefresh(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     scheduleMinimapRender();
@@ -2274,6 +2280,7 @@ async function saveCanvas(){
     sanitizeConnections();
     const savingCanvasId = String(canvas.id || '');
     const savingSequence = localCanvasSaveSequence;
+    let saveHadNewerEdits = false;
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
@@ -2312,13 +2319,29 @@ async function saveCanvas(){
         if(!res.ok) throw new Error('save failed');
         const data = await res.json().catch(() => ({}));
         const localViewport = {...viewport};
-        if(data.canvas) canvas = {...canvas, ...data.canvas, viewport:localViewport};
+        saveHadNewerEdits = CLASSIC_SAVE_QUEUE_ENABLED
+            && (localCanvasSaveSequence > savingSequence || saveCanvasAgain);
+        if(data.canvas){
+            const responseRevision = Number(data.canvas.revision || 0);
+            const responseUpdatedAt = Number(data.canvas.updated_at || 0);
+            if(!saveHadNewerEdits){
+                const localNodes = nodes;
+                const localConnections = connections;
+                canvas = {...canvas, ...data.canvas, nodes:localNodes, connections:localConnections, viewport:localViewport};
+            } else {
+                canvas = {
+                    ...canvas,
+                    updated_at:Math.max(Number(canvas.updated_at || 0), responseUpdatedAt),
+                    revision:Math.max(Number(canvas.revision || 0), responseRevision)
+                };
+            }
+        }
         viewport = localViewport;
         canvas.updated_at = Number(canvas.updated_at || Date.now());
         lastCanvasUpdatedAt = canvas.updated_at;
-        localCanvasDirty = Boolean(saveCanvasAgain);
+        localCanvasDirty = Boolean(saveHadNewerEdits || saveCanvasAgain);
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
-        setStatus('Saved');
+        setStatus(localCanvasDirty ? 'Saving...' : 'Saved');
         loadCanvasList(false);
         savedVideoClipSequencesByCanvas.set(
             savingCanvasId,
@@ -7623,7 +7646,23 @@ function restoreMediaPlaybackStates(states){
         restoreMediaPlaybackState(media, states.get(`${tag}:${url}`));
     });
 }
-function measureCanvasOriginalImageNodes(root=nodesEl){
+function scheduleClassicIdleIconRefresh(root=nodesEl){
+    if(!root) return;
+    if(!CLASSIC_IDLE_MEDIA_ENABLED){ refreshIcons(root); return; }
+    classicIdleIconRoots.add(root);
+    if(classicIdleIconHandle) return;
+    const run = () => {
+        classicIdleIconHandle = 0;
+        const roots = [...classicIdleIconRoots];
+        classicIdleIconRoots.clear();
+        roots.forEach(item => {
+            if(item?.isConnected !== false) refreshIcons(item);
+        });
+    };
+    if('requestIdleCallback' in window) classicIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
+    else classicIdleIconHandle = window.setTimeout(run, 0);
+}
+function measureCanvasOriginalImageNodesNow(root=nodesEl){
     root.querySelectorAll?.('.image-node img[data-original-src]').forEach(imgEl => {
         if(imgEl.dataset.previewKind === 'video') return;
         const nodeEl = imgEl.closest('.image-node');
@@ -7640,6 +7679,20 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
             scheduleSave();
         });
     });
+}
+function measureCanvasOriginalImageNodes(root=nodesEl){
+    if(!root) return;
+    if(!CLASSIC_IDLE_MEDIA_ENABLED){ measureCanvasOriginalImageNodesNow(root); return; }
+    classicIdleMediaMeasureRoots.add(root);
+    if(classicIdleMediaMeasureHandle) return;
+    const run = () => {
+        classicIdleMediaMeasureHandle = 0;
+        const roots = [...classicIdleMediaMeasureRoots];
+        classicIdleMediaMeasureRoots.clear();
+        roots.forEach(item => measureCanvasOriginalImageNodesNow(item?.isConnected === false ? nodesEl : item));
+    };
+    if('requestIdleCallback' in window) classicIdleMediaMeasureHandle = window.requestIdleCallback(run, {timeout:1200});
+    else classicIdleMediaMeasureHandle = window.setTimeout(run, 0);
 }
 
 function render(){
@@ -7690,7 +7743,7 @@ function render(){
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
-    refreshIcons(nodesEl);
+    scheduleClassicIdleIconRefresh(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);

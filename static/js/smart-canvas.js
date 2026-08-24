@@ -611,6 +611,22 @@ function refreshIcons(root=document){
     if(!window.lucide) return;
     window.lucide.createIcons({root:root || document});
 }
+function scheduleSmartIdleIconRefresh(root=world){
+    if(!root) return;
+    if(!SMART_IDLE_MEDIA_ENABLED){ refreshIcons(root); return; }
+    smartIdleIconRoots.add(root);
+    if(smartIdleIconHandle) return;
+    const run = () => {
+        smartIdleIconHandle = 0;
+        const roots = [...smartIdleIconRoots];
+        smartIdleIconRoots.clear();
+        roots.forEach(item => {
+            if(item?.isConnected !== false) refreshIcons(item);
+        });
+    };
+    if('requestIdleCallback' in window) smartIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
+    else smartIdleIconHandle = window.setTimeout(run, 0);
+}
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 const escapeAttr = escapeHtml;
@@ -6168,6 +6184,14 @@ const smartClientId = `canvas_smart_${Math.random().toString(36).slice(2, 10)}${
 let canvasSyncInFlight = false;
 let saveRequestedWhileInFlight = false;
 let trailingSaveDelay = 450;
+let smartLocalSaveSequence = 0;
+const SMART_SAVE_QUEUE_ENABLED = true;
+const SMART_IDLE_MEDIA_ENABLED = true;
+let smartIdleMediaMeasureHandle = 0;
+const smartIdleMediaMeasureRoots = new Set();
+let smartIdleMediaMeasureNodeIndex = new Map();
+let smartIdleIconHandle = 0;
+const smartIdleIconRoots = new Set();
 let smartRouteActive = window.top === window;
 let smartParentShortcutWindow = null;
 let canvasSyncTimer = null;
@@ -7102,6 +7126,7 @@ async function loadCanvas(){
 }
 function scheduleSave(delay=450){
     const safeDelay = Math.max(50, Number(delay) || 450);
+    smartLocalSaveSequence += 1;
     if(canvasSyncInFlight){
         saveRequestedWhileInFlight = true;
         trailingSaveDelay = Math.min(trailingSaveDelay, safeDelay);
@@ -7127,6 +7152,8 @@ async function saveCanvas(){
     if(saveIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(saveIdleHandle); saveIdleHandle = 0; }
     saveRequestedWhileInFlight = false;
     trailingSaveDelay = 450;
+    const savingSequence = smartLocalSaveSequence;
+    const savingRevision = Number(canvas.revision || 0);
     canvasSyncInFlight = true;
     savePromptDraftForCurrent();
     canvas.nodes = nodes;
@@ -7155,8 +7182,14 @@ async function saveCanvas(){
         });
         if(res.ok){
             const data = await res.json();
-            if(data.canvas && data.canvas.updated_at) canvas.updated_at = data.canvas.updated_at;
-            if(data.canvas && data.canvas.revision) canvas.revision = data.canvas.revision;
+            const responseUpdatedAt = Number(data.canvas?.updated_at || 0);
+            const responseRevision = Number(data.canvas?.revision || 0);
+            const hasNewerLocalEdits = SMART_SAVE_QUEUE_ENABLED && smartLocalSaveSequence > savingSequence;
+            canvas.updated_at = Math.max(Number(canvas.updated_at || 0), responseUpdatedAt);
+            canvas.revision = Math.max(Number(canvas.revision || savingRevision), responseRevision);
+            if(!hasNewerLocalEdits && data.canvas?.title && canvas.title !== data.canvas.title){
+                canvas.title = data.canvas.title;
+            }
         } else if(res.status === 409) {
             // 冲突：别人先保存了。合并对方的状态（节点 id 合并、图片取并集，谁都不丢），
             // 然后用对方最新的 updated_at 作为基底重存，把合并结果落盘——而不是直接覆盖对方。
@@ -9309,7 +9342,7 @@ function render(){
         bindSmartPreviewImageFallbacks(root);
     });
     else {
-        refreshIcons(world);
+        scheduleSmartIdleIconRefresh(world);
         bindSmartPreviewImageFallbacks(world);
     }
     syncSmartSelectedImageResolution(world);
@@ -9393,7 +9426,7 @@ function registerSmartCanvasPerfFixture(){
     });
 }
 registerSmartCanvasPerfFixture();
-function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
+function measureSmartNodeImagesNow(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
     (root || world).querySelectorAll?.('.image-node img,.image-node video').forEach(imgEl => {
         const nodeEl = imgEl.closest('.image-node');
         const itemEl = imgEl.closest('[data-image-index]');
@@ -9462,6 +9495,22 @@ function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, no
         else imgEl.addEventListener('load', apply, {once:true});
         imgEl.addEventListener('loadedmetadata', apply, {once:true});
     });
+}
+function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
+    if(!root) return;
+    if(!SMART_IDLE_MEDIA_ENABLED){ measureSmartNodeImagesNow(nodeIndex, root); return; }
+    smartIdleMediaMeasureNodeIndex = nodeIndex;
+    smartIdleMediaMeasureRoots.add(root);
+    if(smartIdleMediaMeasureHandle) return;
+    const run = () => {
+        smartIdleMediaMeasureHandle = 0;
+        const roots = [...smartIdleMediaMeasureRoots];
+        smartIdleMediaMeasureRoots.clear();
+        const currentIndex = smartIdleMediaMeasureNodeIndex;
+        roots.forEach(item => measureSmartNodeImagesNow(currentIndex, item?.isConnected === false ? world : item));
+    };
+    if('requestIdleCallback' in window) smartIdleMediaMeasureHandle = window.requestIdleCallback(run, {timeout:1200});
+    else smartIdleMediaMeasureHandle = window.setTimeout(run, 0);
 }
 function bindConnectionEvents(){
     world.querySelectorAll('[data-conn-index]').forEach(el => {

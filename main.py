@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.297"
+APP_VERSION = "1.0.298"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3720,6 +3720,10 @@ class WorkMetadataRequest(BaseModel):
     name: Optional[str] = Field(default=None, max_length=160)
     favorite: Optional[bool] = None
     trashed: Optional[bool] = None
+
+class WorkBatchRequest(BaseModel):
+    ids: List[str] = Field(default_factory=list, max_length=500)
+    action: str = Field(default="trash", max_length=32)
 
 class MediaCleanupRequest(BaseModel):
     grace_seconds: int = Field(default=7 * 24 * 60 * 60, ge=0, le=90 * 24 * 60 * 60)
@@ -20283,6 +20287,8 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
             "canvas_id": str(item.get("canvas_id") or ""),
             "canvas_title": str(item.get("canvas_title") or "未命名画布"),
             "canvas_kind": str(item.get("canvas_kind") or "classic"),
+            "node_id": str(item.get("node_id") or ""),
+            "source_path": str(item.get("source_path") or ""),
         })
     return finalize_work_items(works)
 
@@ -20423,6 +20429,201 @@ async def set_work_metadata(work_id: str, payload: WorkMetadataRequest):
 async def set_work_favorite(work_id: str, payload: WorkFavoriteRequest):
     work, revision = update_work_metadata(work_id, favorite=payload.favorite)
     return {"work": work, "revision": revision}
+
+
+_CANVAS_MEDIA_VALUE_KEYS = {
+    "url", "path", "src", "uri", "output", "output_url", "outputurl", "video",
+    "video_url", "videourl", "image", "image_url", "imageurl", "audio", "audio_url",
+    "audiourl", "file_url", "fileurl", "download_url", "downloadurl", "source_url",
+    "sourceurl", "local_url", "localurl", "thumbnail", "thumbnail_url", "thumbnailurl",
+    "preview", "preview_url", "previewurl",
+}
+
+
+def _strip_canvas_media_reference(value: Any, target_url: str) -> Tuple[Any, bool]:
+    """从单个画布节点中移除指向目标媒体的字段/资产对象。"""
+    target = canonical_local_media_origin_url(str(target_url or "").strip())
+    if not target:
+        return value, False
+    if isinstance(value, dict):
+        changed = False
+        result = {}
+        for key, child in value.items():
+            normalized_key = str(key or "").replace("-", "_").lower()
+            if normalized_key in _CANVAS_MEDIA_VALUE_KEYS and isinstance(child, str):
+                if canonical_local_media_origin_url(child) == target:
+                    changed = True
+                    continue
+            if isinstance(child, dict) and canonical_local_media_origin_url(canvas_asset_url_value(child)) == target:
+                changed = True
+                continue
+            if isinstance(child, list):
+                filtered = []
+                list_changed = False
+                for entry in child:
+                    if isinstance(entry, str) and canonical_local_media_origin_url(entry) == target:
+                        list_changed = True
+                        continue
+                    if isinstance(entry, dict) and canonical_local_media_origin_url(canvas_asset_url_value(entry)) == target:
+                        list_changed = True
+                        continue
+                    cleaned, nested_changed = _strip_canvas_media_reference(entry, target)
+                    list_changed = list_changed or nested_changed
+                    filtered.append(cleaned)
+                child = filtered
+                changed = changed or list_changed
+            else:
+                child, nested_changed = _strip_canvas_media_reference(child, target)
+                changed = changed or nested_changed
+            result[key] = child
+        return result, changed
+    if isinstance(value, list):
+        result = []
+        changed = False
+        for child in value:
+            cleaned, nested_changed = _strip_canvas_media_reference(child, target)
+            changed = changed or nested_changed
+            result.append(cleaned)
+        return result, changed
+    return value, False
+
+
+def _remove_canvas_work_reference(work: Dict[str, Any]) -> bool:
+    canvas_id = str(work.get("canvas_id") or "").strip()
+    node_id = str(work.get("node_id") or "").strip()
+    target_url = str(work.get("url") or "").strip()
+    if not canvas_id or not node_id or not target_url:
+        return False
+    canvas = DATABASE.get_canvas(canvas_id)
+    if not isinstance(canvas, dict) or not isinstance(canvas.get("nodes"), list):
+        return False
+    changed = False
+    nodes = []
+    for node in canvas["nodes"]:
+        if isinstance(node, dict) and str(node.get("id") or "") == node_id:
+            cleaned, node_changed = _strip_canvas_media_reference(node, target_url)
+            node = cleaned
+            changed = changed or node_changed
+        nodes.append(node)
+    if not changed:
+        return False
+    canvas["nodes"] = nodes
+    save_canvas(canvas, broadcast=True)
+    with CANVAS_ASSETS_INDEX_LOCK:
+        CANVAS_ASSETS_INDEX_CACHE["items_by_canvas"] = {}
+    return True
+
+
+def _delete_selected_work_files(works: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """真实删除选中的媒体文件，并同步删除作品记录/画布引用。"""
+    selected_ids = {str(item.get("id") or "").strip() for item in works if str(item.get("id") or "").strip()}
+    seen_paths = set()
+    deleted_files = 0
+    skipped_files = 0
+    file_errors = []
+    for work in works:
+        path = work_local_file_path(work)
+        if not path or path in seen_paths:
+            if not path:
+                skipped_files += 1
+            continue
+        seen_paths.add(path)
+        try:
+            os.remove(path)
+            deleted_files += 1
+        except FileNotFoundError:
+            skipped_files += 1
+        except Exception as exc:
+            file_errors.append({"path": path, "error": str(exc)[:240]})
+
+    generated = [item for item in works if str(item.get("source") or "") != "canvas"]
+    history_records = {}
+    for record in DATABASE.list_history():
+        history_id = str(record.get("_history_id") or record.get("id") or "").strip()
+        if history_id:
+            history_records[history_id] = dict(record)
+    grouped = {}
+    for item in generated:
+        history_id = str(item.get("history_id") or "").strip()
+        if history_id:
+            grouped.setdefault(history_id, []).append(item)
+    deleted_records = 0
+    with HISTORY_LOCK:
+        for history_id, selected_items in grouped.items():
+            record = history_records.get(history_id)
+            if not record:
+                continue
+            images = list(record.get("images") or []) if isinstance(record.get("images"), list) else []
+            remove_indexes = {int(item.get("output_index") or 0) for item in selected_items}
+            kept_images = [url for index, url in enumerate(images) if index not in remove_indexes]
+            if kept_images:
+                updated = dict(record)
+                updated["id"] = history_id
+                updated["_history_id"] = history_id
+                updated["images"] = kept_images
+                image_items = record.get("image_items")
+                if isinstance(image_items, list):
+                    updated["image_items"] = [value for index, value in enumerate(image_items) if index not in remove_indexes]
+                DATABASE.prepend_history(updated, limit=5000)
+            else:
+                deleted_records += len(DATABASE.delete_history_ids([history_id]))
+
+    removed_canvas_assets = sum(1 for work in works if str(work.get("source") or "") == "canvas" and _remove_canvas_work_reference(work))
+    revision = 0
+    with WORK_METADATA_LOCK:
+        metadata = work_metadata()
+        for work_id in selected_ids:
+            metadata.pop(work_id, None)
+        revision = DATABASE.put_document("works", "metadata", metadata)
+        DATABASE.rebuild_work_items(metadata)
+    for work in works:
+        url = str(work.get("url") or "").strip()
+        if url:
+            DATABASE.delete_media_objects([url])
+    publish_entity_changed("history", "works", revision)
+    publish_entity_changed("history", "global")
+    return {
+        "success": True,
+        "deleted_records": deleted_records,
+        "deleted_files": deleted_files,
+        "skipped_files": skipped_files,
+        "removed_canvas_assets": removed_canvas_assets,
+        "file_errors": file_errors[:20],
+        "revision": revision,
+    }
+
+
+@app.post("/api/works/batch")
+async def batch_work_action(payload: WorkBatchRequest):
+    ids = []
+    seen = set()
+    for value in payload.ids:
+        work_id = str(value or "").strip()
+        if work_id and work_id not in seen:
+            seen.add(work_id)
+            ids.append(work_id)
+    if not ids:
+        raise HTTPException(status_code=400, detail="请选择至少一个作品")
+    action = str(payload.action or "").strip().lower()
+    if action not in {"favorite", "trash", "delete"}:
+        raise HTTPException(status_code=400, detail="不支持的批量操作")
+    all_works = {str(item.get("id") or ""): item for item in all_works_with_canvas()}
+    works = [all_works[work_id] for work_id in ids if work_id in all_works]
+    if not works:
+        raise HTTPException(status_code=404, detail="选中的作品不存在或已被移除")
+    if action == "delete":
+        return _delete_selected_work_files(works)
+    changed = []
+    if action == "favorite":
+        for work in works:
+            changed_work, _ = update_work_metadata(str(work["id"]), favorite=True)
+            changed.append(changed_work)
+    else:
+        for work in works:
+            changed_work, _ = update_work_metadata(str(work["id"]), trashed=True)
+            changed.append(changed_work)
+    publish_entity_changed("history", "global")
+    return {"success": True, "action": action, "count": len(changed), "works": changed}
 
 
 @app.post("/api/works/{work_id}/reveal")

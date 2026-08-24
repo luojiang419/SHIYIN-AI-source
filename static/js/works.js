@@ -29,6 +29,9 @@
         previewController:null,
         localBaseUrl:'',
         localTargetUrl:'',
+        selectedIds:new Set(),
+        selectionDrag:null,
+        suppressCardClickUntil:0,
         renderStart:-1,
         renderEnd:-1,
     };
@@ -68,7 +71,7 @@
     }
 
     function cache(){
-        ['worksCount','worksTabs','worksSearch','worksKind','worksMediaFilter','worksSortOrder','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','compareWork','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewVideo','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
+        ['worksCount','worksTabs','worksSearch','worksKind','worksMediaFilter','worksSortOrder','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksSelectionActions','worksSelectionCount','worksBatchFavorite','worksBatchDelete','worksBatchTrash','worksClearSelection','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','compareWork','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewVideo','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
     }
     async function fetchJson(url,options={}){
         const response = await fetch(url,options);
@@ -144,7 +147,8 @@
         const left = col * (metrics.cardWidth + GRID_GAP);
         const top = row * metrics.rowHeight;
         const isVideo = workMediaType(item) === 'video';
-        return `<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
+        const selected = state.selectedIds.has(item.id);
+        return `<article class="works-card ${item.trashed?'trashed':''} ${selected?'selected':''}" data-work-id="${escapeHtml(item.id)}" aria-selected="${selected?'true':'false'}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
             <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${isVideo ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
@@ -153,12 +157,73 @@
             </div></article>`;
     }
     function bindGridActions(){
-        el.worksGrid.querySelectorAll('[data-preview-work]').forEach(button=>button.addEventListener('click',()=>openPreview(button.dataset.previewWork)));
+        el.worksGrid.querySelectorAll('[data-preview-work]').forEach(button=>button.addEventListener('click',event=>{
+            if(Date.now()<state.suppressCardClickUntil) return;
+            if(event.shiftKey){ toggleSelection(button.dataset.previewWork); return; }
+            openPreview(button.dataset.previewWork);
+        }));
         el.worksGrid.querySelectorAll('[data-compare-work]').forEach(button=>button.addEventListener('click',()=>openCompare(button.dataset.compareWork)));
         el.worksGrid.querySelectorAll('[data-favorite-work]').forEach(button=>button.addEventListener('click',()=>toggleFavorite(button.dataset.favoriteWork)));
         el.worksGrid.querySelectorAll('[data-download-work]').forEach(button=>button.addEventListener('click',()=>downloadWork(state.works.find(item=>item.id===button.dataset.downloadWork))));
         el.worksGrid.querySelectorAll('[data-reveal-work]').forEach(button=>button.addEventListener('click',()=>revealWork(button.dataset.revealWork)));
         el.worksGrid.querySelectorAll('[data-trash-work]').forEach(button=>button.addEventListener('click',()=>setTrashed(button.dataset.trashWork,button.dataset.trashValue==='true')));
+    }
+    function renderSelectionActions(){
+        const count=state.selectedIds.size;
+        el.worksSelectionActions?.classList.toggle('hidden',count===0);
+        if(el.worksSelectionCount) el.worksSelectionCount.textContent=`已选择 ${count} 项`;
+    }
+    function toggleSelection(workId){
+        const id=String(workId || '').trim();
+        if(!id) return;
+        if(state.selectedIds.has(id)) state.selectedIds.delete(id); else state.selectedIds.add(id);
+        renderVirtual(true);
+    }
+    function clearSelection(){
+        state.selectedIds.clear();
+        renderVirtual(true);
+    }
+    function updateSelectionRect(drag,event){
+        const left=Math.min(drag.startX,event.clientX), top=Math.min(drag.startY,event.clientY);
+        const right=Math.max(drag.startX,event.clientX), bottom=Math.max(drag.startY,event.clientY);
+        Object.assign(drag.rect.style,{left:`${left}px`,top:`${top}px`,width:`${Math.max(1,right-left)}px`,height:`${Math.max(1,bottom-top)}px`});
+        const selected=new Set(drag.base);
+        el.worksGrid.querySelectorAll('[data-work-id]').forEach(card=>{
+            const box=card.getBoundingClientRect();
+            if(left<box.right && right>box.left && top<box.bottom && bottom>box.top) selected.add(card.dataset.workId);
+        });
+        state.selectedIds=selected;
+        renderVirtual(true);
+    }
+    function endSelectionDrag(event){
+        const drag=state.selectionDrag;
+        if(!drag) return;
+        document.removeEventListener('mousemove',drag.onMove);
+        document.removeEventListener('mouseup',drag.onUp);
+        drag.rect.remove();
+        if(!drag.moved){
+            const card=drag.startTarget?.closest?.('[data-work-id]');
+            if(card) toggleSelection(card.dataset.workId);
+        }
+        state.suppressCardClickUntil=Date.now()+80;
+        state.selectionDrag=null;
+    }
+    function beginSelectionDrag(event){
+        if(!event.shiftKey || event.button!==0 || event.target.closest?.('input,select,textarea,button:not(.works-card-media)')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect=document.createElement('div');
+        rect.className='works-selection-rect';
+        document.body.appendChild(rect);
+        const drag={startX:event.clientX,startY:event.clientY,startTarget:event.target,base:new Set(state.selectedIds),rect,moved:false,onMove:null,onUp:null};
+        drag.onMove=moveEvent=>{
+            if(Math.abs(moveEvent.clientX-drag.startX)>3 || Math.abs(moveEvent.clientY-drag.startY)>3) drag.moved=true;
+            updateSelectionRect(drag,moveEvent);
+        };
+        drag.onUp=upEvent=>endSelectionDrag(upEvent);
+        state.selectionDrag=drag;
+        document.addEventListener('mousemove',drag.onMove);
+        document.addEventListener('mouseup',drag.onUp,{once:true});
     }
     function renderVirtual(force=false){
         const metrics = gridMetrics();
@@ -176,6 +241,7 @@
         if(el.worksClearAll) el.worksClearAll.disabled = !(state.total || state.works.length);
         el.worksTabs.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===state.tab));
         renderViewControls();
+        renderSelectionActions();
         if(!force && state.renderStart === start && state.renderEnd === end) return;
         state.renderStart = start;
         state.renderEnd = end;
@@ -195,6 +261,7 @@
                 state.works=[];
                 state.total=0;
                 state.nextCursor='';
+                state.selectedIds.clear();
                 state.renderStart=-1;
                 state.renderEnd=-1;
                 el.worksGrid.scrollTop=0;
@@ -414,6 +481,18 @@
             toast(`${t('works.clearAllDone')} ${result.deleted_files || 0}`);
         } catch(error){ toast(error.message || t('works.clearAllFailed')); }
     }
+    async function batchAction(action){
+        const ids=[...state.selectedIds];
+        if(!ids.length) return;
+        if(action==='delete' && !window.confirm('删除后将永久删除选中的作品文件，无法恢复；如只想隐藏请使用“移到回收站”。确定继续吗？')) return;
+        if(action==='trash' && !window.confirm('确定将选中的作品移到回收站吗？')) return;
+        try {
+            const data=await fetchJson('/api/works/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,action})});
+            state.selectedIds.clear();
+            toast(action==='delete' ? `已永久删除 ${data.deleted_files || data.deleted_records || ids.length} 个作品` : action==='trash' ? `已移到回收站 ${data.count || ids.length} 个作品` : `已收藏 ${data.count || ids.length} 个作品`);
+            await loadWorks({reset:true});
+        } catch(error){ toast(error.message || '批量操作失败'); }
+    }
     function handleScroll(){
         renderVirtual();
         const remaining = el.worksGrid.scrollHeight - el.worksGrid.scrollTop - el.worksGrid.clientHeight;
@@ -443,6 +522,11 @@
         window.addEventListener('resize',()=>renderVirtual(true));
         el.worksDownloadAll.addEventListener('click',downloadAll);
         el.worksClearAll.addEventListener('click',clearAllWorks);
+        el.worksBatchFavorite?.addEventListener('click',()=>batchAction('favorite'));
+        el.worksBatchDelete?.addEventListener('click',()=>batchAction('delete'));
+        el.worksBatchTrash?.addEventListener('click',()=>batchAction('trash'));
+        el.worksClearSelection?.addEventListener('click',clearSelection);
+        el.worksGrid.addEventListener('mousedown',beginSelectionDrag);
     }
     document.addEventListener('DOMContentLoaded',()=>{cache();bind();loadWorks({reset:true});});
 })();

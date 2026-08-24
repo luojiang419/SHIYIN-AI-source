@@ -23,6 +23,7 @@ class WorksFrontendContractTests(unittest.TestCase):
         cls.works = (root / "static" / "works.html").read_text(encoding="utf-8")
         cls.works_js = (root / "static" / "js" / "works.js").read_text(encoding="utf-8")
         cls.works_css = (root / "static" / "css" / "works.css").read_text(encoding="utf-8")
+        cls.main_source = (root / "main.py").read_text(encoding="utf-8")
         cls.compare_js = (root / "static" / "js" / "compare-viewer.js").read_text(encoding="utf-8")
 
     def test_works_navigation_is_directly_below_asset_library(self):
@@ -31,6 +32,17 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertLess(asset, works)
         self.assertIn('id="frame-works"', self.index)
         self.assertIn("'works'", self.index)
+
+    def test_works_supports_shift_drag_selection_and_batch_action_toolbar(self):
+        self.assertIn('id="worksSelectionActions"', self.works)
+        self.assertIn('id="worksBatchFavorite"', self.works)
+        self.assertIn('id="worksBatchDelete"', self.works)
+        self.assertIn('id="worksBatchTrash"', self.works)
+        self.assertIn("state.selectedIds", self.works_js)
+        self.assertIn("el.worksGrid.addEventListener('mousedown',beginSelectionDrag)", self.works_js)
+        self.assertIn("fetchJson('/api/works/batch'", self.works_js)
+        self.assertIn("class=\"works-card ${item.trashed?'trashed':''} ${selected?'selected':''}\"", self.works_js)
+        self.assertIn(".works-selection-rect", self.works_css)
 
     def test_works_has_all_and_favorite_tabs_with_persistent_api(self):
         self.assertIn('data-tab="all"', self.works)
@@ -76,6 +88,13 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn("suggestedName:name", self.works_js)
         self.assertIn("works-download-all", self.works_css)
         self.assertIn("works-danger-button", self.works_css)
+
+    def test_batch_delete_action_contract_is_real_delete_and_trash_is_separate(self):
+        self.assertIn('@app.post("/api/works/batch")', self.main_source)
+        self.assertIn('action not in {"favorite", "trash", "delete"}', self.main_source)
+        self.assertIn('_delete_selected_work_files(works)', self.main_source)
+        self.assertIn('os.remove(path)', self.main_source)
+        self.assertIn('update_work_metadata(str(work["id"]), trashed=True)', self.main_source)
 
     def test_work_card_actions_remain_visible_in_dense_grids(self):
         self.assertIn("display:block", self.works_css)
@@ -519,6 +538,61 @@ class WorksBackendTests(unittest.TestCase):
                 self.assertFalse(image.exists())
                 self.assertEqual(database.list_history(), [])
                 self.assertEqual(self.main.work_metadata(), {})
+
+    def test_batch_delete_physically_removes_selected_file_and_record(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = CanvasDatabase(Path(root) / "canvas.db")
+            database.initialize()
+            output = Path(root) / "output"
+            output.mkdir()
+            image = output / "selected.png"
+            image.write_bytes(b"selected")
+            database.prepend_history({
+                "id": "history-batch-delete",
+                "type": "ecommerce",
+                "timestamp": 40,
+                "images": ["/assets/output/selected.png"],
+            })
+            work_id = self.main.work_item_id("history-batch-delete", 0, "/assets/output/selected.png")
+            with (
+                patch.object(self.main, "DATABASE", database),
+                patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(output)),
+                patch.object(self.main, "output_file_from_url", side_effect=lambda url: str(image) if str(url).endswith("selected.png") else ""),
+                patch.object(self.main, "publish_entity_changed"),
+            ):
+                result = asyncio.run(self.main.batch_work_action(self.main.WorkBatchRequest(ids=[work_id], action="delete")))
+                self.assertTrue(result["success"])
+                self.assertEqual(result["deleted_files"], 1)
+                self.assertFalse(image.exists())
+                self.assertEqual(database.list_history(), [])
+                self.assertEqual(self.main.work_metadata(), {})
+
+    def test_batch_trash_keeps_file_and_marks_record_recoverable(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = CanvasDatabase(Path(root) / "canvas.db")
+            database.initialize()
+            output = Path(root) / "output"
+            output.mkdir()
+            image = output / "kept.png"
+            image.write_bytes(b"kept")
+            database.prepend_history({
+                "id": "history-batch-trash",
+                "type": "ecommerce",
+                "timestamp": 41,
+                "images": ["/assets/output/kept.png"],
+            })
+            work_id = self.main.work_item_id("history-batch-trash", 0, "/assets/output/kept.png")
+            with (
+                patch.object(self.main, "DATABASE", database),
+                patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(output)),
+                patch.object(self.main, "output_file_from_url", side_effect=lambda url: str(image) if str(url).endswith("kept.png") else ""),
+                patch.object(self.main, "publish_entity_changed"),
+            ):
+                result = asyncio.run(self.main.batch_work_action(self.main.WorkBatchRequest(ids=[work_id], action="trash")))
+                self.assertTrue(result["success"])
+                self.assertTrue(image.exists())
+                listed = asyncio.run(self.main.list_generated_works(include_trashed=True))
+                self.assertTrue(listed["works"][0]["trashed"])
 
     def test_media_reconcile_counts_references_and_cleans_orphans(self):
         with tempfile.TemporaryDirectory() as root:

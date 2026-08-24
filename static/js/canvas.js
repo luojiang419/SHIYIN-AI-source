@@ -16855,6 +16855,7 @@ function startSelection(e){
     e.stopPropagation();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     const startWorld = screenToWorld(e.clientX, e.clientY);
+    window.CanvasPerformance?.beginInteraction?.('classic.marquee', {nodes:nodes.length});
     selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, sw:startWorld.x, sh:startWorld.y};
     document.body.classList.add('canvas-selecting');
     selectionBox.style.display = 'block';
@@ -16895,6 +16896,7 @@ function finishSelection(){
     document.body.classList.remove('canvas-selecting');
     window.onmousemove = null;
     window.onmouseup = null;
+    window.CanvasPerformance?.markPaintFrom?.('classic.marquee', 'classic.marquee', {selected:selected.size, nodes:nodes.length});
     refreshSelectionVisuals();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
 }
@@ -18391,6 +18393,7 @@ function startNodeDrag(e, node){
         [...selected].forEach(id => collect(canvasNodeIndex.get(id)));
     }
     const children = [...collected.values()];
+    window.CanvasPerformance?.beginInteraction?.('classic.node-drag', {nodes:1 + children.length, total:nodes.length});
     dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y};
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
@@ -18460,6 +18463,7 @@ function startLink(e, originId, originKind, originRole=''){
     originKind = originKind || 'out';
     const src = portPoint(originId, originKind, originRole);
     const source = nodes.find(n => n.id === originId);
+    window.CanvasPerformance?.beginInteraction?.('classic.port-link', {nodes:nodes.length, connections:connections.length, originKind});
     tempLink = {from:originId, originKind, originRole, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
     window.onmousemove = e2 => {
         const p = screenToWorld(e2.clientX, e2.clientY);
@@ -18504,6 +18508,7 @@ function startLink(e, originId, originKind, originRole=''){
         } else if(originKind === 'in'){
             openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY, originRole);
         }
+        window.CanvasPerformance?.markPaintFrom?.('classic.port-link', 'classic.port-link', {nodes:nodes.length, connections:connections.length, target:Boolean(target)});
         tempLink = null;
         window.onmousemove = null;
         window.onmouseup = null;
@@ -18644,6 +18649,10 @@ function sanitizeConnections(){
 function endDrag(event=null){
     const hadContentDrag = Boolean(dragNode || resizeNode || llmPaneDrag || knifeChanged || tempLink);
     const hadViewportDrag = Boolean(dragBoard || minimapDrag);
+    if(dragNode) window.CanvasPerformance?.markPaintFrom?.('classic.node-drag', 'classic.node-drag', {nodes:1 + (dragNode.children || []).length, total:nodes.length});
+    if(dragBoard) window.CanvasPerformance?.markPaintFrom?.('classic.pan', 'classic.pan', {nodes:nodes.length});
+    if(minimapDrag) window.CanvasPerformance?.markPaintFrom?.('classic.minimap-drag', 'classic.minimap-drag', {nodes:nodes.length});
+    if(tempLink) window.CanvasPerformance?.markPaintFrom?.('classic.port-link', 'classic.port-link', {nodes:nodes.length, connections:connections.length});
     if(dragNode){
         const moved = [dragNode.node, ...(dragNode.children || []).map(c => c.node)].filter(Boolean);
         // 拖动 group/promptGroup 自身时不重新评估（成员跟着一起走，包含关系不变）
@@ -19417,6 +19426,7 @@ minimap?.addEventListener('mousedown', e => {
     if(e.target.closest?.('#canvasArrangeBtn')) return;
     e.preventDefault();
     e.stopPropagation();
+    window.CanvasPerformance?.beginInteraction?.('classic.minimap-drag', {nodes:nodes.length});
     minimapDrag = true;
     centerViewportOnWorldPoint(minimapEventToWorld(e));
     window.onmousemove = e2 => {
@@ -19467,6 +19477,7 @@ function startBoardPan(e, opts={}){
     e.stopPropagation();
     closeCreateMenu();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    window.CanvasPerformance?.beginInteraction?.('classic.pan', {nodes:nodes.length});
     dragBoard = {sx:e.clientX, sy:e.clientY, ox:viewport.x, oy:viewport.y, moved:false, clearSelectionOnClick:Boolean(opts.clearSelectionOnClick)};
     document.body.classList.add('canvas-board-pan');
     window.onmousemove = e2 => {
@@ -19548,6 +19559,7 @@ board.addEventListener('mousedown', e => {
 board.onwheel = e => {
     if(!canvas) return;
     e.preventDefault();
+    if(!window.CanvasPerformance?.isInteractionActive?.('classic.zoom')) window.CanvasPerformance?.beginInteraction?.('classic.zoom', {nodes:nodes.length, connections:connections.length});
     const before = screenToWorld(e.clientX, e.clientY);
     viewport.scale = viewport.scale * (e.deltaY > 0 ? .92 : 1.08);
     const rect = board.getBoundingClientRect();
@@ -19557,6 +19569,7 @@ board.onwheel = e => {
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleViewportSave();
+    window.CanvasPerformance?.markPaintFrom?.('classic.zoom', 'classic.zoom', {nodes:nodes.length, connections:connections.length});
 };
 board.addEventListener('dragover', e => {
     const perfEnd = window.CanvasPerformance?.start?.('classic.dragover');

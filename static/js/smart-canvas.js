@@ -10931,6 +10931,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                 const n = nodeIndex.get(dragId);
                 return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
             }).filter(Boolean);
+            window.CanvasPerformance?.beginInteraction?.('smart.node-drag', {nodes:group.length, total:nodes.length});
             dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();
@@ -10951,6 +10952,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                     hoverRole:'',
                     moved:false
                 };
+                window.CanvasPerformance?.beginInteraction?.('smart.port-link', {nodes:nodes.length, connections:(canvas?.connections || []).length, fromPort:portType});
                 shell.classList.add('port-dragging');
                 capturePendingUndo();
                 ensurePortDragPathElement();
@@ -18205,6 +18207,7 @@ shell.onmousedown = e => {
     if(e.button === 0 && smartTemporaryToolMode === 'select'){
         e.preventDefault();
         didPan = false;
+        window.CanvasPerformance?.beginInteraction?.('smart.marquee', {nodes:nodes.length});
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
         return;
@@ -18212,6 +18215,7 @@ shell.onmousedown = e => {
     if(e.button === 0 && activeSmartCanvasTool(e) === 'select'){
         e.preventDefault();
         didPan = false;
+        window.CanvasPerformance?.beginInteraction?.('smart.marquee', {nodes:nodes.length});
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
         return;
@@ -18220,6 +18224,7 @@ shell.onmousedown = e => {
     e.preventDefault();
     didPan = false;
     dismissSmartNodeToolbar();
+    window.CanvasPerformance?.beginInteraction?.('smart.pan', {nodes:nodes.length});
     panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
     shell.classList.add('panning');
 };
@@ -18272,6 +18277,7 @@ minimap?.addEventListener('mousedown', e => {
     if(e.target.closest?.('#smartArrangeBtn')) return;
     e.preventDefault();
     e.stopPropagation();
+    window.CanvasPerformance?.beginInteraction?.('smart.minimap-drag', {nodes:nodes.length});
     smartMinimapDrag = true;
     centerViewportOnWorldPoint(minimapEventToWorld(e));
 });
@@ -18578,6 +18584,11 @@ window.onmousemove = e => {
     if(target) setDropHighlight(target.id);
 };
 window.onmouseup = e => {
+    if(portDragState) window.CanvasPerformance?.markPaintFrom?.('smart.port-link', 'smart.port-link', {nodes:nodes.length, connections:(canvas?.connections || []).length});
+    if(selectionState) window.CanvasPerformance?.markPaintFrom?.('smart.marquee', 'smart.marquee', {nodes:nodes.length});
+    if(panState) window.CanvasPerformance?.markPaintFrom?.('smart.pan', 'smart.pan', {nodes:nodes.length});
+    if(smartMinimapDrag) window.CanvasPerformance?.markPaintFrom?.('smart.minimap-drag', 'smart.minimap-drag', {nodes:nodes.length});
+    if(dragState) window.CanvasPerformance?.markPaintFrom?.('smart.node-drag', 'smart.node-drag', {nodes:(dragState.group || []).length, total:nodes.length});
     document.body.classList.remove('smart-node-drag');
     document.body.classList.remove('smart-node-resize');
     if(portDragState){
@@ -18757,6 +18768,7 @@ window.onmouseup = e => {
 shell.addEventListener('wheel', e => {
     if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
     e.preventDefault();
+    if(!window.CanvasPerformance?.isInteractionActive?.('smart.zoom')) window.CanvasPerformance?.beginInteraction?.('smart.zoom', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
@@ -18767,6 +18779,7 @@ shell.addEventListener('wheel', e => {
     viewport.y = sy - before.y * viewport.scale;
     applyViewport();
     scheduleSave();
+    window.CanvasPerformance?.markPaintFrom?.('smart.zoom', 'smart.zoom', {nodes:nodes.length, connections:(canvas?.connections || []).length});
 }, {passive:false});
 shell.ondragover = e => setSmartDropCopyEffect(e, true);
 shell.ondrop = async e => {

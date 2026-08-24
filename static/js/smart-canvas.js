@@ -93,6 +93,8 @@ const SMART_SAFE_LOD_ENABLED = true;
 const SMART_SAFE_LOD_MARGIN = 480;
 // 端口连线成功后只替换受影响节点并刷新连线层；关闭时回退原全量 render。
 const SMART_PORT_LINK_MUTATION_ENABLED = true;
+// 连接层统一委托点击事件；关闭时回退原逐元素监听，便于异常止损。
+const SMART_CONNECTION_EVENT_DELEGATION_ENABLED = true;
 let smartSafeLodRaf = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
@@ -9514,7 +9516,27 @@ function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, no
     if('requestIdleCallback' in window) smartIdleMediaMeasureHandle = window.requestIdleCallback(run, {timeout:1200});
     else smartIdleMediaMeasureHandle = window.setTimeout(run, 0);
 }
+let smartConnectionEventsDelegated = false;
 function bindConnectionEvents(){
+    if(SMART_CONNECTION_EVENT_DELEGATION_ENABLED){
+        if(smartConnectionEventsDelegated) return;
+        world.addEventListener('dblclick', e => {
+            const hit = e.target?.closest?.('.conn-hit[data-conn-index]');
+            if(!hit || !world.contains(hit)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            disconnectConnections(hit.dataset.connIndex);
+        });
+        world.addEventListener('click', e => {
+            const target = e.target?.closest?.('[data-conn-index]');
+            if(!target || !world.contains(target) || target.classList.contains('conn-hit')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            disconnectConnections(target.dataset.connIndex);
+        });
+        smartConnectionEventsDelegated = true;
+        return;
+    }
     world.querySelectorAll('[data-conn-index]').forEach(el => {
         if(el.classList.contains('conn-hit')){
             el.addEventListener('dblclick', e => {

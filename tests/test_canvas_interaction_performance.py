@@ -77,6 +77,14 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("if(SMART_PORT_LINK_MUTATION_ENABLED)", drop)
         self.assertIn("render();", drop)
 
+    def test_smart_connection_events_use_delegation_with_legacy_fallback(self):
+        bind = body(SMART_CANVAS_JS, "function bindConnectionEvents(){", "function ensurePortDragPathElement")
+        self.assertIn("SMART_CONNECTION_EVENT_DELEGATION_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("smartConnectionEventsDelegated", bind)
+        self.assertIn("world.addEventListener('click'", bind)
+        self.assertIn("world.addEventListener('dblclick'", bind)
+        self.assertIn("world.querySelectorAll('[data-conn-index]')", bind)
+
     def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
         dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")
         self.assertLess(dragover.index("if(hasOutputMediaDrag"), dragover.index("if(hasImageDropData"))

@@ -32,6 +32,8 @@
         selectedIds:new Set(),
         selectionMode:false,
         shiftPressed:false,
+        batchBusy:false,
+        batchBusyAction:'',
         selectionDrag:null,
         suppressCardClickUntil:0,
         renderStart:-1,
@@ -169,7 +171,7 @@
             event.stopPropagation();
             const id=input.dataset.selectWork;
             if(input.checked) state.selectedIds.add(id); else state.selectedIds.delete(id);
-            renderVirtual(true);
+            syncSelectionVisuals();
         }));
         el.worksGrid.querySelectorAll('[data-compare-work]').forEach(button=>button.addEventListener('click',()=>openCompare(button.dataset.compareWork)));
         el.worksGrid.querySelectorAll('[data-favorite-work]').forEach(button=>button.addEventListener('click',()=>toggleFavorite(button.dataset.favoriteWork)));
@@ -177,10 +179,24 @@
         el.worksGrid.querySelectorAll('[data-reveal-work]').forEach(button=>button.addEventListener('click',()=>revealWork(button.dataset.revealWork)));
         el.worksGrid.querySelectorAll('[data-trash-work]').forEach(button=>button.addEventListener('click',()=>setTrashed(button.dataset.trashWork,button.dataset.trashValue==='true')));
     }
+    function syncSelectionVisuals(){
+        el.worksGrid.querySelectorAll('[data-work-id]').forEach(card=>{
+            const selected=state.selectedIds.has(card.dataset.workId);
+            card.classList.toggle('selected',selected);
+            card.setAttribute('aria-selected',selected?'true':'false');
+            const input=card.querySelector('[data-select-work]');
+            if(input) input.checked=selected;
+            const indicator=input?.nextElementSibling;
+            if(indicator) indicator.textContent=selected?'✓':'';
+        });
+        renderSelectionActions();
+    }
     function renderSelectionActions(){
         const count=state.selectedIds.size;
         el.worksSelectionActions?.classList.toggle('hidden',count===0);
-        if(el.worksSelectionCount) el.worksSelectionCount.textContent=`已选择 ${count} 项`;
+        if(el.worksSelectionCount) el.worksSelectionCount.textContent=state.batchBusy ? `正在${state.batchBusyAction || '处理'} ${count} 项…` : `已选择 ${count} 项`;
+        [el.worksBatchFavorite,el.worksBatchDelete,el.worksBatchTrash,el.worksClearSelection].forEach(button=>{ if(button) button.disabled=state.batchBusy; });
+        el.worksSelectionActions?.classList.toggle('is-busy',state.batchBusy);
         el.worksSelectionModeToggle?.classList.toggle('active',state.selectionMode);
         el.worksSelectionModeToggle?.setAttribute('aria-checked',state.selectionMode?'true':'false');
         const indicator=el.worksSelectionModeToggle?.querySelector('span');
@@ -191,11 +207,12 @@
         const id=String(workId || '').trim();
         if(!id) return;
         if(state.selectedIds.has(id)) state.selectedIds.delete(id); else state.selectedIds.add(id);
-        renderVirtual(true);
+        syncSelectionVisuals();
     }
     function clearSelection(){
+        if(state.batchBusy) return;
         state.selectedIds.clear();
-        renderVirtual(true);
+        syncSelectionVisuals();
     }
     function toggleSelectionMode(){
         state.selectionMode=!state.selectionMode;
@@ -212,13 +229,15 @@
             if(left<box.right && right>box.left && top<box.bottom && bottom>box.top) selected.add(card.dataset.workId);
         });
         state.selectedIds=selected;
-        renderVirtual(true);
+        syncSelectionVisuals();
     }
     function endSelectionDrag(event){
         const drag=state.selectionDrag;
         if(!drag) return;
         document.removeEventListener('mousemove',drag.onMove);
         document.removeEventListener('mouseup',drag.onUp);
+        if(drag.raf) cancelAnimationFrame(drag.raf);
+        if(drag.lastEvent && drag.moved) updateSelectionRect(drag,drag.lastEvent);
         drag.rect.remove();
         if(!drag.moved){
             const card=drag.startTarget?.closest?.('[data-work-id]');
@@ -238,7 +257,12 @@
         const drag={startX:event.clientX,startY:event.clientY,startTarget:event.target,base:new Set(state.selectedIds),rect,moved:false,onMove:null,onUp:null};
         drag.onMove=moveEvent=>{
             if(Math.abs(moveEvent.clientX-drag.startX)>3 || Math.abs(moveEvent.clientY-drag.startY)>3) drag.moved=true;
-            updateSelectionRect(drag,moveEvent);
+            drag.lastEvent=moveEvent;
+            if(drag.raf) return;
+            drag.raf=requestAnimationFrame(()=>{
+                drag.raf=0;
+                if(state.selectionDrag===drag && drag.lastEvent) updateSelectionRect(drag,drag.lastEvent);
+            });
         };
         drag.onUp=upEvent=>endSelectionDrag(upEvent);
         state.selectionDrag=drag;
@@ -503,15 +527,37 @@
     }
     async function batchAction(action){
         const ids=[...state.selectedIds];
-        if(!ids.length) return;
+        if(!ids.length || state.batchBusy) return;
         if(action==='delete' && !window.confirm('删除后将永久删除选中的作品文件，无法恢复；如只想隐藏请使用“移到回收站”。确定继续吗？')) return;
         if(action==='trash' && !window.confirm('确定将选中的作品移到回收站吗？')) return;
+        state.batchBusy=true;
+        state.batchBusyAction=action==='delete'?'删除':action==='trash'?'移到回收站':'收藏';
+        renderSelectionActions();
+        toast(`${state.batchBusyAction}处理中，请稍候…`);
         try {
             const data=await fetchJson('/api/works/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,action})});
+            const selectedSet=new Set(ids);
+            if(action==='delete'){
+                const removedCount=state.works.reduce((count,item)=>count+(selectedSet.has(item.id)?1:0),0);
+                state.works=state.works.filter(item=>!selectedSet.has(item.id));
+                state.total=Math.max(0,state.total-removedCount);
+            } else if(action==='favorite'){
+                state.works.forEach(item=>{if(selectedSet.has(item.id)) item.favorite=true;});
+            } else if(action==='trash'){
+                state.works.forEach(item=>{if(selectedSet.has(item.id)) item.trashed=true;});
+            }
             state.selectedIds.clear();
+            state.batchBusy=false;
+            state.batchBusyAction='';
+            renderKinds();
+            renderVirtual(true);
             toast(action==='delete' ? `已永久删除 ${data.deleted_files || data.deleted_records || ids.length} 个作品` : action==='trash' ? `已移到回收站 ${data.count || ids.length} 个作品` : `已收藏 ${data.count || ids.length} 个作品`);
-            await loadWorks({reset:true});
-        } catch(error){ toast(error.message || '批量操作失败'); }
+        } catch(error){
+            state.batchBusy=false;
+            state.batchBusyAction='';
+            renderSelectionActions();
+            toast(error.message || '批量操作失败');
+        }
     }
     function handleScroll(){
         renderVirtual();

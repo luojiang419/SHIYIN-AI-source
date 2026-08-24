@@ -44,6 +44,9 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn('data-select-work="${escapeHtml(item.id)}"', self.works_js)
         self.assertIn("state.selectionMode || state.shiftPressed || event.shiftKey", self.works_js)
         self.assertIn("el.worksGrid?.classList.toggle('selection-mode',state.selectionMode)", self.works_js)
+        self.assertIn("function syncSelectionVisuals()", self.works_js)
+        self.assertIn("drag.raf=requestAnimationFrame", self.works_js)
+        self.assertNotIn("state.selectedIds=selected;\n        renderVirtual(true);", self.works_js)
         self.assertIn("el.worksGrid.addEventListener('mousedown',beginSelectionDrag)", self.works_js)
         self.assertIn("fetchJson('/api/works/batch'", self.works_js)
         self.assertIn("class=\"works-card ${item.trashed?'trashed':''} ${selected?'selected':''}\"", self.works_js)
@@ -101,6 +104,13 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn('_delete_selected_work_files(works)', self.main_source)
         self.assertIn('os.remove(path)', self.main_source)
         self.assertIn('update_work_metadata(str(work["id"]), trashed=True)', self.main_source)
+
+    def test_batch_actions_keep_list_visible_and_apply_optimistic_state(self):
+        self.assertIn("batchBusy:false", self.works_js)
+        self.assertIn("正在${state.batchBusyAction || '处理'} ${count} 项…", self.works_js)
+        self.assertIn("state.works=state.works.filter(item=>!selectedSet.has(item.id))", self.works_js)
+        self.assertIn("state.total=Math.max(0,state.total-removedCount)", self.works_js)
+        self.assertNotIn("await loadWorks({reset:true});", self.works_js)
 
     def test_work_card_actions_remain_visible_in_dense_grids(self):
         self.assertIn("display:block", self.works_css)

@@ -11,6 +11,8 @@ svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8;
 .works-toolbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:18px; }
 .works-heading { min-width:0; display:flex; align-items:center; gap:18px; }
 .works-selection-actions { min-width:0; display:flex; align-items:center; gap:6px; padding:4px 6px; border:1px solid var(--wk-border-strong); border-radius:13px; background:var(--wk-panel); box-shadow:var(--wk-shadow); }
+.works-selection-actions.is-busy { opacity:.82; }
+.works-selection-actions.is-busy button { cursor:wait; }
 .works-selection-actions span { padding:0 5px; color:var(--wk-muted); font-size:9px; font-weight:900; white-space:nowrap; }
 .works-selection-actions button { min-height:32px; padding:0 10px; border:1px solid var(--wk-border); border-radius:9px; background:var(--wk-control); color:var(--wk-text-soft); font-size:9px; font-weight:900; white-space:nowrap; }
 .works-selection-actions button:hover:not(:disabled) { border-color:var(--wk-accent); color:var(--wk-accent); }

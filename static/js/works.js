@@ -342,6 +342,17 @@
         try { await el.worksPreviewFrame.requestFullscreen?.({navigationUI:'hide'}); }
         catch(error) { toast(error.message || t('works.preview')); }
     }
+    function handlePreviewFullscreenKeydown(event){
+        const fullscreenElement=document.fullscreenElement;
+        const video=el.worksPreviewVideo;
+        const isPreviewFullscreen=fullscreenElement===el.worksPreviewFrame || fullscreenElement===video;
+        const isSpace=event.code==='Space' || event.key===' ';
+        if(!isPreviewFullscreen || !isSpace || !video || video.hidden || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if(video.paused || video.ended) video.play().catch(error=>toast(error.message || t('works.preview')));
+        else video.pause();
+    }
     function openCompare(workId=''){
         const work=state.works.find(item=>item.id===workId) || state.works.find(item=>!item.trashed);
         if(!state.compareViewer) state.compareViewer=new window.CompareViewer({root:el.worksCompareStage,before:el.worksBeforeImage,after:el.worksAfterImage,afterClip:el.worksAfterClip,handle:el.worksCompareHandle,zoomOutButton:el.worksZoomOut,zoomLabel:el.worksZoomReset,zoomInButton:el.worksZoomIn,fullscreenButton:el.worksFullscreen});
@@ -427,6 +438,7 @@
         el.closeWorksPreview.addEventListener('click',closePreview);
         el.worksPreviewDialog.addEventListener('click',event=>{if(event.target===el.worksPreviewDialog)closePreview();});
         el.worksPreviewFullscreen.addEventListener('click',togglePreviewFullscreen);
+        document.addEventListener('keydown',handlePreviewFullscreenKeydown);
         el.worksGrid.addEventListener('scroll',handleScroll,{passive:true});
         window.addEventListener('resize',()=>renderVirtual(true));
         el.worksDownloadAll.addEventListener('click',downloadAll);

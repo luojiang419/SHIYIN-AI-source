@@ -26,3 +26,7 @@
 ## 追加经验（1.0.295）
 
 `hidden` 不是绝对可靠的视觉隐藏方式：如果组件样式对元素写了更高优先级的 `display:block`（本案为 `.studio-preview-img` 的图片缩放样式），浏览器 UA 的 `[hidden] { display:none }` 会被覆盖。双层预览（图片和视频共用容器）必须在容器级补充 `.preview-frame > [hidden] { display:none !important; }`，并用浏览器实际计算样式和矩形尺寸确认隐藏元素为 `display:none`、宽高为 0；不能只看 `hidden=true`。
+
+## 追加经验（1.0.296）
+
+全屏播放的空格控制不能依赖浏览器默认快捷键：焦点可能停留在全屏按钮或全屏容器，默认行为还可能滚动页面。应在文档级监听 `keydown`，仅当 `document.fullscreenElement` 是作品预览容器/视频时处理 `Space`，调用 `preventDefault()` 后显式执行 `play()`/`pause()`；同时过滤 `repeat` 与组合键，避免长按造成状态抖动。

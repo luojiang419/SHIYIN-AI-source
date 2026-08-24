@@ -101,6 +101,19 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("new Set([...previous, ...selected])", connection)
         self.assertIn("svg.querySelectorAll('path.conn-hit[data-conn-index]')", connection)
 
+    def test_classic_selection_feedback_uses_node_and_connection_indexes_with_fallback(self):
+        selection = body(CANVAS_JS, "function refreshSelectionVisuals(){", "function syncConnectionSelectionVisuals")
+        connection = body(CANVAS_JS, "function syncConnectionSelectionVisuals(){", "function pathEl")
+        self.assertIn("CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED", CANVAS_JS)
+        self.assertIn("classicSelectionFeedbackState", selection)
+        self.assertIn("canvasNodeDomIndex.get(id)", selection)
+        self.assertIn("nodesEl.querySelectorAll('.node')", selection)
+        self.assertIn("scheduleClassicMinimapSelectionUpdate", selection)
+        self.assertIn("classicConnectionSelectionIndex", connection)
+        self.assertIn("classicConnectionModelIndex", connection)
+        self.assertIn("classicLinkDom.get(connectionId)", connection)
+        self.assertIn("linksEl.querySelectorAll('.link-hit[data-connection-id]')", connection)
+
     def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
         dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")
         self.assertLess(dragover.index("if(hasOutputMediaDrag"), dragover.index("if(hasImageDropData"))

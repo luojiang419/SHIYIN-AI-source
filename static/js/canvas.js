@@ -470,6 +470,8 @@ const CLASSIC_SAFE_LOD_ENABLED = true;
 const CLASSIC_SAFE_LOD_MARGIN = 480;
 // 框选优先复用节点矩形索引；关闭时回退结束阶段的逐节点尺寸读取。
 const CLASSIC_MARQUEE_RECT_CACHE_ENABLED = true;
+// 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
+const CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
 let classicSafeLodRaf = 0;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
@@ -482,6 +484,9 @@ let minimapRenderQueued = false;
 let minimapViewportQueued = false;
 let minimapNodeUpdateQueued = false;
 const minimapNodeUpdateIds = new Set();
+let classicSelectionFeedbackState = null;
+const classicConnectionSelectionIndex = new Map();
+const classicConnectionModelIndex = new Map();
 const CLASSIC_MINIMAP_CANVAS_ENABLED = true;
 let minimapCanvas = null;
 const minimapNodeRectIndex = new Map();
@@ -1550,6 +1555,9 @@ function setCanvasMode(open){
         linkControlsEl.innerHTML = '';
         classicLinkDom.clear();
         classicLinkControlDom.clear();
+        classicConnectionSelectionIndex.clear();
+        classicConnectionModelIndex.clear();
+        classicSelectionFeedbackState = null;
         classicTempLinkDom = null;
         classicKnifeTrailDom = null;
         selectionHub.classList.remove('open');
@@ -1746,6 +1754,14 @@ function markClassicConnectionsDirtyForNodes(ids=[]){
     (connections || []).forEach(connection => {
         if(affected.has(connection.from) || affected.has(connection.to)) classicConnectionDirtyIds.add(connection.id);
     });
+}
+function scheduleClassicMinimapSelectionUpdate(ids=[]){
+    const affected = [...new Set((ids || []).filter(Boolean))];
+    if(!affected.length || !CLASSIC_MINIMAP_CANVAS_ENABLED || !minimapState){
+        scheduleMinimapRender();
+        return;
+    }
+    scheduleMinimapNodeUpdate(affected);
 }
 function markClassicConnectionStructureDirty(){
     classicConnectionStructureDirty = true;
@@ -19581,6 +19597,18 @@ function renderLinks(){
     classicKnifeTrailDom?.remove();
     classicKnifeTrailDom = null;
     renderKnifeTrail();
+    classicConnectionSelectionIndex.clear();
+    classicConnectionModelIndex.clear();
+    connections.forEach(connection => {
+        if(!connection?.id) return;
+        classicConnectionModelIndex.set(connection.id, connection);
+        [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+            const ids = classicConnectionSelectionIndex.get(nodeId) || new Set();
+            ids.add(connection.id);
+            classicConnectionSelectionIndex.set(nodeId, ids);
+        });
+    });
+    classicSelectionFeedbackState = null;
     classicConnectionDirtyIds.clear();
     classicConnectionStructureDirty = false;
     perfEnd?.();
@@ -19674,28 +19702,59 @@ function isConnectionSelected(connection){
     return selected.has(connection.from) || selected.has(connection.to);
 }
 function refreshSelectionVisuals(){
-    nodesEl.querySelectorAll('.node').forEach(el => {
-        el.classList.toggle('selected', selected.has(el.dataset.id));
-    });
+    const nextSelected = new Set(selected);
+    const previous = classicSelectionFeedbackState;
+    const incremental = CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && canvasNodeDomIndex.size > 0;
+    const affectedNodeIds = new Set([...(previous?.ids || []), ...nextSelected]);
+    if(incremental){
+        affectedNodeIds.forEach(id => canvasNodeDomIndex.get(id)?.classList.toggle('selected', nextSelected.has(id)));
+    } else {
+        nodesEl.querySelectorAll('.node').forEach(el => {
+            el.classList.toggle('selected', nextSelected.has(el.dataset.id));
+        });
+    }
     syncCanvasSelectedImageResolution(nodesEl);
     syncConnectionSelectionVisuals();
+    classicSelectionFeedbackState = {ids:nextSelected};
     scheduleClassicSafeLod();
     renderSelectionHub();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
-    scheduleMinimapRender();
+    canvasArrangeBtn?.classList.toggle('visible', nextSelected.size > 0);
+    scheduleClassicMinimapSelectionUpdate([...affectedNodeIds]);
 }
 function syncConnectionSelectionVisuals(){
     const selectedIds = selected;
-    const connectionById = new Map((connections || []).map(connection => [connection.id, connection]));
-    linksEl.querySelectorAll('.link-hit[data-connection-id]').forEach(hit => {
-        const connection = connectionById.get(hit.dataset.connectionId);
+    const previous = classicSelectionFeedbackState?.ids;
+    const incremental = CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && classicConnectionSelectionIndex.size > 0;
+    const updateConnection = connectionId => {
+        const connection = classicConnectionModelIndex.get(connectionId);
         const active = Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to)));
-        hit.previousElementSibling?.classList.toggle('link-active', active);
-    });
-    linkControlsEl.querySelectorAll('.link-delete[data-connection-id]').forEach(button => {
-        const connection = connectionById.get(button.dataset.connectionId);
-        button.classList.toggle('visible', Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to))));
-    });
+        const entry = classicLinkDom.get(connectionId);
+        entry?.path?.classList.toggle('link-active', active);
+        entry?.hit?.previousElementSibling?.classList.toggle('link-active', active);
+        classicLinkControlDom.get(connectionId)?.classList.toggle('visible', active);
+    };
+    if(incremental){
+        const affected = new Set([...previous, ...selectedIds]);
+        const connectionIds = new Set();
+        affected.forEach(nodeId => (classicConnectionSelectionIndex.get(nodeId) || []).forEach(id => connectionIds.add(id)));
+        connectionIds.forEach(updateConnection);
+    } else {
+        const connectionById = new Map((connections || []).map(connection => [connection.id, connection]));
+        linksEl.querySelectorAll('.link-hit[data-connection-id]').forEach(hit => {
+            const connection = connectionById.get(hit.dataset.connectionId);
+            const active = Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to)));
+            hit.previousElementSibling?.classList.toggle('link-active', active);
+        });
+        linkControlsEl.querySelectorAll('.link-delete[data-connection-id]').forEach(button => {
+            const connection = connectionById.get(button.dataset.connectionId);
+            button.classList.toggle('visible', Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to))));
+        });
+    }
 }
 function pathEl(x1,y1,x2,y2,cls){
     const p = document.createElementNS('http://www.w3.org/2000/svg','path');

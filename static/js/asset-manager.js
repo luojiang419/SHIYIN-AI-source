@@ -493,10 +493,23 @@ function assetPreviewUrl(url, w=256){
     const width = Math.max(64, Math.min(2048, Math.round(Number(w) || 256)));
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(path)}`;
 }
+// 视频播放统一走本地流式代理，避免远程 CDN 缺少 CORS/Range 响应导致 WebView 无法播放。
+function assetMediaPlaybackUrl(url, name='video.mp4'){
+    const raw = String(url || '').trim();
+    if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    if(raw.startsWith('/assets/') || raw.startsWith('/output/') || raw.startsWith('/api/')) return raw;
+    if(!/^https?:\/\//i.test(raw)) return raw;
+    let filename = String(name || '').trim();
+    if(!filename){
+        try { filename = decodeURIComponent(new URL(raw).pathname.split('/').filter(Boolean).pop() || 'video.mp4'); }
+        catch(_) { filename = 'video.mp4'; }
+    }
+    return `/api/download-output?inline=1&url=${encodeURIComponent(raw)}&name=${encodeURIComponent(filename)}`;
+}
 function assetThumb(item){
     const kind = assetKind(item);
     // 视频用 poster（服务端生成的一帧）+ preload=none：不再为每个视频加载元数据，素材多时滚动顺畅。
-    if(kind === 'video') return `<video src="${escapeAttr(item.url)}" poster="${escapeAttr(assetPreviewUrl(item.url, 256))}" muted preload="none" playsinline></video>`;
+    if(kind === 'video') return `<video src="${escapeAttr(assetMediaPlaybackUrl(item.url, item.name))}" poster="${escapeAttr(assetPreviewUrl(item.url, 256))}" muted preload="none" playsinline></video>`;
     if(kind === 'audio') return `<div class="asset-file-icon"><i data-lucide="file-audio"></i><span>音频</span></div>`;
     if(kind === 'text') return `<div class="asset-file-icon"><i data-lucide="file-text"></i><span>文本</span></div>`;
     return `<img src="${escapeAttr(assetPreviewUrl(item.url, 256))}" alt="${escapeAttr(item.name || 'asset')}" loading="lazy" decoding="async">`;
@@ -3346,7 +3359,7 @@ async function handleClick(event){
     const canvasAssetDownload = target.closest?.('[data-canvas-asset-download]');
     if(canvasAssetDownload){ await downloadCanvasAssetItems([canvasAssetDownload.dataset.canvasAssetDownload || '']); return; }
     const canvasAssetOpen = target.closest?.('[data-canvas-asset-open]');
-    if(canvasAssetOpen){ const it = findCanvasAssetItem(canvasAssetOpen.dataset.canvasAssetOpen || ''); if(it?.url) window.open(it.url, '_blank', 'noopener'); return; }
+    if(canvasAssetOpen){ const it = findCanvasAssetItem(canvasAssetOpen.dataset.canvasAssetOpen || ''); if(it?.url) window.open(assetKind(it) === 'video' ? assetMediaPlaybackUrl(it.url, it.name) : it.url, '_blank', 'noopener'); return; }
     const canvasAssetCopy = target.closest?.('[data-canvas-asset-copy]');
     if(canvasAssetCopy){ const it = findCanvasAssetItem(canvasAssetCopy.dataset.canvasAssetCopy || ''); const ok = await copyTextToClipboard(it?.url || ''); setStatus(ok ? '已复制画布资产链接' : '复制失败'); return; }
     const canvasAssetCheck = target.closest?.('[data-canvas-asset-check]');
@@ -3708,7 +3721,7 @@ async function handleClick(event){
 }
 function openAssetItem(id){
     const item = findAssetItem(id);
-    if(item?.url) window.open(item.url, '_blank', 'noopener');
+    if(item?.url) window.open(assetKind(item) === 'video' ? assetMediaPlaybackUrl(item.url, item.name) : item.url, '_blank', 'noopener');
 }
 function showDetailPreview(source, id){
     const item = source === 'local'
@@ -3735,7 +3748,7 @@ function showDetailPreview(source, id){
     overlay.innerHTML = `
         <div class="asset-lightbox-inner" role="dialog" aria-modal="true" aria-label="${kind === 'video' ? '视频预览' : '图片预览'}">
             ${kind === 'video'
-                ? `<video class="asset-lightbox-video" src="${escapeAttr(url)}" controls autoplay playsinline preload="metadata"></video>`
+                ? `<video class="asset-lightbox-video" src="${escapeAttr(assetMediaPlaybackUrl(url, item.name))}" controls autoplay muted playsinline preload="metadata"></video>`
                 : `<img class="asset-lightbox-image" src="${escapeAttr(url)}" alt="${escapeAttr(item.name || 'preview')}" draggable="false">`}
         </div>
     `;

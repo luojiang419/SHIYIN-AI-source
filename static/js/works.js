@@ -36,6 +36,20 @@
     const byId = id => document.getElementById(id);
     const t = key => window.StudioI18n?.t?.(key) || key;
     const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g,ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    // 远程视频不能直接交给 WebView 播放：很多上游地址不返回可用的 CORS/Range 响应。
+    // 统一交给后端流式代理，代理会保留 Range、Content-Type 与 Content-Range。
+    function mediaPlaybackUrl(url, name='video.mp4'){
+        const raw = String(url || '').trim();
+        if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+        if(raw.startsWith('/assets/') || raw.startsWith('/output/') || raw.startsWith('/api/')) return raw;
+        if(!/^https?:\/\//i.test(raw)) return raw;
+        let filename = String(name || '').trim();
+        if(!filename){
+            try { filename = decodeURIComponent(new URL(raw).pathname.split('/').filter(Boolean).pop() || 'video.mp4'); }
+            catch(_) { filename = 'video.mp4'; }
+        }
+        return `/api/download-output?inline=1&url=${encodeURIComponent(raw)}&name=${encodeURIComponent(filename)}`;
+    }
 
     function cache(){
         ['worksCount','worksTabs','worksSearch','worksKind','worksMediaFilter','worksSortOrder','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','compareWork','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewVideo','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
@@ -114,7 +128,7 @@
         const left = col * (metrics.cardWidth + GRID_GAP);
         const top = row * metrics.rowHeight;
         return `<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
-            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${item.kind === 'video' ? `<video src="${escapeHtml(item.url)}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
+            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${item.kind === 'video' ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
                 <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
@@ -283,7 +297,7 @@
         if(!work) return;
         el.worksPreviewImage.hidden=work.kind === 'video';
         el.worksPreviewVideo.hidden=work.kind !== 'video';
-        if(work.kind === 'video') { el.worksPreviewVideo.src=work.url; el.worksPreviewVideo.load(); }
+        if(work.kind === 'video') { el.worksPreviewVideo.src=mediaPlaybackUrl(work.url, work.name); el.worksPreviewVideo.load(); }
         else { el.worksPreviewVideo.removeAttribute('src'); el.worksPreviewImage.src=work.url; }
         el.worksPreviewImage.alt=work.name || t('works.work');
         el.worksPreviewName.textContent=work.name || t('works.work');

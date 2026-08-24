@@ -5970,6 +5970,11 @@ let smartParentShortcutWindow = null;
 let canvasSyncTimer = null;
 let canvasMetaPollTimer = null;
 let connectionLayerRaf = 0;
+// 普通节点拖动只更新相邻连线；分组、历史/级联等复杂拓扑自动回退到全量 SVG。
+const SMART_INCREMENTAL_CONNECTIONS = true;
+const smartConnectionDirtyIds = new Set();
+const smartConnectionDom = new Map();
+let smartConnectionStructureDirty = false;
 function mergeSmartImageLists(localImgs, remoteImgs){
     const out = [];
     const seen = new Set();
@@ -7296,22 +7301,99 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         const color = isCascade ? '#16a34a' : isHistory ? 'rgba(118,111,104,0.46)' : kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
         const opacity = isPendingLine ? '.82' : '1';
         const width = kind === 'input' ? '1.9' : '1.6';
-        return `<path class="${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path><path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
+        const connectionId = item.indices.length === 1 ? (canvas?.connections?.[item.indices[0]]?.id || '') : '';
+        const dataId = connectionId ? ` data-connection-id="${escapeAttr(connectionId)}"` : '';
+        return `<path class="${cls}"${dataId} d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path><path class="conn-hit" data-conn-index="${dataIndex}"${dataId} d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle${dataId} cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}"${dataId} transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
     }).join('');
     const result = `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`;
     perfEnd?.();
     return result;
+}
+function markSmartConnectionsDirtyForNodes(ids=[]){
+    const affected = new Set((ids || []).filter(Boolean));
+    if(!affected.size) return;
+    (canvas?.connections || []).forEach(connection => {
+        if(affected.has(connection.from) || affected.has(connection.to)) smartConnectionDirtyIds.add(connection.id);
+    });
+}
+function rebuildSmartConnectionDomIndex(){
+    smartConnectionDom.clear();
+    const svg = world.querySelector('svg.connection-layer');
+    if(!svg) return;
+    svg.querySelectorAll('[data-connection-id]').forEach(el => {
+        const id = el.dataset.connectionId || '';
+        if(!id) return;
+        const entry = smartConnectionDom.get(id) || {};
+        if(el.classList.contains('conn-hit')) entry.hit = el;
+        else if(el.classList.contains('conn-cut')) entry.cut = el;
+        else if(el.tagName?.toLowerCase() === 'circle') entry.dot = el;
+        else if(el.tagName?.toLowerCase() === 'path') entry.path = el;
+        smartConnectionDom.set(id, entry);
+    });
+}
+function smartIncrementalConnectionState(connection, index){
+    const kind = connection.kind || 'flow';
+    const isPending = Boolean(!connection.kind && smartNodeIndex.get(connection.to)?.pending);
+    const selectedIds = new Set(selectedNodeIds());
+    const selected = selectedIds.has(connection.from) || selectedIds.has(connection.to);
+    const cls = [isPending ? 'conn-pending' : '', selected ? 'conn-selected' : ''].filter(Boolean).join(' ');
+    const color = kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
+    return {cls, color, opacity:isPending ? '.82' : '1', width:kind === 'input' ? '1.9' : '1.6', index};
+}
+function renderSmartConnectionIncremental(ids=[]){
+    if(!SMART_INCREMENTAL_CONNECTIONS || smartConnectionStructureDirty || !smartConnectionDom.size) return false;
+    const conns = canvas?.connections || [];
+    if(smartConnectionDom.size !== conns.length) return false;
+    if(conns.some(connection => connection.kind === 'history' || isSmartGroupNode(smartNodeIndex.get(connection.from)) || isSmartGroupNode(smartNodeIndex.get(connection.to)))) return false;
+    for(const id of ids){
+        const connection = conns.find(item => item.id === id);
+        const entry = smartConnectionDom.get(id);
+        const fromNode = connection && smartNodeIndex.get(connection.from);
+        const toNode = connection && smartNodeIndex.get(connection.to);
+        if(!connection || !entry?.path || !entry.hit || !entry.cut || !fromNode || !toNode) return false;
+        const fr = cachedSmartNodeRect(fromNode), tr = cachedSmartNodeRect(toNode);
+        const fromPoint = cachedSmartPortPoint(fromNode, 'out', '', fr);
+        const toPoint = cachedSmartPortPoint(toNode, 'in', connection.inputRole || '', tr);
+        const dx = Math.max(50, Math.abs(toPoint.x - fromPoint.x) * 0.45);
+        const curve = `M${fromPoint.x} ${fromPoint.y} C ${fromPoint.x + dx} ${fromPoint.y}, ${toPoint.x - dx} ${toPoint.y}, ${toPoint.x} ${toPoint.y}`;
+        const mx = (fromPoint.x + toPoint.x) / 2, my = (fromPoint.y + toPoint.y) / 2;
+        const state = smartIncrementalConnectionState(connection, conns.indexOf(connection));
+        entry.path.setAttribute('class', state.cls);
+        entry.path.setAttribute('d', curve);
+        entry.path.setAttribute('stroke', state.color);
+        entry.path.setAttribute('stroke-width', state.width);
+        entry.path.setAttribute('opacity', state.opacity);
+        entry.hit.setAttribute('d', curve);
+        entry.hit.dataset.connIndex = String(state.index);
+        entry.dot?.setAttribute('cx', String(toPoint.x));
+        entry.dot?.setAttribute('cy', String(toPoint.y));
+        entry.dot?.setAttribute('fill', state.color);
+        entry.cut.setAttribute('data-conn-index', String(state.index));
+        entry.cut.setAttribute('transform', `translate(${mx} ${my})`);
+        entry.cut.querySelector('circle')?.setAttribute('stroke', state.color);
+        entry.cut.querySelector('path')?.setAttribute('stroke', state.color);
+    }
+    return true;
 }
 function refreshConnectionLayer(){
     const perfEnd = window.CanvasPerformance?.start?.('smart.refreshConnectionLayer');
     connectionLayerRaf = 0;
     const oldSvg = world.querySelector('svg.connection-layer');
     if(!oldSvg){ perfEnd?.({skipped:true}); return; }
+    const portDragPath = oldSvg.querySelector('path.port-drag-temp');
+    const portDragD = portDragPath?.getAttribute('d') || '';
     const tpl = document.createElement('template');
     tpl.innerHTML = renderConnections().trim();
     const nextSvg = tpl.content.firstElementChild;
     if(nextSvg) oldSvg.replaceWith(nextSvg);
     bindConnectionEvents();
+    rebuildSmartConnectionDomIndex();
+    if(portDragState){
+        const nextPortDragPath = ensurePortDragPathElement();
+        if(nextPortDragPath && portDragD) nextPortDragPath.setAttribute('d', portDragD);
+    }
+    smartConnectionDirtyIds.clear();
+    smartConnectionStructureDirty = false;
     perfEnd?.();
 }
 function scheduleConnectionLayerRefresh(){
@@ -7325,7 +7407,9 @@ function scheduleInteractionLayerRefresh(){
     if(interactionLayerRaf) return;
     interactionLayerRaf = requestAnimationFrame(() => {
         interactionLayerRaf = 0;
-        refreshConnectionLayer();
+        const dirty = [...smartConnectionDirtyIds];
+        smartConnectionDirtyIds.clear();
+        if(dirty.length && !renderSmartConnectionIncremental(dirty)) refreshConnectionLayer();
         scheduleSmartMinimapNodeUpdate((dragState?.group || [{id:dragState?.id}]).map(item => item?.id));
     });
 }
@@ -7341,6 +7425,7 @@ function moveNodeElementsDuringDrag(){
         }
     });
     invalidateSmartGeometry(groupItems.map(item => item.id));
+    markSmartConnectionsDirtyForNodes(groupItems.map(item => item.id));
     const active = selectedNode();
     if(active && (dragState.group || [{id:dragState.id}]).some(item => item.id === active.id)){
         positionComposerForNode(active);
@@ -7355,6 +7440,7 @@ function updateNodeElementDuringResize(node){
         return;
     }
     invalidateSmartGeometry([node.id]);
+    markSmartConnectionsDirtyForNodes([node.id]);
     const imgs = isSmartGroupNode(node) ? smartGroupImageRefs(node).map(ref => ref.item) : (node.images || []);
     const layout = imageLayout(imgs, nodeScale(node), node);
     el.style.width = `${layout.width}px`;
@@ -9008,6 +9094,9 @@ function render(){
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents(nodeIndex, mutation ? new Set(nodeHtmlEntries.map(entry => entry.node.id)) : null);
     bindConnectionEvents();
+    rebuildSmartConnectionDomIndex();
+    smartConnectionDirtyIds.clear();
+    smartConnectionStructureDirty = false;
     if(mutation) syncSelectionUi();
     updateComposer();
     scheduleSmartMinimapRender();

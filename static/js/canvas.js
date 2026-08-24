@@ -477,6 +477,10 @@ let minimapViewportQueued = false;
 let minimapNodeUpdateQueued = false;
 const minimapNodeUpdateIds = new Set();
 let linksRenderQueued = false;
+// 连接层增量更新开关：结构性变更或索引失效时始终回退到 renderLinks 全量路径。
+const CLASSIC_INCREMENTAL_LINKS = true;
+const classicConnectionDirtyIds = new Set();
+let classicConnectionStructureDirty = false;
 const classicLinkDom = new Map();
 const classicLinkControlDom = new Map();
 let classicTempLinkDom = null;
@@ -1689,13 +1693,93 @@ function scheduleMinimapNodeUpdate(ids=[]){
         updateMinimapViewport();
     });
 }
+function markClassicConnectionsDirtyForNodes(ids=[]){
+    const affected = new Set((ids || []).filter(Boolean));
+    if(!affected.size) return;
+    (connections || []).forEach(connection => {
+        if(affected.has(connection.from) || affected.has(connection.to)) classicConnectionDirtyIds.add(connection.id);
+    });
+}
+function markClassicConnectionStructureDirty(){
+    classicConnectionStructureDirty = true;
+}
+function renderClassicTempLink(){
+    const setPathGeometry = (path, x1, y1, x2, y2) => {
+        const dx = Math.max(80, Math.abs(x2 - x1) * .45);
+        path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+    };
+    if(tempLink){
+        if(!classicTempLinkDom){
+            classicTempLinkDom = pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp');
+            linksEl.appendChild(classicTempLinkDom);
+        }
+        setPathGeometry(classicTempLinkDom, tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
+    } else if(classicTempLinkDom){
+        classicTempLinkDom.remove();
+        classicTempLinkDom = null;
+    }
+}
+function renderClassicConnectionPatch(ids=[]){
+    if(!CLASSIC_INCREMENTAL_LINKS || classicConnectionStructureDirty || !classicLinkDom.size){
+        renderLinks();
+        return;
+    }
+    const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex : new Map(nodes.map(node => [node.id, node]));
+    const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex : new Map();
+    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map(), nodeIndex, nodeElements};
+    const dirty = new Set((ids || []).filter(Boolean));
+    if(!dirty.size){ renderClassicTempLink(); return; }
+    const setPathGeometry = (path, x1, y1, x2, y2) => {
+        const dx = Math.max(80, Math.abs(x2 - x1) * .45);
+        path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+    };
+    for(const connectionId of dirty){
+        const connection = connections.find(item => item.id === connectionId);
+        const target = connection ? nodeIndex.get(connection.to) : null;
+        const entry = classicLinkDom.get(connectionId);
+        if(!connection || !canResolvePort(connection.from, nodeIndex) || !canResolvePort(connection.to, nodeIndex) || (target?.type === 'multiView' && !classicMultiViewInputSlots(target).some(([role]) => role === (connection.inputRole || '')))){
+            entry?.path?.remove();
+            entry?.hit?.remove();
+            classicLinkDom.delete(connectionId);
+            classicLinkControlDom.get(connectionId)?.remove();
+            classicLinkControlDom.delete(connectionId);
+            continue;
+        }
+        const a = portPoint(connection.from, 'out', '', layout);
+        const b = portPoint(connection.to, 'in', connection.inputRole || '', layout);
+        let current = entry;
+        if(!current){
+            current = {path:pathEl(a.x, a.y, b.x, b.y, 'link'), hit:linkHitEl(a.x, a.y, b.x, b.y, connection.id)};
+            classicLinkDom.set(connection.id, current);
+            linksEl.appendChild(current.path);
+            linksEl.appendChild(current.hit);
+        }
+        current.path.className.baseVal = `link${isConnectionSelected(connection) ? ' link-active' : ''}`;
+        current.hit.dataset.connectionId = connection.id;
+        setPathGeometry(current.path, a.x, a.y, b.x, b.y);
+        setPathGeometry(current.hit, a.x, a.y, b.x, b.y);
+        let control = classicLinkControlDom.get(connection.id);
+        if(!control){
+            control = linkDeleteButton(connection, a, b);
+            classicLinkControlDom.set(connection.id, control);
+            linkControlsEl.appendChild(control);
+        }
+        control.className = `link-delete ${isConnectionSelected(connection) ? 'visible' : ''} ${hoveredConnectionId === connection.id ? 'hover' : ''}`;
+        control.style.left = `${(a.x + b.x) / 2}px`;
+        control.style.top = `${(a.y + b.y) / 2}px`;
+    }
+    renderClassicTempLink();
+}
 // 拖动/缩放节点时每个 mousemove 都全量重建连线 SVG 会掉帧；用 rAF 合并成每帧最多刷新一次。
 function scheduleLinksRender(){
     if(linksRenderQueued) return;
     linksRenderQueued = true;
     requestAnimationFrame(() => {
         linksRenderQueued = false;
-        renderLinks();
+        const dirty = [...classicConnectionDirtyIds];
+        classicConnectionDirtyIds.clear();
+        if(CLASSIC_INCREMENTAL_LINKS && !classicConnectionStructureDirty && (dirty.length || tempLink)) renderClassicConnectionPatch(dirty);
+        else renderLinks();
     });
 }
 function renderMinimap(){
@@ -15129,6 +15213,7 @@ function deleteConnection(id, event){
     event?.stopPropagation();
     pushUndo();
     connections = connections.filter(c => c.id !== id);
+    markClassicConnectionStructureDirty();
     if(hoveredConnectionId === id) hoveredConnectionId = '';
     syncGeneratorInputs();
     render();
@@ -18471,6 +18556,7 @@ function onNodeDrag(e){
         }
     });
     invalidateCanvasGeometry([dragNode.node.id, ...(dragNode.children || []).map(item => item.node.id)]);
+    markClassicConnectionsDirtyForNodes([dragNode.node.id, ...(dragNode.children || []).map(item => item.node.id)]);
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
@@ -18507,6 +18593,7 @@ function onNodeResize(e){
         el.style.height = `${resizeNode.node.h}px`;
     }
     invalidateCanvasGeometry([resizeNode.node.id]);
+    markClassicConnectionsDirtyForNodes([resizeNode.node.id]);
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleMinimapNodeUpdate([resizeNode.node.id]);
@@ -18538,6 +18625,7 @@ function startLink(e, originId, originKind, originRole=''){
                     pushUndo();
                     if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
                     connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
+                    markClassicConnectionStructureDirty();
                     syncLatestGeneratedOutputToConnection(fromId, toId);
                 }
                 syncGeneratorInputs();
@@ -18551,6 +18639,7 @@ function startLink(e, originId, originKind, originRole=''){
                 const out = {id:uid('out'), type:'output', x:p.x, y:p.y - 63, images:[]};
                 nodes.push(out);
                 connections.push({id:uid('c'), from:source.id, to:out.id});
+                markClassicConnectionStructureDirty();
                 syncLatestGeneratedOutputToConnection(source.id, out.id);
                 syncGeneratorInputs();
                 scheduleSave();
@@ -19250,6 +19339,8 @@ function renderLinks(){
     classicKnifeTrailDom?.remove();
     classicKnifeTrailDom = null;
     renderKnifeTrail();
+    classicConnectionDirtyIds.clear();
+    classicConnectionStructureDirty = false;
     perfEnd?.();
 }
 function renderKnifeTrail(){
@@ -19429,6 +19520,7 @@ function applyKnifeCut(from, to){
     if(!knifeChanged) pushUndo();
     knifeChanged = true;
     connections = next;
+    markClassicConnectionStructureDirty();
     syncGeneratorInputs();
     refreshGeneratorInputViews();
     knifeNeedsRender = true;
@@ -19626,7 +19718,7 @@ board.onwheel = e => {
     viewport.x = e.clientX - rect.left - before.x * viewport.scale;
     viewport.y = e.clientY - rect.top - before.y * viewport.scale;
     applyViewport();
-    scheduleLinksRender();
+    if(tempLink) scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleViewportSave();
     window.CanvasPerformance?.markPaintFrom?.('classic.zoom', 'classic.zoom', {nodes:nodes.length, connections:connections.length});

@@ -38,10 +38,16 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn('id="worksBatchFavorite"', self.works)
         self.assertIn('id="worksBatchDelete"', self.works)
         self.assertIn('id="worksBatchTrash"', self.works)
+        self.assertIn('id="worksSelectionModeToggle"', self.works)
         self.assertIn("state.selectedIds", self.works_js)
+        self.assertIn("selectionMode:false", self.works_js)
+        self.assertIn('data-select-work="${escapeHtml(item.id)}"', self.works_js)
+        self.assertIn("state.selectionMode || state.shiftPressed || event.shiftKey", self.works_js)
+        self.assertIn("el.worksGrid?.classList.toggle('selection-mode',state.selectionMode)", self.works_js)
         self.assertIn("el.worksGrid.addEventListener('mousedown',beginSelectionDrag)", self.works_js)
         self.assertIn("fetchJson('/api/works/batch'", self.works_js)
         self.assertIn("class=\"works-card ${item.trashed?'trashed':''} ${selected?'selected':''}\"", self.works_js)
+        self.assertIn(".works-grid.selection-mode .works-card-checkbox", self.works_css)
         self.assertIn(".works-selection-rect", self.works_css)
 
     def test_works_has_all_and_favorite_tabs_with_persistent_api(self):

@@ -91,6 +91,8 @@ let dragState = null;
 // 安全视口 LOD 只延迟普通节点 body；节点外壳、端口、模型和特殊节点始终保留。
 const SMART_SAFE_LOD_ENABLED = true;
 const SMART_SAFE_LOD_MARGIN = 480;
+// 框选优先复用节点矩形索引；关闭时回退逐节点布局计算。
+const SMART_MARQUEE_RECT_CACHE_ENABLED = true;
 // 端口连线成功后只替换受影响节点并刷新连线层；关闭时回退原全量 render。
 const SMART_PORT_LINK_MUTATION_ENABLED = true;
 // 连接层统一委托点击事件；关闭时回退原逐元素监听，便于异常止损。
@@ -18383,7 +18385,7 @@ function finishSelection(event){
     const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y);
     const maxX = Math.max(a.x, b.x), maxY = Math.max(a.y, b.y);
     selectedIds = nodes.filter(node => {
-        const r = nodeRect(node);
+        const r = SMART_MARQUEE_RECT_CACHE_ENABLED ? cachedSmartNodeRect(node) : nodeRect(node);
         return r.x < maxX && r.x + r.width > minX && r.y < maxY && r.y + r.height > minY;
     }).map(n => n.id);
     selectedId = selectedIds.length === 1 ? selectedIds[0] : '';

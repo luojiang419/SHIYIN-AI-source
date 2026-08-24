@@ -468,6 +468,8 @@ let dragNode = null;
 // 安全视口 LOD 只作用于普通节点 body；节点模型、外壳和端口始终保留。
 const CLASSIC_SAFE_LOD_ENABLED = true;
 const CLASSIC_SAFE_LOD_MARGIN = 480;
+// 框选优先复用节点矩形索引；关闭时回退结束阶段的逐节点尺寸读取。
+const CLASSIC_MARQUEE_RECT_CACHE_ENABLED = true;
 let classicSafeLodRaf = 0;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
@@ -17259,8 +17261,9 @@ function finishSelection(){
         const node = nodeIndex.get(el.dataset.id);
         if(!node) return;
         const x = Number(node.x) || 0, y = Number(node.y) || 0;
-        const w = el.offsetWidth || Number(node.w) || 260;
-        const h = el.offsetHeight || Number(node.h) || 200;
+        const cached = CLASSIC_MARQUEE_RECT_CACHE_ENABLED ? estimatedNodeRect(node) : null;
+        const w = cached?.w || el.offsetWidth || Number(node.w) || 260;
+        const h = cached?.h || el.offsetHeight || Number(node.h) || 200;
         if(x < maxX && x + w > minX && y < maxY && y + h > minY) selected.add(node.id);
     });
     selectDrag = null;

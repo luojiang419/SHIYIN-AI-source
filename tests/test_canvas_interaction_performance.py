@@ -20,12 +20,16 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
     def test_classic_marquee_uses_world_coordinates_and_incremental_selection(self):
         selection = body(CANVAS_JS, "function finishSelection(){", "function formatVideoClipTime")
         self.assertIn("const endWorld = screenToWorld", selection)
+        self.assertIn("CLASSIC_MARQUEE_RECT_CACHE_ENABLED", CANVAS_JS)
+        self.assertIn("estimatedNodeRect(node)", selection)
         self.assertIn("refreshSelectionVisuals();", selection)
         self.assertNotIn("getBoundingClientRect()", selection)
         self.assertNotIn("render();", selection)
 
     def test_smart_marquee_does_not_rebuild_all_nodes(self):
         selection = body(SMART_CANVAS_JS, "function finishSelection(event){", "function groupSelectedNodes")
+        self.assertIn("SMART_MARQUEE_RECT_CACHE_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("cachedSmartNodeRect(node)", selection)
         self.assertIn("syncSelectionUi();", selection)
         self.assertIn("updateComposer();", selection)
         self.assertNotIn("render();", selection)

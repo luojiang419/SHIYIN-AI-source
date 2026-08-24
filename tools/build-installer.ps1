@@ -19,6 +19,8 @@ if ($IncrementVersion) {
 
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid VERSION: $version" }
+& (Join-Path $PSScriptRoot 'assert-version-sync.ps1') -Root $projectRoot
+if ($LASTEXITCODE -ne 0) { throw 'Version synchronization check failed.' }
 
 $buildRoot = Join-Path $projectRoot '.build\installer'
 $backendDist = Join-Path $buildRoot 'backend-dist'

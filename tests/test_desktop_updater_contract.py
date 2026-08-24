@@ -12,6 +12,7 @@ DESKTOP_UPDATER = ROOT / "static" / "js" / "desktop-updater.js"
 INDEX = ROOT / "static" / "index.html"
 APP_SETTINGS = ROOT / "static" / "app-settings.html"
 INSTALLER_BUILD_SCRIPT = ROOT / "tools" / "build-installer.ps1"
+VERSION_SYNC_SCRIPT = ROOT / "tools" / "assert-version-sync.ps1"
 WEB_CACHE_STAMP_SCRIPT = ROOT / "tools" / "stamp-web-cache-version.mjs"
 INSTALLER_VERIFY_SCRIPT = ROOT / "tools" / "verify-installer-artifact.ps1"
 INSTALLER_SCRIPT = ROOT / "installer" / "shiyin_ai.iss"
@@ -190,6 +191,41 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertRegex(version, r"^\d+\.\d+\.\d+$")
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         self.assertEqual(package["version"], version)
+        package_lock = json.loads((ROOT / "package-lock.json").read_text(encoding="utf-8"))
+        tauri = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+        update_notes = json.loads((ROOT / "static" / "update-notes.json").read_text(encoding="utf-8"))
+        cargo_toml = (ROOT / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
+        cargo_lock = (ROOT / "src-tauri" / "Cargo.lock").read_text(encoding="utf-8")
+        backend = (ROOT / "main.py").read_text(encoding="utf-8")
+        release_notes = (ROOT / "release-notes" / "current.md").read_text(encoding="utf-8")
+        self.assertEqual(package_lock["version"], version)
+        self.assertEqual(package_lock["packages"][""]["version"], version)
+        self.assertEqual(tauri["version"], version)
+        self.assertEqual(update_notes["version"], version)
+        self.assertEqual(re.search(r'^version\s*=\s*"([^"]+)"', cargo_toml, re.M).group(1), version)
+        self.assertEqual(
+            re.search(r'\[\[package\]\]\s*name\s*=\s*"canvas-desktop"\s*version\s*=\s*"([^"]+)"', cargo_lock).group(1),
+            version,
+        )
+        self.assertEqual(re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', backend, re.M).group(1), version)
+        self.assertEqual(re.search(r'^# SHIYIN AI v(\d+\.\d+\.\d+)$', release_notes, re.M).group(1), version)
+
+    def test_installer_fails_before_build_when_any_version_source_is_stale(self):
+        installer_build = INSTALLER_BUILD_SCRIPT.read_text(encoding="utf-8")
+        sync_script = VERSION_SYNC_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("assert-version-sync.ps1", installer_build)
+        self.assertIn("Version synchronization check failed", installer_build)
+        for source in (
+            "package.json",
+            "package-lock.json",
+            "src-tauri/Cargo.toml",
+            "src-tauri/Cargo.lock",
+            "src-tauri/tauri.conf.json",
+            "main.py",
+            "static/update-notes.json",
+            "release-notes/current.md",
+        ):
+            self.assertIn(source, sync_script)
 
     def test_ci_uses_storyboard_style_cross_repository_release_transaction(self):
         workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")

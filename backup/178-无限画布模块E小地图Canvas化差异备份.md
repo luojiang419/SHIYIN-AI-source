@@ -36,4 +36,4 @@
 
 ## 回滚方式
 
-将 `CLASSIC_MINIMAP_CANVAS_ENABLED` 或 `SMART_MINIMAP_CANVAS_ENABLED` 改为 `false`，即可恢复对应小地图的 DOM 全量渲染；必要时可整体回退本备份对应提交。
+将 `CLASSIC_MINIMAP_CANVAS_ENABLED` 或 `SMART_MINIMAP_CANVAS_ENABLED` 改为 `false`，即可恢复对应小地图的 DOM 全量渲染；若 Canvas 创建/绘制异常，先关闭对应开关止损，必要时可整体回退本备份对应提交。

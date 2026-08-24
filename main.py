@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.286"
+APP_VERSION = "1.0.287"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -19950,6 +19950,58 @@ def work_download_name(work: Dict[str, Any], sequence: int = 1) -> str:
     return sanitize_export_filename(filename, f"SHIYIN-{safe_sequence:06d}-{work_date_part(work)}.png")
 
 
+def work_display_name(work: Dict[str, Any], sequence: int = 1, used_names: Optional[set] = None) -> str:
+    """按最终列表顺序生成稳定且唯一的作品卡片名称。
+
+    旧数据可能把下载序号生成的默认名持久化到作品元数据中。作品历史和
+    画布资产合并、排序或分页后，继续直接使用这个旧值就会造成多个卡片
+    显示同一个文件名。企业格式名称和原始文件名都视为默认名，只有其他
+    值才视为用户自定义名称。
+    """
+    original_name = str(work.get("original_name") or "").strip()
+    current_name = str(work.get("name") or "").strip()
+    if not current_name or current_name == original_name or work_output_filename_is_enterprise(current_name):
+        candidate = original_name if work_output_filename_is_enterprise(original_name) else work_download_name(work, sequence)
+    else:
+        candidate = current_name[:160]
+
+    if used_names is None:
+        return candidate
+
+    def name_key(value: str) -> str:
+        return str(value or "").strip().casefold()
+
+    key = name_key(candidate)
+    if key not in used_names:
+        used_names.add(key)
+        return candidate
+
+    fallback = original_name if work_output_filename_is_enterprise(original_name) else work_download_name(work, sequence)
+    fallback_key = name_key(fallback)
+    if fallback_key not in used_names:
+        used_names.add(fallback_key)
+        return fallback
+
+    stem, extension = os.path.splitext(fallback)
+    suffix = 2
+    unique = f"{stem}-{suffix}{extension}"
+    while name_key(unique) in used_names:
+        suffix += 1
+        unique = f"{stem}-{suffix}{extension}"
+    used_names.add(name_key(unique))
+    return unique[:160]
+
+
+def normalize_work_display_names(works: List[Dict[str, Any]], offset: int = 0) -> List[Dict[str, Any]]:
+    """在合并/排序/分页前统一更新默认名称，并清理重复展示名。"""
+    used_names = set()
+    for sequence, item in enumerate(works, offset + 1):
+        item["download_sequence"] = sequence
+        item["download_name"] = work_download_name(item, sequence)
+        item["name"] = work_display_name(item, sequence, used_names)
+    return works
+
+
 def work_local_file_path(work: Dict[str, Any]) -> str:
     url = str(work.get("url") or "").strip()
     candidates = []
@@ -20084,11 +20136,7 @@ def generated_work_items(records: List[Dict[str, Any]], metadata: Optional[Dict[
                 "_custom_name": bool(saved_name),
             })
     works.sort(key=lambda item: (float(item.get("created_at") or 0), item["id"]), reverse=True)
-    for sequence, item in enumerate(works, 1):
-        item["download_sequence"] = sequence
-        item["download_name"] = work_download_name(item, sequence)
-        if not item.pop("_custom_name", False) and not work_output_filename_is_enterprise(item.get("original_name", "")):
-            item["name"] = item["download_name"]
+    normalize_work_display_names(works)
     return works
 
 
@@ -20193,9 +20241,7 @@ def all_works_with_canvas(metadata: Optional[Dict[str, Dict[str, Any]]] = None) 
     canvas_items = [item for item in canvas_generated_work_items(metadata) if str(item.get("url") or "").strip() not in seen_urls]
     works = generated + canvas_items
     works.sort(key=lambda item: (float(item.get("created_at") or 0), str(item.get("id") or "")), reverse=True)
-    for sequence, item in enumerate(works, 1):
-        item["download_sequence"] = sequence
-        item["download_name"] = work_download_name(item, sequence)
+    normalize_work_display_names(works)
     return works
 
 
@@ -20235,6 +20281,7 @@ async def list_generated_works(
         filtered.append(item)
     reverse = str(sort_order or "desc").lower() != "asc"
     filtered.sort(key=lambda item: (float(item.get("created_at") or 0), str(item.get("id") or "")), reverse=reverse)
+    normalize_work_display_names(filtered)
     offset = 0
     if cursor:
         try:
@@ -20244,9 +20291,7 @@ async def list_generated_works(
     safe_limit = max(1, min(1000, int(limit or 500)))
     page_items = filtered[offset:offset + safe_limit]
     next_cursor = f"works#{offset + len(page_items)}" if offset + len(page_items) < len(filtered) else ""
-    for sequence, item in enumerate(page_items, offset + 1):
-        item["download_sequence"] = sequence
-        item["download_name"] = work_download_name(item, sequence)
+    normalize_work_display_names(page_items, offset)
     return {"works": page_items, "total": len(filtered), "next_cursor": next_cursor}
 
 

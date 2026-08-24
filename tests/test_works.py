@@ -288,6 +288,54 @@ class WorksBackendTests(unittest.TestCase):
         self.assertEqual([item["created_at"] for item in works], [100.0, 200.0])
         self.assertEqual(len({item["name"] for item in works}), 2)
 
+    def test_merged_work_items_replace_stale_duplicate_enterprise_names(self):
+        stale_name = "SHIYIN-000001-20260824.mp4"
+        canvas_items = [
+            {
+                "id": "canvas-asset-1",
+                "name": stale_name,
+                "original_name": "SHIYIN-000037-20260821.mp4",
+                "url": "/assets/output/SHIYIN-000037-20260821.mp4",
+                "kind": "video",
+                "created_at": 200,
+            },
+            {
+                "id": "canvas-asset-2",
+                "name": stale_name,
+                "original_name": "SHIYIN-000136-20260822.mp4",
+                "url": "/assets/output/SHIYIN-000136-20260822.mp4",
+                "kind": "video",
+                "created_at": 100,
+            },
+        ]
+        with (
+            patch.object(self.main, "all_generated_works", return_value=[]),
+            patch.object(self.main, "canvas_generated_work_items", return_value=canvas_items),
+        ):
+            works = self.main.all_works_with_canvas({})
+        self.assertEqual(
+            [item["name"] for item in works],
+            ["SHIYIN-000037-20260821.mp4", "SHIYIN-000136-20260822.mp4"],
+        )
+        self.assertEqual(len({item["name"] for item in works}), 2)
+
+    def test_display_name_uniquifies_duplicate_custom_names(self):
+        works = self.main.normalize_work_display_names([
+            {
+                "name": "同名作品.mp4",
+                "original_name": "source-a.mp4",
+                "created_at": 20,
+            },
+            {
+                "name": "同名作品.mp4",
+                "original_name": "source-b.mp4",
+                "created_at": 10,
+            },
+        ])
+        self.assertEqual(works[0]["name"], "同名作品.mp4")
+        self.assertNotEqual(works[1]["name"], works[0]["name"])
+        self.assertRegex(works[1]["name"], r"^SHIYIN-000002-\d{8}\.mp4$")
+
     def test_generated_work_items_use_each_local_file_modified_time(self):
         with tempfile.TemporaryDirectory() as root:
             first = Path(root) / "SHIYIN-000201-20260824.png"

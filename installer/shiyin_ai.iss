@@ -13,6 +13,8 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={code:ResolveDefaultInstallDir}
 UsePreviousAppDir=no
+; 已有安装目录直接覆盖，不弹出“目录已存在”确认；下方 InstallDelete 仍只替换 app，data 保持原位。
+DirExistsWarning=no
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer

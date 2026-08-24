@@ -39,9 +39,11 @@
     function workMediaType(item){
         const explicit = String(item?.media_type || item?.mediaKind || '').toLowerCase();
         const kind = String(item?.kind || '').toLowerCase();
-        const url = String(item?.url || '').toLowerCase();
-        if(explicit.includes('video') || kind.includes('video') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/.test(url)) return 'video';
-        if(explicit.includes('audio') || kind.includes('audio') || /\.(mp3|wav|flac|ogg|m4a|aac)(\?|#|$)/.test(url)) return 'audio';
+        const mediaNames = [item?.url, item?.name, item?.original_name, item?.filename]
+            .map(value => String(value || '').toLowerCase());
+        const hasExtension = (pattern) => mediaNames.some(value => pattern.test(value));
+        if(explicit.includes('video') || kind.includes('video') || hasExtension(/\.(mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/)) return 'video';
+        if(explicit.includes('audio') || kind.includes('audio') || hasExtension(/\.(mp3|wav|flac|ogg|m4a|aac)(\?|#|$)/)) return 'audio';
         return 'image';
     }
     // 远程视频不能直接交给 WebView 播放：很多上游地址不返回可用的 CORS/Range 响应。

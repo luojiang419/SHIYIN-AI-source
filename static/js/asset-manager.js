@@ -345,11 +345,13 @@ function promptCountForCategory(category, lib=activePromptLibrary()){
     return items.filter(item => (item.category || 'custom') === category).length;
 }
 function assetKind(item){
-    const url = String(item?.url || '').toLowerCase();
+    const mediaNames = [item?.url, item?.name, item?.original_name, item?.filename]
+        .map(value => String(value || '').toLowerCase());
     const kind = String(item?.kind || item?.type || '').toLowerCase();
-    if(kind.includes('video') || /\.(mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/.test(url)) return 'video';
-    if(kind.includes('audio') || /\.(mp3|wav|flac|ogg|m4a)(\?|#|$)/.test(url)) return 'audio';
-    if(kind.includes('text') || /\.(txt|json|csv|srt|vtt|md)(\?|#|$)/.test(url)) return 'text';
+    const hasExtension = (pattern) => mediaNames.some(value => pattern.test(value));
+    if(kind.includes('video') || hasExtension(/\.(mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/)) return 'video';
+    if(kind.includes('audio') || hasExtension(/\.(mp3|wav|flac|ogg|m4a)(\?|#|$)/)) return 'audio';
+    if(kind.includes('text') || hasExtension(/\.(txt|json|csv|srt|vtt|md)(\?|#|$)/)) return 'text';
     return 'image';
 }
 function assetClassificationChips(item, limit=10){

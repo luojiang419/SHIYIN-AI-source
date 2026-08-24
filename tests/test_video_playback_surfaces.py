@@ -18,6 +18,8 @@ def test_works_video_surfaces_use_stream_proxy_for_remote_urls():
     assert "mediaPlaybackUrl(item.url, item.name)" in WORKS
     assert "mediaPlaybackUrl(work.url, work.name)" in WORKS
     assert "function workMediaType(item)" in WORKS
+    assert "item?.original_name" in WORKS
+    assert "item?.filename" in WORKS
     assert "const isVideo = workMediaType(item) === 'video'" in WORKS
     assert "el.worksPreviewImage.hidden=isVideo" in WORKS
     assert "if(raw.startsWith('/assets/') || raw.startsWith('/output/'))" in WORKS
@@ -32,5 +34,7 @@ def test_asset_manager_video_surfaces_use_stream_proxy_and_muted_autoplay():
     assert 'controls autoplay muted playsinline' in ASSETS
     assert "if(raw.startsWith('/assets/') || raw.startsWith('/output/'))" in ASSETS
     assert "data-canvas-asset-reveal" in ASSETS
+    assert "item?.original_name" in ASSETS
+    assert "item?.filename" in ASSETS
     assert "/api/canvas-assets/${encodeURIComponent" in ASSETS
     assert "video-playback-directory-fix" in (ROOT / "static/asset-manager.html").read_text(encoding="utf-8")

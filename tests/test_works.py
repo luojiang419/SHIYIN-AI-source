@@ -342,6 +342,14 @@ class WorksBackendTests(unittest.TestCase):
         self.assertEqual(works[0]["kind"], "online-video")
         self.assertEqual(works[0]["media_type"], "video")
 
+    def test_video_media_type_falls_back_to_displayed_filename_when_url_has_no_extension(self):
+        work = {
+            "url": "https://cdn.example.test/file/abc123",
+            "name": "SHIYIN-000001-20260824.mp4",
+            "kind": "online",
+        }
+        self.assertEqual(self.main.work_media_type(work), "video")
+
     def test_video_media_filter_uses_actual_media_type(self):
         with patch.object(self.main, "all_works_with_canvas", return_value=[
             {"id": "video", "kind": "online-video", "url": "/assets/output/result.mp4", "created_at": 1},

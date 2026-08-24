@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.293"
+APP_VERSION = "1.0.294"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4544,8 +4544,10 @@ def canvas_asset_downloadable_url(url):
 
 def canvas_asset_kind(value, url=""):
     explicit = ""
+    names = [url]
     if isinstance(value, dict):
         explicit = str(value.get("kind") or value.get("mediaKind") or value.get("type") or "").lower()
+        names.extend(str(value.get(key) or "").strip() for key in ("name", "filename", "file", "title"))
     if "video" in explicit:
         return "video"
     if "audio" in explicit:
@@ -4554,6 +4556,11 @@ def canvas_asset_kind(value, url=""):
         return "text"
     if "workflow" in explicit:
         return "workflow"
+    for name in names:
+        if asset_library_media_kind(name) == "video":
+            return "video"
+        if asset_library_media_kind(name) == "audio":
+            return "audio"
     return asset_library_media_kind(url or canvas_asset_url_value(value))
 
 def canvas_asset_name(value, url="", fallback="asset"):
@@ -20051,7 +20058,13 @@ def work_media_type(work: Dict[str, Any]) -> str:
         return "video"
     if "audio" in kind:
         return "audio"
-    return asset_library_media_kind(str(work.get("url") or "").strip())
+    for key in ("url", "name", "original_name", "filename"):
+        candidate = str(work.get(key) or "").strip()
+        if asset_library_media_kind(candidate) == "video":
+            return "video"
+        if asset_library_media_kind(candidate) == "audio":
+            return "audio"
+    return "image"
 
 
 def work_local_file_modified_at(work: Dict[str, Any]) -> float:

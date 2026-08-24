@@ -347,7 +347,7 @@ function promptCountForCategory(category, lib=activePromptLibrary()){
 function assetKind(item){
     const url = String(item?.url || '').toLowerCase();
     const kind = String(item?.kind || item?.type || '').toLowerCase();
-    if(kind.includes('video') || /\.(mp4|webm|mov|m4v)(\?|#|$)/.test(url)) return 'video';
+    if(kind.includes('video') || /\.(mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/.test(url)) return 'video';
     if(kind.includes('audio') || /\.(mp3|wav|flac|ogg|m4a)(\?|#|$)/.test(url)) return 'audio';
     if(kind.includes('text') || /\.(txt|json|csv|srt|vtt|md)(\?|#|$)/.test(url)) return 'text';
     return 'image';
@@ -497,7 +497,13 @@ function assetPreviewUrl(url, w=256){
 function assetMediaPlaybackUrl(url, name='video.mp4'){
     const raw = String(url || '').trim();
     if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
-    if(raw.startsWith('/assets/') || raw.startsWith('/output/') || raw.startsWith('/api/')) return raw;
+    // 本地视频同样通过后端流式接口，避免桌面 WebView 将相对路径解析到
+    // Tauri 的虚拟 origin；接口同时保留 Range/Content-Type，支持拖动进度。
+    if(raw.startsWith('/api/')) return raw;
+    if(raw.startsWith('/assets/') || raw.startsWith('/output/')){
+        const filename = String(name || '').trim() || 'video.mp4';
+        return `/api/download-output?inline=1&url=${encodeURIComponent(raw)}&name=${encodeURIComponent(filename)}`;
+    }
     if(!/^https?:\/\//i.test(raw)) return raw;
     let filename = String(name || '').trim();
     if(!filename){
@@ -1455,6 +1461,7 @@ function renderCanvasAssetDetail(item){
             <div class="panel-title"><strong>画布资产详情</strong><span>${escapeHtml(canvasAssetKindLabel(item))}</span></div>
             <div class="panel-actions">
                 ${canPreview ? `<button class="asset-icon-btn" type="button" data-canvas-asset-preview="${escapeAttr(item.id)}" title="${kind === 'video' ? '预览视频' : '放大预览'}"><i data-lucide="${kind === 'video' ? 'play' : 'maximize-2'}"></i></button>` : ''}
+                <button class="asset-icon-btn" type="button" data-canvas-asset-reveal="${escapeAttr(item.id)}" title="打开目录"><i data-lucide="folder-open"></i></button>
                 <button class="asset-icon-btn" type="button" data-canvas-asset-open="${escapeAttr(item.id)}" title="打开链接"><i data-lucide="external-link"></i></button>
                 <button class="asset-icon-btn" type="button" data-canvas-asset-copy="${escapeAttr(item.id)}" title="复制链接"><i data-lucide="copy"></i></button>
                 <button class="asset-btn primary" type="button" data-canvas-asset-download="${escapeAttr(item.id)}"><i data-lucide="download"></i><span>下载</span></button>
@@ -3360,6 +3367,14 @@ async function handleClick(event){
     if(canvasAssetDownload){ await downloadCanvasAssetItems([canvasAssetDownload.dataset.canvasAssetDownload || '']); return; }
     const canvasAssetOpen = target.closest?.('[data-canvas-asset-open]');
     if(canvasAssetOpen){ const it = findCanvasAssetItem(canvasAssetOpen.dataset.canvasAssetOpen || ''); if(it?.url) window.open(assetKind(it) === 'video' ? assetMediaPlaybackUrl(it.url, it.name) : it.url, '_blank', 'noopener'); return; }
+    const canvasAssetReveal = target.closest?.('[data-canvas-asset-reveal]');
+    if(canvasAssetReveal){
+        try {
+            await apiJson(`/api/canvas-assets/${encodeURIComponent(canvasAssetReveal.dataset.canvasAssetReveal || '')}/reveal`, {method:'POST'});
+            setStatus('已打开资产所在真实目录');
+        } catch(error) { setStatus(error.message || '打开目录失败'); }
+        return;
+    }
     const canvasAssetCopy = target.closest?.('[data-canvas-asset-copy]');
     if(canvasAssetCopy){ const it = findCanvasAssetItem(canvasAssetCopy.dataset.canvasAssetCopy || ''); const ok = await copyTextToClipboard(it?.url || ''); setStatus(ok ? '已复制画布资产链接' : '复制失败'); return; }
     const canvasAssetCheck = target.closest?.('[data-canvas-asset-check]');

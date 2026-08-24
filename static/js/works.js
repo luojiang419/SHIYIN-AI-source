@@ -49,7 +49,13 @@
     function mediaPlaybackUrl(url, name='video.mp4'){
         const raw = String(url || '').trim();
         if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
-        if(raw.startsWith('/assets/') || raw.startsWith('/output/') || raw.startsWith('/api/')) return raw;
+        // 本地媒体也统一经过后端流式接口：桌面 WebView 的页面 origin 可能不是
+        // 后端端口，直接使用 /assets 或 /output 会请求到不存在的虚拟目录。
+        if(raw.startsWith('/api/')) return raw;
+        if(raw.startsWith('/assets/') || raw.startsWith('/output/')){
+            const filename = String(name || '').trim() || 'video.mp4';
+            return `/api/download-output?inline=1&url=${encodeURIComponent(raw)}&name=${encodeURIComponent(filename)}`;
+        }
         if(!/^https?:\/\//i.test(raw)) return raw;
         let filename = String(name || '').trim();
         if(!filename){

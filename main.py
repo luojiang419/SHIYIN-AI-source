@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.292"
+APP_VERSION = "1.0.293"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -20011,6 +20011,12 @@ def work_local_file_path(work: Dict[str, Any]) -> str:
     path = output_file_from_url(url)
     if path:
         candidates.append(path)
+    parsed = urllib.parse.urlparse(url)
+    # 远程 CDN 地址不能按 basename 在本地盲猜，否则可能打开同名的另一份文件，
+    # 让“打开目录”看起来成功但实际定位错误。仅允许内部媒体 URL 进入兼容回退。
+    is_external = parsed.scheme in {"http", "https"} and not internal_media_request_path(url)
+    if is_external:
+        return ""
     basename = filename_from_media_url(url, "")
     if basename:
         candidates.append(local_media_file_by_basename(basename))
@@ -20097,6 +20103,15 @@ def reveal_file_in_folder(path: str) -> None:
         if not opener:
             raise RuntimeError("当前系统未找到 xdg-open，无法打开目录")
         subprocess.Popen([opener, os.path.dirname(file_path)])
+
+
+def reveal_work_file(work: Dict[str, Any]) -> str:
+    """解析作品/画布资产的真实本地文件并交给系统文件管理器。"""
+    path = work_local_file_path(work)
+    if not path:
+        raise FileNotFoundError(str(work.get("url") or work.get("id") or ""))
+    reveal_file_in_folder(path)
+    return path
 
 
 def history_reference_images(record: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -20408,14 +20423,35 @@ async def reveal_generated_work(work_id: str):
         work = next((item for item in all_works_with_canvas() if item.get("id") == work_id), None)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在或对应文件记录已被移除")
-    path = work_local_file_path(work)
-    if not path:
-        raise HTTPException(status_code=404, detail="当前作品不是可定位的本地文件")
     try:
-        await asyncio.to_thread(reveal_file_in_folder, path)
+        path = await asyncio.to_thread(reveal_work_file, work)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="当前作品不是可定位的本地文件")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"打开目录失败：{exc}") from exc
     return {"revealed": True, "path": path}
+
+
+@app.post("/api/canvas-assets/{asset_id}/reveal")
+async def reveal_canvas_asset(asset_id: str):
+    """在系统文件管理器中打开画布资产所在的真实目录并选中文件。"""
+    target_id = str(asset_id or "").strip()
+    if not target_id:
+        raise HTTPException(status_code=400, detail="画布资产标识不能为空")
+    try:
+        indexed = await asyncio.to_thread(canvas_assets_index)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"读取画布资产失败：{exc}") from exc
+    item = next((value for value in indexed.get("items") or [] if str(value.get("id") or "") == target_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="画布资产不存在或已被移除")
+    try:
+        path = await asyncio.to_thread(reveal_work_file, item)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="当前画布资产不是可定位的本地文件")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"打开目录失败：{exc}") from exc
+    return {"revealed": True, "path": path, "asset_id": target_id}
 
 
 def works_archive_response(works: List[Dict[str, Any]], filename: str = "") -> Response:

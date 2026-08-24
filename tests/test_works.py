@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from canvas_core.database import CanvasDatabase
+from starlette.requests import Request
 
 
 class WorksFrontendContractTests(unittest.TestCase):
@@ -249,6 +250,47 @@ class WorksBackendTests(unittest.TestCase):
             self.assertEqual(Path(result["path"]), image)
             popen.assert_called_once()
 
+    def test_reveal_work_uses_real_path_resolver_for_legacy_and_current_media(self):
+        with tempfile.TemporaryDirectory() as root:
+            media = Path(root) / "media"
+            generated = media / "generated"
+            generated.mkdir(parents=True)
+            video = generated / "SHIYIN-000001-20260824.mp4"
+            video.write_bytes(b"video")
+            work = {"url": "/assets/output/SHIYIN-000001-20260824.mp4"}
+            with (
+                patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(generated)),
+                patch.object(self.main, "reveal_file_in_folder") as reveal,
+            ):
+                path = self.main.reveal_work_file(work)
+            self.assertEqual(Path(path), video)
+            reveal.assert_called_once_with(str(video))
+
+    def test_video_stream_proxy_returns_mp4_file_response_for_local_media(self):
+        with tempfile.TemporaryDirectory() as root:
+            video = Path(root) / "video.mp4"
+            video.write_bytes(b"fake-mp4")
+            request = Request({"type": "http", "method": "GET", "path": "/api/download-output", "headers": [], "query_string": b""})
+            with patch.object(self.main, "output_file_from_url", return_value=str(video)):
+                response = self.main.download_output(request, "/assets/output/video.mp4", inline=True)
+            self.assertEqual(Path(response.path), video)
+            self.assertEqual(response.media_type, "video/mp4")
+
+    def test_canvas_asset_reveal_resolves_indexed_item_to_real_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            video = Path(root) / "asset.mp4"
+            video.write_bytes(b"video")
+            item = {"id": "asset-video", "url": "/assets/output/asset.mp4", "kind": "video"}
+            with (
+                patch.object(self.main, "canvas_assets_index", return_value={"items": [item]}),
+                patch.object(self.main, "work_local_file_path", return_value=str(video)),
+                patch.object(self.main, "reveal_file_in_folder") as reveal,
+            ):
+                result = asyncio.run(self.main.reveal_canvas_asset("asset-video"))
+            self.assertTrue(result["revealed"])
+            self.assertEqual(Path(result["path"]), video)
+            reveal.assert_called_once_with(str(video))
+
     def test_canvas_work_items_use_actual_filename_and_file_modified_time(self):
         with tempfile.TemporaryDirectory() as root:
             first = Path(root) / "SHIYIN-000101-20260824.png"
@@ -403,6 +445,19 @@ class WorksBackendTests(unittest.TestCase):
                 patch.object(self.main, "local_media_file_by_basename", return_value=None),
             ):
                 self.assertEqual(self.main.work_local_file_path(work), str(image.resolve()))
+
+    def test_remote_work_never_reveals_an_unrelated_same_named_local_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            local = Path(root) / "same.mp4"
+            local.write_bytes(b"local")
+            with (
+                patch.object(self.main, "output_file_from_url", return_value=""),
+                patch.object(self.main, "local_media_file_by_basename", return_value=str(local)),
+            ):
+                self.assertEqual(
+                    self.main.work_local_file_path({"url": "https://cdn.example/same.mp4"}),
+                    "",
+                )
 
     def test_download_all_works_creates_enterprise_named_zip(self):
         with tempfile.TemporaryDirectory() as root:

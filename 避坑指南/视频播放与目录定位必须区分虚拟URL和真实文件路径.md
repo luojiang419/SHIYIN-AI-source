@@ -48,3 +48,9 @@
 ## 追加经验（1.0.300）
 
 虚拟列表的选择状态不应通过频繁 `innerHTML` 全量重建来同步，否则每次鼠标移动都会重新创建图片/视频元素并绑定事件，表现为拖拽卡顿、视频闪烁甚至 WebView 黑屏。应把“数据列表重建”和“选中状态变化”分离：选择只修改已有卡片的 class、ARIA 和 checkbox，并用 `requestAnimationFrame` 合帧。批量删除也不能在请求开始时先清空列表；应保留界面、锁定操作按钮，成功后再按 id 增量移除，失败则恢复可操作状态。
+
+## 追加经验（1.0.301）
+
+Windows Explorer 会对 `subprocess.Popen` 的参数列表再次进行命令行解析。将 `/select,"C:\\Program Files\\..."` 作为带内层引号的列表参数传入时，Explorer 可能静默解析失败并打开默认“文档”目录。
+
+目录定位必须在已解析出真实磁盘文件后，传入完整命令行字符串 `"explorer.exe" /select,"C:\\真实路径\\文件"`，并通过 Shell.Application 实测最终 Explorer 的 `LocationURL`；不能只断言 API 返回路径。

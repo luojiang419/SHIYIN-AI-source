@@ -284,6 +284,10 @@ class WorksBackendTests(unittest.TestCase):
             self.assertTrue(result["revealed"])
             self.assertEqual(Path(result["path"]), image)
             popen.assert_called_once()
+            command = popen.call_args.args[0]
+            self.assertIsInstance(command, str)
+            self.assertIn('/select,"', command)
+            self.assertIn(str(image), command)
 
     def test_reveal_work_uses_real_path_resolver_for_legacy_and_current_media(self):
         with tempfile.TemporaryDirectory() as root:

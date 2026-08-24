@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.300"
+APP_VERSION = "1.0.301"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -20104,9 +20104,12 @@ def reveal_file_in_folder(path: str) -> None:
     if os.name == "nt":
         explorer = shutil.which("explorer.exe") or "explorer.exe"
         try:
-            # 路径可能包含空格；把完整文件路径作为 /select 的一个参数，
-            # 否则 Explorer 会把它拆成多个参数而静默打开失败。
-            subprocess.Popen([explorer, f'/select,"{file_path}"'], close_fds=True)
+            # Explorer 自己会再次解析命令行。若把 /select 和带空格的路径
+            # 作为 Python 参数列表传入，CreateProcess 会额外转义内层引号，
+            # Explorer 解析失败后会静默打开默认的“文档”目录。传入完整命令行，
+            # 让 Explorer 收到标准的 explorer.exe /select,"C:\\path\\file" 形式。
+            command = f'"{explorer}" /select,"{file_path}"'
+            subprocess.Popen(command, close_fds=True)
         except OSError:
             start_file = getattr(os, "startfile", None)
             if not start_file:

@@ -215,6 +215,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         sync_script = VERSION_SYNC_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("assert-version-sync.ps1", installer_build)
         self.assertIn("Version synchronization check failed", installer_build)
+        self.assertIn("if (-not $?)", installer_build)
         for source in (
             "package.json",
             "package-lock.json",

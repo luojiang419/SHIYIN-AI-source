@@ -244,6 +244,10 @@ let smartMinimapRenderQueued = false;
 let smartMinimapViewportQueued = false;
 let smartMinimapNodeUpdateQueued = false;
 const smartMinimapNodeUpdateIds = new Set();
+// Canvas 小地图为可回退优化：关闭后恢复原有 DOM 节点矩形渲染。
+const SMART_MINIMAP_CANVAS_ENABLED = true;
+let smartMinimapCanvas = null;
+const smartMinimapNodeRectIndex = new Map();
 let smartMinimapDrag = false;
 let zoomPreviewState = null;
 let runTimerInterval = null;
@@ -2963,8 +2967,164 @@ function viewportCenter(){
         y:(shell.clientHeight / 2 - viewport.y) / viewport.scale
     };
 }
+function ensureSmartMinimapCanvas(){
+    if(!minimapContent) return null;
+    if(!smartMinimapCanvas || !smartMinimapCanvas.isConnected){
+        smartMinimapCanvas = minimapContent.querySelector('canvas.minimap-canvas');
+        if(!smartMinimapCanvas){
+            smartMinimapCanvas = document.createElement('canvas');
+            smartMinimapCanvas.className = 'minimap-canvas';
+            smartMinimapCanvas.setAttribute('aria-hidden', 'true');
+            minimapContent.prepend(smartMinimapCanvas);
+        }
+    }
+    if(!minimapViewport || !minimapViewport.isConnected){
+        minimapViewport = minimapContent.querySelector('#minimapViewport') || document.getElementById('minimapViewport');
+        if(!minimapViewport){
+            minimapViewport = document.createElement('div');
+            minimapViewport.id = 'minimapViewport';
+            minimapViewport.className = 'smart-minimap-viewport';
+            minimapContent.appendChild(minimapViewport);
+        }
+    }
+    return smartMinimapCanvas;
+}
+function resizeSmartMinimapCanvas(){
+    const canvasEl = ensureSmartMinimapCanvas();
+    if(!canvasEl) return null;
+    const width = minimapContent.clientWidth || 170;
+    const height = minimapContent.clientHeight || 108;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const resized = canvasEl.width !== Math.round(width * dpr) || canvasEl.height !== Math.round(height * dpr);
+    if(resized){
+        canvasEl.width = Math.round(width * dpr);
+        canvasEl.height = Math.round(height * dpr);
+    }
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {canvasEl, ctx, width, height, resized};
+}
+function smartMinimapColors(){
+    const styles = getComputedStyle(document.body);
+    return {
+        normal:styles.getPropertyValue('--strong').trim() || '#766f68',
+        selected:styles.getPropertyValue('--strong-text').trim() || '#ffffff',
+        outline:styles.getPropertyValue('--strong').trim() || '#1f1f1f'
+    };
+}
+function smartMinimapRect(node, state){
+    const r = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
+    return {
+        left:state.offsetX + (r.x - state.minX) * state.scale,
+        top:state.offsetY + (r.y - state.minY) * state.scale,
+        width:Math.max(4, r.width * state.scale),
+        height:Math.max(4, r.height * state.scale)
+    };
+}
+function drawSmartMinimapNode(ctx, node, rect, colors){
+    if(!node || !rect) return;
+    const selectedNode = isNodeSelected(node.id);
+    ctx.save();
+    ctx.globalAlpha = selectedNode ? .98 : .74;
+    ctx.fillStyle = selectedNode ? colors.selected : colors.normal;
+    ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+    if(selectedNode){
+        ctx.globalAlpha = .95;
+        ctx.strokeStyle = colors.outline;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rect.left + .5, rect.top + .5, Math.max(1, rect.width - 1), Math.max(1, rect.height - 1));
+    }
+    ctx.restore();
+}
+function drawSmartMinimapAll(visibleNodes){
+    const surface = resizeSmartMinimapCanvas();
+    if(!surface || !smartMinimapState) return;
+    const {ctx, width, height} = surface;
+    ctx.clearRect(0, 0, width, height);
+    smartMinimapNodeRectIndex.clear();
+    const colors = smartMinimapColors();
+    (visibleNodes || []).forEach(node => {
+        const rect = smartMinimapRect(node, smartMinimapState);
+        smartMinimapNodeRectIndex.set(node.id, rect);
+        drawSmartMinimapNode(ctx, node, rect, colors);
+    });
+    if(!(visibleNodes || []).length){
+        ctx.save();
+        ctx.fillStyle = colors.normal;
+        ctx.globalAlpha = .58;
+        ctx.font = '800 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('EMPTY', width / 2, height / 2);
+        ctx.restore();
+    }
+}
+function redrawSmartMinimapDirty(ids=[]){
+    const surface = resizeSmartMinimapCanvas();
+    if(!surface || !smartMinimapState) return;
+    const {ctx, width, height, resized} = surface;
+    if(resized){ drawSmartMinimapAll(nodes.filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID)); return; }
+    const dirty = new Set((ids || []).filter(Boolean));
+    if(!dirty.size) return;
+    const regions = [];
+    const nextRects = new Map();
+    dirty.forEach(id => {
+        const oldRect = smartMinimapNodeRectIndex.get(id);
+        if(oldRect) regions.push(oldRect);
+        const node = smartNodeIndex.get(id) || nodes.find(item => item.id === id && item.id !== SMART_LOG_PREVIEW_NODE_ID);
+        if(node){
+            const nextRect = smartMinimapRect(node, smartMinimapState);
+            nextRects.set(id, nextRect);
+            regions.push(nextRect);
+        } else smartMinimapNodeRectIndex.delete(id);
+    });
+    if(!regions.length) return;
+    const region = regions.reduce((acc, rect) => ({
+        left:Math.min(acc.left, rect.left), top:Math.min(acc.top, rect.top),
+        right:Math.max(acc.right, rect.left + rect.width), bottom:Math.max(acc.bottom, rect.top + rect.height)
+    }), {left:Infinity, top:Infinity, right:-Infinity, bottom:-Infinity});
+    const left = Math.max(0, region.left - 4), top = Math.max(0, region.top - 4);
+    const right = Math.min(width, region.right + 4), bottom = Math.min(height, region.bottom + 4);
+    ctx.clearRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+    const colors = smartMinimapColors();
+    const visibleNodes = nodes.filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID);
+    visibleNodes.forEach(node => {
+        const rect = nextRects.get(node.id) || smartMinimapNodeRectIndex.get(node.id);
+        if(!rect || rect.left > right || rect.left + rect.width < left || rect.top > bottom || rect.top + rect.height < top) return;
+        if(nextRects.has(node.id)) smartMinimapNodeRectIndex.set(node.id, rect);
+        drawSmartMinimapNode(ctx, node, rect, colors);
+    });
+}
+function renderSmartMinimapDomFallback(visibleNodes=[]){
+    if(!minimapContent || !smartMinimapState) return;
+    smartMinimapCanvas = null;
+    smartMinimapNodeRectIndex.clear();
+    const {minX, minY, scale, offsetX, offsetY} = smartMinimapState;
+    const nodeHtml = visibleNodes.map(node => {
+        const rect = smartMinimapRect(node, smartMinimapState);
+        return `<div class="minimap-node ${isNodeSelected(node.id) ? 'selected' : ''}" data-node-id="${escapeAttr(node.id)}" style="left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px"></div>`;
+    }).join('');
+    const viewW = shell.clientWidth / viewport.scale;
+    const viewH = shell.clientHeight / viewport.scale;
+    const viewX = -viewport.x / viewport.scale;
+    const viewY = -viewport.y / viewport.scale;
+    const project = r => ({
+        left:offsetX + (r.x - minX) * scale,
+        top:offsetY + (r.y - minY) * scale,
+        width:Math.max(4, r.width * scale),
+        height:Math.max(4, r.height * scale)
+    });
+    const view = project({x:viewX, y:viewY, width:viewW, height:viewH});
+    minimapContent.innerHTML = `${nodeHtml}${visibleNodes.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="smart-minimap-viewport"></div>`;
+    minimapViewport = document.getElementById('minimapViewport');
+    minimapViewport.style.left = `${view.left}px`;
+    minimapViewport.style.top = `${view.top}px`;
+    minimapViewport.style.width = `${view.width}px`;
+    minimapViewport.style.height = `${view.height}px`;
+}
 function renderMinimap(){
-    if(!minimapContent || !minimapViewport) return;
+    if(!minimapContent) return;
     smartArrangeBtn?.classList.toggle('visible', selectedNodeIds().length > 0);
     const width = minimapContent.clientWidth || 170;
     const height = minimapContent.clientHeight || 108;
@@ -2972,7 +3132,8 @@ function renderMinimap(){
     const viewH = shell.clientHeight / viewport.scale;
     const viewX = -viewport.x / viewport.scale;
     const viewY = -viewport.y / viewport.scale;
-    const rects = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID).map(cachedSmartNodeRect);
+    const visibleNodes = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID);
+    const rects = visibleNodes.map(cachedSmartNodeRect);
     rects.push({x:viewX, y:viewY, width:viewW, height:viewH});
     const minX = Math.min(...rects.map(r => r.x), -200);
     const minY = Math.min(...rects.map(r => r.y), -200);
@@ -2988,14 +3149,17 @@ function renderMinimap(){
         width:Math.max(4, r.width * scale),
         height:Math.max(4, r.height * scale)
     });
-    const nodeHtml = rects.slice(0, -1).map((r, index) => {
-        const p = project(r);
-        const node = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID)[index];
-        return `<div class="minimap-node" data-node-id="${escapeAttr(node?.id || '')}" style="left:${p.left}px;top:${p.top}px;width:${p.width}px;height:${p.height}px"></div>`;
-    }).join('');
     const view = project({x:viewX, y:viewY, width:viewW, height:viewH});
-    minimapContent.innerHTML = `${nodeHtml}<div id="minimapViewport" class="smart-minimap-viewport" style="left:${view.left}px;top:${view.top}px;width:${view.width}px;height:${view.height}px"></div>`;
-    minimapViewport = document.getElementById('minimapViewport');
+    if(!SMART_MINIMAP_CANVAS_ENABLED){
+        renderSmartMinimapDomFallback(visibleNodes);
+        return;
+    }
+    ensureSmartMinimapCanvas();
+    drawSmartMinimapAll(visibleNodes);
+    minimapViewport.style.left = `${view.left}px`;
+    minimapViewport.style.top = `${view.top}px`;
+    minimapViewport.style.width = `${view.width}px`;
+    minimapViewport.style.height = `${view.height}px`;
 }
 function scheduleSmartMinimapRender(){
     if(smartMinimapRenderQueued) return;
@@ -3029,17 +3193,12 @@ function scheduleSmartMinimapNodeUpdate(ids=[]){
     requestAnimationFrame(() => {
         smartMinimapNodeUpdateQueued = false;
         if(!smartMinimapState || !minimapContent){ smartMinimapNodeUpdateIds.clear(); return; }
-        const {minX, minY, scale, offsetX, offsetY} = smartMinimapState;
-        smartMinimapNodeUpdateIds.forEach(id => {
-            const node = smartNodeIndex.get(id) || nodes.find(item => item.id === id && item.id !== SMART_LOG_PREVIEW_NODE_ID);
-            const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
-            if(!node || !el) return;
-            const rect = nodeRect(node);
-            el.style.left = `${offsetX + (rect.x - minX) * scale}px`;
-            el.style.top = `${offsetY + (rect.y - minY) * scale}px`;
-            el.style.width = `${Math.max(4, rect.width * scale)}px`;
-            el.style.height = `${Math.max(4, rect.height * scale)}px`;
-        });
+        if(!SMART_MINIMAP_CANVAS_ENABLED){
+            renderMinimap();
+            smartMinimapNodeUpdateIds.clear();
+            return;
+        }
+        redrawSmartMinimapDirty([...smartMinimapNodeUpdateIds]);
         smartMinimapNodeUpdateIds.clear();
         scheduleSmartMinimapViewportUpdate();
     });

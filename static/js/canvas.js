@@ -480,6 +480,9 @@ let minimapRenderQueued = false;
 let minimapViewportQueued = false;
 let minimapNodeUpdateQueued = false;
 const minimapNodeUpdateIds = new Set();
+const CLASSIC_MINIMAP_CANVAS_ENABLED = true;
+let minimapCanvas = null;
+const minimapNodeRectIndex = new Map();
 let linksRenderQueued = false;
 // 连接层增量更新开关：结构性变更或索引失效时始终回退到 renderLinks 全量路径。
 const CLASSIC_INCREMENTAL_LINKS = true;
@@ -1719,17 +1722,12 @@ function scheduleMinimapNodeUpdate(ids=[]){
     requestAnimationFrame(() => {
         minimapNodeUpdateQueued = false;
         if(!minimapState || !minimapContent){ minimapNodeUpdateIds.clear(); return; }
-        const {bounds, scale, ox, oy} = minimapState;
-        minimapNodeUpdateIds.forEach(id => {
-            const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
-            const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
-            if(!node || !el) return;
-            const rect = estimatedNodeRect(node);
-            el.style.left = `${ox + (rect.x - bounds.x) * scale}px`;
-            el.style.top = `${oy + (rect.y - bounds.y) * scale}px`;
-            el.style.width = `${Math.max(3, rect.w * scale)}px`;
-            el.style.height = `${Math.max(3, rect.h * scale)}px`;
-        });
+        if(!CLASSIC_MINIMAP_CANVAS_ENABLED){
+            renderMinimap();
+            minimapNodeUpdateIds.clear();
+            return;
+        }
+        redrawClassicMinimapDirty([...minimapNodeUpdateIds]);
         minimapNodeUpdateIds.clear();
         updateMinimapViewport();
     });
@@ -1823,6 +1821,149 @@ function scheduleLinksRender(){
         else renderLinks();
     });
 }
+function ensureClassicMinimapCanvas(){
+    if(!minimapContent) return null;
+    if(!minimapCanvas || !minimapCanvas.isConnected){
+        minimapCanvas = minimapContent.querySelector('canvas.minimap-canvas');
+        if(!minimapCanvas){
+            minimapCanvas = document.createElement('canvas');
+            minimapCanvas.className = 'minimap-canvas';
+            minimapCanvas.setAttribute('aria-hidden', 'true');
+            minimapContent.prepend(minimapCanvas);
+        }
+    }
+    if(!minimapViewport || !minimapViewport.isConnected){
+        minimapViewport = minimapContent.querySelector('#minimapViewport') || document.getElementById('minimapViewport');
+        if(!minimapViewport){
+            minimapViewport = document.createElement('div');
+            minimapViewport.id = 'minimapViewport';
+            minimapViewport.className = 'minimap-viewport';
+            minimapContent.appendChild(minimapViewport);
+        }
+    }
+    return minimapCanvas;
+}
+function resizeClassicMinimapCanvas(){
+    const canvasEl = ensureClassicMinimapCanvas();
+    if(!canvasEl) return null;
+    const width = minimapContent.clientWidth || 172;
+    const height = minimapContent.clientHeight || 110;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const resized = canvasEl.width !== Math.round(width * dpr) || canvasEl.height !== Math.round(height * dpr);
+    if(resized){
+        canvasEl.width = Math.round(width * dpr);
+        canvasEl.height = Math.round(height * dpr);
+    }
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {canvasEl, ctx, width, height, resized};
+}
+function classicMinimapColors(){
+    const styles = getComputedStyle(document.body);
+    return {
+        normal:styles.getPropertyValue('--text').trim() || '#766f68',
+        selected:styles.getPropertyValue('--strong').trim() || '#1f1f1f',
+        selectedOutline:styles.getPropertyValue('--strong-text').trim() || '#ffffff'
+    };
+}
+function classicMinimapRect(node, state){
+    const r = estimatedNodeRect(node);
+    const {bounds, scale, ox, oy} = state;
+    return {
+        left:ox + (r.x - bounds.x) * scale,
+        top:oy + (r.y - bounds.y) * scale,
+        width:Math.max(3, r.w * scale),
+        height:Math.max(3, r.h * scale)
+    };
+}
+function drawClassicMinimapNode(ctx, node, rect, colors){
+    if(!rect || !node) return;
+    const selectedNode = selected.has(node.id);
+    ctx.save();
+    ctx.globalAlpha = selectedNode ? .96 : .58;
+    ctx.fillStyle = selectedNode ? colors.selected : colors.normal;
+    ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+    if(selectedNode){
+        ctx.globalAlpha = .95;
+        ctx.strokeStyle = colors.selectedOutline;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rect.left + .5, rect.top + .5, Math.max(1, rect.width - 1), Math.max(1, rect.height - 1));
+    }
+    ctx.restore();
+}
+function drawClassicMinimapAll(){
+    const surface = resizeClassicMinimapCanvas();
+    if(!surface || !minimapState) return;
+    const {ctx, width, height} = surface;
+    ctx.clearRect(0, 0, width, height);
+    minimapNodeRectIndex.clear();
+    const colors = classicMinimapColors();
+    (nodes || []).forEach(node => {
+        const rect = classicMinimapRect(node, minimapState);
+        minimapNodeRectIndex.set(node.id, rect);
+        drawClassicMinimapNode(ctx, node, rect, colors);
+    });
+    if(!(nodes || []).length){
+        ctx.save();
+        ctx.fillStyle = colors.normal;
+        ctx.globalAlpha = .58;
+        ctx.font = '800 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('EMPTY', width / 2, height / 2);
+        ctx.restore();
+    }
+}
+function redrawClassicMinimapDirty(ids=[]){
+    const surface = resizeClassicMinimapCanvas();
+    if(!surface || !minimapState) return;
+    const {ctx, width, height, resized} = surface;
+    if(resized){ drawClassicMinimapAll(); return; }
+    const dirty = new Set((ids || []).filter(Boolean));
+    if(!dirty.size) return;
+    const nextRects = new Map();
+    const regions = [];
+    dirty.forEach(id => {
+        const oldRect = minimapNodeRectIndex.get(id);
+        if(oldRect) regions.push(oldRect);
+        const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
+        if(node){
+            const nextRect = classicMinimapRect(node, minimapState);
+            nextRects.set(id, nextRect);
+            regions.push(nextRect);
+        } else minimapNodeRectIndex.delete(id);
+    });
+    if(!regions.length) return;
+    const region = regions.reduce((acc, rect) => ({
+        left:Math.min(acc.left, rect.left), top:Math.min(acc.top, rect.top),
+        right:Math.max(acc.right, rect.left + rect.width), bottom:Math.max(acc.bottom, rect.top + rect.height)
+    }), {left:Infinity, top:Infinity, right:-Infinity, bottom:-Infinity});
+    const pad = 3;
+    const left = Math.max(0, region.left - pad), top = Math.max(0, region.top - pad);
+    const right = Math.min(width, region.right + pad), bottom = Math.min(height, region.bottom + pad);
+    ctx.clearRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+    const colors = classicMinimapColors();
+    (nodes || []).forEach(node => {
+        const rect = nextRects.get(node.id) || minimapNodeRectIndex.get(node.id);
+        if(!rect || rect.left > right || rect.left + rect.width < left || rect.top > bottom || rect.top + rect.height < top) return;
+        if(nextRects.has(node.id)) minimapNodeRectIndex.set(node.id, rect);
+        drawClassicMinimapNode(ctx, node, rect, colors);
+    });
+}
+function renderClassicMinimapDomFallback(){
+    if(!minimapContent || !minimapState) return;
+    minimapCanvas = null;
+    minimapNodeRectIndex.clear();
+    const {bounds, scale, ox, oy} = minimapState;
+    const nodeHtml = (nodes || []).map(node => {
+        const r = estimatedNodeRect(node);
+        return `<div class="minimap-node ${selected.has(node.id) ? 'selected' : ''}" data-node-id="${escapeAttr(node.id)}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
+    }).join('');
+    minimapContent.innerHTML = `${nodeHtml}${nodes?.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="minimap-viewport"></div>`;
+    minimapViewport = document.getElementById('minimapViewport');
+    updateMinimapViewport();
+}
 function renderMinimap(){
     if(!minimapContent || !minimapViewport) return;
     canvasArrangeBtn?.classList.toggle('visible', selected.size > 0);
@@ -1835,12 +1976,12 @@ function renderMinimap(){
     const ox = (cw - mapW) / 2;
     const oy = (ch - mapH) / 2;
     minimapState = {bounds, scale, ox, oy, cw, ch};
-    const nodeHtml = (nodes || []).map(n => {
-        const r = estimatedNodeRect(n);
-        return `<div class="minimap-node ${selected.has(n.id) ? 'selected' : ''}" data-node-id="${escapeAttr(n.id)}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
-    }).join('');
-    minimapContent.innerHTML = `${nodeHtml}${nodes?.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="minimap-viewport"></div>`;
-    minimapViewport = document.getElementById('minimapViewport');
+    if(!CLASSIC_MINIMAP_CANVAS_ENABLED){
+        renderClassicMinimapDomFallback();
+        return;
+    }
+    ensureClassicMinimapCanvas();
+    drawClassicMinimapAll();
     updateMinimapViewport();
 }
 function updateMinimapViewport(){

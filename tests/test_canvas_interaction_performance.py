@@ -114,6 +114,15 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("classicLinkDom.get(connectionId)", connection)
         self.assertIn("linksEl.querySelectorAll('.link-hit[data-connection-id]')", connection)
 
+    def test_classic_node_drag_reuses_dom_index_with_selector_fallback(self):
+        start = body(CANVAS_JS, "function startNodeDrag(e, node)", "function onNodeDrag")
+        drag = body(CANVAS_JS, "function onNodeDrag(e)", "function startNodeResize")
+        self.assertIn("CLASSIC_DRAG_DOM_INDEX_ENABLED", CANVAS_JS)
+        self.assertIn("canvasNodeDomIndex.get(n.id)", start)
+        self.assertIn("dragNode.el", drag)
+        self.assertIn("childDrag.el", drag)
+        self.assertIn("nodesEl.querySelector", drag)
+
     def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
         dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")
         self.assertLess(dragover.index("if(hasOutputMediaDrag"), dragover.index("if(hasImageDropData"))

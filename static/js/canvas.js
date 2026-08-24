@@ -472,6 +472,8 @@ const CLASSIC_SAFE_LOD_MARGIN = 480;
 const CLASSIC_MARQUEE_RECT_CACHE_ENABLED = true;
 // 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
 const CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
+// 节点拖动优先复用已有 DOM 索引；索引缺失或关闭时回退选择器查询。
+const CLASSIC_DRAG_DOM_INDEX_ENABLED = true;
 let classicSafeLodRaf = 0;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
@@ -18770,7 +18772,7 @@ function startNodeDrag(e, node){
     const collected = new Map();
     const collect = n => {
         if(!n || collected.has(n.id) || n.id === dragTarget.id) return;
-        collected.set(n.id, {node:n, ox:n.x, oy:n.y});
+        collected.set(n.id, {node:n, ox:n.x, oy:n.y, el:canvasNodeDomIndex.get(n.id) || null});
         if(n.type === 'group' || n.type === 'promptGroup'){
             (n.items || []).map(id => canvasNodeIndex.get(id)).forEach(collect);
         }
@@ -18784,7 +18786,15 @@ function startNodeDrag(e, node){
     }
     const children = [...collected.values()];
     window.CanvasPerformance?.beginInteraction?.('classic.node-drag', {nodes:1 + children.length, total:nodes.length});
-    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y};
+    dragNode = {
+        node: dragTarget,
+        children,
+        el:canvasNodeDomIndex.get(dragTarget.id) || null,
+        sx:e.clientX,
+        sy:e.clientY,
+        ox:dragTarget.x,
+        oy:dragTarget.y
+    };
     scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
@@ -18796,7 +18806,8 @@ function onNodeDrag(e){
     const dy = (e.clientY - dragNode.sy) / viewport.scale;
     dragNode.node.x = dragNode.ox + dx;
     dragNode.node.y = dragNode.oy + dy;
-    const el = nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
+    const el = (CLASSIC_DRAG_DOM_INDEX_ENABLED ? (dragNode.el || canvasNodeDomIndex.get(dragNode.node.id)) : null)
+        || nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
     if(el){
         el.style.left = `${dragNode.node.x}px`;
         el.style.top = `${dragNode.node.y}px`;
@@ -18804,7 +18815,8 @@ function onNodeDrag(e){
     (dragNode.children || []).forEach(childDrag => {
         childDrag.node.x = childDrag.ox + dx;
         childDrag.node.y = childDrag.oy + dy;
-        const childEl = nodesEl.querySelector(`.node[data-id="${childDrag.node.id}"]`);
+        const childEl = (CLASSIC_DRAG_DOM_INDEX_ENABLED ? (childDrag.el || canvasNodeDomIndex.get(childDrag.node.id)) : null)
+            || nodesEl.querySelector(`.node[data-id="${childDrag.node.id}"]`);
         if(childEl){
             childEl.style.left = `${childDrag.node.x}px`;
             childEl.style.top = `${childDrag.node.y}px`;

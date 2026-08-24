@@ -91,6 +91,8 @@ let dragState = null;
 // 安全视口 LOD 只延迟普通节点 body；节点外壳、端口、模型和特殊节点始终保留。
 const SMART_SAFE_LOD_ENABLED = true;
 const SMART_SAFE_LOD_MARGIN = 480;
+// 端口连线成功后只替换受影响节点并刷新连线层；关闭时回退原全量 render。
+const SMART_PORT_LINK_MUTATION_ENABLED = true;
 let smartSafeLodRaf = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
@@ -9937,7 +9939,12 @@ function handlePortDrop(drag, e){
         const inputRole = drag.fromPort === 'out' ? targetRole : (drag.fromRole || '');
         if(connectInputNode(fromId, toId, inputRole)){
             commitPendingUndo();
-            render();
+            if(SMART_PORT_LINK_MUTATION_ENABLED){
+                queueSmartRenderMutation({replaceIds:[toId]});
+                render();
+            } else {
+                render();
+            }
             scheduleSave();
         } else {
             discardPendingUndo();

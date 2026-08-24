@@ -70,6 +70,13 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertNotIn("querySelectorAll('.node-port.is-active')", visual)
         self.assertIn("elementFromPoint", drag)
 
+    def test_smart_port_drop_uses_scoped_node_mutation_with_full_render_fallback(self):
+        drop = body(SMART_CANVAS_JS, "function handlePortDrop(drag, e)", "function pickMediaForSmartNode")
+        self.assertIn("SMART_PORT_LINK_MUTATION_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("queueSmartRenderMutation({replaceIds:[toId]})", drop)
+        self.assertIn("if(SMART_PORT_LINK_MUTATION_ENABLED)", drop)
+        self.assertIn("render();", drop)
+
     def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
         dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")
         self.assertLess(dragover.index("if(hasOutputMediaDrag"), dragover.index("if(hasImageDropData"))

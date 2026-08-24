@@ -123,6 +123,14 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("childDrag.el", drag)
         self.assertIn("nodesEl.querySelector", drag)
 
+    def test_smart_drag_drop_highlight_reuses_current_target_index(self):
+        highlight = body(SMART_CANVAS_JS, "function clearDropHighlight(){", "function deleteNode")
+        self.assertIn("SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("smartDropHighlightId", highlight)
+        self.assertIn("smartNodeDomIndex.get(targetId)", highlight)
+        self.assertIn("world.querySelectorAll('.image-node.drop-target')", highlight)
+        self.assertIn("if(SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED && smartDropHighlightId === targetId) return;", highlight)
+
     def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
         dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")
         self.assertLess(dragover.index("if(hasOutputMediaDrag"), dragover.index("if(hasImageDropData"))

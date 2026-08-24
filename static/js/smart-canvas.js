@@ -99,6 +99,8 @@ const SMART_PORT_LINK_MUTATION_ENABLED = true;
 const SMART_CONNECTION_EVENT_DELEGATION_ENABLED = true;
 // 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
 const SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
+// 拖动目标高亮只切换旧/新节点；关闭或索引缺失时回退原选择器扫描。
+const SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED = true;
 let smartSafeLodRaf = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
@@ -122,6 +124,7 @@ let mentionInsertMode = 'token';
 let panState = null;
 let didPan = false;
 let smartNodeToolbarDismissed = false;
+let smartDropHighlightId = '';
 let expandedPromptSource = null;
 function openExpandedPromptEditor(source){
     if(!source || !expandedPromptModal || !expandedPromptTextarea || !expandedPromptRich) return;
@@ -9288,6 +9291,7 @@ function render(){
     const mutation = smartRenderMutation;
     smartRenderMutation = null;
     smartSelectionFeedbackState = null;
+    smartDropHighlightId = '';
     const perfEnd = window.CanvasPerformance?.start?.('smart.render', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
     invalidateSmartGeometry();
@@ -11565,13 +11569,29 @@ function pruneSmartGroupMembershipsForNode(node){
     return changed;
 }
 function clearDropHighlight(){
-    world.querySelectorAll('.image-node.drop-target').forEach(el => el.classList.remove('drop-target'));
+    if(SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED && smartDropHighlightId){
+        const current = smartNodeDomIndex.get(smartDropHighlightId);
+        if(current) current.classList.remove('drop-target');
+        else world.querySelectorAll('.image-node.drop-target').forEach(el => el.classList.remove('drop-target'));
+        smartDropHighlightId = '';
+        return;
+    }
+    if(!SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED){
+        world.querySelectorAll('.image-node.drop-target').forEach(el => el.classList.remove('drop-target'));
+    }
+    smartDropHighlightId = '';
 }
 function setDropHighlight(targetId){
+    targetId = targetId || '';
+    if(SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED && smartDropHighlightId === targetId) return;
     clearDropHighlight();
     if(!targetId) return;
-    const el = world.querySelector(`.image-node[data-id="${targetId}"]`);
-    if(el) el.classList.add('drop-target');
+    const el = (SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED ? smartNodeDomIndex.get(targetId) : null)
+        || world.querySelector(`.image-node[data-id="${CSS.escape(targetId)}"]`);
+    if(el){
+        el.classList.add('drop-target');
+        smartDropHighlightId = targetId;
+    }
 }
 function deleteNode(id){
     pushUndo();

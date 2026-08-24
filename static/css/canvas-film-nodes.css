@@ -39,6 +39,32 @@
     font-weight:800;
     letter-spacing:.04em;
 }
+.film-line-art-batch-summary {
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:8px;
+    min-width:0;
+    padding:8px 10px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:var(--soft);
+}
+.film-line-art-batch-summary strong {
+    min-width:0;
+    overflow:hidden;
+    color:var(--text);
+    font-size:11px;
+    font-weight:800;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.film-line-art-batch-summary small {
+    flex:0 0 auto;
+    color:var(--muted);
+    font-size:9px;
+    white-space:nowrap;
+}
 .film-add-actor,
 .film-parse-button,
 .film-run-button {

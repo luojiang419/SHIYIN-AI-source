@@ -9163,10 +9163,8 @@ function classicFilmHasActiveRun(node, out){
 }
 async function runFilmLineArtNode(node, opts={}){
     const api=window.CanvasFilmNodes;
-    const assets=classicFilmAssets(node);
-    const built=api.buildPrompt(node,assets,{provider:node.apiProvider,model:node.model});
-    const frames=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `frame-${index + 1}.png`}));
-    if(!frames.length){
+    const refs=batchGeneratorImageRefs(node).map((ref,index)=>({...ref,name:ref.name || `image-${index + 1}.png`}));
+    if(!refs.length){
         if(!opts.cascade) showErrorModal('请先连接视频帧组、分镜图组或图像输出','生成线稿分镜');
         return;
     }
@@ -9181,41 +9179,55 @@ async function runFilmLineArtNode(node, opts={}){
     const transformOptions={
         ratio:['source','16:9','1:1','9:16','3:2','2:3'].includes(node.aspectRatio) ? node.aspectRatio : 'source',
         resolution:['1k','2k','4k'].includes(node.resolution) ? node.resolution : '2k',
-        quality:['auto','medium','high'].includes(node.quality) ? node.quality : 'high',
-        prompt:node.prompt
+        quality:['auto','medium','high'].includes(node.quality) ? node.quality : 'high'
     };
     const out=outputForNode(node,560,true);
-    const run=runSnapshot(node,[transformationPrompt('line-art',model),String(node.prompt || '').trim()].filter(Boolean).join('\n'),frames);
-    const pendingIds=frames.map(() => uid('p'));
-    const pendings=pendingIds.map((id,index)=>makePendingForRun(id,run,node,{refs:[frames[index]]}));
-    out._pending=[...(out._pending || []),...pendings];
+    const prompt=[transformationPrompt('line-art',model),String(node.prompt || '').trim()].filter(Boolean).join('\n');
+    const plans=await Promise.all(refs.map(async(ref,index)=>{
+        const requestSize=await storyboardTransformSize(ref,model,transformOptions.ratio,transformOptions.resolution);
+        const run=runSnapshot(node,prompt,[ref]);
+        run.taskLabel=`生成线稿分镜 ${index + 1}/${refs.length}`;
+        const payload={prompt,provider_id:providerId,model,size:requestSize,quality:transformOptions.quality,reference_images:[ref]};
+        const pendingId=uid('p');
+        const pending=makePendingForRun(pendingId,run,node,{refs:[ref],requestSize,cascadeTargetId:cascadeTargetIdFromOptions(opts)},{
+            canvasTaskType:'online-image',providerId,model,appendGenerated:true,
+            batchIndex:index,batchTotal:refs.length,sourceRef:{url:ref.url,name:ref.name || `image-${index + 1}`}
+        });
+        return {index,ref,run,payload,pendingId,pending};
+    }));
+    out._pending=[...(out._pending || []),...plans.map(plan=>plan.pending)];
     node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out); scheduleSave();
     try {
-        const results=[]; let cursor=0;
-        const worker=async()=>{
-            while(cursor < frames.length){
-                const index=cursor++;
-                const result=await transformStoryboardFrame(frames[index],'line-art',providerId,model,index,transformOptions);
-                results[index]=result;
-                const pending=pendings[index];
-                if(pending){ pending.canvasTaskId=result.taskId || ''; pending.previewSize=await storyboardTransformSize(frames[index],model,transformOptions.ratio,transformOptions.resolution); }
-                setStatus(`生成线稿分镜 ${index + 1}/${frames.length}`); refreshRunNodes(node,out); scheduleSave();
+        const submissions=await Promise.allSettled(plans.map(plan=>createCanvasImageTask(plan.payload,{cascadeTargetId:cascadeTargetIdFromOptions(opts)})));
+        const accepted=[];
+        submissions.forEach((result,index)=>{
+            const plan=plans[index];
+            const pending=pendingById(out,plan.pendingId);
+            if(result.status==='fulfilled' && result.value?.task_id){
+                if(pending) pending.canvasTaskId=result.value.task_id;
+                accepted.push({...plan,taskId:result.value.task_id});
+                return;
             }
-        };
-        await Promise.all(Array.from({length:Math.min(3,frames.length)},worker));
-        const images=results.filter(Boolean).map(({taskId,...item})=>item);
-        if(!images.length) throw new Error('生成线稿分镜没有返回图片');
-        mergeGeneratedOutputs(node,images,Boolean(opts.cascade));
-        out._pending=(out._pending || []).filter(item=>!pendingIds.includes(item.id));
-        appendOutputImagesWithoutDuplicates(out,images);
-        node.runStatus='done'; node.runError=''; scheduleSave();
-        setStatus(`生成线稿分镜完成，共 ${images.length} 张`);
+            if(pending){
+                pending.failed=true;
+                pending.canvasTaskStatus='failed';
+                pending.error=result.status==='rejected' ? (result.reason?.message || String(result.reason || tr('canvas.generationFailed'))) : tr('canvas.generationFailed');
+            }
+        });
+        refreshRunNodes(node,out); scheduleSave(); await saveCanvas();
+        const statuses=await Promise.all(accepted.map(plan=>pollCanvasImageTask(plan.taskId,{cascadeTargetId:cascadeTargetIdFromOptions(opts)})));
+        const failedCount=(plans.length-accepted.length)+statuses.filter(status=>status !== 'succeeded').length;
+        node.running=false; node.runStatus=failedCount ? 'failed' : 'done'; node.runError=failedCount ? `${failedCount}/${plans.length} 张处理失败` : '';
+        refreshRunNodes(node,out); scheduleSave();
+        if(statuses.includes('aborted')) throw cascadeAbortError(cascadeStopMessage());
+        if(opts.cascade && failedCount) throw new Error(node.runError || '生成线稿分镜失败');
+        if(failedCount && !accepted.length) showErrorModal(node.runError || '生成线稿分镜失败','生成线稿分镜');
+        setStatus(failedCount ? `生成线稿分镜完成，${plans.length - failedCount}/${plans.length} 张成功` : `生成线稿分镜完成，共 ${plans.length} 张`);
     } catch(error){
-        const message=error.message || String(error);
-        pendingIds.map(id=>pendingById(out,id)).filter(Boolean).forEach(pending=>{pending.failed=true;pending.error=message;});
-        node.runStatus='failed'; node.runError=message;
+        node.runStatus='failed'; node.runError=error.message || String(error); node.running=false;
+        refreshRunNodes(node,out); scheduleSave();
         if(opts.cascade) throw error;
-        showErrorModal(message,'生成线稿分镜失败');
+        if(!isCascadeAbortError(error)) showErrorModal(node.runError,'生成线稿分镜失败');
     } finally {
         node.running=classicFilmHasActiveRun(node,out); refreshRunNodes(node,out);
     }

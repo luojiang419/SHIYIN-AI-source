@@ -1730,8 +1730,21 @@ function createFilmNode(type, point){
     nodes.push(node); selectedId=node.id; selectedIds=[]; selectedImage={nodeId:'',index:-1};
     render(); scheduleSave(); return node;
 }
+function smartFilmLineArtRunSettings(node){
+    const sourceSettings=node?.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
+    const providerId=filmSmartImageProviderId(node) || sourceSettings.provider_id || imageProviders()[0]?.id || '';
+    const models=providerImageModels(providerId);
+    return {...sourceSettings,engine:'api',apiKind:'image',provider_id:providerId,model:node?.model || sourceSettings.model || models[0] || '',ratio:node?.aspectRatio || 'source',resolution:node?.resolution || '2k',quality:node?.quality || 'high',count:1};
+}
+async function runSmartFilmLineArtNode(node){
+    if(!node || node.specialType !== 'film-line-art') return;
+    const refs=smartBatchInputRefs(node);
+    if(!refs.length){ toast('请先连接视频帧组、分镜图组或图像输出'); return; }
+    return runSmartBatchGenerator(node,{prompt:window.CanvasFilmNodes.lineArtPrompt(node),runSettings:smartFilmLineArtRunSettings(node),lineArt:true});
+}
 async function runSmartFilmNode(node){
     if(!node || !window.CanvasFilmNodes) return;
+    if(node.specialType === 'film-line-art') return runSmartFilmLineArtNode(node);
     const api=window.CanvasFilmNodes;
     const assets=filmSmartAssets(node);
     const settingsForNodeRun=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
@@ -1747,22 +1760,7 @@ async function runSmartFilmNode(node){
     output.filmSourceNodeId=node.id;
     node.running=true; node.runError=''; render(); scheduleSave();
     try {
-        if(node.specialType === 'film-line-art'){
-            const lineRefs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `frame-${index + 1}.png`}));
-            if(!lineRefs.length) throw new Error('请先连接视频帧组、分镜图组或图像输出');
-            const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
-            const imageModels=providerImageModels(imageProvider);
-            const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || 'source',resolution:node.resolution || '2k',quality:node.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
-            const linePrompt=window.CanvasFilmNodes.lineArtPrompt(node);
-            const generated=await Promise.all(lineRefs.map(async(ref,index)=>{
-                const created=await runApiGeneration(linePrompt,[ref],imageSettings);
-                const results=await Promise.all((created.taskIds || []).map(taskId=>pollSmartCanvasTask(taskId)));
-                return results.flatMap(result=>(result?.image_items || result?.images || resultMediaUrls(result) || [])).map(item=>typeof item==='object'?{...item,url:item.url || item.path || '',kind:'image',name:item.name || `line-art-${index + 1}.png`}:{url:item,kind:'image',name:`line-art-${index + 1}.png`}).filter(item=>item.url);
-            }));
-            const images=generated.flat();
-            if(!images.length) throw new Error('生成线稿分镜没有返回图片');
-            node.images=images; finalizePendingNode(output,images,meta,'image');
-        } else if(node.specialType === 'film-storyboard'){
+        if(node.specialType === 'film-storyboard'){
             const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
             const imageModels=providerImageModels(imageProvider);
             const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || settingsForNodeRun.ratio || '16:9',resolution:node.resolution || settingsForNodeRun.resolution || '2k',quality:node.quality || settingsForNodeRun.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
@@ -10264,11 +10262,13 @@ async function smartBatchRunSettingsForRef(baseSettings, ref){
         customSize:'', customWidth:'', customHeight:''
     };
 }
-function prepareSmartBatchOutput(node, refs, meta){
-    let output = nodes.find(item => item.id === node.batchOutputNodeId && isSmartImageNode(item) && !item.specialType);
+function prepareSmartBatchOutput(node, refs, meta, options={}){
+    const outputKey=options.outputKey || 'batchOutputNodeId';
+    const outputId=outputKey === 'batchOutputNodeId' ? node.batchOutputNodeId : node[outputKey];
+    let output = nodes.find(item => item.id === outputId && isSmartImageNode(item) && !item.specialType);
     if(!output){
         output = createPendingOutputFromSource(node, refs.length, meta, {selectOutput:true, refs});
-        node.batchOutputNodeId = output.id;
+        node[outputKey] = output.id;
     } else {
         const box = pendingBoxSize(refs.length, {sourceNode:node, refs});
         output.images = [];
@@ -10281,8 +10281,9 @@ function prepareSmartBatchOutput(node, refs, meta){
         attachRunMeta(output, meta);
         if(!(canvas?.connections || []).some(connection => connection.from === node.id && connection.to === output.id)) connectInputNode(node.id, output.id);
     }
-    output.title = '批处理结果';
-    output.batchSourceNodeId = node.id;
+    output.title = options.outputTitle || '批处理结果';
+    if(options.sourceField) output[options.sourceField] = node.id;
+    else output.batchSourceNodeId = node.id;
     output.generationSlots = refs.map((ref, index) => ({
         id:uid('generation-slot'), index, status:'loading',
         sourceRef:{url:ref.url, name:ref.name || `图${index + 1}`}
@@ -10293,20 +10294,23 @@ function prepareSmartBatchOutput(node, refs, meta){
     output.runTimerHidden = false;
     return output;
 }
-async function runSmartBatchGenerator(node){
-    if(!node || node.specialType !== 'batch-generator' || node.batchStatus === 'running') return;
+async function runSmartBatchGenerator(node, options={}){
+    const isLineArt=node?.specialType === 'film-line-art';
+    if(!node || (!isLineArt && node.specialType !== 'batch-generator') || node.batchStatus === 'running') return;
     const refs = smartBatchInputRefs(node);
     if(!refs.length){ toast(tr('smart.batchNeedsImages')); return; }
-    const prompt = smartBatchPrompt(node) || 'Edit the reference image.';
-    const baseSettings = smartMultiViewSettingsForNode(node);
+    const prompt = options.prompt || smartBatchPrompt(node) || 'Edit the reference image.';
+    const baseSettings = options.runSettings || smartMultiViewSettingsForNode(node);
     if(!baseSettings.provider_id || !baseSettings.model){ toast(tr('smart.errNoApiModel')); return; }
     const startedAt = nowMs();
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
     meta.settings = settingsForStorage(baseSettings);
-    const output = prepareSmartBatchOutput(node, refs, meta);
+    const output = isLineArt
+        ? prepareSmartBatchOutput(node, refs, meta, {outputKey:'lineArtOutputNodeId',outputTitle:'线稿分镜结果',sourceField:'lineArtSourceNodeId'})
+        : prepareSmartBatchOutput(node, refs, meta);
     output.runSettings = settingsForStorage(baseSettings);
     const runLog = {
-        nodeId:node.id, nodeType:'batch-generator', kind:'image',
+        nodeId:node.id, nodeType:isLineArt ? 'film-line-art' : 'batch-generator', kind:'image',
         settings:cloneSmartSettings(baseSettings), prompt,
         refs:refs.map(ref => ({url:ref.url, name:ref.name, kind:'image'})),
         size:'per-source'

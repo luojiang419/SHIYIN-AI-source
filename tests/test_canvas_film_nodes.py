@@ -45,6 +45,17 @@ def test_line_art_storyboard_node_has_classic_and_smart_execution_branches():
     assert "if(filmPorts.length || rolePorts.length > 1)" in CLASSIC
 
 
+def test_line_art_storyboard_reuses_batch_image_collection_and_parallel_submission():
+    assert "const refs=batchGeneratorImageRefs(node)" in CLASSIC
+    assert "const submissions=await Promise.allSettled(plans.map(plan=>createCanvasImageTask" in CLASSIC
+    assert "const statuses=await Promise.all(accepted.map(plan=>pollCanvasImageTask" in CLASSIC
+    assert "async function runSmartFilmLineArtNode(node)" in SMART
+    assert "return runSmartBatchGenerator(node,{prompt:window.CanvasFilmNodes.lineArtPrompt(node)" in SMART
+    assert "smartBatchInputRefs(node)" in SMART
+    assert "smartBatchRunSettingsForRef(baseSettings, ref)" in SMART
+    assert "outputKey:'lineArtOutputNodeId'" in SMART
+
+
 def test_film_video_ports_are_grouped_per_actor_and_support_inherited_count():
     assert "function effectiveActorCount(node)" in FILM
     assert "node?.autoActorCount || 0" in FILM

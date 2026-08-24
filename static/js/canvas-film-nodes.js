@@ -63,6 +63,9 @@
             node.aspectRatio = node.aspectRatio || 'source';
             node.resolution = node.resolution || '2k';
             node.quality = node.quality || 'high';
+            node.batchStatus = String(node.batchStatus || 'idle');
+            node.batchError = String(node.batchError || '');
+            node.batchCompleted = Math.max(0, Number(node.batchCompleted) || 0);
         } else {
             node.duration = clamp(node.duration || 5, 1, 60);
             node.aspectRatio = node.aspectRatio || '16:9';
@@ -163,7 +166,8 @@
     }
     function mapping(node, assets=[], options={}){
         const rule = modelRule(node.apiProvider || options.provider, node.model || options.model);
-        const refs = assetList(node, assets).slice(0, rule.maxImages).map((ref,index) => ({
+        const assetRefs = assetList(node, assets);
+        const refs = (node.type === LINE_ART_TYPE ? assetRefs : assetRefs.slice(0, rule.maxImages)).map((ref,index) => ({
             ...ref,
             assetIndex:index + 1,
             asset_index:index + 1,
@@ -219,9 +223,18 @@
         const modelOptions = ['film-storyboard',LINE_ART_TYPE].includes(node.type)
             ? (options.imageModelOptions || options.modelOptions)?.(node) || ''
             : options.modelOptions?.(node) || '';
+        const lineArtAssets = isLineArt ? (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url) : [];
+        const lineArtStatus = node.batchStatus === 'running'
+            ? `正在并行提交 ${lineArtAssets.length} 张图片…`
+            : node.batchStatus === 'error'
+                ? (node.batchError || '部分图片处理失败，可在输出节点重试')
+                : node.batchStatus === 'done'
+                    ? `已完成 ${Number(node.batchCompleted || lineArtAssets.length)} 张图片`
+                    : (lineArtAssets.length ? `已连接 ${lineArtAssets.length} 张图片` : '可输入任意数量图片');
         return `<div class="film-node-panel ${node.type}">
             <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span>${isLineArt ? '<span class="film-line-art-badge">逐帧转换</span>' : '<button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button>'}</div>
             <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
+            ${isLineArt ? `<div class="film-line-art-batch-summary"><strong>${esc(lineArtStatus)}</strong><small>每张图片独立提交，批量并行生成</small></div>` : ''}
             <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
             ${promptHtml(node)}
             <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>

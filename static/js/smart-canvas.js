@@ -97,11 +97,15 @@ const SMART_MARQUEE_RECT_CACHE_ENABLED = true;
 const SMART_PORT_LINK_MUTATION_ENABLED = true;
 // 连接层统一委托点击事件；关闭时回退原逐元素监听，便于异常止损。
 const SMART_CONNECTION_EVENT_DELEGATION_ENABLED = true;
+// 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
+const SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
 let smartSafeLodRaf = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
 let loopInsertPreview = null;
 let selectionState = null;
+let smartSelectionFeedbackState = null;
+const smartConnectionSelectionIndex = new Map();
 let smartCanvasToolMode = 'select';
 let smartTemporaryToolMode = '';
 let smartTemporaryToolCode = '';
@@ -1426,33 +1430,76 @@ function clearImageClickTimer(){
 }
 function syncSelectionUi(){
     const ids = selectedNodeIds();
+    const nextIds = new Set(ids);
+    const imageNodeId = selectedImage.nodeId || '';
+    const previous = smartSelectionFeedbackState;
+    const incremental = SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && smartNodeDomIndex.size > 0;
     world.classList.toggle('smart-multi-selected', ids.length > 1);
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
-    world.querySelectorAll('.image-node').forEach(el => {
-        const id = el.dataset.id || '';
-        el.classList.toggle('selected', isNodeSelected(id));
-        el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
-            const index = Number(item.dataset.imageIndex || 0);
-            item.classList.toggle('image-selected', selectedImage.nodeId === id && selectedImage.index === index);
+    if(incremental){
+        const affectedNodeIds = new Set([...previous.ids, ...nextIds]);
+        if(previous.imageNodeId !== imageNodeId){
+            if(previous.imageNodeId) affectedNodeIds.add(previous.imageNodeId);
+            if(imageNodeId) affectedNodeIds.add(imageNodeId);
+        }
+        affectedNodeIds.forEach(id => {
+            const el = smartNodeDomIndex.get(id);
+            if(!el) return;
+            el.classList.toggle('selected', nextIds.has(id));
+            if(previous.imageNodeId === imageNodeId && previous.imageIndex === Number(selectedImage.index)) return;
+            el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
+                const index = Number(item.dataset.imageIndex || 0);
+                item.classList.toggle('image-selected', imageNodeId === id && Number(selectedImage.index) === index);
+            });
         });
-    });
+    } else {
+        world.querySelectorAll('.image-node').forEach(el => {
+            const id = el.dataset.id || '';
+            el.classList.toggle('selected', nextIds.has(id));
+            el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
+                const index = Number(item.dataset.imageIndex || 0);
+                item.classList.toggle('image-selected', imageNodeId === id && Number(selectedImage.index) === index);
+            });
+        });
+    }
     syncSmartSelectedImageResolution(world);
     syncRunButtonState();
     syncConnectionSelectionUi();
+    smartSelectionFeedbackState = {
+        ids:nextIds,
+        imageNodeId,
+        imageIndex:Number(selectedImage.index),
+        connectionIds:nextIds
+    };
     scheduleSmartSafeLod();
 }
 function syncConnectionSelectionUi(){
     const svg = world.querySelector('svg.connection-layer');
     if(!svg) return;
     const selected = new Set(selectedNodeIds());
+    const previous = smartSelectionFeedbackState?.connectionIds;
+    const incremental = SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && smartConnectionSelectionIndex.size > 0;
     const connectionsByIndex = canvas?.connections || [];
-    svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(hit => {
-        const active = String(hit.dataset.connIndex || '').split(',').some(rawIndex => {
+    const updateHit = hit => {
+        const active = String(hit?.dataset?.connIndex || '').split(',').some(rawIndex => {
             const connection = connectionsByIndex[Number(rawIndex)];
             return connection && (selected.has(connection.from) || selected.has(connection.to));
         });
-        hit.previousElementSibling?.classList.toggle('conn-selected', active);
-    });
+        hit?.previousElementSibling?.classList.toggle('conn-selected', active);
+    };
+    if(incremental){
+        const affected = new Set([...previous, ...selected]);
+        const hits = new Set();
+        affected.forEach(id => (smartConnectionSelectionIndex.get(id) || []).forEach(hit => hits.add(hit)));
+        hits.forEach(updateHit);
+    } else {
+        svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(updateHit);
+    }
+    if(smartSelectionFeedbackState) smartSelectionFeedbackState.connectionIds = selected;
 }
 function isNodeSelected(id){
     return selectedId === id || selectedIds.includes(id);
@@ -7560,6 +7607,8 @@ function markSmartConnectionsDirtyForNodes(ids=[]){
 }
 function rebuildSmartConnectionDomIndex(){
     smartConnectionDom.clear();
+    smartConnectionSelectionIndex.clear();
+    smartSelectionFeedbackState = null;
     const svg = world.querySelector('svg.connection-layer');
     if(!svg) return;
     svg.querySelectorAll('[data-connection-id]').forEach(el => {
@@ -7571,6 +7620,19 @@ function rebuildSmartConnectionDomIndex(){
         else if(el.tagName?.toLowerCase() === 'circle') entry.dot = el;
         else if(el.tagName?.toLowerCase() === 'path') entry.path = el;
         smartConnectionDom.set(id, entry);
+    });
+    const connectionsByIndex = canvas?.connections || [];
+    svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(hit => {
+        if(!hit.previousElementSibling) return;
+        String(hit.dataset.connIndex || '').split(',').forEach(rawIndex => {
+            const connection = connectionsByIndex[Number(rawIndex)];
+            if(!connection) return;
+            [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+                const list = smartConnectionSelectionIndex.get(nodeId) || [];
+                if(!list.includes(hit)) list.push(hit);
+                smartConnectionSelectionIndex.set(nodeId, list);
+            });
+        });
     });
 }
 function smartIncrementalConnectionState(connection, index){
@@ -9225,6 +9287,7 @@ function render(){
     }
     const mutation = smartRenderMutation;
     smartRenderMutation = null;
+    smartSelectionFeedbackState = null;
     const perfEnd = window.CanvasPerformance?.start?.('smart.render', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
     invalidateSmartGeometry();

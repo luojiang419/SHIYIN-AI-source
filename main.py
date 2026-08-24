@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.285"
+APP_VERSION = "1.0.286"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -19952,12 +19952,41 @@ def work_download_name(work: Dict[str, Any], sequence: int = 1) -> str:
 
 def work_local_file_path(work: Dict[str, Any]) -> str:
     url = str(work.get("url") or "").strip()
+    candidates = []
     path = output_file_from_url(url)
-    if not path:
-        path = local_media_file_by_basename(filename_from_media_url(url, ""))
-    if path and os.path.isfile(path):
-        return os.path.abspath(path)
+    if path:
+        candidates.append(path)
+    basename = filename_from_media_url(url, "")
+    if basename:
+        candidates.append(local_media_file_by_basename(basename))
+        # 兼容旧版迁移后仍保留在 exports/generated 的作品。作品接口使用
+        # /assets/output URL，但旧文件实际位于 exports/generated 下，原先会
+        # 因此只能预览/下载，无法定位到文件所在目录。
+        data_layout_exports = getattr(DATA_LAYOUT, "exports", None)
+        if data_layout_exports:
+            candidates.append(os.path.join(os.fspath(data_layout_exports), "generated", basename))
+        candidates.append(os.path.join(os.fspath(OUTPUT_DIR), "generated", basename))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            absolute = os.path.abspath(os.fspath(candidate))
+            if os.path.isfile(absolute):
+                return absolute
+        except (OSError, TypeError, ValueError):
+            continue
     return ""
+
+
+def work_local_file_modified_at(work: Dict[str, Any]) -> float:
+    """返回作品本地文件的精确修改时间；远程作品没有可用值时返回 0。"""
+    path = work_local_file_path(work)
+    if not path:
+        return 0.0
+    try:
+        return float(os.path.getmtime(path) or 0)
+    except (OSError, TypeError, ValueError):
+        return 0.0
 
 
 def generated_work_output_file_path(work: Dict[str, Any]) -> str:
@@ -19981,7 +20010,16 @@ def reveal_file_in_folder(path: str) -> None:
         raise FileNotFoundError(file_path)
     if os.name == "nt":
         explorer = shutil.which("explorer.exe") or "explorer.exe"
-        subprocess.Popen([explorer, f"/select,{file_path}"])
+        try:
+            # 路径可能包含空格；把完整文件路径作为 /select 的一个参数，
+            # 否则 Explorer 会把它拆成多个参数而静默打开失败。
+            subprocess.Popen([explorer, f'/select,"{file_path}"'], close_fds=True)
+        except OSError:
+            start_file = getattr(os, "startfile", None)
+            if not start_file:
+                raise
+            # Explorer 不可用时至少打开文件所在目录，保证按钮仍然可用。
+            start_file(os.path.dirname(file_path))
     elif sys.platform == "darwin":
         subprocess.Popen(["open", "-R", file_path])
     else:
@@ -20058,6 +20096,11 @@ def finalize_work_items(works: List[Dict[str, Any]], offset: int = 0) -> List[Di
     finalized = []
     for index, item in enumerate(works, offset + 1):
         value = normalize_local_media_origins(dict(item))
+        # 同一批生成结果共享历史记录时间，无法区分每个文件的真实完成时间。
+        # 对本地媒体使用文件 mtime，远程媒体或旧文件不存在时继续沿用历史时间。
+        file_created_at = work_local_file_modified_at(value)
+        if file_created_at > 0:
+            value["created_at"] = file_created_at
         value["download_sequence"] = index
         value["download_name"] = work_download_name(value, index)
         custom_name = str(value.get("name") or "").strip()
@@ -20099,12 +20142,17 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
         if asset_id == "canvas-":
             continue
         saved_meta = metadata.get(asset_id) if isinstance(metadata.get(asset_id), dict) else {}
-        original_name = str(item.get("name") or filename_from_media_url(url, "画布资产"))
+        # 作品管理展示的是实际媒体文件名，而不是节点上的通用 label/name。
+        # 节点 label 可能在同一画布内重复，URL basename 才是稳定的文件身份。
+        original_name = filename_from_media_url(url, "画布资产")
         width = int(item.get("width") or item.get("natural_w") or 0)
         height = int(item.get("height") or item.get("natural_h") or 0)
         raw_created_at = float(item.get("created_at") or item.get("canvas_updated_at") or 0)
         if raw_created_at > 10000000000:
             raw_created_at /= 1000.0
+        file_created_at = work_local_file_modified_at({"url": url})
+        if file_created_at > 0:
+            raw_created_at = file_created_at
         works.append({
             "id": asset_id,
             "history_id": f"canvas:{item.get('canvas_id') or ''}",

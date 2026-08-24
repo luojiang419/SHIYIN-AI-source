@@ -249,6 +249,93 @@ class WorksBackendTests(unittest.TestCase):
             self.assertEqual(Path(result["path"]), image)
             popen.assert_called_once()
 
+    def test_canvas_work_items_use_actual_filename_and_file_modified_time(self):
+        with tempfile.TemporaryDirectory() as root:
+            first = Path(root) / "SHIYIN-000101-20260824.png"
+            second = Path(root) / "SHIYIN-000102-20260824.png"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+            os.utime(first, (100, 100))
+            os.utime(second, (200, 200))
+            indexed = {
+                "items": [
+                    {
+                        "id": "asset-1",
+                        "url": "/assets/output/SHIYIN-000101-20260824.png",
+                        "name": "同一个节点名称",
+                        "kind": "image",
+                        "created_at": 999,
+                    },
+                    {
+                        "id": "asset-2",
+                        "url": "/assets/output/SHIYIN-000102-20260824.png",
+                        "name": "同一个节点名称",
+                        "kind": "image",
+                        "created_at": 999,
+                    },
+                ]
+            }
+            paths = {
+                "/assets/output/SHIYIN-000101-20260824.png": str(first),
+                "/assets/output/SHIYIN-000102-20260824.png": str(second),
+            }
+            with (
+                patch.object(self.main, "canvas_assets_index", return_value=indexed),
+                patch.object(self.main, "output_file_from_url", side_effect=lambda url: paths.get(url, "")),
+            ):
+                works = self.main.canvas_generated_work_items({})
+        self.assertEqual([item["original_name"] for item in works], [first.name, second.name])
+        self.assertEqual([item["created_at"] for item in works], [100.0, 200.0])
+        self.assertEqual(len({item["name"] for item in works}), 2)
+
+    def test_generated_work_items_use_each_local_file_modified_time(self):
+        with tempfile.TemporaryDirectory() as root:
+            first = Path(root) / "SHIYIN-000201-20260824.png"
+            second = Path(root) / "SHIYIN-000202-20260824.png"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+            os.utime(first, (300, 300))
+            os.utime(second, (400, 400))
+            paths = {
+                "/assets/output/SHIYIN-000201-20260824.png": str(first),
+                "/assets/output/SHIYIN-000202-20260824.png": str(second),
+            }
+            with patch.object(self.main, "output_file_from_url", side_effect=lambda url: paths.get(url, "")):
+                works = self.main.finalize_work_items([
+                    {
+                        "id": "work-first",
+                        "url": "/assets/output/SHIYIN-000201-20260824.png",
+                        "original_name": first.name,
+                        "name": first.name,
+                        "created_at": 999,
+                    },
+                    {
+                        "id": "work-second",
+                        "url": "/assets/output/SHIYIN-000202-20260824.png",
+                        "original_name": second.name,
+                        "name": second.name,
+                        "created_at": 999,
+                    },
+                ])
+        self.assertEqual([item["created_at"] for item in works], [300.0, 400.0])
+
+    def test_reveal_work_falls_back_to_legacy_exports_generated_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            exports = Path(root) / "exports"
+            legacy = exports / "generated"
+            legacy.mkdir(parents=True)
+            image = legacy / "legacy.png"
+            image.write_bytes(b"image")
+            data_layout = SimpleNamespace(exports=exports)
+            work = {"id": "work-legacy", "url": "/assets/output/legacy.png", "original_name": "legacy.png", "created_at": 20}
+            with (
+                patch.object(self.main, "DATA_LAYOUT", data_layout),
+                patch.object(self.main, "OUTPUT_DIR", str(Path(root) / "exports-root")),
+                patch.object(self.main, "output_file_from_url", return_value=""),
+                patch.object(self.main, "local_media_file_by_basename", return_value=None),
+            ):
+                self.assertEqual(self.main.work_local_file_path(work), str(image.resolve()))
+
     def test_download_all_works_creates_enterprise_named_zip(self):
         with tempfile.TemporaryDirectory() as root:
             first = Path(root) / "first.png"

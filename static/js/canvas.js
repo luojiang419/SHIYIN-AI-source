@@ -373,6 +373,8 @@ const canvasAssetAddCategoryBtn = document.getElementById('canvasAssetAddCategor
 const canvasAssetDropZone = document.getElementById('canvasAssetDropZone');
 const canvasAssetGrid = document.getElementById('canvasAssetGrid');
 const canvasAssetHoverPreview = document.getElementById('canvasAssetHoverPreview');
+const canvasFpsValue = document.getElementById('canvasFpsValue');
+const canvasNodeCountValue = document.getElementById('canvasNodeCountValue');
 const workflowTransferToggle = document.getElementById('workflowTransferToggle');
 const canvasLogToggle = document.getElementById('canvasLogToggle');
 const workflowTransferModal = document.getElementById('workflowTransferModal');
@@ -510,6 +512,29 @@ let emojiPickerCanvasId = null;
 let canvasMetaAnchorId = '';
 let expandedPromptSource = null;
 let storyboardTransformState = null;
+let canvasFrameSample = {last:0, frames:0, fps:0};
+function updateCanvasStats(){
+    if(canvasNodeCountValue) canvasNodeCountValue.textContent = String(nodes.length);
+    if(canvasFpsValue) canvasFpsValue.textContent = canvasFrameSample.fps ? String(Math.round(canvasFrameSample.fps)) : '--';
+}
+function startCanvasStatsLoop(){
+    if(startCanvasStatsLoop.started) return;
+    startCanvasStatsLoop.started = true;
+    const tick = timestamp => {
+        if(canvasFrameSample.last){
+            canvasFrameSample.frames += 1;
+            const elapsed = timestamp - canvasFrameSample.last;
+            if(elapsed >= 500){
+                canvasFrameSample.fps = canvasFrameSample.frames * 1000 / elapsed;
+                canvasFrameSample.frames = 0;
+                canvasFrameSample.last = timestamp;
+                updateCanvasStats();
+            }
+        } else canvasFrameSample.last = timestamp;
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+}
 function openExpandedPromptEditor(source){
     if(!source || !expandedPromptModal || !expandedPromptTextarea) return;
     expandedPromptSource = source;
@@ -7341,6 +7366,7 @@ function render(){
     }
     const perfEnd = window.CanvasPerformance?.start?.('classic.render', {nodes:nodes.length, connections:connections.length});
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    updateCanvasStats();
     nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
     window.CanvasSpecialNodes?.disposePanoramasIn?.(nodesEl);
@@ -9832,15 +9858,14 @@ async function addUrlToCanvasAssetLibrary(url, name=''){
 }
 async function uploadFilesToLibrary(files, libraryId, categoryId){
     const form = new FormData();
+    form.append('library_id', libraryId || '');
+    form.append('category_id', categoryId || '');
     [...files].forEach(file => form.append('files', file));
-    const uploaded = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r => r.json());
-    const items = (uploaded.files || []).filter(file => file?.url).map(file => ({library_id:libraryId, category_id:categoryId, url:file.url, name:file.name || 'asset'}));
-    if(!items.length) return null;
-    return fetch('/api/asset-library/items/batch', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({library_id:libraryId, category_id:categoryId, items})
-    }).then(r => r.json());
+    return fetch('/api/asset-library/items/upload', {method:'POST', body:form}).then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '上传素材失败');
+        return data;
+    });
 }
 function openAssetManager(){
     assetManagerModal?.classList.add('open');
@@ -15211,11 +15236,37 @@ function addGenerationLog({run, outputs=[], runMs=0, error=''}) {
     };
     canvas.logs = [entry, ...canvas.logs].slice(0, CANVAS_GENERATION_LOG_LIMIT);
 }
+async function downloadCanvasLogOutputs(log){
+    const items = (log?.outputs || []).map(item => {
+        const url = outputUrlValue(item);
+        return url ? {url, name:item?.name || outputImageName(url)} : null;
+    }).filter(Boolean);
+    if(!items.length) return;
+    if(items.length === 1){
+        await downloadUrl(items[0].url, items[0].name || outputDownloadName(items[0].url));
+        return;
+    }
+    const response = await fetch('/api/canvas-assets/download', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({filename:`canvas-log-${log.id || Date.now()}.zip`, items})
+    });
+    if(!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '下载生成结果失败');
+    const blob = await response.blob();
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = `canvas-log-${log.id || Date.now()}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1200);
+}
 function renderCanvasLog(){
     const list = document.getElementById('logList') || (typeof logList !== 'undefined' ? logList : null);
     const logs = (typeof canvas !== 'undefined' && Array.isArray(canvas?.logs)) ? canvas.logs : [];
     if(!list) return;
-    list.innerHTML = logs.length ? logs.map(log => {
+    list.innerHTML = logs.length ? logs.map((log, logIndex) => {
         const thumbs = (log.outputs || []).slice(0, 8).map(item => {
             const url = outputUrlValue(item);
             if(!url) return '';
@@ -15240,7 +15291,9 @@ function renderCanvasLog(){
             idText ? `ID ${idText}` : '',
             backendText,
         ].filter(Boolean);
+        const canOperate = (log.outputs || []).some(item => outputUrlValue(item));
         return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
+            <div class="log-thumbs">${thumbs}</div>
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -15252,7 +15305,10 @@ function renderCanvasLog(){
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
             </div>
-            <div class="log-thumbs">${thumbs}</div>
+            <div class="log-actions">
+                <button type="button" class="log-action-btn" data-log-view="${escapeAttr(log.id || String(logIndex))}" ${canOperate ? '' : 'disabled'} title="查看"><i data-lucide="eye"></i><span>查看</span></button>
+                <button type="button" class="log-action-btn" data-log-download="${escapeAttr(log.id || String(logIndex))}" ${canOperate ? '' : 'disabled'} title="下载"><i data-lucide="download"></i><span>下载</span></button>
+            </div>
         </div>`;
     }).join('') : `<div class="log-empty">${tr('canvas.noLogs')}</div>`;
     bindCanvasPreviewImageFallbacks(list);
@@ -15260,6 +15316,27 @@ function renderCanvasLog(){
         el.onclick = e => {
             e.stopPropagation();
             openOutputLightbox(el.dataset.url, null);
+        };
+    });
+    list.querySelectorAll('[data-log-view]').forEach(button => {
+        button.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const log = logs.find((item, index) => String(item.id || index) === String(button.dataset.logView));
+            const first = (log?.outputs || []).map(outputUrlValue).find(Boolean);
+            if(first) openOutputLightbox(first, null);
+        };
+    });
+    list.querySelectorAll('[data-log-download]').forEach(button => {
+        button.onclick = async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const log = logs.find((item, index) => String(item.id || index) === String(button.dataset.logDownload));
+            if(!log) return;
+            button.disabled = true;
+            try { await downloadCanvasLogOutputs(log); }
+            catch(error){ setStatus(error.message || '下载生成结果失败'); }
+            finally { button.disabled = false; }
         };
     });
     const bindCanvasLogCopy = (selector, key) => {
@@ -18502,7 +18579,16 @@ function startLink(e, originId, originKind, originRole=''){
                 openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY, originRole);
             }
         } else if(originKind === 'in'){
-            openLinkCreateMenu(originId, originKind, e2.clientX, e2.clientY, originRole);
+            // 从输入端口拖离并松开：直接断开该输入端口现有连接，避免必须寻找连线删除按钮。
+            const removed = connections.filter(c => c.to === originId && (!originRole || (c.inputRole || '') === originRole));
+            if(removed.length){
+                pushUndo();
+                const removedIds = new Set(removed.map(c => c.id));
+                connections = connections.filter(c => !removedIds.has(c.id));
+                syncGeneratorInputs();
+                scheduleSave();
+                refreshNodes([originId]);
+            }
         }
         tempLink = null;
         window.onmousemove = null;
@@ -19145,7 +19231,9 @@ function renderLinks(){
         path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
     };
     segments.forEach(({c, a, b}) => {
-        const relClass = isConnectionSelected(c) ? ' link-active' : '';
+        const selectedConnection = isConnectionSelected(c);
+        const downstreamSelected = selected.has(c.from);
+        const relClass = selectedConnection ? ` link-active${downstreamSelected ? ' link-breathe' : ''}` : '';
         let entry = classicLinkDom.get(c.id);
         if(!entry){
             entry = {path:pathEl(a.x, a.y, b.x, b.y, `link${relClass}`), hit:linkHitEl(a.x, a.y, b.x, b.y, c.id)};
@@ -20010,6 +20098,8 @@ function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']
 function escapeAttr(str){ return escapeHtml(str); }
 
 window.onload = async () => {
+    startCanvasStatsLoop();
+    updateCanvasStats();
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem(CANVAS_THEME_KEY) || 'light');
     loadClassicShortcutLocalFallback();
     void loadClassicShortcutSettings();

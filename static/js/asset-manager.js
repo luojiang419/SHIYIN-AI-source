@@ -2439,26 +2439,16 @@ async function uploadFiles(files){
     const cat = activeAssetCategory();
     if(!cat) throw new Error('请先创建图片分组');
     const form = new FormData();
+    form.append('library_id', activeAssetLibraryId || '');
+    form.append('category_id', activeAssetCategoryId || '');
     [...files].forEach(file => form.append('files', file));
-    const uploaded = await apiJson('/api/ai/upload', {method:'POST', body:form});
-    const items = (uploaded.files || []).filter(file => file?.url).map(file => ({
-        library_id:activeAssetLibraryId,
-        category_id:activeAssetCategoryId,
-        url:file.url,
-        name:file.name || 'asset'
-    }));
-    if(!items.length) throw new Error('没有可保存的素材');
-    const data = await apiJson('/api/asset-library/items/batch', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({library_id:activeAssetLibraryId, category_id:activeAssetCategoryId, items})
-    });
+    const data = await apiJson('/api/asset-library/items/upload', {method:'POST', body:form});
     assetLibrary = data.library || assetLibrary;
     selectedAssetIds.clear();
     selectedAssetId = data.items?.[0]?.id || selectedAssetId;
     render();
-    setStatus(`已上传 ${items.length} 个素材`);
-    return {count:items.length, items:data.items || []};
+    setStatus(`已上传 ${data.items?.length || 0} 个素材`);
+    return {count:data.items?.length || 0, items:data.items || []};
 }
 async function uploadWorkflowFiles(files){
     const cat = activeWorkflowCategory();
@@ -4604,15 +4594,30 @@ root.addEventListener('change', event => {
 });
 root.addEventListener('dragover', event => {
     const drop = event.target.closest?.('#assetDrop, #localUploadDrop');
+    const assetSurface = activeTab === 'assets' && event.target.closest?.('.asset-content');
+    if(assetSurface && event.dataTransfer?.files?.length){
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        assetSurface.classList.add('external-drag-over');
+        return;
+    }
     if(!drop) return;
     event.preventDefault();
     drop.classList.add('drag-over');
 });
 root.addEventListener('dragleave', event => {
+    event.target.closest?.('.asset-content')?.classList.remove('external-drag-over');
     event.target.closest?.('#assetDrop, #localUploadDrop')?.classList.remove('drag-over');
 });
 root.addEventListener('drop', event => {
     const drop = event.target.closest?.('#assetDrop, #localUploadDrop');
+    const assetSurface = activeTab === 'assets' && event.target.closest?.('.asset-content');
+    if(assetSurface && !drop && event.dataTransfer?.files?.length){
+        event.preventDefault();
+        assetSurface.classList.remove('external-drag-over');
+        uploadFiles(event.dataTransfer.files).catch(err => setStatus(err.message || '上传失败'));
+        return;
+    }
     if(!drop) return;
     event.preventDefault();
     drop.classList.remove('drag-over');

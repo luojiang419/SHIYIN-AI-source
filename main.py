@@ -4526,7 +4526,13 @@ def canvas_asset_url_value(value):
     if isinstance(value, str):
         return value.strip()
     if isinstance(value, dict):
-        for key in ("url", "path", "src", "uri", "output", "output_url", "outputUrl", "video", "video_url", "videoUrl"):
+        for key in (
+            "url", "path", "src", "uri", "output", "output_url", "outputUrl",
+            "video", "video_url", "videoUrl", "image", "image_url", "imageUrl",
+            "audio", "audio_url", "audioUrl", "file_url", "fileUrl", "download_url",
+            "downloadUrl", "source_url", "sourceUrl", "local_url", "localUrl",
+            "thumbnail", "thumbnail_url", "thumbnailUrl", "preview", "preview_url", "previewUrl",
+        ):
             text = str(value.get(key) or "").strip()
             if text:
                 return text
@@ -4564,8 +4570,6 @@ def iter_canvas_asset_values(value, path=""):
         if url:
             yield path, value, url
         for key, child in value.items():
-            if key in {"run", "runs", "settings", "params", "metadata", "meta", "prompt", "text", "caption", "logs"}:
-                continue
             yield from iter_canvas_asset_values(child, f"{path}.{key}" if path else str(key))
     elif isinstance(value, list):
         for index, child in enumerate(value):
@@ -18946,6 +18950,51 @@ async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
                 item["classification"] = classification
         cat.setdefault("items", []).append(item)
         added.append(item)
+    save_asset_library(lib)
+    return {"library": lib, "items": added}
+
+@app.post("/api/asset-library/items/upload")
+async def upload_asset_library_items(
+    files: List[UploadFile] = File(...),
+    library_id: str = Form(""),
+    category_id: str = Form(""),
+):
+    """外部拖拽直传素材库：文件直接落到当前库/分组目录，避免先写入临时 input 再复制。"""
+    lib = load_asset_library()
+    cat = find_asset_category_in_library(lib, category_id, library_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="素材分组不存在")
+    if str(cat.get("type") or "image").lower() == "workflow":
+        raise HTTPException(status_code=400, detail="工作流分组请上传 JSON 或 ZIP 文件")
+    dest_dir = os.path.join(ASSET_LIBRARY_DIR, str(cat.get("dir") or "").strip("/"))
+    os.makedirs(dest_dir, exist_ok=True)
+    added = []
+    for file in files[:200]:
+        content = await file.read()
+        if not content:
+            continue
+        if len(content) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"{file.filename or '素材'} 超过 50MB")
+        kind, ext = _local_upload_kind_ext(file.filename or "", file.content_type or "")
+        if kind not in {"image", "video", "audio"}:
+            continue
+        # 先写到数据临时目录，再由统一资产函数生成安全、唯一的分类文件名。
+        temp_path = os.path.join(DATA_LAYOUT.temp, f"asset_drop_{uuid.uuid4().hex}{ext}")
+        try:
+            with open(temp_path, "wb") as handle:
+                handle.write(content)
+            _, item = make_asset_library_item(temp_path, file.filename or "asset", subdir=cat.get("dir") or "")
+            if item.get("kind") == "image":
+                classification = await classify_asset_image_best_effort(output_file_from_url(item.get("url") or "") or temp_path)
+                if classification:
+                    item["classification"] = classification
+            cat.setdefault("items", []).append(item)
+            added.append(item)
+        finally:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
     save_asset_library(lib)
     return {"library": lib, "items": added}
 

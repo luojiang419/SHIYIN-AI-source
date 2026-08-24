@@ -145,6 +145,10 @@
                 <div id="nodes"></div>
             </div>
             <button id="canvasArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i><span>整理选中</span></button>
+            <div id="canvasStats" class="canvas-stats" aria-live="polite" aria-label="画布状态">
+                <span><i data-lucide="gauge" class="w-3.5 h-3.5"></i><b id="canvasFpsValue">--</b><em>FPS</em></span>
+                <span><i data-lucide="boxes" class="w-3.5 h-3.5"></i><b id="canvasNodeCountValue">0</b><em>节点</em></span>
+            </div>
             <div id="minimap" class="minimap" title="导航地图">
                 <div id="minimapContent" class="minimap-content">
                     <div id="minimapViewport" class="minimap-viewport"></div>

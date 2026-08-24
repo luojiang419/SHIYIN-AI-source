@@ -188,7 +188,11 @@
             <div id="promptTemplateCats" class="prompt-template-cats"></div>
             <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
-        <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+                <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+                <div id="smartCanvasStats" class="smart-canvas-stats" aria-live="polite" aria-label="画布状态">
+                    <span><i data-lucide="gauge" aria-hidden="true"></i><b id="smartFpsValue">--</b><em>FPS</em></span>
+                    <span><i data-lucide="boxes" aria-hidden="true"></i><b id="smartNodeCountValue">0</b><em>节点</em></span>
+                </div>
         <div id="minimap" class="smart-minimap" aria-hidden="true">
             <div id="minimapContent" class="smart-minimap-content">
                 <div id="minimapViewport" class="smart-minimap-viewport"></div>

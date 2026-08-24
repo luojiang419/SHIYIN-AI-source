@@ -25,6 +25,8 @@ const smartArrangeMenuBtn = document.getElementById('smartArrangeMenuBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const smartLogList = document.getElementById('smartLogList');
+const smartFpsValue = document.getElementById('smartFpsValue');
+const smartNodeCountValue = document.getElementById('smartNodeCountValue');
 const smartShortcutModal = document.getElementById('smartShortcutModal');
 const smartShortcutList = document.getElementById('smartShortcutList');
 const smartWorkflowToggle = document.getElementById('smartWorkflowToggle');
@@ -450,6 +452,27 @@ let panoramaState = {
 };
 window.__smartCanvasPanoramaState = panoramaState;
 let viewport = {x:0, y:0, scale:1};
+let smartCanvasFrameSample = {last:0, frames:0, fps:0};
+function updateSmartCanvasStats(){
+    if(smartNodeCountValue) smartNodeCountValue.textContent = String(nodes.length);
+    if(smartFpsValue) smartFpsValue.textContent = smartCanvasFrameSample.fps ? String(smartCanvasFrameSample.fps) : '--';
+}
+function startSmartCanvasStatsLoop(){
+    const tick = now => {
+        smartCanvasFrameSample.frames += 1;
+        if(!smartCanvasFrameSample.last) smartCanvasFrameSample.last = now;
+        const elapsed = now - smartCanvasFrameSample.last;
+        if(elapsed >= 500){
+            smartCanvasFrameSample.fps = Math.round(smartCanvasFrameSample.frames * 1000 / elapsed);
+            smartCanvasFrameSample.frames = 0;
+            smartCanvasFrameSample.last = now;
+            updateSmartCanvasStats();
+        }
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    updateSmartCanvasStats();
+}
 let settings = {
     engine:'api',
     apiKind:'image',
@@ -1415,7 +1438,13 @@ function syncConnectionSelectionUi(){
             const connection = connectionsByIndex[Number(rawIndex)];
             return connection && (selected.has(connection.from) || selected.has(connection.to));
         });
-        hit.previousElementSibling?.classList.toggle('conn-selected', active);
+        const path = hit.previousElementSibling;
+        path?.classList.toggle('conn-selected', active);
+        const breathe = String(hit.dataset.connIndex || '').split(',').some(rawIndex => {
+            const connection = connectionsByIndex[Number(rawIndex)];
+            return connection && selected.has(connection.from);
+        });
+        path?.classList.toggle('conn-breathe', breathe);
     });
 }
 function isNodeSelected(id){
@@ -6673,6 +6702,24 @@ async function addUrlToAssetLibrary(url, name=''){
     setAssetLibraryFromResponse(data);
     toast(tr('smart.assetSaved'));
 }
+async function addFilesToAssetLibrary(files=[]){
+    if(assetLibraryIsLocal()) return addFilesToLocalAssetLibrary(files);
+    const cat = activeAssetCategory();
+    if(!cat){ toast(tr('smart.assetNoFolder')); return []; }
+    const supported = [...(files || [])].filter(isSupportedUploadFile);
+    if(!supported.length) return [];
+    const form = new FormData();
+    form.append('library_id', activeAssetLibraryId || '');
+    form.append('category_id', cat.id);
+    supported.forEach(file => form.append('files', file, file.name || 'media'));
+    const data = await fetch('/api/asset-library/items/upload', {method:'POST', body:form}).then(async response => {
+        if(!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || tr('smart.assetAddFail'));
+        return response.json();
+    });
+    setAssetLibraryFromResponse(data);
+    toast(`已保存 ${data.items?.length || 0} 个素材`);
+    return data.items || [];
+}
 function localAssetFolderPath(){
     const cat = activeAssetCategory();
     return cat && cat.id !== '__root__' ? (cat.id || '') : '';
@@ -7226,7 +7273,8 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
             isCascade && Boolean(cascadeState) && cascadeState !== 'done' ? 'conn-cascade-wait' : '',
             isCascade && cascadeState === 'active' ? 'conn-cascade-active' : '',
             isHistory ? 'conn-history' : '',
-            isSelectedLine ? 'conn-selected' : ''
+            isSelectedLine ? 'conn-selected' : '',
+            selectedConnIds.has(item.from) ? 'conn-breathe' : ''
         ].filter(Boolean).join(' ');
         const color = isCascade ? '#16a34a' : isHistory ? 'rgba(118,111,104,0.46)' : kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
         const opacity = isPendingLine ? '.82' : '1';
@@ -7941,7 +7989,7 @@ function smartLogPreviewNode(url, kind='image'){
 }
 function renderSmartCanvasLog(){
     const logs = canvas?.logs || [];
-    smartLogList.innerHTML = logs.length ? logs.map(log => {
+    smartLogList.innerHTML = logs.length ? logs.map((log, logIndex) => {
         const outputs = (log.outputs || []).map(smartLogOutputItem).filter(item => item?.url);
         const thumbs = outputs.slice(0, 8).map(item => {
             const safe = escapeAttr(item.url);
@@ -7963,7 +8011,9 @@ function renderSmartCanvasLog(){
             taskId ? `ID ${taskId}` : '',
             backend
         ].filter(Boolean);
+        const canDownload = outputs.length > 0;
         return `<div class="log-item ${log.status === 'failed' ? 'failed' : ''}">
+            <div class="log-thumbs">${thumbs}</div>
             <div class="log-main">
                 <div class="log-meta">
                     <span class="log-chip ${log.status === 'failed' ? 'status-failed' : 'status-ok'}">${escapeHtml(log.status === 'failed' ? tr('canvas.failed') : tr('canvas.success'))}</span>
@@ -7975,7 +8025,10 @@ function renderSmartCanvasLog(){
                 ${log.error ? `<div class="log-error" title="${escapeAttr(log.error)}" data-error="${escapeAttr(log.error)}">${escapeHtml(log.error)}</div>` : ''}
                 <div class="log-prompt" title="${escapeAttr(log.prompt || tr('canvas.noPromptMeta'))}" data-prompt="${escapeAttr(log.prompt || '')}">${escapeHtml(log.prompt || tr('canvas.noPromptMeta'))}</div>
             </div>
-            <div class="log-thumbs">${thumbs}</div>
+            <div class="log-actions">
+                <button type="button" class="log-action-btn" data-smart-log-view="${logIndex}" ${canDownload ? '' : 'disabled'}>查看</button>
+                <button type="button" class="log-action-btn" data-smart-log-download="${logIndex}" ${canDownload ? '' : 'disabled'}>下载</button>
+            </div>
         </div>`;
     }).join('') : `<div class="log-empty">${escapeHtml(tr('canvas.noLogs'))}</div>`;
     bindSmartPreviewImageFallbacks(smartLogList);
@@ -7983,6 +8036,23 @@ function renderSmartCanvasLog(){
         el.onclick = e => {
             e.stopPropagation();
             smartLogPreviewNode(el.dataset.url, el.dataset.kind || 'image');
+        };
+    });
+    smartLogList.querySelectorAll('[data-smart-log-view]').forEach(el => {
+        el.onclick = e => {
+            e.stopPropagation();
+            const log = logs[Number(el.dataset.smartLogView)];
+            const item = (log?.outputs || []).map(smartLogOutputItem).find(output => output?.url);
+            if(item) smartLogPreviewNode(item.url, item.kind || (outputUrlLooksVideo(item.url) ? 'video' : 'image'));
+        };
+    });
+    smartLogList.querySelectorAll('[data-smart-log-download]').forEach(el => {
+        el.onclick = async e => {
+            e.stopPropagation();
+            const log = logs[Number(el.dataset.smartLogDownload)];
+            const items = (log?.outputs || []).map(smartLogOutputItem).filter(output => output?.url);
+            if(items.length === 1) downloadPreviewFile(items[0]);
+            else if(items.length > 1) await zipDownloadImageItems(`generation-log-${Number(el.dataset.smartLogDownload) + 1}`, items);
         };
     });
     const bindLogCopy = (selector, key) => {
@@ -8830,6 +8900,7 @@ function render(){
     }
     const mutation = smartRenderMutation;
     smartRenderMutation = null;
+    updateSmartCanvasStats();
     const perfEnd = window.CanvasPerformance?.start?.('smart.render', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
     world.classList.toggle('smart-large-scene', nodes.length > 200);
@@ -9535,6 +9606,20 @@ function handlePortDrop(drag, e){
         return;
     }
     if(!drag.moved){ discardPendingUndo(); render(); return; }
+    if(drag.fromPort === 'in'){
+        const before = (canvas?.connections || []).length;
+        const role = drag.fromRole || '';
+        canvas.connections = (canvas.connections || []).filter(connection => !(connection.to === drag.fromId && (!role || (connection.inputRole || '') === role)));
+        if(canvas.connections.length !== before){
+            commitPendingUndo();
+            render();
+            scheduleSave();
+        } else {
+            discardPendingUndo();
+            render();
+        }
+        return;
+    }
     if(hit?.closest?.('.composer,.smart-back,.smart-canvas-tool-switch,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.smart-minimap')){
         discardPendingUndo(); render(); return;
     }
@@ -19254,11 +19339,7 @@ async function handleAssetPanelDrop(e){
     try {
         const payload = await resolveSmartImageDropPayload(e.dataTransfer);
         if(payload.type === 'files') {
-            if(assetLibraryIsLocal()) await addFilesToLocalAssetLibrary(payload.files);
-            else {
-                const uploaded = await uploadFiles(payload.files);
-                for(const file of uploaded) if(file?.url) await addUrlToAssetLibrary(file.url, file.name || '');
-            }
+            await addFilesToAssetLibrary(payload.files);
         } else if(payload.type === 'localPaths') {
             if(assetLibraryIsLocal()) await addLocalPathsToLocalAssetLibrary(payload.localPaths);
             else {
@@ -19703,6 +19784,7 @@ function scheduleSmartSecondaryStartup(){
     else setTimeout(run, 0);
 }
 window.onload = async () => {
+    startSmartCanvasStatsLoop();
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem('canvas_theme') || 'light');
     loadSmartShortcutLocalFallback();
     loadPromptPresets();

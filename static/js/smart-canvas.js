@@ -88,6 +88,10 @@ let selectedId = '';
 let selectedIds = [];
 let selectedImage = {nodeId:'', index:-1};
 let dragState = null;
+// 安全视口 LOD 只延迟普通节点 body；节点外壳、端口、模型和特殊节点始终保留。
+const SMART_SAFE_LOD_ENABLED = true;
+const SMART_SAFE_LOD_MARGIN = 480;
+let smartSafeLodRaf = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
 let loopInsertPreview = null;
@@ -1409,6 +1413,7 @@ function syncSelectionUi(){
     syncSmartSelectedImageResolution(world);
     syncRunButtonState();
     syncConnectionSelectionUi();
+    scheduleSmartSafeLod();
 }
 function syncConnectionSelectionUi(){
     const svg = world.querySelector('svg.connection-layer');
@@ -2904,7 +2909,46 @@ function applyViewport(){
     world.classList.toggle('canvas-scaled', Math.abs(viewport.scale - 1) > 0.001);
     shell.style.backgroundSize = '24px 24px';
     shell.style.backgroundPosition = '0 0';
+    scheduleSmartSafeLod();
     scheduleSmartMinimapViewportUpdate();
+}
+function scheduleSmartSafeLod(){
+    if(smartSafeLodRaf || !world) return;
+    smartSafeLodRaf = requestAnimationFrame(() => {
+        smartSafeLodRaf = 0;
+        updateSmartSafeLod();
+    });
+}
+function updateSmartSafeLod(){
+    if(!world) return;
+    const largeScene = SMART_SAFE_LOD_ENABLED && nodes.length > 200;
+    world.classList.toggle('smart-lod-active', largeScene);
+    const viewX = -viewport.x / Math.max(0.05, viewport.scale || 1);
+    const viewY = -viewport.y / Math.max(0.05, viewport.scale || 1);
+    const viewW = shell.clientWidth / Math.max(0.05, viewport.scale || 1);
+    const viewH = shell.clientHeight / Math.max(0.05, viewport.scale || 1);
+    const margin = SMART_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
+    const minX = viewX - margin, minY = viewY - margin;
+    const maxX = viewX + viewW + margin, maxY = viewY + viewH + margin;
+    const keepIds = new Set(selectedNodeIds());
+    (dragState?.group || []).forEach(item => keepIds.add(item?.id));
+    if(dragState?.id) keepIds.add(dragState.id);
+    if(resizeState?.id) keepIds.add(resizeState.id);
+    if(portDragState?.fromId) keepIds.add(portDragState.fromId);
+    if(portDragState?.hoverTargetId) keepIds.add(portDragState.hoverTargetId);
+    if(loopInsertPreview?.nodeId) keepIds.add(loopInsertPreview.nodeId);
+    world.querySelectorAll('.image-node.smart-lod-safe').forEach(el => {
+        const node = smartNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
+        if(!node){ el.classList.remove('smart-lod-outside'); return; }
+        const rect = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
+        const intersects = rect.x < maxX && rect.x + rect.width > minX && rect.y < maxY && rect.y + rect.height > minY;
+        const outside = largeScene && !intersects && !keepIds.has(node.id);
+        const nextState = outside ? 'deferred' : 'full';
+        if(el.dataset.lodState !== nextState){
+            el.classList.toggle('smart-lod-outside', outside);
+            el.dataset.lodState = nextState;
+        }
+    });
 }
 function screenToWorld(event){
     const rect = shell.getBoundingClientRect();
@@ -9038,11 +9082,12 @@ function render(){
         const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length : (isGroup ? displayCount : 0);
         const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
         const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
+        const smartLodSafe = !isSpecial && !isSmartGroup && !isPrompt && !isLoop && !isGroup && !isHistory;
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
         const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const html = `<div class="image-node ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
@@ -11067,6 +11112,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             }
             document.body.classList.add('smart-node-resize');
             capturePendingUndo();
+            scheduleSmartSafeLod();
         });
         const beginNodeDrag = e => {
             if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button')) return;
@@ -11091,6 +11137,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             }).filter(Boolean);
             window.CanvasPerformance?.beginInteraction?.('smart.node-drag', {nodes:group.length, total:nodes.length});
             dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
+            scheduleSmartSafeLod();
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();
         };
@@ -11110,6 +11157,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                     hoverRole:'',
                     moved:false
                 };
+                scheduleSmartSafeLod();
                 window.CanvasPerformance?.beginInteraction?.('smart.port-link', {nodes:nodes.length, connections:(canvas?.connections || []).length, fromPort:portType});
                 shell.classList.add('port-dragging');
                 capturePendingUndo();
@@ -18918,6 +18966,7 @@ window.onmouseup = e => {
         clearDropHighlight();
         loopInsertPreview = null;
         dragState = null;
+        scheduleSmartSafeLod();
         scheduleSave();
         scheduleConnectionLayerRefresh();
         scheduleSmartMinimapRender();

@@ -465,6 +465,10 @@ let videoFrameOpenSequence = 0;
 let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
 let dragNode = null;
+// 安全视口 LOD 只作用于普通节点 body；节点模型、外壳和端口始终保留。
+const CLASSIC_SAFE_LOD_ENABLED = true;
+const CLASSIC_SAFE_LOD_MARGIN = 480;
+let classicSafeLodRaf = 0;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
 let canvasMutationBatchDepth = 0;
@@ -1612,6 +1616,7 @@ function rebuildCanvasDomIndexes(){
 }
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    scheduleClassicSafeLod();
     scheduleMinimapViewportUpdate();
     scheduleSelectionHubPosition();
 }
@@ -1629,6 +1634,42 @@ function estimatedNodeRect(n){
     const rect = {x:n.x || 0, y:n.y || 0, w, h};
     canvasNodeRectIndex.set(n.id, rect);
     return rect;
+}
+function scheduleClassicSafeLod(){
+    if(classicSafeLodRaf || !nodesEl) return;
+    classicSafeLodRaf = requestAnimationFrame(() => {
+        classicSafeLodRaf = 0;
+        updateClassicSafeLod();
+    });
+}
+function updateClassicSafeLod(){
+    if(!nodesEl) return;
+    const largeScene = CLASSIC_SAFE_LOD_ENABLED && nodes.length > 200;
+    nodesEl.classList.toggle('canvas-lod-active', largeScene);
+    const view = currentWorldViewRect();
+    const margin = CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
+    const minX = view.x - margin, minY = view.y - margin;
+    const maxX = view.x + view.w + margin, maxY = view.y + view.h + margin;
+    const keepIds = new Set(selected);
+    if(dragNode){
+        keepIds.add(dragNode.node?.id);
+        (dragNode.children || []).forEach(item => keepIds.add(item.node?.id));
+    }
+    if(resizeNode?.node?.id) keepIds.add(resizeNode.node.id);
+    if(tempLink?.from && !String(tempLink.from).startsWith('selection:')) keepIds.add(tempLink.from);
+    if(linkCreateState?.originId) keepIds.add(linkCreateState.originId);
+    nodesEl.querySelectorAll('.node.canvas-lod-safe').forEach(el => {
+        const node = canvasNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
+        if(!node){ el.classList.remove('canvas-lod-outside'); return; }
+        const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
+        const intersects = rect.x < maxX && rect.x + rect.w > minX && rect.y < maxY && rect.y + rect.h > minY;
+        const outside = largeScene && !intersects && !keepIds.has(node.id);
+        const nextState = outside ? 'deferred' : 'full';
+        if(el.dataset.lodState !== nextState){
+            el.classList.toggle('canvas-lod-outside', outside);
+            el.dataset.lodState = nextState;
+        }
+    });
 }
 function currentWorldViewRect(){
     const rect = board.getBoundingClientRect();
@@ -8944,7 +8985,7 @@ function renderNode(node){
     const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
     const canvasLodSafe = ![
-        'panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'
+        'panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle','group','promptGroup'
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
         && !window.CanvasFilmNodes?.isType?.(node.type);
@@ -18531,6 +18572,7 @@ function startNodeDrag(e, node){
     const children = [...collected.values()];
     window.CanvasPerformance?.beginInteraction?.('classic.node-drag', {nodes:1 + children.length, total:nodes.length});
     dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y};
+    scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
     window.onmouseup = endDrag;
@@ -18574,6 +18616,7 @@ function startNodeResize(e, node){
         sw:(rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w),
         sh:(rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160)
     };
+    scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-resize');
     window.onmousemove = onNodeResize;
     window.onmouseup = endDrag;
@@ -18605,6 +18648,7 @@ function startLink(e, originId, originKind, originRole=''){
     const source = nodes.find(n => n.id === originId);
     window.CanvasPerformance?.beginInteraction?.('classic.port-link', {nodes:nodes.length, connections:connections.length, originKind});
     tempLink = {from:originId, originKind, originRole, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
+    scheduleClassicSafeLod();
     window.onmousemove = e2 => {
         const p = screenToWorld(e2.clientX, e2.clientY);
         tempLink.x2 = p.x;
@@ -18804,6 +18848,7 @@ function endDrag(event=null){
     dragNode = null;
     dragBoard = null;
     resizeNode = null;
+    scheduleClassicSafeLod();
     llmPaneDrag = null;
     knifeActive = false;
     knifePoint = null;
@@ -19437,6 +19482,7 @@ function refreshSelectionVisuals(){
     });
     syncCanvasSelectedImageResolution(nodesEl);
     syncConnectionSelectionVisuals();
+    scheduleClassicSafeLod();
     renderSelectionHub();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
     scheduleMinimapRender();

@@ -224,6 +224,9 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node { position:absolute; min-width:220px; min-height:96px; border:1px solid var(--line); border-radius:22px; background:var(--card); box-shadow:0 16px 42px var(--shadow); overflow:visible; user-select:none; z-index:2; }
 /* LOD 只放在节点内部，节点外层必须保持可溢出以显示左右端口。 */
 #nodes.canvas-large-scene > .node.canvas-lod-safe > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+/* JS 只给视口外普通节点加 deferred；节点外壳和端口不参与 LOD。 */
+#nodes.canvas-lod-active > .node.canvas-lod-safe.canvas-lod-outside > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+#nodes.canvas-lod-active > .node.canvas-lod-safe:not(.canvas-lod-outside) > .node-body { content-visibility:visible; contain: none; }
 .node::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--card); pointer-events:none; z-index:-1; overflow:hidden; }
 .node.sized { display:flex; flex-direction:column; }
 .node.selected { outline:2px solid var(--strong); outline-offset:2px; }

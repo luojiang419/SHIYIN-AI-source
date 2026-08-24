@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.290"
+APP_VERSION = "1.0.291"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -20033,6 +20033,21 @@ def work_local_file_path(work: Dict[str, Any]) -> str:
     return ""
 
 
+def work_media_type(work: Dict[str, Any]) -> str:
+    """返回作品实际媒体类型，而不是生成任务类型。"""
+    explicit = str(work.get("media_type") or work.get("mediaKind") or "").strip().lower()
+    if "video" in explicit:
+        return "video"
+    if "audio" in explicit:
+        return "audio"
+    kind = str(work.get("kind") or "").strip().lower()
+    if "video" in kind:
+        return "video"
+    if "audio" in kind:
+        return "audio"
+    return asset_library_media_kind(str(work.get("url") or "").strip())
+
+
 def work_local_file_modified_at(work: Dict[str, Any]) -> float:
     """返回作品本地文件的精确修改时间；远程作品没有可用值时返回 0。"""
     path = work_local_file_path(work)
@@ -20120,6 +20135,12 @@ def generated_work_items(records: List[Dict[str, Any]], metadata: Optional[Dict[
                 "original_name": original_name,
                 "url": url,
                 "kind": str(record.get("type") or "image"),
+                "media_type": (
+                    "video"
+                    if any("video" in str(item_meta.get(key) or "").lower() for key in ("kind", "mediaKind", "type"))
+                    or asset_library_media_kind(url) == "video"
+                    else "image"
+                ),
                 "operation": str(record.get("operation") or params.get("operation") or ""),
                 "created_at": created_at,
                 "prompt": str(record.get("prompt") or params.get("prompt") or ""),
@@ -20147,6 +20168,7 @@ def finalize_work_items(works: List[Dict[str, Any]], offset: int = 0) -> List[Di
     finalized = []
     for index, item in enumerate(works, offset + 1):
         value = normalize_local_media_origins(dict(item))
+        value["media_type"] = work_media_type(value)
         # 同一批生成结果共享历史记录时间，无法区分每个文件的真实完成时间。
         # 对本地媒体使用文件 mtime，远程媒体或旧文件不存在时继续沿用历史时间。
         file_created_at = work_local_file_modified_at(value)
@@ -20212,6 +20234,7 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
             "original_name": original_name,
             "url": url,
             "kind": kind,
+            "media_type": kind,
             "operation": "canvas",
             "created_at": raw_created_at,
             "prompt": str(item.get("node_title") or item.get("canvas_title") or ""),
@@ -20275,7 +20298,7 @@ async def list_generated_works(
             continue
         if normalized_kind and str(item.get("kind") or "").lower() != normalized_kind:
             continue
-        if normalized_media != "all" and str(item.get("kind") or "").lower() != normalized_media:
+        if normalized_media != "all" and work_media_type(item) != normalized_media:
             continue
         if query:
             haystack = " ".join(str(item.get(key) or "") for key in ("name", "original_name", "prompt", "model", "operation", "url", "canvas_title")).lower()

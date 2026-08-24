@@ -199,6 +199,18 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         render = body(SMART_CANVAS_JS, "function render(){", "function registerSmartCanvasPerfFixture")
         self.assertIn("refreshIcons(root)", render)
         self.assertIn("measureSmartNodeImages(nodeIndex, root)", render)
+        input_thumbs = body(SMART_CANVAS_JS, "function renderInputThumbsRow(node)", "function bindInputThumbReferenceActions")
+        self.assertIn("refreshIcons(inputThumbsRow)", input_thumbs)
+        self.assertNotIn("refreshIcons();", input_thumbs)
+        dynamic = body(SMART_CANVAS_JS, "function renderDynamicParams()", "function renderApiParams")
+        self.assertIn("refreshIcons(dynamicParams)", dynamic)
+        self.assertNotIn("refreshIcons();", dynamic)
+        editor_mode = body(SMART_CANVAS_JS, "function setImageEditMode", "let previewCompareOn")
+        self.assertIn("refreshIcons(imageEditModal)", editor_mode)
+        self.assertNotIn("refreshIcons();", editor_mode)
+        cascade_button = body(SMART_CANVAS_JS, "function syncCascadeRunButton", "function loadNodePromptDraftToInput")
+        self.assertIn("refreshIcons(cascadeRunBtn)", cascade_button)
+        self.assertNotIn("refreshIcons();", cascade_button)
 
     def test_hidden_smart_toolbar_does_not_apply_backdrop_filter(self):
         css = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")

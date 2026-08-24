@@ -4056,7 +4056,7 @@ function renderDynamicParams(){
     restoreDynamicParamsScroll(scrollState);
     updatePromptPlaceholder();
     persistActiveSmartSettings();
-    refreshIcons();
+    refreshIcons(dynamicParams);
 }
 function renderApiParams(){
     const providers = imageProviders();
@@ -12279,7 +12279,7 @@ function setImageEditMode(mode, userTouched=false){
     syncBrushToolButtons();
     syncTextToolState(true);
     updatePreviewNavButtons();
-    refreshIcons();
+    refreshIcons(imageEditModal);
 }
 let previewCompareOn = false;
 let previewCompareIndex = -1;
@@ -14629,7 +14629,7 @@ function renderInputThumbsRow(node){
     if(!dedup.length){
         inputThumbsRow.innerHTML = `<div class="input-thumb-list empty"></div><div class="input-thumb-actions">${addButton}</div>`;
         bindInputThumbReferenceActions();
-        refreshIcons();
+        refreshIcons(inputThumbsRow);
         return;
     }
     const mediaCounters = {image:0, video:0, audio:0, text:0, file:0};
@@ -14657,7 +14657,7 @@ function renderInputThumbsRow(node){
     bindSmartPreviewImageFallbacks(inputThumbsRow);
     bindInputThumbsDrag(node, dedup, manualRefKeys);
     bindInputThumbReferenceActions();
-    refreshIcons();
+    refreshIcons(inputThumbsRow);
 }
 function bindInputThumbReferenceActions(){
     inputThumbsRow?.querySelectorAll('[data-input-add-reference]').forEach(btn => {
@@ -15979,7 +15979,7 @@ function renderMentionPicker(source){
             else insertMentionToken(item);
         });
     });
-    refreshIcons();
+    refreshIcons(mentionPicker);
 }
 function showMentionPicker(){
     const node = selectedNode();
@@ -16977,7 +16977,7 @@ function syncCascadeRunButton(node=selectedNode()){
     cascadeRunBtn.innerHTML = runningForNode
         ? `<i data-lucide="square"></i><span>${escapeHtml(smartCascadeStopText(Boolean(loopRunState?.stopRequested)))}</span>`
         : `<i data-lucide="workflow"></i><span>${escapeHtml(tr('smart.loopRunAll'))}</span>`;
-    refreshIcons();
+    refreshIcons(cascadeRunBtn);
 }
 function loadNodePromptDraftToInput(node){
     if(node?.promptDraftHtml) {
@@ -18793,7 +18793,7 @@ function openCreateMenu(event, options={}){
     createMenu.style.left = `${left}px`;
     createMenu.style.top = `${top}px`;
     createMenu.classList.add('open');
-    refreshIcons();
+    refreshIcons(createMenu);
 }
 function addCreatedNodeToMenuGroup(node){
     const group = createMenuGroupId ? nodes.find(n => n.id === createMenuGroupId) : null;

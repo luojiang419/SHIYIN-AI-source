@@ -36,6 +36,14 @@
     const byId = id => document.getElementById(id);
     const t = key => window.StudioI18n?.t?.(key) || key;
     const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g,ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    function workMediaType(item){
+        const explicit = String(item?.media_type || item?.mediaKind || '').toLowerCase();
+        const kind = String(item?.kind || '').toLowerCase();
+        const url = String(item?.url || '').toLowerCase();
+        if(explicit.includes('video') || kind.includes('video') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/.test(url)) return 'video';
+        if(explicit.includes('audio') || kind.includes('audio') || /\.(mp3|wav|flac|ogg|m4a|aac)(\?|#|$)/.test(url)) return 'audio';
+        return 'image';
+    }
     // 远程视频不能直接交给 WebView 播放：很多上游地址不返回可用的 CORS/Range 响应。
     // 统一交给后端流式代理，代理会保留 Range、Content-Type 与 Content-Range。
     function mediaPlaybackUrl(url, name='video.mp4'){
@@ -127,8 +135,9 @@
         const row = Math.floor(index / metrics.columns);
         const left = col * (metrics.cardWidth + GRID_GAP);
         const top = row * metrics.rowHeight;
+        const isVideo = workMediaType(item) === 'video';
         return `<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
-            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${item.kind === 'video' ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
+            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${isVideo ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
                 <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
@@ -295,9 +304,10 @@
     function openPreview(workId=''){
         const work=state.works.find(item=>item.id===workId && item.url);
         if(!work) return;
-        el.worksPreviewImage.hidden=work.kind === 'video';
-        el.worksPreviewVideo.hidden=work.kind !== 'video';
-        if(work.kind === 'video') { el.worksPreviewVideo.src=mediaPlaybackUrl(work.url, work.name); el.worksPreviewVideo.load(); }
+        const isVideo = workMediaType(work) === 'video';
+        el.worksPreviewImage.hidden=isVideo;
+        el.worksPreviewVideo.hidden=!isVideo;
+        if(isVideo) { el.worksPreviewVideo.src=mediaPlaybackUrl(work.url, work.name); el.worksPreviewVideo.load(); }
         else { el.worksPreviewVideo.removeAttribute('src'); el.worksPreviewImage.src=work.url; }
         el.worksPreviewImage.alt=work.name || t('works.work');
         el.worksPreviewName.textContent=work.name || t('works.work');

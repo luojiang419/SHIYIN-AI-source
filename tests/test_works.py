@@ -288,6 +288,26 @@ class WorksBackendTests(unittest.TestCase):
         self.assertEqual([item["created_at"] for item in works], [100.0, 200.0])
         self.assertEqual(len({item["name"] for item in works}), 2)
 
+    def test_video_media_type_is_inferred_when_history_kind_is_task_type(self):
+        record = {
+            "_history_id": "video-history",
+            "type": "online-video",
+            "timestamp": 100,
+            "images": ["/assets/output/SHIYIN-000001-20260824.mp4"],
+            "image_items": [{"url": "/assets/output/SHIYIN-000001-20260824.mp4", "kind": "video"}],
+        }
+        works = self.main.generated_work_items([record], {})
+        self.assertEqual(works[0]["kind"], "online-video")
+        self.assertEqual(works[0]["media_type"], "video")
+
+    def test_video_media_filter_uses_actual_media_type(self):
+        with patch.object(self.main, "all_works_with_canvas", return_value=[
+            {"id": "video", "kind": "online-video", "url": "/assets/output/result.mp4", "created_at": 1},
+            {"id": "image", "kind": "online", "url": "/assets/output/result.png", "created_at": 2},
+        ]):
+            result = asyncio.run(self.main.list_generated_works(limit=20, media_type="video"))
+        self.assertEqual([item["id"] for item in result["works"]], ["video"])
+
     def test_merged_work_items_replace_stale_duplicate_enterprise_names(self):
         stale_name = "SHIYIN-000001-20260824.mp4"
         canvas_items = [

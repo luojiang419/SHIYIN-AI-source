@@ -90,6 +90,18 @@
         el.worksMediaFilter?.querySelectorAll('[data-media-type]').forEach(button=>button.classList.toggle('active',button.dataset.mediaType===state.mediaType));
         el.worksSortOrder?.querySelectorAll('[data-sort-order]').forEach(button=>button.classList.toggle('active',button.dataset.sortOrder===state.sortOrder));
     }
+    function workTimestamp(item){
+        const value=Number(item?.created_at || 0);
+        return Number.isFinite(value) ? (value > 10000000000 ? value / 1000 : value) : 0;
+    }
+    function sortWorksForDisplay(){
+        state.works.sort((a,b)=>{
+            const delta=workTimestamp(a)-workTimestamp(b);
+            if(delta) return state.sortOrder === 'desc' ? -delta : delta;
+            const left=String(a?.id || ''), right=String(b?.id || '');
+            return state.sortOrder === 'desc' ? right.localeCompare(left) : left.localeCompare(right);
+        });
+    }
     function gridMetrics(){
         const width = Math.max(1, el.worksGrid.clientWidth || 1);
         const columns = Math.max(1, Math.floor((width + GRID_GAP) / (CARD_MIN_WIDTH + GRID_GAP)));
@@ -159,6 +171,7 @@
             renderVirtual(true);
             const data=await fetchJson(`/api/works?${queryParams(reset?'':state.nextCursor)}`,{cache:'no-store'});
             state.works = reset ? (data.works || []) : [...state.works, ...(data.works || [])];
+            sortWorksForDisplay();
             state.total = Number(data.total || state.works.length);
             state.nextCursor = data.next_cursor || '';
             renderKinds();

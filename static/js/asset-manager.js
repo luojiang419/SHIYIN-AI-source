@@ -787,7 +787,7 @@ function canvasKindLabel(kind){
 }
 function canvasAssetSortLabel(){
     const map = {canvas:'画布名称', updated:'最近更新', name:'资产名称', kind:'类型'};
-    return `${map[canvasAssetSort] || map.updated} / ${canvasAssetSortOrder === 'asc' ? '升序' : '降序'}`;
+    return `${map[canvasAssetSort] || map.updated} / ${canvasAssetSortOrder === 'asc' ? '最早优先' : '最新优先'}`;
 }
 function currentCanvasAssetItems(){
     const q = String(canvasAssetQuery || '').trim().toLowerCase();
@@ -1355,7 +1355,7 @@ function renderCanvasAssetsManager(){
                         <option value="kind" ${canvasAssetSort === 'kind' ? 'selected' : ''}>类型</option>
                     </select>
                     <div id="canvasAssetMediaFilter" class="asset-segmented" role="group" aria-label="媒体类型"><button class="${canvasAssetMediaType === 'all' ? 'active' : ''}" type="button" data-canvas-media-type="all">全部</button><button class="${canvasAssetMediaType === 'image' ? 'active' : ''}" type="button" data-canvas-media-type="image">图片</button><button class="${canvasAssetMediaType === 'video' ? 'active' : ''}" type="button" data-canvas-media-type="video">视频</button></div>
-                    <div id="canvasAssetSortOrder" class="asset-segmented" role="group" aria-label="排序顺序"><button class="${canvasAssetSortOrder === 'asc' ? 'active' : ''}" type="button" data-canvas-sort-order="asc">升序</button><button class="${canvasAssetSortOrder === 'desc' ? 'active' : ''}" type="button" data-canvas-sort-order="desc">降序</button></div>
+                    <div id="canvasAssetSortOrder" class="asset-segmented" role="group" aria-label="排序顺序"><button class="${canvasAssetSortOrder === 'asc' ? 'active' : ''}" type="button" data-canvas-sort-order="asc">最早优先</button><button class="${canvasAssetSortOrder === 'desc' ? 'active' : ''}" type="button" data-canvas-sort-order="desc">最新优先</button></div>
                     <button class="asset-btn ${canvasAssetManageMode ? 'primary' : ''}" type="button" data-canvas-asset-manage ${total ? '' : 'disabled'}><i data-lucide="list-checks"></i><span>${canvasAssetManageMode ? '完成管理' : '批量管理'}</span></button>
                 </div>
             </div>

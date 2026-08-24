@@ -451,6 +451,11 @@ let canvas = null;
 let nodes = [];
 let connections = [];
 let canvasNodeIndex = new Map();
+const canvasNodeDomIndex = new Map();
+const canvasPortDomIndex = new Map();
+const canvasNodeRectIndex = new Map();
+const canvasPortGeometryIndex = new Map();
+let canvasGeometryEpoch = 0;
 let videoClipEditor = null;
 let videoClipHandleDrag = '';
 let videoClipOpenSequence = 0;
@@ -1563,17 +1568,63 @@ function screenToWorld(clientX, clientY, rect=null){
     rect = rect || board.getBoundingClientRect();
     return { x:(clientX - rect.left - viewport.x) / viewport.scale, y:(clientY - rect.top - viewport.y) / viewport.scale };
 }
+function canvasPortIndexKey(nodeId, kind, inputRole=''){
+    return `${nodeId}:${kind}:${inputRole || ''}`;
+}
+function invalidateCanvasGeometry(ids=[]){
+    canvasGeometryEpoch += 1;
+    const list = (ids || []).filter(Boolean);
+    if(!list.length){
+        canvasNodeRectIndex.clear();
+        canvasPortGeometryIndex.clear();
+        return;
+    }
+    const affected = new Set(list);
+    list.forEach(id => canvasNodeRectIndex.delete(id));
+    [...canvasPortGeometryIndex.keys()].forEach(key => {
+        if(affected.has(String(key).split(':', 1)[0])) canvasPortGeometryIndex.delete(key);
+    });
+}
+function rebuildCanvasDomIndexes(){
+    canvasNodeDomIndex.clear();
+    canvasPortDomIndex.clear();
+    canvasNodeRectIndex.clear();
+    canvasPortGeometryIndex.clear();
+    canvasGeometryEpoch += 1;
+    nodesEl?.querySelectorAll?.('.node[data-id]').forEach(el => {
+        const id = el.dataset.id || '';
+        if(!id) return;
+        canvasNodeDomIndex.set(id, el);
+        const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
+        if(node){
+            const size = defaultNodeSize(node.type);
+            canvasNodeRectIndex.set(id, {x:Number(node.x) || 0, y:Number(node.y) || 0, w:el.offsetWidth || node.w || size.w || 260, h:el.offsetHeight || node.h || size.h || 160});
+        }
+        el.querySelectorAll('.port').forEach(port => {
+            const kind = port.classList.contains('out') ? 'out' : 'in';
+            canvasPortDomIndex.set(canvasPortIndexKey(id, kind, port.dataset.inputRole || ''), port);
+        });
+    });
+}
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     scheduleMinimapViewportUpdate();
     scheduleSelectionHubPosition();
 }
 function estimatedNodeRect(n){
-    const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(n.id)}"]`);
+    const cached = canvasNodeRectIndex.get(n.id);
+    if(cached){
+        cached.x = Number(n.x) || 0;
+        cached.y = Number(n.y) || 0;
+        return cached;
+    }
+    const el = canvasNodeDomIndex.get(n.id);
     const size = defaultNodeSize(n.type);
     const w = el?.offsetWidth || n.w || size.w || 260;
     const h = el?.offsetHeight || n.h || size.h || 160;
-    return {x:n.x || 0, y:n.y || 0, w, h};
+    const rect = {x:n.x || 0, y:n.y || 0, w, h};
+    canvasNodeRectIndex.set(n.id, rect);
+    return rect;
 }
 function currentWorldViewRect(){
     const rect = board.getBoundingClientRect();
@@ -1625,7 +1676,7 @@ function scheduleMinimapNodeUpdate(ids=[]){
         if(!minimapState || !minimapContent){ minimapNodeUpdateIds.clear(); return; }
         const {bounds, scale, ox, oy} = minimapState;
         minimapNodeUpdateIds.forEach(id => {
-            const node = nodes.find(item => item.id === id);
+            const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
             const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
             if(!node || !el) return;
             const rect = estimatedNodeRect(node);
@@ -1689,7 +1740,6 @@ function centerViewportOnWorldPoint(point){
     viewport.x = rect.width / 2 - point.x * viewport.scale;
     viewport.y = rect.height / 2 - point.y * viewport.scale;
     applyViewport();
-    renderLinks();
     scheduleSelectionHubPosition();
 }
 function safeViewportScale(value){
@@ -1703,7 +1753,6 @@ function fitAllNodesViewport(){
         viewport.x = rect.width / 2;
         viewport.y = rect.height / 2;
         applyViewport();
-        renderLinks();
         renderSelectionHub();
         scheduleViewportSave();
         return;
@@ -1723,7 +1772,6 @@ function fitAllNodesViewport(){
     viewport.x = rect.width / 2 - cx * viewport.scale;
     viewport.y = rect.height / 2 - cy * viewport.scale;
     applyViewport();
-    renderLinks();
     scheduleSelectionHubPosition();
     scheduleViewportSave();
 }
@@ -1752,7 +1800,6 @@ function exitZoomPreview(point=null){
         viewport.y = prev.y;
     }
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
     return true;
@@ -1781,7 +1828,6 @@ function exitZoomPreviewToNode(nodeId){
     viewport.x = boardRect.width / 2 - cx * viewport.scale;
     viewport.y = boardRect.height / 2 - cy * viewport.scale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
     return true;
@@ -1791,6 +1837,7 @@ function toggleZoomPreview(){
     else enterZoomPreview();
 }
 function refreshGeometry(){
+    invalidateCanvasGeometry();
     renderLinks();
     renderSelectionHub();
 }
@@ -1918,13 +1965,13 @@ function renderClassicMutation(mutation){
     const replaceIds = mutation?.replaceIds || new Set();
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
     removeIds.forEach(id => {
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
     });
     createdIds.forEach(id => {
         const node = canvasNodeIndex.get(id);
         if(!node) return;
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(current) current.remove();
         try { nodesEl.appendChild(renderNode(node)); }
         catch(error){ console.error('[canvas] incremental node render failed:', id, error); }
@@ -1932,7 +1979,7 @@ function renderClassicMutation(mutation){
     replaceIds.forEach(id => {
         if(createdIds.has(id)) return;
         const node = canvasNodeIndex.get(id);
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(!node || !current) return;
         try {
             const fresh = renderNode(node);
@@ -1940,6 +1987,7 @@ function renderClassicMutation(mutation){
             current.replaceWith(fresh);
         } catch(error){ console.error('[canvas] incremental node refresh failed:', id, error); }
     });
+    rebuildCanvasDomIndexes();
     refreshSelectionVisuals();
     refreshGeometryAfterLayout();
     refreshIcons();
@@ -7371,6 +7419,7 @@ function render(){
             console.error('[canvas] renderNode 失败，已跳过该节点：', node?.id, node?.type, err);
         }
     });
+    rebuildCanvasDomIndexes();
     restoreMediaPlaybackStates(mediaStates);
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
@@ -7428,9 +7477,10 @@ function patchCanvasNodeCreates(createdNodes=[], refreshIds=[]){
     }
     try {
         created.forEach(node => {
-            if(!node?.id || nodesEl.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`)) return;
+            if(!node?.id || canvasNodeDomIndex.has(node.id)) return;
             nodesEl.appendChild(renderNode(node));
         });
+        rebuildCanvasDomIndexes();
         if((refreshIds || []).length) refreshNodes(refreshIds);
         else {
             refreshGeometryAfterLayout();
@@ -7458,10 +7508,10 @@ function refreshNodes(ids=[]){
     const outputScrolls = captureOutputScrolls();
     applyViewport();
     for(const id of uniqueIds){
-        const node = nodes.find(n => n.id === id);
+        const node = canvasNodeIndex.get(id);
         if(!node) continue;
         if(node.type === 'output' && refreshOutputNodeContent(node)) continue;
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(!current){
             render();
             return;
@@ -7475,6 +7525,7 @@ function refreshNodes(ids=[]){
             console.error('[canvas] refreshNode 失败，已跳过该节点：', id, err);
         }
     }
+    rebuildCanvasDomIndexes();
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
@@ -18419,6 +18470,7 @@ function onNodeDrag(e){
             childEl.style.top = `${childDrag.node.y}px`;
         }
     });
+    invalidateCanvasGeometry([dragNode.node.id, ...(dragNode.children || []).map(item => item.node.id)]);
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
@@ -18454,6 +18506,7 @@ function onNodeResize(e){
         el.style.width = `${resizeNode.node.w}px`;
         el.style.height = `${resizeNode.node.h}px`;
     }
+    invalidateCanvasGeometry([resizeNode.node.id]);
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleMinimapNodeUpdate([resizeNode.node.id]);
@@ -19096,16 +19149,22 @@ function updateGroupMembership(movedNodes){
 
 function portPoint(id, kind, inputRole='', layout=null){
     const cache = layout?.cache;
-    const cacheKey = `${id}:${kind}:${inputRole || ''}`;
+    const cacheKey = canvasPortIndexKey(id, kind, inputRole);
     if(cache?.has(cacheKey)) return cache.get(cacheKey);
+    const cachedGeometry = canvasPortGeometryIndex.get(cacheKey);
+    if(cachedGeometry?.epoch === canvasGeometryEpoch){
+        const point = {x:cachedGeometry.x, y:cachedGeometry.y};
+        cache?.set(cacheKey, point);
+        return point;
+    }
     const n = layout?.nodeIndex?.get(id) || canvasNodeIndex.get(id) || nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
-    const el = layout?.nodeElements?.get(id) || nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    const roleSelector = inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : '';
-    const port = el?.querySelector(`.port.${kind}${roleSelector}`);
+    const el = layout?.nodeElements?.get(id) || canvasNodeDomIndex.get(id);
+    const port = canvasPortDomIndex.get(cacheKey) || el?.querySelector(`.port.${kind}${inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : ''}`);
     if(port){
         const r = port.getBoundingClientRect();
         const point = screenToWorld(r.left + r.width / 2, r.top + r.height / 2, layout?.boardRect);
+        canvasPortGeometryIndex.set(cacheKey, {...point, epoch:canvasGeometryEpoch});
         cache?.set(cacheKey, point);
         return point;
     }
@@ -19114,6 +19173,7 @@ function portPoint(id, kind, inputRole='', layout=null){
     const w = (el?.offsetWidth) || n.w || 260, h = (el?.offsetHeight) || n.h || 160;
     const nx = Number(n.x) || 0, ny = Number(n.y) || 0;
     const point = kind === 'out' ? {x:nx + w, y:ny + h / 2} : {x:nx, y:ny + h / 2};
+    canvasPortGeometryIndex.set(cacheKey, {...point, epoch:canvasGeometryEpoch});
     cache?.set(cacheKey, point);
     return point;
 }
@@ -19127,9 +19187,9 @@ function renderLinks(){
     // 否则“读一条 rect → append 一条线”交错进行，每次 append 都让布局失效，下一次读 rect 就触发一次
     // 全量强制重排（layout thrashing），连线一多拖动就掉帧。读写分离后每帧只强制重排一次。
     const segments = [];
-    const nodeIndex = new Map(nodes.map(node => [node.id, node]));
-    const nodeElements = new Map();
-    nodesEl.querySelectorAll('.node[data-id]').forEach(el => nodeElements.set(el.dataset.id, el));
+    const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex : new Map(nodes.map(node => [node.id, node]));
+    const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex : new Map();
+    if(!nodeElements.size) nodesEl.querySelectorAll('.node[data-id]').forEach(el => nodeElements.set(el.dataset.id, el));
     const layout = {boardRect:board.getBoundingClientRect(), cache:new Map(), nodeIndex, nodeElements};
     // 连接端点仍按 portPoint(c.to, 'in', c.inputRole || '') 的角色语义解析，layout 仅用于复用测量结果。
     connections.forEach(c => {
@@ -19359,7 +19419,7 @@ function applyKnifeCut(from, to){
     if(!canvas || !connections.length || !from || !to) return;
     const nodeHits = new Set();
     nodes.forEach(n => {
-        const el = nodesEl.querySelector(`.node[data-id="${n.id}"]`);
+        const el = canvasNodeDomIndex.get(n.id);
         if(!el) return;
         const r = nodeRect(n);
         if(segmentIntersectsRect(from, to, r)) nodeHits.add(n.id);

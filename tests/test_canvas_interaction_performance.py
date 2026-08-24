@@ -40,8 +40,8 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
 
     def test_connection_refresh_reuses_node_and_dom_indexes(self):
         links = body(CANVAS_JS, "function renderLinks(){", "function renderKnifeTrail")
-        self.assertIn("const nodeIndex = new Map(nodes.map(node => [node.id, node]));", links)
-        self.assertIn("const nodeElements = new Map();", links)
+        self.assertIn("const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex", links)
+        self.assertIn("const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex", links)
         self.assertIn("canResolvePort(c.from, nodeIndex)", links)
         self.assertNotRegex(links, re.compile(r"nodes\.find\(node => node\.id === c\.to\)"))
 

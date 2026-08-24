@@ -19826,6 +19826,7 @@ minimap?.addEventListener('mousedown', e => {
     };
     window.onmouseup = () => {
         minimapDrag = false;
+        window.CanvasPerformance?.markPaintFrom?.('classic.minimap-drag', 'classic.minimap-drag', {nodes:nodes.length});
         window.onmousemove = null;
         window.onmouseup = null;
         scheduleViewportSave();

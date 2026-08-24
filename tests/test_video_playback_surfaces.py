@@ -24,6 +24,7 @@ def test_works_video_surfaces_use_stream_proxy_for_remote_urls():
     assert "el.worksPreviewImage.hidden=isVideo" in WORKS
     assert "if(raw.startsWith('/assets/') || raw.startsWith('/output/'))" in WORKS
     assert "video-playback-directory-fix" in (ROOT / "static/works.html").read_text(encoding="utf-8")
+    assert ".works-preview-frame > [hidden] { display:none !important; }" in (ROOT / "static/css/works.css").read_text(encoding="utf-8")
 
 
 def test_asset_manager_video_surfaces_use_stream_proxy_and_muted_autoplay():

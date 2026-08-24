@@ -22,3 +22,7 @@
 ## 追加经验（1.0.294）
 
 旧作品记录可能把视频后缀只保存在 `name` 或 `original_name`，而 `url` 没有扩展名、`kind/media_type` 仍是历史任务类型。若前端只看 URL，就会把 MP4 错误渲染成 `<img>`，表现为文件名旁的破图图标。后端 `work_media_type`、画布资产 `canvas_asset_kind` 与两个前端页面必须共享同一套 `url/name/original_name/filename` 扩展名兜底；升级时同步递增版本号，强制清掉 WebView 旧脚本缓存。
+
+## 追加经验（1.0.295）
+
+`hidden` 不是绝对可靠的视觉隐藏方式：如果组件样式对元素写了更高优先级的 `display:block`（本案为 `.studio-preview-img` 的图片缩放样式），浏览器 UA 的 `[hidden] { display:none }` 会被覆盖。双层预览（图片和视频共用容器）必须在容器级补充 `.preview-frame > [hidden] { display:none !important; }`，并用浏览器实际计算样式和矩形尺寸确认隐藏元素为 `display:none`、宽高为 0；不能只看 `hidden=true`。

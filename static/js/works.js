@@ -343,11 +343,11 @@
         catch(error) { toast(error.message || t('works.preview')); }
     }
     function handlePreviewFullscreenKeydown(event){
-        const fullscreenElement=document.fullscreenElement;
         const video=el.worksPreviewVideo;
-        const isPreviewFullscreen=fullscreenElement===el.worksPreviewFrame || fullscreenElement===video;
         const isSpace=event.code==='Space' || event.key===' ';
-        if(!isPreviewFullscreen || !isSpace || !video || video.hidden || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+        const isPreviewVideoOpen=Boolean(el.worksPreviewDialog?.open && video && !video.hidden);
+        const isEditableTarget=event.target?.matches?.('input,textarea,select,[contenteditable="true"]');
+        if(!isPreviewVideoOpen || !isSpace || isEditableTarget || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
         event.preventDefault();
         event.stopPropagation();
         if(video.paused || video.ended) video.play().catch(error=>toast(error.message || t('works.preview')));

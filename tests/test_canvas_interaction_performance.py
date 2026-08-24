@@ -20,12 +20,16 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
     def test_classic_marquee_uses_world_coordinates_and_incremental_selection(self):
         selection = body(CANVAS_JS, "function finishSelection(){", "function formatVideoClipTime")
         self.assertIn("const endWorld = screenToWorld", selection)
+        self.assertIn("CLASSIC_MARQUEE_RECT_CACHE_ENABLED", CANVAS_JS)
+        self.assertIn("estimatedNodeRect(node)", selection)
         self.assertIn("refreshSelectionVisuals();", selection)
         self.assertNotIn("getBoundingClientRect()", selection)
         self.assertNotIn("render();", selection)
 
     def test_smart_marquee_does_not_rebuild_all_nodes(self):
         selection = body(SMART_CANVAS_JS, "function finishSelection(event){", "function groupSelectedNodes")
+        self.assertIn("SMART_MARQUEE_RECT_CACHE_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("cachedSmartNodeRect(node)", selection)
         self.assertIn("syncSelectionUi();", selection)
         self.assertIn("updateComposer();", selection)
         self.assertNotIn("render();", selection)
@@ -40,8 +44,8 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
 
     def test_connection_refresh_reuses_node_and_dom_indexes(self):
         links = body(CANVAS_JS, "function renderLinks(){", "function renderKnifeTrail")
-        self.assertIn("const nodeIndex = new Map(nodes.map(node => [node.id, node]));", links)
-        self.assertIn("const nodeElements = new Map();", links)
+        self.assertIn("const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex", links)
+        self.assertIn("const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex", links)
         self.assertIn("canResolvePort(c.from, nodeIndex)", links)
         self.assertNotRegex(links, re.compile(r"nodes\.find\(node => node\.id === c\.to\)"))
 
@@ -69,6 +73,63 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("activePortEl", visual)
         self.assertNotIn("querySelectorAll('.node-port.is-active')", visual)
         self.assertIn("elementFromPoint", drag)
+
+    def test_smart_port_drop_uses_scoped_node_mutation_with_full_render_fallback(self):
+        drop = body(SMART_CANVAS_JS, "function handlePortDrop(drag, e)", "function pickMediaForSmartNode")
+        self.assertIn("SMART_PORT_LINK_MUTATION_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("queueSmartRenderMutation({replaceIds:[toId]})", drop)
+        self.assertIn("if(SMART_PORT_LINK_MUTATION_ENABLED)", drop)
+        self.assertIn("render();", drop)
+
+    def test_smart_connection_events_use_delegation_with_legacy_fallback(self):
+        bind = body(SMART_CANVAS_JS, "function bindConnectionEvents(){", "function ensurePortDragPathElement")
+        self.assertIn("SMART_CONNECTION_EVENT_DELEGATION_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("smartConnectionEventsDelegated", bind)
+        self.assertIn("world.addEventListener('click'", bind)
+        self.assertIn("world.addEventListener('dblclick'", bind)
+        self.assertIn("world.querySelectorAll('[data-conn-index]')", bind)
+
+    def test_smart_selection_feedback_updates_only_affected_dom_with_fallback(self):
+        selection = body(SMART_CANVAS_JS, "function syncSelectionUi(){", "function isNodeSelected")
+        connection = body(SMART_CANVAS_JS, "function syncConnectionSelectionUi(){", "function isNodeSelected")
+        self.assertIn("SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("smartSelectionFeedbackState", selection)
+        self.assertIn("new Set([...previous.ids, ...nextIds])", selection)
+        self.assertIn("smartNodeDomIndex.get(id)", selection)
+        self.assertIn("world.querySelectorAll('.image-node')", selection)
+        self.assertIn("smartConnectionSelectionIndex", connection)
+        self.assertIn("new Set([...previous, ...selected])", connection)
+        self.assertIn("svg.querySelectorAll('path.conn-hit[data-conn-index]')", connection)
+
+    def test_classic_selection_feedback_uses_node_and_connection_indexes_with_fallback(self):
+        selection = body(CANVAS_JS, "function refreshSelectionVisuals(){", "function syncConnectionSelectionVisuals")
+        connection = body(CANVAS_JS, "function syncConnectionSelectionVisuals(){", "function pathEl")
+        self.assertIn("CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED", CANVAS_JS)
+        self.assertIn("classicSelectionFeedbackState", selection)
+        self.assertIn("canvasNodeDomIndex.get(id)", selection)
+        self.assertIn("nodesEl.querySelectorAll('.node')", selection)
+        self.assertIn("scheduleClassicMinimapSelectionUpdate", selection)
+        self.assertIn("classicConnectionSelectionIndex", connection)
+        self.assertIn("classicConnectionModelIndex", connection)
+        self.assertIn("classicLinkDom.get(connectionId)", connection)
+        self.assertIn("linksEl.querySelectorAll('.link-hit[data-connection-id]')", connection)
+
+    def test_classic_node_drag_reuses_dom_index_with_selector_fallback(self):
+        start = body(CANVAS_JS, "function startNodeDrag(e, node)", "function onNodeDrag")
+        drag = body(CANVAS_JS, "function onNodeDrag(e)", "function startNodeResize")
+        self.assertIn("CLASSIC_DRAG_DOM_INDEX_ENABLED", CANVAS_JS)
+        self.assertIn("canvasNodeDomIndex.get(n.id)", start)
+        self.assertIn("dragNode.el", drag)
+        self.assertIn("childDrag.el", drag)
+        self.assertIn("nodesEl.querySelector", drag)
+
+    def test_smart_drag_drop_highlight_reuses_current_target_index(self):
+        highlight = body(SMART_CANVAS_JS, "function clearDropHighlight(){", "function deleteNode")
+        self.assertIn("SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED", SMART_CANVAS_JS)
+        self.assertIn("smartDropHighlightId", highlight)
+        self.assertIn("smartNodeDomIndex.get(targetId)", highlight)
+        self.assertIn("world.querySelectorAll('.image-node.drop-target')", highlight)
+        self.assertIn("if(SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED && smartDropHighlightId === targetId) return;", highlight)
 
     def test_output_drag_checks_stable_mime_before_generic_file_probe(self):
         dragover = body(CANVAS_JS, "board.addEventListener('dragover'", "board.addEventListener('dragleave'")

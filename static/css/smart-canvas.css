@@ -42,6 +42,10 @@ button { border:0; cursor:pointer; }
 .image-node { position:absolute; width:260px; min-height:178px; border-radius:16px; background:transparent; border:0; box-shadow:none; overflow:visible; user-select:none; cursor:move; }
 /* LOD 只放在节点内部，节点外层必须保持可溢出以显示左右端口。 */
 .world.smart-large-scene > .image-node:not(.smart-special-node) > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+/* JS 只给视口外普通节点加 deferred；节点外壳、端口、Prompt/Loop 和分组保持完整。 */
+.world.smart-lod-active > .image-node.smart-lod-safe.smart-lod-outside > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+.world.smart-lod-active > .image-node.smart-lod-safe:not(.smart-lod-outside) > .node-body { content-visibility:visible; contain:none; }
+.world.smart-lod-active > .image-node:not(.smart-lod-safe) > .node-body { content-visibility:visible; contain:none; }
 body.smart-node-drag * { user-select:none !important; }
 body.smart-node-drag .image-node textarea,
 body.smart-node-drag .image-node input,
@@ -1097,6 +1101,7 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .smart-canvas-stats em { color:var(--faint); font-size:9px; font-style:normal; font-weight:800; letter-spacing:.06em; }
 @media (prefers-reduced-motion: reduce){ .connection-layer .conn-breathe { animation:none; filter:none; } }
 .smart-minimap-content { position:absolute; inset:10px; border-radius:12px; overflow:hidden; background-image:radial-gradient(var(--grid) 1px, transparent 1px); background-size:12px 12px; opacity:.95; }
+.minimap-canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; display:block; }
 .minimap-node { position:absolute; min-width:4px; min-height:4px; border-radius:3px; background:var(--strong); opacity:.8; }
 .smart-minimap-viewport { position:absolute; border-radius:8px; border:2px solid var(--strong); background:rgba(255,255,255,.12); }
 .asset-toggle { position:absolute; right:22px; top:22px; z-index:56; width:96px; height:40px; padding:0 16px; border-radius:999px; background:var(--panel); color:var(--text); border:1px solid var(--line); box-shadow:0 14px 34px var(--shadow); backdrop-filter:blur(16px); display:flex; align-items:center; justify-content:center; gap:8px; font-size:12px; font-weight:750; white-space:nowrap; }

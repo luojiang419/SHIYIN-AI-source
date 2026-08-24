@@ -226,6 +226,9 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node { position:absolute; min-width:220px; min-height:96px; border:1px solid var(--line); border-radius:22px; background:var(--card); box-shadow:0 16px 42px var(--shadow); overflow:visible; user-select:none; z-index:2; }
 /* LOD 只放在节点内部，节点外层必须保持可溢出以显示左右端口。 */
 #nodes.canvas-large-scene > .node.canvas-lod-safe > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+/* JS 只给视口外普通节点加 deferred；节点外壳和端口不参与 LOD。 */
+#nodes.canvas-lod-active > .node.canvas-lod-safe.canvas-lod-outside > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+#nodes.canvas-lod-active > .node.canvas-lod-safe:not(.canvas-lod-outside) > .node-body { content-visibility:visible; contain: none; }
 .node::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--card); pointer-events:none; z-index:-1; overflow:hidden; }
 .node.sized { display:flex; flex-direction:column; }
 .node.selected { outline:2px solid var(--strong); outline-offset:2px; }
@@ -936,6 +939,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .minimap-arrange-btn:hover { color:var(--text); background:var(--soft-2); transform:translateY(-1px); }
 .minimap-arrange-btn i,.minimap-arrange-btn svg { flex:0 0 auto; }
 .minimap-content { position:relative; width:100%; height:100%; border-radius:10px; background:var(--soft); overflow:hidden; }
+.minimap-canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; display:block; }
 .minimap-node { position:absolute; border-radius:3px; background:color-mix(in srgb,var(--text) 64%,transparent); border:1px solid var(--line-2); min-width:2px; min-height:2px; }
 .minimap-node.selected { background:var(--strong); box-shadow:0 0 0 1px var(--strong-text); }
 .minimap-viewport { position:absolute; border:1.5px solid var(--strong); background:color-mix(in srgb,var(--strong) 8%,transparent); border-radius:5px; box-shadow:0 0 0 1px var(--strong-text); pointer-events:none; }

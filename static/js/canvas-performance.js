@@ -7,11 +7,18 @@
         catch (_) { return false; }
     })();
     const MAX_SAMPLES = 600;
+    const FIXTURE_PRESETS = Object.freeze({
+        100: Object.freeze({nodes:100, connections:200}),
+        300: Object.freeze({nodes:300, connections:600}),
+        500: Object.freeze({nodes:500, connections:1000}),
+        1000: Object.freeze({nodes:1000, connections:2000})
+    });
     const samples = new Map();
     const longTasks = [];
     const eventTimings = [];
     const interactions = new Map();
     const fixtureFactories = new Map();
+    let activeFixture = null;
     let overlay = null;
     let overlayTimer = 0;
     let frameRaf = 0;
@@ -46,8 +53,11 @@
         finally { end(); }
     }
     function beginInteraction(name, meta={}){
+        if(interactions.has(name)) return false;
         interactions.set(name, {at:now(), meta});
+        return true;
     }
+    function isInteractionActive(name){ return interactions.has(name); }
     function endInteraction(name, metric=name, meta={}){
         const item = interactions.get(name);
         if(!item) return 0;
@@ -83,6 +93,7 @@
             longTasks:longTasks.slice(),
             eventTimings:eventTimings.slice(),
             activeInteractions:[...interactions.keys()],
+            fixture:activeFixture ? {...activeFixture, options:{...activeFixture.options}} : null,
             generatedAt:new Date().toISOString()
         };
     }
@@ -148,11 +159,23 @@
     function registerFixtureFactory(kind, factory){
         if(typeof factory === 'function') fixtureFactories.set(String(kind), factory);
     }
+    function fixtureOptions(options={}){
+        const input = typeof options === 'number' ? {nodes:options} : (options || {});
+        const presetKey = String(input.preset || input.nodes || '500');
+        const preset = FIXTURE_PRESETS[presetKey] || FIXTURE_PRESETS['500'];
+        return {...preset, ...input, nodes:Number(input.nodes || preset.nodes), connections:Number(input.connections ?? preset.connections)};
+    }
     function installFixture(kind, options={}){
         if(!enabled) throw new Error('请先使用 ?canvasPerf=1 打开画布，再安装性能 fixture');
         const factory = fixtureFactories.get(String(kind));
         if(!factory) throw new Error(`未注册 ${kind} 画布 fixture`);
-        return factory(options);
+        const resolved = fixtureOptions(options);
+        const cleanup = factory(resolved);
+        activeFixture = {kind:String(kind), options:resolved};
+        return () => {
+            try { return typeof cleanup === 'function' ? cleanup() : undefined; }
+            finally { activeFixture = null; }
+        };
     }
     function destroy(){
         if(frameRaf) cancelAnimationFrame(frameRaf);
@@ -168,10 +191,12 @@
         measure,
         beginInteraction,
         endInteraction,
+        isInteractionActive,
         markPaintFrom,
         snapshot,
         clear,
         registerFixtureFactory,
+        fixturePresets:FIXTURE_PRESETS,
         installFixture,
         destroy
     });

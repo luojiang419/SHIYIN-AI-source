@@ -453,6 +453,11 @@ let canvas = null;
 let nodes = [];
 let connections = [];
 let canvasNodeIndex = new Map();
+const canvasNodeDomIndex = new Map();
+const canvasPortDomIndex = new Map();
+const canvasNodeRectIndex = new Map();
+const canvasPortGeometryIndex = new Map();
+let canvasGeometryEpoch = 0;
 let videoClipEditor = null;
 let videoClipHandleDrag = '';
 let videoClipOpenSequence = 0;
@@ -462,6 +467,16 @@ let videoFrameOpenSequence = 0;
 let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
 let dragNode = null;
+// 安全视口 LOD 只作用于普通节点 body；节点模型、外壳和端口始终保留。
+const CLASSIC_SAFE_LOD_ENABLED = true;
+const CLASSIC_SAFE_LOD_MARGIN = 480;
+// 框选优先复用节点矩形索引；关闭时回退结束阶段的逐节点尺寸读取。
+const CLASSIC_MARQUEE_RECT_CACHE_ENABLED = true;
+// 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
+const CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
+// 节点拖动优先复用已有 DOM 索引；索引缺失或关闭时回退选择器查询。
+const CLASSIC_DRAG_DOM_INDEX_ENABLED = true;
+let classicSafeLodRaf = 0;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
 let canvasMutationBatchDepth = 0;
@@ -473,7 +488,17 @@ let minimapRenderQueued = false;
 let minimapViewportQueued = false;
 let minimapNodeUpdateQueued = false;
 const minimapNodeUpdateIds = new Set();
+let classicSelectionFeedbackState = null;
+const classicConnectionSelectionIndex = new Map();
+const classicConnectionModelIndex = new Map();
+const CLASSIC_MINIMAP_CANVAS_ENABLED = true;
+let minimapCanvas = null;
+const minimapNodeRectIndex = new Map();
 let linksRenderQueued = false;
+// 连接层增量更新开关：结构性变更或索引失效时始终回退到 renderLinks 全量路径。
+const CLASSIC_INCREMENTAL_LINKS = true;
+const classicConnectionDirtyIds = new Set();
+let classicConnectionStructureDirty = false;
 const classicLinkDom = new Map();
 const classicLinkControlDom = new Map();
 let classicTempLinkDom = null;
@@ -585,6 +610,12 @@ let localCanvasDirty = false;
 let savingCanvasNow = false;
 let saveCanvasAgain = false;
 let localCanvasSaveSequence = 0;
+const CLASSIC_SAVE_QUEUE_ENABLED = true;
+const CLASSIC_IDLE_MEDIA_ENABLED = true;
+let classicIdleMediaMeasureHandle = 0;
+const classicIdleMediaMeasureRoots = new Set();
+let classicIdleIconHandle = 0;
+const classicIdleIconRoots = new Set();
 let flushingVideoClipDeletions = false;
 const pendingVideoClipDeletions = new Map();
 const savedVideoClipSequencesByCanvas = new Map();
@@ -1551,6 +1582,9 @@ function setCanvasMode(open){
         linkControlsEl.innerHTML = '';
         classicLinkDom.clear();
         classicLinkControlDom.clear();
+        classicConnectionSelectionIndex.clear();
+        classicConnectionModelIndex.clear();
+        classicSelectionFeedbackState = null;
         classicTempLinkDom = null;
         classicKnifeTrailDom = null;
         selectionHub.classList.remove('open');
@@ -1588,17 +1622,100 @@ function screenToWorld(clientX, clientY, rect=null){
     rect = rect || board.getBoundingClientRect();
     return { x:(clientX - rect.left - viewport.x) / viewport.scale, y:(clientY - rect.top - viewport.y) / viewport.scale };
 }
+function canvasPortIndexKey(nodeId, kind, inputRole=''){
+    return `${nodeId}:${kind}:${inputRole || ''}`;
+}
+function invalidateCanvasGeometry(ids=[]){
+    canvasGeometryEpoch += 1;
+    const list = (ids || []).filter(Boolean);
+    if(!list.length){
+        canvasNodeRectIndex.clear();
+        canvasPortGeometryIndex.clear();
+        return;
+    }
+    const affected = new Set(list);
+    list.forEach(id => canvasNodeRectIndex.delete(id));
+    [...canvasPortGeometryIndex.keys()].forEach(key => {
+        if(affected.has(String(key).split(':', 1)[0])) canvasPortGeometryIndex.delete(key);
+    });
+}
+function rebuildCanvasDomIndexes(){
+    canvasNodeDomIndex.clear();
+    canvasPortDomIndex.clear();
+    canvasNodeRectIndex.clear();
+    canvasPortGeometryIndex.clear();
+    canvasGeometryEpoch += 1;
+    nodesEl?.querySelectorAll?.('.node[data-id]').forEach(el => {
+        const id = el.dataset.id || '';
+        if(!id) return;
+        canvasNodeDomIndex.set(id, el);
+        const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
+        if(node){
+            const size = defaultNodeSize(node.type);
+            canvasNodeRectIndex.set(id, {x:Number(node.x) || 0, y:Number(node.y) || 0, w:el.offsetWidth || node.w || size.w || 260, h:el.offsetHeight || node.h || size.h || 160});
+        }
+        el.querySelectorAll('.port').forEach(port => {
+            const kind = port.classList.contains('out') ? 'out' : 'in';
+            canvasPortDomIndex.set(canvasPortIndexKey(id, kind, port.dataset.inputRole || ''), port);
+        });
+    });
+}
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    scheduleClassicSafeLod();
     scheduleMinimapViewportUpdate();
     scheduleSelectionHubPosition();
 }
 function estimatedNodeRect(n){
-    const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(n.id)}"]`);
+    const cached = canvasNodeRectIndex.get(n.id);
+    if(cached){
+        cached.x = Number(n.x) || 0;
+        cached.y = Number(n.y) || 0;
+        return cached;
+    }
+    const el = canvasNodeDomIndex.get(n.id);
     const size = defaultNodeSize(n.type);
     const w = el?.offsetWidth || n.w || size.w || 260;
     const h = el?.offsetHeight || n.h || size.h || 160;
-    return {x:n.x || 0, y:n.y || 0, w, h};
+    const rect = {x:n.x || 0, y:n.y || 0, w, h};
+    canvasNodeRectIndex.set(n.id, rect);
+    return rect;
+}
+function scheduleClassicSafeLod(){
+    if(classicSafeLodRaf || !nodesEl) return;
+    classicSafeLodRaf = requestAnimationFrame(() => {
+        classicSafeLodRaf = 0;
+        updateClassicSafeLod();
+    });
+}
+function updateClassicSafeLod(){
+    if(!nodesEl) return;
+    const largeScene = CLASSIC_SAFE_LOD_ENABLED && nodes.length > 200;
+    nodesEl.classList.toggle('canvas-lod-active', largeScene);
+    const view = currentWorldViewRect();
+    const margin = CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
+    const minX = view.x - margin, minY = view.y - margin;
+    const maxX = view.x + view.w + margin, maxY = view.y + view.h + margin;
+    const keepIds = new Set(selected);
+    if(dragNode){
+        keepIds.add(dragNode.node?.id);
+        (dragNode.children || []).forEach(item => keepIds.add(item.node?.id));
+    }
+    if(resizeNode?.node?.id) keepIds.add(resizeNode.node.id);
+    if(tempLink?.from && !String(tempLink.from).startsWith('selection:')) keepIds.add(tempLink.from);
+    if(linkCreateState?.originId) keepIds.add(linkCreateState.originId);
+    nodesEl.querySelectorAll('.node.canvas-lod-safe').forEach(el => {
+        const node = canvasNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
+        if(!node){ el.classList.remove('canvas-lod-outside'); return; }
+        const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
+        const intersects = rect.x < maxX && rect.x + rect.w > minX && rect.y < maxY && rect.y + rect.h > minY;
+        const outside = largeScene && !intersects && !keepIds.has(node.id);
+        const nextState = outside ? 'deferred' : 'full';
+        if(el.dataset.lodState !== nextState){
+            el.classList.toggle('canvas-lod-outside', outside);
+            el.dataset.lodState = nextState;
+        }
+    });
 }
 function currentWorldViewRect(){
     const rect = board.getBoundingClientRect();
@@ -1648,20 +1765,100 @@ function scheduleMinimapNodeUpdate(ids=[]){
     requestAnimationFrame(() => {
         minimapNodeUpdateQueued = false;
         if(!minimapState || !minimapContent){ minimapNodeUpdateIds.clear(); return; }
-        const {bounds, scale, ox, oy} = minimapState;
-        minimapNodeUpdateIds.forEach(id => {
-            const node = nodes.find(item => item.id === id);
-            const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
-            if(!node || !el) return;
-            const rect = estimatedNodeRect(node);
-            el.style.left = `${ox + (rect.x - bounds.x) * scale}px`;
-            el.style.top = `${oy + (rect.y - bounds.y) * scale}px`;
-            el.style.width = `${Math.max(3, rect.w * scale)}px`;
-            el.style.height = `${Math.max(3, rect.h * scale)}px`;
-        });
+        if(!CLASSIC_MINIMAP_CANVAS_ENABLED){
+            renderMinimap();
+            minimapNodeUpdateIds.clear();
+            return;
+        }
+        redrawClassicMinimapDirty([...minimapNodeUpdateIds]);
         minimapNodeUpdateIds.clear();
         updateMinimapViewport();
     });
+}
+function markClassicConnectionsDirtyForNodes(ids=[]){
+    const affected = new Set((ids || []).filter(Boolean));
+    if(!affected.size) return;
+    (connections || []).forEach(connection => {
+        if(affected.has(connection.from) || affected.has(connection.to)) classicConnectionDirtyIds.add(connection.id);
+    });
+}
+function scheduleClassicMinimapSelectionUpdate(ids=[]){
+    const affected = [...new Set((ids || []).filter(Boolean))];
+    if(!affected.length || !CLASSIC_MINIMAP_CANVAS_ENABLED || !minimapState){
+        scheduleMinimapRender();
+        return;
+    }
+    scheduleMinimapNodeUpdate(affected);
+}
+function markClassicConnectionStructureDirty(){
+    classicConnectionStructureDirty = true;
+}
+function renderClassicTempLink(){
+    const setPathGeometry = (path, x1, y1, x2, y2) => {
+        const dx = Math.max(80, Math.abs(x2 - x1) * .45);
+        path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+    };
+    if(tempLink){
+        if(!classicTempLinkDom){
+            classicTempLinkDom = pathEl(tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2, 'link temp');
+            linksEl.appendChild(classicTempLinkDom);
+        }
+        setPathGeometry(classicTempLinkDom, tempLink.x1, tempLink.y1, tempLink.x2, tempLink.y2);
+    } else if(classicTempLinkDom){
+        classicTempLinkDom.remove();
+        classicTempLinkDom = null;
+    }
+}
+function renderClassicConnectionPatch(ids=[]){
+    if(!CLASSIC_INCREMENTAL_LINKS || classicConnectionStructureDirty || !classicLinkDom.size){
+        renderLinks();
+        return;
+    }
+    const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex : new Map(nodes.map(node => [node.id, node]));
+    const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex : new Map();
+    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map(), nodeIndex, nodeElements};
+    const dirty = new Set((ids || []).filter(Boolean));
+    if(!dirty.size){ renderClassicTempLink(); return; }
+    const setPathGeometry = (path, x1, y1, x2, y2) => {
+        const dx = Math.max(80, Math.abs(x2 - x1) * .45);
+        path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+    };
+    for(const connectionId of dirty){
+        const connection = connections.find(item => item.id === connectionId);
+        const target = connection ? nodeIndex.get(connection.to) : null;
+        const entry = classicLinkDom.get(connectionId);
+        if(!connection || !canResolvePort(connection.from, nodeIndex) || !canResolvePort(connection.to, nodeIndex) || (target?.type === 'multiView' && !classicMultiViewInputSlots(target).some(([role]) => role === (connection.inputRole || '')))){
+            entry?.path?.remove();
+            entry?.hit?.remove();
+            classicLinkDom.delete(connectionId);
+            classicLinkControlDom.get(connectionId)?.remove();
+            classicLinkControlDom.delete(connectionId);
+            continue;
+        }
+        const a = portPoint(connection.from, 'out', '', layout);
+        const b = portPoint(connection.to, 'in', connection.inputRole || '', layout);
+        let current = entry;
+        if(!current){
+            current = {path:pathEl(a.x, a.y, b.x, b.y, 'link'), hit:linkHitEl(a.x, a.y, b.x, b.y, connection.id)};
+            classicLinkDom.set(connection.id, current);
+            linksEl.appendChild(current.path);
+            linksEl.appendChild(current.hit);
+        }
+        current.path.className.baseVal = `link${isConnectionSelected(connection) ? ' link-active' : ''}`;
+        current.hit.dataset.connectionId = connection.id;
+        setPathGeometry(current.path, a.x, a.y, b.x, b.y);
+        setPathGeometry(current.hit, a.x, a.y, b.x, b.y);
+        let control = classicLinkControlDom.get(connection.id);
+        if(!control){
+            control = linkDeleteButton(connection, a, b);
+            classicLinkControlDom.set(connection.id, control);
+            linkControlsEl.appendChild(control);
+        }
+        control.className = `link-delete ${isConnectionSelected(connection) ? 'visible' : ''} ${hoveredConnectionId === connection.id ? 'hover' : ''}`;
+        control.style.left = `${(a.x + b.x) / 2}px`;
+        control.style.top = `${(a.y + b.y) / 2}px`;
+    }
+    renderClassicTempLink();
 }
 // 拖动/缩放节点时每个 mousemove 都全量重建连线 SVG 会掉帧；用 rAF 合并成每帧最多刷新一次。
 function scheduleLinksRender(){
@@ -1669,8 +1866,154 @@ function scheduleLinksRender(){
     linksRenderQueued = true;
     requestAnimationFrame(() => {
         linksRenderQueued = false;
-        renderLinks();
+        const dirty = [...classicConnectionDirtyIds];
+        classicConnectionDirtyIds.clear();
+        if(CLASSIC_INCREMENTAL_LINKS && !classicConnectionStructureDirty && (dirty.length || tempLink)) renderClassicConnectionPatch(dirty);
+        else renderLinks();
     });
+}
+function ensureClassicMinimapCanvas(){
+    if(!minimapContent) return null;
+    if(!minimapCanvas || !minimapCanvas.isConnected){
+        minimapCanvas = minimapContent.querySelector('canvas.minimap-canvas');
+        if(!minimapCanvas){
+            minimapCanvas = document.createElement('canvas');
+            minimapCanvas.className = 'minimap-canvas';
+            minimapCanvas.setAttribute('aria-hidden', 'true');
+            minimapContent.prepend(minimapCanvas);
+        }
+    }
+    if(!minimapViewport || !minimapViewport.isConnected){
+        minimapViewport = minimapContent.querySelector('#minimapViewport') || document.getElementById('minimapViewport');
+        if(!minimapViewport){
+            minimapViewport = document.createElement('div');
+            minimapViewport.id = 'minimapViewport';
+            minimapViewport.className = 'minimap-viewport';
+            minimapContent.appendChild(minimapViewport);
+        }
+    }
+    return minimapCanvas;
+}
+function resizeClassicMinimapCanvas(){
+    const canvasEl = ensureClassicMinimapCanvas();
+    if(!canvasEl) return null;
+    const width = minimapContent.clientWidth || 172;
+    const height = minimapContent.clientHeight || 110;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const resized = canvasEl.width !== Math.round(width * dpr) || canvasEl.height !== Math.round(height * dpr);
+    if(resized){
+        canvasEl.width = Math.round(width * dpr);
+        canvasEl.height = Math.round(height * dpr);
+    }
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {canvasEl, ctx, width, height, resized};
+}
+function classicMinimapColors(){
+    const styles = getComputedStyle(document.body);
+    return {
+        normal:styles.getPropertyValue('--text').trim() || '#766f68',
+        selected:styles.getPropertyValue('--strong').trim() || '#1f1f1f',
+        selectedOutline:styles.getPropertyValue('--strong-text').trim() || '#ffffff'
+    };
+}
+function classicMinimapRect(node, state){
+    const r = estimatedNodeRect(node);
+    const {bounds, scale, ox, oy} = state;
+    return {
+        left:ox + (r.x - bounds.x) * scale,
+        top:oy + (r.y - bounds.y) * scale,
+        width:Math.max(3, r.w * scale),
+        height:Math.max(3, r.h * scale)
+    };
+}
+function drawClassicMinimapNode(ctx, node, rect, colors){
+    if(!rect || !node) return;
+    const selectedNode = selected.has(node.id);
+    ctx.save();
+    ctx.globalAlpha = selectedNode ? .96 : .58;
+    ctx.fillStyle = selectedNode ? colors.selected : colors.normal;
+    ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+    if(selectedNode){
+        ctx.globalAlpha = .95;
+        ctx.strokeStyle = colors.selectedOutline;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rect.left + .5, rect.top + .5, Math.max(1, rect.width - 1), Math.max(1, rect.height - 1));
+    }
+    ctx.restore();
+}
+function drawClassicMinimapAll(){
+    const surface = resizeClassicMinimapCanvas();
+    if(!surface || !minimapState) return;
+    const {ctx, width, height} = surface;
+    ctx.clearRect(0, 0, width, height);
+    minimapNodeRectIndex.clear();
+    const colors = classicMinimapColors();
+    (nodes || []).forEach(node => {
+        const rect = classicMinimapRect(node, minimapState);
+        minimapNodeRectIndex.set(node.id, rect);
+        drawClassicMinimapNode(ctx, node, rect, colors);
+    });
+    if(!(nodes || []).length){
+        ctx.save();
+        ctx.fillStyle = colors.normal;
+        ctx.globalAlpha = .58;
+        ctx.font = '800 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('EMPTY', width / 2, height / 2);
+        ctx.restore();
+    }
+}
+function redrawClassicMinimapDirty(ids=[]){
+    const surface = resizeClassicMinimapCanvas();
+    if(!surface || !minimapState) return;
+    const {ctx, width, height, resized} = surface;
+    if(resized){ drawClassicMinimapAll(); return; }
+    const dirty = new Set((ids || []).filter(Boolean));
+    if(!dirty.size) return;
+    const nextRects = new Map();
+    const regions = [];
+    dirty.forEach(id => {
+        const oldRect = minimapNodeRectIndex.get(id);
+        if(oldRect) regions.push(oldRect);
+        const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
+        if(node){
+            const nextRect = classicMinimapRect(node, minimapState);
+            nextRects.set(id, nextRect);
+            regions.push(nextRect);
+        } else minimapNodeRectIndex.delete(id);
+    });
+    if(!regions.length) return;
+    const region = regions.reduce((acc, rect) => ({
+        left:Math.min(acc.left, rect.left), top:Math.min(acc.top, rect.top),
+        right:Math.max(acc.right, rect.left + rect.width), bottom:Math.max(acc.bottom, rect.top + rect.height)
+    }), {left:Infinity, top:Infinity, right:-Infinity, bottom:-Infinity});
+    const pad = 3;
+    const left = Math.max(0, region.left - pad), top = Math.max(0, region.top - pad);
+    const right = Math.min(width, region.right + pad), bottom = Math.min(height, region.bottom + pad);
+    ctx.clearRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+    const colors = classicMinimapColors();
+    (nodes || []).forEach(node => {
+        const rect = nextRects.get(node.id) || minimapNodeRectIndex.get(node.id);
+        if(!rect || rect.left > right || rect.left + rect.width < left || rect.top > bottom || rect.top + rect.height < top) return;
+        if(nextRects.has(node.id)) minimapNodeRectIndex.set(node.id, rect);
+        drawClassicMinimapNode(ctx, node, rect, colors);
+    });
+}
+function renderClassicMinimapDomFallback(){
+    if(!minimapContent || !minimapState) return;
+    minimapCanvas = null;
+    minimapNodeRectIndex.clear();
+    const {bounds, scale, ox, oy} = minimapState;
+    const nodeHtml = (nodes || []).map(node => {
+        const r = estimatedNodeRect(node);
+        return `<div class="minimap-node ${selected.has(node.id) ? 'selected' : ''}" data-node-id="${escapeAttr(node.id)}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
+    }).join('');
+    minimapContent.innerHTML = `${nodeHtml}${nodes?.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="minimap-viewport"></div>`;
+    minimapViewport = document.getElementById('minimapViewport');
+    updateMinimapViewport();
 }
 function renderMinimap(){
     if(!minimapContent || !minimapViewport) return;
@@ -1684,12 +2027,12 @@ function renderMinimap(){
     const ox = (cw - mapW) / 2;
     const oy = (ch - mapH) / 2;
     minimapState = {bounds, scale, ox, oy, cw, ch};
-    const nodeHtml = (nodes || []).map(n => {
-        const r = estimatedNodeRect(n);
-        return `<div class="minimap-node ${selected.has(n.id) ? 'selected' : ''}" data-node-id="${escapeAttr(n.id)}" style="left:${ox + (r.x - bounds.x) * scale}px;top:${oy + (r.y - bounds.y) * scale}px;width:${Math.max(3, r.w * scale)}px;height:${Math.max(3, r.h * scale)}px"></div>`;
-    }).join('');
-    minimapContent.innerHTML = `${nodeHtml}${nodes?.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="minimap-viewport"></div>`;
-    minimapViewport = document.getElementById('minimapViewport');
+    if(!CLASSIC_MINIMAP_CANVAS_ENABLED){
+        renderClassicMinimapDomFallback();
+        return;
+    }
+    ensureClassicMinimapCanvas();
+    drawClassicMinimapAll();
     updateMinimapViewport();
 }
 function updateMinimapViewport(){
@@ -1714,7 +2057,6 @@ function centerViewportOnWorldPoint(point){
     viewport.x = rect.width / 2 - point.x * viewport.scale;
     viewport.y = rect.height / 2 - point.y * viewport.scale;
     applyViewport();
-    renderLinks();
     scheduleSelectionHubPosition();
 }
 function safeViewportScale(value){
@@ -1728,7 +2070,6 @@ function fitAllNodesViewport(){
         viewport.x = rect.width / 2;
         viewport.y = rect.height / 2;
         applyViewport();
-        renderLinks();
         renderSelectionHub();
         scheduleViewportSave();
         return;
@@ -1748,7 +2089,6 @@ function fitAllNodesViewport(){
     viewport.x = rect.width / 2 - cx * viewport.scale;
     viewport.y = rect.height / 2 - cy * viewport.scale;
     applyViewport();
-    renderLinks();
     scheduleSelectionHubPosition();
     scheduleViewportSave();
 }
@@ -1777,7 +2117,6 @@ function exitZoomPreview(point=null){
         viewport.y = prev.y;
     }
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
     return true;
@@ -1806,7 +2145,6 @@ function exitZoomPreviewToNode(nodeId){
     viewport.x = boardRect.width / 2 - cx * viewport.scale;
     viewport.y = boardRect.height / 2 - cy * viewport.scale;
     applyViewport();
-    renderLinks();
     renderSelectionHub();
     scheduleViewportSave();
     return true;
@@ -1816,6 +2154,7 @@ function toggleZoomPreview(){
     else enterZoomPreview();
 }
 function refreshGeometry(){
+    invalidateCanvasGeometry();
     renderLinks();
     renderSelectionHub();
 }
@@ -1943,13 +2282,13 @@ function renderClassicMutation(mutation){
     const replaceIds = mutation?.replaceIds || new Set();
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
     removeIds.forEach(id => {
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
     });
     createdIds.forEach(id => {
         const node = canvasNodeIndex.get(id);
         if(!node) return;
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(current) current.remove();
         try { nodesEl.appendChild(renderNode(node)); }
         catch(error){ console.error('[canvas] incremental node render failed:', id, error); }
@@ -1957,7 +2296,7 @@ function renderClassicMutation(mutation){
     replaceIds.forEach(id => {
         if(createdIds.has(id)) return;
         const node = canvasNodeIndex.get(id);
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(!node || !current) return;
         try {
             const fresh = renderNode(node);
@@ -1965,9 +2304,10 @@ function renderClassicMutation(mutation){
             current.replaceWith(fresh);
         } catch(error){ console.error('[canvas] incremental node refresh failed:', id, error); }
     });
+    rebuildCanvasDomIndexes();
     refreshSelectionVisuals();
     refreshGeometryAfterLayout();
-    refreshIcons();
+    scheduleClassicIdleIconRefresh(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     scheduleMinimapRender();
@@ -1985,6 +2325,7 @@ async function saveCanvas(){
     sanitizeConnections();
     const savingCanvasId = String(canvas.id || '');
     const savingSequence = localCanvasSaveSequence;
+    let saveHadNewerEdits = false;
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
@@ -2023,13 +2364,29 @@ async function saveCanvas(){
         if(!res.ok) throw new Error('save failed');
         const data = await res.json().catch(() => ({}));
         const localViewport = {...viewport};
-        if(data.canvas) canvas = {...canvas, ...data.canvas, viewport:localViewport};
+        saveHadNewerEdits = CLASSIC_SAVE_QUEUE_ENABLED
+            && (localCanvasSaveSequence > savingSequence || saveCanvasAgain);
+        if(data.canvas){
+            const responseRevision = Number(data.canvas.revision || 0);
+            const responseUpdatedAt = Number(data.canvas.updated_at || 0);
+            if(!saveHadNewerEdits){
+                const localNodes = nodes;
+                const localConnections = connections;
+                canvas = {...canvas, ...data.canvas, nodes:localNodes, connections:localConnections, viewport:localViewport};
+            } else {
+                canvas = {
+                    ...canvas,
+                    updated_at:Math.max(Number(canvas.updated_at || 0), responseUpdatedAt),
+                    revision:Math.max(Number(canvas.revision || 0), responseRevision)
+                };
+            }
+        }
         viewport = localViewport;
         canvas.updated_at = Number(canvas.updated_at || Date.now());
         lastCanvasUpdatedAt = canvas.updated_at;
-        localCanvasDirty = Boolean(saveCanvasAgain);
+        localCanvasDirty = Boolean(saveHadNewerEdits || saveCanvasAgain);
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
-        setStatus('Saved');
+        setStatus(localCanvasDirty ? 'Saving...' : 'Saved');
         loadCanvasList(false);
         savedVideoClipSequencesByCanvas.set(
             savingCanvasId,
@@ -7334,7 +7691,23 @@ function restoreMediaPlaybackStates(states){
         restoreMediaPlaybackState(media, states.get(`${tag}:${url}`));
     });
 }
-function measureCanvasOriginalImageNodes(root=nodesEl){
+function scheduleClassicIdleIconRefresh(root=nodesEl){
+    if(!root) return;
+    if(!CLASSIC_IDLE_MEDIA_ENABLED){ refreshIcons(root); return; }
+    classicIdleIconRoots.add(root);
+    if(classicIdleIconHandle) return;
+    const run = () => {
+        classicIdleIconHandle = 0;
+        const roots = [...classicIdleIconRoots];
+        classicIdleIconRoots.clear();
+        roots.forEach(item => {
+            if(item?.isConnected !== false) refreshIcons(item);
+        });
+    };
+    if('requestIdleCallback' in window) classicIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
+    else classicIdleIconHandle = window.setTimeout(run, 0);
+}
+function measureCanvasOriginalImageNodesNow(root=nodesEl){
     root.querySelectorAll?.('.image-node img[data-original-src]').forEach(imgEl => {
         if(imgEl.dataset.previewKind === 'video') return;
         const nodeEl = imgEl.closest('.image-node');
@@ -7351,6 +7724,20 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
             scheduleSave();
         });
     });
+}
+function measureCanvasOriginalImageNodes(root=nodesEl){
+    if(!root) return;
+    if(!CLASSIC_IDLE_MEDIA_ENABLED){ measureCanvasOriginalImageNodesNow(root); return; }
+    classicIdleMediaMeasureRoots.add(root);
+    if(classicIdleMediaMeasureHandle) return;
+    const run = () => {
+        classicIdleMediaMeasureHandle = 0;
+        const roots = [...classicIdleMediaMeasureRoots];
+        classicIdleMediaMeasureRoots.clear();
+        roots.forEach(item => measureCanvasOriginalImageNodesNow(item?.isConnected === false ? nodesEl : item));
+    };
+    if('requestIdleCallback' in window) classicIdleMediaMeasureHandle = window.requestIdleCallback(run, {timeout:1200});
+    else classicIdleMediaMeasureHandle = window.setTimeout(run, 0);
 }
 
 function render(){
@@ -7397,11 +7784,12 @@ function render(){
             console.error('[canvas] renderNode 失败，已跳过该节点：', node?.id, node?.type, err);
         }
     });
+    rebuildCanvasDomIndexes();
     restoreMediaPlaybackStates(mediaStates);
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
-    refreshIcons(nodesEl);
+    scheduleClassicIdleIconRefresh(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
@@ -7454,9 +7842,10 @@ function patchCanvasNodeCreates(createdNodes=[], refreshIds=[]){
     }
     try {
         created.forEach(node => {
-            if(!node?.id || nodesEl.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`)) return;
+            if(!node?.id || canvasNodeDomIndex.has(node.id)) return;
             nodesEl.appendChild(renderNode(node));
         });
+        rebuildCanvasDomIndexes();
         if((refreshIds || []).length) refreshNodes(refreshIds);
         else {
             refreshGeometryAfterLayout();
@@ -7484,10 +7873,10 @@ function refreshNodes(ids=[]){
     const outputScrolls = captureOutputScrolls();
     applyViewport();
     for(const id of uniqueIds){
-        const node = nodes.find(n => n.id === id);
+        const node = canvasNodeIndex.get(id);
         if(!node) continue;
         if(node.type === 'output' && refreshOutputNodeContent(node)) continue;
-        const current = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
+        const current = canvasNodeDomIndex.get(id);
         if(!current){
             render();
             return;
@@ -7501,6 +7890,7 @@ function refreshNodes(ids=[]){
             console.error('[canvas] refreshNode 失败，已跳过该节点：', id, err);
         }
     }
+    rebuildCanvasDomIndexes();
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
@@ -8835,7 +9225,7 @@ function renderNode(node){
     const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
     const canvasLodSafe = ![
-        'panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'
+        'panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle','group','promptGroup'
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
         && !window.CanvasFilmNodes?.isType?.(node.type);
@@ -15103,6 +15493,7 @@ function deleteConnection(id, event){
     event?.stopPropagation();
     pushUndo();
     connections = connections.filter(c => c.id !== id);
+    markClassicConnectionStructureDirty();
     if(hoveredConnectionId === id) hoveredConnectionId = '';
     syncGeneratorInputs();
     render();
@@ -16932,6 +17323,7 @@ function startSelection(e){
     e.stopPropagation();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     const startWorld = screenToWorld(e.clientX, e.clientY);
+    window.CanvasPerformance?.beginInteraction?.('classic.marquee', {nodes:nodes.length});
     selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, sw:startWorld.x, sh:startWorld.y};
     document.body.classList.add('canvas-selecting');
     selectionBox.style.display = 'block';
@@ -16964,14 +17356,16 @@ function finishSelection(){
         const node = nodeIndex.get(el.dataset.id);
         if(!node) return;
         const x = Number(node.x) || 0, y = Number(node.y) || 0;
-        const w = el.offsetWidth || Number(node.w) || 260;
-        const h = el.offsetHeight || Number(node.h) || 200;
+        const cached = CLASSIC_MARQUEE_RECT_CACHE_ENABLED ? estimatedNodeRect(node) : null;
+        const w = cached?.w || el.offsetWidth || Number(node.w) || 260;
+        const h = cached?.h || el.offsetHeight || Number(node.h) || 200;
         if(x < maxX && x + w > minX && y < maxY && y + h > minY) selected.add(node.id);
     });
     selectDrag = null;
     document.body.classList.remove('canvas-selecting');
     window.onmousemove = null;
     window.onmouseup = null;
+    window.CanvasPerformance?.markPaintFrom?.('classic.marquee', 'classic.marquee', {selected:selected.size, nodes:nodes.length});
     refreshSelectionVisuals();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
 }
@@ -18455,7 +18849,7 @@ function startNodeDrag(e, node){
     const collected = new Map();
     const collect = n => {
         if(!n || collected.has(n.id) || n.id === dragTarget.id) return;
-        collected.set(n.id, {node:n, ox:n.x, oy:n.y});
+        collected.set(n.id, {node:n, ox:n.x, oy:n.y, el:canvasNodeDomIndex.get(n.id) || null});
         if(n.type === 'group' || n.type === 'promptGroup'){
             (n.items || []).map(id => canvasNodeIndex.get(id)).forEach(collect);
         }
@@ -18468,7 +18862,17 @@ function startNodeDrag(e, node){
         [...selected].forEach(id => collect(canvasNodeIndex.get(id)));
     }
     const children = [...collected.values()];
-    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y};
+    window.CanvasPerformance?.beginInteraction?.('classic.node-drag', {nodes:1 + children.length, total:nodes.length});
+    dragNode = {
+        node: dragTarget,
+        children,
+        el:canvasNodeDomIndex.get(dragTarget.id) || null,
+        sx:e.clientX,
+        sy:e.clientY,
+        ox:dragTarget.x,
+        oy:dragTarget.y
+    };
+    scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
     window.onmouseup = endDrag;
@@ -18479,7 +18883,8 @@ function onNodeDrag(e){
     const dy = (e.clientY - dragNode.sy) / viewport.scale;
     dragNode.node.x = dragNode.ox + dx;
     dragNode.node.y = dragNode.oy + dy;
-    const el = nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
+    const el = (CLASSIC_DRAG_DOM_INDEX_ENABLED ? (dragNode.el || canvasNodeDomIndex.get(dragNode.node.id)) : null)
+        || nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
     if(el){
         el.style.left = `${dragNode.node.x}px`;
         el.style.top = `${dragNode.node.y}px`;
@@ -18487,12 +18892,15 @@ function onNodeDrag(e){
     (dragNode.children || []).forEach(childDrag => {
         childDrag.node.x = childDrag.ox + dx;
         childDrag.node.y = childDrag.oy + dy;
-        const childEl = nodesEl.querySelector(`.node[data-id="${childDrag.node.id}"]`);
+        const childEl = (CLASSIC_DRAG_DOM_INDEX_ENABLED ? (childDrag.el || canvasNodeDomIndex.get(childDrag.node.id)) : null)
+            || nodesEl.querySelector(`.node[data-id="${childDrag.node.id}"]`);
         if(childEl){
             childEl.style.left = `${childDrag.node.x}px`;
             childEl.style.top = `${childDrag.node.y}px`;
         }
     });
+    invalidateCanvasGeometry([dragNode.node.id, ...(dragNode.children || []).map(item => item.node.id)]);
+    markClassicConnectionsDirtyForNodes([dragNode.node.id, ...(dragNode.children || []).map(item => item.node.id)]);
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
@@ -18510,6 +18918,7 @@ function startNodeResize(e, node){
         sw:(rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w),
         sh:(rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160)
     };
+    scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-resize');
     window.onmousemove = onNodeResize;
     window.onmouseup = endDrag;
@@ -18528,6 +18937,8 @@ function onNodeResize(e){
         el.style.width = `${resizeNode.node.w}px`;
         el.style.height = `${resizeNode.node.h}px`;
     }
+    invalidateCanvasGeometry([resizeNode.node.id]);
+    markClassicConnectionsDirtyForNodes([resizeNode.node.id]);
     scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleMinimapNodeUpdate([resizeNode.node.id]);
@@ -18537,7 +18948,9 @@ function startLink(e, originId, originKind, originRole=''){
     originKind = originKind || 'out';
     const src = portPoint(originId, originKind, originRole);
     const source = nodes.find(n => n.id === originId);
+    window.CanvasPerformance?.beginInteraction?.('classic.port-link', {nodes:nodes.length, connections:connections.length, originKind});
     tempLink = {from:originId, originKind, originRole, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
+    scheduleClassicSafeLod();
     window.onmousemove = e2 => {
         const p = screenToWorld(e2.clientX, e2.clientY);
         tempLink.x2 = p.x;
@@ -18558,6 +18971,7 @@ function startLink(e, originId, originKind, originRole=''){
                     pushUndo();
                     if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
                     connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
+                    markClassicConnectionStructureDirty();
                     syncLatestGeneratedOutputToConnection(fromId, toId);
                 }
                 syncGeneratorInputs();
@@ -18571,6 +18985,7 @@ function startLink(e, originId, originKind, originRole=''){
                 const out = {id:uid('out'), type:'output', x:p.x, y:p.y - 63, images:[]};
                 nodes.push(out);
                 connections.push({id:uid('c'), from:source.id, to:out.id});
+                markClassicConnectionStructureDirty();
                 syncLatestGeneratedOutputToConnection(source.id, out.id);
                 syncGeneratorInputs();
                 scheduleSave();
@@ -18590,6 +19005,7 @@ function startLink(e, originId, originKind, originRole=''){
                 refreshNodes([originId]);
             }
         }
+        window.CanvasPerformance?.markPaintFrom?.('classic.port-link', 'classic.port-link', {nodes:nodes.length, connections:connections.length, target:Boolean(target)});
         tempLink = null;
         window.onmousemove = null;
         window.onmouseup = null;
@@ -18730,6 +19146,10 @@ function sanitizeConnections(){
 function endDrag(event=null){
     const hadContentDrag = Boolean(dragNode || resizeNode || llmPaneDrag || knifeChanged || tempLink);
     const hadViewportDrag = Boolean(dragBoard || minimapDrag);
+    if(dragNode) window.CanvasPerformance?.markPaintFrom?.('classic.node-drag', 'classic.node-drag', {nodes:1 + (dragNode.children || []).length, total:nodes.length});
+    if(dragBoard) window.CanvasPerformance?.markPaintFrom?.('classic.pan', 'classic.pan', {nodes:nodes.length});
+    if(minimapDrag) window.CanvasPerformance?.markPaintFrom?.('classic.minimap-drag', 'classic.minimap-drag', {nodes:nodes.length});
+    if(tempLink) window.CanvasPerformance?.markPaintFrom?.('classic.port-link', 'classic.port-link', {nodes:nodes.length, connections:connections.length});
     if(dragNode){
         const moved = [dragNode.node, ...(dragNode.children || []).map(c => c.node)].filter(Boolean);
         // 拖动 group/promptGroup 自身时不重新评估（成员跟着一起走，包含关系不变）
@@ -18739,6 +19159,7 @@ function endDrag(event=null){
     dragNode = null;
     dragBoard = null;
     resizeNode = null;
+    scheduleClassicSafeLod();
     llmPaneDrag = null;
     knifeActive = false;
     knifePoint = null;
@@ -19173,16 +19594,22 @@ function updateGroupMembership(movedNodes){
 
 function portPoint(id, kind, inputRole='', layout=null){
     const cache = layout?.cache;
-    const cacheKey = `${id}:${kind}:${inputRole || ''}`;
+    const cacheKey = canvasPortIndexKey(id, kind, inputRole);
     if(cache?.has(cacheKey)) return cache.get(cacheKey);
+    const cachedGeometry = canvasPortGeometryIndex.get(cacheKey);
+    if(cachedGeometry?.epoch === canvasGeometryEpoch){
+        const point = {x:cachedGeometry.x, y:cachedGeometry.y};
+        cache?.set(cacheKey, point);
+        return point;
+    }
     const n = layout?.nodeIndex?.get(id) || canvasNodeIndex.get(id) || nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
-    const el = layout?.nodeElements?.get(id) || nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    const roleSelector = inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : '';
-    const port = el?.querySelector(`.port.${kind}${roleSelector}`);
+    const el = layout?.nodeElements?.get(id) || canvasNodeDomIndex.get(id);
+    const port = canvasPortDomIndex.get(cacheKey) || el?.querySelector(`.port.${kind}${inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : ''}`);
     if(port){
         const r = port.getBoundingClientRect();
         const point = screenToWorld(r.left + r.width / 2, r.top + r.height / 2, layout?.boardRect);
+        canvasPortGeometryIndex.set(cacheKey, {...point, epoch:canvasGeometryEpoch});
         cache?.set(cacheKey, point);
         return point;
     }
@@ -19191,6 +19618,7 @@ function portPoint(id, kind, inputRole='', layout=null){
     const w = (el?.offsetWidth) || n.w || 260, h = (el?.offsetHeight) || n.h || 160;
     const nx = Number(n.x) || 0, ny = Number(n.y) || 0;
     const point = kind === 'out' ? {x:nx + w, y:ny + h / 2} : {x:nx, y:ny + h / 2};
+    canvasPortGeometryIndex.set(cacheKey, {...point, epoch:canvasGeometryEpoch});
     cache?.set(cacheKey, point);
     return point;
 }
@@ -19204,9 +19632,9 @@ function renderLinks(){
     // 否则“读一条 rect → append 一条线”交错进行，每次 append 都让布局失效，下一次读 rect 就触发一次
     // 全量强制重排（layout thrashing），连线一多拖动就掉帧。读写分离后每帧只强制重排一次。
     const segments = [];
-    const nodeIndex = new Map(nodes.map(node => [node.id, node]));
-    const nodeElements = new Map();
-    nodesEl.querySelectorAll('.node[data-id]').forEach(el => nodeElements.set(el.dataset.id, el));
+    const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex : new Map(nodes.map(node => [node.id, node]));
+    const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex : new Map();
+    if(!nodeElements.size) nodesEl.querySelectorAll('.node[data-id]').forEach(el => nodeElements.set(el.dataset.id, el));
     const layout = {boardRect:board.getBoundingClientRect(), cache:new Map(), nodeIndex, nodeElements};
     // 连接端点仍按 portPoint(c.to, 'in', c.inputRole || '') 的角色语义解析，layout 仅用于复用测量结果。
     connections.forEach(c => {
@@ -19269,6 +19697,20 @@ function renderLinks(){
     classicKnifeTrailDom?.remove();
     classicKnifeTrailDom = null;
     renderKnifeTrail();
+    classicConnectionSelectionIndex.clear();
+    classicConnectionModelIndex.clear();
+    connections.forEach(connection => {
+        if(!connection?.id) return;
+        classicConnectionModelIndex.set(connection.id, connection);
+        [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+            const ids = classicConnectionSelectionIndex.get(nodeId) || new Set();
+            ids.add(connection.id);
+            classicConnectionSelectionIndex.set(nodeId, ids);
+        });
+    });
+    classicSelectionFeedbackState = null;
+    classicConnectionDirtyIds.clear();
+    classicConnectionStructureDirty = false;
     perfEnd?.();
 }
 function renderKnifeTrail(){
@@ -19360,27 +19802,59 @@ function isConnectionSelected(connection){
     return selected.has(connection.from) || selected.has(connection.to);
 }
 function refreshSelectionVisuals(){
-    nodesEl.querySelectorAll('.node').forEach(el => {
-        el.classList.toggle('selected', selected.has(el.dataset.id));
-    });
+    const nextSelected = new Set(selected);
+    const previous = classicSelectionFeedbackState;
+    const incremental = CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && canvasNodeDomIndex.size > 0;
+    const affectedNodeIds = new Set([...(previous?.ids || []), ...nextSelected]);
+    if(incremental){
+        affectedNodeIds.forEach(id => canvasNodeDomIndex.get(id)?.classList.toggle('selected', nextSelected.has(id)));
+    } else {
+        nodesEl.querySelectorAll('.node').forEach(el => {
+            el.classList.toggle('selected', nextSelected.has(el.dataset.id));
+        });
+    }
     syncCanvasSelectedImageResolution(nodesEl);
     syncConnectionSelectionVisuals();
+    classicSelectionFeedbackState = {ids:nextSelected};
+    scheduleClassicSafeLod();
     renderSelectionHub();
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
-    scheduleMinimapRender();
+    canvasArrangeBtn?.classList.toggle('visible', nextSelected.size > 0);
+    scheduleClassicMinimapSelectionUpdate([...affectedNodeIds]);
 }
 function syncConnectionSelectionVisuals(){
     const selectedIds = selected;
-    const connectionById = new Map((connections || []).map(connection => [connection.id, connection]));
-    linksEl.querySelectorAll('.link-hit[data-connection-id]').forEach(hit => {
-        const connection = connectionById.get(hit.dataset.connectionId);
+    const previous = classicSelectionFeedbackState?.ids;
+    const incremental = CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && classicConnectionSelectionIndex.size > 0;
+    const updateConnection = connectionId => {
+        const connection = classicConnectionModelIndex.get(connectionId);
         const active = Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to)));
-        hit.previousElementSibling?.classList.toggle('link-active', active);
-    });
-    linkControlsEl.querySelectorAll('.link-delete[data-connection-id]').forEach(button => {
-        const connection = connectionById.get(button.dataset.connectionId);
-        button.classList.toggle('visible', Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to))));
-    });
+        const entry = classicLinkDom.get(connectionId);
+        entry?.path?.classList.toggle('link-active', active);
+        entry?.hit?.previousElementSibling?.classList.toggle('link-active', active);
+        classicLinkControlDom.get(connectionId)?.classList.toggle('visible', active);
+    };
+    if(incremental){
+        const affected = new Set([...previous, ...selectedIds]);
+        const connectionIds = new Set();
+        affected.forEach(nodeId => (classicConnectionSelectionIndex.get(nodeId) || []).forEach(id => connectionIds.add(id)));
+        connectionIds.forEach(updateConnection);
+    } else {
+        const connectionById = new Map((connections || []).map(connection => [connection.id, connection]));
+        linksEl.querySelectorAll('.link-hit[data-connection-id]').forEach(hit => {
+            const connection = connectionById.get(hit.dataset.connectionId);
+            const active = Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to)));
+            hit.previousElementSibling?.classList.toggle('link-active', active);
+        });
+        linkControlsEl.querySelectorAll('.link-delete[data-connection-id]').forEach(button => {
+            const connection = connectionById.get(button.dataset.connectionId);
+            button.classList.toggle('visible', Boolean(connection && (selectedIds.has(connection.from) || selectedIds.has(connection.to))));
+        });
+    }
 }
 function pathEl(x1,y1,x2,y2,cls){
     const p = document.createElementNS('http://www.w3.org/2000/svg','path');
@@ -19438,7 +19912,7 @@ function applyKnifeCut(from, to){
     if(!canvas || !connections.length || !from || !to) return;
     const nodeHits = new Set();
     nodes.forEach(n => {
-        const el = nodesEl.querySelector(`.node[data-id="${n.id}"]`);
+        const el = canvasNodeDomIndex.get(n.id);
         if(!el) return;
         const r = nodeRect(n);
         if(segmentIntersectsRect(from, to, r)) nodeHits.add(n.id);
@@ -19448,6 +19922,7 @@ function applyKnifeCut(from, to){
     if(!knifeChanged) pushUndo();
     knifeChanged = true;
     connections = next;
+    markClassicConnectionStructureDirty();
     syncGeneratorInputs();
     refreshGeneratorInputViews();
     knifeNeedsRender = true;
@@ -19505,6 +19980,7 @@ minimap?.addEventListener('mousedown', e => {
     if(e.target.closest?.('#canvasArrangeBtn')) return;
     e.preventDefault();
     e.stopPropagation();
+    window.CanvasPerformance?.beginInteraction?.('classic.minimap-drag', {nodes:nodes.length});
     minimapDrag = true;
     centerViewportOnWorldPoint(minimapEventToWorld(e));
     window.onmousemove = e2 => {
@@ -19512,6 +19988,7 @@ minimap?.addEventListener('mousedown', e => {
     };
     window.onmouseup = () => {
         minimapDrag = false;
+        window.CanvasPerformance?.markPaintFrom?.('classic.minimap-drag', 'classic.minimap-drag', {nodes:nodes.length});
         window.onmousemove = null;
         window.onmouseup = null;
         scheduleViewportSave();
@@ -19555,6 +20032,7 @@ function startBoardPan(e, opts={}){
     e.stopPropagation();
     closeCreateMenu();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+    window.CanvasPerformance?.beginInteraction?.('classic.pan', {nodes:nodes.length});
     dragBoard = {sx:e.clientX, sy:e.clientY, ox:viewport.x, oy:viewport.y, moved:false, clearSelectionOnClick:Boolean(opts.clearSelectionOnClick)};
     document.body.classList.add('canvas-board-pan');
     window.onmousemove = e2 => {
@@ -19636,15 +20114,17 @@ board.addEventListener('mousedown', e => {
 board.onwheel = e => {
     if(!canvas) return;
     e.preventDefault();
+    if(!window.CanvasPerformance?.isInteractionActive?.('classic.zoom')) window.CanvasPerformance?.beginInteraction?.('classic.zoom', {nodes:nodes.length, connections:connections.length});
     const before = screenToWorld(e.clientX, e.clientY);
     viewport.scale = viewport.scale * (e.deltaY > 0 ? .92 : 1.08);
     const rect = board.getBoundingClientRect();
     viewport.x = e.clientX - rect.left - before.x * viewport.scale;
     viewport.y = e.clientY - rect.top - before.y * viewport.scale;
     applyViewport();
-    scheduleLinksRender();
+    if(tempLink) scheduleLinksRender();
     scheduleSelectionHubPosition();
     scheduleViewportSave();
+    window.CanvasPerformance?.markPaintFrom?.('classic.zoom', 'classic.zoom', {nodes:nodes.length, connections:connections.length});
 };
 board.addEventListener('dragover', e => {
     const perfEnd = window.CanvasPerformance?.start?.('classic.dragover');

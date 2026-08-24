@@ -81,14 +81,35 @@ let canvas = null;
 let canvasUsesConnections = true;
 let nodes = [];
 let smartNodeIndex = new Map();
+const smartNodeDomIndex = new Map();
+const smartPortDomIndex = new Map();
+const smartNodeRectIndex = new Map();
+const smartPortGeometryIndex = new Map();
+let smartGeometryEpoch = 0;
 let selectedId = '';
 let selectedIds = [];
 let selectedImage = {nodeId:'', index:-1};
 let dragState = null;
+// 安全视口 LOD 只延迟普通节点 body；节点外壳、端口、模型和特殊节点始终保留。
+const SMART_SAFE_LOD_ENABLED = true;
+const SMART_SAFE_LOD_MARGIN = 480;
+// 框选优先复用节点矩形索引；关闭时回退逐节点布局计算。
+const SMART_MARQUEE_RECT_CACHE_ENABLED = true;
+// 端口连线成功后只替换受影响节点并刷新连线层；关闭时回退原全量 render。
+const SMART_PORT_LINK_MUTATION_ENABLED = true;
+// 连接层统一委托点击事件；关闭时回退原逐元素监听，便于异常止损。
+const SMART_CONNECTION_EVENT_DELEGATION_ENABLED = true;
+// 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
+const SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
+// 拖动目标高亮只切换旧/新节点；关闭或索引缺失时回退原选择器扫描。
+const SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED = true;
+let smartSafeLodRaf = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
 let loopInsertPreview = null;
 let selectionState = null;
+let smartSelectionFeedbackState = null;
+const smartConnectionSelectionIndex = new Map();
 let smartCanvasToolMode = 'select';
 let smartTemporaryToolMode = '';
 let smartTemporaryToolCode = '';
@@ -105,6 +126,7 @@ let mentionInsertMode = 'token';
 let panState = null;
 let didPan = false;
 let smartNodeToolbarDismissed = false;
+let smartDropHighlightId = '';
 let expandedPromptSource = null;
 function openExpandedPromptEditor(source){
     if(!source || !expandedPromptModal || !expandedPromptTextarea || !expandedPromptRich) return;
@@ -237,6 +259,10 @@ let smartMinimapRenderQueued = false;
 let smartMinimapViewportQueued = false;
 let smartMinimapNodeUpdateQueued = false;
 const smartMinimapNodeUpdateIds = new Set();
+// Canvas 小地图为可回退优化：关闭后恢复原有 DOM 节点矩形渲染。
+const SMART_MINIMAP_CANVAS_ENABLED = true;
+let smartMinimapCanvas = null;
+const smartMinimapNodeRectIndex = new Map();
 let smartMinimapDrag = false;
 let zoomPreviewState = null;
 let runTimerInterval = null;
@@ -620,6 +646,22 @@ async function copyTextToClipboard(text){
 function refreshIcons(root=document){
     if(!window.lucide) return;
     window.lucide.createIcons({root:root || document});
+}
+function scheduleSmartIdleIconRefresh(root=world){
+    if(!root) return;
+    if(!SMART_IDLE_MEDIA_ENABLED){ refreshIcons(root); return; }
+    smartIdleIconRoots.add(root);
+    if(smartIdleIconHandle) return;
+    const run = () => {
+        smartIdleIconHandle = 0;
+        const roots = [...smartIdleIconRoots];
+        smartIdleIconRoots.clear();
+        roots.forEach(item => {
+            if(item?.isConnected !== false) refreshIcons(item);
+        });
+    };
+    if('requestIdleCallback' in window) smartIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
+    else smartIdleIconHandle = window.setTimeout(run, 0);
 }
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
@@ -1414,27 +1456,62 @@ function clearImageClickTimer(){
 }
 function syncSelectionUi(){
     const ids = selectedNodeIds();
+    const nextIds = new Set(ids);
+    const imageNodeId = selectedImage.nodeId || '';
+    const previous = smartSelectionFeedbackState;
+    const incremental = SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && smartNodeDomIndex.size > 0;
     world.classList.toggle('smart-multi-selected', ids.length > 1);
     smartArrangeBtn?.classList.toggle('visible', ids.length > 0);
-    world.querySelectorAll('.image-node').forEach(el => {
-        const id = el.dataset.id || '';
-        el.classList.toggle('selected', isNodeSelected(id));
-        el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
-            const index = Number(item.dataset.imageIndex || 0);
-            item.classList.toggle('image-selected', selectedImage.nodeId === id && selectedImage.index === index);
+    if(incremental){
+        const affectedNodeIds = new Set([...previous.ids, ...nextIds]);
+        if(previous.imageNodeId !== imageNodeId){
+            if(previous.imageNodeId) affectedNodeIds.add(previous.imageNodeId);
+            if(imageNodeId) affectedNodeIds.add(imageNodeId);
+        }
+        affectedNodeIds.forEach(id => {
+            const el = smartNodeDomIndex.get(id);
+            if(!el) return;
+            el.classList.toggle('selected', nextIds.has(id));
+            if(previous.imageNodeId === imageNodeId && previous.imageIndex === Number(selectedImage.index)) return;
+            el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
+                const index = Number(item.dataset.imageIndex || 0);
+                item.classList.toggle('image-selected', imageNodeId === id && Number(selectedImage.index) === index);
+            });
         });
-    });
+    } else {
+        world.querySelectorAll('.image-node').forEach(el => {
+            const id = el.dataset.id || '';
+            el.classList.toggle('selected', nextIds.has(id));
+            el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
+                const index = Number(item.dataset.imageIndex || 0);
+                item.classList.toggle('image-selected', imageNodeId === id && Number(selectedImage.index) === index);
+            });
+        });
+    }
     syncSmartSelectedImageResolution(world);
     syncRunButtonState();
     syncConnectionSelectionUi();
+    smartSelectionFeedbackState = {
+        ids:nextIds,
+        imageNodeId,
+        imageIndex:Number(selectedImage.index),
+        connectionIds:nextIds
+    };
+    scheduleSmartSafeLod();
 }
 function syncConnectionSelectionUi(){
     const svg = world.querySelector('svg.connection-layer');
     if(!svg) return;
     const selected = new Set(selectedNodeIds());
+    const previous = smartSelectionFeedbackState?.connectionIds;
+    const incremental = SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
+        && previous
+        && smartConnectionSelectionIndex.size > 0;
     const connectionsByIndex = canvas?.connections || [];
-    svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(hit => {
-        const active = String(hit.dataset.connIndex || '').split(',').some(rawIndex => {
+    const updateHit = hit => {
+        const active = String(hit?.dataset?.connIndex || '').split(',').some(rawIndex => {
             const connection = connectionsByIndex[Number(rawIndex)];
             return connection && (selected.has(connection.from) || selected.has(connection.to));
         });
@@ -1445,7 +1522,16 @@ function syncConnectionSelectionUi(){
             return connection && selected.has(connection.from);
         });
         path?.classList.toggle('conn-breathe', breathe);
-    });
+    };
+    if(incremental){
+        const affected = new Set([...previous, ...selected]);
+        const hits = new Set();
+        affected.forEach(id => (smartConnectionSelectionIndex.get(id) || []).forEach(hit => hits.add(hit)));
+        hits.forEach(updateHit);
+    } else {
+        svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(updateHit);
+    }
+    if(smartSelectionFeedbackState) smartSelectionFeedbackState.connectionIds = selected;
 }
 function isNodeSelected(id){
     return selectedId === id || selectedIds.includes(id);
@@ -2623,6 +2709,66 @@ function nodeRect(node){
     const layout = imageLayout(node.images || [], nodeScale(node), node);
     return {x:node.x || 0, y:node.y || 0, width:layout.width, height:layout.height};
 }
+function smartPortIndexKey(nodeId, kind, role=''){
+    return `${nodeId}:${kind}:${role || ''}`;
+}
+function invalidateSmartGeometry(ids=[]){
+    smartGeometryEpoch += 1;
+    const list = (ids || []).filter(Boolean);
+    if(!list.length){
+        smartNodeRectIndex.clear();
+        smartPortGeometryIndex.clear();
+        return;
+    }
+    const affected = new Set(list);
+    list.forEach(id => smartNodeRectIndex.delete(id));
+    [...smartPortGeometryIndex.keys()].forEach(key => {
+        if(affected.has(String(key).split(':', 1)[0])) smartPortGeometryIndex.delete(key);
+    });
+}
+function rebuildSmartCanvasDomIndexes(){
+    smartNodeDomIndex.clear();
+    smartPortDomIndex.clear();
+    smartNodeRectIndex.clear();
+    smartPortGeometryIndex.clear();
+    smartGeometryEpoch += 1;
+    world?.querySelectorAll?.('.image-node[data-id]').forEach(el => {
+        const id = el.dataset.id || '';
+        if(!id) return;
+        smartNodeDomIndex.set(id, el);
+        const node = smartNodeIndex.get(id) || nodes.find(item => item.id === id);
+        if(node){
+            const measured = nodeRect(node);
+            smartNodeRectIndex.set(id, {x:Number(node.x) || 0, y:Number(node.y) || 0, width:el.offsetWidth || measured.width, height:el.offsetHeight || measured.height});
+        }
+        el.querySelectorAll('.node-port').forEach(port => {
+            smartPortDomIndex.set(smartPortIndexKey(id, port.dataset.port || '', port.dataset.inputRole || ''), port);
+        });
+    });
+}
+function cachedSmartNodeRect(node){
+    if(!node) return {x:0, y:0, width:0, height:0};
+    const cached = smartNodeRectIndex.get(node.id);
+    if(cached && cached.x === (Number(node.x) || 0) && cached.y === (Number(node.y) || 0)) return cached;
+    const measured = nodeRect(node);
+    smartNodeRectIndex.set(node.id, measured);
+    return measured;
+}
+function cachedSmartPortPoint(node, kind, role='', rect=null){
+    const key = smartPortIndexKey(node?.id || '', kind, role);
+    const cached = smartPortGeometryIndex.get(key);
+    if(cached?.epoch === smartGeometryEpoch) return cached;
+    const r = rect || cachedSmartNodeRect(node);
+    const isHistory = kind === 'history-out' || kind === 'history-in';
+    const isOut = kind === 'out' || kind === 'history-out';
+    const ratio = node?.specialType === 'multi-view' ? multiViewRoleRatio(role) : role === 'pose-reference' ? 0.36 : role === 'target-image' ? 0.68 : 0.5;
+    const point = isHistory
+        ? {x:r.x + r.width / 2, y:isOut ? r.y + r.height : r.y}
+        : {x:isOut ? r.x + r.width : r.x, y:r.y + r.height * (isOut ? 0.5 : ratio)};
+    const value = {...point, epoch:smartGeometryEpoch};
+    smartPortGeometryIndex.set(key, value);
+    return value;
+}
 const SMART_NODE_LAYOUT_GAP = 72;
 const SMART_NODE_LAYOUT_ROW_GAP = 52;
 function smartRectsOverlap(a, b){
@@ -2868,7 +3014,46 @@ function applyViewport(){
     world.classList.toggle('canvas-scaled', Math.abs(viewport.scale - 1) > 0.001);
     shell.style.backgroundSize = '24px 24px';
     shell.style.backgroundPosition = '0 0';
+    scheduleSmartSafeLod();
     scheduleSmartMinimapViewportUpdate();
+}
+function scheduleSmartSafeLod(){
+    if(smartSafeLodRaf || !world) return;
+    smartSafeLodRaf = requestAnimationFrame(() => {
+        smartSafeLodRaf = 0;
+        updateSmartSafeLod();
+    });
+}
+function updateSmartSafeLod(){
+    if(!world) return;
+    const largeScene = SMART_SAFE_LOD_ENABLED && nodes.length > 200;
+    world.classList.toggle('smart-lod-active', largeScene);
+    const viewX = -viewport.x / Math.max(0.05, viewport.scale || 1);
+    const viewY = -viewport.y / Math.max(0.05, viewport.scale || 1);
+    const viewW = shell.clientWidth / Math.max(0.05, viewport.scale || 1);
+    const viewH = shell.clientHeight / Math.max(0.05, viewport.scale || 1);
+    const margin = SMART_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
+    const minX = viewX - margin, minY = viewY - margin;
+    const maxX = viewX + viewW + margin, maxY = viewY + viewH + margin;
+    const keepIds = new Set(selectedNodeIds());
+    (dragState?.group || []).forEach(item => keepIds.add(item?.id));
+    if(dragState?.id) keepIds.add(dragState.id);
+    if(resizeState?.id) keepIds.add(resizeState.id);
+    if(portDragState?.fromId) keepIds.add(portDragState.fromId);
+    if(portDragState?.hoverTargetId) keepIds.add(portDragState.hoverTargetId);
+    if(loopInsertPreview?.nodeId) keepIds.add(loopInsertPreview.nodeId);
+    world.querySelectorAll('.image-node.smart-lod-safe').forEach(el => {
+        const node = smartNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
+        if(!node){ el.classList.remove('smart-lod-outside'); return; }
+        const rect = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
+        const intersects = rect.x < maxX && rect.x + rect.width > minX && rect.y < maxY && rect.y + rect.height > minY;
+        const outside = largeScene && !intersects && !keepIds.has(node.id);
+        const nextState = outside ? 'deferred' : 'full';
+        if(el.dataset.lodState !== nextState){
+            el.classList.toggle('smart-lod-outside', outside);
+            el.dataset.lodState = nextState;
+        }
+    });
 }
 function screenToWorld(event){
     const rect = shell.getBoundingClientRect();
@@ -2883,8 +3068,164 @@ function viewportCenter(){
         y:(shell.clientHeight / 2 - viewport.y) / viewport.scale
     };
 }
+function ensureSmartMinimapCanvas(){
+    if(!minimapContent) return null;
+    if(!smartMinimapCanvas || !smartMinimapCanvas.isConnected){
+        smartMinimapCanvas = minimapContent.querySelector('canvas.minimap-canvas');
+        if(!smartMinimapCanvas){
+            smartMinimapCanvas = document.createElement('canvas');
+            smartMinimapCanvas.className = 'minimap-canvas';
+            smartMinimapCanvas.setAttribute('aria-hidden', 'true');
+            minimapContent.prepend(smartMinimapCanvas);
+        }
+    }
+    if(!minimapViewport || !minimapViewport.isConnected){
+        minimapViewport = minimapContent.querySelector('#minimapViewport') || document.getElementById('minimapViewport');
+        if(!minimapViewport){
+            minimapViewport = document.createElement('div');
+            minimapViewport.id = 'minimapViewport';
+            minimapViewport.className = 'smart-minimap-viewport';
+            minimapContent.appendChild(minimapViewport);
+        }
+    }
+    return smartMinimapCanvas;
+}
+function resizeSmartMinimapCanvas(){
+    const canvasEl = ensureSmartMinimapCanvas();
+    if(!canvasEl) return null;
+    const width = minimapContent.clientWidth || 170;
+    const height = minimapContent.clientHeight || 108;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const resized = canvasEl.width !== Math.round(width * dpr) || canvasEl.height !== Math.round(height * dpr);
+    if(resized){
+        canvasEl.width = Math.round(width * dpr);
+        canvasEl.height = Math.round(height * dpr);
+    }
+    const ctx = canvasEl.getContext('2d');
+    if(!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {canvasEl, ctx, width, height, resized};
+}
+function smartMinimapColors(){
+    const styles = getComputedStyle(document.body);
+    return {
+        normal:styles.getPropertyValue('--strong').trim() || '#766f68',
+        selected:styles.getPropertyValue('--strong-text').trim() || '#ffffff',
+        outline:styles.getPropertyValue('--strong').trim() || '#1f1f1f'
+    };
+}
+function smartMinimapRect(node, state){
+    const r = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
+    return {
+        left:state.offsetX + (r.x - state.minX) * state.scale,
+        top:state.offsetY + (r.y - state.minY) * state.scale,
+        width:Math.max(4, r.width * state.scale),
+        height:Math.max(4, r.height * state.scale)
+    };
+}
+function drawSmartMinimapNode(ctx, node, rect, colors){
+    if(!node || !rect) return;
+    const selectedNode = isNodeSelected(node.id);
+    ctx.save();
+    ctx.globalAlpha = selectedNode ? .98 : .74;
+    ctx.fillStyle = selectedNode ? colors.selected : colors.normal;
+    ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+    if(selectedNode){
+        ctx.globalAlpha = .95;
+        ctx.strokeStyle = colors.outline;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rect.left + .5, rect.top + .5, Math.max(1, rect.width - 1), Math.max(1, rect.height - 1));
+    }
+    ctx.restore();
+}
+function drawSmartMinimapAll(visibleNodes){
+    const surface = resizeSmartMinimapCanvas();
+    if(!surface || !smartMinimapState) return;
+    const {ctx, width, height} = surface;
+    ctx.clearRect(0, 0, width, height);
+    smartMinimapNodeRectIndex.clear();
+    const colors = smartMinimapColors();
+    (visibleNodes || []).forEach(node => {
+        const rect = smartMinimapRect(node, smartMinimapState);
+        smartMinimapNodeRectIndex.set(node.id, rect);
+        drawSmartMinimapNode(ctx, node, rect, colors);
+    });
+    if(!(visibleNodes || []).length){
+        ctx.save();
+        ctx.fillStyle = colors.normal;
+        ctx.globalAlpha = .58;
+        ctx.font = '800 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('EMPTY', width / 2, height / 2);
+        ctx.restore();
+    }
+}
+function redrawSmartMinimapDirty(ids=[]){
+    const surface = resizeSmartMinimapCanvas();
+    if(!surface || !smartMinimapState) return;
+    const {ctx, width, height, resized} = surface;
+    if(resized){ drawSmartMinimapAll(nodes.filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID)); return; }
+    const dirty = new Set((ids || []).filter(Boolean));
+    if(!dirty.size) return;
+    const regions = [];
+    const nextRects = new Map();
+    dirty.forEach(id => {
+        const oldRect = smartMinimapNodeRectIndex.get(id);
+        if(oldRect) regions.push(oldRect);
+        const node = smartNodeIndex.get(id) || nodes.find(item => item.id === id && item.id !== SMART_LOG_PREVIEW_NODE_ID);
+        if(node){
+            const nextRect = smartMinimapRect(node, smartMinimapState);
+            nextRects.set(id, nextRect);
+            regions.push(nextRect);
+        } else smartMinimapNodeRectIndex.delete(id);
+    });
+    if(!regions.length) return;
+    const region = regions.reduce((acc, rect) => ({
+        left:Math.min(acc.left, rect.left), top:Math.min(acc.top, rect.top),
+        right:Math.max(acc.right, rect.left + rect.width), bottom:Math.max(acc.bottom, rect.top + rect.height)
+    }), {left:Infinity, top:Infinity, right:-Infinity, bottom:-Infinity});
+    const left = Math.max(0, region.left - 4), top = Math.max(0, region.top - 4);
+    const right = Math.min(width, region.right + 4), bottom = Math.min(height, region.bottom + 4);
+    ctx.clearRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+    const colors = smartMinimapColors();
+    const visibleNodes = nodes.filter(node => node.id !== SMART_LOG_PREVIEW_NODE_ID);
+    visibleNodes.forEach(node => {
+        const rect = nextRects.get(node.id) || smartMinimapNodeRectIndex.get(node.id);
+        if(!rect || rect.left > right || rect.left + rect.width < left || rect.top > bottom || rect.top + rect.height < top) return;
+        if(nextRects.has(node.id)) smartMinimapNodeRectIndex.set(node.id, rect);
+        drawSmartMinimapNode(ctx, node, rect, colors);
+    });
+}
+function renderSmartMinimapDomFallback(visibleNodes=[]){
+    if(!minimapContent || !smartMinimapState) return;
+    smartMinimapCanvas = null;
+    smartMinimapNodeRectIndex.clear();
+    const {minX, minY, scale, offsetX, offsetY} = smartMinimapState;
+    const nodeHtml = visibleNodes.map(node => {
+        const rect = smartMinimapRect(node, smartMinimapState);
+        return `<div class="minimap-node ${isNodeSelected(node.id) ? 'selected' : ''}" data-node-id="${escapeAttr(node.id)}" style="left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px"></div>`;
+    }).join('');
+    const viewW = shell.clientWidth / viewport.scale;
+    const viewH = shell.clientHeight / viewport.scale;
+    const viewX = -viewport.x / viewport.scale;
+    const viewY = -viewport.y / viewport.scale;
+    const project = r => ({
+        left:offsetX + (r.x - minX) * scale,
+        top:offsetY + (r.y - minY) * scale,
+        width:Math.max(4, r.width * scale),
+        height:Math.max(4, r.height * scale)
+    });
+    const view = project({x:viewX, y:viewY, width:viewW, height:viewH});
+    minimapContent.innerHTML = `${nodeHtml}${visibleNodes.length ? '' : '<div class="minimap-empty">EMPTY</div>'}<div id="minimapViewport" class="smart-minimap-viewport"></div>`;
+    minimapViewport = document.getElementById('minimapViewport');
+    minimapViewport.style.left = `${view.left}px`;
+    minimapViewport.style.top = `${view.top}px`;
+    minimapViewport.style.width = `${view.width}px`;
+    minimapViewport.style.height = `${view.height}px`;
+}
 function renderMinimap(){
-    if(!minimapContent || !minimapViewport) return;
+    if(!minimapContent) return;
     smartArrangeBtn?.classList.toggle('visible', selectedNodeIds().length > 0);
     const width = minimapContent.clientWidth || 170;
     const height = minimapContent.clientHeight || 108;
@@ -2892,7 +3233,8 @@ function renderMinimap(){
     const viewH = shell.clientHeight / viewport.scale;
     const viewX = -viewport.x / viewport.scale;
     const viewY = -viewport.y / viewport.scale;
-    const rects = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID).map(nodeRect);
+    const visibleNodes = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID);
+    const rects = visibleNodes.map(cachedSmartNodeRect);
     rects.push({x:viewX, y:viewY, width:viewW, height:viewH});
     const minX = Math.min(...rects.map(r => r.x), -200);
     const minY = Math.min(...rects.map(r => r.y), -200);
@@ -2908,14 +3250,17 @@ function renderMinimap(){
         width:Math.max(4, r.width * scale),
         height:Math.max(4, r.height * scale)
     });
-    const nodeHtml = rects.slice(0, -1).map((r, index) => {
-        const p = project(r);
-        const node = nodes.filter(n => n.id !== SMART_LOG_PREVIEW_NODE_ID)[index];
-        return `<div class="minimap-node" data-node-id="${escapeAttr(node?.id || '')}" style="left:${p.left}px;top:${p.top}px;width:${p.width}px;height:${p.height}px"></div>`;
-    }).join('');
     const view = project({x:viewX, y:viewY, width:viewW, height:viewH});
-    minimapContent.innerHTML = `${nodeHtml}<div id="minimapViewport" class="smart-minimap-viewport" style="left:${view.left}px;top:${view.top}px;width:${view.width}px;height:${view.height}px"></div>`;
-    minimapViewport = document.getElementById('minimapViewport');
+    if(!SMART_MINIMAP_CANVAS_ENABLED){
+        renderSmartMinimapDomFallback(visibleNodes);
+        return;
+    }
+    ensureSmartMinimapCanvas();
+    drawSmartMinimapAll(visibleNodes);
+    minimapViewport.style.left = `${view.left}px`;
+    minimapViewport.style.top = `${view.top}px`;
+    minimapViewport.style.width = `${view.width}px`;
+    minimapViewport.style.height = `${view.height}px`;
 }
 function scheduleSmartMinimapRender(){
     if(smartMinimapRenderQueued) return;
@@ -2949,17 +3294,12 @@ function scheduleSmartMinimapNodeUpdate(ids=[]){
     requestAnimationFrame(() => {
         smartMinimapNodeUpdateQueued = false;
         if(!smartMinimapState || !minimapContent){ smartMinimapNodeUpdateIds.clear(); return; }
-        const {minX, minY, scale, offsetX, offsetY} = smartMinimapState;
-        smartMinimapNodeUpdateIds.forEach(id => {
-            const node = nodes.find(item => item.id === id && item.id !== SMART_LOG_PREVIEW_NODE_ID);
-            const el = minimapContent.querySelector(`.minimap-node[data-node-id="${CSS.escape(id)}"]`);
-            if(!node || !el) return;
-            const rect = nodeRect(node);
-            el.style.left = `${offsetX + (rect.x - minX) * scale}px`;
-            el.style.top = `${offsetY + (rect.y - minY) * scale}px`;
-            el.style.width = `${Math.max(4, rect.width * scale)}px`;
-            el.style.height = `${Math.max(4, rect.height * scale)}px`;
-        });
+        if(!SMART_MINIMAP_CANVAS_ENABLED){
+            renderMinimap();
+            smartMinimapNodeUpdateIds.clear();
+            return;
+        }
+        redrawSmartMinimapDirty([...smartMinimapNodeUpdateIds]);
         smartMinimapNodeUpdateIds.clear();
         scheduleSmartMinimapViewportUpdate();
     });
@@ -2991,7 +3331,7 @@ function fitAllNodesViewport(){
         scheduleSave();
         return;
     }
-    const rects = nodes.map(nodeRect);
+    const rects = nodes.map(cachedSmartNodeRect);
     const minX = Math.min(...rects.map(r => r.x));
     const minY = Math.min(...rects.map(r => r.y));
     const maxX = Math.max(...rects.map(r => r.x + r.width));
@@ -5929,11 +6269,24 @@ const smartClientId = `canvas_smart_${Math.random().toString(36).slice(2, 10)}${
 let canvasSyncInFlight = false;
 let saveRequestedWhileInFlight = false;
 let trailingSaveDelay = 450;
+let smartLocalSaveSequence = 0;
+const SMART_SAVE_QUEUE_ENABLED = true;
+const SMART_IDLE_MEDIA_ENABLED = true;
+let smartIdleMediaMeasureHandle = 0;
+const smartIdleMediaMeasureRoots = new Set();
+let smartIdleMediaMeasureNodeIndex = new Map();
+let smartIdleIconHandle = 0;
+const smartIdleIconRoots = new Set();
 let smartRouteActive = window.top === window;
 let smartParentShortcutWindow = null;
 let canvasSyncTimer = null;
 let canvasMetaPollTimer = null;
 let connectionLayerRaf = 0;
+// 普通节点拖动只更新相邻连线；分组、历史/级联等复杂拓扑自动回退到全量 SVG。
+const SMART_INCREMENTAL_CONNECTIONS = true;
+const smartConnectionDirtyIds = new Set();
+const smartConnectionDom = new Map();
+let smartConnectionStructureDirty = false;
 function mergeSmartImageLists(localImgs, remoteImgs){
     const out = [];
     const seen = new Set();
@@ -6876,6 +7229,7 @@ async function loadCanvas(){
 }
 function scheduleSave(delay=450){
     const safeDelay = Math.max(50, Number(delay) || 450);
+    smartLocalSaveSequence += 1;
     if(canvasSyncInFlight){
         saveRequestedWhileInFlight = true;
         trailingSaveDelay = Math.min(trailingSaveDelay, safeDelay);
@@ -6901,6 +7255,8 @@ async function saveCanvas(){
     if(saveIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(saveIdleHandle); saveIdleHandle = 0; }
     saveRequestedWhileInFlight = false;
     trailingSaveDelay = 450;
+    const savingSequence = smartLocalSaveSequence;
+    const savingRevision = Number(canvas.revision || 0);
     canvasSyncInFlight = true;
     savePromptDraftForCurrent();
     canvas.nodes = nodes;
@@ -6929,8 +7285,14 @@ async function saveCanvas(){
         });
         if(res.ok){
             const data = await res.json();
-            if(data.canvas && data.canvas.updated_at) canvas.updated_at = data.canvas.updated_at;
-            if(data.canvas && data.canvas.revision) canvas.revision = data.canvas.revision;
+            const responseUpdatedAt = Number(data.canvas?.updated_at || 0);
+            const responseRevision = Number(data.canvas?.revision || 0);
+            const hasNewerLocalEdits = SMART_SAVE_QUEUE_ENABLED && smartLocalSaveSequence > savingSequence;
+            canvas.updated_at = Math.max(Number(canvas.updated_at || 0), responseUpdatedAt);
+            canvas.revision = Math.max(Number(canvas.revision || savingRevision), responseRevision);
+            if(!hasNewerLocalEdits && data.canvas?.title && canvas.title !== data.canvas.title){
+                canvas.title = data.canvas.title;
+            }
         } else if(res.status === 409) {
             // 冲突：别人先保存了。合并对方的状态（节点 id 合并、图片取并集，谁都不丢），
             // 然后用对方最新的 updated_at 作为基底重存，把合并结果落盘——而不是直接覆盖对方。
@@ -7200,6 +7562,7 @@ function shellPoint(event){
 }
 function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
     const perfEnd = window.CanvasPerformance?.start?.('smart.renderConnections', {nodes:nodes.length, connections:(canvas?.connections || []).length});
+    nodeIndex = smartNodeIndex.size ? smartNodeIndex : nodeIndex;
     const conns = (canvas?.connections || []).map((conn, index) => ({...conn, index})).filter(c => nodeIndex.has(c.from) && nodeIndex.has(c.to));
     const cascadeKeys = cascadeConnectionKeys();
     const activeCascadeCount = (smartCascadeRunPath?.states && Object.values(smartCascadeRunPath.states).filter(state => state && state !== 'done').length) || 0;
@@ -7241,7 +7604,7 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         const fromNode = nodeIndex.get(item.from);
         const toNode = nodeIndex.get(item.toId);
         if(!fromNode || !toNode) return '';
-        const fr = nodeRect(fromNode), tr = nodeRect(toNode);
+        const fr = cachedSmartNodeRect(fromNode), tr = cachedSmartNodeRect(toNode);
         const kind = item.kind;
         const isHistory = kind === 'history';
         const dataIndex = item.indices.join(',');
@@ -7255,11 +7618,10 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         const isCascade = !isHistory && (edgeKeys.some(k => cascadeKeys.has(k)) || Boolean(cascadeState) || isInsertPreview);
         const isPendingLine = !isCascade && item.targets.some(t => nodeIndex.get(t)?.pending);
         const isSelectedLine = selectedConnIds.size > 0 && (selectedConnIds.has(item.from) || selectedConnIds.has(item.toId) || item.targets.some(t => selectedConnIds.has(t)));
-        const fx = isHistory ? fr.x + fr.width / 2 : fr.x + fr.width;
-        const fy = isHistory ? fr.y + fr.height : fr.y + fr.height / 2;
-        const tx = isHistory ? tr.x + tr.width / 2 : tr.x;
-        const roleRatio = item.toId && nodeIndex.get(item.toId)?.specialType === 'multi-view' ? multiViewRoleRatio(item.inputRole) : item.inputRole === 'pose-reference' ? 0.36 : item.inputRole === 'target-image' ? 0.68 : 0.5;
-        const ty = isHistory ? tr.y : tr.y + tr.height * roleRatio;
+        const fromPoint = cachedSmartPortPoint(fromNode, isHistory ? 'history-out' : 'out', '', fr);
+        const toPoint = cachedSmartPortPoint(toNode, isHistory ? 'history-in' : 'in', item.inputRole || '', tr);
+        const fx = fromPoint.x, fy = fromPoint.y;
+        const tx = toPoint.x, ty = toPoint.y;
         const dx = Math.max(50, Math.abs(tx - fx) * 0.45);
         const dy = Math.max(36, Math.abs(ty - fy) * 0.45);
         const curve = isHistory
@@ -7279,22 +7641,114 @@ function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))
         const color = isCascade ? '#16a34a' : isHistory ? 'rgba(118,111,104,0.46)' : kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
         const opacity = isPendingLine ? '.82' : '1';
         const width = kind === 'input' ? '1.9' : '1.6';
-        return `<path class="${cls}" d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path><path class="conn-hit" data-conn-index="${dataIndex}" d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}" transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
+        const connectionId = item.indices.length === 1 ? (canvas?.connections?.[item.indices[0]]?.id || '') : '';
+        const dataId = connectionId ? ` data-connection-id="${escapeAttr(connectionId)}"` : '';
+        return `<path class="${cls}"${dataId} d="${curve}" stroke="${color}" stroke-width="${width}" fill="none" opacity="${opacity}"></path><path class="conn-hit" data-conn-index="${dataIndex}"${dataId} d="${curve}" stroke="transparent" stroke-width="14" fill="none"></path><circle${dataId} cx="${tx}" cy="${ty}" r="3.5" fill="${color}" opacity=".66"></circle><g class="conn-cut" data-conn-index="${dataIndex}"${dataId} transform="translate(${mx} ${my})"><circle r="8" fill="var(--card)" stroke="${color}" stroke-width="1.4"></circle><path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="${color}" stroke-width="1.5" stroke-linecap="round"></path></g>`;
     }).join('');
     const result = `<svg class="connection-layer ${reduceMotion ? 'conn-reduce-motion' : ''}" width="6000" height="4000" viewBox="0 0 6000 4000" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`;
     perfEnd?.();
     return result;
+}
+function markSmartConnectionsDirtyForNodes(ids=[]){
+    const affected = new Set((ids || []).filter(Boolean));
+    if(!affected.size) return;
+    (canvas?.connections || []).forEach(connection => {
+        if(affected.has(connection.from) || affected.has(connection.to)) smartConnectionDirtyIds.add(connection.id);
+    });
+}
+function rebuildSmartConnectionDomIndex(){
+    smartConnectionDom.clear();
+    smartConnectionSelectionIndex.clear();
+    smartSelectionFeedbackState = null;
+    const svg = world.querySelector('svg.connection-layer');
+    if(!svg) return;
+    svg.querySelectorAll('[data-connection-id]').forEach(el => {
+        const id = el.dataset.connectionId || '';
+        if(!id) return;
+        const entry = smartConnectionDom.get(id) || {};
+        if(el.classList.contains('conn-hit')) entry.hit = el;
+        else if(el.classList.contains('conn-cut')) entry.cut = el;
+        else if(el.tagName?.toLowerCase() === 'circle') entry.dot = el;
+        else if(el.tagName?.toLowerCase() === 'path') entry.path = el;
+        smartConnectionDom.set(id, entry);
+    });
+    const connectionsByIndex = canvas?.connections || [];
+    svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(hit => {
+        if(!hit.previousElementSibling) return;
+        String(hit.dataset.connIndex || '').split(',').forEach(rawIndex => {
+            const connection = connectionsByIndex[Number(rawIndex)];
+            if(!connection) return;
+            [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+                const list = smartConnectionSelectionIndex.get(nodeId) || [];
+                if(!list.includes(hit)) list.push(hit);
+                smartConnectionSelectionIndex.set(nodeId, list);
+            });
+        });
+    });
+}
+function smartIncrementalConnectionState(connection, index){
+    const kind = connection.kind || 'flow';
+    const isPending = Boolean(!connection.kind && smartNodeIndex.get(connection.to)?.pending);
+    const selectedIds = new Set(selectedNodeIds());
+    const selected = selectedIds.has(connection.from) || selectedIds.has(connection.to);
+    const cls = [isPending ? 'conn-pending' : '', selected ? 'conn-selected' : ''].filter(Boolean).join(' ');
+    const color = kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
+    return {cls, color, opacity:isPending ? '.82' : '1', width:kind === 'input' ? '1.9' : '1.6', index};
+}
+function renderSmartConnectionIncremental(ids=[]){
+    if(!SMART_INCREMENTAL_CONNECTIONS || smartConnectionStructureDirty || !smartConnectionDom.size) return false;
+    const conns = canvas?.connections || [];
+    if(smartConnectionDom.size !== conns.length) return false;
+    if(conns.some(connection => connection.kind === 'history' || isSmartGroupNode(smartNodeIndex.get(connection.from)) || isSmartGroupNode(smartNodeIndex.get(connection.to)))) return false;
+    for(const id of ids){
+        const connection = conns.find(item => item.id === id);
+        const entry = smartConnectionDom.get(id);
+        const fromNode = connection && smartNodeIndex.get(connection.from);
+        const toNode = connection && smartNodeIndex.get(connection.to);
+        if(!connection || !entry?.path || !entry.hit || !entry.cut || !fromNode || !toNode) return false;
+        const fr = cachedSmartNodeRect(fromNode), tr = cachedSmartNodeRect(toNode);
+        const fromPoint = cachedSmartPortPoint(fromNode, 'out', '', fr);
+        const toPoint = cachedSmartPortPoint(toNode, 'in', connection.inputRole || '', tr);
+        const dx = Math.max(50, Math.abs(toPoint.x - fromPoint.x) * 0.45);
+        const curve = `M${fromPoint.x} ${fromPoint.y} C ${fromPoint.x + dx} ${fromPoint.y}, ${toPoint.x - dx} ${toPoint.y}, ${toPoint.x} ${toPoint.y}`;
+        const mx = (fromPoint.x + toPoint.x) / 2, my = (fromPoint.y + toPoint.y) / 2;
+        const state = smartIncrementalConnectionState(connection, conns.indexOf(connection));
+        entry.path.setAttribute('class', state.cls);
+        entry.path.setAttribute('d', curve);
+        entry.path.setAttribute('stroke', state.color);
+        entry.path.setAttribute('stroke-width', state.width);
+        entry.path.setAttribute('opacity', state.opacity);
+        entry.hit.setAttribute('d', curve);
+        entry.hit.dataset.connIndex = String(state.index);
+        entry.dot?.setAttribute('cx', String(toPoint.x));
+        entry.dot?.setAttribute('cy', String(toPoint.y));
+        entry.dot?.setAttribute('fill', state.color);
+        entry.cut.setAttribute('data-conn-index', String(state.index));
+        entry.cut.setAttribute('transform', `translate(${mx} ${my})`);
+        entry.cut.querySelector('circle')?.setAttribute('stroke', state.color);
+        entry.cut.querySelector('path')?.setAttribute('stroke', state.color);
+    }
+    return true;
 }
 function refreshConnectionLayer(){
     const perfEnd = window.CanvasPerformance?.start?.('smart.refreshConnectionLayer');
     connectionLayerRaf = 0;
     const oldSvg = world.querySelector('svg.connection-layer');
     if(!oldSvg){ perfEnd?.({skipped:true}); return; }
+    const portDragPath = oldSvg.querySelector('path.port-drag-temp');
+    const portDragD = portDragPath?.getAttribute('d') || '';
     const tpl = document.createElement('template');
     tpl.innerHTML = renderConnections().trim();
     const nextSvg = tpl.content.firstElementChild;
     if(nextSvg) oldSvg.replaceWith(nextSvg);
     bindConnectionEvents();
+    rebuildSmartConnectionDomIndex();
+    if(portDragState){
+        const nextPortDragPath = ensurePortDragPathElement();
+        if(nextPortDragPath && portDragD) nextPortDragPath.setAttribute('d', portDragD);
+    }
+    smartConnectionDirtyIds.clear();
+    smartConnectionStructureDirty = false;
     perfEnd?.();
 }
 function scheduleConnectionLayerRefresh(){
@@ -7308,7 +7762,9 @@ function scheduleInteractionLayerRefresh(){
     if(interactionLayerRaf) return;
     interactionLayerRaf = requestAnimationFrame(() => {
         interactionLayerRaf = 0;
-        refreshConnectionLayer();
+        const dirty = [...smartConnectionDirtyIds];
+        smartConnectionDirtyIds.clear();
+        if(dirty.length && !renderSmartConnectionIncremental(dirty)) refreshConnectionLayer();
         scheduleSmartMinimapNodeUpdate((dragState?.group || [{id:dragState?.id}]).map(item => item?.id));
     });
 }
@@ -7317,12 +7773,14 @@ function moveNodeElementsDuringDrag(){
     const groupItems = dragState.group || [{id:dragState.id}];
     groupItems.map(item => item.id).forEach(id => {
         const n = smartNodeIndex.get(id);
-        const el = world.querySelector(`.image-node[data-id="${CSS.escape(id)}"]`);
+        const el = smartNodeDomIndex.get(id);
         if(n && el){
             el.style.left = `${n.x || 0}px`;
             el.style.top = `${n.y || 0}px`;
         }
     });
+    invalidateSmartGeometry(groupItems.map(item => item.id));
+    markSmartConnectionsDirtyForNodes(groupItems.map(item => item.id));
     const active = selectedNode();
     if(active && (dragState.group || [{id:dragState.id}]).some(item => item.id === active.id)){
         positionComposerForNode(active);
@@ -7331,11 +7789,13 @@ function moveNodeElementsDuringDrag(){
 }
 function updateNodeElementDuringResize(node){
     if(!node) return;
-    const el = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`);
+    const el = smartNodeDomIndex.get(node.id);
     if(!el){
         render();
         return;
     }
+    invalidateSmartGeometry([node.id]);
+    markSmartConnectionsDirtyForNodes([node.id]);
     const imgs = isSmartGroupNode(node) ? smartGroupImageRefs(node).map(ref => ref.item) : (node.images || []);
     const layout = imageLayout(imgs, nodeScale(node), node);
     el.style.width = `${layout.width}px`;
@@ -8901,8 +9361,11 @@ function render(){
     const mutation = smartRenderMutation;
     smartRenderMutation = null;
     updateSmartCanvasStats();
+    smartSelectionFeedbackState = null;
+    smartDropHighlightId = '';
     const perfEnd = window.CanvasPerformance?.start?.('smart.render', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    invalidateSmartGeometry();
     world.classList.toggle('smart-large-scene', nodes.length > 200);
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
     window.CanvasSpecialNodes?.disposePanoramasIn?.(world);
@@ -8955,11 +9418,12 @@ function render(){
         const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length : (isGroup ? displayCount : 0);
         const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
         const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
+        const smartLodSafe = !isSpecial && !isSmartGroup && !isPrompt && !isLoop && !isGroup && !isHistory;
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
         const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        const html = `<div class="image-node ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
             ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
@@ -9007,9 +9471,13 @@ function render(){
             if(reusable !== fresh) reusable.remove();
         }
     });
+    rebuildSmartCanvasDomIndexes();
     restoreMediaPlaybackStates(mediaStates);
     bindNodeEvents(nodeIndex, mutation ? new Set(nodeHtmlEntries.map(entry => entry.node.id)) : null);
     bindConnectionEvents();
+    rebuildSmartConnectionDomIndex();
+    smartConnectionDirtyIds.clear();
+    smartConnectionStructureDirty = false;
     if(mutation) syncSelectionUi();
     updateComposer();
     scheduleSmartMinimapRender();
@@ -9018,7 +9486,7 @@ function render(){
         bindSmartPreviewImageFallbacks(root);
     });
     else {
-        refreshIcons(world);
+        scheduleSmartIdleIconRefresh(world);
         bindSmartPreviewImageFallbacks(world);
     }
     syncSmartSelectedImageResolution(world);
@@ -9102,7 +9570,7 @@ function registerSmartCanvasPerfFixture(){
     });
 }
 registerSmartCanvasPerfFixture();
-function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
+function measureSmartNodeImagesNow(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
     (root || world).querySelectorAll?.('.image-node img,.image-node video').forEach(imgEl => {
         const nodeEl = imgEl.closest('.image-node');
         const itemEl = imgEl.closest('[data-image-index]');
@@ -9172,7 +9640,43 @@ function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, no
         imgEl.addEventListener('loadedmetadata', apply, {once:true});
     });
 }
+function measureSmartNodeImages(nodeIndex=new Map(nodes.map(node => [node.id, node])), root=world){
+    if(!root) return;
+    if(!SMART_IDLE_MEDIA_ENABLED){ measureSmartNodeImagesNow(nodeIndex, root); return; }
+    smartIdleMediaMeasureNodeIndex = nodeIndex;
+    smartIdleMediaMeasureRoots.add(root);
+    if(smartIdleMediaMeasureHandle) return;
+    const run = () => {
+        smartIdleMediaMeasureHandle = 0;
+        const roots = [...smartIdleMediaMeasureRoots];
+        smartIdleMediaMeasureRoots.clear();
+        const currentIndex = smartIdleMediaMeasureNodeIndex;
+        roots.forEach(item => measureSmartNodeImagesNow(currentIndex, item?.isConnected === false ? world : item));
+    };
+    if('requestIdleCallback' in window) smartIdleMediaMeasureHandle = window.requestIdleCallback(run, {timeout:1200});
+    else smartIdleMediaMeasureHandle = window.setTimeout(run, 0);
+}
+let smartConnectionEventsDelegated = false;
 function bindConnectionEvents(){
+    if(SMART_CONNECTION_EVENT_DELEGATION_ENABLED){
+        if(smartConnectionEventsDelegated) return;
+        world.addEventListener('dblclick', e => {
+            const hit = e.target?.closest?.('.conn-hit[data-conn-index]');
+            if(!hit || !world.contains(hit)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            disconnectConnections(hit.dataset.connIndex);
+        });
+        world.addEventListener('click', e => {
+            const target = e.target?.closest?.('[data-conn-index]');
+            if(!target || !world.contains(target) || target.classList.contains('conn-hit')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            disconnectConnections(target.dataset.connIndex);
+        });
+        smartConnectionEventsDelegated = true;
+        return;
+    }
     world.querySelectorAll('[data-conn-index]').forEach(el => {
         if(el.classList.contains('conn-hit')){
             el.addEventListener('dblclick', e => {
@@ -9544,7 +10048,7 @@ function updatePortDragVisual(){
     const perfEnd = window.CanvasPerformance?.start?.('smart.updatePortDragVisual');
     const fromNode = smartNodeIndex.get(portDragState.fromId);
     if(!fromNode){ perfEnd?.({skipped:true}); return; }
-    const fr = nodeRect(fromNode);
+    const fr = cachedSmartNodeRect(fromNode);
     const isOut = portDragState.fromPort === 'out';
     const fx = isOut ? fr.x + fr.width : fr.x;
     const fromNodeRoleIsMultiView = fromNode.specialType === 'multi-view';
@@ -9561,10 +10065,10 @@ function updatePortDragVisual(){
     portDragState.activePortEl = null;
     portDragState.activeNodeEl = null;
     if(portDragState.hoverTargetId){
-        const targetNodeEl = world.querySelector(`.image-node[data-id="${portDragState.hoverTargetId}"]`);
+        const targetNodeEl = smartNodeDomIndex.get(portDragState.hoverTargetId);
         targetNodeEl?.classList.add('port-hover');
         const roleSelector = portDragState.hoverRole ? `[data-input-role="${CSS.escape(portDragState.hoverRole)}"]` : '';
-        const targetPortEl = targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]${roleSelector}`);
+        const targetPortEl = smartPortDomIndex.get(smartPortIndexKey(portDragState.hoverTargetId, portDragState.hoverPort, portDragState.hoverRole)) || targetNodeEl?.querySelector(`.node-port[data-port="${portDragState.hoverPort}"]${roleSelector}`);
         targetPortEl?.classList.add('is-active');
         portDragState.activeNodeEl = targetNodeEl || null;
         portDragState.activePortEl = targetPortEl || null;
@@ -9597,7 +10101,12 @@ function handlePortDrop(drag, e){
         const inputRole = drag.fromPort === 'out' ? targetRole : (drag.fromRole || '');
         if(connectInputNode(fromId, toId, inputRole)){
             commitPendingUndo();
-            render();
+            if(SMART_PORT_LINK_MUTATION_ENABLED){
+                queueSmartRenderMutation({replaceIds:[toId]});
+                render();
+            } else {
+                render();
+            }
             scheduleSave();
         } else {
             discardPendingUndo();
@@ -9654,7 +10163,11 @@ function pickMediaForSmartNode(nodeId){
 }
 function smartSpecialInputImage(node, inputRole=''){
     if(inputRole){
-        const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && item.inputRole === inputRole);
+        const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && (
+            inputRole === 'pose-reference' ? item.inputRole === 'pose-reference' :
+            inputRole === 'target-image' ? item.inputRole === 'target-image' :
+            item.inputRole === inputRole
+        ));
         const source = connection ? nodes.find(item => item.id === connection.from) : null;
         return source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') || (source.url ? {...source, kind:'image'} : null) : null;
     }
@@ -10994,6 +11507,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             }
             document.body.classList.add('smart-node-resize');
             capturePendingUndo();
+            scheduleSmartSafeLod();
         });
         const beginNodeDrag = e => {
             if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button')) return;
@@ -11016,7 +11530,9 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                 const n = nodeIndex.get(dragId);
                 return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
             }).filter(Boolean);
+            window.CanvasPerformance?.beginInteraction?.('smart.node-drag', {nodes:group.length, total:nodes.length});
             dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
+            scheduleSmartSafeLod();
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();
         };
@@ -11036,6 +11552,8 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                     hoverRole:'',
                     moved:false
                 };
+                scheduleSmartSafeLod();
+                window.CanvasPerformance?.beginInteraction?.('smart.port-link', {nodes:nodes.length, connections:(canvas?.connections || []).length, fromPort:portType});
                 shell.classList.add('port-dragging');
                 capturePendingUndo();
                 ensurePortDragPathElement();
@@ -11140,13 +11658,29 @@ function pruneSmartGroupMembershipsForNode(node){
     return changed;
 }
 function clearDropHighlight(){
-    world.querySelectorAll('.image-node.drop-target').forEach(el => el.classList.remove('drop-target'));
+    if(SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED && smartDropHighlightId){
+        const current = smartNodeDomIndex.get(smartDropHighlightId);
+        if(current) current.classList.remove('drop-target');
+        else world.querySelectorAll('.image-node.drop-target').forEach(el => el.classList.remove('drop-target'));
+        smartDropHighlightId = '';
+        return;
+    }
+    if(!SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED){
+        world.querySelectorAll('.image-node.drop-target').forEach(el => el.classList.remove('drop-target'));
+    }
+    smartDropHighlightId = '';
 }
 function setDropHighlight(targetId){
+    targetId = targetId || '';
+    if(SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED && smartDropHighlightId === targetId) return;
     clearDropHighlight();
     if(!targetId) return;
-    const el = world.querySelector(`.image-node[data-id="${targetId}"]`);
-    if(el) el.classList.add('drop-target');
+    const el = (SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED ? smartNodeDomIndex.get(targetId) : null)
+        || world.querySelector(`.image-node[data-id="${CSS.escape(targetId)}"]`);
+    if(el){
+        el.classList.add('drop-target');
+        smartDropHighlightId = targetId;
+    }
 }
 function deleteNode(id){
     pushUndo();
@@ -18023,7 +18557,7 @@ function finishSelection(event){
     const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y);
     const maxX = Math.max(a.x, b.x), maxY = Math.max(a.y, b.y);
     selectedIds = nodes.filter(node => {
-        const r = nodeRect(node);
+        const r = SMART_MARQUEE_RECT_CACHE_ENABLED ? cachedSmartNodeRect(node) : nodeRect(node);
         return r.x < maxX && r.x + r.width > minX && r.y < maxY && r.y + r.height > minY;
     }).map(n => n.id);
     selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
@@ -18290,6 +18824,7 @@ shell.onmousedown = e => {
     if(e.button === 0 && smartTemporaryToolMode === 'select'){
         e.preventDefault();
         didPan = false;
+        window.CanvasPerformance?.beginInteraction?.('smart.marquee', {nodes:nodes.length});
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
         return;
@@ -18297,6 +18832,7 @@ shell.onmousedown = e => {
     if(e.button === 0 && activeSmartCanvasTool(e) === 'select'){
         e.preventDefault();
         didPan = false;
+        window.CanvasPerformance?.beginInteraction?.('smart.marquee', {nodes:nodes.length});
         selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
         return;
@@ -18305,6 +18841,7 @@ shell.onmousedown = e => {
     e.preventDefault();
     didPan = false;
     dismissSmartNodeToolbar();
+    window.CanvasPerformance?.beginInteraction?.('smart.pan', {nodes:nodes.length});
     panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
     shell.classList.add('panning');
 };
@@ -18357,6 +18894,7 @@ minimap?.addEventListener('mousedown', e => {
     if(e.target.closest?.('#smartArrangeBtn')) return;
     e.preventDefault();
     e.stopPropagation();
+    window.CanvasPerformance?.beginInteraction?.('smart.minimap-drag', {nodes:nodes.length});
     smartMinimapDrag = true;
     centerViewportOnWorldPoint(minimapEventToWorld(e));
 });
@@ -18663,6 +19201,11 @@ window.onmousemove = e => {
     if(target) setDropHighlight(target.id);
 };
 window.onmouseup = e => {
+    if(portDragState) window.CanvasPerformance?.markPaintFrom?.('smart.port-link', 'smart.port-link', {nodes:nodes.length, connections:(canvas?.connections || []).length});
+    if(selectionState) window.CanvasPerformance?.markPaintFrom?.('smart.marquee', 'smart.marquee', {nodes:nodes.length});
+    if(panState) window.CanvasPerformance?.markPaintFrom?.('smart.pan', 'smart.pan', {nodes:nodes.length});
+    if(smartMinimapDrag) window.CanvasPerformance?.markPaintFrom?.('smart.minimap-drag', 'smart.minimap-drag', {nodes:nodes.length});
+    if(dragState) window.CanvasPerformance?.markPaintFrom?.('smart.node-drag', 'smart.node-drag', {nodes:(dragState.group || []).length, total:nodes.length});
     document.body.classList.remove('smart-node-drag');
     document.body.classList.remove('smart-node-resize');
     if(portDragState){
@@ -18834,6 +19377,7 @@ window.onmouseup = e => {
         clearDropHighlight();
         loopInsertPreview = null;
         dragState = null;
+        scheduleSmartSafeLod();
         scheduleSave();
         scheduleConnectionLayerRefresh();
         scheduleSmartMinimapRender();
@@ -18842,6 +19386,7 @@ window.onmouseup = e => {
 shell.addEventListener('wheel', e => {
     if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
     e.preventDefault();
+    if(!window.CanvasPerformance?.isInteractionActive?.('smart.zoom')) window.CanvasPerformance?.beginInteraction?.('smart.zoom', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
@@ -18852,6 +19397,7 @@ shell.addEventListener('wheel', e => {
     viewport.y = sy - before.y * viewport.scale;
     applyViewport();
     scheduleSave();
+    window.CanvasPerformance?.markPaintFrom?.('smart.zoom', 'smart.zoom', {nodes:nodes.length, connections:(canvas?.connections || []).length});
 }, {passive:false});
 shell.ondragover = e => setSmartDropCopyEffect(e, true);
 shell.ondrop = async e => {

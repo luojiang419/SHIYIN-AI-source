@@ -37,6 +37,8 @@
             <div class="works-filters">
                 <label class="works-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input id="worksSearch" type="search" data-i18n-placeholder="works.search" placeholder="搜索提示词、模型或文件名"></label>
                 <select id="worksKind" aria-label="作品类型"><option value="" data-i18n="works.allTypes">全部类型</option></select>
+                <div id="worksMediaFilter" class="works-segmented" role="group" aria-label="媒体类型"><button type="button" data-media-type="all">全部</button><button type="button" data-media-type="image">图片</button><button type="button" data-media-type="video">视频</button></div>
+                <div id="worksSortOrder" class="works-segmented" role="group" aria-label="排序顺序"><button type="button" data-sort-order="asc">升序</button><button type="button" data-sort-order="desc">降序</button></div>
                 <button id="worksQuickCompare" class="works-compare-now" type="button" data-i18n="works.compareNow">随时对比</button>
                 <button id="worksClearAll" class="works-danger-button" type="button" data-i18n="works.clearAll">清空作品</button>
                 <button id="worksRefresh" class="works-icon-button" type="button" data-i18n-title="works.refresh" aria-label="刷新">↻</button>
@@ -86,6 +88,7 @@
             </header>
             <div id="worksPreviewFrame" class="works-preview-frame">
                 <img id="worksPreviewImage" class="studio-preview-img" alt="作品预览" draggable="false">
+                <video id="worksPreviewVideo" class="studio-preview-video" controls playsinline hidden></video>
             </div>
             <footer><div id="worksPreviewMeta" class="works-compare-meta"></div><button id="worksPreviewDownload" type="button" data-i18n="works.download">下载</button></footer>
         </div>
@@ -96,6 +99,6 @@
     <div id="worksToast" class="works-toast" role="status"></div>
     <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
     <script src="/static/js/image-preview.js?v=2026.08.05.works-preview.1"></script>
-    <script src="/static/js/works.js?v=2026.08.05.preview-entry.1"></script>
+    <script src="/static/js/works.js?v=2026.08.24.unified-assets-view.1"></script>
 </body>
 </html>

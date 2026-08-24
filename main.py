@@ -20080,6 +20080,77 @@ def all_generated_works() -> List[Dict[str, Any]]:
     return finalize_work_items(works)
 
 
+def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """把无限画布中的图片/视频资产适配成作品管理使用的统一记录。"""
+    metadata = metadata if isinstance(metadata, dict) else {}
+    try:
+        indexed = canvas_assets_index()
+    except Exception:
+        indexed = {"items": []}
+    works: List[Dict[str, Any]] = []
+    for item in indexed.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").lower()
+        url = str(item.get("url") or "").strip()
+        if kind not in {"image", "video"} or not url:
+            continue
+        asset_id = f"canvas-{str(item.get('id') or '').strip()}"
+        if asset_id == "canvas-":
+            continue
+        saved_meta = metadata.get(asset_id) if isinstance(metadata.get(asset_id), dict) else {}
+        original_name = str(item.get("name") or filename_from_media_url(url, "画布资产"))
+        width = int(item.get("width") or item.get("natural_w") or 0)
+        height = int(item.get("height") or item.get("natural_h") or 0)
+        raw_created_at = float(item.get("created_at") or item.get("canvas_updated_at") or 0)
+        if raw_created_at > 10000000000:
+            raw_created_at /= 1000.0
+        works.append({
+            "id": asset_id,
+            "history_id": f"canvas:{item.get('canvas_id') or ''}",
+            "output_index": 0,
+            "name": str(saved_meta.get("name") or original_name)[:160],
+            "original_name": original_name,
+            "url": url,
+            "kind": kind,
+            "operation": "canvas",
+            "created_at": raw_created_at,
+            "prompt": str(item.get("node_title") or item.get("canvas_title") or ""),
+            "provider_id": "",
+            "provider_name": "",
+            "model": str(item.get("node_type") or ""),
+            "width": width,
+            "height": height,
+            "task_id": "",
+            "source_url": "",
+            "references": [],
+            "favorite": bool(saved_meta.get("favorite")),
+            "favorite_updated_at": float(saved_meta.get("favorite_updated_at") or saved_meta.get("updated_at") or 0),
+            "trashed": bool(saved_meta.get("trashed")),
+            "trashed_at": float(saved_meta.get("trashed_at") or 0),
+            "metadata_updated_at": float(saved_meta.get("updated_at") or 0),
+            "source": "canvas",
+            "canvas_id": str(item.get("canvas_id") or ""),
+            "canvas_title": str(item.get("canvas_title") or "未命名画布"),
+            "canvas_kind": str(item.get("canvas_kind") or "classic"),
+        })
+    return finalize_work_items(works)
+
+
+def all_works_with_canvas(metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """合并生成历史与无限画布资产，并按 URL 去重，优先保留生成历史记录。"""
+    metadata = metadata if isinstance(metadata, dict) else work_metadata()
+    generated = all_generated_works()
+    seen_urls = {str(item.get("url") or "").strip() for item in generated if str(item.get("url") or "").strip()}
+    canvas_items = [item for item in canvas_generated_work_items(metadata) if str(item.get("url") or "").strip() not in seen_urls]
+    works = generated + canvas_items
+    works.sort(key=lambda item: (float(item.get("created_at") or 0), str(item.get("id") or "")), reverse=True)
+    for sequence, item in enumerate(works, 1):
+        item["download_sequence"] = sequence
+        item["download_name"] = work_download_name(item, sequence)
+    return works
+
+
 @app.get("/api/works")
 async def list_generated_works(
     favorite: Optional[bool] = None,
@@ -20088,37 +20159,58 @@ async def list_generated_works(
     limit: int = 500,
     cursor: str = "",
     include_trashed: bool = False,
+    sort_order: str = "desc",
+    media_type: str = "all",
 ):
-    DATABASE.ensure_work_items_indexed(work_metadata())
-    page = DATABASE.list_work_items(
-        favorite=favorite,
-        kind=kind,
-        search=search,
-        limit=limit,
-        cursor=cursor,
-        include_trashed=include_trashed,
-    )
+    metadata = work_metadata()
+    DATABASE.ensure_work_items_indexed(metadata)
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_media = str(media_type or "all").strip().lower()
+    if normalized_media not in {"all", "image", "video"}:
+        normalized_media = "all"
+    works = all_works_with_canvas(metadata)
+    filtered: List[Dict[str, Any]] = []
+    query = str(search or "").strip().lower()
+    for item in works:
+        if not include_trashed and item.get("trashed"):
+            continue
+        if favorite is True and not item.get("favorite"):
+            continue
+        if normalized_kind and str(item.get("kind") or "").lower() != normalized_kind:
+            continue
+        if normalized_media != "all" and str(item.get("kind") or "").lower() != normalized_media:
+            continue
+        if query:
+            haystack = " ".join(str(item.get(key) or "") for key in ("name", "original_name", "prompt", "model", "operation", "url", "canvas_title")).lower()
+            if query not in haystack:
+                continue
+        filtered.append(item)
+    reverse = str(sort_order or "desc").lower() != "asc"
+    filtered.sort(key=lambda item: (float(item.get("created_at") or 0), str(item.get("id") or "")), reverse=reverse)
     offset = 0
     if cursor:
         try:
-            offset = int(str(cursor).rsplit("#", 1)[1])
+            offset = max(0, int(str(cursor).rsplit("#", 1)[1]))
         except (IndexError, ValueError):
             offset = 0
-    works = finalize_work_items(page.get("items") or [], offset)
-    next_cursor = str(page.get("next_cursor") or "")
-    if next_cursor:
-        next_cursor = f"{next_cursor}#{offset + len(works)}"
-    return {"works": works, "total": int(page.get("total") or 0), "next_cursor": next_cursor}
+    safe_limit = max(1, min(1000, int(limit or 500)))
+    page_items = filtered[offset:offset + safe_limit]
+    next_cursor = f"works#{offset + len(page_items)}" if offset + len(page_items) < len(filtered) else ""
+    for sequence, item in enumerate(page_items, offset + 1):
+        item["download_sequence"] = sequence
+        item["download_name"] = work_download_name(item, sequence)
+    return {"works": page_items, "total": len(filtered), "next_cursor": next_cursor}
 
 
 def update_work_metadata(work_id: str, *, name: Optional[str] = None, favorite: Optional[bool] = None, trashed: Optional[bool] = None) -> Tuple[Dict[str, Any], int]:
     work_id = str(work_id or "").strip()
-    DATABASE.ensure_work_items_indexed(work_metadata())
+    metadata = work_metadata()
+    DATABASE.ensure_work_items_indexed(metadata)
     target = DATABASE.get_work_item(work_id)
     if target:
         target = finalize_work_items([target])[0]
     if not target:
-        target = next((item for item in all_generated_works() if item.get("id") == work_id), None)
+        target = next((item for item in all_works_with_canvas(metadata) if item.get("id") == work_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="作品不存在或对应文件记录已被移除")
     now = time.time()
@@ -20154,7 +20246,16 @@ def update_work_metadata(work_id: str, *, name: Optional[str] = None, favorite: 
         revision = DATABASE.put_document("works", "metadata", metadata)
         indexed = DATABASE.update_work_item_metadata(work_id, entry if work_id in metadata else {})
     publish_entity_changed("history", "works", revision)
-    refreshed = finalize_work_items([indexed])[0] if indexed else next((item for item in all_generated_works() if item.get("id") == work_id), target)
+    refreshed = finalize_work_items([indexed])[0] if indexed else next((item for item in all_works_with_canvas(metadata) if item.get("id") == work_id), target)
+    if not indexed:
+        refreshed.update({
+            "name": str(entry.get("name") or refreshed.get("original_name") or refreshed.get("name") or "")[:160],
+            "favorite": bool(entry.get("favorite")),
+            "favorite_updated_at": float(entry.get("favorite_updated_at") or entry.get("updated_at") or 0),
+            "trashed": bool(entry.get("trashed")),
+            "trashed_at": float(entry.get("trashed_at") or 0),
+            "metadata_updated_at": float(entry.get("updated_at") or 0),
+        })
     return refreshed, revision
 
 
@@ -20185,7 +20286,7 @@ async def reveal_generated_work(work_id: str):
     if work:
         work = finalize_work_items([work])[0]
     if not work:
-        work = next((item for item in all_generated_works() if item.get("id") == work_id), None)
+        work = next((item for item in all_works_with_canvas() if item.get("id") == work_id), None)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在或对应文件记录已被移除")
     path = work_local_file_path(work)

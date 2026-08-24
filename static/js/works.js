@@ -1,5 +1,14 @@
 (function(){
     'use strict';
+    const WORKS_VIEW_SETTINGS_KEY = 'works_view_settings_v1';
+    function readViewSettings(){
+        try { const value=JSON.parse(localStorage.getItem(WORKS_VIEW_SETTINGS_KEY) || '{}'); return value && typeof value === 'object' ? value : {}; }
+        catch(_) { return {}; }
+    }
+    function writeViewSettings(){
+        try { localStorage.setItem(WORKS_VIEW_SETTINGS_KEY, JSON.stringify({sortOrder:state.sortOrder,mediaType:state.mediaType})); } catch(_) {}
+    }
+    const savedViewSettings = readViewSettings();
     const PAGE_LIMIT = 120;
     const OVERSCAN_ROWS = 3;
     const CARD_MIN_WIDTH = 210;
@@ -13,6 +22,8 @@
         tab:'all',
         search:'',
         kind:'',
+        sortOrder: savedViewSettings.sortOrder === 'asc' ? 'asc' : 'desc',
+        mediaType: ['all','image','video'].includes(savedViewSettings.mediaType) ? savedViewSettings.mediaType : 'all',
         compareWork:null,
         compareViewer:null,
         previewController:null,
@@ -27,7 +38,7 @@
     const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g,ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
 
     function cache(){
-        ['worksCount','worksTabs','worksSearch','worksKind','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
+        ['worksCount','worksTabs','worksSearch','worksKind','worksMediaFilter','worksSortOrder','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','compareWork','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewVideo','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
     }
     async function fetchJson(url,options={}){
         const response = await fetch(url,options);
@@ -58,6 +69,8 @@
         if(state.tab === 'trash') params.set('include_trashed','true');
         if(state.kind) params.set('kind', state.kind);
         if(state.search.trim()) params.set('search', state.search.trim());
+        params.set('sort_order', state.sortOrder);
+        params.set('media_type', state.mediaType);
         return params;
     }
     function serverVisible(item){
@@ -73,6 +86,10 @@
         state.kind=kinds.includes(current)?current:'';
         el.worksKind.value=state.kind;
     }
+    function renderViewControls(){
+        el.worksMediaFilter?.querySelectorAll('[data-media-type]').forEach(button=>button.classList.toggle('active',button.dataset.mediaType===state.mediaType));
+        el.worksSortOrder?.querySelectorAll('[data-sort-order]').forEach(button=>button.classList.toggle('active',button.dataset.sortOrder===state.sortOrder));
+    }
     function gridMetrics(){
         const width = Math.max(1, el.worksGrid.clientWidth || 1);
         const columns = Math.max(1, Math.floor((width + GRID_GAP) / (CARD_MIN_WIDTH + GRID_GAP)));
@@ -85,7 +102,7 @@
         const left = col * (metrics.cardWidth + GRID_GAP);
         const top = row * metrics.rowHeight;
         return `<article class="works-card ${item.trashed?'trashed':''}" data-work-id="${escapeHtml(item.id)}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
-            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy"><span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
+            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${item.kind === 'video' ? `<video src="${escapeHtml(item.url)}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
                 <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
@@ -115,6 +132,7 @@
         if(el.worksDownloadAll) el.worksDownloadAll.disabled = !(state.total || state.works.length);
         if(el.worksClearAll) el.worksClearAll.disabled = !(state.total || state.works.length);
         el.worksTabs.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===state.tab));
+        renderViewControls();
         if(!force && state.renderStart === start && state.renderEnd === end) return;
         state.renderStart = start;
         state.renderEnd = end;
@@ -250,7 +268,10 @@
     function openPreview(workId=''){
         const work=state.works.find(item=>item.id===workId && item.url);
         if(!work) return;
-        el.worksPreviewImage.src=work.url;
+        el.worksPreviewImage.hidden=work.kind === 'video';
+        el.worksPreviewVideo.hidden=work.kind !== 'video';
+        if(work.kind === 'video') { el.worksPreviewVideo.src=work.url; el.worksPreviewVideo.load(); }
+        else { el.worksPreviewVideo.removeAttribute('src'); el.worksPreviewImage.src=work.url; }
         el.worksPreviewImage.alt=work.name || t('works.work');
         el.worksPreviewName.textContent=work.name || t('works.work');
         el.worksPreviewMeta.innerHTML=[kindLabel(work),work.model || '',work.width&&work.height?`${work.width}x${work.height}`:'',dateText(work.created_at)].filter(Boolean).map(value=>`<span>${escapeHtml(value)}</span>`).join('');
@@ -265,6 +286,7 @@
         if(document.fullscreenElement === el.worksPreviewFrame) document.exitFullscreen?.().catch?.(()=>{});
         el.worksPreviewDialog.close();
         el.worksPreviewImage.removeAttribute('src');
+        el.worksPreviewVideo?.removeAttribute('src');
         state.previewController?.reset?.();
     }
     async function togglePreviewFullscreen(){
@@ -346,6 +368,8 @@
         el.worksTabs.addEventListener('click',event=>{const btn=event.target.closest('[data-tab]');if(!btn)return;state.tab=btn.dataset.tab;loadWorks({reset:true});});
         el.worksSearch.addEventListener('input',event=>{state.search=event.target.value;scheduleReload();});
         el.worksKind.addEventListener('change',event=>{state.kind=event.target.value;loadWorks({reset:true});});
+        el.worksMediaFilter?.addEventListener('click',event=>{const button=event.target.closest('[data-media-type]');if(!button)return;state.mediaType=button.dataset.mediaType || 'all';writeViewSettings();loadWorks({reset:true});});
+        el.worksSortOrder?.addEventListener('click',event=>{const button=event.target.closest('[data-sort-order]');if(!button)return;state.sortOrder=button.dataset.sortOrder === 'asc' ? 'asc' : 'desc';writeViewSettings();loadWorks({reset:true});});
         el.worksQuickCompare.addEventListener('click',()=>openCompare());
         el.closeWorksCompare.addEventListener('click',closeCompare);
         el.compareTargetSelect.addEventListener('change',syncCompareTarget);

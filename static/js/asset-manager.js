@@ -4,6 +4,15 @@ const refreshBtn = document.getElementById('refreshBtn');
 const uploadInput = document.getElementById('assetUploadInput');
 
 const LOCAL_CAPTION_SETTINGS_KEY = 'asset_manager_local_caption_settings_v1';
+const CANVAS_ASSET_VIEW_SETTINGS_KEY = 'canvas_asset_view_settings_v1';
+function readCanvasAssetViewSettings(){
+    try { const value=JSON.parse(localStorage.getItem(CANVAS_ASSET_VIEW_SETTINGS_KEY) || '{}'); return value && typeof value === 'object' ? value : {}; }
+    catch(_) { return {}; }
+}
+function writeCanvasAssetViewSettings(){
+    try { localStorage.setItem(CANVAS_ASSET_VIEW_SETTINGS_KEY, JSON.stringify({sort:canvasAssetSort,order:canvasAssetSortOrder,mediaType:canvasAssetMediaType})); } catch(_) {}
+}
+const savedCanvasAssetViewSettings = readCanvasAssetViewSettings();
 function readLocalCaptionSettings(){
     try {
         const data = JSON.parse(localStorage.getItem(LOCAL_CAPTION_SETTINGS_KEY) || '{}');
@@ -107,7 +116,9 @@ let activeCanvasAssetCanvasId = '';
 let selectedCanvasAssetId = '';
 let selectedCanvasAssetIds = new Set();
 let canvasAssetQuery = '';
-let canvasAssetSort = 'canvas_asc';
+let canvasAssetSort = ['updated','name','canvas','kind'].includes(savedCanvasAssetViewSettings.sort) ? savedCanvasAssetViewSettings.sort : 'updated';
+let canvasAssetSortOrder = savedCanvasAssetViewSettings.order === 'asc' ? 'asc' : 'desc';
+let canvasAssetMediaType = ['all','image','video'].includes(savedCanvasAssetViewSettings.mediaType) ? savedCanvasAssetViewSettings.mediaType : 'all';
 let canvasAssetManageMode = false;
 let searchCompositionActive = false;
 let searchRenderTimer = null;
@@ -775,14 +786,15 @@ function canvasKindLabel(kind){
     return kind === 'smart' ? '智能画布' : '普通画布';
 }
 function canvasAssetSortLabel(){
-    const map = {canvas_asc:'画布名称', updated_desc:'最近更新', updated_asc:'最早更新', name_asc:'名称 A-Z', kind:'类型'};
-    return map[canvasAssetSort] || map.canvas_asc;
+    const map = {canvas:'画布名称', updated:'最近更新', name:'资产名称', kind:'类型'};
+    return `${map[canvasAssetSort] || map.updated} / ${canvasAssetSortOrder === 'asc' ? '升序' : '降序'}`;
 }
 function currentCanvasAssetItems(){
     const q = String(canvasAssetQuery || '').trim().toLowerCase();
     let list = uniqueCanvasAssets(canvasAssetsData.items || []).filter(item => {
         if((item.canvas_kind || 'classic') !== activeCanvasAssetCategory) return false;
         if(activeCanvasAssetCanvasId && item.canvas_id !== activeCanvasAssetCanvasId) return false;
+        if(canvasAssetMediaType !== 'all' && assetKind(item) !== canvasAssetMediaType) return false;
         if(!q) return true;
         return [
             item.name,
@@ -799,15 +811,21 @@ function currentCanvasAssetItems(){
     const byCanvasName = (a, b) => String(a.canvas_title || '').localeCompare(String(b.canvas_title || ''), 'zh-Hans-CN', {numeric:true, sensitivity:'base'})
         || String(a.canvas_id || '').localeCompare(String(b.canvas_id || ''), 'zh-Hans-CN')
         || byTime(b) - byTime(a);
-    if(canvasAssetSort === 'canvas_asc') list.sort(byCanvasName);
-    else if(canvasAssetSort === 'updated_asc') list.sort((a, b) => byTime(a) - byTime(b));
-    else if(canvasAssetSort === 'name_asc') list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN', {numeric:true, sensitivity:'base'}));
-    else if(canvasAssetSort === 'kind') list.sort((a, b) => canvasAssetKindLabel(a).localeCompare(canvasAssetKindLabel(b), 'zh-Hans-CN') || byTime(b) - byTime(a));
-    else list.sort((a, b) => byTime(b) - byTime(a));
+    const compare = canvasAssetSort === 'canvas'
+        ? byCanvasName
+        : canvasAssetSort === 'name'
+            ? ((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN', {numeric:true, sensitivity:'base'}))
+            : canvasAssetSort === 'kind'
+                ? ((a, b) => canvasAssetKindLabel(a).localeCompare(canvasAssetKindLabel(b), 'zh-Hans-CN') || byTime(b) - byTime(a))
+                : ((a, b) => byTime(a) - byTime(b));
+    list.sort((a, b) => {
+        const result = compare(a, b);
+        return canvasAssetSortOrder === 'asc' ? result : -result;
+    });
     return list;
 }
 function groupCanvasAssetItems(items){
-    if(canvasAssetSort !== 'canvas_asc') return [{key:'__all__', title:'', subtitle:'', items}];
+    if(canvasAssetSort !== 'canvas') return [{key:'__all__', title:'', subtitle:'', items}];
     const groups = [];
     const map = new Map();
     (items || []).forEach(item => {
@@ -1330,13 +1348,14 @@ function renderCanvasAssetsManager(){
                 <div class="asset-tools">
                     <button class="asset-btn" type="button" data-canvas-asset-refresh title="重新读取画布中的图片、视频、音频资源"><i data-lucide="refresh-cw"></i><span>刷新资源</span></button>
                     <label class="asset-search-wrap"><i data-lucide="search"></i><input id="canvasAssetSearch" class="asset-search" type="search" value="${escapeAttr(canvasAssetQuery)}" placeholder="搜索画布资产"></label>
-                    <select id="canvasAssetSort" class="manage-select canvas-sort-select" title="排序方法">
-                        <option value="canvas_asc" ${canvasAssetSort === 'canvas_asc' ? 'selected' : ''}>画布名称</option>
-                        <option value="updated_desc" ${canvasAssetSort === 'updated_desc' ? 'selected' : ''}>最近更新</option>
-                        <option value="updated_asc" ${canvasAssetSort === 'updated_asc' ? 'selected' : ''}>最早更新</option>
-                        <option value="name_asc" ${canvasAssetSort === 'name_asc' ? 'selected' : ''}>资产名称</option>
+                    <select id="canvasAssetSort" class="manage-select canvas-sort-select" title="排序字段">
+                        <option value="updated" ${canvasAssetSort === 'updated' ? 'selected' : ''}>最近更新</option>
+                        <option value="canvas" ${canvasAssetSort === 'canvas' ? 'selected' : ''}>画布名称</option>
+                        <option value="name" ${canvasAssetSort === 'name' ? 'selected' : ''}>资产名称</option>
                         <option value="kind" ${canvasAssetSort === 'kind' ? 'selected' : ''}>类型</option>
                     </select>
+                    <div id="canvasAssetMediaFilter" class="asset-segmented" role="group" aria-label="媒体类型"><button class="${canvasAssetMediaType === 'all' ? 'active' : ''}" type="button" data-canvas-media-type="all">全部</button><button class="${canvasAssetMediaType === 'image' ? 'active' : ''}" type="button" data-canvas-media-type="image">图片</button><button class="${canvasAssetMediaType === 'video' ? 'active' : ''}" type="button" data-canvas-media-type="video">视频</button></div>
+                    <div id="canvasAssetSortOrder" class="asset-segmented" role="group" aria-label="排序顺序"><button class="${canvasAssetSortOrder === 'asc' ? 'active' : ''}" type="button" data-canvas-sort-order="asc">升序</button><button class="${canvasAssetSortOrder === 'desc' ? 'active' : ''}" type="button" data-canvas-sort-order="desc">降序</button></div>
                     <button class="asset-btn ${canvasAssetManageMode ? 'primary' : ''}" type="button" data-canvas-asset-manage ${total ? '' : 'disabled'}><i data-lucide="list-checks"></i><span>${canvasAssetManageMode ? '完成管理' : '批量管理'}</span></button>
                 </div>
             </div>
@@ -3042,6 +3061,24 @@ async function saveLocalUploadCaption(id){
 }
 async function handleClick(event){
     const target = event.target;
+    if(activeTab === 'canvas-assets'){
+        const mediaButton = target.closest?.('[data-canvas-media-type]');
+        if(mediaButton){
+            canvasAssetMediaType = ['all','image','video'].includes(mediaButton.dataset.canvasMediaType) ? mediaButton.dataset.canvasMediaType : 'all';
+            writeCanvasAssetViewSettings();
+            selectedCanvasAssetId = '';
+            render();
+            return;
+        }
+        const orderButton = target.closest?.('[data-canvas-sort-order]');
+        if(orderButton){
+            canvasAssetSortOrder = orderButton.dataset.canvasSortOrder === 'asc' ? 'asc' : 'desc';
+            writeCanvasAssetViewSettings();
+            selectedCanvasAssetId = '';
+            render();
+            return;
+        }
+    }
     if(guardMatchesManagedSelection(target)){
         event.preventDefault();
         event.stopPropagation();
@@ -4560,9 +4597,26 @@ root.addEventListener('change', event => {
         return;
     }
     if(event.target?.id === 'canvasAssetSort'){
-        canvasAssetSort = event.target.value || 'canvas_asc';
+        canvasAssetSort = ['updated','canvas','name','kind'].includes(event.target.value) ? event.target.value : 'updated';
+        writeCanvasAssetViewSettings();
         selectedCanvasAssetId = '';
         render();
+    }
+    const canvasMediaButton = event.target.closest?.('[data-canvas-media-type]');
+    if(canvasMediaButton){
+        canvasAssetMediaType = ['all','image','video'].includes(canvasMediaButton.dataset.canvasMediaType) ? canvasMediaButton.dataset.canvasMediaType : 'all';
+        writeCanvasAssetViewSettings();
+        selectedCanvasAssetId = '';
+        render();
+        return;
+    }
+    const canvasSortButton = event.target.closest?.('[data-canvas-sort-order]');
+    if(canvasSortButton){
+        canvasAssetSortOrder = canvasSortButton.dataset.canvasSortOrder === 'asc' ? 'asc' : 'desc';
+        writeCanvasAssetViewSettings();
+        selectedCanvasAssetId = '';
+        render();
+        return;
     }
     if(event.target?.id === 'referenceTypePreviewSelect'){
         selectedReferenceTypeId = event.target.value || '';

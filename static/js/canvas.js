@@ -3656,31 +3656,6 @@ function addEcommerceNode(type, point){
     node.id = uid(prefix);
     return addNode(node);
 }
-function createEcommerceWorkflow(point){
-    if(!ensureCanvas()) return null;
-    const base = point || defaultPoint(0,0);
-    pushUndo();
-    beginCanvasMutationBatch();
-    try {
-        const model = addEcommerceNode('ecom-model',{x:base.x,y:base.y});
-        const product = addEcommerceNode('ecom-product',{x:base.x,y:base.y + 470});
-        const scene = addEcommerceNode('ecom-scene',{x:base.x + 430,y:base.y});
-        const compose = addEcommerceNode('ecom-compose',{x:base.x + 430,y:base.y + 470});
-        const video = addEcommerceNode('ecom-video',{x:base.x + 980,y:base.y + 470});
-        if(!model || !product || !scene || !compose || !video) return null;
-        connections.push(
-            {id:uid('c'),from:model.id,to:compose.id,inputRole:'ecom-model'},
-            {id:uid('c'),from:product.id,to:compose.id,inputRole:'ecom-product'},
-            {id:uid('c'),from:scene.id,to:compose.id,inputRole:'ecom-scene'},
-            {id:uid('c'),from:compose.id,to:video.id},
-        );
-        selected.clear();
-        [model,product,scene,compose,video].forEach(node => selected.add(node.id));
-        syncGeneratorInputs();
-        setStatus('已创建电商工作流：模特 / 商品 / 场景 → A+ 图合成 → 电商视频');
-        return {model,product,scene,compose,video};
-    } finally { endCanvasMutationBatch(); }
-}
 function createFilmWorkflow(point){
     if(!ensureCanvas()) return null;
     const base = point || defaultPoint(0,0);
@@ -4916,176 +4891,6 @@ function groupImageItems(group){
             natural_h:Number(n.natural_h || n.height || 0)
         }));
 }
-function groupMemberNodes(group){
-    if(!group || group.type !== 'group') return [];
-    const ids = new Set((group.items || []).filter(Boolean));
-    return [...ids].map(id => nodes.find(node => node.id === id)).filter(Boolean);
-}
-function groupInternalConnections(group){
-    const ids = new Set(groupMemberNodes(group).map(node => node.id));
-    return connections.filter(connection => ids.has(connection.from) && ids.has(connection.to));
-}
-function groupInputPort(group, inputRole=''){
-    normalizeGroupExposedPorts(group);
-    return (group?.exposedInputs || []).find(port => String(port.id || '') === String(inputRole || '')) || null;
-}
-function groupInputPorts(group){
-    normalizeGroupExposedPorts(group);
-    return Array.isArray(group?.exposedInputs) ? group.exposedInputs : [];
-}
-function groupOutputNodes(group){
-    normalizeGroupExposedPorts(group);
-    const members = new Map(groupMemberNodes(group).map(node => [node.id, node]));
-    const outputs = (group?.exposedOutputs || []).map(output => members.get(output.sourceId)).filter(Boolean);
-    return outputs.length ? outputs : groupMemberNodes(group).filter(node => {
-        if(node.type === 'prompt') return false;
-        return Boolean(mediaRefsFromNode(node).length);
-    });
-}
-function groupInputEntries(group, context={}){
-    if(!group || group.type !== 'group') return new Map();
-    normalizeGroupExposedPorts(group);
-    const entriesByNode = new Map();
-    connections.filter(connection => connection.to === group.id).forEach(connection => {
-        const port = groupInputPort(group, connection.inputRole || '');
-        if(!port?.targetId) return;
-        const source = nodes.find(node => node.id === connection.from);
-        if(!source) return;
-        const refs = mediaRefsFromNode(source, context).filter(ref => ref?.url);
-        if(!refs.length) return;
-        const entries = entriesByNode.get(port.targetId) || [];
-        entries.push({
-            role:port.targetRole || port.role || '',
-            sourceId:source.id,
-            refs,
-        });
-        entriesByNode.set(port.targetId, entries);
-    });
-    return entriesByNode;
-}
-function groupWorkflowNodes(group){
-    if(!group || group.type !== 'group') return [];
-    normalizeGroupExposedPorts(group);
-    const members = groupMemberNodes(group).filter(node => (
-        ['ecom-compose','ecom-video'].includes(node.type)
-        || (node.type === 'group' && node.exposedWorkflow)
-    ));
-    const ids = new Set(members.map(node => node.id));
-    const edges = groupInternalConnections(group)
-        .filter(connection => ids.has(connection.from) && ids.has(connection.to))
-        .map(connection => [connection.from, connection.to]);
-    const order = [];
-    const visited = new Set();
-    const visiting = new Set();
-    const visit = id => {
-        if(visited.has(id)) return;
-        if(visiting.has(id)) throw new Error('组内工作流存在循环连接');
-        visiting.add(id);
-        edges.filter(([,to]) => to === id).forEach(([from]) => visit(from));
-        visiting.delete(id);
-        visited.add(id);
-        const node = members.find(item => item.id === id);
-        if(node) order.push(node);
-    };
-    members.forEach(node => visit(node.id));
-    return order;
-}
-function groupRuntimeContext(group, context={}){
-    const stack = context.groupStack instanceof Set ? new Set(context.groupStack) : new Set();
-    if(stack.has(group.id)) throw new Error('嵌套工作流组存在循环引用');
-    stack.add(group.id);
-    return {
-        ...context,
-        groupId:group.id,
-        groupStack:stack,
-        inputEntriesByNode:groupInputEntries(group, context),
-    };
-}
-async function runGroupNode(groupId, opts={}){
-    const group = nodes.find(node => node.id === groupId && node.type === 'group');
-    if(!group || (group.running && !opts.cascade)) return;
-    let order = [];
-    try {
-        order = groupWorkflowNodes(group);
-        if(!order.length) throw new Error('组内没有可运行的电商工作流节点');
-        const runtime = groupRuntimeContext(group, opts);
-        group.running = true;
-        group.runStatus = 'running';
-        group.runError = '';
-        refreshNodes([group.id, ...order.map(node => node.id)]);
-        for(const child of order){
-            if(opts.cascade) ensureCascadeActive(cascadeTargetIdFromOptions(opts));
-            child.runStatus = 'running';
-            child.runError = '';
-            refreshNodes([child.id]);
-            const childOpts = {...runtime, cascade:true};
-            if(child.type === 'group') await runGroupNode(child.id, childOpts);
-            else if(child.type === 'ecom-compose') await runEcommerceComposeNode(child.id, childOpts);
-            else if(child.type === 'ecom-video') await runVideoNode(child.id, childOpts);
-            child.runStatus = 'done';
-            refreshNodes([child.id]);
-        }
-        group.runStatus = 'done';
-        group.runError = '';
-        const groupRefs = mediaRefsFromNode(group, runtime);
-        connections.filter(connection => connection.from === group.id)
-            .map(connection => nodes.find(node => node.id === connection.to))
-            .filter(node => node?.type === 'output')
-            .forEach(output => appendOutputImagesWithoutDuplicates(output, groupRefs));
-        scheduleSave();
-    } catch(error){
-        if(isCascadeAbortError(error)) throw error;
-        group.runStatus = 'failed';
-        group.runError = error.message || String(error);
-        if(opts.cascade) throw error;
-        showErrorModal(group.runError,'电商工作流组运行失败');
-    } finally {
-        group.running = false;
-        refreshNodes([group.id, ...order.map(node => node.id)]);
-    }
-}
-function groupCanExposeInputNode(node){
-    return Boolean(node && window.CanvasEcommerceNodes?.isType?.(node.type));
-}
-function groupInputPortId(nodeId, role){
-    return `group-input:${nodeId}:${role || 'input'}`;
-}
-function normalizeGroupExposedPorts(group){
-    if(!group || group.type !== 'group') return group;
-    const members = groupMemberNodes(group);
-    const internal = groupInternalConnections(group);
-    const inputs = [];
-    members.forEach(node => {
-        if(!groupCanExposeInputNode(node)) return;
-        (window.CanvasEcommerceNodes?.inputPorts?.(node.type) || []).forEach(port => {
-            const hasInternalSource = internal.some(connection => connection.to === node.id && (connection.inputRole || '') === (port.role || ''));
-            if(hasInternalSource) return;
-            inputs.push({
-                id:groupInputPortId(node.id, port.role),
-                role:port.role || '',
-                label:`${window.CanvasEcommerceNodes?.title?.(node.type) || node.type} · ${port.label || '输入'}`,
-                title:port.title || '连接到组内节点',
-                targetId:node.id,
-                targetRole:port.role || '',
-                targetType:node.type,
-            });
-        });
-    });
-    const outputs = members.filter(node => {
-        if(!groupCanExposeInputNode(node) && !['image','output','video','generator','batchGenerator','rh','panorama','dwpose','poseReference','relight','angle'].includes(node.type)) return false;
-        return !internal.some(connection => connection.from === node.id);
-    }).map(node => ({
-        id:`group-output:${node.id}`,
-        sourceId:node.id,
-        label:window.CanvasEcommerceNodes?.title?.(node.type) || node.name || node.type,
-        title:'组内终端输出',
-    }));
-    if(JSON.stringify(group.exposedInputs || []) !== JSON.stringify(inputs)) group.exposedInputs = inputs;
-    if(JSON.stringify(group.exposedOutputs || []) !== JSON.stringify(outputs)) group.exposedOutputs = outputs;
-    const container = inputs.length > 0 || outputs.some(output => members.find(node => node.id === output.sourceId)?.type === 'ecom-video');
-    if(group.exposedWorkflow !== container) group.exposedWorkflow = container;
-    return group;
-}
 function extensionFromNameOrUrl(name='', url=''){
     const source = [name, url].map(value => String(value || '').split('?')[0].split('#')[0]).find(value => /\.[a-z0-9]{2,8}$/i.test(value));
     return source?.match(/(\.[a-z0-9]{2,8})$/i)?.[1] || '.png';
@@ -5288,12 +5093,6 @@ function menuAdd(type){
     if(type === 'rh') addRhNode(menuPoint);
     if(type === 'output') addOutputNode(menuPoint);
 }
-function menuCreateEcommerceWorkflow(){
-    const point = menuPoint ? {...menuPoint} : defaultPoint(0,0);
-    closeCreateMenu();
-    return createEcommerceWorkflow(point);
-}
-window.menuCreateEcommerceWorkflow = menuCreateEcommerceWorkflow;
 function menuCreateFilmWorkflow(){
     const point = menuPoint ? {...menuPoint} : defaultPoint(0,0);
     closeCreateMenu();
@@ -9163,22 +8962,15 @@ function bindClassicSpecialNode(el, node){
     if(node.type === 'relight') api.bindRelight(el, node, options);
     if(node.type === 'angle') api.bindAngle(el, node, options);
 }
-function ecommerceConnectedEntries(node, context={}, options={}){
+function ecommerceConnectedEntries(node){
     const api = window.CanvasEcommerceNodes;
     if(!api || !node) return [];
     const direct = connections.filter(connection => connection.to === node.id).map(connection => {
         const source = nodes.find(item => item.id === connection.from);
-        const refs = source ? mediaRefsFromNode(source, context) : [];
+        const refs = source ? mediaRefsFromNode(source) : [];
         return {connection,source,role:connection.inputRole || '',refs};
     }).filter(entry => entry.source);
-    if(options.includeInjected === false) return direct;
-    const injected = context.inputEntriesByNode instanceof Map ? (context.inputEntriesByNode.get(node.id) || []) : [];
-    return direct.concat(injected.map((entry, index) => ({
-        connection:{from:entry.sourceId || `group-input:${node.id}:${index}`,to:node.id,inputRole:entry.role || ''},
-        source:null,
-        role:entry.role || '',
-        refs:Array.isArray(entry.refs) ? entry.refs : [],
-    })));
+    return direct;
 }
 function ecommerceComposeSummary(node){
     const summary = {model:0,product:0,scene:0,pose:0};
@@ -9188,9 +8980,9 @@ function ecommerceComposeSummary(node){
     });
     return summary;
 }
-function ecommerceComposeInputs(node, context={}){
+function ecommerceComposeInputs(node){
     const typed = [];
-    ecommerceConnectedEntries(node, context).forEach(entry => {
+    ecommerceConnectedEntries(node).forEach(entry => {
         if(!entry.refs.length) return;
         if(entry.source && window.CanvasEcommerceNodes?.isType?.(entry.source.type)){
             entry.refs.forEach(ref => typed.push({...ref}));
@@ -9565,7 +9357,6 @@ async function runFilmNode(nodeId, opts={}){
 function renderNode(node){
     window.CanvasEcommerceNodes?.normalize?.(node);
     window.CanvasFilmNodes?.normalize?.(node);
-    if(node.type === 'group') normalizeGroupExposedPorts(node);
     normalizeApiNodeLayout(node);
     if(node.type === 'multiView') normalizeClassicMultiViewNode(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
@@ -9613,7 +9404,7 @@ function renderNode(node){
         : 0;
     const groupCountHtml = node.type === 'group' ? `<span class="group-image-count">${groupImageCount}张</span>` : '';
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video','group'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -9745,12 +9536,7 @@ function renderNode(node){
         if(imgCount) parts.push(`${imgCount} ${tr('canvas.imageCount')}`);
         if(promptCount) parts.push(`${promptCount} ${tr('canvas.promptCount')}`);
         const text = parts.length ? `${parts.join(' · ')} ${tr('canvas.grouped')}` : tr('canvas.groupEmpty');
-        const exposedInputs = groupInputPorts(node);
-        const exposedOutputs = groupOutputNodes(node);
-        const workflowMeta = node.exposedWorkflow
-            ? `<div class="group-workflow-meta"><span>输入 ${exposedInputs.length}</span><span>输出 ${exposedOutputs.length}</span></div><button type="button" class="group-workflow-run" data-group-run ${node.running ? 'disabled' : ''}><i data-lucide="play"></i>${node.running ? '运行中…' : '运行工作流组'}</button>`
-            : '';
-        body.innerHTML = `<div class="text-[11px] text-gray-400">${text}</div>${workflowMeta}`;
+        body.innerHTML = `<div class="text-[11px] text-gray-400">${text}</div>`;
         const previewItems = groupImageItems(node);
         if(previewItems.length){
             const openGroupPreview = e => {
@@ -9831,15 +9617,14 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const ecommercePorts = window.CanvasEcommerceNodes?.inputPorts?.(node.type) || [];
-    const groupPorts = node.type === 'group' ? groupInputPorts(node) : [];
     const filmPorts = window.CanvasFilmNodes?.inputPorts?.(node) || [];
-    const rolePorts = filmPorts.length ? filmPorts : ecommercePorts.length ? ecommercePorts : groupPorts;
-    const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : node.type === 'group' ? ' group-role-port' : ''}`;
+    const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
+    const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
     const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
     const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
     if(filmPorts.length || rolePorts.length > 1){
         el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
-    } else if(ecommercePorts.length || groupPorts.length){
+    } else if(ecommercePorts.length){
         el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
@@ -9888,11 +9673,6 @@ function renderNode(node){
         event.stopPropagation();
         handleClassicBuildingAction(node.id, button.dataset.buildingAction || 'run');
     }));
-    el.querySelector('[data-group-run]')?.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        runGroupNode(node.id);
-    });
     el.querySelectorAll('[data-multi-view-mode]').forEach(button => button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
@@ -13887,22 +13667,14 @@ function mediaRefsFromNode(node, context={}){
             .map(connection => nodes.find(source => source.id === connection.from))
             .filter(Boolean)
             .flatMap(source => mediaRefsFromNode(source, nextContext));
-        const injectedItems = nextContext.inputEntriesByNode instanceof Map
-            ? (nextContext.inputEntriesByNode.get(node.id) || []).flatMap(entry => entry.refs || [])
-            : [];
-        return window.CanvasEcommerceNodes.mediaRefs(node, {extraItems:[...upstreamItems, ...injectedItems]});
+        return window.CanvasEcommerceNodes.mediaRefs(node, {extraItems:upstreamItems});
     }
     if(node.type === 'image' && node.url){
         const kind = mediaKindForNode(node);
         return [{url:node.url, name:node.name || kind, role:node.role || '', kind}];
     }
     if(node.type === 'group'){
-        normalizeGroupExposedPorts(node);
-        if(!node.exposedWorkflow) return groupImageItems(node).map(item => ({...item, __index:undefined}));
-        const groupContext = {...nextContext, inputEntriesByNode:groupInputEntries(node, nextContext)};
-        return groupOutputNodes(node)
-            .flatMap(outputNode => mediaRefsFromNode(outputNode, groupContext))
-            .filter((ref,index,list) => ref?.url && list.findIndex(candidate => candidate.url === ref.url) === index);
+        return groupImageItems(node).map(item => ({...item, __index:undefined}));
     }
     if(node.type === 'output'){
         return (node.images || []).map((item, i) => {
@@ -13919,21 +13691,8 @@ function mediaRefsFromNode(node, context={}){
     if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node);
     return [];
 }
-function generatorSources(gen, context={}){
+function generatorSources(gen){
     const directNodes = connections.filter(c => c.to === gen.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean);
-    const injectedSources = context.inputEntriesByNode instanceof Map
-        ? (context.inputEntriesByNode.get(gen.id) || []).flatMap((entry, index) => {
-            const refs = (entry.refs || []).filter(ref => ref?.url);
-            return refs.length ? [{
-                id:`group-input:${gen.id}:${entry.role || index}`,
-                type:'groupInput',
-                label:`组输入 · ${entry.role || '媒体'}`,
-                preview:refs[0].url,
-                refs,
-                prompt:''
-            }] : [];
-        })
-        : [];
     return directNodes.map(n => {
         if(n.type === 'output' && (n.images||[]).length){
             // 从 output 节点取最新一张图当作 reference 给下游
@@ -13968,15 +13727,6 @@ function generatorSources(gen, context={}){
             return {id:n.id, type:kind, label:n.name || kind, preview:n.url, refs:[{url:n.url, name:n.name || kind, role:n.role || '', kind}], prompt:''};
         }
         if(n.type === 'group') {
-            normalizeGroupExposedPorts(n);
-            if(n.exposedWorkflow){
-                const refs = mediaRefsFromNode(n, context);
-                if(refs.length) return {
-                    id:`${n.id}:workflow`, type:'groupWorkflow', groupId:n.id,
-                    label:n.title || '工作流组', preview:refs[0].url, refs, prompt:''
-                };
-                return null;
-            }
             const items = (n.items || []).map(id => nodes.find(x => x.id === id)).filter(Boolean);
             const sources = items.filter(x => x.type === 'image' && x.url).map(img => ({
                 id:`${n.id}:${img.id}`,
@@ -14030,7 +13780,7 @@ function generatorSources(gen, context={}){
         }
         if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
         return null;
-    }).concat(injectedSources).flat().filter(Boolean);
+    }).flat().filter(Boolean);
 }
 function orderedSources(gen, sources){
     gen.inputs = (gen.inputs || []).filter(id => sources.some(s => s.id === id));
@@ -15418,7 +15168,6 @@ function bindCascadeButtons(wrap, nodeId){
 // —— 一键运行：从目标节点反向追溯到所有上游生成节点，按拓扑顺序串行执行 ——
 function runCascadeNodeByType(node, opts={}){
     const runOpts = {cascade:true, ...opts};
-    if(node.type === 'group') return runGroupNode(node.id, runOpts);
     if(node.type === 'generator') return runGenerator(node.id, runOpts);
     if(node.type === 'batchGenerator') return runBatchGenerator(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
@@ -15459,7 +15208,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','rh','ecom-compose','ecom-video','group'];
+    return ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','rh','ecom-compose','ecom-video'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -15703,7 +15452,6 @@ async function runOneCascadePass(order, options={}){
             else if(node.type === 'video' || node.type === 'ecom-video') await runVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'topazVideo') await runTopazVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'ecom-compose') await runEcommerceComposeNode(id, {cascade:true, cascadeTargetId:targetId});
-            else if(node.type === 'group') await runGroupNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'rh') await runRhNode(id, {cascade:true, cascadeTargetId:targetId});
             if(targetId) ensureCascadeActive(targetId);
             node.runStatus = 'done';
@@ -19481,13 +19229,6 @@ function canConnect(fromId, toId, inputRole=''){
         if(to.type === 'output') return true;
         if(to.type === 'loop') return Boolean(to.imageInput);
         return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
-    }
-    if(to.type === 'group'){
-        const exposed = groupInputPort(to, inputRole);
-        if(!exposed || !exposed.targetId || exposed.targetId === fromId) return false;
-        if(from.type === 'group' && groupMemberNodes(from).some(node => node.id === exposed.targetId)) return false;
-        return canConnect(fromId, exposed.targetId, exposed.targetRole || '')
-            && !wouldCreateGeneratorCycle(fromId, toId);
     }
     if(to.type === 'film-storyboard' || to.type === 'film-video' || to.type === 'film-line-art'){
         const valid = (window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole);

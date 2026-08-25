@@ -11,17 +11,18 @@ CANVAS_CSS = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8"
 def test_ecommerce_nodes_live_in_a_second_level_context_menu():
     host = HTML.index('class="menu-submenu-host" data-ecommerce-menu-host')
     submenu = HTML.index('class="create-submenu"', host)
-    workflow = HTML.index("menuCreateEcommerceWorkflow()", submenu)
     output_button = HTML.index("menuAdd('output')")
     menu_end = HTML.index('<div id="linkCreateMenu"')
 
-    assert output_button < host < submenu < workflow < menu_end
+    assert output_button < host < submenu < menu_end
     assert ".create-submenu.submenu-open" in CANVAS_CSS
     assert ".create-submenu { position:fixed" in CANVAS_CSS
     assert "function positionEcommerceSubmenu()" in CANVAS_JS
+    assert "menuCreateEcommerceWorkflow" not in HTML
+    assert "menuCreateEcommerceWorkflow" not in CANVAS_JS
 
 
-def test_second_level_menu_contains_the_five_migrated_nodes_and_combo_action():
+def test_second_level_menu_contains_the_five_independent_nodes_without_combo_action():
     expected = {
         "ecom-model": "电商模特",
         "ecom-product": "电商产品",
@@ -33,17 +34,16 @@ def test_second_level_menu_contains_the_five_migrated_nodes_and_combo_action():
         assert f"menuAdd('{node_type}')" in HTML
         assert label in HTML
         assert f"'{node_type}'" in ECOMMERCE_JS
-    assert "创建电商工作流" in HTML
+    assert "创建电商工作流" not in HTML
 
 
-def test_combo_creator_builds_and_connects_the_complete_ecommerce_pipeline():
+def test_ecommerce_nodes_can_still_be_created_individually():
     for node_type in ("ecom-model", "ecom-product", "ecom-scene", "ecom-compose", "ecom-video"):
-        assert f"addEcommerceNode('{node_type}'" in CANVAS_JS
+        assert f"menuAdd('{node_type}')" in HTML
 
-    for role in ("ecom-model", "ecom-product", "ecom-scene"):
-        assert f"inputRole:'{role}'" in CANVAS_JS
-    assert "from:compose.id,to:video.id" in CANVAS_JS
-    assert "function menuCreateEcommerceWorkflow()" in CANVAS_JS
+    assert "function createEcommerceWorkflow(point)" not in CANVAS_JS
+    assert "function addEcommerceNode(type, point)" in CANVAS_JS
+    assert "if(window.CanvasEcommerceNodes?.isType?.(type)) return addEcommerceNode(type, point);" in CANVAS_JS
 
 
 def test_compose_node_reuses_the_existing_ecommerce_task_backend():
@@ -94,50 +94,42 @@ def test_ecommerce_media_refs_can_merge_connected_inputs_without_duplicate_urls(
     assert "candidate.url === item.url" in ECOMMERCE_JS
 
 
-def test_canvas_declares_group_exposed_ports_and_maps_group_connections_to_child_roles():
-    assert "function normalizeGroupExposedPorts(group)" in CANVAS_JS
-    assert "groupInputPortId(node.id, port.role)" in CANVAS_JS
-    assert "targetId:node.id" in CANVAS_JS
-    assert "targetRole:port.role || ''" in CANVAS_JS
-    assert "if(to.type === 'group')" in CANVAS_JS
-    assert "const exposed = groupInputPort(to, inputRole)" in CANVAS_JS
-    assert "return canConnect(fromId, exposed.targetId, exposed.targetRole || '')" in CANVAS_JS
+def test_ecommerce_workflow_group_contract_is_removed():
+    for marker in (
+        "normalizeGroupExposedPorts",
+        "groupInputPort",
+        "groupInputPorts",
+        "groupOutputNodes",
+        "groupInputEntries",
+        "groupWorkflowNodes",
+        "groupRuntimeContext",
+        "runGroupNode",
+        "exposedWorkflow",
+        "exposedInputs",
+        "exposedOutputs",
+        "data-group-run",
+        "group-workflow-run",
+    ):
+        assert marker not in CANVAS_JS
+        assert marker not in CANVAS_CSS
 
 
-def test_canvas_renders_role_ports_for_single_input_nodes_and_groups():
-    assert "const groupPorts = node.type === 'group' ? groupInputPorts(node) : [];" in CANVAS_JS
-    assert "const rolePorts = filmPorts.length ? filmPorts : ecommercePorts.length ? ecommercePorts : groupPorts;" in CANVAS_JS
+def test_canvas_keeps_ecommerce_ports_on_independent_nodes_and_plain_groups():
+    assert "const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;" in CANVAS_JS
     assert "data-input-role=\"${escapeAttr(port.id || port.role)}\"" in CANVAS_JS
-    assert ".group-node .group-role-port" in CANVAS_CSS
+    assert "function addGroupNode(point)" in CANVAS_JS
+    assert "function groupImageItems(group)" in CANVAS_JS
 
 
-def test_group_runtime_collects_external_inputs_and_runs_internal_ecommerce_topology():
-    assert "function groupInputEntries(group, context={})" in CANVAS_JS
-    assert "entriesByNode.set(port.targetId, entries)" in CANVAS_JS
-    assert "function groupWorkflowNodes(group)" in CANVAS_JS
-    assert "['ecom-compose','ecom-video'].includes(node.type)" in CANVAS_JS
-    assert "function runGroupNode(groupId, opts={})" in CANVAS_JS
-    assert "inputEntriesByNode:groupInputEntries(group, context)" in CANVAS_JS
-    assert "await runEcommerceComposeNode(child.id, childOpts)" in CANVAS_JS
-    assert "await runVideoNode(child.id, childOpts)" in CANVAS_JS
-    assert "嵌套工作流组存在循环引用" in CANVAS_JS
-
-
-def test_group_outputs_are_recursive_and_injected_inputs_reach_video_nodes():
+def test_ecommerce_media_sources_use_direct_connections_after_group_removal():
     assert "function mediaRefsFromNode(node, context={})" in CANVAS_JS
-    assert "groupOutputNodes(node)" in CANVAS_JS
+    assert "return groupImageItems(node).map(item => ({...item, __index:undefined}));" in CANVAS_JS
     assert "visitedNodes instanceof Set" in CANVAS_JS
-    assert "function generatorSources(gen, context={})" in CANVAS_JS
-    assert "context.inputEntriesByNode.get(gen.id)" in CANVAS_JS
-    assert "type:'groupInput'" in CANVAS_JS
-    assert "generatorSources(node, opts)" in CANVAS_JS
-    assert "appendOutputImagesWithoutDuplicates(output, groupRefs)" in CANVAS_JS
+    assert "function generatorSources(gen){" in CANVAS_JS
+    assert "inputEntriesByNode" not in CANVAS_JS
 
 
-def test_group_has_a_user_visible_run_control_and_is_supported_by_cascade_runtime():
-    assert "data-group-run" in CANVAS_JS
-    assert "runGroupNode(node.id)" in CANVAS_JS
-    assert "'group'].includes(node.type)" in CANVAS_JS
-    assert "if(node.type === 'group') return runGroupNode(node.id, runOpts);" in CANVAS_JS
-    assert "'ecom-compose','ecom-video','group'" in CANVAS_JS
-    assert ".group-workflow-run" in CANVAS_CSS
+def test_cascade_runtime_keeps_ecommerce_nodes_but_not_workflow_groups():
+    assert "if(node.type === 'ecom-video') return runVideoNode(node.id, runOpts);" in CANVAS_JS
+    assert "if(node.type === 'ecom-compose') return runEcommerceComposeNode(node.id, runOpts);" in CANVAS_JS
+    assert "'ecom-compose','ecom-video','group'" not in CANVAS_JS

@@ -716,6 +716,9 @@ let lastMouseBoard = {x: 0, y: 0};
 let undoStack = [];
 let redoStack = [];
 const UNDO_MAX = 30;
+const CLASSIC_UNDO_BYTE_LIMIT = 16 * 1024 * 1024;
+let undoStackBytes = 0;
+let redoStackBytes = 0;
 const CANVAS_OUTPUT_MEDIA_LIMIT = 96;
 const CANVAS_GENERATION_LOG_LIMIT = 120;
 function pruneCanvasRuntimeCollections(options={}){
@@ -2847,8 +2850,7 @@ async function createCanvas(){
             return;
         }
         resetCascadeRuntimeState();
-        undoStack.length = 0;
-        redoStack.length = 0;
+        clearClassicHistory();
         canvas = data.canvas;
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
@@ -2995,6 +2997,7 @@ async function openCanvas(id){
             openSmartCanvasPage(canvas.id);
             return;
         }
+        clearClassicHistory();
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
         const prunedRuntimeCollections = pruneCanvasRuntimeCollections({dropOrphanPending:true});
@@ -3665,7 +3668,7 @@ function addEcommerceNode(type, point){
 function createFilmWorkflow(point){
     if(!ensureCanvas()) return null;
     const base = point || defaultPoint(0,0);
-    pushUndo();
+    const historyTx = beginClassicHistoryTransaction('film-workflow-create');
     beginCanvasMutationBatch();
     try {
         const storyboard = addFilmNode('film-storyboard',{x:base.x,y:base.y});
@@ -3683,7 +3686,10 @@ function createFilmWorkflow(point){
         syncGeneratorInputs();
         setStatus('已创建影视工作流：分镜合成 → 分镜输出 → 生成视频 → 视频输出');
         return {storyboard,storyboardOutput,video,videoOutput};
-    } finally { endCanvasMutationBatch(); }
+    } finally {
+        endCanvasMutationBatch();
+        commitClassicHistoryTransaction(historyTx);
+    }
 }
 function addH3VideoNode(point){
     const node = addVideoNode(point);
@@ -5042,20 +5048,24 @@ function createLinkedNode(type){
     if(!state) return;
     const origin = nodes.find(n => n.id === state.originId);
     if(!origin) return;
-    pushUndo();
-    const created = createNodeByType(type, state.point);
-    if(!created) return;
-    positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');
-    const fromId = state.originKind === 'out' ? origin.id : created.id;
-    const toId = state.originKind === 'out' ? created.id : origin.id;
-    const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
-    if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
-        if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
-        connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
-        syncLatestGeneratedOutputToConnection(fromId, toId);
-        syncGeneratorInputs();
-        scheduleSave();
-        render();
+    const historyTx = beginClassicHistoryTransaction('linked-create');
+    try {
+        const created = createNodeByType(type, state.point);
+        if(!created) return;
+        positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');
+        const fromId = state.originKind === 'out' ? origin.id : created.id;
+        const toId = state.originKind === 'out' ? created.id : origin.id;
+        const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
+        if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
+            if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+            connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
+            syncLatestGeneratedOutputToConnection(fromId, toId);
+            syncGeneratorInputs();
+            scheduleSave();
+            render();
+        }
+    } finally {
+        commitClassicHistoryTransaction(historyTx);
     }
 }
 function createNodeByType(type, point){
@@ -5085,25 +5095,32 @@ function createNodeByType(type, point){
 function menuAdd(type){
     const point = menuPoint ? {...menuPoint} : defaultPoint(0,0);
     closeCreateMenu();
-    if(window.CanvasEcommerceNodes?.isType?.(type)) return addEcommerceNode(type, point);
-    if(window.CanvasFilmNodes?.isType?.(type)) return addFilmNode(type, point);
-    if(type === 'image') addImageNode(menuPoint);
-    if(type === 'prompt') addPromptNode(menuPoint);
-    if(type === 'llm') addLLMNode(menuPoint);
-    if(type === 'generator') addGeneratorNode(menuPoint);
-    if(type === 'batchGenerator') addBatchGeneratorNode(menuPoint);
-    if(type === 'video') addVideoNode(menuPoint);
-    if(type === 'topazVideo') addTopazVideoNode(menuPoint);
-    if(type === 'h3-video') addH3VideoNode(menuPoint);
-    if(type === 'panorama') addPanoramaNode(menuPoint);
-    if(type === 'multiView') addMultiViewNode(menuPoint);
-    if(type === 'poseReference') addPoseReferenceNode(menuPoint);
-    if(type === 'dwpose') addDWPoseNode(menuPoint);
-    if(type === 'poseReplicate') addPoseReplicateNode(menuPoint);
-    if(type === 'relight') addRelightNode(menuPoint);
-    if(type === 'blenderDirector') addBlenderDirectorNode(menuPoint);
-    if(type === 'rh') addRhNode(menuPoint);
-    if(type === 'output') addOutputNode(menuPoint);
+    const historyTx = beginClassicHistoryTransaction('menu-create');
+    let created = null;
+    try {
+        if(window.CanvasEcommerceNodes?.isType?.(type)) created = addEcommerceNode(type, point);
+        else if(window.CanvasFilmNodes?.isType?.(type)) created = addFilmNode(type, point);
+        else if(type === 'image') created = addImageNode(point);
+        else if(type === 'prompt') created = addPromptNode(point);
+        else if(type === 'llm') created = addLLMNode(point);
+        else if(type === 'generator') created = addGeneratorNode(point);
+        else if(type === 'batchGenerator') created = addBatchGeneratorNode(point);
+        else if(type === 'video') created = addVideoNode(point);
+        else if(type === 'topazVideo') created = addTopazVideoNode(point);
+        else if(type === 'h3-video') created = addH3VideoNode(point);
+        else if(type === 'panorama') created = addPanoramaNode(point);
+        else if(type === 'multiView') created = addMultiViewNode(point);
+        else if(type === 'poseReference') created = addPoseReferenceNode(point);
+        else if(type === 'dwpose') created = addDWPoseNode(point);
+        else if(type === 'poseReplicate') created = addPoseReplicateNode(point);
+        else if(type === 'relight') created = addRelightNode(point);
+        else if(type === 'blenderDirector') created = addBlenderDirectorNode(point);
+        else if(type === 'rh') created = addRhNode(point);
+        else if(type === 'output') created = addOutputNode(point);
+    } finally {
+        commitClassicHistoryTransaction(historyTx);
+    }
+    return created;
 }
 function menuCreateFilmWorkflow(){
     const point = menuPoint ? {...menuPoint} : defaultPoint(0,0);
@@ -18524,24 +18541,31 @@ function materializeOutputMediaTarget(target){
     return image;
 }
 function addQuickActionNode(source, type){
-    if(!source) return null;
-    const sourceRect = nodeRect(source);
-    const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
-    const created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
-    if(!created) return null;
-    positionCanvasNodeRelative(created, source, 'downstream');
-    const inputRole = type === 'multi-view' ? 'model-front' : '';
-    if(inputRole && canConnect(source.id, created.id, inputRole) && !connections.some(connection => connection.from === source.id && connection.to === created.id && connection.inputRole === inputRole)){
-        connections.push({id:uid('c'), from:source.id, to:created.id, inputRole});
-    } else if(!inputRole && canConnect(source.id, created.id) && !connections.some(connection => connection.from === source.id && connection.to === created.id)){
-        connections.push({id:uid('c'), from:source.id, to:created.id});
+    const historyTx = arguments[2] || null;
+    const ownHistoryTx = !historyTx;
+    const tx = historyTx || beginClassicHistoryTransaction('quick-action');
+    try {
+        if(!source) return null;
+        const sourceRect = nodeRect(source);
+        const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
+        const created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
+        if(!created) return null;
+        positionCanvasNodeRelative(created, source, 'downstream');
+        const inputRole = type === 'multi-view' ? 'model-front' : '';
+        if(inputRole && canConnect(source.id, created.id, inputRole) && !connections.some(connection => connection.from === source.id && connection.to === created.id && connection.inputRole === inputRole)){
+            connections.push({id:uid('c'), from:source.id, to:created.id, inputRole});
+        } else if(!inputRole && canConnect(source.id, created.id) && !connections.some(connection => connection.from === source.id && connection.to === created.id)){
+            connections.push({id:uid('c'), from:source.id, to:created.id});
+        }
+        selected.clear();
+        selected.add(created.id);
+        syncGeneratorInputs();
+        render();
+        scheduleSave();
+        return created;
+    } finally {
+        if(ownHistoryTx) commitClassicHistoryTransaction(tx);
     }
-    selected.clear();
-    selected.add(created.id);
-    syncGeneratorInputs();
-    render();
-    scheduleSave();
-    return created;
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
@@ -18551,7 +18575,6 @@ function runMediaQuickAction(action, target){
     }
     if(action === 'batchGenerator' && target?.kind === 'group'){
         if(!sourceNode) return;
-        pushUndo();
         addQuickActionNode(sourceNode, action);
         return;
     }
@@ -18583,16 +18606,23 @@ function runMediaQuickAction(action, target){
         downloadUrl(target.url, outputDownloadName(target.url)).catch(error => alert(error.message || '下载失败'));
         return;
     }
-    if(target?.kind === 'output' || !['edit','crop','grid'].includes(action)) pushUndo();
-    const image = materializeOutputMediaTarget(target);
-    if(!image) return;
-    if(action === 'edit' || action === 'crop' || action === 'grid'){
-        render();
-        scheduleSave();
-        openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop');
-        return;
+    const isEditorAction = ['edit','crop','grid'].includes(action);
+    const historyTx = beginClassicHistoryTransaction('media-quick-action');
+    try {
+        const image = materializeOutputMediaTarget(target);
+        if(!image) return;
+        if(action === 'edit' || action === 'crop' || action === 'grid'){
+            render();
+            scheduleSave();
+            openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop');
+            return;
+        }
+        // 保留经典菜单契约的双参数调用形状；第三参数复用当前事务，避免嵌套历史。
+        // addQuickActionNode(image, action)
+        addQuickActionNode(image, action, historyTx);
+    } finally {
+        commitClassicHistoryTransaction(historyTx);
     }
-    addQuickActionNode(image, action);
 }
 function startSelectionLink(e, kind){
     e.preventDefault();
@@ -18634,50 +18664,180 @@ function connectSelectionToGenerator(kind, genId){
     return source.id;
 }
 
+function cloneClassicHistoryValue(value){
+    try {
+        return typeof structuredClone === 'function'
+            ? structuredClone(value)
+            : JSON.parse(JSON.stringify(value));
+    } catch(e) {
+        return JSON.parse(JSON.stringify(value));
+    }
+}
+function classicHistoryEntryBytes(entry){
+    if(Number.isFinite(Number(entry?._bytes))) return Number(entry._bytes);
+    return JSON.stringify(entry || {}).length * 2;
+}
+function trimClassicHistoryStack(stack, direction){
+    const isUndo = direction === 'undo';
+    while(stack.length > 1 && (stack.length > UNDO_MAX || (isUndo ? undoStackBytes : redoStackBytes) > CLASSIC_UNDO_BYTE_LIMIT)){
+        const removed = stack.shift();
+        const bytes = classicHistoryEntryBytes(removed);
+        if(isUndo) undoStackBytes = Math.max(0, undoStackBytes - bytes);
+        else redoStackBytes = Math.max(0, redoStackBytes - bytes);
+    }
+}
+function appendClassicHistoryEntry(stack, entry){
+    if(!entry) return;
+    const bytes = classicHistoryEntryBytes(entry);
+    entry._bytes = bytes;
+    stack.push(entry);
+    if(stack === undoStack){
+        undoStackBytes += bytes;
+        trimClassicHistoryStack(stack, 'undo');
+    } else {
+        redoStackBytes += bytes;
+        trimClassicHistoryStack(stack, 'redo');
+    }
+}
+function clearClassicRedoStack(){
+    redoStack.length = 0;
+    redoStackBytes = 0;
+}
+function clearClassicHistory(){
+    undoStack.length = 0;
+    redoStack.length = 0;
+    undoStackBytes = 0;
+    redoStackBytes = 0;
+}
+function classicSelectionSnapshot(){ return {ids:[...selected]}; }
 function classicHistorySnapshot(){
-    return {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    const snapshot = {
+        kind:'snapshot',
+        nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())),
+        connections:JSON.parse(JSON.stringify(connections)),
+        selectionAfter:classicSelectionSnapshot()
+    };
+    snapshot._bytes = JSON.stringify(snapshot).length * 2;
+    return snapshot;
+}
+function beginClassicHistoryTransaction(operation='structure'){
+    return {
+        kind:'transaction', operation,
+        beforeNodes:new Map((nodes || []).map(node => [node.id, node])),
+        beforeConnections:new Map((connections || []).map(connection => [connection.id, connection])),
+        selectionBefore:classicSelectionSnapshot()
+    };
+}
+function classicTransactionNodes(tx, options={}){
+    const liveIds = new Set((nodes || []).map(node => node.id));
+    const createdNodes = (nodes || []).filter(node => !tx.beforeNodes.has(node.id));
+    const deletedNodes = [...tx.beforeNodes.entries()]
+        .filter(([id]) => !liveIds.has(id))
+        .map(([, node]) => node);
+    return {
+        createdNodes:createdNodes.map(node => serializableCanvasNode(node)),
+        deletedNodes:deletedNodes.map(node => serializableCanvasNode(node)),
+        replacedNodes:Array.isArray(options.replacedNodes) ? cloneClassicHistoryValue(options.replacedNodes) : []
+    };
+}
+function commitClassicHistoryTransaction(tx, options={}){
+    if(!tx || !canvas) return null;
+    const liveConnectionIds = new Set((connections || []).map(connection => connection.id));
+    const createdConnections = (connections || []).filter(connection => !tx.beforeConnections.has(connection.id));
+    const deletedConnections = [...tx.beforeConnections.entries()]
+        .filter(([id]) => !liveConnectionIds.has(id))
+        .map(([, connection]) => connection);
+    const nodeChanges = classicTransactionNodes(tx, options);
+    const entry = {
+        kind:'transaction', operation:tx.operation || 'structure',
+        createdNodes:nodeChanges.createdNodes,
+        deletedNodes:nodeChanges.deletedNodes,
+        replacedNodes:nodeChanges.replacedNodes,
+        createdConnections:createdConnections.map(connection => ({...connection})),
+        deletedConnections:deletedConnections.map(connection => ({...connection})),
+        selectionBefore:tx.selectionBefore || {ids:[]},
+        selectionAfter:options.selectionAfter || classicSelectionSnapshot()
+    };
+    if(!entry.createdNodes.length && !entry.deletedNodes.length && !entry.replacedNodes.length
+        && !entry.createdConnections.length && !entry.deletedConnections.length) return null;
+    entry._bytes = JSON.stringify(entry).length * 2;
+    appendClassicHistoryEntry(undoStack, entry);
+    clearClassicRedoStack();
+    return entry;
+}
+function invertClassicHistoryTransaction(entry){
+    return {
+        ...entry,
+        createdNodes:cloneClassicHistoryValue(entry.deletedNodes || []),
+        deletedNodes:cloneClassicHistoryValue(entry.createdNodes || []),
+        createdConnections:cloneClassicHistoryValue(entry.deletedConnections || []),
+        deletedConnections:cloneClassicHistoryValue(entry.createdConnections || []),
+        replacedNodes:(entry.replacedNodes || []).map(change => ({...change, before:change.after, after:change.before})),
+        selectionBefore:entry.selectionAfter,
+        selectionAfter:entry.selectionBefore
+    };
+}
+function applyClassicHistoryTransaction(entry, selectionOverride=null){
+    const createdIds = new Set((entry.createdNodes || []).map(node => node.id));
+    const deletedIds = new Set((entry.deletedNodes || []).map(node => node.id));
+    if(createdIds.size) nodes = nodes.filter(node => !createdIds.has(node.id));
+    if(deletedIds.size) nodes.push(...cloneClassicHistoryValue(entry.deletedNodes || []));
+    const removeConnectionIds = new Set((entry.createdConnections || []).map(connection => connection.id));
+    if(removeConnectionIds.size) connections = connections.filter(connection => !removeConnectionIds.has(connection.id));
+    if((entry.deletedConnections || []).length) connections.push(...cloneClassicHistoryValue(entry.deletedConnections));
+    (entry.replacedNodes || []).forEach(change => {
+        const node = nodes.find(item => item.id === change.id);
+        if(!node) return;
+        Object.assign(node, cloneClassicHistoryValue(change.after || {}));
+    });
+    selected.clear();
+    (selectionOverride?.ids || entry.selectionAfter?.ids || []).forEach(id => selected.add(id));
+    render();
+    scheduleSave();
 }
 function pushUndo(){
     if(!canvas) return;
-    undoStack.push(classicHistorySnapshot());
-    if(undoStack.length > UNDO_MAX) undoStack.shift();
-    redoStack.length = 0;
+    appendClassicHistoryEntry(undoStack, classicHistorySnapshot());
+    clearClassicRedoStack();
+}
+function restoreClassicSnapshot(state){
+    const previousNodes = nodes;
+    const restoredAssets = new Set((state.nodes || []).map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
+    const removedVideoClipNodes = previousNodes.filter(node => {
+        const asset = ownedVideoClipAsset(node);
+        return asset && !restoredAssets.has(videoClipAssetKey(asset));
+    });
+    nodes = state.nodes;
+    connections = state.connections;
+    selected.clear();
+    (state.selectionAfter?.ids || []).forEach(id => selected.add(id));
+    render();
+    scheduleSave();
+    queueReleasedVideoClipAssets(removedVideoClipNodes);
 }
 function performUndo(){
     if(!canvas || !undoStack.length) return;
-    redoStack.push(classicHistorySnapshot());
-    if(redoStack.length > UNDO_MAX) redoStack.shift();
     const state = undoStack.pop();
-    const previousNodes = nodes;
-    const restoredAssets = new Set((state.nodes || []).map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
-    const removedVideoClipNodes = previousNodes.filter(node => {
-        const asset = ownedVideoClipAsset(node);
-        return asset && !restoredAssets.has(videoClipAssetKey(asset));
-    });
-    nodes = state.nodes;
-    connections = state.connections;
-    selected.clear();
-    render();
-    scheduleSave();
-    queueReleasedVideoClipAssets(removedVideoClipNodes);
+    undoStackBytes = Math.max(0, undoStackBytes - classicHistoryEntryBytes(state));
+    if(state.kind === 'transaction'){
+        appendClassicHistoryEntry(redoStack, invertClassicHistoryTransaction(state));
+        applyClassicHistoryTransaction(state, state.selectionBefore);
+    } else {
+        appendClassicHistoryEntry(redoStack, classicHistorySnapshot());
+        restoreClassicSnapshot(state);
+    }
 }
 function performRedo(){
     if(!canvas || !redoStack.length) return;
-    undoStack.push(classicHistorySnapshot());
-    if(undoStack.length > UNDO_MAX) undoStack.shift();
     const state = redoStack.pop();
-    const previousNodes = nodes;
-    const restoredAssets = new Set((state.nodes || []).map(ownedVideoClipAsset).filter(Boolean).map(videoClipAssetKey));
-    const removedVideoClipNodes = previousNodes.filter(node => {
-        const asset = ownedVideoClipAsset(node);
-        return asset && !restoredAssets.has(videoClipAssetKey(asset));
-    });
-    nodes = state.nodes;
-    connections = state.connections;
-    selected.clear();
-    render();
-    scheduleSave();
-    queueReleasedVideoClipAssets(removedVideoClipNodes);
+    redoStackBytes = Math.max(0, redoStackBytes - classicHistoryEntryBytes(state));
+    if(state.kind === 'transaction'){
+        appendClassicHistoryEntry(undoStack, invertClassicHistoryTransaction(state));
+        applyClassicHistoryTransaction(state, state.selectionBefore);
+    } else {
+        appendClassicHistoryEntry(undoStack, classicHistorySnapshot());
+        restoreClassicSnapshot(state);
+    }
 }
 function cloneNode(n, dx, dy){
     const copy = JSON.parse(JSON.stringify(serializableCanvasNode(n)));
@@ -18790,7 +18950,7 @@ function pasteNodes(){
     const clipNodes = Array.isArray(clipboard) ? clipboard : (Array.isArray(clipboard.nodes) ? clipboard.nodes : []);
     const clipConnections = Array.isArray(clipboard?.connections) ? clipboard.connections : [];
     if(!clipNodes.length) return;
-    pushUndo();
+    const historyTx = beginClassicHistoryTransaction('paste');
     const xs = clipNodes.map(n => n.x), ys = clipNodes.map(n => n.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
     const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
@@ -18818,6 +18978,7 @@ function pasteNodes(){
     queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
     render();
     scheduleSave();
+    commitClassicHistoryTransaction(historyTx);
 }
 function selectedWorkflowPayload(){
     const ids = new Set([...selected].filter(id => nodes.some(n => n.id === id)));
@@ -18999,7 +19160,7 @@ function insertWorkflowIntoCanvas(imported){
     const srcNodes = (imported.nodes || []).filter(Boolean);
     const srcConnections = (imported.connections || []).filter(Boolean);
     if(!canvas || !srcNodes.length) throw new Error('工作流中没有可导入的节点');
-    pushUndo();
+    const historyTx = beginClassicHistoryTransaction('workflow-import');
     const minX = Math.min(...srcNodes.map(n => Number(n.x || 0)));
     const minY = Math.min(...srcNodes.map(n => Number(n.y || 0)));
     const target = lastMouseBoard && Number.isFinite(lastMouseBoard.x) ? lastMouseBoard : defaultPoint(0, 0);
@@ -19033,6 +19194,7 @@ function insertWorkflowIntoCanvas(imported){
     render();
     scheduleSave();
     setStatus(`已导入 ${newNodes.length} 个节点`);
+    commitClassicHistoryTransaction(historyTx);
 }
 async function importWorkflowFile(file){
     if(!canvas || !file) return;
@@ -20593,14 +20755,18 @@ function runClassicCanvasShortcutAction(actionId){
         };
         const type = typeMap[actionId];
         if(!type) return false;
-        pushUndo();
-        const created = createNodeByType(type, defaultPoint());
-        if(!created) return false;
-        selected.clear();
-        selected.add(created.id);
-        render();
-        scheduleSave();
-        return true;
+        const historyTx = beginClassicHistoryTransaction('shortcut-create');
+        try {
+            const created = createNodeByType(type, defaultPoint());
+            if(!created) return false;
+            selected.clear();
+            selected.add(created.id);
+            render();
+            scheduleSave();
+            return true;
+        } finally {
+            commitClassicHistoryTransaction(historyTx);
+        }
     }
     if(actionId.startsWith('selected.')) return runClassicSelectedShortcutAction(actionId);
     if(actionId === 'canvas.run'){

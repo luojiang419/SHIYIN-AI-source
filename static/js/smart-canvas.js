@@ -299,6 +299,7 @@ const redoStack = [];
 let redoStackBytes = 0;
 let undoSuppressed = false;
 let pendingUndoSnapshot = null;
+let smartHistoryTransactionDepth = 0;
 let runningHubWorkflowCache = {};
 function activeSmartCascadeCount(){ return smartCascadeRuns.size; }
 function smartCascadeRunForLoop(loopId){ return loopId ? smartCascadeRuns.get(loopId) || null : null; }
@@ -325,15 +326,30 @@ function smartCascadePathForCtx(ctx=null){
     return ctx?.runState?.runPath || ctx?.runPath || smartCascadeRunPath;
 }
 function capturePendingUndo(){ pendingUndoSnapshot = snapshotForUndo(); }
-function appendUndoSnapshot(snapshot){
-    if(!snapshot) return;
-    undoStack.push(snapshot);
-    undoStackBytes += Number(snapshot._bytes || 0);
-    while(undoStack.length > 1 && (undoStack.length > UNDO_LIMIT || undoStackBytes > UNDO_BYTE_LIMIT)){
-        const removed = undoStack.shift();
-        undoStackBytes = Math.max(0, undoStackBytes - Number(removed?._bytes || 0));
+function smartHistoryEntryBytes(entry){
+    if(Number.isFinite(Number(entry?._bytes))) return Number(entry._bytes);
+    return JSON.stringify(entry || {}).length * 2;
+}
+function appendSmartHistoryEntry(stack, entry){
+    if(!entry) return;
+    const bytes = smartHistoryEntryBytes(entry);
+    entry._bytes = bytes;
+    stack.push(entry);
+    if(stack === undoStack){
+        undoStackBytes += bytes;
+        while(stack.length > 1 && (stack.length > UNDO_LIMIT || undoStackBytes > UNDO_BYTE_LIMIT)){
+            const removed = stack.shift();
+            undoStackBytes = Math.max(0, undoStackBytes - smartHistoryEntryBytes(removed));
+        }
+    } else {
+        redoStackBytes += bytes;
+        while(stack.length > 1 && (stack.length > UNDO_LIMIT || redoStackBytes > UNDO_BYTE_LIMIT)){
+            const removed = stack.shift();
+            redoStackBytes = Math.max(0, redoStackBytes - smartHistoryEntryBytes(removed));
+        }
     }
 }
+function appendUndoSnapshot(snapshot){ appendSmartHistoryEntry(undoStack, snapshot); }
 function commitPendingUndo(){
     if(pendingUndoSnapshot){
         appendUndoSnapshot(pendingUndoSnapshot);
@@ -349,6 +365,7 @@ function snapshotForUndo(){
     });
     const snapshot = JSON.parse(serialized);
     return {
+        kind:'snapshot',
         nodes:snapshot.nodes,
         connections:snapshot.connections,
         selectedId,
@@ -357,8 +374,81 @@ function snapshotForUndo(){
         _bytes:serialized.length * 2,
     };
 }
+function cloneSmartHistoryValue(value){
+    try { return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
+    catch(e) { return JSON.parse(JSON.stringify(value)); }
+}
+function smartSelectionSnapshot(){
+    return {selectedId, selectedIds:selectedIds.slice(), selectedImage:{...selectedImage}};
+}
+function beginSmartHistoryTransaction(operation='structure'){
+    smartHistoryTransactionDepth += 1;
+    return {
+        kind:'transaction', operation,
+        beforeNodes:new Map((nodes || []).map(node => [node.id, node])),
+        beforeConnections:new Map((canvas?.connections || []).map(connection => [connection.id, connection])),
+        selectionBefore:smartSelectionSnapshot()
+    };
+}
+function abortSmartHistoryTransaction(tx){
+    if(!tx) return;
+    smartHistoryTransactionDepth = Math.max(0, smartHistoryTransactionDepth - 1);
+}
+function commitSmartHistoryTransaction(tx, options={}){
+    if(!tx || !canvas) return null;
+    smartHistoryTransactionDepth = Math.max(0, smartHistoryTransactionDepth - 1);
+    const liveNodeIds = new Set((nodes || []).map(node => node.id));
+    const liveConnectionIds = new Set((canvas.connections || []).map(connection => connection.id));
+    const entry = {
+        kind:'transaction', operation:tx.operation || 'structure',
+        createdNodes:(nodes || []).filter(node => !tx.beforeNodes.has(node.id)).map(cloneSmartHistoryValue),
+        deletedNodes:[...tx.beforeNodes.entries()].filter(([id]) => !liveNodeIds.has(id)).map(([, node]) => cloneSmartHistoryValue(node)),
+        replacedNodes:Array.isArray(options.replacedNodes) ? cloneSmartHistoryValue(options.replacedNodes) : [],
+        createdConnections:(canvas.connections || []).filter(connection => !tx.beforeConnections.has(connection.id)).map(connection => ({...connection})),
+        deletedConnections:[...tx.beforeConnections.entries()].filter(([id]) => !liveConnectionIds.has(id)).map(([, connection]) => ({...connection})),
+        selectionBefore:tx.selectionBefore || smartSelectionSnapshot(),
+        selectionAfter:options.selectionAfter || smartSelectionSnapshot()
+    };
+    if(!entry.createdNodes.length && !entry.deletedNodes.length && !entry.replacedNodes.length
+        && !entry.createdConnections.length && !entry.deletedConnections.length) return null;
+    entry._bytes = JSON.stringify(entry).length * 2;
+    appendSmartHistoryEntry(undoStack, entry);
+    clearRedoStack();
+    return entry;
+}
+function invertSmartHistoryTransaction(entry){
+    return {
+        ...entry,
+        createdNodes:cloneSmartHistoryValue(entry.deletedNodes || []),
+        deletedNodes:cloneSmartHistoryValue(entry.createdNodes || []),
+        createdConnections:cloneSmartHistoryValue(entry.deletedConnections || []),
+        deletedConnections:cloneSmartHistoryValue(entry.createdConnections || []),
+        replacedNodes:(entry.replacedNodes || []).map(change => ({...change, before:change.after, after:change.before})),
+        selectionBefore:entry.selectionAfter,
+        selectionAfter:entry.selectionBefore
+    };
+}
+function applySmartHistoryTransaction(entry, selectionOverride=null){
+    const createdIds = new Set((entry.createdNodes || []).map(node => node.id));
+    const deletedIds = new Set((entry.deletedNodes || []).map(node => node.id));
+    if(createdIds.size) nodes = nodes.filter(node => !createdIds.has(node.id));
+    if(deletedIds.size) nodes.push(...cloneSmartHistoryValue(entry.deletedNodes || []));
+    const removeConnectionIds = new Set((entry.createdConnections || []).map(connection => connection.id));
+    if(removeConnectionIds.size) canvas.connections = (canvas.connections || []).filter(connection => !removeConnectionIds.has(connection.id));
+    if((entry.deletedConnections || []).length) canvas.connections.push(...cloneSmartHistoryValue(entry.deletedConnections));
+    (entry.replacedNodes || []).forEach(change => {
+        const node = nodes.find(item => item.id === change.id);
+        if(node) Object.assign(node, cloneSmartHistoryValue(change.after || {}));
+    });
+    const selection = selectionOverride || entry.selectionAfter || {};
+    selectedId = selection.selectedId || '';
+    selectedIds = Array.isArray(selection.selectedIds) ? selection.selectedIds.slice() : [];
+    selectedImage = {...(selection.selectedImage || {nodeId:'', index:-1})};
+    render();
+    scheduleSave();
+}
 function pushUndo(){
-    if(undoSuppressed) return;
+    if(undoSuppressed || smartHistoryTransactionDepth) return;
     if(!canvas) return;
     appendUndoSnapshot(snapshotForUndo());
     clearRedoStack();
@@ -367,15 +457,15 @@ function clearRedoStack(){
     redoStack.length = 0;
     redoStackBytes = 0;
 }
-function appendRedoSnapshot(snapshot){
-    if(!snapshot) return;
-    redoStack.push(snapshot);
-    redoStackBytes += Number(snapshot._bytes || 0);
-    while(redoStack.length > 1 && (redoStack.length > UNDO_LIMIT || redoStackBytes > UNDO_BYTE_LIMIT)){
-        const removed = redoStack.shift();
-        redoStackBytes = Math.max(0, redoStackBytes - Number(removed?._bytes || 0));
-    }
+function clearSmartHistory(){
+    undoStack.length = 0;
+    redoStack.length = 0;
+    undoStackBytes = 0;
+    redoStackBytes = 0;
+    pendingUndoSnapshot = null;
+    smartHistoryTransactionDepth = 0;
 }
+function appendRedoSnapshot(snapshot){ appendSmartHistoryEntry(redoStack, snapshot); }
 function restoreCanvasSnapshot(snap){
     undoSuppressed = true;
     nodes = snap.nodes;
@@ -391,18 +481,28 @@ function restoreCanvasSnapshot(snap){
 }
 function performUndo(){
     if(!undoStack.length){ toast(tr('smart.toastNoUndo')); return; }
-    appendRedoSnapshot(snapshotForUndo());
     const snap = undoStack.pop();
-    undoStackBytes = Math.max(0, undoStackBytes - Number(snap?._bytes || 0));
-    restoreCanvasSnapshot(snap);
+    undoStackBytes = Math.max(0, undoStackBytes - smartHistoryEntryBytes(snap));
+    if(snap.kind === 'transaction'){
+        appendRedoSnapshot(invertSmartHistoryTransaction(snap));
+        applySmartHistoryTransaction(snap, snap.selectionBefore);
+    } else {
+        appendRedoSnapshot(snapshotForUndo());
+        restoreCanvasSnapshot(snap);
+    }
     toast(tr('smart.toastUndone'));
 }
 function performRedo(){
     if(!redoStack.length){ toast('没有可恢复的操作'); return; }
-    appendUndoSnapshot(snapshotForUndo());
     const snap = redoStack.pop();
-    redoStackBytes = Math.max(0, redoStackBytes - Number(snap?._bytes || 0));
-    restoreCanvasSnapshot(snap);
+    redoStackBytes = Math.max(0, redoStackBytes - smartHistoryEntryBytes(snap));
+    if(snap.kind === 'transaction'){
+        appendUndoSnapshot(invertSmartHistoryTransaction(snap));
+        applySmartHistoryTransaction(snap, snap.selectionBefore);
+    } else {
+        appendUndoSnapshot(snapshotForUndo());
+        restoreCanvasSnapshot(snap);
+    }
     toast('已恢复');
 }
 let comfyWorkflowCache = {};
@@ -1091,35 +1191,42 @@ function insertSmartWorkflowIntoCanvas(imported){
     const srcNodes = (imported.nodes || []).filter(Boolean);
     const srcConnections = (imported.connections || []).filter(Boolean);
     if(!canvas || !srcNodes.length) throw new Error('工作流中没有可导入的节点');
-    pushUndo();
-    const minX = Math.min(...srcNodes.map(n => Number(n.x || 0)));
-    const minY = Math.min(...srcNodes.map(n => Number(n.y || 0)));
-    const target = viewportCenter();
-    const dx = target.x - minX;
-    const dy = target.y - minY;
-    const idMap = new Map();
-    const newNodes = srcNodes.map(source => {
-        const copy = serializableSmartNode(source);
-        const oldId = copy.id || uid(copy.type || 'smart');
-        copy.id = uid(copy.type || 'smart');
-        copy.x = Number(copy.x || 0) + dx;
-        copy.y = Number(copy.y || 0) + dy;
-        copy.created_at = copy.created_at || Date.now();
-        idMap.set(oldId, copy.id);
-        return normalizeLegacySmartNode(copy);
-    }).filter(Boolean);
-    const newConnections = srcConnections
-        .map(conn => ({...JSON.parse(JSON.stringify(conn)), from:idMap.get(conn.from), to:idMap.get(conn.to)}))
-        .filter(conn => conn.from && conn.to);
-    nodes.push(...newNodes);
-    canvas.connections = [...(canvas.connections || []), ...newConnections];
-    selectedIds = newNodes.length > 1 ? newNodes.map(node => node.id) : [];
-    selectedId = newNodes.length === 1 ? newNodes[0].id : '';
-    selectedImage = {nodeId:'', index:-1};
-    activeComposerSubject = null;
-    render();
-    scheduleSave();
-    toast(`已导入 ${newNodes.length} 个节点`);
+    const historyTx = beginSmartHistoryTransaction('workflow-import');
+    let completed = false;
+    try {
+        const minX = Math.min(...srcNodes.map(n => Number(n.x || 0)));
+        const minY = Math.min(...srcNodes.map(n => Number(n.y || 0)));
+        const target = viewportCenter();
+        const dx = target.x - minX;
+        const dy = target.y - minY;
+        const idMap = new Map();
+        const newNodes = srcNodes.map(source => {
+            const copy = serializableSmartNode(source);
+            const oldId = copy.id || uid(copy.type || 'smart');
+            copy.id = uid(copy.type || 'smart');
+            copy.x = Number(copy.x || 0) + dx;
+            copy.y = Number(copy.y || 0) + dy;
+            copy.created_at = copy.created_at || Date.now();
+            idMap.set(oldId, copy.id);
+            return normalizeLegacySmartNode(copy);
+        }).filter(Boolean);
+        const newConnections = srcConnections
+            .map(conn => ({...JSON.parse(JSON.stringify(conn)), from:idMap.get(conn.from), to:idMap.get(conn.to)}))
+            .filter(conn => conn.from && conn.to);
+        nodes.push(...newNodes);
+        canvas.connections = [...(canvas.connections || []), ...newConnections];
+        selectedIds = newNodes.length > 1 ? newNodes.map(node => node.id) : [];
+        selectedId = newNodes.length === 1 ? newNodes[0].id : '';
+        selectedImage = {nodeId:'', index:-1};
+        activeComposerSubject = null;
+        render();
+        scheduleSave();
+        toast(`已导入 ${newNodes.length} 个节点`);
+        completed = true;
+    } finally {
+        if(completed) commitSmartHistoryTransaction(historyTx);
+        else abortSmartHistoryTransaction(historyTx);
+    }
 }
 async function importSmartWorkflowFile(file){
     if(!canvas || !file) return;
@@ -7199,6 +7306,7 @@ async function loadCanvas(){
         const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`);
         if(!res.ok) return;
         const data = await res.json();
+        clearSmartHistory();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
         canvasUsesConnections = Object.prototype.hasOwnProperty.call(canvas || {}, 'connections');
@@ -7466,44 +7574,51 @@ function copySelectedNodes(){
 function pasteNodes(){
     if(!canvas || !nodeClipboard?.nodes?.length || isEditableTarget(document.activeElement)) return;
     lastNodePasteAt = Date.now();
-    pushUndo();
-    const sourceNodes = nodeClipboard.nodes;
-    const xs = sourceNodes.map(n => Number(n.x) || 0);
-    const ys = sourceNodes.map(n => Number(n.y) || 0);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const p = lastMouseWorld || viewportCenter();
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    const idMap = new Map();
-    const copies = sourceNodes.map(n => {
-        const copy = cloneSmartNode(n, dx, dy);
-        idMap.set(n.id, copy.id);
-        return copy;
-    });
-    copies.forEach(copy => {
-        if(Array.isArray(copy.items)){
-            copy.items = copy.items.map(id => idMap.get(id)).filter(Boolean);
-        }
-        if(Array.isArray(copy.inputNodeIds)){
-            copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
-        }
-        if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || '';
-    });
-    const newConnections = (nodeClipboard.connections || []).map(conn => ({
-        ...conn,
-        ...(conn.id ? {id:uid('c')} : {}),
-        from:idMap.get(conn.from),
-        to:idMap.get(conn.to)
-    })).filter(conn => conn.from && conn.to && conn.from !== conn.to);
-    canvas.connections = [...(canvas.connections || []), ...newConnections];
-    nodes.push(...copies);
-    selectedId = copies.length === 1 ? copies[0].id : '';
-    selectedIds = copies.length > 1 ? copies.map(n => n.id) : [];
-    selectedImage = {nodeId:'', index:-1};
-    queueSmartRenderMutation({createdIds:copies.map(item => item.id)});
-    render();
-    scheduleSave();
+    const historyTx = beginSmartHistoryTransaction('paste');
+    let completed = false;
+    try {
+        const sourceNodes = nodeClipboard.nodes;
+        const xs = sourceNodes.map(n => Number(n.x) || 0);
+        const ys = sourceNodes.map(n => Number(n.y) || 0);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+        const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        const p = lastMouseWorld || viewportCenter();
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const idMap = new Map();
+        const copies = sourceNodes.map(n => {
+            const copy = cloneSmartNode(n, dx, dy);
+            idMap.set(n.id, copy.id);
+            return copy;
+        });
+        copies.forEach(copy => {
+            if(Array.isArray(copy.items)){
+                copy.items = copy.items.map(id => idMap.get(id)).filter(Boolean);
+            }
+            if(Array.isArray(copy.inputNodeIds)){
+                copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
+            }
+            if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || '';
+        });
+        const newConnections = (nodeClipboard.connections || []).map(conn => ({
+            ...conn,
+            ...(conn.id ? {id:uid('c')} : {}),
+            from:idMap.get(conn.from),
+            to:idMap.get(conn.to)
+        })).filter(conn => conn.from && conn.to && conn.from !== conn.to);
+        canvas.connections = [...(canvas.connections || []), ...newConnections];
+        nodes.push(...copies);
+        selectedId = copies.length === 1 ? copies[0].id : '';
+        selectedIds = copies.length > 1 ? copies.map(n => n.id) : [];
+        selectedImage = {nodeId:'', index:-1};
+        queueSmartRenderMutation({createdIds:copies.map(item => item.id)});
+        render();
+        scheduleSave();
+        completed = true;
+    } finally {
+        if(completed) commitSmartHistoryTransaction(historyTx);
+        else abortSmartHistoryTransaction(historyTx);
+    }
 }
 // 跨页"素材库 → 画布"剪贴板：素材库管理页把所选素材写进这个 localStorage key，
 // 画布里按 Ctrl+V 读取并批量生成图片节点（网格平铺），用完即清空（一次性）。
@@ -7526,24 +7641,31 @@ function pasteAssetsFromInbox(){
     const rows = Math.ceil(items.length / cols);
     const startX = center.x - (cols - 1) * cell / 2;
     const startY = center.y - (rows - 1) * cell / 2;
-    pushUndo();
-    const created = [];
-    items.forEach((it, i) => {
-        const r = Math.floor(i / cols), c = i % cols;
-        const p = {x: startX + c * cell, y: startY + r * cell};
-        const node = createImageNodeAt(p, [assetNodeImageFromItem(it)], {skipUndo:true, select:false, deferRender:true, deferSave:true});
-        if(node) created.push(node.id);
-    });
-    selectedId = created.length === 1 ? created[0] : '';
-    selectedIds = created.length > 1 ? created : [];
-    selectedImage = {nodeId:'', index:-1};
-    lastNodePasteAt = Date.now();
-    try { localStorage.removeItem(SMART_CANVAS_ASSET_INBOX_KEY); } catch(e){}
-    queueSmartRenderMutation({createdIds:created});
-    render();
-    scheduleSave();
-    toast(`已粘贴 ${created.length} 个素材到画布`);
-    return true;
+    const historyTx = beginSmartHistoryTransaction('asset-paste');
+    let completed = false;
+    try {
+        const created = [];
+        items.forEach((it, i) => {
+            const r = Math.floor(i / cols), c = i % cols;
+            const p = {x: startX + c * cell, y: startY + r * cell};
+            const node = createImageNodeAt(p, [assetNodeImageFromItem(it)], {skipUndo:true, select:false, deferRender:true, deferSave:true});
+            if(node) created.push(node.id);
+        });
+        selectedId = created.length === 1 ? created[0] : '';
+        selectedIds = created.length > 1 ? created : [];
+        selectedImage = {nodeId:'', index:-1};
+        lastNodePasteAt = Date.now();
+        try { localStorage.removeItem(SMART_CANVAS_ASSET_INBOX_KEY); } catch(e){}
+        queueSmartRenderMutation({createdIds:created});
+        render();
+        scheduleSave();
+        toast(`已粘贴 ${created.length} 个素材到画布`);
+        completed = true;
+        return true;
+    } finally {
+        if(completed) commitSmartHistoryTransaction(historyTx);
+        else abortSmartHistoryTransaction(historyTx);
+    }
 }
 function duplicateForAltDrag(node, preserveConnections=false){
     const ids = (isNodeSelected(node.id) ? selectedNodeIds() : [node.id]);
@@ -18897,24 +19019,29 @@ function createNodeFromMenu(type, point=null){
     const p = point || createMenuPoint || viewportCenter();
     const groupId = createMenuGroupId;
     closeCreateMenu();
-    if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
-    if(type === 'film-storyboard' || type === 'film-video' || type === 'film-line-art') return createFilmNode(type,p);
-    if(type === 'panorama') return createPanoramaNode(p);
-    if(type === 'pose-reference') return createPoseReferenceNode(p);
-    if(type === 'dwpose') return createDWPoseNode(p);
-    if(type === 'pose-replicate') return createPoseReplicateNode(p);
-    if(type === 'relight') return createRelightNode(p);
-    if(type === 'multi-view') return createMultiViewNode(p);
-    if(type === 'batch') return createSmartBatchGeneratorNode(null, p);
-    let created = null;
-    if(type === 'h3-video') created = createH3VideoNode(p);
-    else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
-    else if(type === 'loop') return null;
-    else created = createImageNodeAt(p);
-    createMenuGroupId = groupId;
-    addCreatedNodeToMenuGroup(created);
-    createMenuGroupId = '';
-    return created;
+    const historyTx = beginSmartHistoryTransaction('menu-create');
+    try {
+        if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
+        if(type === 'film-storyboard' || type === 'film-video' || type === 'film-line-art') return createFilmNode(type,p);
+        if(type === 'panorama') return createPanoramaNode(p);
+        if(type === 'pose-reference') return createPoseReferenceNode(p);
+        if(type === 'dwpose') return createDWPoseNode(p);
+        if(type === 'pose-replicate') return createPoseReplicateNode(p);
+        if(type === 'relight') return createRelightNode(p);
+        if(type === 'multi-view') return createMultiViewNode(p);
+        if(type === 'batch') return createSmartBatchGeneratorNode(null, p);
+        let created = null;
+        if(type === 'h3-video') created = createH3VideoNode(p);
+        else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
+        else if(type === 'loop') return null;
+        else created = createImageNodeAt(p);
+        createMenuGroupId = groupId;
+        addCreatedNodeToMenuGroup(created);
+        createMenuGroupId = '';
+        return created;
+    } finally {
+        commitSmartHistoryTransaction(historyTx);
+    }
 }
 shell.addEventListener('mousedown', e => {
     if(!zoomPreviewState) return;

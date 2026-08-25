@@ -25,6 +25,27 @@
         'ecom-compose':{w:440,h:0},
         'ecom-video':{w:400,h:0},
     };
+    const INPUT_PORTS = {
+        'ecom-model':[
+            {role:'model-reference',label:'输入',title:'连接人物图片、生成图片或素材组'},
+        ],
+        'ecom-product':[
+            {role:'product-reference',label:'输入',title:'连接商品图片、生成图片或素材组'},
+        ],
+        'ecom-scene':[
+            {role:'scene-reference',label:'输入',title:'连接场景图片、生成图片或素材组'},
+        ],
+        'ecom-compose':[
+            {role:'ecom-model',label:'模特',title:'连接电商模特、人物图或模特形象图'},
+            {role:'ecom-product',label:'商品',title:'连接电商产品或商品图'},
+            {role:'ecom-scene',label:'场景',title:'连接电商场景或背景图'},
+            {role:'ecom-pose',label:'动作',title:'可选：连接姿势参考图'},
+        ],
+        'ecom-video':[
+            {role:'video-input',label:'输入',title:'连接 A+ 成片、图片或提示词'},
+        ],
+    };
+    const IMAGE_NAME_PATTERN = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)$/i;
 
     function esc(value){
         return String(value == null ? '' : value)
@@ -97,14 +118,7 @@
     function isMediaOutput(type){ return ['ecom-model','ecom-product','ecom-scene','ecom-compose','ecom-video'].includes(type); }
     function isGenerator(type){ return ['ecom-compose','ecom-video'].includes(type); }
     function inputPorts(type){
-        if(type === 'ecom-compose') return [
-            {role:'ecom-model',label:'模特',title:'连接电商模特、人物图或模特形象图'},
-            {role:'ecom-product',label:'商品',title:'连接电商产品或商品图'},
-            {role:'ecom-scene',label:'场景',title:'连接电商场景或背景图'},
-            {role:'ecom-pose',label:'动作',title:'可选：连接姿势参考图'},
-        ];
-        if(type === 'ecom-video') return [{role:'',label:'输入',title:'连接 A+ 成片、图片或提示词'}];
-        return [];
+        return (INPUT_PORTS[type] || []).map(port => ({...port}));
     }
     function canOutput(type){ return isType(type); }
 
@@ -168,13 +182,18 @@
     }
 
     async function uploadFiles(files, limit){
-        const accepted = [...(files || [])].filter(file => String(file.type || '').startsWith('image/')).slice(0, limit);
+        const accepted = [...(files || [])].filter(file => {
+            const type = String(file?.type || '').toLowerCase();
+            const name = String(file?.name || '');
+            return type.startsWith('image/') || IMAGE_NAME_PATTERN.test(name);
+        }).slice(0, limit);
         if(!accepted.length) return [];
         const form = new FormData();
         accepted.forEach(file => form.append('files', file));
         const response = await fetch('/api/ai/upload',{method:'POST',body:form});
-        if(!response.ok) throw new Error('图片上传失败');
-        const data = await response.json();
+        let data = {};
+        try { data = await response.json(); } catch(_) {}
+        if(!response.ok) throw new Error(String(data?.detail || data?.message || `图片上传失败（${response.status}）`));
         return (data.files || []).map(normalizeItem).filter(item => item.url);
     }
     function notify(options, node, render=false){ options.onChange?.(node,{render}); }
@@ -215,18 +234,22 @@
             if(el) el.innerHTML = `<span>模特 ${Number(summary.model || 0)}</span><span>商品 ${Number(summary.product || 0)}</span><span>场景 ${Number(summary.scene || 0)}</span><span>动作 ${Number(summary.pose || 0)}</span>`;
         }
     }
-    function mediaRefs(node){
+    function mediaRefs(node, options={}){
         normalize(node);
+        const extraItems = Array.isArray(options.extraItems) ? options.extraItems : [];
+        const items = [...node.ecomItems, ...extraItems]
+            .map(normalizeItem)
+            .filter(item => item.url)
+            .filter((item,index,list) => list.findIndex(candidate => candidate.url === item.url) === index);
         if(node.type === 'ecom-model'){
-            const items = node.ecomItems.slice(0,node.ecomModelRole === 'subject' ? 2 : 1);
-            return items.map((item,index) => {
+            return items.slice(0,node.ecomModelRole === 'subject' ? 2 : 1).map((item,index) => {
                 const role = index === 1 ? 'model_identity' : node.ecomModelRole;
                 return {...item,role,reference_type:role,reference_id:`${node.id}_${role}_${index + 1}`,instruction:node.ecomDescription || ''};
             });
         }
         if(node.type === 'ecom-product'){
             const primaryId = `${node.id}_product_1`;
-            return node.ecomItems.map((item,index) => ({
+            return items.map((item,index) => ({
                 ...item,
                 role:index === 0 ? node.ecomProductRole : 'detail',
                 reference_type:index === 0 ? node.ecomProductRole : 'detail',
@@ -235,7 +258,7 @@
                 instruction:node.ecomDescription || '',
             }));
         }
-        if(node.type === 'ecom-scene') return node.ecomItems.slice(0,1).map((item,index) => ({...item,role:'scene',reference_type:'scene',reference_id:`${node.id}_scene_${index + 1}`,instruction:node.scenePrompt || ''}));
+        if(node.type === 'ecom-scene') return items.slice(0,1).map((item,index) => ({...item,role:'scene',reference_type:'scene',reference_id:`${node.id}_scene_${index + 1}`,instruction:node.scenePrompt || ''}));
         if(node.type === 'ecom-compose') return (node.generatedOutputs || []).map((item,index) => ({url:outputUrl(item),name:`ecommerce-compose-${index + 1}.png`,kind:'image'})).filter(item => item.url);
         return [];
     }

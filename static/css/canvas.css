@@ -1434,6 +1434,14 @@ body.theme-dark .model-modal { background:rgba(0,0,0,.72); }
 .ecom-compose-node .port.pose-role-port[data-input-role="ecom-scene"] { top:58%; }
 .ecom-compose-node .port.pose-role-port[data-input-role="ecom-pose"] { top:76%; }
 .ecom-compose-node .port.pose-role-port::after { min-width:30px; max-width:42px; font-size:8px; }
+.group-node .group-role-port { left:-7px; top:calc(58px + (var(--canvas-port-index) + .5) * (100% - 76px) / var(--canvas-port-count)); }
+.group-node .group-role-port::before { content:attr(data-role-label); position:absolute; left:35px; top:50%; transform:translateY(-50%); max-width:104px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:3px 6px; border:1px solid color-mix(in srgb,var(--line) 80%,transparent); border-radius:6px; background:color-mix(in srgb,var(--panel) 92%,transparent); color:var(--muted); font-size:8px; font-weight:850; line-height:1; pointer-events:none; }
+.group-workflow-meta { display:flex; gap:6px; color:var(--faint); font-size:9px; }
+.group-workflow-meta span { padding:4px 6px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
+.group-workflow-run { width:100%; min-height:30px; margin-top:7px; border:1px solid var(--strong); border-radius:8px; background:var(--strong); color:var(--strong-text); display:flex; align-items:center; justify-content:center; gap:6px; font-size:10px; font-weight:850; }
+.group-workflow-run:hover:not(:disabled) { filter:brightness(1.08); transform:translateY(-1px); }
+.group-workflow-run:disabled { opacity:.58; cursor:wait; }
+.group-workflow-run svg { width:13px; height:13px; }
 .theme-dark .ecom-model-node .node-head,.theme-dark .ecom-product-node .node-head,.theme-dark .ecom-scene-node .node-head,.theme-dark .ecom-compose-node .node-head,.theme-dark .ecom-video-node .node-head { background:linear-gradient(135deg,var(--soft),var(--card-solid)); }
 .theme-dark .ecom-node-empty { background:var(--soft); }
 .theme-dark .ecom-node-status.failed { background:rgba(127,29,29,.2); color:#fca5a5; }

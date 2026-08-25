@@ -7,6 +7,8 @@ const nameInput = document.getElementById('nameInput');
 const idInput = document.getElementById('idInput');
 const baseInput = document.getElementById('baseInput');
 const protocolInput = document.getElementById('protocolInput');
+const responsesEndpointInput = document.getElementById('responsesEndpointInput');
+const responsesEndpointWrap = document.getElementById('responsesEndpointWrap');
 const imageRequestModeInput = document.getElementById('imageRequestModeInput');
 const imageEditRouteInput = document.getElementById('imageEditRouteInput');
 const keyInput = document.getElementById('keyInput');
@@ -741,6 +743,8 @@ function syncEditor(){
     if(item.id === 'local-vision') baseInput.value = item.base_url;
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
+    item.request_protocol = selectedProtocol === 'responses' ? 'responses' : 'chat_completions';
+    item.responses_endpoint = (responsesEndpointInput?.value || item.responses_endpoint || '/v1/responses').trim() || '/v1/responses';
     item.image_request_mode = normalizeImageRequestMode(
         item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
             ? 'openai'
@@ -781,7 +785,9 @@ function updateProtocolFromInput(){
     const item = provider();
     if(!item || !protocolInput || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'minimax-h3' || item.id === 'kling-cli') return;
     const value = String(protocolInput.value || 'openai').toLowerCase();
-    item.protocol = ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(value) ? value : 'openai';
+    item.protocol = ['openai', 'responses', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(value) ? value : 'openai';
+    item.request_protocol = item.protocol === 'responses' ? 'responses' : 'chat_completions';
+    if(item.protocol === 'responses') item.responses_endpoint = item.responses_endpoint || '/v1/responses';
     if(['jimeng', 'codex'].includes(item.protocol)) item.base_url = '';
     document.body.classList.toggle('show-jimeng', item.protocol === 'jimeng');
     document.body.classList.toggle('show-codex', item.protocol === 'codex');
@@ -792,6 +798,13 @@ function updateProtocolFromInput(){
     renderEditor();
     if(keyInput) keyInput.value = savedKey;
     updateApimartDomesticHint(item);
+}
+function syncResponsesEndpointVisibility(){
+    const isResponses = String(protocolInput?.value || provider()?.protocol || '').toLowerCase() === 'responses';
+    if(responsesEndpointWrap){
+        responsesEndpointWrap.hidden = !isResponses;
+        responsesEndpointWrap.style.display = isResponses ? 'block' : 'none';
+    }
 }
 function isVolcengineProvider(item){
     return String(item?.protocol || '').toLowerCase() === 'volcengine';
@@ -2386,10 +2399,14 @@ function renderEditor(){
     baseInput.placeholder = EXAMPLE_BASE_URL;
     baseInput.value = item.base_url || '';
     if(protocolInput){
-        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : (item.protocol || 'openai');
+        const storedProtocol = String(item.protocol || 'openai').toLowerCase();
+        const editableProtocol = storedProtocol === 'responses' || (storedProtocol === 'openai' && item.request_protocol === 'responses') ? 'responses' : storedProtocol;
+        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : editableProtocol;
         protocolInput.disabled = FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
         protocolInput.title = protocolInput.disabled ? '内置平台使用固定协议' : '';
     }
+    if(responsesEndpointInput) responsesEndpointInput.value = item.responses_endpoint || '/v1/responses';
+    syncResponsesEndpointVisibility();
     if(imageRequestModeInput){
         imageRequestModeInput.value = normalizeImageRequestMode(item.image_request_mode);
         imageRequestModeInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
@@ -2784,10 +2801,12 @@ function applyDetectedImageRequestMode(mode){
 function applyDetectedProtocol(protocol){
     const item = provider();
     const detected = String(protocol || '').toLowerCase();
-    if(!item || !protocolInput || !['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(detected)) return false;
+    if(!item || !protocolInput || !['openai', 'responses', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex'].includes(detected)) return false;
     if(String(protocolInput.value || '').toLowerCase() === detected && String(item.protocol || '').toLowerCase() === detected) return false;
     protocolInput.value = detected;
     item.protocol = detected;
+    item.request_protocol = detected === 'responses' ? 'responses' : 'chat_completions';
+    if(detected === 'responses') item.responses_endpoint = item.responses_endpoint || '/v1/responses';
     item.base_url = ['jimeng', 'codex'].includes(detected) ? '' : (baseInput?.value.trim() || item.base_url || '');
     if(detected === 'volcengine'){
         item.video_models = unique(item.video_models || []);
@@ -2888,7 +2907,7 @@ async function probeAsync(){
         const detectedProtocol = String(data.protocol || '').toLowerCase();
         const isAsync = data.ok === true && detectedProtocol === 'apimart';
         const isOpenAiCompat = data.ok === true && detectedProtocol === 'openai';
-        const keepManualProtocol = ['gemini', 'volcengine', 'jimeng', 'codex'].includes(currentProtocol);
+        const keepManualProtocol = ['responses', 'gemini', 'volcengine', 'jimeng', 'codex'].includes(currentProtocol);
         if(protocolInput && !keepManualProtocol){
             applyDetectedProtocol(detectedProtocol || (isAsync ? 'apimart' : 'openai'));
         }
@@ -2902,20 +2921,25 @@ async function probeAsync(){
             ? '方舟/Ark 任务协议'
             : isAsync
                 ? 'APIMart 异步'
+                : detectedProtocol === 'responses'
+                    ? 'Responses（原生）'
                 : detectedProtocol === 'openai'
                     ? 'OpenAI 兼容'
                     : keepManualProtocol
                     ? (currentProtocol === 'gemini' ? 'Gemini' : currentProtocol.toUpperCase())
                     : 'OpenAI 兼容';
+        const protocolDetail = (detectedProtocol || currentProtocol) === 'responses'
+            ? '视觉输入：<strong style="color:var(--text)">Responses input_image</strong>'
+            : `图片接口：<strong style="color:var(--text)">${imageRequestModeLabel(imageRequestModeInput?.value || item.image_request_mode)}</strong>`;
         showVerifyResult(`
             ${hideTasksEndpointTip ? '' : `<div style="font-size:11px;font-weight:800;color:${color}">${icon} ${escapeHtml(probeMessage)}</div>`}
-            <div style="font-size:11px;color:var(--muted);font-weight:700;margin-top:2px">${keepManualProtocol ? '协议已验证为' : '协议已自动设置为'}：<strong style="color:var(--text)">${proto}</strong> · 图片接口：<strong style="color:var(--text)">${imageRequestModeLabel(imageRequestModeInput?.value || item.image_request_mode)}</strong></div>
+            <div style="font-size:11px;color:var(--muted);font-weight:700;margin-top:2px">${keepManualProtocol ? '协议已验证为' : '协议已自动设置为'}：<strong style="color:var(--text)">${proto}</strong> · ${protocolDetail}</div>
             <details style="margin-top:6px">
                 <summary style="font-size:10.5px;color:var(--muted);cursor:pointer;font-weight:700;user-select:none">▸ 查看原始响应 (HTTP ${data.status_code})</summary>
                 <pre style="margin-top:6px;padding:10px 12px;border-radius:10px;background:var(--soft);border:1px solid var(--line-2);font-size:10.5px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-all;color:var(--text);max-height:200px;overflow:auto">${escapeHtml(rawJson)}</pre>
             </details>`);
     } catch(e){
-        const keepManualProtocol = ['gemini', 'volcengine', 'jimeng', 'codex'].includes(String(protocolInput?.value || item.protocol || '').toLowerCase());
+        const keepManualProtocol = ['responses', 'gemini', 'volcengine', 'jimeng', 'codex'].includes(String(protocolInput?.value || item.protocol || '').toLowerCase());
         if(protocolInput && !keepManualProtocol){ protocolInput.value = 'openai'; protocolInput.dispatchEvent(new Event('change')); }
         const suffix = keepManualProtocol ? '，已保留当前手动选择的协议' : '，协议已设为 OpenAI 兼容';
         showVerifyResult(`<div style="font-size:11px;font-weight:800;color:#b45309">⚠ ${escapeHtml(e.message || String(e))}${suffix}</div>`);
@@ -2968,7 +2992,8 @@ async function testConnection(){
                 video: new Set(data.video_models || []),
             };
             const openBtn = document.getElementById('openPickerBtn');
-            if(openBtn){ openBtn.disabled = false; openBtn.style.opacity = '1'; }
+            const hasFetchedModels = lastFetchedAll.length > 0;
+            if(openBtn){ openBtn.disabled = !hasFetchedModels; openBtn.style.opacity = hasFetchedModels ? '1' : '.55'; }
             const isRunningHubNow = runninghubContext || detectedProtocol === 'runninghub';
             const isVolcengineNow = !isRunningHubNow && (detectedProtocol === 'volcengine' || isVolcengineProvider(item));
             const volcengineNote = isVolcengineNow
@@ -2976,11 +3001,15 @@ async function testConnection(){
                 : '';
             const jimengNote = isJimeng ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">即梦 CLI 已可用，可在画布里选择“即梦 CLI”生成。</div>` : '';
             const codexNote = isCodex ? `<div style="margin-top:6px;color:#15803d;font-size:11px;font-weight:700">OpenAI Codex CLI 已可用，可在画布里选择“OpenAI CLI”聊天或生成图片。</div>` : '';
+            const responsesNote = detectedProtocol === 'responses'
+                ? `<div style="margin-top:6px;color:${data.manual_model_required ? '#92400e' : '#15803d'};font-size:11px;font-weight:700">${escapeHtml(data.message || (data.manual_model_required ? '该上游未提供 /v1/models，请在聊天模型中手动填写模型名称。' : 'Responses（原生）可用。'))}</div>`
+                : '';
             const imageModeNote = ` · 图片接口：${imageRequestModeLabel(imageRequestModeInput?.value || item.image_request_mode)}`;
             const runninghubNote = isRunningHubNow
                 ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
                 : imageModeNote;
-            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · 找到 ${data.model_count} 个模型${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}`);
+            const modelSummary = data.manual_model_required ? '模型列表不可用，可手动填写模型' : `找到 ${data.model_count || 0} 个模型`;
+            showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ 地址验证通过 · ${modelSummary}${runninghubNote}</span>${volcengineNote}${jimengNote}${codexNote}${responsesNote}`);
         } else {
             showVerifyResult(`
                 <div style="font-size:11px;font-weight:800;color:#b45309">⚠ 地址验证未通过 (HTTP ${data.status})</div>
@@ -3036,12 +3065,17 @@ async function fetchModels(){
         if(data.image_request_mode) applyDetectedImageRequestMode(data.image_request_mode);
         // 启用「选择模型」按钮，并 statusbar 显示已拉取数量
         const openBtn = document.getElementById('openPickerBtn');
-        if(openBtn){ openBtn.disabled = false; openBtn.style.opacity = '1'; }
+        const hasFetchedModels = lastFetchedAll.length > 0;
+        if(openBtn){ openBtn.disabled = !hasFetchedModels; openBtn.style.opacity = hasFetchedModels ? '1' : '.55'; }
         const extra = (runninghubContext || detectedProtocol === 'runninghub' || item.id === 'runninghub')
             ? ` · RunningHub OpenAPI${runninghubModelSourceNote(data)}`
             : (detectedProtocol === 'volcengine' || isVolcengineProvider(item)) ? ' · 已识别方舟协议，火山聊天建议改填 ep-... 接入点' : '';
         const imageModeExtra = normalizeImageRequestMode(imageRequestModeInput?.value || item.image_request_mode) === 'openai-json' ? ' · 图片接口已设为 OpenAI JSON' : '';
-        setStatus(`已拉取 ${data.total} 个模型 · 点「选择模型」勾选要导入的${extra}${imageModeExtra}`);
+        if(data.manual_model_required && !hasFetchedModels){
+            setStatus(data.message || '该 Responses API 未提供模型列表，请在聊天模型中手动添加模型名称');
+            return;
+        }
+        setStatus(`已拉取 ${data.total || 0} 个模型 · 点「选择模型」勾选要导入的${extra}${imageModeExtra}`);
         openModelPicker();
     } catch(e){
         alert('拉取失败：' + (e.message || e));
@@ -3189,6 +3223,7 @@ function modelProtocolSelectHtml(kind, index, model, item){
     return `<select class="model-protocol-select" title="该模型使用的协议，默认跟随平台全局协议" onchange="updateModelProtocol('${kind}', ${index}, this.value)">
         <option value="" ${current === '' ? 'selected' : ''}>默认</option>
         ${opt('openai', 'OpenAI')}
+        ${opt('responses', 'Responses')}
         ${opt('gemini', 'Gemini')}
     </select>`;
 }
@@ -3300,7 +3335,7 @@ function addProvider(){
     let id = 'custom-api';
     let index = 2;
     while(providers.some(item => item.id === id)) id = `custom-api-${index++}`;
-    providers.push({id, name:'API', base_url:'', protocol:'openai', image_request_mode:'openai', image_edit_route:'general', image_generation_endpoint:'', image_edit_endpoint:'', enabled:true, primary:false, image_models:[], chat_models:[], video_models:[], has_key:false, key_preview:''});
+    providers.push({id, name:'API', base_url:'', protocol:'openai', request_protocol:'chat_completions', responses_endpoint:'/v1/responses', image_request_mode:'openai', image_edit_route:'general', image_generation_endpoint:'', image_edit_endpoint:'', enabled:true, primary:false, image_models:[], chat_models:[], video_models:[], has_key:false, key_preview:''});
     selectedId = id;
     renderEditor();
     scheduleProviderAutoSave(0);
@@ -3402,7 +3437,7 @@ function updateModelProtocol(kind, index, value){
     if(!name) return;
     if(!item.model_protocols || typeof item.model_protocols !== 'object') item.model_protocols = {};
     const proto = String(value || '').trim().toLowerCase();
-    if(proto === 'openai' || proto === 'gemini'){
+    if(proto === 'openai' || proto === 'responses' || proto === 'gemini'){
         item.model_protocols[name] = proto;
     } else {
         delete item.model_protocols[name];
@@ -3463,7 +3498,9 @@ async function persistProviders(options={}){
             ? 'minimax-h3'
             : item.id === 'kling-cli'
             ? 'kling-cli'
-            : ['openai', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'minimax-h3', 'kling-cli'].includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
+            : ['openai', 'responses', 'apimart', 'gemini', 'volcengine', 'runninghub', 'jimeng', 'codex', 'minimax-h3', 'kling-cli'].includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
+        item.request_protocol = item.protocol === 'responses' ? 'responses' : 'chat_completions';
+        item.responses_endpoint = item.responses_endpoint || '/v1/responses';
         item.image_request_mode = normalizeImageRequestMode(
             item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
                 ? 'openai'
@@ -3537,6 +3574,8 @@ async function persistProviders(options={}){
                 name:item.name,
                 base_url:item.base_url,
                 protocol:(item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (item.protocol || 'openai'),
+                request_protocol:item.request_protocol || ((item.protocol || 'openai') === 'responses' ? 'responses' : 'chat_completions'),
+                responses_endpoint:item.responses_endpoint || '/v1/responses',
                 image_request_mode:item.image_request_mode || 'openai',
                 image_edit_route:item.image_edit_route || 'general',
                 image_generation_endpoint:item.image_generation_endpoint || '',

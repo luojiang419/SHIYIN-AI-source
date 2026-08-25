@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.308"
+APP_VERSION = "1.0.309"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -626,8 +626,10 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3", "kling-cli"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "responses", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3", "kling-cli"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json"}
+SUPPORTED_REQUEST_PROTOCOLS = {"chat_completions", "responses"}
+DEFAULT_RESPONSES_ENDPOINT = "/v1/responses"
 RUNNINGHUB_DEFAULT_BASE_URL = "https://www.runninghub.cn"
 RUNNINGHUB_OPENAPI_BASE_URL = "https://www.runninghub.cn/openapi/v2"
 RUNNINGHUB_MODEL_REGISTRY_URL = "https://raw.githubusercontent.com/HM-RunningHub/ComfyUI_RH_OpenAPI/main/models_registry.json"
@@ -920,7 +922,7 @@ def friendly_validation_error(errors):
         err_type = str(err.get("type") or "")
         msg = str(err.get("msg") or "")
         if "max_length" in err_type or "at most" in msg:
-            parts.append(f"{label}过长：当前内容超过后端上限 {limit} 个字符。请拆分为多个提示词节点，或先用 LLM 节点压缩后再生成。")
+            parts.append(f"{label}过长：当前内容超过后端上限 {limit} 个字符。请拆分为多个提示词节点，或先用 AI助手节点压缩后再生成。")
         elif "min_length" in err_type:
             parts.append(f"{label}不能为空。")
         else:
@@ -1673,6 +1675,17 @@ def normalize_image_request_mode(value):
     mode = str(value or "").strip().lower()
     return mode if mode in SUPPORTED_IMAGE_REQUEST_MODES else "openai"
 
+def normalize_request_protocol(value, provider_protocol="openai"):
+    """规整聊天传输协议；旧配置的 protocol=responses 自动迁移。"""
+    candidate = str(value or "").strip().lower()
+    if candidate in SUPPORTED_REQUEST_PROTOCOLS:
+        return candidate
+    return "responses" if str(provider_protocol or "").strip().lower() == "responses" else "chat_completions"
+
+def normalize_responses_endpoint(value):
+    endpoint = normalize_endpoint_override(value, "Responses 端点")
+    return endpoint or DEFAULT_RESPONSES_ENDPOINT
+
 def provider_endpoint_url(provider, key, default_path):
     base_url = str((provider or {}).get("base_url") or AI_BASE_URL).strip().rstrip("/")
     override = str((provider or {}).get(key) or "").strip()
@@ -1763,6 +1776,8 @@ def normalize_provider(item):
     protocol = str(item.get("protocol") or "openai").strip().lower()
     if protocol not in SUPPORTED_PROVIDER_PROTOCOLS:
         protocol = "openai"
+    request_protocol = normalize_request_protocol(item.get("request_protocol"), protocol)
+    responses_endpoint = normalize_responses_endpoint(item.get("responses_endpoint"))
     image_request_mode = detect_image_request_mode(base_url, item.get("image_models") or []) or normalize_image_request_mode(item.get("image_request_mode"))
     image_generation_endpoint = normalize_endpoint_override(item.get("image_generation_endpoint"), "文生图端口")
     image_edit_endpoint = normalize_endpoint_override(item.get("image_edit_endpoint"), "图生图/编辑端口")
@@ -1797,11 +1812,14 @@ def normalize_provider(item):
         protocol = "kling-cli"
         base_url = ""
         image_request_mode = "openai"
+        request_protocol = "chat_completions"
     return {
         "id": provider_id,
         "name": name,
         "base_url": base_url,
         "protocol": protocol,
+        "request_protocol": request_protocol,
+        "responses_endpoint": responses_endpoint,
         "image_request_mode": image_request_mode,
         "image_generation_endpoint": image_generation_endpoint,
         "image_edit_endpoint": image_edit_endpoint,
@@ -1992,6 +2010,8 @@ RUNTIME_PROVIDER_FIELDS = (
     "id",
     "name",
     "protocol",
+    "request_protocol",
+    "responses_endpoint",
     "image_request_mode",
     "enabled",
     "primary",
@@ -3984,6 +4004,8 @@ class ApiProviderPayload(BaseModel):
     name: str = ""
     base_url: str = ""
     protocol: str = "openai"
+    request_protocol: str = ""
+    responses_endpoint: str = ""
     image_request_mode: str = "openai"
     image_generation_endpoint: str = ""
     image_edit_endpoint: str = ""
@@ -4716,6 +4738,141 @@ def resolve_chat_provider(provider: str, model: str, ms_model: str):
     hdrs = api_headers(provider=api_provider, model=mdl)
     return base, hdrs, mdl
 
+def effective_request_protocol(provider, model=""):
+    """返回聊天请求实际使用的传输协议，兼容旧的 protocol=responses 配置。"""
+    overrides = (provider or {}).get("model_protocols") if isinstance(provider, dict) else None
+    override = str((overrides or {}).get(str(model or "").strip()) or "").strip().lower() if isinstance(overrides, dict) else ""
+    if override in {"openai", "responses"}:
+        return "responses" if override == "responses" else "chat_completions"
+    configured = str((provider or {}).get("request_protocol") or "").strip().lower()
+    effective = effective_protocol(provider, model)
+    if effective == "responses":
+        return "responses"
+    if configured in SUPPORTED_REQUEST_PROTOCOLS:
+        return configured
+    return "chat_completions"
+
+def resolve_chat_transport(provider: str, model: str, ms_model: str):
+    """解析统一文本请求所需的端点、鉴权、模型和传输协议。"""
+    if provider == "modelscope":
+        base, headers, resolved_model = resolve_chat_provider(provider, model, ms_model)
+        return {
+            "provider": {},
+            "protocol": "chat_completions",
+            "url": f"{base}/chat/completions",
+            "headers": headers,
+            "model": resolved_model,
+        }
+    provider_config = get_api_provider(provider or "")
+    base, headers, resolved_model = resolve_chat_provider(provider, model, ms_model)
+    request_protocol = effective_request_protocol(provider_config, resolved_model)
+    if request_protocol == "responses":
+        url = provider_endpoint_url(provider_config, "responses_endpoint", DEFAULT_RESPONSES_ENDPOINT)
+    else:
+        url = f"{base}/chat/completions"
+    return {
+        "provider": provider_config,
+        "protocol": request_protocol,
+        "url": url,
+        "headers": headers,
+        "model": resolved_model,
+    }
+
+def responses_input_from_messages(messages):
+    """将内部消息记录转换为 Responses 原生 input，兼容已有 OpenAI 多模态片段。"""
+    result = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user").strip().lower() or "user"
+        if role == "system":
+            continue
+        if role not in {"user", "assistant"}:
+            continue
+        content = message.get("content", "")
+        parts = []
+        if isinstance(content, str):
+            if content:
+                parts.append({"type": "input_text", "text": content})
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, str) and item:
+                    parts.append({"type": "input_text", "text": item})
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                item_type = str(item.get("type") or "").strip().lower()
+                if item_type in {"text", "input_text"}:
+                    text = str(item.get("text") or item.get("content") or "")
+                    if text:
+                        parts.append({"type": "input_text", "text": text})
+                elif item_type in {"image_url", "input_image"}:
+                    image_url = item.get("image_url")
+                    if isinstance(image_url, dict):
+                        image_url = image_url.get("url")
+                    image_url = str(image_url or item.get("url") or "").strip()
+                    if image_url:
+                        image_item = {"type": "input_image", "image_url": image_url}
+                        detail = item.get("detail")
+                        if detail:
+                            image_item["detail"] = detail
+                        parts.append(image_item)
+                elif item_type == "video_url":
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Responses 视觉模型不接收原始视频，请先将视频提取为关键帧图片。",
+                    )
+                elif item_type:
+                    text = str(item.get("text") or item.get("content") or "")
+                    if text:
+                        parts.append({"type": "input_text", "text": text})
+        if parts:
+            result.append({"role": role, "content": parts})
+    return result
+
+def build_llm_request_body(transport, messages, stream=False):
+    body = {"model": transport["model"]}
+    if transport["protocol"] == "responses":
+        instructions = []
+        for message in messages or []:
+            if not isinstance(message, dict) or str(message.get("role") or "").strip().lower() != "system":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                instructions.append(content.strip())
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, str) and part.strip():
+                        instructions.append(part.strip())
+                    elif isinstance(part, dict):
+                        text = str(part.get("text") or part.get("content") or "").strip()
+                        if text:
+                            instructions.append(text)
+        body["input"] = responses_input_from_messages(messages)
+        merged_instructions = "\n\n".join(dict.fromkeys(instructions))
+        if merged_instructions:
+            body["instructions"] = merged_instructions
+    else:
+        body["messages"] = messages
+    if stream:
+        body["stream"] = True
+    elif is_apimart_provider(transport.get("provider")):
+        body["stream"] = False
+    return body
+
+async def request_llm_json(transport, messages):
+    """执行一次非流式文本请求，旧协议和 Responses 共用同一入口。"""
+    async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
+        response = await client.post(
+            transport["url"],
+            headers=transport["headers"],
+            json=build_llm_request_body(transport, messages),
+        )
+        response.raise_for_status()
+        if not response.content:
+            raise HTTPException(status_code=502, detail="上游接口返回了空响应")
+        return response.json()
+
 def log_net_error(context, exc, url=""):
     """把网络请求异常的完整链路（含底层 SSL/socket 原因）打到控制台，方便排查 VPN/代理问题。
     httpx 通常把真正的 SSL/连接错误包在 __cause__/__context__ 里，这里把整条链都打出来，
@@ -4826,6 +4983,39 @@ def text_from_chat_response(data):
                 parts.append(item.get("text") or item.get("content") or "")
         return "\n".join(part for part in parts if part)
     return str(content)
+
+def text_from_responses_response(data):
+    if not isinstance(data, dict):
+        return ""
+    direct = data.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct
+    parts = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content") or []
+        if isinstance(content, str):
+            parts.append(content)
+            continue
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text") or part.get("content")
+            if isinstance(text, str) and text:
+                parts.append(text)
+    if parts:
+        return "\n".join(parts)
+    return text_from_chat_response(data)
+
+def text_from_llm_response(data, protocol="chat_completions"):
+    if str(protocol or "").strip().lower() == "responses":
+        text = text_from_responses_response(data)
+        if text:
+            return text
+    return text_from_chat_response(data)
 
 def text_delta_from_chat_chunk(data):
     choices = data.get("choices") or []
@@ -5071,13 +5261,13 @@ def images_api_unsupported(response):
 def provider_protocol(provider):
     return str((provider or {}).get("protocol") or "openai").strip().lower()
 
-# 单模型可覆盖的协议（仅 OpenAI / Gemini，二者可共用同一站点的 Base URL + Key）
-PER_MODEL_PROTOCOL_OPTIONS = {"openai", "gemini"}
+# 单模型可覆盖的协议（OpenAI Chat Completions、Responses、Gemini 可共用同一站点的 Base URL + Key）
+PER_MODEL_PROTOCOL_OPTIONS = {"openai", "responses", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
 FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3", "kling-cli"}
 
 def normalize_model_protocols(value):
-    """规整 {模型名: 协议} 覆盖表，仅保留 openai/gemini。"""
+    """规整 {模型名: 协议} 覆盖表，仅保留支持的文本协议。"""
     out = {}
     if isinstance(value, dict):
         for raw_name, raw_proto in value.items():
@@ -11174,7 +11364,8 @@ def parse_agent_decision(raw_text, message, refs, has_previous_image):
 async def decide_chat_agent_action(payload, conversation, refs):
     has_previous_image = bool(latest_chat_image_refs(conversation, 1))
     fallback = heuristic_agent_decision(payload.message, refs, has_previous_image)
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
+    transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
+    model = transport["model"]
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
     custom_system_prompt = str(getattr(payload, "system_prompt", "") or "").strip()
     system = (
@@ -11202,21 +11393,10 @@ async def decide_chat_agent_action(payload, conversation, refs):
         )
     })
     try:
-        provider_cfg = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
-        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-            req_body = {"model": model, "messages": upstream_messages}
-            if is_apimart_provider(provider_cfg):
-                req_body["stream"] = False
-            response = await client.post(
-                f"{chat_base}/chat/completions",
-                headers=chat_hdrs,
-                json=req_body,
-            )
-            response.raise_for_status()
-            raw = response.json()
-            decision = parse_agent_decision(text_from_chat_response(raw), payload.message, refs, has_previous_image)
-            decision["router_model"] = model
-            return decision
+        raw = await request_llm_json(transport, upstream_messages)
+        decision = parse_agent_decision(text_from_llm_response(raw, transport["protocol"]), payload.message, refs, has_previous_image)
+        decision["router_model"] = model
+        return decision
     except Exception as exc:
         print(f"[chat-agent] intent router fallback: {exc}")
         fallback["router_model"] = model
@@ -11237,21 +11417,15 @@ async def build_chat_text_reply(payload, conversation):
             "raw_usage": None,
             "raw": raw,
         }
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
-    is_apimart = is_apimart_provider(provider_cfg)
+    transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
+    model = transport["model"]
     upstream_messages = [{"role": "system", "content": chat_system_prompt(payload)}]
     for item in conversation["messages"][-MAX_HISTORY_MESSAGES:]:
         msg = upstream_message_from_record(item)
         if msg:
             upstream_messages.append(msg)
     try:
-        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-            req_body = {"model": model, "messages": upstream_messages}
-            if is_apimart:
-                req_body["stream"] = False
-            response = await client.post(f"{chat_base}/chat/completions", headers=chat_hdrs, json=req_body)
-            response.raise_for_status()
-            raw = response.json()
+        raw = await request_llm_json(transport, upstream_messages)
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, model, provider_cfg)
@@ -11262,7 +11436,7 @@ async def build_chat_text_reply(payload, conversation):
     return {
         "id": uuid.uuid4().hex,
         "role": "assistant",
-        "content": text_from_chat_response(raw).strip() or "接口返回了空回复。",
+        "content": text_from_llm_response(raw, transport["protocol"]).strip() or "接口返回了空回复。",
         "created_at": now_ms(),
         "model": model,
         "raw_usage": raw_data.get("usage") if isinstance(raw_data, dict) else None,
@@ -13792,6 +13966,55 @@ async def probe_openai_compat_bearer_endpoint(client, base_url: str, api_key: st
         return True, {"status": response.status_code, "message": "OpenAI 兼容 Bearer 鉴权入口可达", "raw": raw}
     return False, {"status": response.status_code, "message": f"OpenAI 兼容入口服务端错误 {response.status_code}", "raw": raw}
 
+def responses_api_url(base_url: str):
+    root = openai_compat_root_for_probe(base_url)
+    return f"{root}/responses" if root else ""
+
+async def probe_responses_endpoint(client, base_url: str, api_key: str):
+    """用必然不会正式生成的空请求确认 Responses 路径和 Bearer Key。"""
+    url = responses_api_url(base_url)
+    if not url:
+        return False, {"status": 0, "message": "Base URL 为空", "raw": {}}
+    response = await client.post(
+        url,
+        headers={**upstream_model_headers(api_key, "responses"), "Content-Type": "application/json"},
+        json={},
+    )
+    try:
+        raw = response.json() if response.text else {}
+    except Exception:
+        raw = response.text[:500]
+    status = response.status_code
+    if status in (301, 302, 303, 307, 308):
+        location = response.headers.get("Location") or response.headers.get("location") or ""
+        suffix = f"：{location}" if location else ""
+        return False, {"status": status, "message": f"Responses 端点发生跳转{suffix}", "raw": raw}
+    if status in (401, 403):
+        return False, {"status": status, "message": "Responses API Key 无效或无权限", "raw": raw}
+    if looks_like_html_response(response.text):
+        return False, {"status": status, "message": "Responses 端点返回网页 HTML，Base URL 可能不是 API 地址", "raw": raw}
+    if status == 404:
+        return False, {"status": status, "message": "平台不支持 /v1/responses 端点", "raw": raw}
+    if status < 300 or status in (400, 422, 429):
+        return True, {"status": status, "message": "Responses（原生）端点可用，API Key 已通过认证", "raw": raw}
+    return False, {"status": status, "message": f"Responses 端点返回 HTTP {status}", "raw": raw}
+
+def responses_models_payload(models_probe, endpoint_probe):
+    models_ok = bool(models_probe.get("model_count") or models_probe.get("all"))
+    return {
+        "ok": True,
+        "status": models_probe.get("status") if models_ok else endpoint_probe.get("status") or 200,
+        "protocol": "responses",
+        "message": models_probe.get("message") if models_ok else "Responses（原生）端点可用；上游未提供 /v1/models，请在聊天模型中手动填写模型名称。",
+        "model_count": models_probe.get("model_count") or 0,
+        "image_models": models_probe.get("image_models") or [],
+        "chat_models": models_probe.get("chat_models") or [],
+        "video_models": models_probe.get("video_models") or [],
+        "all": models_probe.get("all") or [],
+        "manual_model_required": not models_ok,
+        "raw": {"models_probe": models_probe.get("raw"), "responses_probe": endpoint_probe.get("raw")},
+    }
+
 async def probe_openai_models_endpoint(client, base_url: str, api_key: str):
     url = upstream_models_url(base_url, "openai")
     response = await client.get(url, headers=upstream_model_headers(api_key, "openai"))
@@ -13944,6 +14167,22 @@ async def test_provider_connection(payload: TestConnectionPayload):
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
+    if protocol == "responses":
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                models_ok, models_probe = await probe_openai_models_endpoint(client, base_url, api_key)
+                endpoint_ok, endpoint_probe = await probe_responses_endpoint(client, base_url, api_key)
+            if endpoint_ok:
+                return responses_models_payload(models_probe if models_ok else {}, endpoint_probe)
+            return {
+                "ok": False,
+                "status": endpoint_probe.get("status") or models_probe.get("status") or 0,
+                "protocol": "responses",
+                "message": endpoint_probe.get("message") or models_probe.get("message") or "Responses（原生）验证失败",
+                "raw": {"models_probe": models_probe.get("raw"), "responses_probe": endpoint_probe.get("raw")},
+            }
+        except httpx.HTTPError as exc:
+            return {"ok": False, "status": 0, "protocol": "responses", "message": f"Responses（原生）验证失败：{str(exc)[:300]}"}
     if is_grsai_target(base_url, payload.provider_id):
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -14027,6 +14266,19 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
     api_key = api_key_from_payload(payload, protocol)
     if not api_key:
         raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
+    if protocol == "responses":
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                endpoint_ok, endpoint_probe = await probe_responses_endpoint(client, base_url, api_key)
+            return {
+                "ok": endpoint_ok,
+                "protocol": "responses",
+                "status_code": endpoint_probe.get("status") or 0,
+                "message": endpoint_probe.get("message") or "Responses（原生）验证失败",
+                "raw": endpoint_probe.get("raw"),
+            }
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Responses（原生）验证失败：{str(exc)[:300]}") from exc
     if is_grsai_target(base_url, payload.provider_id):
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -14132,6 +14384,21 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
                         "video_models": [],
                         "all": [],
                     }
+                responses_ok, responses_probe = await probe_responses_endpoint(client, base_url, api_key)
+                if responses_ok:
+                    return {
+                        "ok": True,
+                        "protocol": "responses",
+                        "status_code": responses_probe.get("status") or openai_probe.get("status") or sc,
+                        "message": "已识别 Responses（原生）端点；上游未提供 /v1/models，模型请手动填写。",
+                        "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw"), "responses_probe": responses_probe.get("raw")},
+                        "model_count": 0,
+                        "image_models": [],
+                        "chat_models": [],
+                        "video_models": [],
+                        "all": [],
+                        "manual_model_required": True,
+                    }
                 detected, volc_probe = await probe_volcengine_auto_detect(client, base_url, api_key)
                 if detected:
                     return {
@@ -14185,6 +14452,43 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
+    if protocol == "responses":
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                models_ok, models_probe = await probe_openai_models_endpoint(client, base_url, api_key)
+                if models_ok:
+                    return {
+                        "total": models_probe.get("model_count") or 0,
+                        "protocol": "responses",
+                        "image_models": models_probe.get("image_models") or [],
+                        "chat_models": models_probe.get("chat_models") or [],
+                        "video_models": models_probe.get("video_models") or [],
+                        "all": models_probe.get("all") or [],
+                        "manual_model_required": False,
+                        "message": models_probe.get("message") or "已拉取 Responses 模型列表",
+                        "raw": {"models_probe": models_probe.get("raw")},
+                    }
+                endpoint_ok, endpoint_probe = await probe_responses_endpoint(client, base_url, api_key)
+                if endpoint_ok:
+                    return {
+                        "total": 0,
+                        "protocol": "responses",
+                        "image_models": [],
+                        "chat_models": [],
+                        "video_models": [],
+                        "all": [],
+                        "manual_model_required": True,
+                        "message": "Responses（原生）端点可用；上游未提供 /v1/models，请在聊天模型中手动填写模型名称。",
+                        "raw": {"models_probe": models_probe.get("raw"), "responses_probe": endpoint_probe.get("raw")},
+                    }
+                raise HTTPException(
+                    status_code=endpoint_probe.get("status") or models_probe.get("status") or 502,
+                    detail=endpoint_probe.get("message") or models_probe.get("message") or "Responses（原生）模型获取失败",
+                )
+        except HTTPException:
+            raise
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"请求 Responses（原生）接口失败：{exc}") from exc
     if is_grsai_target(base_url):
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -17957,22 +18261,11 @@ async def canvas_video(payload: CanvasVideoRequest):
 # --- 建筑多视图需求规划 ---
 
 async def request_building_plan_completion(provider_id: str, model: str, ms_model: str, messages: List[Dict[str, Any]]):
-    chat_base, chat_hdrs, resolved_model = resolve_chat_provider(provider_id, model, ms_model)
-    provider_config = get_api_provider(provider_id) if provider_id not in ("modelscope",) else {}
+    transport = resolve_chat_transport(provider_id, model, ms_model)
+    resolved_model = transport["model"]
+    provider_config = transport["provider"]
     try:
-        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-            request_body = {"model": resolved_model, "messages": messages}
-            if is_apimart_provider(provider_config):
-                request_body["stream"] = False
-            response = await client.post(
-                f"{chat_base}/chat/completions",
-                headers=chat_hdrs,
-                json=request_body,
-            )
-            response.raise_for_status()
-            if not response.content:
-                raise HTTPException(status_code=502, detail="建筑规划模型返回了空响应")
-            raw = response.json()
+        raw = await request_llm_json(transport, messages)
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, resolved_model, provider_config)
@@ -17984,7 +18277,7 @@ async def request_building_plan_completion(provider_id: str, model: str, ms_mode
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"解析建筑规划模型响应失败：{exc}") from exc
-    text = text_from_chat_response(raw).strip() if isinstance(raw, dict) else ""
+    text = text_from_llm_response(raw, transport["protocol"]).strip() if isinstance(raw, dict) else ""
     raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else {}
     usage = raw_data.get("usage") if isinstance(raw_data, dict) else None
     return text, resolved_model, usage
@@ -18078,10 +18371,10 @@ async def building_multi_view_plan(payload: BuildingMultiViewPlanRequest):
 
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
-    # 判断协议：APIMart 异步 vs 标准 OpenAI
-    _llm_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
-    _is_apimart = is_apimart_provider(_llm_provider)
+    _llm_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
+    model = _llm_transport["model"]
+    _llm_provider = _llm_transport["provider"]
+    _llm_protocol = _llm_transport["protocol"]
     system_prompt = (payload.system_prompt or "").strip()
     upstream_messages = [{"role": "system", "content": system_prompt}] if system_prompt else []
     for item in payload.messages[-MAX_HISTORY_MESSAGES:]:
@@ -18130,19 +18423,7 @@ async def canvas_llm(payload: CanvasLLMRequest):
         upstream_messages.append({"role": "user", "content": payload.message})
     raw = None
     try:
-        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-            req_body = {"model": model, "messages": upstream_messages}
-            if _is_apimart:
-                req_body["stream"] = False   # APIMart 默认流式，强制关闭
-            response = await client.post(
-                f"{chat_base}/chat/completions",
-                headers=chat_hdrs,
-                json=req_body,
-            )
-            response.raise_for_status()
-            if not response.content:
-                raise HTTPException(status_code=502, detail="上游接口返回了空响应")
-            raw = response.json()
+        raw = await request_llm_json(_llm_transport, upstream_messages)
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, model, _llm_provider)
@@ -18154,7 +18435,7 @@ async def canvas_llm(payload: CanvasLLMRequest):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"解析上游响应失败：{exc}") from exc
     try:
-        text = text_from_chat_response(raw).strip() if isinstance(raw, dict) else ""
+        text = text_from_llm_response(raw, _llm_protocol).strip() if isinstance(raw, dict) else ""
         text = text or "接口返回了空回复。"
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"解析回复内容失败：{exc}") from exc
@@ -19116,9 +19397,9 @@ async def import_shared_folder_files(payload: SharedFolderImport):
     return {"library": lib, "items": added}
 
 async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_model=""):
-    chat_base, chat_hdrs, resolved_model = resolve_chat_provider(provider_id, model, ms_model)
-    llm_provider = get_api_provider(provider_id) if provider_id not in ("modelscope",) else {}
-    is_apimart = is_apimart_provider(llm_provider)
+    transport = resolve_chat_transport(provider_id, model, ms_model)
+    resolved_model = transport["model"]
+    llm_provider = transport["provider"]
     prompt_text = (prompt or "描述图片").strip() or "描述图片"
     data_url = image_path_to_data_url(abs_path, max_size=1024)
     messages = [{
@@ -19130,17 +19411,7 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
     }]
     raw = None
     try:
-        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-            req_body = {"model": resolved_model, "messages": messages}
-            if is_apimart:
-                req_body["stream"] = False
-            response = await client.post(
-                f"{chat_base}/chat/completions",
-                headers=chat_hdrs,
-                json=req_body,
-            )
-            response.raise_for_status()
-            raw = response.json()
+        raw = await request_llm_json(transport, messages)
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, resolved_model, llm_provider)
@@ -19152,7 +19423,7 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"解析上游响应失败：{exc}") from exc
-    text = text_from_chat_response(raw).strip() if isinstance(raw, dict) else ""
+    text = text_from_llm_response(raw, transport["protocol"]).strip() if isinstance(raw, dict) else ""
     return text or "接口返回了空回复。", resolved_model
 
 @app.patch("/api/asset-library/items/{item_id}")
@@ -19555,9 +19826,9 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
             return {"conversation": conversation, "message": assistant_message}
-        chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
-        _conv_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
-        _conv_is_apimart = is_apimart_provider(_conv_provider)
+        _conv_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
+        model = _conv_transport["model"]
+        _conv_provider = _conv_transport["provider"]
         history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
         upstream_messages = [{"role": "system", "content": chat_system_prompt(payload)}]
         for item in history:
@@ -19565,17 +19836,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             if msg:
                 upstream_messages.append(msg)
         try:
-            async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-                conv_req_body = {"model": model, "messages": upstream_messages}
-                if _conv_is_apimart:
-                    conv_req_body["stream"] = False
-                response = await client.post(
-                    f"{chat_base}/chat/completions",
-                    headers=chat_hdrs,
-                    json=conv_req_body,
-                )
-                response.raise_for_status()
-                raw = response.json()
+            raw = await request_llm_json(_conv_transport, upstream_messages)
         except httpx.HTTPStatusError as exc:
             body = exc.response.text or ""
             friendly = friendly_chat_error_detail(body, model, _conv_provider)
@@ -19586,7 +19847,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
         assistant_message = {
             "id": uuid.uuid4().hex,
             "role": "assistant",
-            "content": text_from_chat_response(raw).strip() or "接口返回了空回复。",
+            "content": text_from_llm_response(raw, _conv_transport["protocol"]).strip() or "接口返回了空回复。",
             "created_at": now_ms(),
             "model": model,
             "raw_usage": raw_data.get("usage") if isinstance(raw_data, dict) else None,
@@ -19739,8 +20000,9 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
 
         return StreamingResponse(codex_stream(), media_type="text/event-stream")
 
-    chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
-    _stream_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
+    _stream_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
+    model = _stream_transport["model"]
+    _stream_provider = _stream_transport["provider"]
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
     upstream_messages = [{"role": "system", "content": chat_system_prompt(payload)}]
     for item in history:
@@ -19754,35 +20016,53 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
         yield sse_event({"type": "meta", "conversation": conversation})
         try:
             async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-                async with client.stream(
-                    "POST",
-                    f"{chat_base}/chat/completions",
-                    headers=chat_hdrs,
-                    json={"model": model, "messages": upstream_messages, "stream": True},
-                ) as response:
+                if _stream_transport["protocol"] == "responses":
+                    response = await client.post(
+                        _stream_transport["url"],
+                        headers=_stream_transport["headers"],
+                        json=build_llm_request_body(_stream_transport, upstream_messages),
+                    )
                     if response.status_code >= 400:
-                        detail = await response.aread()
-                        body = detail.decode("utf-8", errors="ignore")
+                        body = response.text or ""
                         friendly = friendly_chat_error_detail(body, model, _stream_provider)
                         yield sse_event({"type": "error", "detail": friendly or f"上游接口错误：{body}"})
                         return
-                    async for line in response.aiter_lines():
-                        if not line:
-                            continue
-                        if line.startswith("data:"):
-                            line = line[5:].strip()
-                        if line == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if isinstance(chunk, dict) and chunk.get("usage"):
-                            raw_usage = chunk.get("usage")
-                        delta = text_delta_from_chat_chunk(chunk)
-                        if delta:
-                            content_parts.append(delta)
-                            yield sse_event({"type": "delta", "delta": delta})
+                    raw = response.json()
+                    raw_usage = raw.get("usage") if isinstance(raw, dict) else None
+                    delta = text_from_llm_response(raw, "responses")
+                    if delta:
+                        content_parts.append(delta)
+                        yield sse_event({"type": "delta", "delta": delta})
+                else:
+                    async with client.stream(
+                        "POST",
+                        _stream_transport["url"],
+                        headers=_stream_transport["headers"],
+                        json=build_llm_request_body(_stream_transport, upstream_messages, stream=True),
+                    ) as response:
+                        if response.status_code >= 400:
+                            detail = await response.aread()
+                            body = detail.decode("utf-8", errors="ignore")
+                            friendly = friendly_chat_error_detail(body, model, _stream_provider)
+                            yield sse_event({"type": "error", "detail": friendly or f"上游接口错误：{body}"})
+                            return
+                        async for line in response.aiter_lines():
+                            if not line:
+                                continue
+                            if line.startswith("data:"):
+                                line = line[5:].strip()
+                            if line == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if isinstance(chunk, dict) and chunk.get("usage"):
+                                raw_usage = chunk.get("usage")
+                            delta = text_delta_from_chat_chunk(chunk)
+                            if delta:
+                                content_parts.append(delta)
+                                yield sse_event({"type": "delta", "delta": delta})
         except httpx.HTTPError as exc:
             log_net_error("对话(流式) 网络/TLS错误", exc)
             yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})

@@ -13778,7 +13778,7 @@ function generatorSources(gen){
             const prompts = (n.items || []).map(id => nodes.find(x => x.id === id)).filter(Boolean).map(p => p.text || '').filter(Boolean);
             return {id:n.id, type:'promptGroup', label:`提示词 ${prompts.length} 个`, refs:[], prompt:prompts.join('\n\n')};
         }
-        if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'LLM').slice(0, 32), refs:[], prompt:n.outputText || ''};
+        if(n.type === 'llm' && (n.mode || 'node') === 'node' && n.outputText) return {id:n.id, type:'llm', label:(n.outputText || 'AI助手').slice(0, 32), refs:[], prompt:n.outputText || ''};
         return null;
     }).flat().filter(Boolean);
 }
@@ -15053,7 +15053,7 @@ async function callCanvasLLM(node, message, messages=[], options={}){
         })
     }, options).then(async r => {
         if(!r.ok){
-            throw new Error(await responseErrorMessage(r, 'LLM 运行失败'));
+            throw new Error(await responseErrorMessage(r, 'AI助手运行失败'));
         }
         return r.json();
     });
@@ -15065,7 +15065,7 @@ async function runLLMNode(nodeId, opts={}){
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const input = llmInputText(node) || node.userInput || '';
     if(!input){
-        if(opts.cascade) throw new Error('LLM 缺少提示词输入');
+        if(opts.cascade) throw new Error('AI助手缺少提示词输入');
         alert(tr('canvas.needPromptToLLM')); return;
     }
     if(!opts.cascade){ node.running = true; refreshNodes([node.id]); }
@@ -15085,7 +15085,7 @@ async function runLLMNode(nodeId, opts={}){
         node.runStatus = 'failed'; node.runError = err.message || String(err);
         refreshNodes([node.id]);
         if(opts.cascade) throw err;
-        alert(err.message || 'LLM 运行失败');
+        alert(err.message || 'AI助手运行失败');
     }
 }
 // 判断是不是「链尾」节点：没有下游生成节点（直接相连或经 Output 中转都算）
@@ -15603,7 +15603,7 @@ async function runLLMChat(nodeId){
     } catch(err) {
         node.running = false;
         refreshNodes([node.id]);
-        alert(err.message || 'LLM 运行失败');
+        alert(err.message || 'AI助手运行失败');
     }
 }
 

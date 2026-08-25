@@ -1,7 +1,19 @@
 {
-  "version": "1.0.308",
+  "version": "1.0.309",
   "updated_at": "2026-08-25T00:00:00+08:00",
   "items": [
+    {
+      "type": "feature",
+      "text": "API 设置新增 Responses（原生）协议、Responses 端点配置、模型列表获取和端点探测；上游未提供 /v1/models 时可手动填写模型名称"
+    },
+    {
+      "type": "feature",
+      "text": "AI助手节点支持通过 Responses 原生接口调用视觉模型，自动转换 system、文本、历史消息与 input_image，并解析标准 output_text 响应"
+    },
+    {
+      "type": "improve",
+      "text": "原 LLM 节点用户可见名称统一为 AI助手，经典画布、智能画布、API 设置及中英文提示保持一致，已有画布数据继续兼容"
+    },
     {
       "type": "improve",
       "text": "LLM 节点统一更名为 AI助手；经典画布与智能画布移除循环节点的新建入口，并保留历史画布兼容"

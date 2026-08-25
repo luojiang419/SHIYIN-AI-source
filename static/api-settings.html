@@ -242,6 +242,7 @@
                                 <div class="field-frame protocol-selector-wrap">
                                     <select id="protocolInput">
                                         <option value="openai" data-i18n="api.protocolOpenAI">OpenAI 直连</option>
+                                        <option value="responses" data-i18n="api.protocolResponses">Responses（原生）</option>
                                         <option value="apimart" data-i18n="api.protocolApimart">异步协议</option>
                                         <option value="gemini" data-i18n="api.protocolGemini">Gemini 协议</option>
                                         <option value="volcengine">方舟/Ark 任务协议</option>
@@ -258,6 +259,13 @@
                                         <option value="openai-json">图片：OpenAI JSON</option>
                                     </select>
                                 </div>
+                            </div>
+                            <div id="responsesEndpointWrap" hidden style="display:none;grid-column:1/-1;max-width:520px">
+                                <label class="field full" style="margin:0">
+                                    <span class="label">Responses 端点</span>
+                                    <div class="field-frame"><input id="responsesEndpointInput" type="text" placeholder="/v1/responses"></div>
+                                    <span class="hint">留空使用 /v1/responses；也可以填写完整的 http(s) 地址。</span>
+                                </label>
                             </div>
                             <div id="verifyResult" style="display:none;padding:2px 0;grid-column:1/-1"></div>
                         </div>
@@ -325,7 +333,7 @@
                             <div class="block-head">
                                 <div>
                                     <div id="chatModelsTitle" class="block-title" data-i18n="api.chatModels">聊天模型</div>
-                                    <div id="chatModelsDesc" class="block-desc" data-i18n="api.chatHint">GPT 对话和 LLM 节点使用</div>
+                                    <div id="chatModelsDesc" class="block-desc" data-i18n="api.chatHint">GPT 对话和 AI助手节点使用</div>
                                 </div>
                                 <button class="ghost-btn" type="button" onclick="addModel('chat')"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span data-i18n="api.model">模型</span></button>
                         </div>

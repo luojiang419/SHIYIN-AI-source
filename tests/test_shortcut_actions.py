@@ -22,7 +22,7 @@ class ShortcutActionRegistryTests(unittest.TestCase):
         self.assertEqual(len(action_ids), len(set(action_ids)))
         self.assertGreaterEqual(len(action_ids), 60)
         for action_id in (
-            "create.image", "create.group", "create.prompt", "create.loop", "create.h3Video",
+            "create.image", "create.group", "create.prompt", "create.h3Video",
             "create.panorama", "create.poseReference", "create.dwpose", "create.poseReplicate",
             "create.relight", "create.multiView", "create.batch",
         ):
@@ -59,7 +59,7 @@ class ShortcutActionRegistryTests(unittest.TestCase):
 
     def test_every_registered_node_creation_action_is_dispatched(self):
         for action_id in (
-            "create.image", "create.group", "create.prompt", "create.loop", "create.h3Video",
+            "create.image", "create.group", "create.prompt", "create.h3Video",
             "create.panorama", "create.poseReference", "create.dwpose", "create.poseReplicate",
             "create.relight", "create.multiView", "create.batch",
         ):
@@ -82,7 +82,7 @@ class ShortcutActionRegistryTests(unittest.TestCase):
 
     def test_classic_canvas_dispatches_all_registered_creation_actions(self):
         for action_id in (
-            "create.image", "create.group", "create.prompt", "create.loop", "create.h3Video",
+            "create.image", "create.group", "create.prompt", "create.h3Video",
             "create.panorama", "create.poseReference", "create.dwpose", "create.poseReplicate",
             "create.relight", "create.multiView", "create.batch",
         ):

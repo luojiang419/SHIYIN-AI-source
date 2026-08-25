@@ -58,8 +58,7 @@
                         </div>
                         <button class="tool-btn" onclick="addImageNode()"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.image">图片</span></button>
                         <button class="tool-btn" onclick="addPromptNode()"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                        <button class="tool-btn" onclick="addLoopNode()"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loop">循环</span></button>
-                        <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i><span>LLM</span></button>
+                        <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i><span>AI助手</span></button>
                         <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                         <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
                         <button class="tool-btn" onclick="addFilmNode('film-storyboard')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>分镜合成</span></button>
@@ -98,8 +97,7 @@
                 <button id="canvasArrangeMenuBtn" class="menu-btn canvas-arrange-menu-btn" type="button" hidden><i data-lucide="layout-grid" class="w-4 h-4"></i><span>整理选中</span></button>
                 <button class="menu-btn" onclick="menuAdd('image')"><i data-lucide="image-plus" class="w-4 h-4"></i><span data-i18n="canvas.imageCard">上传节点</span></button>
                 <button class="menu-btn" onclick="menuAdd('prompt')"><i data-lucide="text-cursor-input" class="w-4 h-4"></i><span data-i18n="canvas.prompt">提示词</span></button>
-                <button class="menu-btn" onclick="menuAdd('loop')"><i data-lucide="repeat-2" class="w-4 h-4"></i><span data-i18n="canvas.loopNode">循环节点</span></button>
-                <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">LLM 节点</span></button>
+                <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">AI助手</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
                 <div class="menu-submenu-host" data-film-menu-host>
@@ -525,6 +523,6 @@
     <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>
     <script src="/static/js/canvas-film-nodes.js?v=2026.08.24.film-nodes.3"></script>
     <script src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
-    <script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260823.4&feature=shortcuts-runtime.2&flux2-storyboard=1"></script>
+    <script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260825.1&feature=shortcuts-runtime.2&flux2-storyboard=1&feature=node-labels.1"></script>
 </body>
 </html>

@@ -32,7 +32,6 @@
         {id:'create.image', category:'创建节点', name:'创建图片节点', context:'canvas', defaultBinding:''},
         {id:'create.group', category:'创建节点', name:'创建智能分组节点', context:'canvas', defaultBinding:''},
         {id:'create.prompt', category:'创建节点', name:'创建提示词节点', context:'canvas', defaultBinding:''},
-        {id:'create.loop', category:'创建节点', name:'创建循环节点', context:'canvas', defaultBinding:''},
         {id:'create.h3Video', category:'创建节点', name:'创建 MiniMax H3 视频节点', context:'canvas', defaultBinding:''},
         {id:'create.panorama', category:'创建节点', name:'创建 720° 取景器节点', context:'canvas', defaultBinding:''},
         {id:'create.poseReference', category:'创建节点', name:'创建姿势参考节点', context:'canvas', defaultBinding:''},

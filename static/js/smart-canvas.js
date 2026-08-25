@@ -8729,7 +8729,7 @@ function runSmartEditorShortcutAction(actionId){
 function runSmartCanvasShortcutAction(actionId){
     if(actionId.startsWith('create.')){
         const nodeTypeMap = {
-            'create.image':'image', 'create.group':'group', 'create.prompt':'prompt', 'create.loop':'loop',
+            'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
             'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'pose-reference',
             'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate', 'create.relight':'relight',
             'create.multiView':'multi-view', 'create.batch':'batch'
@@ -8839,7 +8839,7 @@ function promptNodeBodyHtml(node){
             <button class="prompt-node-pill prompt-node-control prompt-expand-open" type="button" title="${escapeHtml(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-preset-edit ${templateActive ? 'active' : ''}" type="button"><i data-lucide="library"></i><span>模板库</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-split-toggle ${node.promptSplitEnabled ? 'active' : ''}" type="button"><i data-lucide="split"></i><span>分隔符</span></button>
-            <button class="prompt-node-pill prompt-llm-toggle ${node.llmEnabled ? 'active' : ''}" type="button"><i data-lucide="sparkles"></i><span>LLM</span></button>
+            <button class="prompt-node-pill prompt-llm-toggle ${node.llmEnabled ? 'active' : ''}" type="button"><i data-lucide="sparkles"></i><span>AI助手</span></button>
         </div>
         ${node.promptSplitEnabled ? `<div class="prompt-node-split-row">
             <label class="prompt-node-split-control prompt-node-control"><span>分隔符</span><input class="prompt-node-separator" type="text" value="${escapeHtml(node.promptSeparator)}" maxlength="8" placeholder=";"></label>
@@ -18869,7 +18869,7 @@ function createNodeFromMenu(type, point=null){
     let created = null;
     if(type === 'h3-video') created = createH3VideoNode(p);
     else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
-    else if(type === 'loop') created = createLoopNode(p.x - 135, p.y - 95);
+    else if(type === 'loop') return null;
     else created = createImageNodeAt(p);
     createMenuGroupId = groupId;
     addCreatedNodeToMenuGroup(created);

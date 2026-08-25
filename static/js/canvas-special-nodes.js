@@ -262,6 +262,25 @@
         natural:'自然真实光照', studio:'专业影棚布光', cinematic:'电影级层次光影',
         sunset:'日落金色时刻', night:'低调夜景照明', neon:'霓虹双色氛围'
     };
+    const EDIT_RESOLUTIONS = ['1k','2k','4k'];
+    const EDIT_QUALITIES = ['standard','high'];
+    const EDIT_RATIOS = ['source','1:1','16:9','9:16','4:3','3:4'];
+    function normalizeEditGeneration(node){
+        node.editResolution = EDIT_RESOLUTIONS.includes(String(node.editResolution)) ? String(node.editResolution) : '2k';
+        node.editQuality = EDIT_QUALITIES.includes(String(node.editQuality)) ? String(node.editQuality) : 'high';
+        node.editRatio = EDIT_RATIOS.includes(String(node.editRatio)) ? String(node.editRatio) : 'source';
+        node.editModel = String(node.editModel || '');
+        return node;
+    }
+    function editGenerationControlsHtml(node){
+        normalizeEditGeneration(node);
+        return `<div class="special-settings-grid edit-generation-settings">
+            <label><span>分辨率</span><select data-edit-field="editResolution"><option value="1k" ${node.editResolution === '1k' ? 'selected' : ''}>1K</option><option value="2k" ${node.editResolution === '2k' ? 'selected' : ''}>2K</option><option value="4k" ${node.editResolution === '4k' ? 'selected' : ''}>4K</option></select></label>
+            <label><span>质量</span><select data-edit-field="editQuality"><option value="standard" ${node.editQuality === 'standard' ? 'selected' : ''}>标准</option><option value="high" ${node.editQuality === 'high' ? 'selected' : ''}>高质量</option></select></label>
+            <label><span>输出画幅</span><select data-edit-field="editRatio"><option value="source" ${node.editRatio === 'source' ? 'selected' : ''}>跟随原图</option><option value="1:1" ${node.editRatio === '1:1' ? 'selected' : ''}>1:1</option><option value="16:9" ${node.editRatio === '16:9' ? 'selected' : ''}>16:9</option><option value="9:16" ${node.editRatio === '9:16' ? 'selected' : ''}>9:16</option><option value="4:3" ${node.editRatio === '4:3' ? 'selected' : ''}>4:3</option><option value="3:4" ${node.editRatio === '3:4' ? 'selected' : ''}>3:4</option></select></label>
+            <label class="edit-model-field"><span>模型覆盖</span><input type="text" value="${esc(node.editModel)}" data-edit-field="editModel" placeholder="留空使用画布默认模型"></label>
+        </div>`;
+    }
     function normalizeRelight(node){
         node.relightDirection = RELIGHT_DIRECTIONS[node.relightDirection] ? node.relightDirection : 'left';
         node.relightTemperature = clamp(Number.isFinite(Number(node.relightTemperature)) ? node.relightTemperature : 18, -100, 100);
@@ -297,6 +316,7 @@
     }
     function relightBodyHtml(node){
         normalizeRelight(node);
+        normalizeEditGeneration(node);
         const output = outputItem(node), preview = output?.url || node.relightSourceUrl || '';
         const directions = [['top','上'],['left','左'],['front','正'],['right','右'],['bottom','下'],['rim','轮廓'],['back','逆光']];
         return `<div class="special-node edit-special relight-special" data-special-node="relight">
@@ -311,6 +331,7 @@
                 <button type="button" data-special-action="upload-relight"><i data-lucide="upload"></i><span>导入图片</span></button>
                 <span class="special-model-hint"><i data-lucide="cloud-cog"></i>画布默认图片模型</span>
             </div>
+            ${editGenerationControlsHtml(node)}
             <div class="relight-direction-pad" aria-label="主光方向">
                 ${directions.map(([value,label]) => `<button type="button" data-relight-direction="${value}" class="${node.relightDirection === value ? 'active' : ''}">${label}</button>`).join('')}
             </div>
@@ -355,7 +376,7 @@
         return ['高俯视','high-angle shot'];
     }
     function angleControlSignature(node){
-        return [Math.round(Number(node.angleAzimuth)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes].join('|');
+        return [Math.round(Number(node.angleAzimuth)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
     }
     function signedAngleAzimuth(value){
         const normalized = ((Number(value) || 0) % 360 + 360) % 360;
@@ -410,6 +431,7 @@
     }
     function angleBodyHtml(node){
         normalizeAngle(node);
+        normalizeEditGeneration(node);
         const output = outputItem(node), preview = output?.url || node.angleSourceUrl || '', azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
         return `<div class="special-node edit-special angle-special" data-special-node="angle">
             <input class="special-file-input" type="file" accept="image/*" data-special-file="angle" hidden>
@@ -430,6 +452,7 @@
                 </div>
                 <div class="angle-readout"><strong data-angle-azimuth>水平 ${Math.round(node.angleAzimuth)}° · ${azimuth[1]}</strong><span data-angle-elevation>俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}</span><em>拖拽视图：左右=水平，上下=俯仰</em></div>
             </div>
+            ${editGenerationControlsHtml(node)}
             <div class="special-toolbar"><button type="button" data-special-action="upload-angle"><i data-lucide="upload"></i><span>导入图片</span></button><span class="special-model-hint"><i data-lucide="cloud-cog"></i>画布默认图片模型</span></div>
             <div class="angle-preset-row">${ANGLE_AZIMUTHS.map(item => `<button type="button" data-angle-preset="${item[0]}" class="${nearestAzimuth(node.angleAzimuth)[0] === item[0] ? 'active' : ''}">${item[0]}°</button>`).join('')}</div>
             <div class="special-settings-grid edit-settings-grid">
@@ -911,7 +934,7 @@
     }
 
     function relightControlSignature(node){
-        return [node.relightDirection,node.relightTemperature,node.relightIntensity,node.relightSoftness,node.relightMood,node.relightPreserve,node.relightNotes].join('|');
+        return [node.relightDirection,node.relightTemperature,node.relightIntensity,node.relightSoftness,node.relightMood,node.relightPreserve,node.relightNotes,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
     }
     function editControlSignature(node, prefix){
         return prefix === 'relight' ? relightControlSignature(normalizeRelight(node)) : angleControlSignature(normalizeAngle(node));
@@ -937,7 +960,8 @@
             viewport.style.setProperty('--angle-yaw', `${signedYaw}deg`);
             viewport.style.setProperty('--angle-pitch', `${Math.round(node.angleElevation)}deg`);
         }
-        if(world) world.style.transform = `rotateX(${-Number(node.angleElevation || 0)}deg) rotateY(${signedYaw}deg)`;
+        // 参考图代表冻结的世界主体，不能随摄影机参数旋转或漂移；只更新下方的摄影机标记与轨迹。
+        if(world) world.style.transform = 'none';
         const marker = root.querySelector('[data-angle-marker]');
         const sightline = root.querySelector('[data-angle-sightline]');
         if(marker){
@@ -1001,6 +1025,7 @@
     function bindEditNode(root, node, options, prefix){
         if(!root || !node) return;
         if(prefix === 'relight') normalizeRelight(node); else normalizeAngle(node);
+        normalizeEditGeneration(node);
         let source = editSource(node, options, prefix);
         // 上游端口是输入真相；同时把解析到的图片快照写回节点，避免刷新/重绘时只剩空占位。
         if(persistEditSource(node, prefix, source)) notify(options, node, false);
@@ -1082,7 +1107,13 @@
                     const file = await options.generateImageEdit(node, editPrompt(node, prefix), source, prefix);
                     if(!file?.url) throw new Error('图片 API 没有返回生成结果');
                     node.specialRunning = false; node.specialGeneratedSourceSignature = generatedSourceSignature; node.specialGeneratedControlSignature = generatedControlSignature;
-                    setOutputItem(node, file, options); notify(options, node, true); options.toast?.(prefix === 'relight' ? '灯光重塑已完成，可连接到下游节点' : '新视角已生成，可连接到下游节点');
+                    setOutputItem(node, file, options);
+                    if(options.createEditOutputNode){
+                        const outputNode = await options.createEditOutputNode(node, file, prefix);
+                        if(!outputNode) throw new Error('输出节点创建失败');
+                        node.specialOutputNodeId = outputNode.id || node.specialOutputNodeId || '';
+                    }
+                    notify(options, node, true); options.toast?.(prefix === 'relight' ? '灯光重塑已完成，可连接到下游节点' : '新视角已生成，可连接到下游节点');
                 } catch(error){ node.specialRunning = false; notify(options, node, true); options.toast?.(error.message || '图片生成失败'); }
             });
         });
@@ -1095,6 +1126,6 @@
         panoramaBodyHtml, poseBodyHtml, poseReferenceBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
         bindPanorama, bindPose, bindPoseReference, bindPoseReplicate, bindRelight, bindAngle,
         buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle,
-        disposePanoramaCanvas, disposePanoramasIn
+        disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
     };
 })();

@@ -270,6 +270,34 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("runApiGeneration(prompt, [{...source, kind:'image'}]", self.smart)
         self.assertIn("clearOutputItem(node, options)", self.shared)
 
+    def test_edit_nodes_expose_generation_controls_and_forward_them(self):
+        for marker in (
+            "function normalizeEditGeneration(node)",
+            "data-edit-field=\"editResolution\"",
+            "data-edit-field=\"editQuality\"",
+            "data-edit-field=\"editRatio\"",
+            "node.editResolution || '2k'",
+            "node.editQuality || 'high'",
+            "requestedRatio",
+        ):
+            self.assertIn(marker, self.shared + self.classic + self.smart)
+
+    def test_special_edit_results_create_downstream_output_nodes(self):
+        for marker in (
+            "createEditOutputNode:createClassicSpecialOutputNode",
+            "function createClassicSpecialOutputNode(sourceNode, item, kind)",
+            "createEditOutputNode:createSmartSpecialOutputNode",
+            "function createSmartSpecialOutputNode(sourceNode, item, kind)",
+            "options.createEditOutputNode",
+        ):
+            self.assertIn(marker, self.classic + self.smart + self.shared)
+
+    def test_angle_subject_preview_is_not_rotated_with_camera(self):
+        self.assertIn("if(world) world.style.transform = 'none'", self.shared)
+        self.assertIn(".angle-world-3d{position:absolute;inset:0", self.angle_styles)
+        self.assertIn("transform:none;transform-origin:50% 50%", self.angle_styles)
+        self.assertIn(".angle-subject-3d{transform:translate(-50%,-54%) translateZ(32px)", self.angle_styles)
+
     def test_edit_preview_and_source_dimensions_stay_truthful(self):
         self.assertIn("relightOverlay.hidden = Boolean(output?.url)", self.shared)
         self.assertIn("nodeForControls[`${prefix}SourceWidth`] = uploaded.natural_w || 0", self.smart)

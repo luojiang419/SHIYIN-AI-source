@@ -8161,13 +8161,16 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     if((!width || !height) && source?.url){
         try { const dimensions = await getImageDimensions(source.url); width = dimensions.width; height = dimensions.height; } catch(_) {}
     }
-    const ratioParts = width > 0 && height > 0 ? ratioPartsFromDimensions(width, height) : {width:1, height:1};
+    const requestedRatio = String(node.editRatio || 'source');
+    const ratioParts = requestedRatio === 'source'
+        ? (width > 0 && height > 0 ? ratioPartsFromDimensions(width, height) : {width:1, height:1})
+        : (() => { const [w,h] = requestedRatio.split(':').map(Number); return {width:Math.max(1,w || 1), height:Math.max(1,h || 1)}; })();
     const payload = {
         prompt,
         provider_id:resolveImageProviderId(providerId),
-        model:resolveImageModel(model),
-        size:apiImageSize('custom', '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
-        quality:'high',
+        model:resolveImageModel(node.editModel || model),
+        size:apiImageSize('custom', node.editResolution || '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
+        quality:node.editQuality || 'high',
         reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}]
     };
     const task = await createCanvasImageTask(payload);
@@ -8177,6 +8180,23 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     if(!url) throw new Error(kind === 'relight' ? '灯光重塑没有返回图片' : '角度调整没有返回图片');
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
+}
+function createClassicSpecialOutputNode(sourceNode, item, kind){
+    if(!sourceNode?.id || !item?.url) return null;
+    let out = nodes.find(candidate => candidate.id === sourceNode.specialOutputNodeId && candidate.type === 'output')
+        || outputNodesForSource(sourceNode.id)[0];
+    if(!out){
+        pushUndo();
+        out = {id:uid('out'), type:'output', x:(Number(sourceNode.x) || 0) + Math.max(460, Number(sourceNode.w) || 460) + 100, y:Number(sourceNode.y) || 0, images:[], specialSourceNodeId:sourceNode.id, specialKind:kind};
+        nodes.push(out);
+        positionCanvasNodeRelative(out, sourceNode, 'downstream');
+        connections.push({id:uid('c'), from:sourceNode.id, to:out.id});
+    }
+    out.specialSourceNodeId = sourceNode.id;
+    out.specialKind = kind;
+    out.title = kind === 'relight' ? '灯光重塑结果' : '角度调整结果';
+    out.images = [{...item, kind:'image'}];
+    return out;
 }
 function classicPoseReplicateOutputPosition(sourceNode){
     const sourceWidth = Math.max(560, Number(sourceNode?.w) || 560);
@@ -8957,6 +8977,7 @@ function bindClassicSpecialNode(el, node){
         generateImageEdit:generateClassicSpecialEdit,
         generatePoseReplicate:generateClassicPoseReplicate,
         createOutputNode:createClassicPoseOutputNode,
+        createEditOutputNode:createClassicSpecialOutputNode,
         toast:message => setStatus(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
             scheduleSave();
@@ -9591,6 +9612,16 @@ function renderNode(node){
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
     if(node.type === 'poseReference') body.innerHTML = window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="muted-note">姿势参考节点加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="muted-note">一键复刻节点加载失败</div>';
+    if(['relight','angle'].includes(node.type)){
+        const prefix = node.type;
+        const connectedSource = classicSpecialInputImage(node);
+        if(connectedSource?.url){
+            node[`${prefix}SourceUrl`] = connectedSource.url;
+            node[`${prefix}SourceName`] = connectedSource.name || `${prefix}-source.png`;
+            node[`${prefix}SourceWidth`] = Number(connectedSource.natural_w || connectedSource.width || 0);
+            node[`${prefix}SourceHeight`] = Number(connectedSource.natural_h || connectedSource.height || 0);
+        }
+    }
     if(node.type === 'relight') body.innerHTML = window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="muted-note">灯光重塑节点加载失败</div>';
     if(node.type === 'angle') body.innerHTML = window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="muted-note">角度调整节点加载失败</div>';
     if(['ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(node.type)) body.innerHTML = window.CanvasEcommerceNodes?.bodyHtml?.(node) || '<div class="muted-note">电商节点加载失败</div>';

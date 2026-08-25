@@ -9438,6 +9438,16 @@ function render(){
         const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
         const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
         const smartLodSafe = !isSpecial && !isSmartGroup && !isPrompt && !isLoop && !isGroup && !isHistory;
+        if(['relight','angle'].includes(node.specialType)){
+            const prefix = node.specialType;
+            const connectedSource = smartSpecialInputImage(node);
+            if(connectedSource?.url){
+                node[`${prefix}SourceUrl`] = connectedSource.url;
+                node[`${prefix}SourceName`] = connectedSource.name || `${prefix}-source.png`;
+                node[`${prefix}SourceWidth`] = Number(connectedSource.natural_w || connectedSource.width || 0);
+                node[`${prefix}SourceHeight`] = Number(connectedSource.natural_h || connectedSource.height || 0);
+            }
+        }
         const body = nodeBodyHtml(node, layout);
         const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
         const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
@@ -10225,12 +10235,17 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
     const width = Math.max(0, Number(source?.natural_w || 0)), height = Math.max(0, Number(source?.natural_h || 0));
     const divisor = width > 0 && height > 0 ? gcdInt(Math.round(width), Math.round(height)) : 1;
-    const ratio = width > 0 && height > 0 ? `${Math.round(width / divisor)}:${Math.round(height / divisor)}` : (base.customRatio || '1:1');
+    const requestedRatio = String(node.editRatio || 'source');
+    const ratio = requestedRatio === 'source'
+        ? (width > 0 && height > 0 ? `${Math.round(width / divisor)}:${Math.round(height / divisor)}` : (base.customRatio || '1:1'))
+        : requestedRatio;
     const runSettings = {
         ...base,
         engine:'api', apiKind:'image', ratio:'custom', resolution:'2k',
         customRatio:ratio, customRatioWidth:ratio.split(':')[0], customRatioHeight:ratio.split(':')[1],
-        customSize:'', customWidth:'', customHeight:'', quality:'high', count:1
+        customSize:'', customWidth:'', customHeight:'', quality:'high', count:1,
+        resolution:node.editResolution || '2k', quality:node.editQuality || 'high',
+        model:node.editModel || base.model
     };
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
     const task = await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
@@ -11089,6 +11104,24 @@ function createSmartPoseOutputNode(sourceNode, item){
     scheduleSave();
     return output;
 }
+function createSmartSpecialOutputNode(sourceNode, item, kind){
+    if(!sourceNode?.id || !item?.url) return null;
+    let output = nodes.find(candidate => candidate.id === sourceNode.specialOutputNodeId && isSmartImageNode(candidate) && !candidate.specialType)
+        || (canvas?.connections || []).filter(connection => connection.from === sourceNode.id).map(connection => nodes.find(item => item.id === connection.to)).find(candidate => candidate && isSmartImageNode(candidate) && !candidate.specialType);
+    if(!output){
+        pushUndo();
+        output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:kind === 'relight' ? '灯光重塑结果' : '角度调整结果', images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+        const point = smartFreeNodePoint(sourceNode, output, 'downstream');
+        output.x = point.x; output.y = point.y;
+        nodes.push(output);
+    }
+    if(!(canvas?.connections || []).some(connection => connection.from === sourceNode.id && connection.to === output.id)) connectInputNode(sourceNode.id, output.id);
+    output.title = kind === 'relight' ? '灯光重塑结果' : '角度调整结果';
+    output.specialSourceNodeId = sourceNode.id;
+    output.specialKind = kind;
+    output.images = [{...item, kind:'image'}];
+    return output;
+}
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(node?.specialType === 'film-storyboard' || node?.specialType === 'film-video' || node?.specialType === 'film-line-art'){
@@ -11204,6 +11237,7 @@ function bindSmartSpecialNode(el, node){
         generateImageEdit:generateSmartSpecialEdit,
         generatePoseReplicate:generateSmartPoseReplicate,
         createOutputNode:createSmartPoseOutputNode,
+        createEditOutputNode:createSmartSpecialOutputNode,
         toast:message => toast(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
             scheduleSave();

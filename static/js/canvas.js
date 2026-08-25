@@ -4506,6 +4506,12 @@ function addOutputNode(point){
     const p = point || defaultPoint(260, 0);
     return addNode({id:uid('out'), type:'output', x:p.x, y:p.y, images:[]});
 }
+function estimateClassicCreateMenuSingleColumnHeight(){
+    const visibleItems = [...createMenu.children].filter(item => !item.hidden);
+    const itemHeight = item => item.classList.contains('menu-divider') ? 13 : 38;
+    const contentHeight = visibleItems.reduce((height, item) => height + itemHeight(item), 0);
+    return 16 + contentHeight + Math.max(0, visibleItems.length - 1) * 6;
+}
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
     closeLinkCreateMenu();
@@ -4517,7 +4523,7 @@ function openCreateMenu(clientX, clientY){
     createMenu.style.left = `${clientX}px`;
     createMenu.style.top = `${clientY}px`;
     createMenu.classList.add('open');
-    const singleColumnHeight = createMenu.getBoundingClientRect().height;
+    const singleColumnHeight = estimateClassicCreateMenuSingleColumnHeight();
     const lacksBottomSpace = clientY + singleColumnHeight + viewportMargin > window.innerHeight;
     createMenu.classList.toggle('create-menu-two-column', lacksBottomSpace);
     const menuRect = createMenu.getBoundingClientRect();
@@ -4537,7 +4543,7 @@ function openCreateMenu(clientX, clientY){
         filmMenuTrigger?.setAttribute('aria-expanded','false');
         filmMenuHost.classList.toggle('submenu-flip', left + menuRect.width + 232 > window.innerWidth - viewportMargin);
     }
-    refreshIcons();
+    refreshIcons(createMenu);
 }
 function closeCreateMenu(){
     createMenu.classList.remove('open');
@@ -4628,7 +4634,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY, inputRole=''
             createLinkedNode(btn.dataset.linkCreate);
         };
     });
-    refreshIcons();
+    refreshIcons(linkCreateMenu);
     return true;
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
@@ -4672,7 +4678,7 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
             createLinkedNode(btn.dataset.linkCreate);
         };
     }));
-    refreshIcons();
+    [nodeInputMenu, nodeOutputMenu].forEach(menu => refreshIcons(menu));
     return true;
 }
 function closeLinkCreateMenu(){
@@ -4722,7 +4728,7 @@ function openImageNodeMenu(nodeId, clientX, clientY){
         closeImageNodeMenu();
         pickImageForNode(nodeId);
     };
-    refreshIcons();
+    refreshIcons(imageNodeMenu);
 }
 function openImageNodePreview(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -4771,7 +4777,7 @@ function openOutputNodeMenu(nodeId, clientX, clientY){
             closeImageNodeMenu();
         };
     }
-    refreshIcons();
+    refreshIcons(imageNodeMenu);
 }
 function closeImageNodeMenu(){
     imageNodeMenu.classList.remove('open');

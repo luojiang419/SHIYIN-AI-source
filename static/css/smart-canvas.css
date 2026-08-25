@@ -310,7 +310,7 @@ body.smart-prompt-split-resize .prompt-node-llm select { pointer-events:none !im
 .loop-number-input { appearance:textfield; -moz-appearance:textfield; }
 .loop-smart-run i,.loop-smart-run svg { width:15px !important; height:15px !important; }
 .loop-smart-run:disabled { opacity:.45; cursor:not-allowed; }
-.create-menu { position:fixed; z-index:75; display:none; width:500px; max-width:calc(100vw - 28px); padding:9px; border-radius:16px; background:var(--panel); border:1px solid var(--line); box-shadow:0 22px 58px var(--shadow); backdrop-filter:blur(20px); }
+.create-menu { position:fixed; z-index:75; display:none; width:500px; max-width:calc(100vw - 28px); padding:9px; border-radius:16px; background:var(--card); border:1px solid var(--line); box-shadow:0 22px 58px var(--shadow); }
 .create-menu.open { display:block; }
 .smart-arrange-menu-btn { width:100%; min-height:36px; display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:8px; border:1px solid var(--line); border-radius:11px; background:var(--soft); color:var(--text); font-size:11px; font-weight:850; cursor:pointer; }
 .smart-arrange-menu-btn:hover { border-color:var(--strong); background:var(--card); }

@@ -21,7 +21,8 @@ class CanvasCreateMenuLayoutTests(unittest.TestCase):
         self.assertIsNotNone(match)
         body = match.group("body")
         self.assertIn("createMenu.classList.remove('create-menu-two-column')", body)
-        self.assertIn("const singleColumnHeight = createMenu.getBoundingClientRect().height", body)
+        self.assertIn("const singleColumnHeight = estimateClassicCreateMenuSingleColumnHeight()", body)
+        self.assertEqual(body.count("getBoundingClientRect()"), 1)
         self.assertIn("clientY + singleColumnHeight + viewportMargin > window.innerHeight", body)
         self.assertIn("createMenu.classList.toggle('create-menu-two-column', lacksBottomSpace)", body)
 

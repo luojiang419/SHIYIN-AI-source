@@ -491,6 +491,10 @@ const minimapNodeUpdateIds = new Set();
 let classicSelectionFeedbackState = null;
 const classicConnectionSelectionIndex = new Map();
 const classicConnectionModelIndex = new Map();
+// 剪贴板复制复用连接选择索引：nodeId -> connectionIds，避免每次复制扫描整张连接表。
+const classicClipboardConnectionIndex = classicConnectionSelectionIndex;
+let classicClipboardConnectionSource = null;
+let classicClipboardConnectionCount = -1;
 const CLASSIC_MINIMAP_CANVAS_ENABLED = true;
 let minimapCanvas = null;
 const minimapNodeRectIndex = new Map();
@@ -678,6 +682,8 @@ let outputTimer = null;
 let loopContext = null;
 let clipboard = null;
 let lastImagePasteAt = 0;
+let lastNodePasteAt = 0;
+let classicNodePasteTimer = 0;
 let promptTemplateNodeId = '';
 let promptTemplateCategory = 'all';
 let promptTemplateSelectedId = '';
@@ -13814,8 +13820,13 @@ function reorderInput(gen, movedId, targetId){
     render();
     scheduleSave();
 }
-function syncGeneratorInputs(){
-    nodes.filter(n => CANVAS_GENERATOR_TYPES.includes(n.type)).forEach(gen => {
+function syncGeneratorInputs(targetIds=null){
+    const targets = targetIds ? (targetIds instanceof Set ? targetIds : new Set(targetIds)) : null;
+    if(targets && [...targets].some(id => !canvasNodeIndex.has(id))) canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    const generators = targets
+        ? [...targets].map(id => canvasNodeIndex.get(id)).filter(node => node && CANVAS_GENERATOR_TYPES.includes(node.type))
+        : nodes.filter(node => CANVAS_GENERATOR_TYPES.includes(node.type));
+    generators.forEach(gen => {
         orderedSources(gen, generatorSources(gen));
         if(gen.type === 'ltxDirector') ltxSyncConnectedImagesToTimeline(gen);
     });
@@ -18725,14 +18736,44 @@ function duplicateNodesForAltDrag(node, preserveConnections=false){
     queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
     return copy;
 }
+function collectClassicClipboardNode(node, collected, collectedIds){
+    if(!node || collectedIds.has(node.id)) return;
+    collectedIds.add(node.id);
+    collected.push(node);
+    if(node.type === 'group' || node.type === 'promptGroup'){
+        (node.items || []).map(id => canvasNodeIndex.get(id)).forEach(child => collectClassicClipboardNode(child, collected, collectedIds));
+    }
+}
+function classicClipboardConnections(nodeIds){
+    if(classicClipboardConnectionSource !== connections || classicClipboardConnectionCount !== connections.length){
+        rebuildClassicConnectionModelIndexes();
+    }
+    const connectionIds = new Set();
+    nodeIds.forEach(nodeId => (classicClipboardConnectionIndex.get(nodeId) || []).forEach(connectionId => connectionIds.add(connectionId)));
+    return [...connectionIds]
+        .map(connectionId => classicConnectionModelIndex.get(connectionId))
+        .filter(connection => connection && nodeIds.has(connection.from) && nodeIds.has(connection.to));
+}
+function appendValidatedPastedConnections(candidates=[]){
+    const appended = [];
+    (candidates || []).forEach(connection => {
+        if(!canConnect(connection.from, connection.to, connection.inputRole || '')) return;
+        connections.push(connection);
+        appended.push(connection);
+    });
+    return appended;
+}
 function copySelectedNodes(){
     if(!canvas || !selected.size) return;
     const el = document.activeElement;
     if(el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return;
-    const toCopy = [...selected].map(id => nodes.find(n => n.id === id)).filter(Boolean);
+    const selectedIds = [...selected];
+    if(selectedIds.some(id => !canvasNodeIndex.has(id))) canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    const toCopy = [];
+    const ids = new Set();
+    selectedIds.map(id => canvasNodeIndex.get(id)).forEach(node => collectClassicClipboardNode(node, toCopy, ids));
     if(!toCopy.length) return;
-    const ids = new Set(toCopy.map(n => n.id));
-    const pickedConnections = (connections || []).filter(c => ids.has(c.from) && ids.has(c.to)).map(c => ({...c}));
+    const pickedConnections = classicClipboardConnections(ids).map(connection => ({...connection}));
     const clone = value => {
         try { return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
         catch { return JSON.parse(JSON.stringify(value)); }
@@ -18759,17 +18800,21 @@ function pasteNodes(){
     const copies = clipNodes.map(n => { const c = cloneNode(n, dx, dy); idMap.set(n.id, c.id); return c; });
     copies.forEach(c => {
         if((c.type === 'group' || c.type === 'promptGroup') && c.items)
-            c.items = c.items.map(id => idMap.get(id) || id);
+            c.items = c.items.map(id => idMap.get(id)).filter(Boolean);
     });
     const newConnections = clipConnections
         .map(c => ({...c, id:uid('c'), from:idMap.get(c.from), to:idMap.get(c.to)}))
         .filter(c => c.from && c.to);
     nodes.push(...copies);
-    connections.push(...newConnections);
+    copies.forEach(copy => canvasNodeIndex.set(copy.id, copy));
+    const appendedConnections = appendValidatedPastedConnections(newConnections);
     selected.clear();
     copies.forEach(c => selected.add(c.id));
-    sanitizeConnections();
-    syncGeneratorInputs();
+    const affectedGeneratorIds = new Set(copies.filter(copy => CANVAS_GENERATOR_TYPES.includes(copy.type)).map(copy => copy.id));
+    appendedConnections.forEach(connection => {
+        if(CANVAS_GENERATOR_TYPES.includes(canvasNodeIndex.get(connection.to)?.type)) affectedGeneratorIds.add(connection.to);
+    });
+    syncGeneratorInputs(affectedGeneratorIds);
     queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
     render();
     scheduleSave();
@@ -19880,6 +19925,13 @@ function renderLinks(){
     classicKnifeTrailDom?.remove();
     classicKnifeTrailDom = null;
     renderKnifeTrail();
+    rebuildClassicConnectionModelIndexes();
+    classicSelectionFeedbackState = null;
+    classicConnectionDirtyIds.clear();
+    classicConnectionStructureDirty = false;
+    perfEnd?.();
+}
+function rebuildClassicConnectionModelIndexes(){
     classicConnectionSelectionIndex.clear();
     classicConnectionModelIndex.clear();
     connections.forEach(connection => {
@@ -19891,10 +19943,8 @@ function renderLinks(){
             classicConnectionSelectionIndex.set(nodeId, ids);
         });
     });
-    classicSelectionFeedbackState = null;
-    classicConnectionDirtyIds.clear();
-    classicConnectionStructureDirty = false;
-    perfEnd?.();
+    classicClipboardConnectionSource = connections;
+    classicClipboardConnectionCount = connections.length;
 }
 function renderKnifeTrail(){
     if(!knifeActive || knifeTrail.length < 2) return;
@@ -20373,17 +20423,41 @@ board.addEventListener('drop', async e => {
 });
 window.addEventListener('dragend', () => dropOverlay.classList.remove('active'));
 window.addEventListener('drop', () => dropOverlay.classList.remove('active'));
-window.addEventListener('paste', e => {
+function cancelClassicNodePasteFallback(){
+    if(!classicNodePasteTimer) return;
+    clearTimeout(classicNodePasteTimer);
+    classicNodePasteTimer = 0;
+}
+function scheduleClassicNodePasteFallback(){
+    const requestedAt = Date.now();
+    cancelClassicNodePasteFallback();
+    classicNodePasteTimer = setTimeout(() => {
+        classicNodePasteTimer = 0;
+        if(lastImagePasteAt >= requestedAt || lastNodePasteAt >= requestedAt || !clipboardNodeCount()) return;
+        lastNodePasteAt = Date.now();
+        pasteNodes();
+    }, 0);
+}
+function handleClassicClipboardPaste(e){
     if(!canvas) return;
     const files = [...(e.clipboardData?.items || [])].filter(x => x.kind === 'file' && /^(image|video|audio)\//.test(String(x.type || ''))).map(x => x.getAsFile());
-    if(!files.length) return;
+    if(files.length){
+        e.preventDefault();
+        cancelClassicNodePasteFallback();
+        lastImagePasteAt = Date.now();
+        const blank = [...selected].map(id => canvasNodeIndex.get(id)).find(node => node?.type === 'image' && !node.url);
+        if(blank) fillImageNode(blank.id, files);
+        else if(files.length > 1) uploadImageGroup(files);
+        else uploadImages(files);
+        return;
+    }
+    if(isEditableTarget(e.target) || !clipboardNodeCount()) return;
     e.preventDefault();
-    lastImagePasteAt = Date.now();
-    const blank = [...selected].map(id => nodes.find(n => n.id === id)).find(n => n?.type === 'image' && !n.url);
-    if(blank) fillImageNode(blank.id, files);
-    else if(files.length > 1) uploadImageGroup(files);
-    else uploadImages(files);
-});
+    cancelClassicNodePasteFallback();
+    lastNodePasteAt = Date.now();
+    pasteNodes();
+}
+window.addEventListener('paste', handleClassicClipboardPaste);
 function classicShortcutSelectionTarget(){
     if(selected.size !== 1) return null;
     const nodeId = [...selected][0];
@@ -20549,11 +20623,7 @@ function runClassicCanvasShortcutAction(actionId){
         return true;
     }
     if(actionId === 'canvas.paste'){
-        const requestedAt = Date.now();
-        setTimeout(() => {
-            if(lastImagePasteAt >= requestedAt || !clipboardNodeCount()) return;
-            pasteNodes();
-        }, 90);
+        scheduleClassicNodePasteFallback();
         return 'allow-default';
     }
     if(actionId === 'canvas.delete'){ if(!selected.size) return false; deleteSelectedNodes(); return true; }
@@ -20671,6 +20741,7 @@ function detachClassicParentShortcutListeners(){
     if(!classicParentShortcutWindow) return;
     classicParentShortcutWindow.removeEventListener('keydown', handleClassicShortcutKeyDown);
     classicParentShortcutWindow.removeEventListener('keyup', handleClassicShortcutKeyUp);
+    classicParentShortcutWindow.removeEventListener('paste', handleClassicClipboardPaste);
     classicParentShortcutWindow.removeEventListener('blur', resetClassicShortcutHoldState);
     classicParentShortcutWindow = null;
 }
@@ -20681,6 +20752,7 @@ function syncClassicParentShortcutListeners(){
     if(!host) return;
     host.addEventListener('keydown', handleClassicShortcutKeyDown);
     host.addEventListener('keyup', handleClassicShortcutKeyUp);
+    host.addEventListener('paste', handleClassicClipboardPaste);
     host.addEventListener('blur', resetClassicShortcutHoldState);
     classicParentShortcutWindow = host;
 }

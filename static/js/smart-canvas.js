@@ -81,6 +81,9 @@ let canvas = null;
 let canvasUsesConnections = true;
 let nodes = [];
 let smartNodeIndex = new Map();
+const smartClipboardConnectionIndex = new Map();
+let smartClipboardConnectionCount = -1;
+let smartClipboardConnectionSource = null;
 const smartNodeDomIndex = new Map();
 const smartPortDomIndex = new Map();
 const smartNodeRectIndex = new Map();
@@ -281,6 +284,7 @@ const smartNodeRunTokens = new Map();
 let smartRhRandomValues = {};
 let lastImagePasteAt = 0;
 let lastNodePasteAt = 0;
+let smartNodePasteTimer = 0;
 let suppressNodeClickUntil = 0;
 let textSelectionGuard = null;
 let smartShortcutOverrides = {};
@@ -7435,13 +7439,23 @@ function cloneSmartNode(node, dx=0, dy=0){
     delete copy.runTimerHidden;
     return copy;
 }
+function collectSmartClipboardNode(node, collected, collectedIds){
+    if(!node || collectedIds.has(node.id)) return;
+    collectedIds.add(node.id);
+    collected.push(node);
+    if(isSmartGroupNode(node)){
+        (node.items || []).map(id => smartNodeIndex.get(id)).forEach(child => collectSmartClipboardNode(child, collected, collectedIds));
+    }
+}
 function copySelectedNodes(){
     if(!canvas || isEditableTarget(document.activeElement)) return;
     const ids = selectedNodeIds();
-    const copiedNodes = ids.map(id => nodes.find(n => n.id === id)).filter(Boolean);
+    if(ids.some(id => !smartNodeIndex.has(id))) smartNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    const copiedNodes = [];
+    const idSet = new Set();
+    ids.map(id => smartNodeIndex.get(id)).forEach(node => collectSmartClipboardNode(node, copiedNodes, idSet));
     if(!copiedNodes.length) return;
-    const idSet = new Set(copiedNodes.map(n => n.id));
-    const copiedConnections = (canvas.connections || []).filter(c => idSet.has(c.from) && idSet.has(c.to));
+    const copiedConnections = smartClipboardConnections(idSet);
     const clone = value => {
         try { return typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
         catch { return JSON.parse(JSON.stringify(value)); }
@@ -7468,6 +7482,9 @@ function pasteNodes(){
         return copy;
     });
     copies.forEach(copy => {
+        if(Array.isArray(copy.items)){
+            copy.items = copy.items.map(id => idMap.get(id)).filter(Boolean);
+        }
         if(Array.isArray(copy.inputNodeIds)){
             copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
         }
@@ -7475,6 +7492,7 @@ function pasteNodes(){
     });
     const newConnections = (nodeClipboard.connections || []).map(conn => ({
         ...conn,
+        ...(conn.id ? {id:uid('c')} : {}),
         from:idMap.get(conn.from),
         to:idMap.get(conn.to)
     })).filter(conn => conn.from && conn.to && conn.from !== conn.to);
@@ -7684,7 +7702,33 @@ function markSmartConnectionsDirtyForNodes(ids=[]){
         if(affected.has(connection.from) || affected.has(connection.to)) smartConnectionDirtyIds.add(connection.id);
     });
 }
+function rebuildSmartClipboardConnectionIndex(){
+    smartClipboardConnectionIndex.clear();
+    const connectionList = canvas?.connections || [];
+    connectionList.forEach((connection, index) => {
+        [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+            const connectionIds = smartClipboardConnectionIndex.get(nodeId) || new Set();
+            connectionIds.add(index);
+            smartClipboardConnectionIndex.set(nodeId, connectionIds);
+        });
+    });
+    smartClipboardConnectionSource = connectionList;
+    smartClipboardConnectionCount = connectionList.length;
+}
+function smartClipboardConnections(nodeIds){
+    const connectionList = canvas?.connections || [];
+    if(smartClipboardConnectionSource !== connectionList || smartClipboardConnectionCount !== connectionList.length){
+        rebuildSmartClipboardConnectionIndex();
+    }
+    const connectionIds = new Set();
+    nodeIds.forEach(nodeId => (smartClipboardConnectionIndex.get(nodeId) || []).forEach(connectionId => connectionIds.add(connectionId)));
+    return [...connectionIds]
+        .sort((left, right) => left - right)
+        .map(connectionId => connectionList[connectionId])
+        .filter(connection => connection && nodeIds.has(connection.from) && nodeIds.has(connection.to));
+}
 function rebuildSmartConnectionDomIndex(){
+    rebuildSmartClipboardConnectionIndex();
     smartConnectionDom.clear();
     smartConnectionSelectionIndex.clear();
     smartSelectionFeedbackState = null;
@@ -8754,11 +8798,7 @@ function runSmartCanvasShortcutAction(actionId){
         return true;
     }
     if(actionId === 'canvas.paste'){
-        const requestedAt = Date.now();
-        setTimeout(() => {
-            if(lastImagePasteAt >= requestedAt || lastNodePasteAt >= requestedAt) return;
-            if(nodeClipboard?.nodes?.length) pasteNodes();
-        }, 90);
+        scheduleSmartNodePasteFallback();
         return 'allow-default';
     }
     if(actionId === 'canvas.delete') return deleteSelectedSmartNodes();
@@ -19495,23 +19535,44 @@ shell.ondrop = async e => {
     if(payload.type === 'none') return;
     await handleSmartImageDropPayload(payload, '', {point:p, forceNew:true});
 };
-window.addEventListener('paste', e => {
+function cancelSmartNodePasteFallback(){
+    if(!smartNodePasteTimer) return;
+    clearTimeout(smartNodePasteTimer);
+    smartNodePasteTimer = 0;
+}
+function scheduleSmartNodePasteFallback(){
+    const requestedAt = Date.now();
+    cancelSmartNodePasteFallback();
+    smartNodePasteTimer = setTimeout(() => {
+        smartNodePasteTimer = 0;
+        if(lastImagePasteAt >= requestedAt || lastNodePasteAt >= requestedAt) return;
+        if(pasteAssetsFromInbox()) return;
+        if(nodeClipboard?.nodes?.length) pasteNodes();
+    }, 0);
+}
+function handleSmartClipboardPaste(e){
     const files = [...(e.clipboardData?.files || [])].filter(isSupportedUploadFile);
     if(files.length){
+        e.preventDefault();
+        cancelSmartNodePasteFallback();
         lastImagePasteAt = Date.now();
         handleFiles(files, selectedId);
         return;
     }
+    if(isEditableTarget(e.target)) return;
     // 素材库管理页「复制到画布」过来的素材：Ctrl+V 批量粘贴成图片节点
-    if(!isEditableTarget(e.target) && pasteAssetsFromInbox()){
+    if(pasteAssetsFromInbox()){
         e.preventDefault();
+        cancelSmartNodePasteFallback();
         return;
     }
-    if(nodeClipboard?.nodes?.length && !isEditableTarget(e.target)){
+    if(nodeClipboard?.nodes?.length){
         e.preventDefault();
+        cancelSmartNodePasteFallback();
         pasteNodes();
     }
-});
+}
+window.addEventListener('paste', handleSmartClipboardPaste);
 function handleSmartShortcutKeyDown(e){
     if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return; }
     if(isEditableTarget(e.target) || !window.ShortcutActions) return;
@@ -19560,6 +19621,7 @@ function detachSmartParentShortcutListeners(){
     if(!smartParentShortcutWindow) return;
     smartParentShortcutWindow.removeEventListener('keydown', handleSmartShortcutKeyDown);
     smartParentShortcutWindow.removeEventListener('keyup', handleSmartShortcutKeyUp);
+    smartParentShortcutWindow.removeEventListener('paste', handleSmartClipboardPaste);
     smartParentShortcutWindow.removeEventListener('blur', resetSmartShortcutHoldState);
     smartParentShortcutWindow = null;
 }
@@ -19570,6 +19632,7 @@ function syncSmartParentShortcutListeners(){
     if(!host) return;
     host.addEventListener('keydown', handleSmartShortcutKeyDown);
     host.addEventListener('keyup', handleSmartShortcutKeyUp);
+    host.addEventListener('paste', handleSmartClipboardPaste);
     host.addEventListener('blur', resetSmartShortcutHoldState);
     smartParentShortcutWindow = host;
 }

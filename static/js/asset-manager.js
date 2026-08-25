@@ -120,6 +120,10 @@ let canvasAssetSort = ['updated','name','canvas','kind'].includes(savedCanvasAss
 let canvasAssetSortOrder = savedCanvasAssetViewSettings.order === 'asc' ? 'asc' : 'desc';
 let canvasAssetMediaType = ['all','image','video'].includes(savedCanvasAssetViewSettings.mediaType) ? savedCanvasAssetViewSettings.mediaType : 'all';
 let canvasAssetManageMode = false;
+let canvasAssetsChangeToken = 0;
+let canvasAssetsLoadedToken = -1;
+let canvasAssetsRefreshTimer = null;
+let canvasAssetsRefreshInFlight = null;
 let searchCompositionActive = false;
 let searchRenderTimer = null;
 let lastSearchCompositionEndAt = 0;
@@ -1101,21 +1105,48 @@ function normalizeCanvasAssetState(){
     if(!selectedCanvasAssetId && items.length) selectedCanvasAssetId = items[0].id;
     selectedCanvasAssetIds = new Set([...selectedCanvasAssetIds].filter(id => findCanvasAssetItem(id)));
 }
-async function refreshCanvasAssets(){
+function scheduleCanvasAssetsRefresh(delay=450){
+    clearTimeout(canvasAssetsRefreshTimer);
+    if(activeTab !== 'canvas-assets' || document.hidden) return;
+    canvasAssetsRefreshTimer = setTimeout(() => {
+        canvasAssetsRefreshTimer = null;
+        refreshCanvasAssets({silent:true}).catch(err => setStatus(err.message || '刷新画布资产失败'));
+    }, Math.max(0, Number(delay) || 0));
+}
+function markCanvasAssetsDirty(){
+    canvasAssetsChangeToken += 1;
+    if(activeTab === 'canvas-assets') scheduleCanvasAssetsRefresh();
+}
+async function refreshCanvasAssets(options={}){
+    if(canvasAssetsRefreshInFlight) return canvasAssetsRefreshInFlight;
+    const silent = options.silent === true;
+    const requestedToken = canvasAssetsChangeToken;
+    const task = (async() => {
+        try {
+            if(!silent) setStatus('正在刷新画布资产...');
+            const data = await apiJson('/api/canvas-assets');
+            canvasAssetsData = {
+                categories:Array.isArray(data.categories) ? data.categories : [],
+                canvases:Array.isArray(data.canvases) ? data.canvases : [],
+                items:Array.isArray(data.items) ? data.items : []
+            };
+            canvasAssetsLoaded = true;
+            canvasAssetsLoadedToken = requestedToken;
+            normalizeCanvasAssetState();
+            render();
+            if(!silent) setStatus('画布资产已刷新');
+        } catch(err) {
+            setStatus(err.message || '刷新画布资产失败');
+            throw err;
+        } finally {
+            if(canvasAssetsChangeToken !== requestedToken) scheduleCanvasAssetsRefresh();
+        }
+    })();
+    canvasAssetsRefreshInFlight = task;
     try {
-        setStatus('正在刷新画布资产...');
-        const data = await apiJson('/api/canvas-assets');
-        canvasAssetsData = {
-            categories:Array.isArray(data.categories) ? data.categories : [],
-            canvases:Array.isArray(data.canvases) ? data.canvases : [],
-            items:Array.isArray(data.items) ? data.items : []
-        };
-        canvasAssetsLoaded = true;
-        normalizeCanvasAssetState();
-        render();
-        setStatus('画布资产已刷新');
-    } catch(err) {
-        setStatus(err.message || '刷新画布资产失败');
+        return await task;
+    } finally {
+        if(canvasAssetsRefreshInFlight === task) canvasAssetsRefreshInFlight = null;
     }
 }
 async function loadAll(){
@@ -1152,7 +1183,7 @@ async function ensureTabData(tab=activeTab){
         await Promise.all([loadSharedFolders(), loadLocalAssets()]);
         render();
         setStatus('本地素材已加载');
-    } else if(tab === 'canvas-assets' && !canvasAssetsLoaded){
+    } else if(tab === 'canvas-assets' && (!canvasAssetsLoaded || canvasAssetsLoadedToken !== canvasAssetsChangeToken)){
         await refreshCanvasAssets();
     }
 }
@@ -4727,10 +4758,20 @@ document.querySelectorAll('[data-tab]').forEach(btn => {
         selectedLocalUploadIds.clear();
         selectedCanvasAssetIds.clear();
         render();
+        ensureTabData(activeTab).catch(err => setStatus(err.message || '加载失败'));
     });
 });
 refreshBtn?.addEventListener('click', () => loadAll().catch(err => setStatus(err.message || '加载失败')));
+function handleCanvasAssetRealtimeMessage(data){
+    if(!data) return;
+    if(data.type === 'canvas_updated' || (data.type === 'entity.changed' && data.topic === 'canvas')) markCanvasAssetsDirty();
+}
 window.addEventListener('message', event => {
     if(event.data?.type === 'studio-theme') window.StudioTheme?.apply?.(event.data.theme);
+    handleCanvasAssetRealtimeMessage(event.data);
+});
+window.addEventListener('canvas-realtime-message', event => handleCanvasAssetRealtimeMessage(event.detail || {}));
+document.addEventListener('visibilitychange', () => {
+    if(!document.hidden && activeTab === 'canvas-assets' && canvasAssetsLoadedToken !== canvasAssetsChangeToken) scheduleCanvasAssetsRefresh(0);
 });
 document.addEventListener('DOMContentLoaded', () => loadAll().catch(err => setStatus(err.message || '加载失败')));

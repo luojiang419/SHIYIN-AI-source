@@ -95,6 +95,27 @@
         target?.postMessage({type: 'desktop-update-settings:response', requestId, ...payload}, origin || location.origin);
     }
 
+    async function saveCanvasDownloads(items = []) {
+        const directory = await invoke('choose_download_directory');
+        if (!directory) return {cancelled: true, count: 0};
+        let count = 0;
+        for (const item of Array.isArray(items) ? items : []) {
+            const url = String(item?.url || '').trim();
+            const name = String(item?.name || '').trim();
+            if (!url || !name) continue;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`下载 ${name} 失败（HTTP ${response.status}）`);
+            const bytes = Array.from(new Uint8Array(await response.arrayBuffer()));
+            await invoke('write_download_file', {directory, filename: name, data: bytes});
+            count += 1;
+        }
+        return {cancelled: false, count};
+    }
+
+    function replyCanvasDownload(target, origin, requestId, payload) {
+        target?.postMessage({type: 'desktop-canvas-download:response', requestId, ...payload}, origin || location.origin);
+    }
+
     window.addEventListener('message', async event => {
         if (event.origin && event.origin !== location.origin) return;
         const data = event.data || {};
@@ -108,6 +129,14 @@
         }
         if (data.type === 'desktop-update:check') {
             checkAndDownload({manual: true}).then(result => reply(event.source, event.origin, data.requestId, {result})).catch(error => reply(event.source, event.origin, data.requestId, {error: error.message || String(error)}));
+        }
+        if (data.type === 'desktop-canvas-download:save') {
+            try {
+                const result = await saveCanvasDownloads(data.items);
+                replyCanvasDownload(event.source, event.origin, data.requestId, result);
+            } catch (error) {
+                replyCanvasDownload(event.source, event.origin, data.requestId, {error: error.message || String(error)});
+            }
         }
     });
 

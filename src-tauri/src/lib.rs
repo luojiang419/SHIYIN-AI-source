@@ -186,6 +186,33 @@ fn native_download_handler(webview: tauri::Webview, event: DownloadEvent<'_>) ->
     }
 }
 
+#[tauri::command]
+fn choose_download_directory() -> Option<String> {
+    FileDialog::new()
+        .set_title("选择画布文件保存文件夹")
+        .pick_folder()
+        .map(|path| path.display().to_string())
+}
+
+#[tauri::command]
+fn write_download_file(directory: String, filename: String, data: Vec<u8>) -> Result<(), String> {
+    let trimmed_name = filename.trim();
+    if trimmed_name.is_empty()
+        || trimmed_name == "."
+        || trimmed_name == ".."
+        || trimmed_name.contains('\\')
+        || trimmed_name.contains('/')
+    {
+        return Err("下载文件名无效".to_string());
+    }
+    let directory_path = PathBuf::from(directory.trim());
+    if directory_path.as_os_str().is_empty() || !directory_path.is_dir() {
+        return Err("所选保存文件夹不存在".to_string());
+    }
+    fs::write(directory_path.join(trimmed_name), data)
+        .map_err(|error| format!("写入文件失败：{error}"))
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -736,6 +763,8 @@ pub fn run() {
             updater::download_update,
             updater::defer_downloaded_update,
             updater::apply_downloaded_update,
+            choose_download_directory,
+            write_download_file,
         ]);
     builder
         .run(tauri::generate_context!())
@@ -744,7 +773,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_legacy_webview_version_dir, suggested_download_name};
+    use super::{is_legacy_webview_version_dir, suggested_download_name, write_download_file};
+    use std::fs;
     use std::path::Path;
 
     #[test]
@@ -776,5 +806,29 @@ mod tests {
         for protected in ["shared", "1.0", "1.0.1-beta", "v1.0.1", "1..1", ""] {
             assert!(!is_legacy_webview_version_dir(protected));
         }
+    }
+
+    #[test]
+    fn desktop_download_writer_accepts_safe_name_and_rejects_path_escape() {
+        let directory =
+            std::env::temp_dir().join(format!("shiyin-download-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).expect("create test directory");
+        write_download_file(
+            directory.display().to_string(),
+            "sample.txt".to_string(),
+            b"ok".to_vec(),
+        )
+        .expect("write safe file");
+        assert_eq!(
+            fs::read(directory.join("sample.txt")).expect("read safe file"),
+            b"ok"
+        );
+        assert!(write_download_file(
+            directory.display().to_string(),
+            "..\\escape.txt".to_string(),
+            vec![1]
+        )
+        .is_err());
+        fs::remove_dir_all(directory).expect("remove test directory");
     }
 }

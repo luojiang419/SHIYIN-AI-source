@@ -4810,6 +4810,100 @@ function outputImageUrls(node){
 function outputDownloadableImageUrls(node){
     return (node?.images || []).map(outputUrlValue).filter(url => url && !isMissingAssetUrl(url) && (url.startsWith('/output/') || url.startsWith('/assets/')));
 }
+function outputDownloadableItems(node){
+    return (node?.images || []).map((item, index) => {
+        const url = outputUrlValue(item);
+        if(!url || isMissingAssetUrl(url) || (!url.startsWith('/output/') && !url.startsWith('/assets/'))) return null;
+        const rawName = typeof item === 'object' ? (item.name || item.filename || item.file || '') : '';
+        return {
+            url,
+            name:safeDownloadFileName(rawName || outputImageName(url) || `canvas-output-${index + 1}`, `canvas-output-${index + 1}.png`),
+        };
+    }).filter(Boolean);
+}
+function uniqueCanvasDownloadName(name, used){
+    const initial = safeDownloadFileName(name, 'canvas-output.bin');
+    const dot = initial.lastIndexOf('.');
+    const stem = dot > 0 ? initial.slice(0, dot) : initial;
+    const ext = dot > 0 ? initial.slice(dot) : '';
+    let candidate = initial;
+    let sequence = 2;
+    while(used.has(candidate.toLowerCase())) candidate = `${stem} (${sequence++})${ext}`;
+    used.add(candidate.toLowerCase());
+    return candidate;
+}
+function canvasDownloadResourceUrl(url, filename){
+    const raw = canvasOriginalMediaUrl(url);
+    if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+    if(raw.startsWith('/api/download-output')) return raw;
+    return `/api/download-output?url=${encodeURIComponent(raw)}&name=${encodeURIComponent(filename || outputDownloadName(raw))}`;
+}
+function requestDesktopCanvasDownload(items){
+    if(window.parent === window || !window.parent?.postMessage) return null;
+    const requestId = `canvas-download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            window.removeEventListener('message', receive);
+            reject(new Error('桌面文件保存服务未响应，请重启软件后重试'));
+        }, 120000);
+        function receive(event){
+            if(event.origin && event.origin !== location.origin) return;
+            const data = event.data || {};
+            if(data.type !== 'desktop-canvas-download:response' || data.requestId !== requestId) return;
+            clearTimeout(timeout);
+            window.removeEventListener('message', receive);
+            if(data.error) reject(new Error(data.error)); else resolve(data);
+        }
+        window.addEventListener('message', receive);
+        window.parent.postMessage({type:'desktop-canvas-download:save', requestId, items}, location.origin);
+    });
+}
+async function saveCanvasItemsToDirectory(title, items){
+    const list = (items || []).filter(item => item?.url);
+    if(!list.length){
+        alert(tr('canvas.outputDownloadEmpty'));
+        return false;
+    }
+    if(typeof window.showDirectoryPicker !== 'function'){
+        const desktopResult = await requestDesktopCanvasDownload(list.map(item => ({
+            url:item.url,
+            name:item.name || outputImageName(item.url)
+        })));
+        if(desktopResult){
+            if(desktopResult.cancelled) return false;
+            const saved = Number(desktopResult.count || 0);
+            setStatus(langIsEn() ? `Saved ${saved} file${saved === 1 ? '' : 's'} to ${title || 'selected folder'}` : `已将 ${saved} 个文件保存到所选文件夹`);
+            return saved > 0;
+        }
+        throw new Error('当前环境不支持选择文件夹，请使用 Windows 桌面版');
+    }
+    let directory;
+    try {
+        directory = await window.showDirectoryPicker({mode:'readwrite'});
+    } catch(error) {
+        if(error?.name === 'AbortError') return false;
+        throw error;
+    }
+    const usedNames = new Set();
+    let saved = 0;
+    for(const item of list){
+        const filename = uniqueCanvasDownloadName(item.name || outputImageName(item.url), usedNames);
+        const response = await fetch(canvasDownloadResourceUrl(item.url, filename));
+        if(!response.ok) throw new Error(await responseErrorMessage(response, `下载 ${filename} 失败`));
+        const handle = await directory.getFileHandle(filename, {create:true});
+        const writable = await handle.createWritable();
+        try {
+            await writable.write(await response.blob());
+            await writable.close();
+        } catch(error){
+            try { await writable.abort(); } catch(_) {}
+            throw error;
+        }
+        saved += 1;
+    }
+    setStatus(langIsEn() ? `Saved ${saved} file${saved === 1 ? '' : 's'} to ${title || 'selected folder'}` : `已将 ${saved} 个文件保存到所选文件夹`);
+    return true;
+}
 function groupImageItems(group){
     if(!group || group.type !== 'group') return [];
     return (group.items || [])
@@ -4913,29 +5007,13 @@ function copyOutputNodeToInputGroup(nodeId){
 }
 async function downloadOutputNodeImages(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    const urls = outputDownloadableImageUrls(node);
-    if(!node || !urls.length){
+    const items = outputDownloadableItems(node);
+    if(!node || !items.length){
         alert(tr('canvas.outputDownloadEmpty'));
         return;
     }
     try {
-        const res = await fetch('/api/canvas-assets/download', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                urls,
-                filename:`${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`
-            })
-        });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
-        const blob = await res.blob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        await saveCanvasItemsToDirectory(canvas?.title || 'canvas-output', items);
     } catch(err) {
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }

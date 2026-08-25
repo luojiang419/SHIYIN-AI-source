@@ -1,4 +1,4 @@
-# SHIYIN AI v1.0.309
+# SHIYIN AI v1.0.310
 
 - API 设置新增 `Responses（原生）`协议、Responses 端点配置、模型列表获取和端点探测；上游未提供 `/v1/models` 时会保留手动填写模型的入口。
 

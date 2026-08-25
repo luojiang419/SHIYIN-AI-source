@@ -7918,11 +7918,16 @@ function refreshNodes(ids=[]){
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
     const focusSnapshot = window.StudioFocusGuard?.capture?.();
     const outputScrolls = captureOutputScrolls();
+    const iconRoots = [];
     applyViewport();
     for(const id of uniqueIds){
         const node = canvasNodeIndex.get(id);
         if(!node) continue;
-        if(node.type === 'output' && refreshOutputNodeContent(node)) continue;
+        if(node.type === 'output' && refreshOutputNodeContent(node)){
+            const current = canvasNodeDomIndex.get(id);
+            if(current) iconRoots.push(current);
+            continue;
+        }
         const current = canvasNodeDomIndex.get(id);
         if(!current){
             render();
@@ -7933,6 +7938,7 @@ function refreshNodes(ids=[]){
             const fresh = renderNode(node);
             if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
             current.replaceWith(fresh);
+            iconRoots.push(fresh);
         } catch(err){
             console.error('[canvas] refreshNode 失败，已跳过该节点：', id, err);
         }
@@ -7941,7 +7947,8 @@ function refreshNodes(ids=[]){
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
-    refreshIcons();
+    // 节点运行/聊天结果只替换受影响节点；全局扫描会让大画布上的 LLM 操作出现明显延迟。
+    iconRoots.forEach(root => refreshIcons(root));
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
@@ -11429,7 +11436,7 @@ function renderLLMBody(node){
         const models = providerChatModels(node.llmProvider);
         node.model = models[0] || '';
         if(node.llmProvider === 'modelscope') node.llmMsModel = node.model;
-        render();
+        refreshNodes([node.id]);
         scheduleSave();
     };
     modelSelect.onchange = e => {
@@ -11438,12 +11445,12 @@ function renderLLMBody(node){
         if((node.llmProvider||'comfly') === 'modelscope') node.llmMsModel = e.target.value;
         scheduleSave();
     };
-    wrap.querySelector('.llm-sys-toggle').onclick = e => { e.stopPropagation(); node.showSystem = !node.showSystem; render(); scheduleSave(); };
+    wrap.querySelector('.llm-sys-toggle').onclick = e => { e.stopPropagation(); node.showSystem = !node.showSystem; refreshNodes([node.id]); scheduleSave(); };
     const sysEl = wrap.querySelector('.llm-system');
     if(sysEl){ sysEl.oninput = e => { node.systemPrompt = e.target.value; scheduleSave(); }; bindScrollableText(sysEl); }
     wrap.querySelectorAll('[data-mode]').forEach(btn => {
         btn.classList.toggle('active', mode === btn.dataset.mode);
-        btn.onclick = e => { e.stopPropagation(); node.mode = btn.dataset.mode; render(); scheduleSave(); };
+        btn.onclick = e => { e.stopPropagation(); node.mode = btn.dataset.mode; refreshNodes([node.id]); scheduleSave(); };
     });
     const nodePane = wrap.querySelector('.llm-node-pane');
     const chatPane = wrap.querySelector('.llm-chat-pane');

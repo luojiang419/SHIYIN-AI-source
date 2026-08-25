@@ -143,6 +143,19 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("childDrag.el", drag)
         self.assertIn("nodesEl.querySelector", drag)
 
+    def test_classic_llm_controls_use_node_refresh_instead_of_full_canvas_render(self):
+        llm = body(CANVAS_JS, "function renderLLMBody(node)", "function renderLLMNodePane")
+        self.assertEqual(llm.count("refreshNodes([node.id])"), 3)
+        self.assertNotIn("render();", llm)
+        self.assertIn("node.mode = btn.dataset.mode; refreshNodes([node.id]); scheduleSave();", llm)
+
+    def test_classic_scoped_refresh_only_rebuilds_icons_for_replaced_nodes(self):
+        refresh = body(CANVAS_JS, "function refreshNodes(ids=[])", "function refreshRunNodes")
+        self.assertIn("const iconRoots = [];", refresh)
+        self.assertIn("iconRoots.push(fresh);", refresh)
+        self.assertIn("iconRoots.forEach(root => refreshIcons(root));", refresh)
+        self.assertNotIn("\n    refreshIcons();", refresh)
+
     def test_smart_drag_drop_highlight_reuses_current_target_index(self):
         highlight = body(SMART_CANVAS_JS, "function clearDropHighlight(){", "function deleteNode")
         self.assertIn("SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED", SMART_CANVAS_JS)

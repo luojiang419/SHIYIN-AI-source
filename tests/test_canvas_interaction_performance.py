@@ -101,6 +101,26 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("new Set([...previous, ...selected])", connection)
         self.assertIn("svg.querySelectorAll('path.conn-hit[data-conn-index]')", connection)
 
+    def test_smart_selection_initializes_incremental_state_before_first_click(self):
+        render = body(SMART_CANVAS_JS, "function render(){", "function registerSmartCanvasPerfFixture")
+        selection = body(SMART_CANVAS_JS, "function syncSelectionUi(){", "function isNodeSelected")
+        resolution = body(SMART_CANVAS_JS, "function syncSmartSelectedImageResolution", "function cloneSmartSettings")
+        self.assertIn("selectionFeedbackBeforeRender", render)
+        self.assertIn("ids:new Set(selectedNodeIds())", render)
+        self.assertIn("syncSmartSelectedImageResolution(world, new Set(selectedNodeIds()))", render)
+        self.assertIn("const affectedNodeIds = new Set", selection)
+        self.assertIn("syncSmartSelectedImageResolution(world, affectedNodeIds)", selection)
+        self.assertIn("smartNodeDomIndex.get(id)", resolution)
+        self.assertIn("const imageElements = affectedNodeIds", resolution)
+        self.assertIn(": [...(root.querySelectorAll?.('.image-node img[data-preview-src][data-original-src]') || [])]", resolution)
+
+    def test_smart_image_single_click_selects_without_double_click_delay(self):
+        self.assertNotIn("imageClickTimer = setTimeout", SMART_CANVAS_JS)
+        self.assertNotIn("}, 220);", SMART_CANVAS_JS)
+        click = body(SMART_CANVAS_JS, "item.addEventListener('click'", "item.addEventListener('dblclick'")
+        self.assertIn("syncSelectionUi();", click)
+        self.assertIn("updateComposer();", click)
+
     def test_classic_selection_feedback_uses_node_and_connection_indexes_with_fallback(self):
         selection = body(CANVAS_JS, "function refreshSelectionVisuals(){", "function syncConnectionSelectionVisuals")
         connection = body(CANVAS_JS, "function syncConnectionSelectionVisuals(){", "function pathEl")
@@ -217,7 +237,7 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         hidden = css[css.index(".smart-node-floating-menu {"):css.index(".smart-node-floating-menu.smart-node-image-menu")]
         self.assertIn("backdrop-filter:none", hidden)
         selected = css[css.index(".image-node.selected .smart-node-floating-menu"):css.index(".world.smart-multi-selected")]
-        self.assertIn("backdrop-filter:blur(18px)", selected)
+        self.assertIn("backdrop-filter:none", selected)
 
     def test_remote_canvas_sync_skips_timestamp_only_redraws(self):
         smart_apply = body(SMART_CANVAS_JS, "function applyMergedServerCanvas", "async function mergeReloadCanvasNow")

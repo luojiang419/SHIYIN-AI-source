@@ -800,9 +800,15 @@ function preloadSmartSelectedHighRes(src){
     smartSelectedHighResLoading.set(src, task);
     return task;
 }
-function syncSmartSelectedImageResolution(root=world){
+function syncSmartSelectedImageResolution(root=world, affectedNodeIds=null){
     const selectedImages = [];
-    root.querySelectorAll?.('.image-node img[data-preview-src][data-original-src]').forEach(img => {
+    const imageElements = affectedNodeIds
+        ? [...affectedNodeIds].flatMap(id => {
+            const nodeEl = smartNodeDomIndex.get(id) || root.querySelector?.(`.image-node[data-id="${CSS.escape(id)}"]`);
+            return nodeEl ? [...nodeEl.querySelectorAll('img[data-preview-src][data-original-src]')] : [];
+        })
+        : [...(root.querySelectorAll?.('.image-node img[data-preview-src][data-original-src]') || [])];
+    imageElements.forEach(img => {
         if(img.dataset.previewKind === 'video') return;
         const nodeEl = img.closest('.image-node');
         const selectedNode = Boolean(nodeEl?.dataset?.id && isNodeSelected(nodeEl.dataset.id));
@@ -1459,6 +1465,9 @@ function syncSelectionUi(){
     const nextIds = new Set(ids);
     const imageNodeId = selectedImage.nodeId || '';
     const previous = smartSelectionFeedbackState;
+    const affectedNodeIds = new Set([...(previous?.ids || []), ...nextIds]);
+    if(previous?.imageNodeId) affectedNodeIds.add(previous.imageNodeId);
+    if(imageNodeId) affectedNodeIds.add(imageNodeId);
     const incremental = SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
         && previous
         && smartNodeDomIndex.size > 0;
@@ -1490,7 +1499,6 @@ function syncSelectionUi(){
             });
         });
     }
-    syncSmartSelectedImageResolution(world);
     syncRunButtonState();
     syncConnectionSelectionUi();
     smartSelectionFeedbackState = {
@@ -1499,6 +1507,7 @@ function syncSelectionUi(){
         imageIndex:Number(selectedImage.index),
         connectionIds:nextIds
     };
+    syncSmartSelectedImageResolution(world, affectedNodeIds);
     scheduleSmartSafeLod();
 }
 function syncConnectionSelectionUi(){
@@ -9379,6 +9388,7 @@ function render(){
     }
     const mutation = smartRenderMutation;
     smartRenderMutation = null;
+    const selectionFeedbackBeforeRender = smartSelectionFeedbackState;
     updateSmartCanvasStats();
     smartSelectionFeedbackState = null;
     smartDropHighlightId = '';
@@ -9507,6 +9517,14 @@ function render(){
     rebuildSmartConnectionDomIndex();
     smartConnectionDirtyIds.clear();
     smartConnectionStructureDirty = false;
+    smartSelectionFeedbackState = mutation && selectionFeedbackBeforeRender
+        ? selectionFeedbackBeforeRender
+        : {
+            ids:new Set(selectedNodeIds()),
+            imageNodeId:selectedImage.nodeId || '',
+            imageIndex:Number(selectedImage.index),
+            connectionIds:new Set(selectedNodeIds())
+        };
     if(mutation) syncSelectionUi();
     updateComposer();
     scheduleSmartMinimapRender();
@@ -9518,7 +9536,7 @@ function render(){
         scheduleSmartIdleIconRefresh(world);
         bindSmartPreviewImageFallbacks(world);
     }
-    syncSmartSelectedImageResolution(world);
+    syncSmartSelectedImageResolution(world, new Set(selectedNodeIds()));
     if(mutation) freshNodeEls.forEach(root => measureSmartNodeImages(nodeIndex, root));
     else measureSmartNodeImages(nodeIndex, world);
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
@@ -11490,18 +11508,15 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                     return;
                 }
                 clearImageClickTimer();
-                imageClickTimer = setTimeout(() => {
-                    imageClickTimer = null;
                 restoreSmartNodeToolbar();
                 hideRunTimerForNode(owner);
                 selectedId = id;
                 selectedIds = [];
                 // Composer 绑定节点本身；这里记录图层焦点，用于交叠时置顶和工具栏目标。
                 selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
-                    if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
-                    syncSelectionUi();
-                    updateComposer();
-                }, 220);
+                if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+                syncSelectionUi();
+                updateComposer();
             });
         item.addEventListener('dblclick', e => {
             if(e.target.closest('video,audio')) return;

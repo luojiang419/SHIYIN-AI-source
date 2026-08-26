@@ -174,7 +174,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn(marker, self.classic)
 
         for marker in (
-            "canvas.connections.push({from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})})",
+            "const connection = {id:uid('c'), from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})}",
             "connectInputNode(fromId, toId, inputRole)",
             "`${c.from}->${c.to}:${c.kind || 'flow'}:${c.inputRole || ''}`",
             ".filter(item => item.to === to.id && (item.kind || 'flow') === 'input')",

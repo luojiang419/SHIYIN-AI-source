@@ -101,6 +101,16 @@ class CanvasUndoTransactionContractTests(unittest.TestCase):
         self.assertIn("try", section)
         self.assertIn("finally", section)
 
+    def test_smart_group_menu_creation_records_only_the_changed_group(self):
+        section = body(SMART_CANVAS_JS, "function createNodeFromMenu", "shell.addEventListener('mousedown'")
+        self.assertIn("const groupBefore = groupId", section)
+        self.assertIn("cloneSmartHistoryValue(smartNodeIndex.get(groupId))", section)
+        self.assertIn("const groupAfter = groupId ? smartNodeIndex.get(groupId) : null", section)
+        self.assertIn("replacedNodes", section)
+        self.assertIn("before:groupBefore", section)
+        self.assertIn("after:cloneSmartHistoryValue(groupAfter)", section)
+        self.assertNotIn("cloneSmartHistoryValue(nodes)", section)
+
     def test_smart_structural_transactions_abort_on_exception(self):
         self.assertIn("function abortSmartHistoryTransaction", SMART_CANVAS_JS)
         for start, end in (
@@ -122,6 +132,15 @@ class CanvasUndoTransactionContractTests(unittest.TestCase):
             self.assertIn("selectionAfter", source)
             section = source[source.index(helper):]
             self.assertRegex(section, re.compile(r"selection(?:Before|After)"))
+
+    def test_transaction_replacements_apply_before_state_for_undo(self):
+        for source, start, end in (
+            (CANVAS_JS, "function applyClassicHistoryTransaction", "function pushUndo"),
+            (SMART_CANVAS_JS, "function applySmartHistoryTransaction", "function pushUndo"),
+        ):
+            section = body(source, start, end)
+            self.assertIn("change.before", section, start)
+            self.assertNotIn("change.after", section, start)
 
     def test_undo_and_redo_dispatch_both_entry_kinds(self):
         for source, undo, redo in (

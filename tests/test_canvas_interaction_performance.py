@@ -122,7 +122,7 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("updateComposer();", click)
 
     def test_classic_selection_feedback_uses_node_and_connection_indexes_with_fallback(self):
-        selection = body(CANVAS_JS, "function refreshSelectionVisuals(){", "function syncConnectionSelectionVisuals")
+        selection = body(CANVAS_JS, "function refreshSelectionVisuals(", "function syncConnectionSelectionVisuals")
         connection = body(CANVAS_JS, "function syncConnectionSelectionVisuals(){", "function pathEl")
         self.assertIn("CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED", CANVAS_JS)
         self.assertIn("classicSelectionFeedbackState", selection)
@@ -185,8 +185,10 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
 
     def test_smart_output_drop_does_not_render_empty_node_before_appending_media(self):
         create_node = body(SMART_CANVAS_JS, "function createNode(x, y", "function createPromptNode")
+        commit_create = body(SMART_CANVAS_JS, "function commitSmartNodeCreate", "function createFilmNode")
         append = body(SMART_CANVAS_JS, "function appendImagesToSmartNode", "async function handleFiles")
-        self.assertIn("options.deferRender !== true", create_node)
+        self.assertIn("commitSmartNodeCreate(node, options)", create_node)
+        self.assertIn("options.deferRender !== true", commit_create)
         self.assertIn("deferRender:true", append)
         self.assertEqual(append.count("render();"), 1)
 

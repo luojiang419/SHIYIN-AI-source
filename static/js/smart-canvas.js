@@ -88,6 +88,7 @@ const smartNodeDomIndex = new Map();
 const smartPortDomIndex = new Map();
 const smartNodeRectIndex = new Map();
 const smartPortGeometryIndex = new Map();
+const smartGroupOwnerIndex = new Map();
 let smartGeometryEpoch = 0;
 let selectedId = '';
 let selectedIds = [];
@@ -438,7 +439,7 @@ function applySmartHistoryTransaction(entry, selectionOverride=null){
     if((entry.deletedConnections || []).length) canvas.connections.push(...cloneSmartHistoryValue(entry.deletedConnections));
     (entry.replacedNodes || []).forEach(change => {
         const node = nodes.find(item => item.id === change.id);
-        if(node) Object.assign(node, cloneSmartHistoryValue(change.after || {}));
+        if(node) Object.assign(node, cloneSmartHistoryValue(change.before || {}));
     });
     const selection = selectionOverride || entry.selectionAfter || {};
     selectedId = selection.selectedId || '';
@@ -1630,17 +1631,24 @@ function syncConnectionSelectionUi(){
         && previous
         && smartConnectionSelectionIndex.size > 0;
     const connectionsByIndex = canvas?.connections || [];
+    const connectionsForHit = hit => {
+        const connectionId = hit?.dataset?.connectionId || '';
+        if(connectionId){
+            const connection = smartConnectionModelIndex.get(connectionId);
+            return connection ? [connection] : [];
+        }
+        return String(hit?.dataset?.connIndex || '')
+            .split(',')
+            .filter(rawIndex => rawIndex !== '')
+            .map(rawIndex => connectionsByIndex[Number(rawIndex)])
+            .filter(Boolean);
+    };
     const updateHit = hit => {
-        const active = String(hit?.dataset?.connIndex || '').split(',').some(rawIndex => {
-            const connection = connectionsByIndex[Number(rawIndex)];
-            return connection && (selected.has(connection.from) || selected.has(connection.to));
-        });
+        const hitConnections = connectionsForHit(hit);
+        const active = hitConnections.some(connection => selected.has(connection.from) || selected.has(connection.to));
         const path = hit.previousElementSibling;
         path?.classList.toggle('conn-selected', active);
-        const breathe = String(hit.dataset.connIndex || '').split(',').some(rawIndex => {
-            const connection = connectionsByIndex[Number(rawIndex)];
-            return connection && selected.has(connection.from);
-        });
+        const breathe = hitConnections.some(connection => selected.has(connection.from));
         path?.classList.toggle('conn-breathe', breathe);
     };
     if(incremental){
@@ -1823,6 +1831,22 @@ function filmSmartImageModelOptions(node){
     return smartMultiViewModelOptions(providerId,node.model || '');
 }
 const smartFilmActiveRuns = new Map();
+function commitSmartNodeCreate(node, options={}){
+    if(!node?.id) throw new Error('智能画布节点缺少稳定 ID');
+    if(!nodes.includes(node)) nodes.push(node);
+    smartNodeIndex.set(node.id, node);
+    if(options.select !== false){
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+    }
+    if(options.deferRender !== true){
+        queueSmartRenderMutation({createdIds:[node.id]});
+        render();
+    }
+    if(options.deferSave !== true) scheduleSave();
+    return node;
+}
 function createFilmNode(type, point){
     const api=window.CanvasFilmNodes;
     if(!api?.isType?.(type)) return null;
@@ -1847,8 +1871,7 @@ function createFilmNode(type, point){
         runSettings:settingsForStorage({...cloneSmartSettings(settings),engine:'api',apiKind:'image',ratio:'16:9',resolution:'2k',quality:'high',count:1}),
     });
     node.id=uid(type === 'film-video' ? 'film-video' : type === 'film-line-art' ? 'film-line-art' : 'film-storyboard');
-    nodes.push(node); selectedId=node.id; selectedIds=[]; selectedImage={nodeId:'',index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function smartFilmLineArtRunSettings(node){
     const sourceSettings=node?.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
@@ -1924,8 +1947,7 @@ function createPanoramaNode(point){
         panoramaResolution:'1280x720', mannequinEnabled:false, mannequinX:0.5,
         mannequinY:0.68, mannequinScale:0.32, scale:MEDIA_NODE_DEFAULT_SCALE
     };
-    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function createDWPoseNode(point){
     pushUndo();
@@ -1934,8 +1956,7 @@ function createDWPoseNode(point){
         x:(point?.x || 0) - 190, y:(point?.y || 0) - 195, w:380, h:390,
         title:'动作提取', images:[], poseStatus:'idle', scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
-    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function createPoseReferenceNode(point){
     pushUndo();
@@ -1946,8 +1967,7 @@ function createPoseReferenceNode(point){
         poseEditorState:window.PoseReferenceEditor?.normalizeState({}) || {},
         scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
-    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function createPoseReplicateNode(point){
     pushUndo();
@@ -1957,8 +1977,7 @@ function createPoseReplicateNode(point){
         title:'一键复刻', images:[], poseReplicateStatus:'idle', poseStatus:'idle',
         poseReplicateRuns:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
-    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function createRelightNode(point){
     pushUndo();
@@ -1969,8 +1988,7 @@ function createRelightNode(point){
         relightDirection:'left', relightTemperature:18, relightIntensity:68,
         relightSoftness:'balanced', relightMood:'cinematic', relightPreserve:true, relightNotes:''
     };
-    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function createAngleNode(point){
     pushUndo();
@@ -1981,8 +1999,7 @@ function createAngleNode(point){
         angleAzimuth:45, angleElevation:0, angleDistance:'medium', angleLens:'50',
         angleSubject:'person', anglePreserve:true, angleNotes:''
     };
-    nodes.push(node); selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
-    render(); scheduleSave(); return node;
+    return commitSmartNodeCreate(node);
 }
 function createMultiViewNode(point, sourceNode=null){
     pushUndo();
@@ -1996,7 +2013,7 @@ function createMultiViewNode(point, sourceNode=null){
         multiViewMode:'person', multiViewStatus:'idle', multiViewInputs:[], multiViewOutputs:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now(),
         buildingPrompt:'', buildingStage:'idle', buildingOutputs:[], buildingPlan:null, buildingErrors:{}, buildingPendingTasks:[], buildingInputSignature:'', buildingOutputNodeId:''
     };
-    nodes.push(node);
+    commitSmartNodeCreate(node, {select:false, deferRender:true, deferSave:true});
     if(sourceNode?.id) connectInputNode(sourceNode.id, node.id, 'model-front');
     selectedId = node.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
     queueSmartRenderMutation({createdIds:[node.id]});
@@ -2016,7 +2033,7 @@ function createSmartBatchGeneratorNode(sourceNode=null, point=null){
         runSettings:settingsForStorage({...normalizeSmartMultiViewSettings(sourceSettings), ratio:'source', count:1}),
         scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
-    nodes.push(node);
+    commitSmartNodeCreate(node, {select:false, deferRender:true, deferSave:true});
     if(sourceNode?.id) connectInputNode(sourceNode.id, node.id);
     selectedId = node.id;
     selectedIds = [];
@@ -2852,9 +2869,9 @@ function smartPortIndexKey(nodeId, kind, role=''){
     return `${nodeId}:${kind}:${role || ''}`;
 }
 function invalidateSmartGeometry(ids=[]){
-    smartGeometryEpoch += 1;
     const list = (ids || []).filter(Boolean);
     if(!list.length){
+        smartGeometryEpoch += 1;
         smartNodeRectIndex.clear();
         smartPortGeometryIndex.clear();
         return;
@@ -2865,24 +2882,60 @@ function invalidateSmartGeometry(ids=[]){
         if(affected.has(String(key).split(':', 1)[0])) smartPortGeometryIndex.delete(key);
     });
 }
+function removeSmartNodeDomIndex(id, {preserveGroupOwner=false}={}){
+    if(!id) return;
+    smartNodeDomIndex.delete(id);
+    smartNodeRectIndex.delete(id);
+    if(!preserveGroupOwner) smartGroupOwnerIndex.delete(id);
+    [...smartGroupOwnerIndex.entries()].forEach(([memberId, groupId]) => {
+        if(groupId === id) smartGroupOwnerIndex.delete(memberId);
+    });
+    const prefix = `${id}:`;
+    [...smartPortDomIndex.keys()].forEach(key => {
+        if(String(key).startsWith(prefix)) smartPortDomIndex.delete(key);
+    });
+    [...smartPortGeometryIndex.keys()].forEach(key => {
+        if(String(key).startsWith(prefix)) smartPortGeometryIndex.delete(key);
+    });
+}
+function indexSmartNodeDom(el, node=null){
+    const id = el?.dataset?.id || node?.id || '';
+    if(!id || !el) throw new Error(`无法索引智能画布节点 DOM：${id || 'missing-id'}`);
+    const model = node || smartNodeIndex.get(id);
+    removeSmartNodeDomIndex(id, {preserveGroupOwner:!isSmartGroupNode(model)});
+    smartNodeDomIndex.set(id, el);
+    if(model){
+        const measured = nodeRect(model);
+        smartNodeRectIndex.set(id, {
+            x:Number(model.x) || 0,
+            y:Number(model.y) || 0,
+            width:el.offsetWidth || measured.width,
+            height:el.offsetHeight || measured.height
+        });
+        if(isSmartGroupNode(model)){
+            [...smartGroupOwnerIndex.entries()].forEach(([memberId, groupId]) => {
+                if(groupId === id) smartGroupOwnerIndex.delete(memberId);
+            });
+            (model.items || []).filter(Boolean).forEach(memberId => smartGroupOwnerIndex.set(memberId, id));
+        }
+    }
+    el.querySelectorAll('.node-port').forEach(port => {
+        smartPortDomIndex.set(smartPortIndexKey(id, port.dataset.port || '', port.dataset.inputRole || ''), port);
+    });
+    return el;
+}
 function rebuildSmartCanvasDomIndexes(){
     smartNodeDomIndex.clear();
     smartPortDomIndex.clear();
     smartNodeRectIndex.clear();
     smartPortGeometryIndex.clear();
+    smartGroupOwnerIndex.clear();
     smartGeometryEpoch += 1;
     world?.querySelectorAll?.('.image-node[data-id]').forEach(el => {
         const id = el.dataset.id || '';
         if(!id) return;
-        smartNodeDomIndex.set(id, el);
         const node = smartNodeIndex.get(id) || nodes.find(item => item.id === id);
-        if(node){
-            const measured = nodeRect(node);
-            smartNodeRectIndex.set(id, {x:Number(node.x) || 0, y:Number(node.y) || 0, width:el.offsetWidth || measured.width, height:el.offsetHeight || measured.height});
-        }
-        el.querySelectorAll('.node-port').forEach(port => {
-            smartPortDomIndex.set(smartPortIndexKey(id, port.dataset.port || '', port.dataset.inputRole || ''), port);
-        });
+        indexSmartNodeDom(el, node);
     });
 }
 function cachedSmartNodeRect(node){
@@ -6425,6 +6478,11 @@ let connectionLayerRaf = 0;
 const SMART_INCREMENTAL_CONNECTIONS = true;
 const smartConnectionDirtyIds = new Set();
 const smartConnectionDom = new Map();
+const smartConnectionModelIndex = new Map();
+const smartConnectionIdsByNode = new Map();
+const smartPendingCreatedConnectionIds = new Set();
+const smartPendingRemovedConnectionIds = new Set();
+const smartPendingAffectedConnectionIds = new Set();
 let smartConnectionStructureDirty = false;
 function mergeSmartImageLists(localImgs, remoteImgs){
     const out = [];
@@ -7473,11 +7531,7 @@ function createNode(x, y, images=[], options={}){
     const node = {id:uid('smart'), type:'smart-image', x, y, title:nodeImages.length > 1 ? 'Group' : nodeImages.length ? 'Image' : tr('smart.createImportNode'), images:nodeImages, created_at:Date.now()};
     node.scale = nodeImages.length > 1 ? MEDIA_GROUP_DEFAULT_SCALE : mediaNodeDefaultScale(node);
     inheritNodeMetaFromImage(node);
-    nodes.push(node);
-    if(options.select !== false) selectedId = node.id;
-    if(options.deferRender !== true) render();
-    if(options.deferSave !== true) scheduleSave();
-    return node;
+    return commitSmartNodeCreate(node, options);
 }
 function createPromptNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
@@ -7501,29 +7555,17 @@ function createPromptNode(x, y, options={}){
         llmInstruction:'',
         created_at:Date.now()
     };
-    nodes.push(node);
-    if(options.select !== false) selectedId = node.id;
-    render();
-    scheduleSave();
-    return node;
+    return commitSmartNodeCreate(node, options);
 }
 function createLoopNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
     const node = {id:uid('loop'), type:'smart-loop', x, y, w:340, h:168, title:'Loop', count:1, mode:'serial', showPrompt:false, imageInput:false, loopStart:1, imageBatchSize:1, variablePrompt:'', created_at:Date.now()};
-    nodes.push(node);
-    if(options.select !== false) selectedId = node.id;
-    render();
-    scheduleSave();
-    return node;
+    return commitSmartNodeCreate(node, options);
 }
 function createSmartGroupNode(x, y, options={}){
     if(!options.skipUndo) pushUndo();
     const node = {id:uid('group'), type:'smart-group', x, y, w:SMART_GROUP_DEFAULT_WIDTH, h:SMART_GROUP_DEFAULT_HEIGHT, title:'智能分组', items:[], created_at:Date.now()};
-    nodes.push(node);
-    if(options.select !== false) selectedId = node.id;
-    render();
-    scheduleSave();
-    return node;
+    return commitSmartNodeCreate(node, options);
 }
 function cloneSmartNode(node, dx=0, dy=0){
     const copy = JSON.parse(JSON.stringify(node));
@@ -7602,16 +7644,17 @@ function pasteNodes(){
         });
         const newConnections = (nodeClipboard.connections || []).map(conn => ({
             ...conn,
-            ...(conn.id ? {id:uid('c')} : {}),
+            id:uid('c'),
             from:idMap.get(conn.from),
             to:idMap.get(conn.to)
         })).filter(conn => conn.from && conn.to && conn.from !== conn.to);
         canvas.connections = [...(canvas.connections || []), ...newConnections];
+        newConnections.forEach(indexSmartConnectionModel);
         nodes.push(...copies);
         selectedId = copies.length === 1 ? copies[0].id : '';
         selectedIds = copies.length > 1 ? copies.map(n => n.id) : [];
         selectedImage = {nodeId:'', index:-1};
-        queueSmartRenderMutation({createdIds:copies.map(item => item.id)});
+        queueSmartRenderMutation({createdIds:copies.map(item => item.id), createdConnectionIds:newConnections.map(connection => connection.id)});
         render();
         scheduleSave();
         completed = true;
@@ -7696,17 +7739,20 @@ function duplicateForAltDrag(node, preserveConnections=false){
         if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || (preserveConnections ? copy.sourceNodeId : '');
     });
     const keepInternal = sourceNodes.some(isSmartGroupNode);
+    const appendedConnections = [];
     if(preserveConnections || keepInternal){
         const idSet = new Set(sourceNodes.map(n => n.id));
         const newConnections = (canvas.connections || [])
             .filter(conn => keepInternal ? (idSet.has(conn.from) && idSet.has(conn.to)) : (idSet.has(conn.from) || idSet.has(conn.to)))
-            .map(conn => ({...conn, from:idMap.get(conn.from) || conn.from, to:idMap.get(conn.to) || conn.to}))
+            .map(conn => ({...conn, id:uid('c'), from:idMap.get(conn.from) || conn.from, to:idMap.get(conn.to) || conn.to}))
             .filter(conn => conn.from && conn.to && conn.from !== conn.to);
         const nextConnections = [...(canvas.connections || [])];
         newConnections.forEach(conn => {
             const kind = conn.kind || 'flow';
             if(nextConnections.some(c => c.from === conn.from && c.to === conn.to && (c.kind || 'flow') === kind && (c.inputRole || '') === (conn.inputRole || ''))) return;
             nextConnections.push(conn);
+            indexSmartConnectionModel(conn);
+            appendedConnections.push(conn);
             const toNode = nodes.find(n => n.id === conn.to) || copies.find(n => n.id === conn.to);
             if(toNode && (conn.kind || 'flow') === 'input'){
                 toNode.inputNodeIds = Array.from(new Set([...(toNode.inputNodeIds || []), conn.from]));
@@ -7719,7 +7765,7 @@ function duplicateForAltDrag(node, preserveConnections=false){
     selectedIds = [];
     selectedImage = {nodeId:'', index:-1};
     const dragCopy = copies.find(c => c.id === idMap.get(node.id)) || copies[0];
-    queueSmartRenderMutation({createdIds:copies.map(item => item.id)});
+    queueSmartRenderMutation({createdIds:copies.map(item => item.id), createdConnectionIds:appendedConnections.map(connection => connection.id)});
     render();
     scheduleSave();
     return dragCopy;
@@ -7728,9 +7774,48 @@ function shellPoint(event){
     const rect = shell.getBoundingClientRect();
     return {x:event.clientX - rect.left, y:event.clientY - rect.top};
 }
+function ensureSmartConnectionIds(connectionList=canvas?.connections || []){
+    (connectionList || []).forEach(connection => {
+        if(connection && !connection.id) connection.id = uid('c');
+    });
+    return connectionList || [];
+}
+function indexSmartConnectionModel(connection){
+    if(!connection?.id) return false;
+    smartConnectionModelIndex.set(connection.id, connection);
+    [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+        const ids = smartConnectionIdsByNode.get(nodeId) || new Set();
+        ids.add(connection.id);
+        smartConnectionIdsByNode.set(nodeId, ids);
+    });
+    return true;
+}
+function removeSmartConnectionModelIndex(connectionId){
+    const connection = smartConnectionModelIndex.get(connectionId);
+    if(!connection) return null;
+    [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+        const ids = smartConnectionIdsByNode.get(nodeId);
+        if(!ids) return;
+        ids.delete(connectionId);
+        if(!ids.size) smartConnectionIdsByNode.delete(nodeId);
+    });
+    smartConnectionModelIndex.delete(connectionId);
+    return connection;
+}
+function recordSmartConnectionMutation({createdIds=[], removedIds=[], affectedIds=[]}={}){
+    (createdIds || []).filter(Boolean).forEach(id => smartPendingCreatedConnectionIds.add(id));
+    (removedIds || []).filter(Boolean).forEach(id => smartPendingRemovedConnectionIds.add(id));
+    (affectedIds || []).filter(Boolean).forEach(id => smartPendingAffectedConnectionIds.add(id));
+}
+function clearPendingSmartConnectionMutation(){
+    smartPendingCreatedConnectionIds.clear();
+    smartPendingRemovedConnectionIds.clear();
+    smartPendingAffectedConnectionIds.clear();
+}
 function renderConnections(nodeIndex=new Map(nodes.map(node => [node.id, node]))){
     const perfEnd = window.CanvasPerformance?.start?.('smart.renderConnections', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     nodeIndex = smartNodeIndex.size ? smartNodeIndex : nodeIndex;
+    ensureSmartConnectionIds();
     const conns = (canvas?.connections || []).map((conn, index) => ({...conn, index})).filter(c => nodeIndex.has(c.from) && nodeIndex.has(c.to));
     const cascadeKeys = cascadeConnectionKeys();
     const activeCascadeCount = (smartCascadeRunPath?.states && Object.values(smartCascadeRunPath.states).filter(state => state && state !== 'done').length) || 0;
@@ -7850,8 +7935,11 @@ function smartClipboardConnections(nodeIds){
         .filter(connection => connection && nodeIds.has(connection.from) && nodeIds.has(connection.to));
 }
 function rebuildSmartConnectionDomIndex(){
+    ensureSmartConnectionIds();
     rebuildSmartClipboardConnectionIndex();
     smartConnectionDom.clear();
+    smartConnectionModelIndex.clear();
+    smartConnectionIdsByNode.clear();
     smartConnectionSelectionIndex.clear();
     smartSelectionFeedbackState = null;
     const svg = world.querySelector('svg.connection-layer');
@@ -7867,6 +7955,7 @@ function rebuildSmartConnectionDomIndex(){
         smartConnectionDom.set(id, entry);
     });
     const connectionsByIndex = canvas?.connections || [];
+    connectionsByIndex.forEach(indexSmartConnectionModel);
     svg.querySelectorAll('path.conn-hit[data-conn-index]').forEach(hit => {
         if(!hit.previousElementSibling) return;
         String(hit.dataset.connIndex || '').split(',').forEach(rawIndex => {
@@ -7889,38 +7978,140 @@ function smartIncrementalConnectionState(connection, index){
     const color = kind === 'input' ? 'rgba(118,111,104,0.62)' : 'rgba(155,146,136,0.62)';
     return {cls, color, opacity:isPending ? '.82' : '1', width:kind === 'input' ? '1.9' : '1.6', index};
 }
+function smartConnectionNeedsFullSvg(connection){
+    if(!connection || (connection.kind || 'flow') === 'history') return true;
+    const fromNode = smartNodeIndex.get(connection.from);
+    const toNode = smartNodeIndex.get(connection.to);
+    return !fromNode || !toNode
+        || isSmartGroupNode(fromNode) || isSmartGroupNode(toNode)
+        || isHistoryGroupNode(fromNode) || isHistoryGroupNode(toNode)
+        || smartGroupOwnerIndex.has(connection.from) || smartGroupOwnerIndex.has(connection.to);
+}
+function setSmartConnectionPatchGeometry(entry, connection){
+    const fromNode = smartNodeIndex.get(connection.from);
+    const toNode = smartNodeIndex.get(connection.to);
+    if(!entry?.path || !entry.hit || !entry.dot || !entry.cut || !fromNode || !toNode) return false;
+    const fr = cachedSmartNodeRect(fromNode), tr = cachedSmartNodeRect(toNode);
+    const fromPoint = cachedSmartPortPoint(fromNode, 'out', '', fr);
+    const toPoint = cachedSmartPortPoint(toNode, 'in', connection.inputRole || '', tr);
+    const dx = Math.max(50, Math.abs(toPoint.x - fromPoint.x) * 0.45);
+    const curve = `M${fromPoint.x} ${fromPoint.y} C ${fromPoint.x + dx} ${fromPoint.y}, ${toPoint.x - dx} ${toPoint.y}, ${toPoint.x} ${toPoint.y}`;
+    const mx = (fromPoint.x + toPoint.x) / 2, my = (fromPoint.y + toPoint.y) / 2;
+    const state = smartIncrementalConnectionState(connection, -1);
+    entry.path.setAttribute('class', state.cls);
+    entry.path.setAttribute('d', curve);
+    entry.path.setAttribute('stroke', state.color);
+    entry.path.setAttribute('stroke-width', state.width);
+    entry.path.setAttribute('opacity', state.opacity);
+    entry.hit.setAttribute('d', curve);
+    entry.hit.dataset.connectionId = connection.id;
+    entry.dot.setAttribute('cx', String(toPoint.x));
+    entry.dot.setAttribute('cy', String(toPoint.y));
+    entry.dot.setAttribute('fill', state.color);
+    entry.cut.dataset.connectionId = connection.id;
+    entry.cut.setAttribute('transform', `translate(${mx} ${my})`);
+    entry.cut.querySelector('circle')?.setAttribute('stroke', state.color);
+    entry.cut.querySelector('path')?.setAttribute('stroke', state.color);
+    return true;
+}
+function createSmartConnectionDom(connection, svg){
+    if(!connection?.id || !svg) return null;
+    const ns = 'http://www.w3.org/2000/svg';
+    const path = document.createElementNS(ns, 'path');
+    path.dataset.connectionId = connection.id;
+    path.setAttribute('fill', 'none');
+    const hit = document.createElementNS(ns, 'path');
+    hit.setAttribute('class', 'conn-hit');
+    hit.dataset.connectionId = connection.id;
+    hit.dataset.connIndex = '';
+    hit.setAttribute('stroke', 'transparent');
+    hit.setAttribute('stroke-width', '14');
+    hit.setAttribute('fill', 'none');
+    const dot = document.createElementNS(ns, 'circle');
+    dot.dataset.connectionId = connection.id;
+    dot.setAttribute('r', '3.5');
+    dot.setAttribute('opacity', '.66');
+    const cut = document.createElementNS(ns, 'g');
+    cut.setAttribute('class', 'conn-cut');
+    cut.dataset.connectionId = connection.id;
+    cut.dataset.connIndex = '';
+    const cutCircle = document.createElementNS(ns, 'circle');
+    cutCircle.setAttribute('r', '8');
+    cutCircle.setAttribute('fill', 'var(--card)');
+    cutCircle.setAttribute('stroke-width', '1.4');
+    const cutPath = document.createElementNS(ns, 'path');
+    cutPath.setAttribute('d', 'M-3 -3 L3 3 M3 -3 L-3 3');
+    cutPath.setAttribute('stroke-width', '1.5');
+    cutPath.setAttribute('stroke-linecap', 'round');
+    cut.append(cutCircle, cutPath);
+    const entry = {path, hit, dot, cut};
+    if(!setSmartConnectionPatchGeometry(entry, connection)) return null;
+    svg.append(path, hit, dot, cut);
+    smartConnectionDom.set(connection.id, entry);
+    [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+        const hits = smartConnectionSelectionIndex.get(nodeId) || [];
+        if(!hits.includes(hit)) hits.push(hit);
+        smartConnectionSelectionIndex.set(nodeId, hits);
+    });
+    return entry;
+}
+function removeSmartConnectionDom(connectionId){
+    const connection = smartConnectionModelIndex.get(connectionId);
+    const entry = smartConnectionDom.get(connectionId);
+    [entry?.path, entry?.hit, entry?.dot, entry?.cut].forEach(el => el?.remove());
+    smartConnectionDom.delete(connectionId);
+    if(connection){
+        [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+            const hits = (smartConnectionSelectionIndex.get(nodeId) || []).filter(hit => hit !== entry?.hit && hit?.isConnected);
+            if(hits.length) smartConnectionSelectionIndex.set(nodeId, hits);
+            else smartConnectionSelectionIndex.delete(nodeId);
+        });
+    }
+    return removeSmartConnectionModelIndex(connectionId);
+}
+function patchSmartMutationConnections(mutation, affectedNodeIds=new Set()){
+    const createdConnectionIds = mutation?.createdConnectionIds || new Set();
+    const removedConnectionIds = mutation?.removedConnectionIds || new Set();
+    const affectedConnectionIds = new Set(mutation?.affectedConnectionIds || []);
+    affectedNodeIds.forEach(nodeId => (smartConnectionIdsByNode.get(nodeId) || []).forEach(id => affectedConnectionIds.add(id)));
+    const changedIds = new Set([...createdConnectionIds, ...removedConnectionIds, ...affectedConnectionIds]);
+    const changedConnections = [...changedIds].map(id => smartConnectionModelIndex.get(id)).filter(Boolean);
+    const requiresFullSvg = mutation?.requiresFullConnectionRender
+        || smartConnectionStructureDirty
+        || smartCascadeAnyRunning()
+        || Boolean(loopInsertPreview)
+        || changedConnections.some(smartConnectionNeedsFullSvg);
+    if(requiresFullSvg){
+        console.warn('[smart-canvas] 复杂连接拓扑回退完整 SVG：', mutation?.requiresFullConnectionRender ? 'group-or-history-node' : 'connection-topology');
+        refreshConnectionLayer();
+        return true;
+    }
+    const svg = world.querySelector('svg.connection-layer');
+    if(!svg) return false;
+    for(const connectionId of removedConnectionIds){
+        if(!removeSmartConnectionDom(connectionId)) return false;
+        affectedConnectionIds.delete(connectionId);
+    }
+    for(const connectionId of createdConnectionIds){
+        const connection = smartConnectionModelIndex.get(connectionId);
+        if(!connection || smartConnectionNeedsFullSvg(connection) || !createSmartConnectionDom(connection, svg)) return false;
+        affectedConnectionIds.delete(connectionId);
+    }
+    for(const connectionId of affectedConnectionIds){
+        const connection = smartConnectionModelIndex.get(connectionId);
+        const entry = smartConnectionDom.get(connectionId);
+        if(!connection || smartConnectionNeedsFullSvg(connection) || !setSmartConnectionPatchGeometry(entry, connection)) return false;
+    }
+    smartConnectionDirtyIds.clear();
+    smartConnectionStructureDirty = false;
+    return true;
+}
 function renderSmartConnectionIncremental(ids=[]){
     if(!SMART_INCREMENTAL_CONNECTIONS || smartConnectionStructureDirty || !smartConnectionDom.size) return false;
-    const conns = canvas?.connections || [];
-    if(smartConnectionDom.size !== conns.length) return false;
-    if(conns.some(connection => connection.kind === 'history' || isSmartGroupNode(smartNodeIndex.get(connection.from)) || isSmartGroupNode(smartNodeIndex.get(connection.to)))) return false;
     for(const id of ids){
-        const connection = conns.find(item => item.id === id);
+        const connection = smartConnectionModelIndex.get(id);
         const entry = smartConnectionDom.get(id);
-        const fromNode = connection && smartNodeIndex.get(connection.from);
-        const toNode = connection && smartNodeIndex.get(connection.to);
-        if(!connection || !entry?.path || !entry.hit || !entry.cut || !fromNode || !toNode) return false;
-        const fr = cachedSmartNodeRect(fromNode), tr = cachedSmartNodeRect(toNode);
-        const fromPoint = cachedSmartPortPoint(fromNode, 'out', '', fr);
-        const toPoint = cachedSmartPortPoint(toNode, 'in', connection.inputRole || '', tr);
-        const dx = Math.max(50, Math.abs(toPoint.x - fromPoint.x) * 0.45);
-        const curve = `M${fromPoint.x} ${fromPoint.y} C ${fromPoint.x + dx} ${fromPoint.y}, ${toPoint.x - dx} ${toPoint.y}, ${toPoint.x} ${toPoint.y}`;
-        const mx = (fromPoint.x + toPoint.x) / 2, my = (fromPoint.y + toPoint.y) / 2;
-        const state = smartIncrementalConnectionState(connection, conns.indexOf(connection));
-        entry.path.setAttribute('class', state.cls);
-        entry.path.setAttribute('d', curve);
-        entry.path.setAttribute('stroke', state.color);
-        entry.path.setAttribute('stroke-width', state.width);
-        entry.path.setAttribute('opacity', state.opacity);
-        entry.hit.setAttribute('d', curve);
-        entry.hit.dataset.connIndex = String(state.index);
-        entry.dot?.setAttribute('cx', String(toPoint.x));
-        entry.dot?.setAttribute('cy', String(toPoint.y));
-        entry.dot?.setAttribute('fill', state.color);
-        entry.cut.setAttribute('data-conn-index', String(state.index));
-        entry.cut.setAttribute('transform', `translate(${mx} ${my})`);
-        entry.cut.querySelector('circle')?.setAttribute('stroke', state.color);
-        entry.cut.querySelector('path')?.setAttribute('stroke', state.color);
+        if(smartConnectionNeedsFullSvg(connection) || !setSmartConnectionPatchGeometry(entry, connection)) return false;
     }
     return true;
 }
@@ -8805,7 +8996,11 @@ function deleteSelectedSmartNodes(){
     nodes.forEach(node => {
         if(isHistoryGroupNode(node) && deleteIds.has(node.historyFor)) deleteIds.add(node.id);
     });
+    const affectedGroupIds = nodes
+        .filter(node => isSmartGroupNode(node) && !deleteIds.has(node.id) && (node.items || []).some(itemId => deleteIds.has(itemId)))
+        .map(node => node.id);
     nodes = nodes.filter(node => !deleteIds.has(node.id));
+    const removedConnections = (canvas?.connections || []).filter(c => deleteIds.has(c.from) || deleteIds.has(c.to));
     if(canvas) canvas.connections = (canvas.connections || []).filter(c => !deleteIds.has(c.from) && !deleteIds.has(c.to));
     nodes.forEach(node => {
         if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(inputId => !deleteIds.has(inputId));
@@ -8814,7 +9009,11 @@ function deleteSelectedSmartNodes(){
     if(deleteIds.has(selectedId)) selectedId = '';
     selectedIds = selectedIds.filter(id => !deleteIds.has(id));
     if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
-    queueSmartRenderMutation({removeIds:[...deleteIds]});
+    queueSmartRenderMutation({
+        removeIds:[...deleteIds],
+        replaceIds:affectedGroupIds,
+        removedConnectionIds:removedConnections.map(connection => connection.id)
+    });
     render();
     scheduleSave();
     return true;
@@ -9535,13 +9734,148 @@ function rememberInlineVideoActivations(nodeIndex=new Map(nodes.map(node => [nod
         if(image && mediaKindForItem(image) === 'video') image._inlineVideoActive = true;
     });
 }
+function smartNodeHtml(node){
+    if(node.specialType === 'multi-view') normalizeSmartMultiViewNode(node);
+    const imgs = node.images || [];
+    const generationSlots = smartGenerationSlots(node);
+    const displayCount = generationSlots.length || imgs.length;
+    const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
+    const slotLoading = generationSlots.some(slot => slot.status === 'loading');
+    const slotFailed = generationSlots.some(slot => slot.status === 'error');
+    const title = node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+    const scale = nodeScale(node);
+    const layout = imageLayout(layoutImages, scale, node);
+    const isPrompt = node.type === 'smart-prompt';
+    const isLoop = node.type === 'smart-loop';
+    const isSmartGroup = node.type === 'smart-group';
+    const isCompactMember = isSmartGroupCompactMember(node);
+    const isImageNode = node.type === 'smart-image' || !node.type;
+    const isSpecial = Boolean(node.specialType);
+    const isJimengPending = Boolean(node.jimengPending && node.jimengPending.submitId && imgs.length === 0);
+    const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
+    const isEmpty = !isSpecial && isImageNode && displayCount === 0 && !node.pending && !isQueued && !isJimengPending;
+    const isHistory = isHistoryGroupNode(node);
+    const isGroup = isImageNode && displayCount > 1;
+    const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length : (isGroup ? displayCount : 0);
+    const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
+    const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
+    const smartLodSafe = !isSpecial && !isSmartGroup && !isPrompt && !isLoop && !isGroup && !isHistory;
+    if(['relight','angle'].includes(node.specialType)){
+        const prefix = node.specialType;
+        const connectedSource = smartSpecialInputImage(node);
+        if(connectedSource?.url){
+            node[`${prefix}SourceUrl`] = connectedSource.url;
+            node[`${prefix}SourceName`] = connectedSource.name || `${prefix}-source.png`;
+            node[`${prefix}SourceWidth`] = Number(connectedSource.natural_w || connectedSource.width || 0);
+            node[`${prefix}SourceHeight`] = Number(connectedSource.natural_h || connectedSource.height || 0);
+        }
+    }
+    const body = nodeBodyHtml(node, layout);
+    const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
+    const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
+    const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
+    return `<div class="image-node ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+        <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
+        ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
+        ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
+        ${runTimePillHtml(node)}
+        <div class="node-body">${body}</div>
+        ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
+        <div class="node-hint">${hint}</div>
+        ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
+        ${node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+        <div class="node-port port-out" data-port="out" title="output"></div>
+    </div>`;
+}
 function queueSmartRenderMutation(mutation={}){
-    const merge = key => new Set([...(smartRenderMutation?.[key] || []), ...(mutation[key] || [])].filter(Boolean));
+    const pendingByKey = {
+        createdConnectionIds:smartPendingCreatedConnectionIds,
+        removedConnectionIds:smartPendingRemovedConnectionIds,
+        affectedConnectionIds:smartPendingAffectedConnectionIds
+    };
+    const merge = key => new Set([...(smartRenderMutation?.[key] || []), ...(mutation[key] || []), ...(pendingByKey[key] || [])].filter(Boolean));
     smartRenderMutation = {
         createdIds:merge('createdIds'),
         removeIds:merge('removeIds'),
-        replaceIds:merge('replaceIds')
+        replaceIds:merge('replaceIds'),
+        createdConnectionIds:merge('createdConnectionIds'),
+        removedConnectionIds:merge('removedConnectionIds'),
+        affectedConnectionIds:merge('affectedConnectionIds')
     };
+    clearPendingSmartConnectionMutation();
+}
+function fallbackSmartRenderMutation(reason, error=null){
+    console.warn('[smart-canvas] 增量渲染失败，回退完整 render：', reason, error || '');
+    smartRenderMutation = null;
+    render();
+    return false;
+}
+function renderSmartMutation(mutation){
+    const createdIds = mutation?.createdIds || new Set();
+    const removeIds = mutation?.removeIds || new Set();
+    const replaceIds = mutation?.replaceIds || new Set();
+    const affectedNodeIds = new Set([...createdIds, ...removeIds, ...replaceIds]);
+    mutation.requiresFullConnectionRender = [...affectedNodeIds].some(id => {
+        const node = smartNodeIndex.get(id);
+        return isSmartGroupNode(node) || isHistoryGroupNode(node) || smartGroupOwnerIndex.has(id);
+    });
+    const missingModels = new Set([...createdIds, ...replaceIds].filter(id => !smartNodeIndex.has(id)));
+    for(let index = nodes.length - 1; index >= 0 && missingModels.size; index--){
+        const node = nodes[index];
+        if(!missingModels.has(node?.id)) continue;
+        smartNodeIndex.set(node.id, node);
+        missingModels.delete(node.id);
+    }
+    if(missingModels.size) return fallbackSmartRenderMutation('node-model-index-missing', [...missingModels]);
+    const focusSnapshot = window.StudioFocusGuard?.capture?.();
+    const freshNodeEls = [];
+    try {
+        removeIds.forEach(id => {
+            const current = smartNodeDomIndex.get(id);
+            if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
+            removeSmartNodeDomIndex(id);
+            smartNodeIndex.delete(id);
+        });
+        const patchIds = [...new Set([...createdIds, ...replaceIds])]
+            .sort((left, right) => (isSmartGroupNode(smartNodeIndex.get(left)) ? 0 : 1) - (isSmartGroupNode(smartNodeIndex.get(right)) ? 0 : 1));
+        patchIds.forEach(id => {
+            const node = smartNodeIndex.get(id);
+            const current = smartNodeDomIndex.get(id);
+            if(!node) throw new Error(`智能节点模型不存在：${id}`);
+            if(replaceIds.has(id) && !current) throw new Error(`替换节点 DOM 不存在：${id}`);
+            const tpl = document.createElement('template');
+            tpl.innerHTML = smartNodeHtml(node).trim();
+            const fresh = tpl.content.firstElementChild;
+            if(!fresh) throw new Error(`智能节点 DOM 创建失败：${id}`);
+            if(current){
+                if(smartNodeHasLiveMedia(node)) transplantSmartMediaElements(current, fresh);
+                current.replaceWith(fresh);
+            } else if(isSmartGroupNode(node)) {
+                const firstNode = smartNodeDomIndex.values().next().value;
+                world.insertBefore(fresh, firstNode?.isConnected ? firstNode : null);
+            } else world.appendChild(fresh);
+            indexSmartNodeDom(fresh, node);
+            freshNodeEls.push(fresh);
+        });
+    } catch(error){
+        return fallbackSmartRenderMutation('node-dom-index-patch', error);
+    }
+    updateSmartCanvasStats();
+    world.classList.toggle('smart-large-scene', nodes.length > 200);
+    smartDropHighlightId = '';
+    bindNodeEvents(smartNodeIndex, new Set(freshNodeEls.map(el => el.dataset.id).filter(Boolean)));
+    if(!patchSmartMutationConnections(mutation, affectedNodeIds)) return fallbackSmartRenderMutation('connection-structure-patch');
+    syncSelectionUi();
+    updateComposer();
+    scheduleSmartMinimapNodeUpdate([...affectedNodeIds]);
+    freshNodeEls.forEach(root => {
+        refreshIcons(root);
+        bindSmartPreviewImageFallbacks(root);
+        measureSmartNodeImages(smartNodeIndex, root);
+    });
+    syncSmartSelectedImageResolution(world, affectedNodeIds);
+    if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
+    return true;
 }
 function render(){
     if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(world)) {
@@ -9550,6 +9884,11 @@ function render(){
     }
     const mutation = smartRenderMutation;
     smartRenderMutation = null;
+    if(mutation){
+        renderSmartMutation(mutation);
+        return;
+    }
+    clearPendingSmartConnectionMutation();
     const selectionFeedbackBeforeRender = smartSelectionFeedbackState;
     updateSmartCanvasStats();
     smartSelectionFeedbackState = null;
@@ -9584,60 +9923,7 @@ function render(){
         // 否则缩小分组把成员挪进卡片区域时会被分组卡片背景遮住而“消失”。
         .slice()
         .sort((a, b) => (isSmartGroupNode(a) ? 0 : 1) - (isSmartGroupNode(b) ? 0 : 1))
-        .map(node => {
-        if(node.specialType === 'multi-view') normalizeSmartMultiViewNode(node);
-        const imgs = node.images || [];
-        const generationSlots = smartGenerationSlots(node);
-        const displayCount = generationSlots.length || imgs.length;
-        const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
-        const slotLoading = generationSlots.some(slot => slot.status === 'loading');
-        const slotFailed = generationSlots.some(slot => slot.status === 'error');
-        const title = node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
-        const scale = nodeScale(node);
-        const layout = imageLayout(layoutImages, scale, node);
-        const isPrompt = node.type === 'smart-prompt';
-        const isLoop = node.type === 'smart-loop';
-        const isSmartGroup = node.type === 'smart-group';
-        const isCompactMember = isSmartGroupCompactMember(node);
-        const isImageNode = node.type === 'smart-image' || !node.type;
-        const isSpecial = Boolean(node.specialType);
-        const isJimengPending = Boolean(node.jimengPending && node.jimengPending.submitId && imgs.length === 0);
-        const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending && !isJimengPending);
-        const isEmpty = !isSpecial && isImageNode && displayCount === 0 && !node.pending && !isQueued && !isJimengPending;
-        const isHistory = isHistoryGroupNode(node);
-        const isGroup = isImageNode && displayCount > 1;
-        const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length : (isGroup ? displayCount : 0);
-        const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
-        const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
-        const smartLodSafe = !isSpecial && !isSmartGroup && !isPrompt && !isLoop && !isGroup && !isHistory;
-        if(['relight','angle'].includes(node.specialType)){
-            const prefix = node.specialType;
-            const connectedSource = smartSpecialInputImage(node);
-            if(connectedSource?.url){
-                node[`${prefix}SourceUrl`] = connectedSource.url;
-                node[`${prefix}SourceName`] = connectedSource.name || `${prefix}-source.png`;
-                node[`${prefix}SourceWidth`] = Number(connectedSource.natural_w || connectedSource.width || 0);
-                node[`${prefix}SourceHeight`] = Number(connectedSource.natural_h || connectedSource.height || 0);
-            }
-        }
-        const body = nodeBodyHtml(node, layout);
-        const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
-        const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-        const html = `<div class="image-node ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
-            <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
-            ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
-            ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
-            ${runTimePillHtml(node)}
-            <div class="node-body">${body}</div>
-            ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
-            <div class="node-hint">${hint}</div>
-            ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            ${node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
-            <div class="node-port port-out" data-port="out" title="output"></div>
-        </div>`;
-        return {node, html};
-    });
+        .map(node => ({node, html:smartNodeHtml(node)}));
     const tpl = document.createElement('template');
     tpl.innerHTML = nodeHtmlEntries.map(entry => entry.html).join('');
     const renderedNodeEls = new Map();
@@ -9874,14 +10160,16 @@ function bindConnectionEvents(){
             if(!hit || !world.contains(hit)) return;
             e.preventDefault();
             e.stopPropagation();
-            disconnectConnections(hit.dataset.connIndex);
+            if(hit.dataset.connectionId) disconnectConnectionsByIds([hit.dataset.connectionId]);
+            else disconnectConnections(hit.dataset.connIndex);
         });
         world.addEventListener('click', e => {
             const target = e.target?.closest?.('[data-conn-index]');
             if(!target || !world.contains(target) || target.classList.contains('conn-hit')) return;
             e.preventDefault();
             e.stopPropagation();
-            disconnectConnections(target.dataset.connIndex);
+            if(target.dataset.connectionId) disconnectConnectionsByIds([target.dataset.connectionId]);
+            else disconnectConnections(target.dataset.connIndex);
         });
         smartConnectionEventsDelegated = true;
         return;
@@ -9890,13 +10178,15 @@ function bindConnectionEvents(){
         if(el.classList.contains('conn-hit')){
             el.addEventListener('dblclick', e => {
                 e.preventDefault(); e.stopPropagation();
-                disconnectConnections(el.dataset.connIndex);
+                if(el.dataset.connectionId) disconnectConnectionsByIds([el.dataset.connectionId]);
+                else disconnectConnections(el.dataset.connIndex);
             });
             return;
         }
         el.addEventListener('click', e => {
             e.preventDefault(); e.stopPropagation();
-            disconnectConnections(el.dataset.connIndex);
+            if(el.dataset.connectionId) disconnectConnectionsByIds([el.dataset.connectionId]);
+            else disconnectConnections(el.dataset.connIndex);
         });
     });
 }
@@ -11924,7 +12214,11 @@ function deleteNode(id){
     nodes.forEach(node => {
         if(isHistoryGroupNode(node) && node.historyFor === id) deleteIds.add(node.id);
     });
+    const affectedGroupIds = nodes
+        .filter(node => isSmartGroupNode(node) && !deleteIds.has(node.id) && (node.items || []).some(itemId => deleteIds.has(itemId)))
+        .map(node => node.id);
     nodes = nodes.filter(node => !deleteIds.has(node.id));
+    const removedConnections = (canvas?.connections || []).filter(c => deleteIds.has(c.from) || deleteIds.has(c.to));
     if(canvas) canvas.connections = (canvas.connections || []).filter(c => !deleteIds.has(c.from) && !deleteIds.has(c.to));
     nodes.forEach(node => {
         if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(inputId => !deleteIds.has(inputId));
@@ -11933,7 +12227,11 @@ function deleteNode(id){
     if(selectedId === id) selectedId = '';
     selectedIds = selectedIds.filter(selected => !deleteIds.has(selected));
     if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
-    queueSmartRenderMutation({removeIds:[...deleteIds]});
+    queueSmartRenderMutation({
+        removeIds:[...deleteIds],
+        replaceIds:affectedGroupIds,
+        removedConnectionIds:removedConnections.map(connection => connection.id)
+    });
     render();
     scheduleSave();
 }
@@ -11967,6 +12265,15 @@ function deleteNodeFromButton(id){
 }
 function disconnectConnection(index){
     disconnectConnections([index]);
+}
+function disconnectConnectionsByIds(connectionIds=[]){
+    const ids = new Set((connectionIds || []).filter(Boolean));
+    if(!ids.size || !Array.isArray(canvas?.connections)) return;
+    const indices = [];
+    canvas.connections.forEach((connection, index) => {
+        if(ids.has(connection.id)) indices.push(index);
+    });
+    disconnectConnections(indices);
 }
 // 断开一条或多条连线（合并到分组的连线会一次性断开其下所有成员连线）。spec 可为索引数组或逗号分隔字符串。
 function disconnectConnections(spec){
@@ -15614,10 +15921,22 @@ function addConnection(fromId, toId, kind='flow', inputRole=''){
     const isFilmInput=Boolean(target && (target.specialType === 'film-storyboard' || target.specialType === 'film-video') && inputRole);
     const isLineArtInput=Boolean(target && target.specialType === 'film-line-art' && inputRole);
     const isFilmInputAny=isFilmInput || isLineArtInput;
+    const removedConnections = [];
     if(inputRole && !(target?.specialType === 'multi-view' && MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole)) && !isFilmInputAny) {
-        canvas.connections = canvas.connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+        canvas.connections = canvas.connections.filter(c => {
+            const remove = c.to === toId && c.inputRole === inputRole;
+            if(remove) removedConnections.push(c);
+            return !remove;
+        });
     }
-    canvas.connections.push({from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})});
+    const connection = {id:uid('c'), from:fromId, to:toId, kind, ...(inputRole ? {inputRole} : {})};
+    canvas.connections.push(connection);
+    indexSmartConnectionModel(connection);
+    recordSmartConnectionMutation({
+        createdIds:[connection.id],
+        removedIds:removedConnections.map(item => item.id)
+    });
+    return connection;
 }
 function connectInputNode(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
@@ -19006,18 +19325,31 @@ function openCreateMenu(event, options={}){
     createMenu.classList.add('open');
     refreshIcons(createMenu);
 }
-function addCreatedNodeToMenuGroup(node){
-    const group = createMenuGroupId ? nodes.find(n => n.id === createMenuGroupId) : null;
+function addCreatedNodeToMenuGroup(node, groupId=createMenuGroupId){
+    const group = groupId ? smartNodeIndex.get(groupId) : null;
     if(addNodeToSmartGroup(group, node)){
         // 通过分组小菜单新建的节点入组后自动整理（节点创建已压过 undo，这里不再重复）。
         arrangeSmartGroupMembers(group, {skipUndo:true});
+        const nodeStillExists = nodes.includes(node);
+        smartNodeIndex.set(group.id, group);
+        smartGroupMembers(group).forEach(member => smartNodeIndex.set(member.id, member));
+        queueSmartRenderMutation({
+            removeIds:nodeStillExists ? [] : [node.id],
+            replaceIds:[group.id, ...smartGroupMembers(group).map(member => member.id)]
+        });
         render();
         scheduleSave();
+        return true;
     }
+    return false;
 }
 function createNodeFromMenu(type, point=null){
     const p = point || createMenuPoint || viewportCenter();
     const groupId = createMenuGroupId;
+    const groupBefore = groupId && smartNodeIndex.has(groupId)
+        ? cloneSmartHistoryValue(smartNodeIndex.get(groupId))
+        : null;
+    let menuGroupChanged = false;
     closeCreateMenu();
     const historyTx = beginSmartHistoryTransaction('menu-create');
     try {
@@ -19035,12 +19367,15 @@ function createNodeFromMenu(type, point=null){
         else if(type === 'prompt') created = createPromptNode(p.x - 158, p.y - 97);
         else if(type === 'loop') return null;
         else created = createImageNodeAt(p);
-        createMenuGroupId = groupId;
-        addCreatedNodeToMenuGroup(created);
-        createMenuGroupId = '';
+        menuGroupChanged = addCreatedNodeToMenuGroup(created, groupId);
         return created;
     } finally {
-        commitSmartHistoryTransaction(historyTx);
+        createMenuGroupId = '';
+        const groupAfter = groupId ? smartNodeIndex.get(groupId) : null;
+        const replacedNodes = menuGroupChanged && groupBefore && groupAfter
+            ? [{id:groupId, before:groupBefore, after:cloneSmartHistoryValue(groupAfter)}]
+            : [];
+        commitSmartHistoryTransaction(historyTx, {replacedNodes});
     }
 }
 shell.addEventListener('mousedown', e => {

@@ -159,9 +159,12 @@ function preloadCanvasSelectedHighRes(src){
     canvasSelectedHighResLoading.set(src, task);
     return task;
 }
-function syncCanvasSelectedImageResolution(root=nodesEl){
+function syncCanvasSelectedImageResolution(root=nodesEl, affectedNodeIds=null){
     const selectedImages = [];
-    root.querySelectorAll?.('.node img[data-preview-src][data-original-src]').forEach(img => {
+    const imageElements = affectedNodeIds
+        ? [...affectedNodeIds].flatMap(id => [...(canvasNodeDomIndex.get(id)?.querySelectorAll?.('img[data-preview-src][data-original-src]') || [])])
+        : [...(root.querySelectorAll?.('.node img[data-preview-src][data-original-src]') || [])];
+    imageElements.forEach(img => {
         if(img.dataset.previewKind === 'video') return;
         const nodeEl = img.closest('.node');
         const selectedNode = Boolean(nodeEl?.dataset?.id && selected.has(nodeEl.dataset.id));
@@ -1635,9 +1638,9 @@ function canvasPortIndexKey(nodeId, kind, inputRole=''){
     return `${nodeId}:${kind}:${inputRole || ''}`;
 }
 function invalidateCanvasGeometry(ids=[]){
-    canvasGeometryEpoch += 1;
     const list = (ids || []).filter(Boolean);
     if(!list.length){
+        canvasGeometryEpoch += 1;
         canvasNodeRectIndex.clear();
         canvasPortGeometryIndex.clear();
         return;
@@ -1648,6 +1651,39 @@ function invalidateCanvasGeometry(ids=[]){
         if(affected.has(String(key).split(':', 1)[0])) canvasPortGeometryIndex.delete(key);
     });
 }
+function removeClassicNodeDomIndex(id){
+    if(!id) return;
+    canvasNodeDomIndex.delete(id);
+    canvasNodeRectIndex.delete(id);
+    const prefix = `${id}:`;
+    [...canvasPortDomIndex.keys()].forEach(key => {
+        if(String(key).startsWith(prefix)) canvasPortDomIndex.delete(key);
+    });
+    [...canvasPortGeometryIndex.keys()].forEach(key => {
+        if(String(key).startsWith(prefix)) canvasPortGeometryIndex.delete(key);
+    });
+}
+function indexClassicNodeDom(el, node=null){
+    const id = el?.dataset?.id || node?.id || '';
+    if(!id || !el) throw new Error(`无法索引经典画布节点 DOM：${id || 'missing-id'}`);
+    removeClassicNodeDomIndex(id);
+    canvasNodeDomIndex.set(id, el);
+    const model = node || canvasNodeIndex.get(id);
+    if(model){
+        const size = defaultNodeSize(model.type);
+        canvasNodeRectIndex.set(id, {
+            x:Number(model.x) || 0,
+            y:Number(model.y) || 0,
+            w:el.offsetWidth || model.w || size.w || 260,
+            h:el.offsetHeight || model.h || size.h || 160
+        });
+    }
+    el.querySelectorAll('.port').forEach(port => {
+        const kind = port.classList.contains('out') ? 'out' : 'in';
+        canvasPortDomIndex.set(canvasPortIndexKey(id, kind, port.dataset.inputRole || ''), port);
+    });
+    return el;
+}
 function rebuildCanvasDomIndexes(){
     canvasNodeDomIndex.clear();
     canvasPortDomIndex.clear();
@@ -1657,16 +1693,8 @@ function rebuildCanvasDomIndexes(){
     nodesEl?.querySelectorAll?.('.node[data-id]').forEach(el => {
         const id = el.dataset.id || '';
         if(!id) return;
-        canvasNodeDomIndex.set(id, el);
         const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
-        if(node){
-            const size = defaultNodeSize(node.type);
-            canvasNodeRectIndex.set(id, {x:Number(node.x) || 0, y:Number(node.y) || 0, w:el.offsetWidth || node.w || size.w || 260, h:el.offsetHeight || node.h || size.h || 160});
-        }
-        el.querySelectorAll('.port').forEach(port => {
-            const kind = port.classList.contains('out') ? 'out' : 'in';
-            canvasPortDomIndex.set(canvasPortIndexKey(id, kind, port.dataset.inputRole || ''), port);
-        });
+        indexClassicNodeDom(el, node);
     });
 }
 function applyViewport(){
@@ -1819,9 +1847,9 @@ function renderClassicTempLink(){
     }
 }
 function renderClassicConnectionPatch(ids=[]){
-    if(!CLASSIC_INCREMENTAL_LINKS || classicConnectionStructureDirty || !classicLinkDom.size){
+    if(!CLASSIC_INCREMENTAL_LINKS || classicConnectionStructureDirty){
         renderLinks();
-        return;
+        return false;
     }
     const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex : new Map(nodes.map(node => [node.id, node]));
     const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex : new Map();
@@ -1833,7 +1861,7 @@ function renderClassicConnectionPatch(ids=[]){
         path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
     };
     for(const connectionId of dirty){
-        const connection = connections.find(item => item.id === connectionId);
+        const connection = classicConnectionModelIndex.get(connectionId);
         const target = connection ? nodeIndex.get(connection.to) : null;
         const entry = classicLinkDom.get(connectionId);
         if(!connection || !canResolvePort(connection.from, nodeIndex) || !canResolvePort(connection.to, nodeIndex) || (target?.type === 'multiView' && !classicMultiViewInputSlots(target).some(([role]) => role === (connection.inputRole || '')))){
@@ -1868,6 +1896,7 @@ function renderClassicConnectionPatch(ids=[]){
         control.style.top = `${(a.y + b.y) / 2}px`;
     }
     renderClassicTempLink();
+    return true;
 }
 // 拖动/缩放节点时每个 mousemove 都全量重建连线 SVG 会掉帧；用 rAF 合并成每帧最多刷新一次。
 function scheduleLinksRender(){
@@ -2282,44 +2311,75 @@ function queueClassicRenderMutation(mutation={}){
     classicRenderMutation = {
         createdIds:merge('createdIds'),
         removeIds:merge('removeIds'),
-        replaceIds:merge('replaceIds')
+        replaceIds:merge('replaceIds'),
+        createdConnectionIds:merge('createdConnectionIds'),
+        removedConnectionIds:merge('removedConnectionIds'),
+        affectedConnectionIds:merge('affectedConnectionIds')
     };
+}
+function fallbackClassicRenderMutation(reason, error=null){
+    console.warn('[canvas] 增量渲染失败，回退完整 render：', reason, error || '');
+    classicRenderMutation = null;
+    render();
+    return false;
+}
+function hydrateClassicMutationNodeRoots(roots=[]){
+    (roots || []).filter(root => root?.isConnected).forEach(root => {
+        scheduleClassicIdleIconRefresh(root);
+        bindCanvasPreviewImageFallbacks(root);
+    });
 }
 function renderClassicMutation(mutation){
     const createdIds = mutation?.createdIds || new Set();
     const removeIds = mutation?.removeIds || new Set();
     const replaceIds = mutation?.replaceIds || new Set();
-    canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
-    removeIds.forEach(id => {
-        const current = canvasNodeDomIndex.get(id);
-        if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
+    const affectedNodeIds = new Set([...createdIds, ...removeIds, ...replaceIds]);
+    const patchedNodeRoots = [];
+    const modelById = new Map();
+    nodes.forEach(node => {
+        if(createdIds.has(node.id) || replaceIds.has(node.id)) modelById.set(node.id, node);
     });
-    createdIds.forEach(id => {
-        const node = canvasNodeIndex.get(id);
-        if(!node) return;
-        const current = canvasNodeDomIndex.get(id);
-        if(current) current.remove();
-        try { nodesEl.appendChild(renderNode(node)); }
-        catch(error){ console.error('[canvas] incremental node render failed:', id, error); }
-    });
-    replaceIds.forEach(id => {
-        if(createdIds.has(id)) return;
-        const node = canvasNodeIndex.get(id);
-        const current = canvasNodeDomIndex.get(id);
-        if(!node || !current) return;
-        try {
+    try {
+        removeIds.forEach(id => {
+            const current = canvasNodeDomIndex.get(id);
+            if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
+            removeClassicNodeDomIndex(id);
+            canvasNodeIndex.delete(id);
+        });
+        createdIds.forEach(id => {
+            const node = modelById.get(id);
+            if(!node) throw new Error(`新增节点模型不存在：${id}`);
+            const current = canvasNodeDomIndex.get(id);
+            if(current) current.remove();
+            removeClassicNodeDomIndex(id);
+            canvasNodeIndex.set(id, node);
+            const fresh = renderNode(node);
+            nodesEl.appendChild(fresh);
+            indexClassicNodeDom(fresh, node);
+            patchedNodeRoots.push(fresh);
+        });
+        replaceIds.forEach(id => {
+            if(createdIds.has(id)) return;
+            const node = modelById.get(id);
+            const current = canvasNodeDomIndex.get(id);
+            if(!node || !current) throw new Error(`替换节点无法解析：${id}`);
             const fresh = renderNode(node);
             if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
             current.replaceWith(fresh);
-        } catch(error){ console.error('[canvas] incremental node refresh failed:', id, error); }
-    });
-    rebuildCanvasDomIndexes();
-    refreshSelectionVisuals();
-    refreshGeometryAfterLayout();
-    scheduleClassicIdleIconRefresh(nodesEl);
-    bindCanvasPreviewImageFallbacks(nodesEl);
-    syncCanvasSelectedImageResolution(nodesEl);
-    scheduleMinimapRender();
+            canvasNodeIndex.set(id, node);
+            indexClassicNodeDom(fresh, node);
+            patchedNodeRoots.push(fresh);
+        });
+    } catch(error){
+        return fallbackClassicRenderMutation('node-dom-index-patch', error);
+    }
+    if(!patchClassicMutationConnections(mutation, affectedNodeIds)) return fallbackClassicRenderMutation('connection-structure-patch');
+    updateCanvasStats();
+    nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
+    refreshSelectionVisuals({affectedNodeIds, syncResolution:false});
+    hydrateClassicMutationNodeRoots(patchedNodeRoots);
+    syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
+    scheduleMinimapNodeUpdate([...affectedNodeIds]);
 }
 function serializableCanvasNodes(list=nodes){
     return (list || []).map(serializableCanvasNode);
@@ -3487,10 +3547,12 @@ function canvasListUrlForProject(projectId){
 function addNode(node){
     if(!ensureCanvas()) return;
     nodes.push(node);
+    canvasNodeIndex.set(node.id, node);
     if(canvasMutationBatchDepth){
         canvasMutationBatchDirty = true;
         return node;
     }
+    queueClassicRenderMutation({createdIds:[node.id]});
     render();
     scheduleSave();
     return node;
@@ -7883,9 +7945,10 @@ function registerClassicCanvasPerfFixture(){
         const total = Math.max(20, Math.min(10000, Number(options.nodes || 500)));
         const edgeCount = Math.max(0, Math.min(20000, Number(options.connections || 1000)));
         const columns = Math.max(1, Math.ceil(Math.sqrt(total)));
+        const sourceCount = Math.max(1, Math.floor(total / 2));
         nodes = Array.from({length:total}, (_, index) => ({
             id:`perf-image-${index}`,
-            type:'image',
+            type:index < sourceCount ? 'image' : 'generator',
             x:(index % columns) * 320,
             y:Math.floor(index / columns) * 220,
             w:260,
@@ -7894,8 +7957,8 @@ function registerClassicCanvasPerfFixture(){
             mediaKind:'image'
         }));
         connections = Array.from({length:edgeCount}, (_, index) => {
-            const from = index % Math.max(1, Math.floor(total / 2));
-            const to = Math.floor(total / 2) + (index % Math.max(1, total - Math.floor(total / 2)));
+            const from = index % sourceCount;
+            const to = sourceCount + (index % Math.max(1, total - sourceCount));
             return {id:`perf-connection-${index}`, from:`perf-image-${from}`, to:`perf-image-${to}`};
         });
         selected.clear();
@@ -15655,9 +15718,10 @@ function deleteNode(id, event){
     pushUndo();
     destroyLTXEditor(nodes.find(n => n.id === id));
     nodes = nodes.filter(n => n.id !== id);
+    const removedConnections = connections.filter(c => c.from === id || c.to === id);
     connections = connections.filter(c => c.from !== id && c.to !== id);
     selected.delete(id);
-    queueClassicRenderMutation({removeIds:[id]});
+    queueClassicRenderMutation({removeIds:[id], removedConnectionIds:removedConnections.map(connection => connection.id)});
     render();
     scheduleSave();
     queueReleasedVideoClipAssets(deletingNode ? [deletingNode] : []);
@@ -18788,7 +18852,7 @@ function applyClassicHistoryTransaction(entry, selectionOverride=null){
     (entry.replacedNodes || []).forEach(change => {
         const node = nodes.find(item => item.id === change.id);
         if(!node) return;
-        Object.assign(node, cloneClassicHistoryValue(change.after || {}));
+        Object.assign(node, cloneClassicHistoryValue(change.before || {}));
     });
     selected.clear();
     (selectionOverride?.ids || entry.selectionAfter?.ids || []).forEach(id => selected.add(id));
@@ -18888,12 +18952,15 @@ function duplicateNodesForAltDrag(node, preserveConnections=false){
         .filter(shouldCopyConnection)
         .map(conn => ({...conn, id:uid('c'), from:idMap.get(conn.from) || conn.from, to:idMap.get(conn.to) || conn.to}))
         .filter(conn => conn.from && conn.to && conn.from !== conn.to);
+    const appendedConnections = [];
     copiedConnections.forEach(conn => {
         if(canConnect(conn.from, conn.to, conn.inputRole || '') && !connections.some(c => c.from === conn.from && c.to === conn.to && (c.inputRole || '') === (conn.inputRole || ''))){
             connections.push(conn);
+            indexClassicConnectionModel(conn);
+            appendedConnections.push(conn);
         }
     });
-    queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
+    queueClassicRenderMutation({createdIds:copies.map(item => item.id), createdConnectionIds:appendedConnections.map(connection => connection.id)});
     return copy;
 }
 function collectClassicClipboardNode(node, collected, collectedIds){
@@ -18968,6 +19035,7 @@ function pasteNodes(){
     nodes.push(...copies);
     copies.forEach(copy => canvasNodeIndex.set(copy.id, copy));
     const appendedConnections = appendValidatedPastedConnections(newConnections);
+    appendedConnections.forEach(indexClassicConnectionModel);
     selected.clear();
     copies.forEach(c => selected.add(c.id));
     const affectedGeneratorIds = new Set(copies.filter(copy => CANVAS_GENERATOR_TYPES.includes(copy.type)).map(copy => copy.id));
@@ -18975,7 +19043,7 @@ function pasteNodes(){
         if(CANVAS_GENERATOR_TYPES.includes(canvasNodeIndex.get(connection.to)?.type)) affectedGeneratorIds.add(connection.to);
     });
     syncGeneratorInputs(affectedGeneratorIds);
-    queueClassicRenderMutation({createdIds:copies.map(item => item.id)});
+    queueClassicRenderMutation({createdIds:copies.map(item => item.id), createdConnectionIds:appendedConnections.map(connection => connection.id)});
     render();
     scheduleSave();
     commitClassicHistoryTransaction(historyTx);
@@ -20093,17 +20161,59 @@ function renderLinks(){
     classicConnectionStructureDirty = false;
     perfEnd?.();
 }
+function indexClassicConnectionModel(connection){
+    if(!connection?.id) return false;
+    classicConnectionModelIndex.set(connection.id, connection);
+    [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+        const ids = classicConnectionSelectionIndex.get(nodeId) || new Set();
+        ids.add(connection.id);
+        classicConnectionSelectionIndex.set(nodeId, ids);
+    });
+    return true;
+}
+function removeClassicConnectionModelIndex(connectionId){
+    const connection = classicConnectionModelIndex.get(connectionId);
+    if(!connection) return false;
+    [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
+        const ids = classicConnectionSelectionIndex.get(nodeId);
+        if(!ids) return;
+        ids.delete(connectionId);
+        if(!ids.size) classicConnectionSelectionIndex.delete(nodeId);
+    });
+    classicConnectionModelIndex.delete(connectionId);
+    return true;
+}
+function patchClassicMutationConnections(mutation, affectedNodeIds=new Set()){
+    const createdConnectionIds = mutation?.createdConnectionIds || new Set();
+    const removedConnectionIds = mutation?.removedConnectionIds || new Set();
+    const affectedConnectionIds = mutation?.affectedConnectionIds || new Set();
+    if(classicConnectionStructureDirty) return false;
+    for(const connectionId of removedConnectionIds){
+        const entry = classicLinkDom.get(connectionId);
+        entry?.path?.remove();
+        entry?.hit?.remove();
+        classicLinkDom.delete(connectionId);
+        classicLinkControlDom.get(connectionId)?.remove();
+        classicLinkControlDom.delete(connectionId);
+        if(!removeClassicConnectionModelIndex(connectionId)) return false;
+    }
+    for(const connectionId of createdConnectionIds){
+        if(!classicConnectionModelIndex.has(connectionId)) return false;
+    }
+    const patchIds = new Set([...createdConnectionIds, ...affectedConnectionIds]);
+    if(patchIds.size && !renderClassicConnectionPatch([...patchIds])) return false;
+    classicClipboardConnectionSource = connections;
+    classicClipboardConnectionCount = connections.length;
+    affectedNodeIds.forEach(id => canvasPortGeometryIndex.delete(canvasPortIndexKey(id, 'in', '')));
+    classicConnectionDirtyIds.clear();
+    classicConnectionStructureDirty = false;
+    return true;
+}
 function rebuildClassicConnectionModelIndexes(){
     classicConnectionSelectionIndex.clear();
     classicConnectionModelIndex.clear();
     connections.forEach(connection => {
-        if(!connection?.id) return;
-        classicConnectionModelIndex.set(connection.id, connection);
-        [connection.from, connection.to].filter(Boolean).forEach(nodeId => {
-            const ids = classicConnectionSelectionIndex.get(nodeId) || new Set();
-            ids.add(connection.id);
-            classicConnectionSelectionIndex.set(nodeId, ids);
-        });
+        indexClassicConnectionModel(connection);
     });
     classicClipboardConnectionSource = connections;
     classicClipboardConnectionCount = connections.length;
@@ -20196,13 +20306,14 @@ function updateConnectionHoverFromMouse(e){
 function isConnectionSelected(connection){
     return selected.has(connection.from) || selected.has(connection.to);
 }
-function refreshSelectionVisuals(){
+function refreshSelectionVisuals(options={}){
+    const forcedAffectedNodeIds = options?.affectedNodeIds || [];
     const nextSelected = new Set(selected);
     const previous = classicSelectionFeedbackState;
     const incremental = CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED
         && previous
         && canvasNodeDomIndex.size > 0;
-    const affectedNodeIds = new Set([...(previous?.ids || []), ...nextSelected]);
+    const affectedNodeIds = new Set([...(previous?.ids || []), ...nextSelected, ...forcedAffectedNodeIds]);
     if(incremental){
         affectedNodeIds.forEach(id => canvasNodeDomIndex.get(id)?.classList.toggle('selected', nextSelected.has(id)));
     } else {
@@ -20210,7 +20321,7 @@ function refreshSelectionVisuals(){
             el.classList.toggle('selected', nextSelected.has(el.dataset.id));
         });
     }
-    syncCanvasSelectedImageResolution(nodesEl);
+    if(options?.syncResolution !== false) syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
     syncConnectionSelectionVisuals();
     classicSelectionFeedbackState = {ids:nextSelected};
     scheduleClassicSafeLod();
@@ -20952,9 +21063,10 @@ function deleteSelectedNodes(){
     const deletingNodes = nodes.filter(node => toDelete.has(node.id));
     toDelete.forEach(id => destroyLTXEditor(nodes.find(n => n.id === id)));
     nodes = nodes.filter(n => !toDelete.has(n.id));
+    const removedConnections = connections.filter(c => toDelete.has(c.from) || toDelete.has(c.to));
     connections = connections.filter(c => !toDelete.has(c.from) && !toDelete.has(c.to));
     selected.clear();
-    queueClassicRenderMutation({removeIds:[...toDelete]});
+    queueClassicRenderMutation({removeIds:[...toDelete], removedConnectionIds:removedConnections.map(connection => connection.id)});
     render();
     scheduleSave();
     queueReleasedVideoClipAssets(deletingNodes);

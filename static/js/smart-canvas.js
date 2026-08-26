@@ -7749,7 +7749,8 @@ function duplicateForAltDrag(node, preserveConnections=false){
         }
         if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || (preserveConnections ? copy.sourceNodeId : '');
     });
-    const keepInternal = sourceNodes.some(isSmartGroupNode);
+    // 多选 Alt 拖拽需要保留所选节点之间的内部连线；单节点行为保持原样。
+    const keepInternal = sourceNodes.some(isSmartGroupNode) || ids.length > 1;
     const appendedConnections = [];
     if(preserveConnections || keepInternal){
         const idSet = new Set(sourceNodes.map(n => n.id));
@@ -7772,8 +7773,10 @@ function duplicateForAltDrag(node, preserveConnections=false){
         canvas.connections = nextConnections;
     }
     nodes.push(...copies);
-    selectedId = '';
-    selectedIds = [];
+    copies.forEach(copy => nodeIndex.set(copy.id, copy));
+    // 保留副本的完整多选状态，后续拖拽阶段才能把整组副本一起移动。
+    selectedId = copies.length === 1 ? copies[0].id : '';
+    selectedIds = copies.length > 1 ? copies.map(copy => copy.id) : [];
     selectedImage = {nodeId:'', index:-1};
     const dragCopy = copies.find(c => c.id === idMap.get(node.id)) || copies[0];
     queueSmartRenderMutation({createdIds:copies.map(item => item.id), createdConnectionIds:appendedConnections.map(connection => connection.id)});

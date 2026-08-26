@@ -19029,6 +19029,9 @@ function cloneNode(n, dx, dy){
     return copy;
 }
 function duplicateNodesForAltDrag(node, preserveConnections=false){
+    // Alt 拖拽时，如果命中的节点属于当前多选集合，则复制整个集合；
+    // 单选或命中未选中节点时仍只复制命中的节点。
+    const selectedSourceIds = selected.has(node?.id) && selected.size > 1 ? [...selected] : [node?.id];
     const sourceIds = new Set();
     const idMap = new Map();
     const copies = [];
@@ -19047,13 +19050,14 @@ function duplicateNodesForAltDrag(node, preserveConnections=false){
         }
         return copy;
     };
-    const copy = collect(node);
-    if(!copy) return node;
+    selectedSourceIds.map(id => nodes.find(item => item.id === id)).filter(Boolean).forEach(collect);
+    if(!copies.length) return {primary:node, copies:[]};
     nodes.push(...copies);
-    // 组复制必须保留组内连线；Shift 仍可额外复制与组外节点相连的连线。
+    const isMultiSelection = selectedSourceIds.length > 1;
+    // 组复制和多选复制必须保留集合内部连线；Shift 仍可额外复制与集合外节点相连的连线。
     const shouldCopyConnection = conn => {
         const fromInside = sourceIds.has(conn.from), toInside = sourceIds.has(conn.to);
-        return (node.type === 'group' || node.type === 'promptGroup')
+        return (isMultiSelection || node.type === 'group' || node.type === 'promptGroup')
             ? (preserveConnections ? (fromInside || toInside) : (fromInside && toInside))
             : (preserveConnections && (fromInside || toInside));
     };
@@ -19070,7 +19074,7 @@ function duplicateNodesForAltDrag(node, preserveConnections=false){
         }
     });
     queueClassicRenderMutation({createdIds:copies.map(item => item.id), createdConnectionIds:appendedConnections.map(connection => connection.id)});
-    return copy;
+    return {primary:copies.find(copy => copy.id === idMap.get(node.id)) || copies[0], copies};
 }
 function collectClassicClipboardNode(node, collected, collectedIds){
     if(!node || collectedIds.has(node.id)) return;
@@ -19395,9 +19399,11 @@ function startNodeDrag(e, node){
     let dragTarget = node;
     if(e.altKey){
         setKnifeMode(false);
-        const copy = duplicateNodesForAltDrag(node, e.shiftKey);
+        const altResult = duplicateNodesForAltDrag(node, e.shiftKey);
+        const copy = altResult?.primary || altResult;
+        const copies = altResult?.copies?.length ? altResult.copies : [copy];
         selected.clear();
-        selected.add(copy.id);
+        copies.filter(Boolean).forEach(item => selected.add(item.id));
         dragTarget = copy;
         if(e.shiftKey){
             sanitizeConnections();

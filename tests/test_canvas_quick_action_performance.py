@@ -4,16 +4,40 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CANVAS_JS = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+SMART_CANVAS_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 CANVAS_CSS = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
 
 
-def section(start_marker, end_marker):
-    start = CANVAS_JS.index(start_marker)
-    end = CANVAS_JS.index(end_marker, start)
-    return CANVAS_JS[start:end]
+def section(start_marker, end_marker, source=CANVAS_JS):
+    start = source.index(start_marker)
+    end = source.index(end_marker, start)
+    return source[start:end]
 
 
 class CanvasQuickActionPerformanceTests(unittest.TestCase):
+    def test_smart_menu_creation_defers_nested_renders_until_batch_flush(self):
+        batch = section(
+            "let smartNodeCreateBatchDepth",
+            "function uid(",
+            SMART_CANVAS_JS,
+        )
+        menu = section(
+            "function createNodeFromMenu",
+            "shell.addEventListener('mousedown'",
+            SMART_CANVAS_JS,
+        )
+        commit = section(
+            "function commitSmartNodeCreate",
+            "function createFilmNode",
+            SMART_CANVAS_JS,
+        )
+
+        self.assertIn("beginSmartNodeCreateBatch", batch)
+        self.assertIn("smartNodeCreateBatchFlushing", batch)
+        self.assertIn("beginSmartNodeCreateBatch();", menu)
+        self.assertIn("endSmartNodeCreateBatch();", menu)
+        self.assertIn("!smartNodeCreateBatchDepth", commit)
+
     def test_incremental_selection_lod_only_visits_affected_nodes(self):
         lod_source = section(
             "function scheduleClassicSafeLod",

@@ -533,6 +533,7 @@ let classicShortcutOverrides = {};
 const classicHeldShortcutActions = new Map();
 let menuPoint = null;
 let linkCreateState = null;
+let canvasSubmenuCloseTimer = 0;
 let internalDrag = false;
 let selected = new Set();
 let selectedOutputMedia = null;
@@ -548,6 +549,14 @@ let canvasMetaAnchorId = '';
 let expandedPromptSource = null;
 let storyboardTransformState = null;
 let canvasFrameSample = {last:0, frames:0, fps:0};
+let classicRenderRaf = 0;
+function scheduleClassicRender(){
+    if(classicRenderRaf) return;
+    classicRenderRaf = requestAnimationFrame(() => {
+        classicRenderRaf = 0;
+        render();
+    });
+}
 function updateCanvasStats(){
     if(canvasNodeCountValue) canvasNodeCountValue.textContent = String(nodes.length);
     if(canvasFpsValue) canvasFpsValue.textContent = canvasFrameSample.fps ? String(Math.round(canvasFrameSample.fps)) : '--';
@@ -2372,11 +2381,11 @@ function endCanvasMutationBatch(options={}){
     canvasMutationBatchCreatedIds.clear();
     if(options.incremental){
         queueClassicRenderMutation({createdIds, ...(options.mutation || {})});
-        render();
+        scheduleClassicRender();
         if(options.save !== false) scheduleSave();
         return;
     }
-    render();
+    scheduleClassicRender();
     scheduleSave();
 }
 function queueClassicRenderMutation(mutation={}){
@@ -3630,7 +3639,7 @@ function addNode(node){
         return node;
     }
     queueClassicRenderMutation({createdIds:[node.id]});
-    render();
+    scheduleClassicRender();
     scheduleSave();
     return node;
 }
@@ -4737,7 +4746,7 @@ function linkCreateOptions(state){
                 {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
                 {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
                 {type:'film-video', label:'影视视频', icon:'clapperboard'},
-                {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-up'},
+                {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'AI助手', icon:'message-square-text'}])
             ];
         }
@@ -4798,7 +4807,7 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const outputOptions = [
         {type:'output', label:'Output', icon:'circle-dot'},
         ...(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type) ? [
-            {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-up'}
+            {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'}
         ] : []),
         ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) ? [
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
@@ -5188,6 +5197,9 @@ function createLinkedNode(type){
     const origin = nodes.find(n => n.id === state.originId);
     if(!origin) return;
     const historyTx = beginClassicHistoryTransaction('linked-create');
+    beginCanvasMutationBatch();
+    let createdConnection = null;
+    const removedConnectionIds = [];
     try {
         const created = createNodeByType(type, state.point);
         if(!created) return;
@@ -5196,14 +5208,25 @@ function createLinkedNode(type){
         const toId = state.originKind === 'out' ? created.id : origin.id;
         const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
         if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
-            if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
-            connections.push({id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})});
+            if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) {
+                const replaced = connections.filter(c => c.to === toId && c.inputRole === inputRole);
+                replaced.forEach(connection => removedConnectionIds.push(connection.id));
+                connections = connections.filter(c => !(c.to === toId && c.inputRole === inputRole));
+            }
+            createdConnection = {id:uid('c'), from:fromId, to:toId, ...(inputRole ? {inputRole} : {})};
+            connections.push(createdConnection);
+            indexClassicConnectionModel(createdConnection);
             syncLatestGeneratedOutputToConnection(fromId, toId);
-            syncGeneratorInputs();
-            scheduleSave();
-            render();
+            syncGeneratorInputs(new Set([created.id, toId]));
         }
     } finally {
+        endCanvasMutationBatch({
+            incremental:true,
+            mutation:{
+                createdConnectionIds:createdConnection ? [createdConnection.id] : [],
+                removedConnectionIds,
+            }
+        });
         commitClassicHistoryTransaction(historyTx);
     }
 }
@@ -5236,6 +5259,7 @@ function menuAdd(type){
     closeCreateMenu();
     const historyTx = beginClassicHistoryTransaction('menu-create');
     let created = null;
+    beginCanvasMutationBatch();
     try {
         if(window.CanvasEcommerceNodes?.isType?.(type)) created = addEcommerceNode(type, point);
         else if(window.CanvasFilmNodes?.isType?.(type)) created = addFilmNode(type, point);
@@ -5257,6 +5281,7 @@ function menuAdd(type){
         else if(type === 'rh') created = addRhNode(point);
         else if(type === 'output') created = addOutputNode(point);
     } finally {
+        endCanvasMutationBatch();
         commitClassicHistoryTransaction(historyTx);
     }
     return created;
@@ -5277,15 +5302,41 @@ function positionFilmSubmenu(){
     filmSubmenu.style.top=`${Math.max(margin,Math.min(window.innerHeight-height-margin,rect.top-8))}px`;
 }
 function closeCanvasSubmenu(host, submenu, trigger){
+    if(canvasSubmenuCloseTimer){
+        clearTimeout(canvasSubmenuCloseTimer);
+        canvasSubmenuCloseTimer = 0;
+    }
     host?.classList.remove('submenu-open','submenu-flip');
     submenu?.classList.remove('submenu-open');
     trigger?.setAttribute('aria-expanded','false');
+}
+function scheduleCanvasSubmenuClose(){
+    if(canvasSubmenuCloseTimer || !createMenu?.classList.contains('open')) return;
+    canvasSubmenuCloseTimer = window.setTimeout(() => {
+        canvasSubmenuCloseTimer = 0;
+        if(!createMenu?.classList.contains('open')) return;
+        // 子菜单 fixed 定位到 body 后，离开主菜单必须显式收起，不能依赖 :hover。
+        filmMenuHost?.classList.remove('submenu-open','submenu-flip');
+        filmSubmenu?.classList.remove('submenu-open');
+        filmMenuTrigger?.setAttribute('aria-expanded','false');
+        ecommerceMenuHost?.classList.remove('submenu-open','submenu-flip');
+        ecommerceSubmenu?.classList.remove('submenu-open');
+        ecommerceMenuTrigger?.setAttribute('aria-expanded','false');
+    }, 140);
 }
 function closeInactiveCanvasSubmenus(event){
     if(!createMenu?.classList.contains('open')) return;
     const target = event.target;
     const inFilm = Boolean((filmMenuHost && filmMenuHost.contains(target)) || (filmSubmenu && filmSubmenu.contains(target)));
     const inEcommerce = Boolean((ecommerceMenuHost && ecommerceMenuHost.contains(target)) || (ecommerceSubmenu && ecommerceSubmenu.contains(target)));
+    if(!inFilm && !inEcommerce){
+        scheduleCanvasSubmenuClose();
+        return;
+    }
+    if(canvasSubmenuCloseTimer){
+        clearTimeout(canvasSubmenuCloseTimer);
+        canvasSubmenuCloseTimer = 0;
+    }
     if(inFilm && !inEcommerce) closeCanvasSubmenu(ecommerceMenuHost,ecommerceSubmenu,ecommerceMenuTrigger);
     if(inEcommerce && !inFilm) closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
 }

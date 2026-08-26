@@ -114,6 +114,24 @@ let smartComposerIdleHandle = 0;
 let smartComposerIdleTimer = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
+let smartNodeCreateBatchDepth = 0;
+let smartNodeCreateBatchNeedsRender = false;
+const smartNodeCreateBatchIds = new Set();
+let smartNodeCreateBatchFlushing = false;
+function beginSmartNodeCreateBatch(){
+    if(!smartNodeCreateBatchDepth) smartNodeCreateBatchIds.clear();
+    smartNodeCreateBatchDepth += 1;
+}
+function endSmartNodeCreateBatch(){
+    smartNodeCreateBatchDepth = Math.max(0, smartNodeCreateBatchDepth - 1);
+    if(smartNodeCreateBatchDepth || (!smartNodeCreateBatchNeedsRender && !smartNodeCreateBatchIds.size)) return;
+    smartNodeCreateBatchNeedsRender = false;
+    if(smartNodeCreateBatchIds.size) queueSmartRenderMutation({createdIds:[...smartNodeCreateBatchIds]});
+    smartNodeCreateBatchIds.clear();
+    smartNodeCreateBatchFlushing = true;
+    try { render(); } finally { smartNodeCreateBatchFlushing = false; }
+    scheduleSave();
+}
 let loopInsertPreview = null;
 let selectionState = null;
 let smartSelectionFeedbackState = null;
@@ -1844,11 +1862,12 @@ function commitSmartNodeCreate(node, options={}){
         selectedIds = [];
         selectedImage = {nodeId:'', index:-1};
     }
-    if(options.deferRender !== true){
+    if(smartNodeCreateBatchDepth) smartNodeCreateBatchIds.add(node.id);
+    if(options.deferRender !== true && !smartNodeCreateBatchDepth){
         queueSmartRenderMutation({createdIds:[node.id]});
         render();
     }
-    if(options.deferSave !== true) scheduleSave();
+    if(options.deferSave !== true && !smartNodeCreateBatchDepth) scheduleSave();
     return node;
 }
 function createFilmNode(type, point){
@@ -9911,6 +9930,10 @@ function scheduleSmartComposerUpdate(){
     }, 600);
 }
 function render(){
+    if(smartNodeCreateBatchDepth && !smartNodeCreateBatchFlushing){
+        smartNodeCreateBatchNeedsRender = true;
+        return;
+    }
     if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(world)) {
         window.StudioFocusGuard.deferDomUpdate('smart-canvas-render', render);
         return;
@@ -19402,6 +19425,7 @@ function createNodeFromMenu(type, point=null){
     let menuGroupChanged = false;
     closeCreateMenu();
     const historyTx = beginSmartHistoryTransaction('menu-create');
+    beginSmartNodeCreateBatch();
     try {
         if(type === 'group') return createSmartGroupNode(p.x - 170, p.y - 110);
         if(type === 'film-storyboard' || type === 'film-video' || type === 'film-line-art') return createFilmNode(type,p);
@@ -19426,6 +19450,7 @@ function createNodeFromMenu(type, point=null){
             ? [{id:groupId, before:groupBefore, after:cloneSmartHistoryValue(groupAfter)}]
             : [];
         commitSmartHistoryTransaction(historyTx, {replacedNodes});
+        endSmartNodeCreateBatch();
     }
 }
 shell.addEventListener('mousedown', e => {

@@ -24,6 +24,31 @@ def css_rule(source: str, selector: str) -> str:
 
 
 class CanvasMenuPerformanceTests(unittest.TestCase):
+    def test_classic_creation_flushes_one_render_after_menu_and_link_mutations(self):
+        menu = body(CANVAS_JS, "function menuAdd", "function menuCreateFilmWorkflow")
+        linked = body(CANVAS_JS, "function createLinkedNode", "function createNodeByType")
+        batch = body(CANVAS_JS, "function beginCanvasMutationBatch", "function queueClassicRenderMutation")
+
+        self.assertIn("beginCanvasMutationBatch();", menu)
+        self.assertIn("endCanvasMutationBatch();", menu)
+        self.assertIn("beginCanvasMutationBatch();", linked)
+        self.assertIn("endCanvasMutationBatch({", linked)
+        self.assertIn("removedConnectionIds", linked)
+        self.assertIn("removedConnectionIds,", linked)
+        self.assertIn("scheduleClassicRender();", batch)
+        self.assertNotIn("render();", menu)
+        self.assertNotIn("render();", linked)
+
+    def test_classic_submenus_close_when_pointer_enters_other_menu_area(self):
+        routing = body(CANVAS_JS, "function closeInactiveCanvasSubmenus", "if(ecommerceMenuTrigger)")
+        closing = body(CANVAS_JS, "function scheduleCanvasSubmenuClose", "function closeInactiveCanvasSubmenus")
+
+        self.assertIn("if(!inFilm && !inEcommerce)", routing)
+        self.assertIn("scheduleCanvasSubmenuClose();", routing)
+        self.assertIn("setTimeout(() =>", closing)
+        self.assertIn("filmMenuHost?.classList.remove('submenu-open','submenu-flip')", closing)
+        self.assertIn("ecommerceMenuHost?.classList.remove('submenu-open','submenu-flip')", closing)
+
     def test_classic_menu_icon_refreshes_are_scoped_to_open_overlays(self):
         create = body(CANVAS_JS, "function openCreateMenu(", "function closeCreateMenu")
         link = body(CANVAS_JS, "function openLinkCreateMenu(", "function openGeneratorNodeMenu")

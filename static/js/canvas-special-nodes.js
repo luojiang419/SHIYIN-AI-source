@@ -424,6 +424,8 @@
             'WORLD COORDINATE LOCK: Preserve each object’s world position, orientation and topology. Screen position may change only by reprojection; never exchange physical left and right.',
             angleSubjectLock(node.angleSubject),
             'MIRROR LOCK: Existing mirror/glass stays fixed. Show ray-consistent content only inside it; never add a mirror, reflected room or duplicate subject.',
+            'STYLE CONSISTENCY LOCK: Image 1 is the sole color-grade reference. Preserve its white balance, exposure, contrast curve, saturation, hue relationships, shadow density, highlight rolloff, grain/noise, lens rendering and illumination direction. Reuse the same LUT-like grade across the new view; do not introduce a new golden/blue cast or relight the scene.',
+            'COLOR MATCH CHECK: Before returning, compare the new view against Image 1 and correct global RGB/luminance statistics so the palette and tonal mood remain indistinguishable while only the camera viewpoint changes.',
             preserve,
             'VALIDITY TEST: Never flip, mirror or rotate Image 1 in 2D. Each signed orbit is a new camera ray through the same frozen world.',
             node.angleNotes ? `补充要求：${node.angleNotes.trim()}` : ''
@@ -1102,7 +1104,13 @@
                     persistEditSource(node, prefix, source);
                     if(!source?.url) throw new Error('请先连接或导入一张图片');
                     if(!options.generateImageEdit) throw new Error('当前画布未配置图片 API 生成能力');
-                    node.specialRunning = true; notify(options, node, true);
+                    node.specialRunning = true;
+                    // 先创建可恢复的下游占位节点，再等待远端任务；长任务期间用户仍能看到并继续连接输出。
+                    if(options.createEditPendingOutputNode){
+                        const pendingNode = await options.createEditPendingOutputNode(node, prefix);
+                        if(pendingNode?.id) node.specialOutputNodeId = pendingNode.id;
+                    }
+                    notify(options, node, true);
                     const generatedSourceSignature = sourceSignature(source), generatedControlSignature = editControlSignature(node, prefix);
                     const file = await options.generateImageEdit(node, editPrompt(node, prefix), source, prefix);
                     if(!file?.url) throw new Error('图片 API 没有返回生成结果');

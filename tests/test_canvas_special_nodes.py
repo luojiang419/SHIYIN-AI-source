@@ -292,6 +292,28 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.classic + self.smart + self.shared)
 
+    def test_angle_creates_recoverable_pending_output_before_remote_generation(self):
+        for source, markers in (
+            (self.classic, ("function createClassicSpecialPendingOutputNode", "specialPending:true", "createEditPendingOutputNode:createClassicSpecialPendingOutputNode")),
+            (self.smart, ("function createSmartSpecialPendingOutputNode", "specialPending:true", "createEditPendingOutputNode:createSmartSpecialPendingOutputNode")),
+        ):
+            for marker in markers:
+                self.assertIn(marker, source)
+        self.assertIn("先创建可恢复的下游占位节点", self.shared)
+        self.assertIn("await options.createEditPendingOutputNode(node, prefix)", self.shared)
+
+    def test_angle_forwards_style_lock_and_color_calibration_metadata(self):
+        for marker in (
+            "STYLE CONSISTENCY LOCK",
+            "COLOR MATCH CHECK",
+            "operation:kind === 'angle' ? 'angle_change' : 'relight'",
+            "style_reference_url:kind === 'angle' ? source.url : ''",
+            "runSettings.operation = 'angle_change'",
+            "runSettings.style_reference_url = source.url",
+            "if(runSettings.style_reference_url) payload.style_reference_url = runSettings.style_reference_url",
+        ):
+            self.assertIn(marker, self.shared + self.classic + self.smart)
+
     def test_angle_subject_preview_is_not_rotated_with_camera(self):
         self.assertIn("if(world) world.style.transform = 'none'", self.shared)
         self.assertIn(".angle-world-3d{position:absolute;inset:0", self.angle_styles)

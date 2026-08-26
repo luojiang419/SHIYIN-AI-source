@@ -8367,6 +8367,8 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
         : (() => { const [w,h] = requestedRatio.split(':').map(Number); return {width:Math.max(1,w || 1), height:Math.max(1,h || 1)}; })();
     const payload = {
         prompt,
+        operation:kind === 'angle' ? 'angle_change' : 'relight',
+        style_reference_url:kind === 'angle' ? source.url : '',
         provider_id:resolveImageProviderId(providerId),
         model:resolveImageModel(node.editModel || model),
         size:apiImageSize('custom', node.editResolution || '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
@@ -8381,6 +8383,27 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
+function createClassicSpecialPendingOutputNode(sourceNode, kind){
+    if(!sourceNode?.id) return null;
+    let out = nodes.find(candidate => candidate.id === sourceNode.specialOutputNodeId && candidate.type === 'output')
+        || outputNodesForSource(sourceNode.id)[0];
+    if(!out){
+        pushUndo();
+        out = {id:uid('out'), type:'output', x:(Number(sourceNode.x)||0)+Math.max(460,Number(sourceNode.w)||460)+100, y:Number(sourceNode.y)||0, images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, specialPending:true};
+        nodes.push(out);
+        positionCanvasNodeRelative(out, sourceNode, 'downstream');
+        const connection = {id:uid('c'), from:sourceNode.id, to:out.id};
+        connections.push(connection);
+        indexClassicConnectionModel(connection);
+    }
+    out.specialSourceNodeId = sourceNode.id;
+    out.specialKind = kind;
+    out.specialPending = true;
+    out.title = kind === 'relight' ? '灯光重塑结果（生成中）' : '角度调整结果（生成中）';
+    scheduleClassicRender();
+    scheduleSave();
+    return out;
+}
 function createClassicSpecialOutputNode(sourceNode, item, kind){
     if(!sourceNode?.id || !item?.url) return null;
     let out = nodes.find(candidate => candidate.id === sourceNode.specialOutputNodeId && candidate.type === 'output')
@@ -8394,6 +8417,7 @@ function createClassicSpecialOutputNode(sourceNode, item, kind){
     }
     out.specialSourceNodeId = sourceNode.id;
     out.specialKind = kind;
+    delete out.specialPending;
     out.title = kind === 'relight' ? '灯光重塑结果' : '角度调整结果';
     out.images = [{...item, kind:'image'}];
     return out;
@@ -9175,6 +9199,7 @@ function bindClassicSpecialNode(el, node){
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
         generateImageEdit:generateClassicSpecialEdit,
+        createEditPendingOutputNode:createClassicSpecialPendingOutputNode,
         generatePoseReplicate:generateClassicPoseReplicate,
         createOutputNode:createClassicPoseOutputNode,
         createEditOutputNode:createClassicSpecialOutputNode,

@@ -408,7 +408,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.320"
+APP_VERSION = "1.0.321"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3705,6 +3705,9 @@ class AIReference(BaseModel):
 
 class OnlineImageRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=ONLINE_IMAGE_PROMPT_MAX_LENGTH)
+    # 画布特殊编辑节点用于选择性增强风格连续性；普通图片生成保持空值兼容。
+    operation: str = ""
+    style_reference_url: str = ""
     provider_id: str = "comfly"
     model: str = ""
     size: str = "1024x1024"
@@ -14718,6 +14721,41 @@ async def execute_ai_image_batch(
         "generation_elapsed_seconds": generation_elapsed_seconds,
     }
 
+def harmonize_generated_image_style(source_url: str, target_url: str, strength: float = 0.82) -> bool:
+    """把角度重投影结果的整体色彩统计拉回源图，避免 Gemini 多视角出现明显色调漂移。
+
+    这是生成后的轻量颜色校准，不改变几何内容；失败时保留原图，避免影响正常出图。
+    """
+    source_path = output_file_from_url(source_url)
+    target_path = output_file_from_url(target_url)
+    if not source_path or not target_path or source_path == target_path:
+        return False
+    try:
+        import numpy as np
+
+        with Image.open(source_path) as source_image, Image.open(target_path) as target_image:
+            source = np.asarray(source_image.convert("RGB").resize((256, 256), Image.Resampling.BILINEAR), dtype=np.float32)
+            target_original = target_image.convert("RGBA")
+            target = np.asarray(target_original.convert("RGB"), dtype=np.float32)
+            source_mean = source.reshape(-1, 3).mean(axis=0)
+            source_std = source.reshape(-1, 3).std(axis=0).clip(min=8.0)
+            target_mean = target.reshape(-1, 3).mean(axis=0)
+            target_std = target.reshape(-1, 3).std(axis=0).clip(min=8.0)
+            adjusted = (target - target_mean) * (source_std / target_std) + source_mean
+            adjusted = target * (1.0 - strength) + adjusted * strength
+            adjusted = np.clip(adjusted, 0, 255).astype(np.uint8)
+            alpha = np.asarray(target_original.getchannel("A"), dtype=np.uint8)
+            rgba = np.dstack((adjusted, alpha))
+            output_image = Image.fromarray(rgba, "RGBA")
+            if str(target_path).lower().endswith((".jpg", ".jpeg")):
+                output_image = output_image.convert("RGB")
+            output_image.save(target_path)
+        return True
+    except Exception as exc:
+        print(f"角度结果风格校准跳过：{exc}")
+        return False
+
+
 async def build_online_image_result(payload: OnlineImageRequest):
     selection = resolve_image_generation_selection(payload.provider_id, payload.model)
     batch = await execute_ai_image_batch(
@@ -14738,6 +14776,11 @@ async def build_online_image_result(payload: OnlineImageRequest):
     generation_started_at = batch["generation_started_at"]
     generation_completed_at = batch["generation_completed_at"]
     generation_elapsed_seconds = batch["generation_elapsed_seconds"]
+    style_reference_url = str(payload.style_reference_url or "").strip()
+    style_calibrated = False
+    if payload.operation == "angle_change" and style_reference_url:
+        for image_url in batch["images"]:
+            style_calibrated = harmonize_generated_image_style(style_reference_url, image_url) or style_calibrated
     result = {
         "prompt": payload.prompt,
         "images": batch["images"],
@@ -14752,7 +14795,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "generation_started_at": generation_started_at,
         "generation_completed_at": generation_completed_at,
         "generation_elapsed_seconds": generation_elapsed_seconds,
-        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "generation_elapsed_seconds": generation_elapsed_seconds},
+        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
@@ -14772,6 +14815,8 @@ def online_image_request_snapshot(payload: OnlineImageRequest) -> Dict[str, Any]
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     return {
         "prompt": payload.prompt,
+        "operation": payload.operation,
+        "style_reference_url": payload.style_reference_url,
         "provider_id": payload.provider_id,
         "model": payload.model,
         "size": payload.size,

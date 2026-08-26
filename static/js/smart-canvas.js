@@ -10778,6 +10778,10 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
         resolution:node.editResolution || '2k', quality:node.editQuality || 'high',
         model:node.editModel || base.model
     };
+    if(kind === 'angle'){
+        runSettings.operation = 'angle_change';
+        runSettings.style_reference_url = source.url;
+    }
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
     const task = await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
     const taskId = task?.taskIds?.[0];
@@ -10788,6 +10792,26 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     if(!url) throw new Error(kind === 'relight' ? '灯光重塑没有返回图片' : '角度调整没有返回图片');
     const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
+}
+function createSmartSpecialPendingOutputNode(sourceNode, kind){
+    if(!sourceNode?.id) return null;
+    let output = nodes.find(candidate => candidate.id === sourceNode.specialOutputNodeId && isSmartImageNode(candidate) && !candidate.specialType)
+        || (canvas?.connections || []).filter(connection => connection.from === sourceNode.id).map(connection => nodes.find(item => item.id === connection.to)).find(candidate => candidate && isSmartImageNode(candidate) && !candidate.specialType);
+    if(!output){
+        pushUndo();
+        output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:kind === 'relight' ? '灯光重塑结果（生成中）' : '角度调整结果（生成中）', images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, specialPending:true, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+        const point = smartFreeNodePoint(sourceNode, output, 'downstream');
+        output.x = point.x; output.y = point.y;
+        nodes.push(output);
+    }
+    if(!(canvas?.connections || []).some(connection => connection.from === sourceNode.id && connection.to === output.id)) connectInputNode(sourceNode.id, output.id);
+    output.title = kind === 'relight' ? '灯光重塑结果（生成中）' : '角度调整结果（生成中）';
+    output.specialSourceNodeId = sourceNode.id;
+    output.specialKind = kind;
+    output.specialPending = true;
+    render();
+    scheduleSave();
+    return output;
 }
 async function smartBatchRunSettingsForRef(baseSettings, ref){
     let width = Number(ref?.natural_w || ref?.width || ref?.w || 0);
@@ -11650,6 +11674,7 @@ function createSmartSpecialOutputNode(sourceNode, item, kind){
     output.title = kind === 'relight' ? '灯光重塑结果' : '角度调整结果';
     output.specialSourceNodeId = sourceNode.id;
     output.specialKind = kind;
+    delete output.specialPending;
     output.images = [{...item, kind:'image'}];
     return output;
 }
@@ -11766,6 +11791,7 @@ function bindSmartSpecialNode(el, node){
         resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
         generatePanorama:generateSmartPanorama,
         generateImageEdit:generateSmartSpecialEdit,
+        createEditPendingOutputNode:createSmartSpecialPendingOutputNode,
         generatePoseReplicate:generateSmartPoseReplicate,
         createOutputNode:createSmartPoseOutputNode,
         createEditOutputNode:createSmartSpecialOutputNode,
@@ -18383,6 +18409,8 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
     const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)};
+    if(runSettings.operation) payload.operation = runSettings.operation;
+    if(runSettings.style_reference_url) payload.style_reference_url = runSettings.style_reference_url;
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
         if(!r.ok) throw new Error(await r.text());
         return r.json();

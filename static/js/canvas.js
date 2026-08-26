@@ -470,7 +470,7 @@ let videoFrameOpenSequence = 0;
 let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
 let dragNode = null;
-// 安全视口 LOD 只作用于普通节点 body；节点模型、外壳和端口始终保留。
+// 安全视口 LOD 只作用于普通节点视觉壳；节点模型和端口始终保留。
 const CLASSIC_SAFE_LOD_ENABLED = true;
 const CLASSIC_SAFE_LOD_MARGIN = 480;
 // 框选优先复用节点矩形索引；关闭时回退结束阶段的逐节点尺寸读取。
@@ -480,10 +480,13 @@ const CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
 // 节点拖动优先复用已有 DOM 索引；索引缺失或关闭时回退选择器查询。
 const CLASSIC_DRAG_DOM_INDEX_ENABLED = true;
 let classicSafeLodRaf = 0;
+let classicSafeLodFullRefreshPending = false;
+const classicSafeLodNodeIds = new Set();
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
 let canvasMutationBatchDepth = 0;
 let canvasMutationBatchDirty = false;
+const canvasMutationBatchCreatedIds = new Set();
 let dragBoard = null;
 let minimapDrag = false;
 let minimapState = null;
@@ -623,6 +626,8 @@ let classicIdleMediaMeasureHandle = 0;
 const classicIdleMediaMeasureRoots = new Set();
 let classicIdleIconHandle = 0;
 const classicIdleIconRoots = new Set();
+let classicIdleNodeRectMeasureHandle = 0;
+const classicIdleNodeRectMeasureIds = new Set();
 let flushingVideoClipDeletions = false;
 const pendingVideoClipDeletions = new Map();
 const savedVideoClipSequencesByCanvas = new Map();
@@ -1663,7 +1668,7 @@ function removeClassicNodeDomIndex(id){
         if(String(key).startsWith(prefix)) canvasPortGeometryIndex.delete(key);
     });
 }
-function indexClassicNodeDom(el, node=null){
+function indexClassicNodeDom(el, node=null, options={}){
     const id = el?.dataset?.id || node?.id || '';
     if(!id || !el) throw new Error(`无法索引经典画布节点 DOM：${id || 'missing-id'}`);
     removeClassicNodeDomIndex(id);
@@ -1671,11 +1676,14 @@ function indexClassicNodeDom(el, node=null){
     const model = node || canvasNodeIndex.get(id);
     if(model){
         const size = defaultNodeSize(model.type);
+        const measure = options.measure !== false;
+        const estimatedWidth = Number(model.w) || Number(size.w) || 260;
+        const estimatedHeight = Number(model.h) || Number(size.h) || 160;
         canvasNodeRectIndex.set(id, {
             x:Number(model.x) || 0,
             y:Number(model.y) || 0,
-            w:el.offsetWidth || model.w || size.w || 260,
-            h:el.offsetHeight || model.h || size.h || 160
+            w:measure ? (el.offsetWidth || estimatedWidth) : estimatedWidth,
+            h:measure ? (el.offsetHeight || estimatedHeight) : estimatedHeight
         });
     }
     el.querySelectorAll('.port').forEach(port => {
@@ -1683,6 +1691,41 @@ function indexClassicNodeDom(el, node=null){
         canvasPortDomIndex.set(canvasPortIndexKey(id, kind, port.dataset.inputRole || ''), port);
     });
     return el;
+}
+function scheduleClassicNodeRectMeasure(ids=[]){
+    (ids || []).filter(Boolean).forEach(id => classicIdleNodeRectMeasureIds.add(id));
+    if(classicIdleNodeRectMeasureHandle || !classicIdleNodeRectMeasureIds.size) return;
+    const run = () => {
+        classicIdleNodeRectMeasureHandle = 0;
+        const measured = [];
+        const idsToMeasure = [...classicIdleNodeRectMeasureIds];
+        classicIdleNodeRectMeasureIds.clear();
+        idsToMeasure.forEach(id => {
+            const el = canvasNodeDomIndex.get(id);
+            const model = canvasNodeIndex.get(id);
+            if(!el?.isConnected || !model) return;
+            const size = defaultNodeSize(model.type);
+            measured.push({
+                id,
+                rect:{
+                    x:Number(model.x) || 0,
+                    y:Number(model.y) || 0,
+                    w:el.offsetWidth || Number(model.w) || Number(size.w) || 260,
+                    h:el.offsetHeight || Number(model.h) || Number(size.h) || 160
+                }
+            });
+        });
+        if(!measured.length) return;
+        invalidateCanvasGeometry(measured.map(item => item.id));
+        measured.forEach(item => canvasNodeRectIndex.set(item.id, item.rect));
+        const measuredIds = measured.map(item => item.id);
+        markClassicConnectionsDirtyForNodes(measuredIds);
+        if(classicConnectionDirtyIds.size) scheduleLinksRender();
+        scheduleMinimapNodeUpdate(measuredIds);
+        if(measuredIds.some(id => selected.has(id))) scheduleSelectionHubPosition();
+    };
+    if('requestIdleCallback' in window) classicIdleNodeRectMeasureHandle = window.requestIdleCallback(run, {timeout:1200});
+    else classicIdleNodeRectMeasureHandle = window.setTimeout(run, 60);
 }
 function rebuildCanvasDomIndexes(){
     canvasNodeDomIndex.clear();
@@ -1718,16 +1761,28 @@ function estimatedNodeRect(n){
     canvasNodeRectIndex.set(n.id, rect);
     return rect;
 }
-function scheduleClassicSafeLod(){
-    if(classicSafeLodRaf || !nodesEl) return;
+function scheduleClassicSafeLod(ids=null){
+    if(!nodesEl) return;
+    if(ids == null){
+        classicSafeLodFullRefreshPending = true;
+        classicSafeLodNodeIds.clear();
+    } else if(!classicSafeLodFullRefreshPending){
+        const targetIds = Array.isArray(ids) || ids instanceof Set ? ids : [ids];
+        targetIds.forEach(id => { if(id) classicSafeLodNodeIds.add(id); });
+    }
+    if(classicSafeLodRaf) return;
     classicSafeLodRaf = requestAnimationFrame(() => {
         classicSafeLodRaf = 0;
-        updateClassicSafeLod();
+        const pendingIds = classicSafeLodFullRefreshPending ? null : [...classicSafeLodNodeIds];
+        classicSafeLodFullRefreshPending = false;
+        classicSafeLodNodeIds.clear();
+        updateClassicSafeLod(pendingIds);
     });
 }
-function updateClassicSafeLod(){
+function updateClassicSafeLod(affectedIds=null){
     if(!nodesEl) return;
     const largeScene = CLASSIC_SAFE_LOD_ENABLED && nodes.length > 200;
+    const largeSceneChanged = nodesEl.classList.contains('canvas-lod-active') !== largeScene;
     nodesEl.classList.toggle('canvas-lod-active', largeScene);
     const view = currentWorldViewRect();
     const margin = CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
@@ -1741,7 +1796,12 @@ function updateClassicSafeLod(){
     if(resizeNode?.node?.id) keepIds.add(resizeNode.node.id);
     if(tempLink?.from && !String(tempLink.from).startsWith('selection:')) keepIds.add(tempLink.from);
     if(linkCreateState?.originId) keepIds.add(linkCreateState.originId);
-    nodesEl.querySelectorAll('.node.canvas-lod-safe').forEach(el => {
+    const elements = affectedIds == null || largeSceneChanged
+        ? nodesEl.querySelectorAll('.node.canvas-lod-safe')
+        : [...new Set(affectedIds)]
+            .map(id => canvasNodeDomIndex.get(id))
+            .filter(el => el?.classList?.contains('canvas-lod-safe'));
+    elements.forEach(el => {
         const node = canvasNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
         if(!node){ el.classList.remove('canvas-lod-outside'); return; }
         const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
@@ -1846,14 +1906,18 @@ function renderClassicTempLink(){
         classicTempLinkDom = null;
     }
 }
-function renderClassicConnectionPatch(ids=[]){
+function renderClassicConnectionPatch(ids=[], options={}){
     if(!CLASSIC_INCREMENTAL_LINKS || classicConnectionStructureDirty){
         renderLinks();
         return false;
     }
     const nodeIndex = canvasNodeIndex.size ? canvasNodeIndex : new Map(nodes.map(node => [node.id, node]));
     const nodeElements = canvasNodeDomIndex.size ? canvasNodeDomIndex : new Map();
-    const layout = {boardRect:board.getBoundingClientRect(), cache:new Map(), nodeIndex, nodeElements};
+    const layout = {
+        boardRect:options.preferEstimated ? null : board.getBoundingClientRect(),
+        cache:new Map(), nodeIndex, nodeElements,
+        preferEstimated:Boolean(options.preferEstimated)
+    };
     const dirty = new Set((ids || []).filter(Boolean));
     if(!dirty.size){ renderClassicTempLink(); return; }
     const setPathGeometry = (path, x1, y1, x2, y2) => {
@@ -2297,12 +2361,21 @@ function serializableCanvasNode(node){
     return copy;
 }
 function beginCanvasMutationBatch(){
+    if(!canvasMutationBatchDepth) canvasMutationBatchCreatedIds.clear();
     canvasMutationBatchDepth += 1;
 }
-function endCanvasMutationBatch(){
+function endCanvasMutationBatch(options={}){
     canvasMutationBatchDepth = Math.max(0, canvasMutationBatchDepth - 1);
     if(canvasMutationBatchDepth || !canvasMutationBatchDirty) return;
     canvasMutationBatchDirty = false;
+    const createdIds = [...canvasMutationBatchCreatedIds];
+    canvasMutationBatchCreatedIds.clear();
+    if(options.incremental){
+        queueClassicRenderMutation({createdIds, ...(options.mutation || {})});
+        render();
+        if(options.save !== false) scheduleSave();
+        return;
+    }
     render();
     scheduleSave();
 }
@@ -2325,7 +2398,6 @@ function fallbackClassicRenderMutation(reason, error=null){
 }
 function hydrateClassicMutationNodeRoots(roots=[]){
     (roots || []).filter(root => root?.isConnected).forEach(root => {
-        scheduleClassicIdleIconRefresh(root);
         bindCanvasPreviewImageFallbacks(root);
     });
 }
@@ -2354,8 +2426,10 @@ function renderClassicMutation(mutation){
             removeClassicNodeDomIndex(id);
             canvasNodeIndex.set(id, node);
             const fresh = renderNode(node);
+            refreshIcons(fresh);
             nodesEl.appendChild(fresh);
-            indexClassicNodeDom(fresh, node);
+            indexClassicNodeDom(fresh, node, {measure:false});
+            scheduleClassicNodeRectMeasure([id]);
             patchedNodeRoots.push(fresh);
         });
         replaceIds.forEach(id => {
@@ -2364,10 +2438,12 @@ function renderClassicMutation(mutation){
             const current = canvasNodeDomIndex.get(id);
             if(!node || !current) throw new Error(`替换节点无法解析：${id}`);
             const fresh = renderNode(node);
+            refreshIcons(fresh);
             if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
             current.replaceWith(fresh);
             canvasNodeIndex.set(id, node);
-            indexClassicNodeDom(fresh, node);
+            indexClassicNodeDom(fresh, node, {measure:false});
+            scheduleClassicNodeRectMeasure([id]);
             patchedNodeRoots.push(fresh);
         });
     } catch(error){
@@ -2376,7 +2452,7 @@ function renderClassicMutation(mutation){
     if(!patchClassicMutationConnections(mutation, affectedNodeIds)) return fallbackClassicRenderMutation('connection-structure-patch');
     updateCanvasStats();
     nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
-    refreshSelectionVisuals({affectedNodeIds, syncResolution:false});
+    refreshSelectionVisuals({affectedNodeIds, syncResolution:false, deferHubPosition:true});
     hydrateClassicMutationNodeRoots(patchedNodeRoots);
     syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
     scheduleMinimapNodeUpdate([...affectedNodeIds]);
@@ -3550,6 +3626,7 @@ function addNode(node){
     canvasNodeIndex.set(node.id, node);
     if(canvasMutationBatchDepth){
         canvasMutationBatchDirty = true;
+        canvasMutationBatchCreatedIds.add(node.id);
         return node;
     }
     queueClassicRenderMutation({createdIds:[node.id]});
@@ -7943,19 +8020,25 @@ function registerClassicCanvasPerfFixture(){
         const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
         const previous = {nodes:clone(nodes), connections:clone(connections), selected:[...selected]};
         const total = Math.max(20, Math.min(10000, Number(options.nodes || 500)));
-        const edgeCount = Math.max(0, Math.min(20000, Number(options.connections || 1000)));
+        const edgeCount = Math.max(0, Math.min(20000, Number(options.connections ?? 1000)));
+        const mediaItems = options.mediaItems || [];
+        if(mediaItems.length && edgeCount) throw new Error('真实媒体性能 fixture 必须使用 connections=0');
         const columns = Math.max(1, Math.ceil(Math.sqrt(total)));
         const sourceCount = Math.max(1, Math.floor(total / 2));
-        nodes = Array.from({length:total}, (_, index) => ({
-            id:`perf-image-${index}`,
-            type:index < sourceCount ? 'image' : 'generator',
-            x:(index % columns) * 320,
-            y:Math.floor(index / columns) * 220,
-            w:260,
-            h:160,
-            name:`perf-${index + 1}`,
-            mediaKind:'image'
-        }));
+        nodes = Array.from({length:total}, (_, index) => {
+            const media = mediaItems[index % mediaItems.length];
+            return {
+                id:`perf-image-${index}`,
+                type:media ? 'image' : (index < sourceCount ? 'image' : 'generator'),
+                x:(index % columns) * 320,
+                y:Math.floor(index / columns) * 220,
+                w:260,
+                h:160,
+                name:media?.name || `perf-${index + 1}`,
+                ...(media ? {url:media.url} : {}),
+                mediaKind:'image'
+            };
+        });
         connections = Array.from({length:edgeCount}, (_, index) => {
             const from = index % sourceCount;
             const to = sourceCount + (index % Math.max(1, total - sourceCount));
@@ -9589,9 +9672,9 @@ function renderNode(node){
             }
             body.addEventListener('dblclick', openPreview, true);
             if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
-                requestAnimationFrame(refreshGeometry);
+                scheduleClassicNodeRectMeasure([node.id]);
             } else if(loadedImg) {
-                loadedImg.onload = () => refreshGeometryAfterLayout();
+                loadedImg.onload = () => scheduleClassicNodeRectMeasure([node.id]);
             }
         } else {
         body.innerHTML = `<div class="blank-image"><i data-lucide="image-plus" class="w-7 h-7"></i><div class="text-[11px] font-bold">${tr('canvas.clickDragPasteImage')}</div></div>`;
@@ -9706,7 +9789,12 @@ function renderNode(node){
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
-    el.appendChild(body);
+    const visualShell = document.createElement('div');
+    visualShell.className = 'node-visual-shell';
+    const nodeHead = el.querySelector(':scope > .node-head');
+    if(nodeHead) visualShell.appendChild(nodeHead);
+    visualShell.appendChild(body);
+    el.appendChild(visualShell);
     el.querySelectorAll('button, select, textarea, input').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation(), true);
         control.addEventListener('click', e => e.stopPropagation());
@@ -18477,7 +18565,7 @@ function bindVideoFrameExtractorControls(){
     });
 }
 bindVideoFrameExtractorControls();
-function renderSelectionHub(){
+function renderSelectionHub(options={}){
     selectionHub.innerHTML = '';
     selectionHub.classList.remove('open');
     selectionHubAnchor = null;
@@ -18551,7 +18639,8 @@ function renderSelectionHub(){
             runMediaQuickAction(button.dataset.mediaAction, target);
         };
     });
-    positionSelectionHub(anchor);
+    if(options.deferPosition) scheduleSelectionHubPosition();
+    else positionSelectionHub(anchor);
     refreshIcons(selectionHub);
 }
 function selectOutputMedia(nodeId, url, wrap=null){
@@ -18608,26 +18697,35 @@ function addQuickActionNode(source, type){
     const historyTx = arguments[2] || null;
     const ownHistoryTx = !historyTx;
     const tx = historyTx || beginClassicHistoryTransaction('quick-action');
+    let created = null;
+    let createdConnection = null;
+    beginCanvasMutationBatch();
     try {
         if(!source) return null;
-        const sourceRect = nodeRect(source);
+        const sourceRect = estimatedNodeRect(source);
         const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
-        const created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
+        created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
         if(!created) return null;
         positionCanvasNodeRelative(created, source, 'downstream');
         const inputRole = type === 'multi-view' ? 'model-front' : '';
         if(inputRole && canConnect(source.id, created.id, inputRole) && !connections.some(connection => connection.from === source.id && connection.to === created.id && connection.inputRole === inputRole)){
-            connections.push({id:uid('c'), from:source.id, to:created.id, inputRole});
+            createdConnection = {id:uid('c'), from:source.id, to:created.id, inputRole};
         } else if(!inputRole && canConnect(source.id, created.id) && !connections.some(connection => connection.from === source.id && connection.to === created.id)){
-            connections.push({id:uid('c'), from:source.id, to:created.id});
+            createdConnection = {id:uid('c'), from:source.id, to:created.id};
+        }
+        if(createdConnection){
+            connections.push(createdConnection);
+            indexClassicConnectionModel(createdConnection);
         }
         selected.clear();
         selected.add(created.id);
-        syncGeneratorInputs();
-        render();
-        scheduleSave();
+        syncGeneratorInputs(new Set([created.id]));
         return created;
     } finally {
+        endCanvasMutationBatch({
+            incremental:true,
+            mutation:{createdConnectionIds:createdConnection ? [createdConnection.id] : []}
+        });
         if(ownHistoryTx) commitClassicHistoryTransaction(tx);
     }
 }
@@ -19647,8 +19745,8 @@ function canvasRectsOverlap(a, b){
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 function canvasFreeNodePoint(source, created, direction='downstream'){
-    const sourceRect = nodeRect(source);
-    const targetRect = nodeRect(created);
+    const sourceRect = estimatedNodeRect(source);
+    const targetRect = estimatedNodeRect(created);
     const width = Math.max(1, targetRect.w);
     const height = Math.max(1, targetRect.h);
     const xBase = direction === 'upstream'
@@ -19658,16 +19756,16 @@ function canvasFreeNodePoint(source, created, direction='downstream'){
     const rowOffsets = [0];
     for(let i=1; i<=12; i++) rowOffsets.push(i, -i);
     const excludedId = created?.id;
+    const occupiedRects = nodes
+        .filter(node => node.id !== excludedId)
+        .map(estimatedNodeRect);
     for(let column=0; column<24; column++){
         const x = direction === 'upstream'
             ? xBase - column * (width + CANVAS_NODE_LAYOUT_GAP)
             : xBase + column * (width + CANVAS_NODE_LAYOUT_GAP);
         for(const rowOffset of rowOffsets){
             const candidate = {x, y:sourceRect.y + rowOffset * rowStep, w:width, h:height};
-            const blocked = nodes.some(node => {
-                if(node.id === excludedId) return false;
-                return canvasRectsOverlap(candidate, nodeRect(node));
-            });
+            const blocked = occupiedRects.some(rect => canvasRectsOverlap(candidate, rect));
             if(!blocked) return {x:Math.round(candidate.x), y:Math.round(candidate.y)};
         }
     }
@@ -20062,6 +20160,14 @@ function portPoint(id, kind, inputRole='', layout=null){
     }
     const n = layout?.nodeIndex?.get(id) || canvasNodeIndex.get(id) || nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
+    if(layout?.preferEstimated){
+        const rect = canvasNodeRectIndex.get(id) || estimatedNodeRect(n);
+        const point = kind === 'out'
+            ? {x:rect.x + rect.w, y:rect.y + rect.h / 2}
+            : {x:rect.x, y:rect.y + rect.h / 2};
+        cache?.set(cacheKey, point);
+        return point;
+    }
     const el = layout?.nodeElements?.get(id) || canvasNodeDomIndex.get(id);
     const port = canvasPortDomIndex.get(cacheKey) || el?.querySelector(`.port.${kind}${inputRole ? `[data-input-role="${CSS.escape(inputRole)}"]` : ''}`);
     if(port){
@@ -20200,8 +20306,9 @@ function patchClassicMutationConnections(mutation, affectedNodeIds=new Set()){
     for(const connectionId of createdConnectionIds){
         if(!classicConnectionModelIndex.has(connectionId)) return false;
     }
-    const patchIds = new Set([...createdConnectionIds, ...affectedConnectionIds]);
-    if(patchIds.size && !renderClassicConnectionPatch([...patchIds])) return false;
+    if(createdConnectionIds.size && !renderClassicConnectionPatch([...createdConnectionIds], {preferEstimated:true})) return false;
+    const affectedExistingIds = [...affectedConnectionIds].filter(id => !createdConnectionIds.has(id));
+    if(affectedExistingIds.length && !renderClassicConnectionPatch(affectedExistingIds)) return false;
     classicClipboardConnectionSource = connections;
     classicClipboardConnectionCount = connections.length;
     affectedNodeIds.forEach(id => canvasPortGeometryIndex.delete(canvasPortIndexKey(id, 'in', '')));
@@ -20324,8 +20431,8 @@ function refreshSelectionVisuals(options={}){
     if(options?.syncResolution !== false) syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
     syncConnectionSelectionVisuals();
     classicSelectionFeedbackState = {ids:nextSelected};
-    scheduleClassicSafeLod();
-    renderSelectionHub();
+    scheduleClassicSafeLod([...affectedNodeIds]);
+    renderSelectionHub({deferPosition:options?.deferHubPosition});
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
     canvasArrangeBtn?.classList.toggle('visible', nextSelected.size > 0);
     scheduleClassicMinimapSelectionUpdate([...affectedNodeIds]);

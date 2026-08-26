@@ -30,13 +30,17 @@ class CanvasMediaQuickToolbarTests(unittest.TestCase):
     def test_output_actions_materialize_the_selected_image_before_linking(self):
         self.assertIn("function materializeOutputMediaTarget(target)", self.javascript)
         self.assertIn("url:target.url", self.javascript)
-        self.assertIn("function addQuickActionNode(source, type)", self.javascript)
-        self.assertIn("connections.push({id:uid('c'), from:source.id, to:created.id})", self.javascript)
+        start = self.javascript.index("function addQuickActionNode(source, type)")
+        end = self.javascript.index("function runMediaQuickAction", start)
+        quick_action = self.javascript[start:end]
+        self.assertIn("createdConnection = {id:uid('c'), from:source.id, to:created.id}", quick_action)
+        self.assertIn("connections.push(createdConnection)", quick_action)
+        self.assertIn("indexClassicConnectionModel(createdConnection)", quick_action)
 
     def test_image_toolbar_has_a_direct_crop_action_reusing_the_image_editor(self):
-        render = re.search(r"function renderSelectionHub\(\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
-        self.assertIsNotNone(render)
-        body = render.group("body")
+        start = self.javascript.index("function renderSelectionHub")
+        end = self.javascript.index("function selectOutputMedia", start)
+        body = self.javascript[start:end]
         self.assertEqual(body.count("{id:'crop', label:langIsEn() ? 'Crop' : '裁切', icon:'crop'}"), 1)
         self.assertLess(body.index("{id:'edit'"), body.index("{id:'crop'"))
         self.assertLess(body.index("{id:'crop'"), body.index("{id:'grid'"))

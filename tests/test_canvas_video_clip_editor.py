@@ -14,7 +14,7 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         cls.styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
 
     def test_video_selection_toolbar_offers_trim_action(self):
-        render = re.search(r"function renderSelectionHub\(\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
+        render = re.search(r"function renderSelectionHub\((?:options=\{\})?\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
         self.assertIsNotNone(render)
         body = render.group("body")
         self.assertIn("['image','video'].includes(mediaKindForNode(node))", body)
@@ -23,7 +23,7 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn("icon:'scissors'", body)
 
     def test_video_selection_toolbar_offers_frame_extraction(self):
-        render = re.search(r"function renderSelectionHub\(\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
+        render = re.search(r"function renderSelectionHub\((?:options=\{\})?\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
         self.assertIsNotNone(render)
         body = render.group("body")
         self.assertIn("id:'extract-video'", body)

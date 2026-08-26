@@ -223,14 +223,15 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .link-delete { position:absolute; width:22px; height:22px; border-radius:999px; display:flex; align-items:center; justify-content:center; transform:translate(-50%,-50%); color:#766f68; background:rgba(255,255,255,.94); border:1px solid #e8e8ea; box-shadow:0 8px 20px rgba(0,0,0,.12); opacity:0; pointer-events:none; transition:opacity .14s var(--ease), color .14s var(--ease), border-color .14s var(--ease), background .14s var(--ease); }
 .link-delete.visible,.link-delete.hover { opacity:1; pointer-events:auto; }
 .link-delete.hover { color:#dc2626; border-color:#fecaca; background:#fff5f5; }
-.node { position:absolute; min-width:220px; min-height:96px; border:1px solid var(--line); border-radius:22px; background:var(--card); box-shadow:0 16px 42px var(--shadow); overflow:visible; user-select:none; z-index:2; }
-/* LOD 只放在节点内部，节点外层必须保持可溢出以显示左右端口。 */
-#nodes.canvas-large-scene > .node.canvas-lod-safe > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
-/* JS 只给视口外普通节点加 deferred；节点外壳和端口不参与 LOD。 */
-#nodes.canvas-lod-active > .node.canvas-lod-safe.canvas-lod-outside > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
-#nodes.canvas-lod-active > .node.canvas-lod-safe:not(.canvas-lod-outside) > .node-body { content-visibility:visible; contain: none; }
-.node::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--card); pointer-events:none; z-index:-1; overflow:hidden; }
+.node { position:absolute; min-width:220px; min-height:96px; border-radius:22px; overflow:visible; user-select:none; z-index:2; }
+.node-visual-shell { position:relative; width:100%; min-height:inherit; box-sizing:border-box; border:1px solid var(--line); border-radius:inherit; background:var(--card); box-shadow:0 16px 42px var(--shadow); overflow:visible; }
+/* LOD 只包含视觉壳；左右端口和缩放手柄留在壳外，不能被 paint containment 裁剪。 */
+#nodes.canvas-large-scene > .node.canvas-lod-safe > .node-visual-shell { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+#nodes.canvas-lod-active > .node.canvas-lod-safe.canvas-lod-outside > .node-visual-shell { content-visibility:auto; contain-intrinsic-size:260px 180px; }
+#nodes.canvas-lod-active > .node.canvas-lod-safe:not(.canvas-lod-outside) > .node-visual-shell { content-visibility:visible; contain:none; }
+.node-visual-shell::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--card); pointer-events:none; z-index:-1; overflow:hidden; }
 .node.sized { display:flex; flex-direction:column; }
+.node.sized > .node-visual-shell { flex:1; min-height:0; display:flex; flex-direction:column; }
 .node.selected { outline:2px solid var(--strong); outline-offset:2px; }
 .node-head { height:42px; flex:0 0 42px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 12px; border-bottom:1px solid var(--line); border-radius:21px 21px 0 0; overflow:hidden; cursor:move; }
 .node-title { font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }

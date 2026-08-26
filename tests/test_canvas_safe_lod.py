@@ -54,7 +54,8 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertIn("scheduleSmartSafeLod();", smart_apply)
         smart_lod = body(SMART, "function updateSmartSafeLod", "function screenToWorld")
         self.assertNotIn(".remove()", smart_lod)
-        self.assertIn("scheduleClassicSafeLod();", body(CLASSIC, "function refreshSelectionVisuals", "function syncConnectionSelectionVisuals"))
+        selection_body = body(CLASSIC, "function refreshSelectionVisuals", "function syncConnectionSelectionVisuals")
+        self.assertRegex(selection_body, r"scheduleClassicSafeLod\(\[\.\.\.affectedNodeIds\]\);")
         self.assertIn("scheduleSmartSafeLod();", body(SMART, "function syncSelectionUi", "function syncConnectionSelectionUi"))
 
 

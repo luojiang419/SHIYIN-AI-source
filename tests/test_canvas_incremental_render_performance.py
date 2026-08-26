@@ -76,6 +76,24 @@ class CanvasIncrementalRenderPerformanceTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, section)
 
+    def test_smart_mutation_hydrates_new_roots_before_inserting_into_world(self):
+        section = body(SMART_CANVAS_JS, "function renderSmartMutation", "function render(){")
+        insert_at = section.index("world.appendChild(fresh)")
+        self.assertLess(section.index("refreshIcons(fresh)"), insert_at)
+        self.assertLess(section.index("bindSmartPreviewImageFallbacks(fresh)"), insert_at)
+        self.assertLess(section.index("measureSmartNodeImages(smartNodeIndex, fresh)"), insert_at)
+
+    def test_smart_mutation_defers_composer_rebuild_to_idle_period(self):
+        mutation = body(SMART_CANVAS_JS, "function renderSmartMutation", "function render(){")
+        self.assertIn("scheduleSmartComposerUpdate()", mutation)
+        self.assertNotIn("\n    updateComposer();", mutation)
+        helper = body(SMART_CANVAS_JS, "function scheduleSmartComposerUpdate", "function render(){")
+        self.assertIn("smartComposerIdleHandle", helper)
+        self.assertIn("smartComposerIdleTimer", helper)
+        self.assertIn("requestIdleCallback", helper)
+        self.assertIn("timeout:1200", helper)
+        self.assertIn("}, 600);", helper)
+
     def test_mutations_carry_connection_structure_differences(self):
         classic = body(CANVAS_JS, "function queueClassicRenderMutation", "function renderClassicMutation")
         smart = body(SMART_CANVAS_JS, "function queueSmartRenderMutation", "function renderSmartMutation")
@@ -125,6 +143,12 @@ class CanvasIncrementalRenderPerformanceTests(unittest.TestCase):
         )
         for section in sections:
             self.assertIn("commitSmartNodeCreate", section)
+
+    def test_smart_toolbar_batch_creation_uses_structure_transaction(self):
+        section = body(SMART_CANVAS_JS, "function createSmartBatchGeneratorNode", "const MULTI_VIEW_INPUT_SLOTS")
+        self.assertIn("beginSmartHistoryTransaction('toolbar-batch')", section)
+        self.assertIn("commitSmartHistoryTransaction(historyTx)", section)
+        self.assertNotIn("pushUndo();", section)
 
     def test_incremental_failures_are_observable_and_fall_back_to_full_render(self):
         for source, helper in (

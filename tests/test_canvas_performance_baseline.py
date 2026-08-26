@@ -57,9 +57,12 @@ class CanvasPerformanceBaselineTests(unittest.TestCase):
             self.assertIn("render();", source)
 
     def test_classic_fixture_connections_survive_business_validation(self):
-        classic = CANVAS_JS[CANVAS_JS.index("registerClassicCanvasPerfFixture"):]
+        start = CANVAS_JS.index("function registerClassicCanvasPerfFixture()")
+        end = CANVAS_JS.index("registerClassicCanvasPerfFixture();", start)
+        classic = CANVAS_JS[start:end]
         self.assertIn("const sourceCount = Math.max(1, Math.floor(total / 2))", classic)
-        self.assertIn("type:index < sourceCount ? 'image' : 'generator'", classic)
+        self.assertIn("type:media ? 'image' : (index < sourceCount ? 'image' : 'generator')", classic)
+        self.assertIn("if(mediaItems.length && edgeCount)", classic)
         self.assertIn("const to = sourceCount +", classic)
 
 

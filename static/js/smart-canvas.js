@@ -108,6 +108,10 @@ const SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
 // 拖动目标高亮只切换旧/新节点；关闭或索引缺失时回退原选择器扫描。
 const SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED = true;
 let smartSafeLodRaf = 0;
+// 结构 mutation 只提交节点/连线本身；Composer 的动态参数重绘移到空闲期，
+// 避免 1000+ 节点场景在粘贴/创建的直接交互帧内触发布局与绘制级联。
+let smartComposerIdleHandle = 0;
+let smartComposerIdleTimer = 0;
 // 复制/粘贴/删除使用增量 DOM 更新，避免按键触发整张智能画布重建。
 let smartRenderMutation = null;
 let loopInsertPreview = null;
@@ -2021,27 +2025,34 @@ function createMultiViewNode(point, sourceNode=null){
     return node;
 }
 function createSmartBatchGeneratorNode(sourceNode=null, point=null){
-    pushUndo();
-    const sourceRect = sourceNode ? nodeRect(sourceNode) : null;
-    const baseX = sourceRect ? sourceRect.x + sourceRect.width + 120 : (point?.x || 0) - 220;
-    const baseY = sourceRect ? sourceRect.y : (point?.y || 0) - 250;
-    const sourceSettings = sourceNode ? smartSettingsForNode(sourceNode) : settings;
-    const node = {
-        id:uid('batch'), type:'smart-image', specialType:'batch-generator',
-        x:baseX, y:baseY, w:440, h:520, title:'批量处理', images:[],
-        batchPrompt:'', batchStatus:'idle', batchError:'',
-        runSettings:settingsForStorage({...normalizeSmartMultiViewSettings(sourceSettings), ratio:'source', count:1}),
-        scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
-    };
-    commitSmartNodeCreate(node, {select:false, deferRender:true, deferSave:true});
-    if(sourceNode?.id) connectInputNode(sourceNode.id, node.id);
-    selectedId = node.id;
-    selectedIds = [];
-    selectedImage = {nodeId:'', index:-1};
-    queueSmartRenderMutation({createdIds:[node.id]});
-    render();
-    scheduleSave();
-    return node;
+    const historyTx = beginSmartHistoryTransaction('toolbar-batch');
+    let completed = false;
+    try {
+        const sourceRect = sourceNode ? nodeRect(sourceNode) : null;
+        const baseX = sourceRect ? sourceRect.x + sourceRect.width + 120 : (point?.x || 0) - 220;
+        const baseY = sourceRect ? sourceRect.y : (point?.y || 0) - 250;
+        const sourceSettings = sourceNode ? smartSettingsForNode(sourceNode) : settings;
+        const node = {
+            id:uid('batch'), type:'smart-image', specialType:'batch-generator',
+            x:baseX, y:baseY, w:440, h:520, title:'批量处理', images:[],
+            batchPrompt:'', batchStatus:'idle', batchError:'',
+            runSettings:settingsForStorage({...normalizeSmartMultiViewSettings(sourceSettings), ratio:'source', count:1}),
+            scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+        };
+        commitSmartNodeCreate(node, {select:false, deferRender:true, deferSave:true});
+        if(sourceNode?.id) connectInputNode(sourceNode.id, node.id);
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        queueSmartRenderMutation({createdIds:[node.id]});
+        render();
+        scheduleSave();
+        completed = true;
+        return node;
+    } finally {
+        if(completed) commitSmartHistoryTransaction(historyTx);
+        else abortSmartHistoryTransaction(historyTx);
+    }
 }
 const MULTI_VIEW_INPUT_SLOTS = window.CanvasBuildingMultiView?.PERSON_INPUT_SLOTS || [
     ['model-front', '模特正面', true], ['model-side', '模特侧面', true], ['model-back', '模特背面', true],
@@ -9847,13 +9858,18 @@ function renderSmartMutation(mutation){
             tpl.innerHTML = smartNodeHtml(node).trim();
             const fresh = tpl.content.firstElementChild;
             if(!fresh) throw new Error(`智能节点 DOM 创建失败：${id}`);
+            let firstNode = null;
             if(current){
                 if(smartNodeHasLiveMedia(node)) transplantSmartMediaElements(current, fresh);
-                current.replaceWith(fresh);
             } else if(isSmartGroupNode(node)) {
-                const firstNode = smartNodeDomIndex.values().next().value;
-                world.insertBefore(fresh, firstNode?.isConnected ? firstNode : null);
-            } else world.appendChild(fresh);
+                firstNode = smartNodeDomIndex.values().next().value;
+            }
+            refreshIcons(fresh);
+            bindSmartPreviewImageFallbacks(fresh);
+            measureSmartNodeImages(smartNodeIndex, fresh);
+            if(current) current.replaceWith(fresh);
+            else if(isSmartGroupNode(node)) world.insertBefore(fresh, firstNode?.isConnected ? firstNode : null);
+            else world.appendChild(fresh);
             indexSmartNodeDom(fresh, node);
             freshNodeEls.push(fresh);
         });
@@ -9866,16 +9882,29 @@ function renderSmartMutation(mutation){
     bindNodeEvents(smartNodeIndex, new Set(freshNodeEls.map(el => el.dataset.id).filter(Boolean)));
     if(!patchSmartMutationConnections(mutation, affectedNodeIds)) return fallbackSmartRenderMutation('connection-structure-patch');
     syncSelectionUi();
-    updateComposer();
+    scheduleSmartComposerUpdate();
     scheduleSmartMinimapNodeUpdate([...affectedNodeIds]);
-    freshNodeEls.forEach(root => {
-        refreshIcons(root);
-        bindSmartPreviewImageFallbacks(root);
-        measureSmartNodeImages(smartNodeIndex, root);
-    });
     syncSmartSelectedImageResolution(world, affectedNodeIds);
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     return true;
+}
+
+function scheduleSmartComposerUpdate(){
+    if(smartComposerIdleTimer) window.clearTimeout(smartComposerIdleTimer);
+    if(smartComposerIdleHandle && 'cancelIdleCallback' in window) window.cancelIdleCallback(smartComposerIdleHandle);
+    smartComposerIdleTimer = 0;
+    smartComposerIdleHandle = 0;
+    // 连续粘贴/创建时重新计时，等待 600ms 结构操作静默后再重绘，避免 Composer
+    // 在每个 mutation 的帧间隙反复重绘，同时保留单次操作后的最终 UI 同步。
+    smartComposerIdleTimer = window.setTimeout(() => {
+        smartComposerIdleTimer = 0;
+        const run = () => {
+            smartComposerIdleHandle = 0;
+            updateComposer();
+        };
+        if('requestIdleCallback' in window) smartComposerIdleHandle = window.requestIdleCallback(run, {timeout:1200});
+        else run();
+    }, 600);
 }
 function render(){
     if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(world)) {
@@ -10036,17 +10065,22 @@ function registerSmartCanvasPerfFixture(){
         const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
         const previous = {nodes:clone(nodes), connections:clone(canvas.connections || []), selectedId, selectedIds:[...selectedIds]};
         const total = Math.max(20, Math.min(10000, Number(options.nodes || 500)));
-        const edgeCount = Math.max(0, Math.min(20000, Number(options.connections || 1000)));
+        const edgeCount = Math.max(0, Math.min(20000, Number(options.connections ?? 1000)));
+        const mediaItems = options.mediaItems || [];
+        if(mediaItems.length && edgeCount) throw new Error('真实媒体性能 fixture 必须使用 connections=0');
         const columns = Math.max(1, Math.ceil(Math.sqrt(total)));
-        nodes = Array.from({length:total}, (_, index) => ({
-            id:`perf-smart-${index}`,
-            type:'smart-image',
-            x:(index % columns) * 240,
-            y:Math.floor(index / columns) * 180,
-            w:200,
-            h:140,
-            images:[]
-        }));
+        nodes = Array.from({length:total}, (_, index) => {
+            const media = mediaItems[index % mediaItems.length];
+            return {
+                id:`perf-smart-${index}`,
+                type:'smart-image',
+                x:(index % columns) * 240,
+                y:Math.floor(index / columns) * 180,
+                w:200,
+                h:140,
+                images:media ? [{...media, kind:'image'}] : []
+            };
+        });
         canvas.connections = Array.from({length:edgeCount}, (_, index) => {
             const from = index % Math.max(1, Math.floor(total / 2));
             const to = Math.floor(total / 2) + (index % Math.max(1, total - Math.floor(total / 2)));
@@ -15072,6 +15106,8 @@ function positionComposerForNode(node){
     composer.style.top = `${rect.y + rect.height + gap}px`;
 }
 function updateComposer(){
+    if(smartComposerIdleTimer){ window.clearTimeout(smartComposerIdleTimer); smartComposerIdleTimer = 0; }
+    if(smartComposerIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(smartComposerIdleHandle); smartComposerIdleHandle = 0; }
     const node = selectedNode();
     syncRunButtonState(node);
     if(smartCascadeSilentSelection && !activeComposerSubject){

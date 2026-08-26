@@ -11,7 +11,9 @@
         100: Object.freeze({nodes:100, connections:200}),
         300: Object.freeze({nodes:300, connections:600}),
         500: Object.freeze({nodes:500, connections:1000}),
-        1000: Object.freeze({nodes:1000, connections:2000})
+        1000: Object.freeze({nodes:1000, connections:2000}),
+        1500: Object.freeze({nodes:1500, connections:3000}),
+        2000: Object.freeze({nodes:2000, connections:4000})
     });
     const samples = new Map();
     const longTasks = [];
@@ -159,11 +161,28 @@
     function registerFixtureFactory(kind, factory){
         if(typeof factory === 'function') fixtureFactories.set(String(kind), factory);
     }
+    function fixtureMediaItems(items=[]){
+        return (Array.isArray(items) ? items : [])
+            .filter(item => item && String(item.url || '').trim())
+            .map(item => ({
+                url:String(item.url || '').trim(),
+                name:String(item.name || 'performance-image'),
+                kind:'image',
+                width:Math.max(0, Number(item.width || 0)),
+                height:Math.max(0, Number(item.height || 0))
+            }));
+    }
     function fixtureOptions(options={}){
         const input = typeof options === 'number' ? {nodes:options} : (options || {});
         const presetKey = String(input.preset || input.nodes || '500');
         const preset = FIXTURE_PRESETS[presetKey] || FIXTURE_PRESETS['500'];
-        return {...preset, ...input, nodes:Number(input.nodes || preset.nodes), connections:Number(input.connections ?? preset.connections)};
+        return {
+            ...preset,
+            ...input,
+            nodes:Number(input.nodes || preset.nodes),
+            connections:Number(input.connections ?? preset.connections),
+            mediaItems:fixtureMediaItems(input.mediaItems)
+        };
     }
     function installFixture(kind, options={}){
         if(!enabled) throw new Error('请先使用 ?canvasPerf=1 打开画布，再安装性能 fixture');

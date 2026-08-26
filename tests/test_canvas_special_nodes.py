@@ -322,6 +322,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
 
     def test_edit_preview_and_source_dimensions_stay_truthful(self):
         self.assertIn("relightOverlay.hidden = Boolean(output?.url)", self.shared)
+        self.assertIn("image.dataset.originalSrc = originalUrl", self.shared)
+        self.assertIn("image.dataset.previewFallback", self.shared)
         self.assertIn("nodeForControls[`${prefix}SourceWidth`] = uploaded.natural_w || 0", self.smart)
         self.assertIn("nodeForControls[`${prefix}SourceHeight`] = uploaded.natural_h || 0", self.smart)
         self.assertIn("w:460, h:660", self.classic)
@@ -338,6 +340,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "function generateClassicSpecialEdit(node, prompt, source, kind)",
             "delete copy.panoramaGenerating",
             "delete copy.specialRunning",
+            "indexClassicConnectionModel(connection)",
+            "scheduleClassicRender();\n    scheduleSave();",
         ):
             self.assertIn(marker, self.classic)
         self.assertRegex(
@@ -357,6 +361,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "node.specialType === 'panorama'",
             "delete node.panoramaGenerating",
             "delete node.specialRunning",
+            "function smartSpecialInputImage(node, inputRole='')",
+            "if(source?.url) return {...source, kind:'image'}",
+            "output.images = [{...item, kind:'image'}];\n    render();\n    scheduleSave();",
         ):
             self.assertIn(marker, self.smart)
         self.assertIn("images = [item]", self.shared)

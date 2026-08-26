@@ -8327,7 +8327,10 @@ function classicSpecialInputImage(node, inputRole=''){
             ...(source.type === 'image' && source.url ? [{url:source.url, name:source.name || 'image', kind:'image'}] : []),
             ...(source.type === 'output' ? (source.images || []).map(item => ({url:outputUrlValue(item), name:outputImageName(outputUrlValue(item)), kind:'image'})) : [])
         ];
-        const ref = refs.find(item => item?.url && (item.kind || 'image') === 'image');
+        // 一些历史画布数据没有保存 kind/mime 字段，但节点本身已经明确是图片。
+        // 不能因为元数据缺失就把输入当成空白，否则灯光重塑节点只显示占位图。
+        const ref = refs.find(item => item?.url && (item.kind || 'image') === 'image')
+            || (source.type === 'image' && source.url ? {url:source.url, name:source.name || 'image', kind:'image'} : null);
         if(ref) return ref;
     }
     return null;
@@ -8413,13 +8416,18 @@ function createClassicSpecialOutputNode(sourceNode, item, kind){
         out = {id:uid('out'), type:'output', x:(Number(sourceNode.x) || 0) + Math.max(460, Number(sourceNode.w) || 460) + 100, y:Number(sourceNode.y) || 0, images:[], specialSourceNodeId:sourceNode.id, specialKind:kind};
         nodes.push(out);
         positionCanvasNodeRelative(out, sourceNode, 'downstream');
-        connections.push({id:uid('c'), from:sourceNode.id, to:out.id});
+        const connection = {id:uid('c'), from:sourceNode.id, to:out.id};
+        connections.push(connection);
+        indexClassicConnectionModel(connection);
     }
     out.specialSourceNodeId = sourceNode.id;
     out.specialKind = kind;
     delete out.specialPending;
     out.title = kind === 'relight' ? '灯光重塑结果' : '角度调整结果';
     out.images = [{...item, kind:'image'}];
+    out.specialPending = false;
+    scheduleClassicRender();
+    scheduleSave();
     return out;
 }
 function classicPoseReplicateOutputPosition(sourceNode){

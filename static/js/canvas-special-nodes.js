@@ -991,8 +991,24 @@
     function updateEditPreview(root, node, options, prefix, source){
         const output = outputItem(node), item = output || source, image = root.querySelector('[data-edit-preview]');
         if(image){
-            if(item?.url){ image.src = options.resolveUrl?.(item.url) || item.url; image.hidden = false; }
-            else { image.removeAttribute('src'); image.hidden = true; }
+            if(item?.url){
+                const originalUrl = String(item.url);
+                let displayUrl = originalUrl;
+                try { displayUrl = options.resolveUrl?.(originalUrl) || originalUrl; } catch(_) {}
+                image.dataset.originalSrc = originalUrl;
+                image.onerror = () => {
+                    // 代理地址不可用时回退原始地址，避免节点永久停留在空占位状态。
+                    if(image.src && image.src !== originalUrl && image.dataset.previewFallback !== originalUrl){
+                        image.dataset.previewFallback = originalUrl;
+                        image.src = originalUrl;
+                        return;
+                    }
+                    image.hidden = true;
+                };
+                image.dataset.previewFallback = '';
+                image.src = displayUrl;
+                image.hidden = false;
+            } else { image.removeAttribute('src'); image.hidden = true; image.onerror = null; }
         }
         root.querySelector('[data-edit-empty]')?.toggleAttribute('hidden', Boolean(item?.url));
         root.querySelector('[data-angle-empty]')?.toggleAttribute('hidden', Boolean(item?.url));
@@ -1107,8 +1123,13 @@
                     node.specialRunning = true;
                     // 先创建可恢复的下游占位节点，再等待远端任务；长任务期间用户仍能看到并继续连接输出。
                     if(options.createEditPendingOutputNode){
-                        const pendingNode = await options.createEditPendingOutputNode(node, prefix);
-                        if(pendingNode?.id) node.specialOutputNodeId = pendingNode.id;
+                        try {
+                            const pendingNode = await options.createEditPendingOutputNode(node, prefix);
+                            if(pendingNode?.id) node.specialOutputNodeId = pendingNode.id;
+                        } catch(error){
+                            // 占位节点失败不应阻断 API 生成；生成完成后仍会尝试创建正式输出节点。
+                            console.warn('[canvas-special] 创建灯光/角度占位输出失败：', error);
+                        }
                     }
                     notify(options, node, true);
                     const generatedSourceSignature = sourceSignature(source), generatedControlSignature = editControlSignature(node, prefix);

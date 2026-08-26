@@ -11676,6 +11676,8 @@ function createSmartSpecialOutputNode(sourceNode, item, kind){
     output.specialKind = kind;
     delete output.specialPending;
     output.images = [{...item, kind:'image'}];
+    render();
+    scheduleSave();
     return output;
 }
 function bindSmartSpecialNode(el, node){

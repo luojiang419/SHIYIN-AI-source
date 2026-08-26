@@ -40,12 +40,17 @@ def test_connected_node_creation_uses_non_overlapping_arranged_spacing_in_both_c
     assert "const CANVAS_NODE_LAYOUT_ROW_GAP = 56;" in CANVAS_JS
     assert "function canvasFreeNodePoint(source, created, direction='downstream')" in CANVAS_JS
     assert "positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');" in CANVAS_JS
-    assert "positionCanvasNodeRelative(created, source, 'downstream');" in CANVAS_JS
 
     assert "const SMART_NODE_LAYOUT_GAP = 72;" in SMART_JS
     assert "const SMART_NODE_LAYOUT_ROW_GAP = 52;" in SMART_JS
     assert "function smartFreeNodePoint(source, created, direction='downstream')" in SMART_JS
     assert "positionSmartNodeRelative(newNode, sourceNode, drag.fromPort === 'out' ? 'downstream' : 'upstream');" in SMART_JS
+
+    quick_action_start = CANVAS_JS.index("function addQuickActionNode(source, type)")
+    quick_action_end = CANVAS_JS.index("function runMediaQuickAction", quick_action_start)
+    quick_action = CANVAS_JS[quick_action_start:quick_action_end]
+    assert "const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};" in quick_action
+    assert "positionCanvasNodeRelative(created, source, 'downstream');" not in quick_action
 
 
 def test_auto_created_output_nodes_use_free_position_algorithm():

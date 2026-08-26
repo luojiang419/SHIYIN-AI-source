@@ -18706,7 +18706,6 @@ function addQuickActionNode(source, type){
         const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};
         created = type === 'angle' ? addAngleNode(point) : createNodeByType(type, point);
         if(!created) return null;
-        positionCanvasNodeRelative(created, source, 'downstream');
         const inputRole = type === 'multi-view' ? 'model-front' : '';
         if(inputRole && canConnect(source.id, created.id, inputRole) && !connections.some(connection => connection.from === source.id && connection.to === created.id && connection.inputRole === inputRole)){
             createdConnection = {id:uid('c'), from:source.id, to:created.id, inputRole};
@@ -18769,14 +18768,26 @@ function runMediaQuickAction(action, target){
         return;
     }
     const isEditorAction = ['edit','crop','grid'].includes(action);
+    // 已存在的图片节点无需创建历史事务或重绘整张画布；先打开编辑器，避免大画布的
+    // 同步 render() 阻塞用户点击后的首帧显示。
+    if(isEditorAction && target?.kind === 'node'){
+        if(!sourceNode || sourceNode.type !== 'image' || mediaKindForNode(sourceNode) !== 'image') return;
+        openImageEditor(sourceNode.id, action === 'grid' ? 'grid' : 'crop');
+        return;
+    }
     const historyTx = beginClassicHistoryTransaction('media-quick-action');
     try {
         const image = materializeOutputMediaTarget(target);
         if(!image) return;
-        if(action === 'edit' || action === 'crop' || action === 'grid'){
-            render();
-            scheduleSave();
+        if(isEditorAction){
+            // 输出节点需要先物化为普通图片节点，但编辑器可以先完成首帧显示；让出一次
+            // 事件循环后再重绘和持久化，避免把重绘塞进首帧前的 requestAnimationFrame。
             openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop');
+            setTimeout(() => {
+                if(!nodes.some(node => node.id === image.id)) return;
+                render();
+                scheduleSave();
+            }, 0);
             return;
         }
         // 保留经典菜单契约的双参数调用形状；第三参数复用当前事务，避免嵌套历史。

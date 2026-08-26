@@ -37,6 +37,13 @@ class CanvasMediaQuickToolbarTests(unittest.TestCase):
         self.assertIn("connections.push(createdConnection)", quick_action)
         self.assertIn("indexClassicConnectionModel(createdConnection)", quick_action)
 
+    def test_floating_toolbar_creates_action_nodes_directly_to_the_right(self):
+        start = self.javascript.index("function addQuickActionNode(source, type)")
+        end = self.javascript.index("function runMediaQuickAction", start)
+        quick_action = self.javascript[start:end]
+        self.assertIn("const point = {x:Math.round(source.x + sourceRect.w + 110), y:Math.round(source.y)};", quick_action)
+        self.assertNotIn("positionCanvasNodeRelative(created, source, 'downstream')", quick_action)
+
     def test_image_toolbar_has_a_direct_crop_action_reusing_the_image_editor(self):
         start = self.javascript.index("function renderSelectionHub")
         end = self.javascript.index("function selectOutputMedia", start)
@@ -49,8 +56,21 @@ class CanvasMediaQuickToolbarTests(unittest.TestCase):
         self.assertIsNotNone(run)
         run_body = run.group("body")
         self.assertIn("['edit','crop','grid'].includes(action)", run_body)
-        self.assertIn("action === 'edit' || action === 'crop' || action === 'grid'", run_body)
+        self.assertIn("if(isEditorAction)", run_body)
         self.assertIn("openImageEditor(image.id, action === 'grid' ? 'grid' : 'crop')", run_body)
+
+    def test_editor_toolbar_actions_do_not_block_modal_with_full_canvas_render(self):
+        start = self.javascript.index("function runMediaQuickAction")
+        end = self.javascript.index("function startSelectionLink", start)
+        run_body = self.javascript[start:end]
+        node_branch_start = run_body.index("if(isEditorAction && target?.kind === 'node')")
+        node_branch_end = run_body.index("const historyTx", node_branch_start)
+        node_branch = run_body[node_branch_start:node_branch_end]
+        self.assertNotIn("render();", node_branch)
+        output_editor = run_body[run_body.index("if(isEditorAction){"):run_body.index("// 保留经典菜单契约", run_body.index("if(isEditorAction){"))]
+        self.assertLess(output_editor.index("openImageEditor"), output_editor.index("setTimeout"))
+        self.assertIn("setTimeout(() =>", output_editor)
+        self.assertIn("render();", output_editor)
 
     def test_toolbar_is_positioned_above_the_selected_media_and_has_visual_state(self):
         self.assertIn("function positionSelectionHub(anchor)", self.javascript)

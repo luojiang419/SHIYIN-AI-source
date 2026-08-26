@@ -10277,6 +10277,7 @@ function bindPromptNodeControls(el, node){
         control.addEventListener('click', e => e.stopPropagation());
         control.addEventListener('dblclick', e => e.stopPropagation());
     });
+    const fitPromptNode = () => fitAutoTextNode(node, el, [el.querySelector('.prompt-node-text'), el.querySelector('.prompt-llm-instruction'), el.querySelector('.prompt-llm-system')], {minLines:3});
     const textEl = el.querySelector('.prompt-node-text');
     if(textEl) {
         bindScrollableText(textEl);
@@ -10284,6 +10285,7 @@ function bindPromptNodeControls(el, node){
             const prevExtra = promptNodeSplitExtraHeight(node);
             node.text = e.target.value;
             refreshPromptNodeSegmentsUi(el, node);
+            fitPromptNode();
             if(node.promptSplitEnabled === true){
                 syncPromptNodeHeightForSplit(node, prevExtra);
                 updateNodeElementDuringResize(node);
@@ -10365,9 +10367,15 @@ function bindPromptNodeControls(el, node){
         scheduleSave();
     };
     const systemEl = el.querySelector('.prompt-llm-system');
-    if(systemEl) { bindScrollableText(systemEl); systemEl.oninput = e => { node.llmSystemPrompt = e.target.value; scheduleSave(); }; }
+    if(systemEl) {
+        bindScrollableText(systemEl);
+        systemEl.oninput = e => { node.llmSystemPrompt = e.target.value; fitPromptNode(); scheduleSave(); };
+    }
     const instructionEl = el.querySelector('.prompt-llm-instruction');
-    if(instructionEl) { bindScrollableText(instructionEl); instructionEl.oninput = e => { node.llmInstruction = e.target.value; scheduleSave(); }; }
+    if(instructionEl) {
+        bindScrollableText(instructionEl);
+        instructionEl.oninput = e => { node.llmInstruction = e.target.value; fitPromptNode(); scheduleSave(); };
+    }
     const instructionResizeEl = el.querySelector('[data-llm-instruction-resize]');
     if(instructionResizeEl) instructionResizeEl.addEventListener('mousedown', e => {
         if(e.button !== 0) return;
@@ -10388,6 +10396,7 @@ function bindPromptNodeControls(el, node){
     });
     const runEl = el.querySelector('.prompt-node-run');
     if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
+    requestAnimationFrame(fitPromptNode);
 }
 function bindLoopNodeControls(el, node){
     el.querySelectorAll('.loop-smart-control').forEach(control => {
@@ -10462,6 +10471,7 @@ function bindLoopNodeControls(el, node){
             scheduleSave();
         };
     });
+    const fitLoopNode = () => fitAutoTextNode(node, el, [...el.querySelectorAll('.loop-smart-text')], {minLines:3});
     const syncPromptFieldsFromDom = () => {
         const values = [...el.querySelectorAll('[data-loop-prompt-index]')]
             .sort((a, b) => Number(a.dataset.loopPromptIndex) - Number(b.dataset.loopPromptIndex))
@@ -10472,7 +10482,7 @@ function bindLoopNodeControls(el, node){
     el.querySelectorAll('.loop-smart-text').forEach(text => {
         bindScrollableText(text);
         text.onfocus = () => { activePromptEditor = text; };
-        text.oninput = () => { syncPromptFieldsFromDom(); scheduleSave(); };
+        text.oninput = () => { syncPromptFieldsFromDom(); fitLoopNode(); scheduleSave(); };
         text.addEventListener('click', e => {
             const remove = e.target.closest?.('.loop-smart-token-chip button');
             if(!remove) return;
@@ -10480,6 +10490,7 @@ function bindLoopNodeControls(el, node){
             e.stopPropagation();
             remove.closest('.loop-smart-token-chip')?.remove();
             syncPromptFieldsFromDom();
+            fitLoopNode();
             scheduleSave();
         });
     });
@@ -10491,6 +10502,7 @@ function bindLoopNodeControls(el, node){
             const values = smartLoopPromptFieldValues(node);
             setSmartLoopPromptFieldValues(node, [...values, '']);
             fitSmartLoopNode(node);
+            fitLoopNode();
             render();
             scheduleSave();
         };
@@ -10506,6 +10518,7 @@ function bindLoopNodeControls(el, node){
             values.splice(removeIndex, 1);
             setSmartLoopPromptFieldValues(node, values);
             fitSmartLoopNode(node);
+            fitLoopNode();
             render();
             scheduleSave();
         };
@@ -10521,6 +10534,7 @@ function bindLoopNodeControls(el, node){
             const token = btn.dataset.loopToken || '《计数》';
             insertSmartLoopToken(text, token);
             syncPromptFieldsFromDom();
+            fitLoopNode();
             scheduleSave();
         };
     });
@@ -10536,6 +10550,7 @@ function bindLoopNodeControls(el, node){
             runSmartCascadeFromLoop(loopId);
         };
     });
+    requestAnimationFrame(fitLoopNode);
 }
 function bindScrollableText(el){
     if(!el || el.dataset.scrollBound === '1') return;
@@ -10602,6 +10617,58 @@ function bindScrollableText(el){
         e.stopPropagation();
         if(textSelectionGuard?.el === el) textSelectionGuard.wheelUntil = Date.now() + 180;
     }, {passive:true});
+}
+const AUTO_FIT_TEXT_MAX_LINES = 100;
+function parseAutoFitPx(value, fallback=0){
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+function fitAutoTextBox(el, {minLines=2, maxLines=AUTO_FIT_TEXT_MAX_LINES}={}){
+    if(!el) return {height:0, maxHeight:0, changed:false};
+    const style = window.getComputedStyle(el);
+    const fontSize = parseAutoFitPx(style.fontSize, 12);
+    const lineHeight = parseAutoFitPx(style.lineHeight, fontSize * 1.45);
+    const paddingY = parseAutoFitPx(style.paddingTop) + parseAutoFitPx(style.paddingBottom);
+    const borderY = parseAutoFitPx(style.borderTopWidth) + parseAutoFitPx(style.borderBottomWidth);
+    const minHeight = Math.max(
+        parseAutoFitPx(style.minHeight),
+        Math.ceil(lineHeight * Math.max(1, minLines) + paddingY + borderY)
+    );
+    const maxHeight = Math.max(minHeight, Math.ceil(lineHeight * Math.max(minLines, maxLines) + paddingY + borderY));
+    const current = parseAutoFitPx(el.style.height, el.getBoundingClientRect().height || minHeight);
+    el.style.height = 'auto';
+    el.style.overflowY = 'hidden';
+    el.style.resize = 'none';
+    const measured = Math.ceil((el.scrollHeight || minHeight) + borderY);
+    const next = Math.max(minHeight, Math.min(maxHeight, measured));
+    el.style.height = `${next}px`;
+    el.style.maxHeight = `${maxHeight}px`;
+    el.style.minHeight = `${minHeight}px`;
+    el.style.overflowY = measured > maxHeight ? 'auto' : 'hidden';
+    return {height:next, maxHeight, changed:Math.abs(next - current) > 1};
+}
+function fitAutoTextNode(node, nodeEl, controls=[], options={}){
+    if(!nodeEl) return false;
+    let changed = false;
+    controls.filter(Boolean).forEach(control => {
+        changed = fitAutoTextBox(control, options).changed || changed;
+        control.style.flex = '0 0 auto';
+    });
+    const style = window.getComputedStyle(nodeEl);
+    const borderY = parseAutoFitPx(style.borderTopWidth) + parseAutoFitPx(style.borderBottomWidth);
+    const current = parseAutoFitPx(nodeEl.style.height, node.h || nodeEl.getBoundingClientRect().height || 0);
+    const measured = Math.ceil((nodeEl.scrollHeight || current) + borderY);
+    const next = Math.max(current, measured);
+    if(next > current + 1){
+        node.h = Math.round(next);
+        nodeEl.style.height = `${node.h}px`;
+        invalidateSmartGeometry([node.id]);
+        markSmartConnectionsDirtyForNodes([node.id]);
+        scheduleSmartMinimapNodeUpdate([node.id]);
+        scheduleInteractionLayerRefresh();
+        changed = true;
+    }
+    return changed;
 }
 function updatePortDragVisual(){
     if(!portDragState) return;
@@ -11708,6 +11775,7 @@ function bindSmartSpecialNode(el, node){
         const resolution = el.querySelector('[data-batch-resolution]');
         const quality = el.querySelector('[data-batch-quality]');
         const prompt = el.querySelector('[data-batch-prompt]');
+        const fitBatchPrompt = () => fitAutoTextNode(node, el, [prompt], {minLines:3});
         [provider, model, resolution, quality, prompt].filter(Boolean).forEach(control => {
             control.addEventListener('mousedown', event => event.stopPropagation());
             control.addEventListener('click', event => event.stopPropagation());
@@ -11725,12 +11793,13 @@ function bindSmartSpecialNode(el, node){
         model?.addEventListener('change', event => { event.stopPropagation(); updateSettings({model:event.target.value}); });
         resolution?.addEventListener('change', event => { event.stopPropagation(); updateSettings({resolution:event.target.value}); });
         quality?.addEventListener('change', event => { event.stopPropagation(); updateSettings({quality:event.target.value}); });
-        prompt?.addEventListener('input', event => { event.stopPropagation(); node.batchPrompt = event.target.value; scheduleSave(); });
+        prompt?.addEventListener('input', event => { event.stopPropagation(); node.batchPrompt = event.target.value; fitBatchPrompt(); scheduleSave(); });
         el.querySelector('[data-special-action="run-batch"]')?.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
             runSmartBatchGenerator(node);
         });
+        requestAnimationFrame(fitBatchPrompt);
         return;
     }
     if(node?.specialType === 'multi-view'){
@@ -11745,12 +11814,14 @@ function bindSmartSpecialNode(el, node){
             scheduleSave();
         }));
         const buildingPrompt = el.querySelector('[data-building-prompt]');
+        const fitBuildingPrompt = () => fitAutoTextNode(node, el, [buildingPrompt], {minLines:3});
         buildingPrompt?.addEventListener('input', event => {
             event.stopPropagation();
             node.buildingPrompt = event.target.value;
             node.buildingStage = 'idle';
             node.buildingPlan = null;
             node.multiViewError = '';
+            fitBuildingPrompt();
             scheduleSave();
         });
         el.querySelectorAll('[data-building-action]').forEach(button => button.addEventListener('click', event => {
@@ -11783,6 +11854,7 @@ function bindSmartSpecialNode(el, node){
         model?.addEventListener('change', event => { event.stopPropagation(); updateSettings({model:event.target.value}); });
         resolution?.addEventListener('change', event => { event.stopPropagation(); updateSettings({resolution:event.target.value}); });
         quality?.addEventListener('change', event => { event.stopPropagation(); updateSettings({quality:event.target.value}); });
+        if(buildingPrompt) requestAnimationFrame(fitBuildingPrompt);
         return;
     }
     if(!api || !node?.specialType) return;
@@ -19200,15 +19272,24 @@ function resumeSmartPendingTasks(){
         resumeSmartPendingNode(node);
     });
 }
+function selectionBoxLocalPoint(clientX, clientY){
+    const rect = selectionBox?.offsetParent?.getBoundingClientRect?.() || selectionBox?.parentElement?.getBoundingClientRect?.() || null;
+    return rect ? {x:clientX - rect.left, y:clientY - rect.top} : {x:clientX, y:clientY};
+}
 function updateSelectionBox(event){
     if(!selectionState) return;
     const sx = selectionState.startScreen.x, sy = selectionState.startScreen.y;
-    const x = Math.min(sx, event.clientX), y = Math.min(sy, event.clientY);
+    const localStartX = selectionState.startLocal?.x ?? sx;
+    const localStartY = selectionState.startLocal?.y ?? sy;
+    const localPoint = selectionBoxLocalPoint(event.clientX, event.clientY);
+    const localX = localPoint.x;
+    const localY = localPoint.y;
+    const x = Math.min(localStartX, localX), y = Math.min(localStartY, localY);
     selectionBox.style.display = 'block';
     selectionBox.style.left = `${x}px`;
     selectionBox.style.top = `${y}px`;
-    selectionBox.style.width = `${Math.abs(event.clientX - sx)}px`;
-    selectionBox.style.height = `${Math.abs(event.clientY - sy)}px`;
+    selectionBox.style.width = `${Math.abs(localX - localStartX)}px`;
+    selectionBox.style.height = `${Math.abs(localY - localStartY)}px`;
 }
 function finishSelection(event){
     if(!selectionState) return;
@@ -19508,7 +19589,8 @@ shell.onmousedown = e => {
         e.preventDefault();
         didPan = false;
         window.CanvasPerformance?.beginInteraction?.('smart.marquee', {nodes:nodes.length});
-        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
+        const startLocal = selectionBoxLocalPoint(e.clientX, e.clientY);
+        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startLocal, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
         return;
     }
@@ -19516,7 +19598,8 @@ shell.onmousedown = e => {
         e.preventDefault();
         didPan = false;
         window.CanvasPerformance?.beginInteraction?.('smart.marquee', {nodes:nodes.length});
-        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
+        const startLocal = selectionBoxLocalPoint(e.clientX, e.clientY);
+        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startLocal, startWorld:screenToWorld(e)};
         updateSelectionBox(e);
         return;
     }

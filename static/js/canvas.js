@@ -9775,6 +9775,7 @@ function renderNode(node){
         const textarea = body.querySelector('textarea');
         const templateBtn = body.querySelector('[data-prompt-template-open]');
         const expandBtn = body.querySelector('[data-prompt-expand]');
+        const fitPromptText = () => fitAutoTextNode(node, el, [textarea], {minLines:3});
         templateBtn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
@@ -9789,9 +9790,11 @@ function renderNode(node){
         textarea.oninput = e => {
             node.text = e.target.value;
             refreshPromptCounter(body, node.text);
+            fitPromptText();
             scheduleSave();
             scheduleGeneratorInputSync();
         };
+        requestAnimationFrame(fitPromptText);
     }
     if(node.type === 'loop') body.appendChild(renderLoopBody(node));
     if(node.type === 'group') {
@@ -9962,8 +9965,10 @@ function renderNode(node){
         node.buildingPlan = null;
         node.multiViewStatus = 'idle';
         node.multiViewError = '';
+        fitAutoTextNode(node, el, [buildingPrompt], {minLines:3});
         scheduleSave();
     });
+    if(buildingPrompt) requestAnimationFrame(() => fitAutoTextNode(node, el, [buildingPrompt], {minLines:3}));
     const multiViewProvider = el.querySelector('[data-multi-view-provider]');
     const multiViewModel = el.querySelector('[data-multi-view-model]');
     const multiViewResolution = el.querySelector('[data-multi-view-resolution]');
@@ -11484,6 +11489,7 @@ function renderLoopBody(node){
     const variable = wrap.querySelector('.loop-variable-editor');
     const toggle = wrap.querySelector('.loop-prompt-toggle');
     const imageToggle = wrap.querySelector('.loop-image-toggle');
+    const fitLoopEditor = () => fitAutoTextNode(node, wrap.closest('.node'), [variable], {minLines:3});
     if(variable) {
         variable.onmousedown = e => e.stopPropagation();
         variable.onclick = e => e.stopPropagation();
@@ -11593,6 +11599,7 @@ function renderLoopBody(node){
         variable.oninput = e => {
             node.variablePrompt = loopEditorText(variable);
             refreshPreview();
+            fitLoopEditor();
             scheduleSave();
             syncGeneratorInputs();
             refreshGeneratorInputViews();
@@ -11605,6 +11612,7 @@ function renderLoopBody(node){
             btn.closest('.loop-token-chip')?.remove();
             node.variablePrompt = loopEditorText(variable);
             refreshPreview();
+            fitLoopEditor();
             scheduleSave();
             syncGeneratorInputs();
             refreshGeneratorInputViews();
@@ -11619,6 +11627,7 @@ function renderLoopBody(node){
             node.variablePrompt = loopEditorText(variable);
             variable.focus();
             refreshPreview();
+            fitLoopEditor();
             scheduleSave();
             syncGeneratorInputs();
             refreshGeneratorInputViews();
@@ -11655,6 +11664,7 @@ function renderLoopBody(node){
             requestCascadeStop(btn.dataset.loopCascadeStop);
         };
     });
+    requestAnimationFrame(fitLoopEditor);
     return wrap;
 }
 function renderLLMBody(node){
@@ -11711,7 +11721,12 @@ function renderLLMBody(node){
     };
     wrap.querySelector('.llm-sys-toggle').onclick = e => { e.stopPropagation(); node.showSystem = !node.showSystem; refreshNodes([node.id]); scheduleSave(); };
     const sysEl = wrap.querySelector('.llm-system');
-    if(sysEl){ sysEl.oninput = e => { node.systemPrompt = e.target.value; scheduleSave(); }; bindScrollableText(sysEl); }
+    if(sysEl){
+        const fitSystem = () => fitAutoTextNode(node, wrap.closest('.node'), [sysEl], {minLines:3});
+        sysEl.oninput = e => { node.systemPrompt = e.target.value; fitSystem(); scheduleSave(); };
+        bindScrollableText(sysEl);
+        requestAnimationFrame(fitSystem);
+    }
     wrap.querySelectorAll('[data-mode]').forEach(btn => {
         btn.classList.toggle('active', mode === btn.dataset.mode);
         btn.onclick = e => { e.stopPropagation(); node.mode = btn.dataset.mode; refreshNodes([node.id]); scheduleSave(); };
@@ -11750,9 +11765,10 @@ function renderLLMNodePane(container, node){
         ${retryBarHtml(node)}
     `;
     const inputEl = container.querySelector('.llm-input-output');
+    const fitInput = () => fitAutoTextNode(node, container.closest('.node'), [inputEl], {minLines:3});
     bindScrollableText(inputEl);
     if(!isReadonly){
-        inputEl.oninput = e => { node.userInput = e.target.value; };
+        inputEl.oninput = e => { node.userInput = e.target.value; fitInput(); };
     }
     bindScrollableText(container.querySelector('.llm-result-output'));
     container.querySelector('.llm-pane-resizer').onmousedown = e => startLLMPaneResize(e, node);
@@ -11771,6 +11787,7 @@ function renderLLMNodePane(container, node){
             }
         };
     }
+    requestAnimationFrame(fitInput);
 }
 function renderLLMChatPane(container, node){
     const messages = node.messages || [];
@@ -11780,9 +11797,10 @@ function renderLLMChatPane(container, node){
         <button class="llm-run mt-2" ${node.running ? 'disabled' : ''}><i data-lucide="send" class="w-4 h-4"></i>${node.running ? tr('canvas.sending') : 'Send'}</button>
     `;
     bindScrollableText(container.querySelector('.llm-chat-log'));
-    bindScrollableText(container.querySelector('.llm-chat-input'));
     const chatInputEl = container.querySelector('.llm-chat-input');
-    chatInputEl.oninput = e => { node.chatInput = e.target.value; scheduleSave(); };
+    const fitChat = () => fitAutoTextNode(node, container.closest('.node'), [chatInputEl], {minLines:2});
+    bindScrollableText(chatInputEl);
+    chatInputEl.oninput = e => { node.chatInput = e.target.value; fitChat(); scheduleSave(); };
     chatInputEl.onkeydown = e => {
         if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){
             e.preventDefault();
@@ -11805,6 +11823,7 @@ function renderLLMChatPane(container, node){
             }
         };
     });
+    requestAnimationFrame(fitChat);
 }
 function bindScrollableText(el){
     if(!el) return;
@@ -11870,6 +11889,59 @@ function bindScrollableText(el){
         e.stopPropagation();
         if(textSelectionGuard?.el === el) textSelectionGuard.wheelUntil = Date.now() + 180;
     }, {passive:true});
+}
+const AUTO_FIT_TEXT_MAX_LINES = 100;
+function parseAutoFitPx(value, fallback=0){
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+function fitAutoTextBox(el, {minLines=2, maxLines=AUTO_FIT_TEXT_MAX_LINES}={}){
+    if(!el) return {height:0, maxHeight:0, changed:false};
+    const style = window.getComputedStyle(el);
+    const fontSize = parseAutoFitPx(style.fontSize, 12);
+    const lineHeight = parseAutoFitPx(style.lineHeight, fontSize * 1.45);
+    const paddingY = parseAutoFitPx(style.paddingTop) + parseAutoFitPx(style.paddingBottom);
+    const borderY = parseAutoFitPx(style.borderTopWidth) + parseAutoFitPx(style.borderBottomWidth);
+    const minHeight = Math.max(
+        parseAutoFitPx(style.minHeight),
+        Math.ceil(lineHeight * Math.max(1, minLines) + paddingY + borderY)
+    );
+    const maxHeight = Math.max(minHeight, Math.ceil(lineHeight * Math.max(minLines, maxLines) + paddingY + borderY));
+    const current = parseAutoFitPx(el.style.height, el.getBoundingClientRect().height || minHeight);
+    el.style.height = 'auto';
+    el.style.overflowY = 'hidden';
+    el.style.resize = 'none';
+    const measured = Math.ceil((el.scrollHeight || minHeight) + borderY);
+    const next = Math.max(minHeight, Math.min(maxHeight, measured));
+    el.style.height = `${next}px`;
+    el.style.maxHeight = `${maxHeight}px`;
+    el.style.minHeight = `${minHeight}px`;
+    el.style.overflowY = measured > maxHeight ? 'auto' : 'hidden';
+    return {height:next, maxHeight, changed:Math.abs(next - current) > 1};
+}
+function fitAutoTextNode(node, nodeEl, controls=[], options={}){
+    if(!nodeEl) return false;
+    let changed = false;
+    controls.filter(Boolean).forEach(control => {
+        changed = fitAutoTextBox(control, options).changed || changed;
+        control.style.flex = '0 0 auto';
+    });
+    const style = window.getComputedStyle(nodeEl);
+    const borderY = parseAutoFitPx(style.borderTopWidth) + parseAutoFitPx(style.borderBottomWidth);
+    const current = parseAutoFitPx(nodeEl.style.height, node.h || nodeEl.getBoundingClientRect().height || 0);
+    const measured = Math.ceil((nodeEl.scrollHeight || current) + borderY);
+    const next = Math.max(current, measured);
+    if(next > current + 1){
+        node.h = Math.round(next);
+        nodeEl.style.height = `${node.h}px`;
+        nodeEl.classList.add('sized');
+        invalidateCanvasGeometry([node.id]);
+        markClassicConnectionsDirtyForNodes([node.id]);
+        scheduleLinksRender();
+        scheduleMinimapNodeUpdate([node.id]);
+        changed = true;
+    }
+    return changed;
 }
 function startLLMPaneResize(e, node){
     e.preventDefault();
@@ -11961,11 +12033,13 @@ function generatorInlinePromptHtml(node, connectedPromptCount=0){
 function bindGeneratorInlinePrompt(wrap, node){
     const input = wrap?.querySelector?.('.generator-prompt-input');
     if(!input || !node) return;
+    const fitPrompt = () => fitAutoTextNode(node, wrap.closest('.node'), [input], {minLines:3});
     input.onmousedown = event => event.stopPropagation();
     input.onclick = event => event.stopPropagation();
     input.oninput = event => {
         event.stopPropagation();
         node.prompt = input.value;
+        fitPrompt();
         scheduleSave();
     };
     input.onkeydown = event => {
@@ -11975,6 +12049,7 @@ function bindGeneratorInlinePrompt(wrap, node){
             runCanvasGenerate(node.id);
         }
     };
+    requestAnimationFrame(fitPrompt);
 }
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
@@ -13356,6 +13431,7 @@ function renderRhPromptFields(container, node, fields){
         </label>`;
     }).join('');
     bindRhParamControls(container, node);
+    requestAnimationFrame(() => fitAutoTextNode(node, container.closest('.node'), [...container.querySelectorAll('textarea[data-rh-role="prompt"]')], {minLines:3}));
 }
 function renderRhParams(container, node, fields, media){
     if(!container) return;
@@ -13443,6 +13519,7 @@ function bindRhParamControls(container, node){
             node.rhParams[key] = {...cur, value:e.target.value};
             const val = control.closest('.field')?.querySelector('.rh-param-val');
             if(val) val.textContent = e.target.value;
+            if(control.tagName === 'TEXTAREA') fitAutoTextNode(node, container.closest('.node'), [control], {minLines:3});
             scheduleSave();
         };
     });
@@ -13749,9 +13826,12 @@ function renderComfySettings(container, node){
         input.onmousedown = e => e.stopPropagation();
         input.onclick = e => e.stopPropagation();
         if(input.classList.contains('model-select')) return;
-        input.onchange = e => updateComfyField(node, input, e);
-        input.oninput = e => updateComfyField(node, input, e);
+        const isTextarea = input.tagName === 'TEXTAREA';
+        const fitTextarea = () => fitAutoTextNode(node, container.closest('.node'), [input], {minLines:3});
+        input.onchange = e => { updateComfyField(node, input, e); if(isTextarea) fitTextarea(); };
+        input.oninput = e => { updateComfyField(node, input, e); if(isTextarea) fitTextarea(); };
     });
+    requestAnimationFrame(() => fitAutoTextNode(node, container.closest('.node'), [...container.querySelectorAll('textarea[data-comfy-type="textarea"]')], {minLines:3}));
 }
 function renderComfyCustomField(node, f){
     const value = comfyParamValue(node, f);
@@ -17761,6 +17841,10 @@ function renameCanvasGroup(group, titleEl){
     input.onclick = event => event.stopPropagation();
     requestAnimationFrame(() => { input.focus(); input.select(); });
 }
+function selectionBoxLocalPoint(clientX, clientY){
+    const rect = selectionBox?.offsetParent?.getBoundingClientRect?.() || selectionBox?.parentElement?.getBoundingClientRect?.() || null;
+    return rect ? {x:clientX - rect.left, y:clientY - rect.top} : {x:clientX, y:clientY};
+}
 
 function startSelection(e){
     e.preventDefault();
@@ -17768,7 +17852,17 @@ function startSelection(e){
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     const startWorld = screenToWorld(e.clientX, e.clientY);
     window.CanvasPerformance?.beginInteraction?.('classic.marquee', {nodes:nodes.length});
-    selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, sw:startWorld.x, sh:startWorld.y};
+    const startLocal = selectionBoxLocalPoint(e.clientX, e.clientY);
+    selectDrag = {
+        sx:e.clientX,
+        sy:e.clientY,
+        x:e.clientX,
+        y:e.clientY,
+        lx:startLocal.x,
+        ly:startLocal.y,
+        sw:startWorld.x,
+        sh:startWorld.y
+    };
     document.body.classList.add('canvas-selecting');
     selectionBox.style.display = 'block';
     updateSelectionBox(e.clientX, e.clientY);
@@ -17778,12 +17872,15 @@ function startSelection(e){
 function updateSelectionBox(x, y){
     if(!selectDrag) return;
     selectDrag.x = x; selectDrag.y = y;
-    const left = Math.min(selectDrag.sx, x);
-    const top = Math.min(selectDrag.sy, y);
+    const localPoint = selectionBoxLocalPoint(x, y);
+    const localX = localPoint.x;
+    const localY = localPoint.y;
+    const left = Math.min(selectDrag.lx ?? selectDrag.sx, localX);
+    const top = Math.min(selectDrag.ly ?? selectDrag.sy, localY);
     selectionBox.style.left = `${left}px`;
     selectionBox.style.top = `${top}px`;
-    selectionBox.style.width = `${Math.abs(x - selectDrag.sx)}px`;
-    selectionBox.style.height = `${Math.abs(y - selectDrag.sy)}px`;
+    selectionBox.style.width = `${Math.abs(localX - (selectDrag.lx ?? selectDrag.sx))}px`;
+    selectionBox.style.height = `${Math.abs(localY - (selectDrag.ly ?? selectDrag.sy))}px`;
 }
 function finishSelection(){
     if(!selectDrag) return;

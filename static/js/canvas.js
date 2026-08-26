@@ -15847,11 +15847,15 @@ function deleteNodeFromButton(id, event){
 function deleteConnection(id, event){
     event?.preventDefault();
     event?.stopPropagation();
-    pushUndo();
+    const removed = connections.find(connection => connection.id === id);
+    if(!removed) return;
+    // 断线只影响一条连接，使用结构事务记录撤销信息，避免 pushUndo 深拷贝整张画布及媒体数据。
+    const historyTx = beginClassicHistoryTransaction('disconnect');
     connections = connections.filter(c => c.id !== id);
-    markClassicConnectionStructureDirty();
+    commitClassicHistoryTransaction(historyTx);
     if(hoveredConnectionId === id) hoveredConnectionId = '';
-    syncGeneratorInputs();
+    syncGeneratorInputs(new Set([removed.to]));
+    queueClassicRenderMutation({removedConnectionIds:[id]});
     render();
     scheduleSave();
 }

@@ -9814,7 +9814,8 @@ function queueSmartRenderMutation(mutation={}){
         replaceIds:merge('replaceIds'),
         createdConnectionIds:merge('createdConnectionIds'),
         removedConnectionIds:merge('removedConnectionIds'),
-        affectedConnectionIds:merge('affectedConnectionIds')
+        affectedConnectionIds:merge('affectedConnectionIds'),
+        requiresFullConnectionRender:Boolean(smartRenderMutation?.requiresFullConnectionRender || mutation.requiresFullConnectionRender)
     };
     clearPendingSmartConnectionMutation();
 }
@@ -9829,10 +9830,10 @@ function renderSmartMutation(mutation){
     const removeIds = mutation?.removeIds || new Set();
     const replaceIds = mutation?.replaceIds || new Set();
     const affectedNodeIds = new Set([...createdIds, ...removeIds, ...replaceIds]);
-    mutation.requiresFullConnectionRender = [...affectedNodeIds].some(id => {
+    mutation.requiresFullConnectionRender = Boolean(mutation.requiresFullConnectionRender || [...affectedNodeIds].some(id => {
         const node = smartNodeIndex.get(id);
         return isSmartGroupNode(node) || isHistoryGroupNode(node) || smartGroupOwnerIndex.has(id);
-    });
+    }));
     const missingModels = new Set([...createdIds, ...replaceIds].filter(id => !smartNodeIndex.has(id)));
     for(let index = nodes.length - 1; index >= 0 && missingModels.size; index--){
         const node = nodes[index];
@@ -12322,7 +12323,11 @@ function disconnectConnections(spec){
     const set = new Set(indices);
     const removed = canvas.connections.filter((_, i) => set.has(i));
     if(!removed.length) return;
-    pushUndo();
+    // 普通断线使用轻量结构事务，避免 pushUndo 深拷贝整张画布及媒体数据。
+    // 历史线断开会降级历史分组节点，仍使用快照确保该模型变更可完整撤销。
+    const needsSnapshotUndo = removed.some(conn => (conn.kind || 'flow') === 'history');
+    const historyTx = needsSnapshotUndo ? null : beginSmartHistoryTransaction('disconnect');
+    if(needsSnapshotUndo) pushUndo();
     canvas.connections = canvas.connections.filter((_, i) => !set.has(i));
     removed.forEach(conn => {
         const toNode = nodes.find(n => n.id === conn.to);
@@ -12334,6 +12339,12 @@ function disconnectConnections(spec){
             const group = nodes.find(n => n.id === conn.to && isHistoryGroupNode(n) && n.historyFor === conn.from);
             demoteHistoryGroupNode(group);
         }
+    });
+    if(historyTx) commitSmartHistoryTransaction(historyTx);
+    queueSmartRenderMutation({
+        removedConnectionIds:removed.map(connection => connection.id),
+        // 合并到分组的可视线没有单一 connection id，必须重建连接 SVG 才能移除整条合并线。
+        requiresFullConnectionRender:removed.length > 1
     });
     render();
     scheduleSave();

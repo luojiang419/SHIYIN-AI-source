@@ -55,6 +55,19 @@ class IncrementalConnectionTests(unittest.TestCase):
         self.assertIn("svg.appendChild(path)", temp)
         self.assertIn("clearPortDragVisual", SMART)
 
+    def test_disconnect_uses_lightweight_history_and_incremental_render(self):
+        classic = body(CLASSIC, "function deleteConnection", "function outputDownloadName")
+        self.assertIn("beginClassicHistoryTransaction('disconnect')", classic)
+        self.assertIn("commitClassicHistoryTransaction(historyTx)", classic)
+        self.assertIn("queueClassicRenderMutation({removedConnectionIds:[id]})", classic)
+        self.assertNotIn("pushUndo();", classic)
+
+        smart = body(SMART, "function disconnectConnections(spec)", "function connectionMidpoint")
+        self.assertIn("beginSmartHistoryTransaction('disconnect')", smart)
+        self.assertIn("commitSmartHistoryTransaction(historyTx)", smart)
+        self.assertIn("removedConnectionIds:removed.map(connection => connection.id)", smart)
+        self.assertIn("requiresFullConnectionRender:removed.length > 1", smart)
+
 
 if __name__ == "__main__":
     unittest.main()

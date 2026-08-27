@@ -10796,7 +10796,12 @@ function smartSpecialInputImage(node, inputRole=''){
             item.inputRole === inputRole
         ));
         const source = connection ? nodes.find(item => item.id === connection.from) : null;
-        return source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') || (source.url ? {...source, kind:'image'} : null) : null;
+        if(source) return imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') || (source.url ? {...source, kind:'image'} : null);
+        if(Array.isArray(node?.inputNodeIds)){
+            const fallbackSource = [...node.inputNodeIds].reverse().map(id => nodes.find(item => item.id === id)).find(Boolean);
+            return fallbackSource ? imagesForNode(fallbackSource).find(item => item?.url && mediaKindForItem(item) === 'image') || (fallbackSource.url ? {...fallbackSource, kind:'image'} : null) : null;
+        }
+        return null;
     }
     const connected = inputImagesFor(node).find(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image');
     if(connected) return connected;
@@ -10806,6 +10811,14 @@ function smartSpecialInputImage(node, inputRole=''){
         const fallback = source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') : null;
         if(fallback) return fallback;
         if(source?.url) return {...source, kind:'image'};
+    }
+    if(Array.isArray(node?.inputNodeIds)){
+        for(const id of [...node.inputNodeIds].reverse()){
+            const source = nodes.find(item => item.id === id);
+            const fallback = source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') : null;
+            if(fallback) return fallback;
+            if(source?.url) return {...source, kind:'image'};
+        }
     }
     return null;
 }

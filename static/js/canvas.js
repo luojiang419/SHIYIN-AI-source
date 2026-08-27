@@ -8321,6 +8321,13 @@ function classicSpecialInputImage(node, inputRole=''){
         .map(connection => nodes.find(item => item.id === connection.from))
         .filter(Boolean)
         .reverse();
+    if(!sources.length && !inputRole && Array.isArray(node?.inputNodeIds)){
+        node.inputNodeIds
+            .map(id => nodes.find(item => item.id === id))
+            .filter(Boolean)
+            .reverse()
+            .forEach(source => sources.push(source));
+    }
     for(const source of sources){
         const refs = [
             ...mediaRefsFromNode(source),

@@ -206,6 +206,17 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.shared)
 
+    def test_relight_and_angle_inputs_fall_back_to_node_input_ids_when_connection_cache_is_stale(self):
+        for marker in (
+            "if(!sources.length && !inputRole && Array.isArray(node?.inputNodeIds))",
+        ):
+            self.assertIn(marker, self.classic)
+        for marker in (
+            "const fallbackSource = [...node.inputNodeIds].reverse().map(id => nodes.find(item => item.id === id)).find(Boolean);",
+            "if(Array.isArray(node?.inputNodeIds)){",
+        ):
+            self.assertIn(marker, self.smart)
+
     def test_angle_control_generates_a_real_novel_view_instead_of_2d_rotation(self):
         for marker in (
             "ANGLE_AZIMUTHS",

@@ -314,6 +314,72 @@
             node.relightNotes ? `补充要求：${node.relightNotes.trim()}` : ''
         ].filter(Boolean).join('\n');
     }
+    function relightPreviewStatusText(source, output){
+        if(output?.url) return `灯光重塑结果已就绪 · ${output.name || 'relight.png'}`;
+        if(source?.url) return `已连接 ${source.name || '图片'} · 调整参数后点击生成`;
+        return '连接或导入一张图片，预览会直接显示在节点内';
+    }
+    function updateRelightPreview(root, node, options, source){
+        const output = outputItem(node);
+        const item = output || source;
+        const stage = root.querySelector('[data-relight-stage]') || root.querySelector('[data-edit-stage]');
+        const image = root.querySelector('[data-relight-preview]') || root.querySelector('[data-edit-preview]');
+        const empty = root.querySelector('[data-relight-empty]') || root.querySelector('[data-edit-empty]');
+        const overlay = root.querySelector('[data-relight-overlay]');
+        const badge = root.querySelector('[data-relight-chip]') || root.querySelector('[data-edit-badge]');
+        const status = root.querySelector('[data-relight-status]');
+        const sourceLabel = root.querySelector('[data-relight-source-label]');
+        const outputLabel = root.querySelector('[data-relight-output-label]');
+        if(image){
+            if(item?.url){
+                const originalUrl = String(item.url);
+                let displayUrl = originalUrl;
+                try { displayUrl = options.resolveUrl?.(originalUrl) || originalUrl; } catch(_) {}
+                image.dataset.originalSrc = originalUrl;
+                image.onerror = () => {
+                    if(image.src && image.src !== originalUrl && image.dataset.previewFallback !== originalUrl){
+                        image.dataset.previewFallback = originalUrl;
+                        image.src = originalUrl;
+                        return;
+                    }
+                    image.hidden = true;
+                };
+                image.dataset.previewFallback = '';
+                image.src = displayUrl;
+                image.hidden = false;
+            } else {
+                image.removeAttribute('src');
+                image.removeAttribute('data-original-src');
+                image.dataset.previewFallback = '';
+                image.hidden = true;
+                image.onerror = null;
+            }
+        }
+        if(empty) empty.toggleAttribute('hidden', Boolean(item?.url));
+        if(stage) stage.classList.toggle('has-source', Boolean(item?.url));
+        if(overlay){
+            overlay.hidden = !source?.url || Boolean(output?.url);
+            const temperature = Number(node.relightTemperature || 0);
+            const color = temperature < -10 ? '104,166,255' : temperature > 10 ? '255,178,92' : '255,244,222';
+            overlay.style.setProperty('--relight-color', color);
+            overlay.style.setProperty('--relight-opacity', String(0.12 + clamp(node.relightIntensity, 10, 100) / 220));
+            overlay.dataset.direction = node.relightDirection;
+        }
+        if(badge) badge.textContent = output?.url ? 'API 结果' : (source?.url ? '连接预览' : '等待输入');
+        if(status) status.textContent = relightPreviewStatusText(source, output);
+        if(sourceLabel) sourceLabel.textContent = source?.url ? `源图 · ${source.name || '已连接'}` : '未连接图片';
+        if(outputLabel) outputLabel.textContent = output?.url ? `结果 · ${output.name || 'relight.png'}` : '等待结果';
+        const temp = root.querySelector('[data-relight-temperature]'), intensity = root.querySelector('[data-relight-intensity]');
+        if(temp) temp.textContent = relightTemperatureText(node.relightTemperature);
+        if(intensity) intensity.textContent = `${Math.round(node.relightIntensity)}%`;
+    }
+    function markRelightChanged(root, node, options, source){
+        if(outputItem(node)?.url) clearOutputItem(node, options);
+        const status = root.querySelector('[data-relight-status]');
+        if(status) status.textContent = source?.url ? '参数已更新，点击生成新的灯光结果' : '请先连接或导入图片';
+        updateRelightPreview(root, node, options, source);
+        notify(options, node, false);
+    }
     function relightBodyHtml(node){
         normalizeRelight(node);
         normalizeEditGeneration(node);
@@ -321,11 +387,17 @@
         const directions = [['top','上'],['left','左'],['front','正'],['right','右'],['bottom','下'],['rim','轮廓'],['back','逆光']];
         return `<div class="special-node edit-special relight-special" data-special-node="relight">
             <input class="special-file-input" type="file" accept="image/*" data-special-file="relight" hidden>
-            <div class="special-edit-stage ${preview ? 'has-source' : ''}" data-edit-stage>
-                <img data-edit-preview src="${esc(preview)}" alt="灯光重塑预览" draggable="false" ${preview ? '' : 'hidden'}>
-                <div class="special-empty" data-edit-empty ${preview ? 'hidden' : ''}><i data-lucide="sun-medium"></i><strong>连接或导入一张图片</strong><span>选择光向后提交到画布默认图片 API</span></div>
-                <div class="relight-preview-overlay" data-relight-overlay></div>
-                <div class="special-edit-badge" data-edit-badge>${output?.url ? 'API 结果' : '实时灯光示意'}</div>
+            <div class="relight-preview-panel">
+                <div class="special-edit-stage relight-preview-shell ${preview ? 'has-source' : ''}" data-edit-stage data-relight-stage>
+                    <img class="relight-preview-image" data-edit-preview data-relight-preview src="${esc(preview)}" alt="灯光重塑预览" draggable="false" ${preview ? '' : 'hidden'}>
+                    <div class="special-empty relight-preview-empty" data-edit-empty data-relight-empty ${preview ? 'hidden' : ''}><i data-lucide="sun-medium"></i><strong>连接或导入一张图片</strong><span>预览会直接显示在节点内</span></div>
+                    <div class="relight-preview-overlay" data-relight-overlay ${preview && !output?.url ? '' : 'hidden'}></div>
+                    <div class="special-edit-badge relight-preview-chip" data-edit-badge data-relight-chip>${output?.url ? 'API 结果' : '连接预览'}</div>
+                </div>
+                <div class="relight-preview-meta">
+                    <span data-relight-source-label>${preview ? `源图 · ${esc(node.relightSourceName || '已连接')}` : '未连接图片'}</span>
+                    <span data-relight-output-label>${output?.url ? `结果 · ${esc(output.name || 'relight.png')}` : '等待结果'}</span>
+                </div>
             </div>
             <div class="special-toolbar">
                 <button type="button" data-special-action="upload-relight"><i data-lucide="upload"></i><span>导入图片</span></button>
@@ -343,7 +415,7 @@
             </div>
             <label class="special-check"><input type="checkbox" data-edit-field="relightPreserve" ${node.relightPreserve ? 'checked' : ''}><span>严格保持人物/产品与构图不变</span></label>
             <textarea class="special-prompt" data-edit-field="relightNotes" rows="2" placeholder="可选：补充灯光颜色、窗影、舞台光等要求">${esc(node.relightNotes)}</textarea>
-            <div class="special-output-row"><span data-edit-status>${output?.url ? `灯光重塑结果已就绪 · ${esc(output.name || 'relight.png')}` : '调整参数后点击生成，不会自动产生 API 费用'}</span><button type="button" class="special-primary" data-special-action="run-relight" ${node.specialRunning ? 'disabled' : ''}><i data-lucide="${node.specialRunning ? 'loader-2' : 'wand-sparkles'}"></i><span>${node.specialRunning ? '重塑中' : '生成重塑图'}</span></button></div>
+            <div class="special-output-row"><span data-relight-status>${output?.url ? `灯光重塑结果已就绪 · ${esc(output.name || 'relight.png')}` : '调整参数后点击生成，不会自动产生 API 费用'}</span><button type="button" class="special-primary" data-special-action="run-relight" ${node.specialRunning ? 'disabled' : ''}><i data-lucide="${node.specialRunning ? 'loader-2' : 'wand-sparkles'}"></i><span>${node.specialRunning ? '重塑中' : '生成重塑图'}</span></button></div>
         </div>`;
     }
 
@@ -1014,7 +1086,7 @@
         root.querySelector('[data-angle-empty]')?.toggleAttribute('hidden', Boolean(item?.url));
         root.querySelector('[data-edit-stage]')?.classList.toggle('has-source', Boolean(item?.url));
         const relightOverlay = root.querySelector('[data-relight-overlay]');
-        if(relightOverlay) relightOverlay.hidden = Boolean(output?.url);
+        if(relightOverlay) relightOverlay.hidden = !source?.url || Boolean(output?.url);
         const badge = root.querySelector('[data-edit-badge]');
         if(badge) badge.textContent = output?.url ? 'API 结果' : '实时灯光示意';
         if(prefix === 'relight') updateRelightPreview(root, node); else updateAnglePreview(root, node);
@@ -1147,7 +1219,105 @@
             });
         });
     }
-    function bindRelight(root, node, options={}){ bindEditNode(root, node, options, 'relight'); }
+    function bindRelight(root, node, options={}){
+        if(!root || !node) return;
+        normalizeRelight(node);
+        normalizeEditGeneration(node);
+        let source = editSource(node, options, 'relight');
+        if(persistEditSource(node, 'relight', source)) notify(options, node, false);
+        const sourceSig = sourceSignature(source), controlSig = relightControlSignature(node), output = outputItem(node);
+        if(output?.url && ((node.specialGeneratedSourceSignature && node.specialGeneratedSourceSignature !== sourceSig) || (node.specialGeneratedControlSignature && node.specialGeneratedControlSignature !== controlSig))){
+            clearOutputItem(node, options);
+            notify(options, node, true);
+        }
+        updateRelightPreview(root, node, options, source);
+        const fileInput = root.querySelector('[data-special-file="relight"]');
+        if(fileInput) fileInput.onchange = async () => {
+            try {
+                const file = await uploadFile(fileInput.files?.[0]);
+                node.relightSourceUrl = file.url;
+                node.relightSourceName = file.name || 'relight-source.png';
+                node.relightSourceWidth = file.natural_w || 0;
+                node.relightSourceHeight = file.natural_h || 0;
+                clearOutputItem(node, options);
+                source = editSource(node, options, 'relight');
+                persistEditSource(node, 'relight', source);
+                updateRelightPreview(root, node, options, source);
+                notify(options, node, true);
+            } catch(error){ options.toast?.(error.message); }
+            finally { fileInput.value = ''; }
+        };
+        root.querySelectorAll('[data-edit-field]').forEach(control => {
+            control.addEventListener('pointerdown', event => event.stopPropagation());
+            const eventName = control.matches('textarea,input[type="range"]') ? 'input' : 'change';
+            control.addEventListener(eventName, event => {
+                event.stopPropagation();
+                const key = control.dataset.editField;
+                let value = control.type === 'checkbox' ? control.checked : control.value;
+                if(['relightTemperature','relightIntensity'].includes(key)) value = Number(value);
+                node[key] = value;
+                source = editSource(node, options, 'relight');
+                persistEditSource(node, 'relight', source);
+                markRelightChanged(root, node, options, source);
+            });
+        });
+        root.querySelectorAll('[data-relight-direction]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+            button.addEventListener('click', event => {
+                event.preventDefault(); event.stopPropagation();
+                node.relightDirection = button.dataset.relightDirection;
+                root.querySelectorAll('[data-relight-direction]').forEach(item => item.classList.toggle('active', item === button));
+                source = editSource(node, options, 'relight');
+                persistEditSource(node, 'relight', source);
+                markRelightChanged(root, node, options, source);
+            });
+        });
+        root.querySelectorAll('[data-special-action]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+            button.addEventListener('click', async event => {
+                event.preventDefault();
+                event.stopPropagation();
+                const action = button.dataset.specialAction;
+                if(action === 'upload-relight'){ fileInput?.click(); return; }
+                if(action !== 'run-relight') return;
+                try {
+                    source = editSource(node, options, 'relight');
+                    persistEditSource(node, 'relight', source);
+                    if(!source?.url) throw new Error('请先连接或导入一张图片');
+                    if(!options.generateImageEdit) throw new Error('当前画布未配置图片 API 生成能力');
+                    node.specialRunning = true;
+                    if(options.createEditPendingOutputNode){
+                        try {
+                            const pendingNode = await options.createEditPendingOutputNode(node, 'relight');
+                            if(pendingNode?.id) node.specialOutputNodeId = pendingNode.id;
+                        } catch(error){
+                            console.warn('[canvas-special] 创建灯光调整占位输出失败：', error);
+                        }
+                    }
+                    notify(options, node, true);
+                    const generatedSourceSignature = sourceSignature(source), generatedControlSignature = relightControlSignature(node);
+                    const file = await options.generateImageEdit(node, buildRelightPrompt(node), source, 'relight');
+                    if(!file?.url) throw new Error('图片 API 没有返回生成结果');
+                    node.specialRunning = false;
+                    node.specialGeneratedSourceSignature = generatedSourceSignature;
+                    node.specialGeneratedControlSignature = generatedControlSignature;
+                    setOutputItem(node, file, options);
+                    if(options.createEditOutputNode){
+                        const outputNode = await options.createEditOutputNode(node, file, 'relight');
+                        if(!outputNode) throw new Error('输出节点创建失败');
+                        node.specialOutputNodeId = outputNode.id || node.specialOutputNodeId || '';
+                    }
+                    updateRelightPreview(root, node, options, source);
+                    notify(options, node, true);
+                    options.toast?.('灯光重塑已完成，可连接到下游节点');
+                } catch(error){
+                    node.specialRunning = false;
+                    notify(options, node, true);
+                    options.toast?.(error.message || '图片生成失败');
+                }
+            });
+        });
+    }
     function bindAngle(root, node, options={}){ bindEditNode(root, node, options, 'angle'); }
 
     window.CanvasSpecialNodes = {

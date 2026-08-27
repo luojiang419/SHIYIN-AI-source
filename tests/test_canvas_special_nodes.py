@@ -141,7 +141,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.18.pose-reference.2", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.27.relight-v2.1", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
@@ -202,6 +202,11 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "relightMood",
             "严格保持人物/产品与构图不变",
             "function buildRelightPrompt(node)",
+            "relightPreviewStatusText",
+            "relight-preview-panel",
+            "data-relight-status",
+            "data-relight-source-label",
+            "data-relight-output-label",
             "function bindRelight(root, node, options={})",
         ):
             self.assertIn(marker, self.shared)
@@ -332,7 +337,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn(".angle-subject-3d{transform:translate(-50%,-54%) translateZ(32px)", self.angle_styles)
 
     def test_edit_preview_and_source_dimensions_stay_truthful(self):
-        self.assertIn("relightOverlay.hidden = Boolean(output?.url)", self.shared)
+        self.assertIn("updateRelightPreview(root, node, options, source)", self.shared)
+        self.assertIn("node.relightSourceUrl = file.url", self.shared)
+        self.assertIn("data-relight-preview", self.shared)
         self.assertIn("image.dataset.originalSrc = originalUrl", self.shared)
         self.assertIn("image.dataset.previewFallback", self.shared)
         self.assertIn("nodeForControls[`${prefix}SourceWidth`] = uploaded.natural_w || 0", self.smart)

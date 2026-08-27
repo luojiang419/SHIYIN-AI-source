@@ -9430,6 +9430,15 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
     if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">姿势参考节点加载失败</div>';
     if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
+    if(['relight','angle'].includes(node.specialType)){
+        const source = smartSpecialInputImage(node);
+        if(source?.url){
+            node[`${node.specialType}SourceUrl`] = source.url;
+            node[`${node.specialType}SourceName`] = source.name || `${node.specialType}-source.png`;
+            node[`${node.specialType}SourceWidth`] = Number(source.natural_w || source.width || 0);
+            node[`${node.specialType}SourceHeight`] = Number(source.natural_h || source.height || 0);
+        }
+    }
     if(node.specialType === 'relight') return window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="smart-group-empty">灯光重塑节点加载失败</div>';
     if(node.specialType === 'angle') return window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="smart-group-empty">角度调整节点加载失败</div>';
     if(node.specialType === 'multi-view') return multiViewBodyHtml(node);

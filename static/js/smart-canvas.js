@@ -14216,7 +14216,7 @@ function gridSplitRectsCustom(width, height){
     return rects;
 }
 function gridLayoutFromRects(rects){
-    return {type:'grid-split', groupId:uid('grid'), rows:Math.max(1, ...rects.map(r => Number(r.row || 0) + 1)), cols:Math.max(1, ...rects.map(r => Number(r.col || 0) + 1))};
+    return {type:'grid-split', itemMode:'cells', groupId:uid('grid'), rows:Math.max(1, ...rects.map(r => Number(r.row || 0) + 1)), cols:Math.max(1, ...rects.map(r => Number(r.col || 0) + 1))};
 }
 function applyGridPreset(rows, cols){
     gridCustomMode = false; gridCustomLines = []; gridCustomHistory = []; gridCustomDrag = null;
@@ -15094,7 +15094,7 @@ async function applyImageGridSplit(){
         const outputImages = files.map((file, i) => ({
             url:file.url,
             name:file.name,
-            grid:{...layout, row:rects[i]?.row || 0, col:rects[i]?.col || 0, w:rects[i]?.w || 1, h:rects[i]?.h || 1}
+            grid:{...layout, row:rects[i]?.row || 0, col:rects[i]?.col || 0, rowSpan:1, colSpan:1, ratioW:rects[i]?.w || 1, ratioH:rects[i]?.h || 1}
         }));
         const point = smartOutputPointForImages(node, outputImages);
         const outputNode = createNode(point.x, point.y, outputImages);

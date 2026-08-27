@@ -6876,7 +6876,7 @@ function gridSplitRectsCustom(width, height){
 function gridLayoutFromRects(rects){
     const rows = Math.max(1, ...rects.map(r => Number(r.row || 0) + 1));
     const cols = Math.max(1, ...rects.map(r => Number(r.col || 0) + 1));
-    return {type:'grid-split', groupId:uid('grid'), rows, cols};
+    return {type:'grid-split', itemMode:'cells', groupId:uid('grid'), rows, cols};
 }
 function applyGridPreset(rows, cols){
     gridCustomMode = false;
@@ -7850,7 +7850,7 @@ async function applyImageGridSplit(){
         appendOutputImages(out, urls, {url:node.url, name:node.name || 'source image'}, urls.map((url, i) => ({
             runMs:0,
             run:{prompt:'宫格切分', refs:[{url:node.url, name:node.name || 'source image'}]},
-            grid:{...layout, row:rects[i]?.row || 0, col:rects[i]?.col || 0, w:rects[i]?.w || 1, h:rects[i]?.h || 1}
+            grid:{...layout, row:rects[i]?.row || 0, col:rects[i]?.col || 0, rowSpan:1, colSpan:1, ratioW:rects[i]?.w || 1, ratioH:rects[i]?.h || 1}
         })), layout);
         closeImageEditor();
         render();
@@ -8244,11 +8244,7 @@ function pendingOutputStyle(pending, useGridLayout=false){
     const grid = useGridLayout ? pending?.grid : null;
     const styles = [];
     if(size && !grid) styles.push(`aspect-ratio:${Math.max(1, size.w)}/${Math.max(1, size.h)}`);
-    if(grid){
-        styles.push(`grid-row:${Number(grid.row || 0) + 1}`);
-        styles.push(`grid-column:${Number(grid.col || 0) + 1} / span ${Math.max(1, Number(grid.w || 1))}`);
-        styles.push(`aspect-ratio:${Math.max(1, Number(grid.ratioW || grid.w || 1))}/${Math.max(1, Number(grid.ratioH || grid.h || 1))}`);
-    }
+    if(grid) return gridOutputItemStyle(grid);
     return styles.length ? ` style="${styles.join(';')}"` : '';
 }
 function renderPendingOutput(pending, useGridLayout=false){
@@ -16794,7 +16790,7 @@ function renderOutputMedia(item, useGridLayout=false){
     const meta = item && typeof item === 'object' ? item : {};
     const kind = mediaKindForOutputItem(item);
     const grid = useGridLayout ? (meta.grid || null) : null;
-    const gridStyle = grid ? ` style="grid-row:${Number(grid.row || 0) + 1};grid-column:${Number(grid.col || 0) + 1} / span ${Math.max(1, Number(grid.w || 1))};aspect-ratio:${Math.max(1, Number(grid.ratioW || grid.w || 1))}/${Math.max(1, Number(grid.ratioH || grid.h || 1))}"` : '';
+    const gridStyle = gridOutputItemStyle(grid);
     const timePill = meta.runMs && !meta.viewed ? `<span class="output-time-pill">${formatRunDuration(meta.runMs)}</span>` : '';
     if(isMissingAssetUrl(url)){
         return `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${gridStyle}>${missingAssetHtml(url, true)}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
@@ -17847,6 +17843,17 @@ function renameCanvasGroup(group, titleEl){
     input.onmousedown = event => event.stopPropagation();
     input.onclick = event => event.stopPropagation();
     requestAnimationFrame(() => { input.focus(); input.select(); });
+}
+function gridOutputItemStyle(grid){
+    if(!grid) return '';
+    const cellLayout = grid.itemMode === 'cells';
+    const row = Math.max(1, Number(grid.row || 0) + 1);
+    const col = Math.max(1, Number(grid.col || 0) + 1);
+    const rowSpan = Math.max(1, Number(cellLayout ? 1 : (grid.rowSpan ?? grid.h ?? 1)) || 1);
+    const colSpan = Math.max(1, Number(cellLayout ? 1 : (grid.colSpan ?? grid.w ?? 1)) || 1);
+    const ratioW = Math.max(1, Number(grid.ratioW || grid.w || 1) || 1);
+    const ratioH = Math.max(1, Number(grid.ratioH || grid.h || 1) || 1);
+    return ` style="grid-row:${row} / span ${rowSpan};grid-column:${col} / span ${colSpan};aspect-ratio:${ratioW}/${ratioH}"`;
 }
 function selectionBoxLocalPoint(clientX, clientY){
     const rect = selectionBox?.offsetParent?.getBoundingClientRect?.() || selectionBox?.parentElement?.getBoundingClientRect?.() || null;

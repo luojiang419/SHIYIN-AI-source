@@ -19,6 +19,32 @@ def collage(rows, cols, cell_w=120, cell_h=96, gap=8):
     return image
 
 
+def solid_blocks(rows, cols, cell_w=120, cell_h=96):
+    image = Image.new("RGB", (cols * cell_w, rows * cell_h), "white")
+    draw = ImageDraw.Draw(image)
+    palette = ["#d84a4a", "#467bd8", "#47a568", "#d89b43", "#7c57c9", "#34a7a0"]
+    for row in range(rows):
+        for col in range(cols):
+            x = col * cell_w
+            y = row * cell_h
+            draw.rectangle((x, y, x + cell_w - 1, y + cell_h - 1), fill=palette[(row * cols + col) % len(palette)])
+    return image
+
+
+def dark_line_collage(rows, cols, cell_w=120, cell_h=96, line=3):
+    width = cols * cell_w + (cols - 1) * line
+    height = rows * cell_h + (rows - 1) * line
+    image = Image.new("RGB", (width, height), "#161616")
+    draw = ImageDraw.Draw(image)
+    palette = ["#f0b4b4", "#a9c1ef", "#a9ddb9", "#efd59f", "#c6b6ed", "#a4ded9"]
+    for row in range(rows):
+        for col in range(cols):
+            x = col * (cell_w + line)
+            y = row * (cell_h + line)
+            draw.rectangle((x, y, x + cell_w - 1, y + cell_h - 1), fill=palette[(row * cols + col) % len(palette)])
+    return image
+
+
 class GridCropDetectionTests(unittest.TestCase):
     def test_detects_three_by_two_collage(self):
         result = detect_grid(collage(3, 2))
@@ -37,6 +63,19 @@ class GridCropDetectionTests(unittest.TestCase):
         result = detect_grid(Image.new("RGB", (420, 280), "#7890a0"))
         self.assertEqual((result.rows, result.cols), (1, 1))
         self.assertEqual(result.confidence, 0.0)
+
+    def test_content_edges_without_separator_are_not_guessed_as_grid(self):
+        result = detect_grid(solid_blocks(3, 2))
+        self.assertEqual((result.rows, result.cols), (1, 1))
+        self.assertEqual(result.confidence, 0.0)
+
+    def test_detects_narrow_dark_separator_lines(self):
+        result = detect_grid(dark_line_collage(2, 3, line=3))
+        self.assertEqual((result.rows, result.cols), (2, 3))
+
+    def test_detects_small_light_gutters(self):
+        result = detect_grid(collage(3, 2, cell_w=80, cell_h=64, gap=2))
+        self.assertEqual((result.rows, result.cols), (3, 2))
 
 
 if __name__ == "__main__":

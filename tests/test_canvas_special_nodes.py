@@ -338,6 +338,12 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
 
     def test_edit_preview_and_source_dimensions_stay_truthful(self):
         self.assertIn("updateRelightPreview(root, node, options, source)", self.shared)
+        self.assertEqual(
+            len(re.findall(r"function updateRelightPreview\s*\(", self.shared)),
+            1,
+            "灯光重塑预览必须只有一个负责同步图片/占位状态的实现",
+        )
+        self.assertIn("function updateRelightControls(root, node)", self.shared)
         self.assertIn("node.relightSourceUrl = file.url", self.shared)
         self.assertIn("data-relight-preview", self.shared)
         self.assertIn("image.dataset.originalSrc = originalUrl", self.shared)

@@ -1014,7 +1014,7 @@
         return prefix === 'relight' ? relightControlSignature(normalizeRelight(node)) : angleControlSignature(normalizeAngle(node));
     }
     function editPrompt(node, prefix){ return prefix === 'relight' ? buildRelightPrompt(node) : buildAnglePrompt(node); }
-    function updateRelightPreview(root, node){
+    function updateRelightControls(root, node){
         const overlay = root.querySelector('[data-relight-overlay]');
         if(!overlay) return;
         const temperature = Number(node.relightTemperature || 0);
@@ -1089,7 +1089,7 @@
         if(relightOverlay) relightOverlay.hidden = !source?.url || Boolean(output?.url);
         const badge = root.querySelector('[data-edit-badge]');
         if(badge) badge.textContent = output?.url ? 'API 结果' : '实时灯光示意';
-        if(prefix === 'relight') updateRelightPreview(root, node); else updateAnglePreview(root, node);
+        if(prefix === 'relight') updateRelightControls(root, node); else updateAnglePreview(root, node);
     }
     function markEditChanged(root, node, options, prefix, source){
         if(outputItem(node)?.url) clearOutputItem(node, options);

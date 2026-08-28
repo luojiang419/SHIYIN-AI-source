@@ -4,7 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/images/logo.png" type="image/png">
-    <title data-i18n="smart.title">智能画布</title>
+    <!-- 兼容历史书签：智能画布已下线，统一进入画布编辑器。 -->
+    <script>
+        (function(){
+            try {
+                var target = '/static/canvas.html' + (location.search || '') + (location.hash || '');
+                location.replace(target);
+            } catch(e) { location.href = '/static/canvas.html'; }
+        })();
+    </script>
+    <title>画布</title>
     <script>
         (function(){
             try {
@@ -83,7 +92,7 @@
             <button id="smartCanvasSelectTool" class="smart-canvas-tool-btn active" type="button" onclick="setSmartCanvasToolMode('select')" title="选择模式" aria-label="选择模式" aria-pressed="true" data-i18n-title="canvas.toolSelect"><i data-lucide="mouse-pointer-2"></i><span data-i18n="canvas.toolSelect">选择</span></button>
             <button id="smartCanvasPanTool" class="smart-canvas-tool-btn" type="button" onclick="setSmartCanvasToolMode('pan')" title="移动模式" aria-label="移动模式" aria-pressed="false" data-i18n-title="canvas.toolPan"><i data-lucide="hand"></i><span data-i18n="canvas.toolPan">移动</span></button>
         </div>
-        <div id="smartTitle" class="smart-title" data-i18n="smart.title">智能画布</div>
+        <div id="smartTitle" class="smart-title" data-i18n="smart.title">画布</div>
         <div id="createMenu" class="create-menu">
             <button id="smartArrangeMenuBtn" class="smart-arrange-menu-btn" type="button" hidden><i data-lucide="layout-grid"></i><span>整理选中</span></button>
             <div class="create-menu-grid">
@@ -469,6 +478,6 @@
     <script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script src="/static/js/canvas-film-nodes.js?v=2026.08.24.film-nodes.3"></script>
     <script src="/static/js/canvas-linkfox-video.js?v=2026.08.28.linkfox-video.3"></script>
-    <script src="/static/js/smart-canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260827.7&feature=shortcuts-runtime.2&feature=building-confirm.1&feature=building-recovery.1&feature=node-labels.1&feature=relight-output.1&app-version=1.0.336"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260827.7&feature=shortcuts-runtime.2&feature=building-confirm.1&feature=building-recovery.1&feature=node-labels.1&feature=relight-output.1&app-version=1.0.337"></script>
 </body>
 </html>

@@ -111,7 +111,7 @@ let assetClassifyBusy = false;
 let localClassifyBusy = false;
 let lightboxPanState = null;
 let canvasAssetsData = {categories:[], canvases:[], items:[]};
-let activeCanvasAssetCategory = 'smart';
+let activeCanvasAssetCategory = 'all';
 let activeCanvasAssetCanvasId = '';
 let selectedCanvasAssetId = '';
 let selectedCanvasAssetIds = new Set();
@@ -746,20 +746,21 @@ function currentWorkflowItems(){
     });
 }
 function canvasAssetCategories(){
-    const cats = Array.isArray(canvasAssetsData.categories) && canvasAssetsData.categories.length
-        ? canvasAssetsData.categories.filter(cat => ['smart','classic'].includes(cat.id))
-        : [
-            {id:'smart', name:'智能画布', count:(canvasAssetsData.items || []).filter(item => item.canvas_kind === 'smart').length, canvas_count:(canvasAssetsData.canvases || []).filter(item => item.kind === 'smart').length},
-            {id:'classic', name:'普通画布', count:(canvasAssetsData.items || []).filter(item => item.canvas_kind !== 'smart').length, canvas_count:(canvasAssetsData.canvases || []).filter(item => item.kind !== 'smart').length}
-        ];
-    return cats;
+    const source = Array.isArray(canvasAssetsData.categories) ? canvasAssetsData.categories : [];
+    const all = source.find(cat => cat.id === 'all');
+    return [all || {
+        id:'all',
+        name:'全部画布',
+        count:(canvasAssetsData.items || []).length,
+        canvas_count:(canvasAssetsData.canvases || []).length
+    }];
 }
 function activeCanvasAssetCategoryInfo(){
-    return canvasAssetCategories().find(cat => cat.id === activeCanvasAssetCategory) || canvasAssetCategories()[0] || {id:'smart', name:'智能画布', count:0, canvas_count:0};
+    return canvasAssetCategories().find(cat => cat.id === activeCanvasAssetCategory) || canvasAssetCategories()[0] || {id:'all', name:'全部画布', count:0, canvas_count:0};
 }
 function defaultCanvasAssetCategory(){
     const cats = canvasAssetCategories();
-    return cats.find(cat => Number(cat.canvas_count || 0) > 0)?.id || cats[0]?.id || 'smart';
+    return cats.find(cat => Number(cat.canvas_count || 0) > 0)?.id || cats[0]?.id || 'all';
 }
 function uniqueCanvasAssets(items){
     const seen = new Set();
@@ -777,15 +778,13 @@ function canvasAssetCountForCanvas(canvasId){
 }
 function canvasAssetsForCategory(categoryId=activeCanvasAssetCategory){
     let list = Array.isArray(canvasAssetsData.canvases) ? canvasAssetsData.canvases.slice() : [];
-    list = list.filter(canvas => (canvas.kind || 'classic') === categoryId);
+    if(categoryId && categoryId !== 'all') list = list.filter(canvas => (canvas.kind || 'classic') === categoryId);
     return list.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN', {numeric:true, sensitivity:'base'}));
 }
 function canvasAssetOpenUrl(canvas){
     if(!canvas?.id) return '';
     const id = encodeURIComponent(canvas.id);
-    return canvas.kind === 'smart'
-        ? `/static/smart-canvas.html?id=${id}&v=2026.08.14.canvas-neutral-no-blue.1`
-        : `/static/canvas.html?id=${id}&v=2026.08.14.canvas-neutral-no-blue.1`;
+    return `/static/canvas.html?id=${id}&v=2026.08.14.canvas-neutral-no-blue.1`;
 }
 function activeCanvasAssetCanvas(){
     if(!activeCanvasAssetCanvasId) return null;
@@ -808,7 +807,7 @@ function canvasAssetKindLabel(item){
     return '图片';
 }
 function canvasKindLabel(kind){
-    return kind === 'smart' ? '智能画布' : '普通画布';
+    return '画布';
 }
 function canvasAssetSortLabel(){
     const map = {canvas:'画布名称', updated:'最近更新', name:'资产名称', kind:'类型'};
@@ -817,7 +816,7 @@ function canvasAssetSortLabel(){
 function currentCanvasAssetItems(){
     const q = String(canvasAssetQuery || '').trim().toLowerCase();
     let list = uniqueCanvasAssets(canvasAssetsData.items || []).filter(item => {
-        if((item.canvas_kind || 'classic') !== activeCanvasAssetCategory) return false;
+        if(activeCanvasAssetCategory !== 'all' && (item.canvas_kind || 'classic') !== activeCanvasAssetCategory) return false;
         if(activeCanvasAssetCanvasId && item.canvas_id !== activeCanvasAssetCanvasId) return false;
         if(canvasAssetMediaType !== 'all' && assetKind(item) !== canvasAssetMediaType) return false;
         if(!q) return true;
@@ -1437,7 +1436,7 @@ function renderCanvasAssetTreeBranch(cat){
     const containsActive = cat.id === activeCanvasAssetCategory && !!activeCanvasAssetCanvasId;
     return `<div class="tree-branch ${cat.id === activeCanvasAssetCategory ? 'expanded' : ''}">
         <button class="tree-row tree-parent ${activeParent ? 'active' : ''} ${containsActive ? 'contains-active' : ''}" type="button" data-canvas-asset-cat="${escapeAttr(cat.id)}">
-            <span class="tree-row-icon"><i data-lucide="${cat.id === 'smart' ? 'sparkles' : cat.id === 'classic' ? 'layout-grid' : 'layout-dashboard'}"></i></span>
+            <span class="tree-row-icon"><i data-lucide="layout-dashboard"></i></span>
             <span class="tree-row-name">${escapeHtml(cat.name || '画布')}</span>
             <span class="tree-row-count">${Number(cat.count || 0)}</span>
         </button>
@@ -1447,7 +1446,7 @@ function renderCanvasAssetTreeBranch(cat){
                 const count = canvasAssetCountForCanvas(canvas.id);
                 return `<button class="tree-row tree-child ${active ? 'active' : ''}" type="button" data-canvas-asset-canvas="${escapeAttr(canvas.id)}" data-canvas-asset-canvas-cat="${escapeAttr(cat.id)}">
                     <span class="tree-elbow"></span>
-                    <span class="tree-row-icon"><i data-lucide="${canvas.kind === 'smart' ? 'sparkles' : 'file-image'}"></i></span>
+                    <span class="tree-row-icon"><i data-lucide="file-image"></i></span>
                     <span class="tree-row-name" title="${escapeAttr(canvas.title || '未命名画布')}">${escapeHtml(canvas.title || '未命名画布')}</span>
                     <span class="tree-row-count">${count}</span>
                 </button>`;
@@ -2641,7 +2640,7 @@ function copySelectedAssetsToCanvas(){
         setStatus('复制失败：' + (err?.message || err));
         return;
     }
-    setStatus(`已复制 ${items.length} 个素材，去智能画布按 Ctrl+V 粘贴`);
+    setStatus(`已复制 ${items.length} 个素材，可在画布中按 Ctrl+V 粘贴`);
 }
 async function downloadSelectedAssets(){
     const items = [...selectedAssetIds].map(id => findAssetItem(id)).filter(it => it?.url);
@@ -2709,7 +2708,7 @@ function copySelectedLocalUploadsToCanvas(){
         setStatus('复制失败：' + (err?.message || err));
         return;
     }
-    setStatus(`已复制 ${items.length} 个素材，去智能画布按 Ctrl+V 粘贴`);
+    setStatus(`已复制 ${items.length} 个素材，可在画布中按 Ctrl+V 粘贴`);
 }
 function renderLocalUploadClipboardBar(){
     if(!localUploadClipboard?.ids?.length) return '';

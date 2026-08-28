@@ -853,8 +853,6 @@ html.studio-theme-dark body .ws-mini-btn.primary,
 body.studio-theme-dark .ws-mini-btn.primary,
 html.studio-theme-dark body .ws-create-confirm,
 body.studio-theme-dark .ws-create-confirm,
-html.studio-theme-dark body .ws-create-toggle-btn.active,
-body.studio-theme-dark .ws-create-toggle-btn.active,
 html.studio-theme-dark body .works-tabs button.active,
 body.studio-theme-dark .works-tabs button.active,
 html.studio-theme-dark body .works-compare-now,
@@ -880,8 +878,6 @@ body.studio-theme-dark .ws-project-row.active .ws-proj-act {
     color:var(--studio-accent-contrast) !important;
 }
 
-html.studio-theme-dark body .ws-card-kind.smart,
-body.studio-theme-dark .ws-card-kind.smart,
 html.studio-theme-dark body .ws-paste-btn,
 body.studio-theme-dark .ws-paste-btn {
     background:var(--studio-control-hover) !important;
@@ -1691,7 +1687,7 @@ body.theme-dark #shell.shell > .board {
     background-size:24px 24px !important;
 }
 
-/* 普通画布快捷工具栏：覆盖旧版蓝灰色规则，跟随统一浅色/暗黑主题变量。 */
+/* 画布快捷工具栏：覆盖旧版蓝灰色规则，跟随统一浅色/暗黑主题变量。 */
 #quickToolbar.toolbar {
     background:color-mix(in srgb,var(--studio-panel) 94%,transparent) !important;
     border-color:var(--studio-border) !important;
@@ -1711,7 +1707,7 @@ body.theme-dark #shell.shell > .board {
     color:var(--studio-text) !important;
 }
 
-/* 普通画布菜单与返回按钮：统一使用当前主题的中性表面，避免旧版蓝灰色残留。 */
+/* 画布菜单与返回按钮：统一使用当前主题的中性表面，避免旧版蓝灰色残留。 */
 #createMenu.create-menu,
 #linkCreateMenu.create-menu,
 #nodeInputMenu.create-menu,
@@ -1756,7 +1752,7 @@ body.theme-dark #shell.shell > .board {
     color:var(--studio-text) !important;
 }
 
-/* 普通画布导航地图与空状态：彻底移除旧版蓝灰背景，三种主题统一从变量取色。 */
+/* 画布导航地图与空状态：彻底移除旧版蓝灰背景，三种主题统一从变量取色。 */
 #minimap,
 #minimapContent,
 #canvasArrangeBtn,
@@ -2307,7 +2303,7 @@ body.theme-dark .log-chip {
     box-shadow:none !important;
 }
 
-/* 星夜黑暗色画布全量收口：canvas.html / canvas-list.html / smart-canvas.html
+/* 星夜黑暗色画布全量收口：统一画布页面
    中未被旧覆盖层处理的蓝灰残留（theme.css 暗色旧蓝灰值、canvas.css 亮色 slate 块、
    indigo/紫色徽章），统一映射到 --studio-* 中性主题变量。 */
 
@@ -2490,8 +2486,6 @@ html.studio-theme-dark body .canvas-item.active .canvas-card-meta,
 body.studio-theme-dark .canvas-item.active .canvas-card-meta,
 html.studio-theme-dark body .canvas-item.active .canvas-owner-chip,
 body.studio-theme-dark .canvas-item.active .canvas-owner-chip,
-html.studio-theme-dark body .canvas-item.active .canvas-kind-chip,
-body.studio-theme-dark .canvas-item.active .canvas-kind-chip,
 html.studio-theme-dark body .canvas-item.active .canvas-preview-mark,
 body.studio-theme-dark .canvas-item.active .canvas-preview-mark,
 html.studio-theme-dark body .canvas-item.active .canvas-card-edit,
@@ -2582,13 +2576,6 @@ body.studio-theme-dark .canvas-meta-pop .emoji-option:hover {
     background:var(--studio-control) !important;
     border-color:var(--studio-border-strong) !important;
     color:var(--studio-muted) !important;
-}
-
-.canvas-kind-chip,
-.ws-card-kind.smart {
-    background:var(--studio-accent-soft) !important;
-    border-color:var(--studio-border-strong) !important;
-    color:var(--studio-accent) !important;
 }
 
 /* 3. 编辑器节点内部遗漏（canvas.html）：设置区、模型面板、Provider 编辑区 */
@@ -2709,7 +2696,7 @@ body.studio-theme-dark .grid-gap-value {
     color:var(--studio-text) !important;
 }
 
-/* 5. 智能画布（smart-canvas.html）：遗漏的蓝黑半透明块与 indigo spinner */
+/* 5. 旧画布节点：遗漏的蓝黑半透明块与 indigo spinner */
 html.studio-theme-dark body .loop-smart-prompt-index,
 body.studio-theme-dark .loop-smart-prompt-index,
 html.theme-dark body .loop-smart-prompt-index,

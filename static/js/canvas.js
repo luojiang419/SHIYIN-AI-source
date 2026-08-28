@@ -326,7 +326,6 @@ const canvasSelectTool = document.getElementById('canvasSelectTool');
 const canvasPanTool = document.getElementById('canvasPanTool');
 const gateStatus = document.getElementById('gateStatus');
 const gateCreateBtn = document.getElementById('gateCreateBtn');
-const gateCreateSmartBtn = document.getElementById('gateCreateSmartBtn');
 const gateRefreshBtn = document.getElementById('gateRefreshBtn');
 const gateBackBtn = document.getElementById('gateBackBtn');
 const gateTrashBtn = document.getElementById('gateTrashBtn');
@@ -540,7 +539,6 @@ let selectedOutputMedia = null;
 let saveTimer = null;
 let saveIdleHandle = 0;
 let creatingCanvas = false;
-let createCanvasKind = 'classic';
 let trashMode = false;
 let pendingDeleteCanvasId = null;
 let pendingPurgeCanvasId = null;
@@ -1625,17 +1623,14 @@ function ensureCanvas(){
     setStatus(tr('canvas.needCanvas'));
     return false;
 }
-function setCreateMode(active, kind='classic'){
+function setCreateMode(active){
     creatingCanvas = active;
-    createCanvasKind = active ? ((kind === 'smart') ? 'smart' : 'classic') : 'classic';
     if(active) trashMode = false;
     canvasGate.classList.toggle('creating', active);
     refreshGateViewControls();
     setStatus(active ? tr('canvas.enterCanvasName') : (canvases.length ? tr('canvas.chooseFirst') : tr('canvas.noCanvasCreateFirst')));
     if(active) {
-        gateTitleInput.placeholder = createCanvasKind === 'smart'
-            ? (tr('canvas.newSmartCanvasPlaceholder') || tr('canvas.newCanvasPlaceholder'))
-            : tr('canvas.newCanvasPlaceholder');
+        gateTitleInput.placeholder = tr('canvas.newCanvasPlaceholder');
         gateTitleInput.focus();
         gateTitleInput.select();
     } else {
@@ -2795,11 +2790,10 @@ function renderCanvasListInto(list){
     }
     items.forEach(item => {
         const row = document.createElement('div');
-        const isSmartCanvas = (item.kind || 'classic') === 'smart';
         const color = String(item.color || '').trim();
         const owner = String(item.owner || '').trim();
         const pinned = !!item.pinned && !trashMode;
-        row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${pinned ? 'pinned' : ''} ${color ? 'has-color' : ''}`;
+        row.className = `canvas-item ${canvas?.id === item.id ? 'active' : ''} ${pinned ? 'pinned' : ''} ${color ? 'has-color' : ''}`;
         row.dataset.canvasId = item.id;
         const ownerChip = owner
             ? `<span class="canvas-owner-chip" role="button" tabindex="0" title="${escapeAttr(owner)}"><i data-lucide="user-round" class="w-3 h-3"></i><span class="canvas-owner-text">${escapeHtml(owner)}</span></span>`
@@ -2807,8 +2801,7 @@ function renderCanvasListInto(list){
         row.innerHTML = `
             <div class="canvas-open" role="button" tabindex="${trashMode ? '-1' : '0'}">
                 <div class="canvas-card-icon-row">
-                    <span class="canvas-preview-mark ${color ? `icon-has-color cc-${escapeAttr(color)}` : ''}" role="button" tabindex="0" title="${trashMode ? tr('canvas.deletedCanvas') : (tr('canvas.editMeta') || '编辑图标 / 颜色 / 负责人')}">${renderCanvasIcon(isSmartCanvas && /[^\x00-\x7F]/.test(item.icon || '') ? 'sparkles' : item.icon, 16)}</span>
-                    ${isSmartCanvas ? `<span class="canvas-kind-chip">${tr('canvas.smartCanvasShort')}</span>` : ''}
+                    <span class="canvas-preview-mark ${color ? `icon-has-color cc-${escapeAttr(color)}` : ''}" role="button" tabindex="0" title="${trashMode ? tr('canvas.deletedCanvas') : (tr('canvas.editMeta') || '编辑图标 / 颜色 / 负责人')}">${renderCanvasIcon(item.icon, 16)}</span>
                 </div>
                 <div class="canvas-card-title">${escapeHtml(item.title)}</div>
                 ${ownerChip}
@@ -2974,8 +2967,7 @@ function positionCanvasMetaPopover(){
 }
 async function createCanvas(){
     const customTitle = gateTitleInput?.value.trim();
-    const isSmart = createCanvasKind === 'smart';
-    const titleBase = isSmart ? tr('canvas.newSmartCanvas') : tr('canvas.newCanvas');
+    const titleBase = tr('canvas.newCanvas');
     const title = customTitle || `${titleBase} ${new Date().toLocaleTimeString(window.StudioI18n?.lang() === 'en' ? 'en-US' : 'zh-CN', {hour:'2-digit', minute:'2-digit'})}`;
     trashMode = false;
     refreshGateViewControls();
@@ -2984,16 +2976,10 @@ async function createCanvas(){
         const res = await fetch('/api/canvases', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({title, icon:isSmart ? 'sparkles' : '🧩', kind:isSmart ? 'smart' : 'classic'})
+            body:JSON.stringify({title, icon:'🧩', kind:'classic'})
         });
         if(!res.ok) throw new Error(tr('canvas.createFailed'));
         const data = await res.json();
-        if(isSmart){
-            setCreateMode(false);
-            await loadCanvasList(false);
-            openSmartCanvasPage(data.canvas?.id);
-            return;
-        }
         resetCascadeRuntimeState();
         clearClassicHistory();
         canvas = data.canvas;
@@ -3015,13 +3001,6 @@ async function createCanvas(){
         setStatus(tr('canvas.createFailed'));
         console.error(e);
     }
-}
-async function createSmartCanvas(){
-    setCreateMode(true, 'smart');
-}
-function openSmartCanvasPage(id){
-    if(!id) return;
-    window.location.href = `/static/smart-canvas.html?id=${encodeURIComponent(id)}&v=2026.08.14.canvas-neutral-no-blue.1`;
 }
 function toggleEmojiPicker(id, event){
     event?.preventDefault();
@@ -3138,10 +3117,6 @@ async function openCanvas(id){
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
-        if((canvas.kind || 'classic') === 'smart'){
-            openSmartCanvasPage(canvas.id);
-            return;
-        }
         clearClassicHistory();
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
@@ -3462,14 +3437,12 @@ async function purgeCanvas(id, event){
     }
 }
 window.createCanvas = createCanvas;
-window.createSmartCanvas = createSmartCanvas;
 window.loadCanvasList = loadCanvasList;
 window.openCanvas = openCanvas;
 window.deleteCanvas = deleteCanvas;
 window.returnToCanvasManager = returnToCanvasManager;
 // 选画布 gate 已拆分到 canvas-list.html；编辑器页不再含这些元素，用可选链避免空引用报错。
 gateCreateBtn?.addEventListener('click', () => setCreateMode(true));
-gateCreateSmartBtn?.addEventListener('click', createSmartCanvas);
 gateBackBtn?.addEventListener('click', () => setTrashMode(false));
 gateTrashBtn?.addEventListener('click', () => setTrashMode(true));
 gateRefreshBtn?.addEventListener('click', () => trashMode ? loadTrashList() : loadCanvasList(false));
@@ -10907,7 +10880,7 @@ function defaultCanvasPromptTemplateGroups(){
         {id:'character', name:tr('smart.tplCatCharacter')},
         {id:'product', name:tr('smart.tplCatProduct')},
         {id:'lighting', name:tr('smart.tplCatLighting')},
-        // “我的”分组在后端/智能画布里用的分类 id 是 custom，这里保持一致，否则后端 custom 条目在普通画布看不到。
+        // “我的”分组使用后端统一的 custom 分类 id，确保画布与素材库保持一致。
         {id:'custom', name:tr('smart.tplCatMine')}
     ];
 }
@@ -10961,7 +10934,7 @@ function activeCanvasPromptLibraryItems(){
             sourceId:t.id,
             builtin:true,
             // 系统提示词库本身是后端真实库（/api/prompt-libraries 返回的 system 库），标记为 remote，
-            // 这样编辑/删除走后端 PATCH/DELETE 并同步（与智能画布一致），而不是只存本地、不同步。
+            // 编辑/删除走后端 PATCH/DELETE 并同步，而不是只存本地。
             remote:true,
             libraryId:'system',
             libraryName:'系统提示词库',
@@ -11048,7 +11021,7 @@ function canvasPromptTemplateVisibleItems(){
     });
 }
 function currentCanvasPromptTemplateLibraryEditable(){
-    // 系统库后端 readonly=false，也允许新增/编辑（走后端，与智能画布、素材库管理同步）。只按 readonly 判断。
+    // 系统库后端 readonly=false，也允许新增/编辑；只按 readonly 判断。
     const lib = activeCanvasPromptLibrary();
     return Boolean(lib && !lib.readonly);
 }

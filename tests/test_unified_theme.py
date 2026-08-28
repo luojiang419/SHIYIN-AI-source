@@ -176,8 +176,6 @@ class UnifiedThemeTests(unittest.TestCase):
             "html.studio-theme-dark body .composer-template-btn",
             "html.studio-theme-dark body .jimeng-pending-spinner i",
             ".canvas-owner-chip",
-            ".canvas-kind-chip",
-            ".ws-card-kind.smart",
             "background:var(--studio-control) !important",
             "background:var(--studio-panel-raised) !important",
         ):

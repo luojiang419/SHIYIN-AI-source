@@ -415,7 +415,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.336"
+APP_VERSION = "1.0.337"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4170,17 +4170,6 @@ class CanvasWorkflowExportRequest(BaseModel):
     category_id: str = ""
     name: str = ""
 
-class SmartCanvasGroupExportItem(BaseModel):
-    kind: str = ""
-    url: str = ""
-    text: str = ""
-    name: str = ""
-
-class SmartCanvasGroupExportRequest(BaseModel):
-    folder: str = ""
-    group_name: str = "group"
-    items: List[SmartCanvasGroupExportItem] = []
-
 class LocalImageImportRequest(BaseModel):
     path: str = ""
     paths: List[str] = Field(default_factory=list)
@@ -4441,7 +4430,8 @@ def save_canvas(canvas, actor_id="", broadcast=True):
         publish_entity_changed("canvas", canvas["id"], int(canvas.get("revision") or 0), actor_id, int(canvas.get("updated_at") or 0))
 
 def normalize_canvas_kind(kind="classic"):
-    return "smart" if str(kind or "").strip().lower() == "smart" else "classic"
+    # 智能画布已下线；保留该归一化入口以兼容旧请求和历史记录，统一按画布处理。
+    return "classic"
 
 # ===== 项目（按项目分类管理画布）=====
 DEFAULT_PROJECT_ID = "default"
@@ -4500,8 +4490,8 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
     canvas_kind = normalize_canvas_kind(kind)
     canvas = {
         "id": uuid.uuid4().hex,
-        "title": (title or ("智能画布" if canvas_kind == "smart" else "未命名画布"))[:80],
-        "icon": (icon or ("sparkles" if canvas_kind == "smart" else "🧩"))[:32],
+        "title": (title or "未命名画布")[:80],
+        "icon": (icon or "🧩")[:32],
         "kind": canvas_kind,
         "owner": "",
         "color": "",
@@ -4527,6 +4517,8 @@ def load_canvas(canvas_id):
         raise HTTPException(status_code=404, detail="画布不存在")
     if canvas.get("deleted_at"):
         raise HTTPException(status_code=404, detail="画布已在回收站")
+    # 历史 smart 记录继续可打开，但在统一画布编辑器中不再暴露旧分类。
+    canvas["kind"] = "classic"
     return canvas
 
 def load_canvas_any(canvas_id):
@@ -4731,6 +4723,7 @@ def canvas_assets_index():
                 canvas_items = extract_canvas_assets(canvas)
             current[cache_key] = canvas_items
             record = dict(record)
+            record["kind"] = "classic"
             record["asset_count"] = len(canvas_items)
             canvases.append(record)
             items.extend(canvas_items)
@@ -4744,8 +4737,6 @@ def canvas_assets_index():
     items.sort(key=lambda item: int(item.get("canvas_updated_at") or item.get("created_at") or 0), reverse=True)
     categories = [
         {"id": "all", "name": "全部画布", "count": item_counts.get("all", 0), "canvas_count": canvas_counts.get("all", 0)},
-        {"id": "smart", "name": "智能画布", "count": item_counts.get("smart", 0), "canvas_count": canvas_counts.get("smart", 0)},
-        {"id": "classic", "name": "普通画布", "count": item_counts.get("classic", 0), "canvas_count": canvas_counts.get("classic", 0)},
     ]
     return {"categories": categories, "canvases": canvases, "items": items}
 
@@ -10855,7 +10846,7 @@ async def runninghub_upload_local_to_filename(client, provider, url, use_wallet=
     raise HTTPException(status_code=502, detail=(raw.get("msg") if isinstance(raw, dict) else "") or f"RunningHub 上传素材失败：{raw}")
 
 async def generate_runninghub_entry_image(prompt, size, model, reference_images, provider, entry):
-    """运行 RunningHub 工作流 / AI 应用（与智能画布一致的运行方式），返回首张图片结果。"""
+    """运行 RunningHub 工作流 / AI 应用并返回首张图片结果。"""
     kind = entry["kind"]
     entry_id = entry["id"]
     fields = rh_sort_fields([f for f in (entry.get("fields") or []) if isinstance(f, dict) and f.get("enabled") is True])
@@ -18769,16 +18760,6 @@ async def list_canvas_assets():
     # （否则画布多时一次请求就会卡住整个 asyncio loop，连 WebSocket 一起掉线）。
     return await asyncio.to_thread(canvas_assets_index)
 
-@app.get("/api/smart-canvas/prompt-templates")
-async def smart_canvas_prompt_templates():
-    try:
-        template_path = prompt_template_markdown_path()
-        source = os.path.relpath(template_path, BASE_DIR).replace("\\", "/") if template_path else ""
-        return {"templates": builtin_prompt_templates(), "source": source}
-    except Exception as e:
-        print(f"读取提示词模板失败: {e}")
-        return {"templates": []}
-
 @app.post("/api/canvas-assets/check")
 async def check_canvas_assets(payload: CanvasAssetCheckRequest):
     result = {}
@@ -19043,65 +19024,6 @@ async def import_canvas_workflow(file: UploadFile = File(...)):
         "connections": connections_payload,
         "resource_map": resource_mapping,
     }
-
-def smart_group_export_folder(folder: str, group_name: str) -> str:
-    text = str(folder or "").strip()
-    if text:
-        path = os.path.abspath(os.path.expanduser(text))
-    else:
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        safe_group = sanitize_export_filename(group_name or "group", "group")
-        path = os.path.abspath(os.path.join(OUTPUT_DIR, "smart-groups", f"{safe_group}-{stamp}"))
-    os.makedirs(path, exist_ok=True)
-    return path
-
-@app.post("/api/smart-canvas/group-export")
-async def export_smart_canvas_group(payload: SmartCanvasGroupExportRequest):
-    target_dir = smart_group_export_folder(payload.folder, payload.group_name)
-    used_names = set()
-    count = 0
-    text_index = 1
-    for item in payload.items[:2000]:
-        kind = str(item.kind or "").lower()
-        if kind == "text":
-            text = str(item.text or "")
-            if not text.strip():
-                continue
-            base = sanitize_export_filename(item.name or f"{text_index}.txt", f"{text_index}.txt")
-            if not base.lower().endswith(".txt"):
-                base += ".txt"
-            text_index += 1
-            name, ext = os.path.splitext(base)
-            out_name = base
-            suffix = 2
-            while out_name in used_names:
-                out_name = f"{name}-{suffix}{ext}"
-                suffix += 1
-            used_names.add(out_name)
-            with open(os.path.join(target_dir, out_name), "w", encoding="utf-8") as f:
-                f.write(text)
-            count += 1
-            continue
-        src = output_file_from_url(item.url)
-        if not src or not os.path.isfile(src):
-            continue
-        base = sanitize_export_filename(item.name or os.path.basename(src), os.path.basename(src) or f"asset-{count + 1}")
-        name, ext = os.path.splitext(base)
-        if not ext:
-            _, src_ext = os.path.splitext(src)
-            ext = src_ext or ".bin"
-            base = name + ext
-        out_name = base
-        suffix = 2
-        while out_name in used_names:
-            out_name = f"{name}-{suffix}{ext}"
-            suffix += 1
-        used_names.add(out_name)
-        shutil.copy2(src, os.path.join(target_dir, out_name))
-        count += 1
-    if count <= 0:
-        raise HTTPException(status_code=404, detail="没有可导出的内容")
-    return {"ok": True, "folder": target_dir, "count": count}
 
 @app.get("/api/reference-slot-types")
 def get_reference_slot_types():
@@ -19911,10 +19833,7 @@ async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
     canvas["kind"] = normalize_canvas_kind(canvas.get("kind"))
     canvas["nodes"] = payload.nodes
     canvas["connections"] = payload.connections
-    if canvas["kind"] == "smart":
-        canvas["viewport"] = payload.viewport
-    else:
-        canvas["viewport"] = canvas.get("viewport") or {"x": 0, "y": 0, "scale": 1}
+    canvas["viewport"] = payload.viewport or canvas.get("viewport") or {"x": 0, "y": 0, "scale": 1}
     canvas["logs"] = payload.logs[-500:]
     canvas["settings"] = payload.settings or {}
     save_canvas(canvas, payload.client_id)

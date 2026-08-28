@@ -399,7 +399,7 @@ body.theme-dark .film-error {
     top:calc(125px + var(--film-port-index) * 36px);
 }
 
-/* 智能画布的端口位置与智能创建三视图输入槽保持同一基准。 */
+/* 端口位置与三视图输入槽保持同一基准。 */
 .smart-film-storyboard-node .film-role-port,
 .smart-film-video-node .film-role-port {
     left:-8px;

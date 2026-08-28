@@ -35,7 +35,7 @@
     <link rel="stylesheet" href="/static/css/pose-reference-editor.css?v=2026.08.18.pose-reference.4">
     <link rel="stylesheet" href="/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2">
     <link rel="stylesheet" href="/static/css/canvas-film-nodes.css?v=2026.08.24.film-nodes.3">
-    <link rel="stylesheet" href="/static/css/canvas-linkfox-video.css?v=2026.08.28.linkfox-video.1">
+    <link rel="stylesheet" href="/static/css/canvas-linkfox-video.css?v=2026.08.28.linkfox-video.2">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1">
 </head>
 <body>
@@ -62,6 +62,7 @@
                         <button class="tool-btn" onclick="addLLMNode()"><i data-lucide="message-square-text" class="w-4 h-4"></i><span>AI助手</span></button>
                         <button class="tool-btn" onclick="addGeneratorNode()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                         <button class="tool-btn" onclick="addVideoNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerate">视频生成</span></button>
+                        <button class="tool-btn linkfox-toolbar-btn" onclick="addLinkfoxVideoNode()"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频</span></button>
                         <button class="tool-btn" onclick="addFilmNode('film-storyboard')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>分镜合成</span></button>
                         <button class="tool-btn" onclick="addFilmNode('film-video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视视频</span></button>
                         <button class="tool-btn" onclick="addTopazVideoNode()"><i data-lucide="scan-line" class="w-4 h-4"></i><span>Topaz 高清</span></button>
@@ -101,6 +102,7 @@
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">AI助手</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
+                <button class="menu-btn linkfox-menu-btn" onclick="menuAdd('linkfox-video')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频生成</span></button>
                 <div class="menu-submenu-host" data-film-menu-host>
                     <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视制作</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
                     <div class="create-submenu" role="menu" aria-label="影视制作节点">
@@ -522,7 +524,7 @@
     <script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>
     <script src="/static/js/canvas-film-nodes.js?v=2026.08.24.film-nodes.3"></script>
-    <script src="/static/js/canvas-linkfox-video.js?v=2026.08.28.linkfox-video.1"></script>
+    <script src="/static/js/canvas-linkfox-video.js?v=2026.08.28.linkfox-video.2"></script>
     <script src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
     <script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260826.10&feature=shortcuts-runtime.2&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-output.1"></script>
 </body>

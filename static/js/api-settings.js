@@ -1,4 +1,6 @@
 let providers = [];
+const LINKFOX_PROVIDER_ID = 'linkfox';
+const LINKFOX_PROVIDER = {id:LINKFOX_PROVIDER_ID, name:'LinkFox', protocol:'linkfox', base_url:'https://tool-gateway.linkfox.com', enabled:true, primary:false, is_virtual:true, configured:false, installed:false};
 let selectedId = '';
 const providerList = document.getElementById('providerList');
 const editorTitle = document.getElementById('editorTitle');
@@ -46,6 +48,7 @@ const settingsContent = document.getElementById('settingsContent');
 const recommendContent = document.getElementById('recommendContent');
 const recommendPanel = document.getElementById('recommendPanel');
 const providerOnboardingCard = document.getElementById('providerOnboardingCard');
+const linkfoxConfigBlock = document.getElementById('linkfoxConfigBlock');
 const linkfoxApiKeyInput = document.getElementById('linkfoxApiKeyInput');
 const linkfoxGatewayInput = document.getElementById('linkfoxGatewayInput');
 const linkfoxKeyHint = document.getElementById('linkfoxKeyHint');
@@ -288,7 +291,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision' || item.id === 'minimax-h3' || item.id === 'kling-cli';
+    const isBuiltin = item.id === LINKFOX_PROVIDER_ID || item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision' || item.id === 'minimax-h3' || item.id === 'kling-cli';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -309,7 +312,7 @@ function visibleProviders(){
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     // 即梦 CLI 不再是固定平台：可删除、可排序，未添加则不存在。
-    return id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || id === 'local-vision';
+    return id === LINKFOX_PROVIDER_ID || id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || id === 'local-vision';
 }
 function unique(values){
     const seen = new Set();
@@ -739,6 +742,7 @@ function refreshProviderOnboarding(){
 function syncEditor(){
     const item = provider();
     if(!item) return;
+    if(item.id === LINKFOX_PROVIDER_ID || item.is_virtual) return;
     const oldId = item.id;
     const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
     // 内置和自定义平台的 ID 都保持稳定；新建时若没有 ID 才生成一次。
@@ -2273,6 +2277,18 @@ function providerDragAttrs(item){
 function renderProviderList(){
     providerList.innerHTML = sortedProviders().map((item, priorityIndex) => {
         const active = item.id === selectedId ? 'active' : '';
+        if(item.id === LINKFOX_PROVIDER_ID || item.is_virtual){
+            const foxState = item.configured && item.installed ? 'has-key' : 'missing-key';
+            return `
+                <button class="provider-card provider-card-banner provider-card-sortable linkfox-provider-card ${active} ${foxState}" type="button" onclick="selectProvider('${LINKFOX_PROVIDER_ID}')">
+                    <span class="provider-banner-inner">
+                        <span class="provider-logo-wrap provider-logo-linkfox"><i data-lucide="sparkles" class="w-5 h-5"></i><span class="provider-logo-fallback">LinkFox</span></span>
+                        <span class="provider-protocol-pill">视频</span>
+                    </span>
+                    <span class="provider-linkfox-state">${item.configured && item.installed ? '已就绪' : '待配置'}</span>
+                </button>
+            `;
+        }
         const stateClass = item.enabled === false ? 'is-disabled' : (item.has_key || item.has_wallet_key ? 'has-key' : 'missing-key');
         const protocolLabel = item.id === 'local-vision' ? 'VISION' : item.id === 'runninghub' ? 'RH' : String(item.protocol || 'openai').toUpperCase();
         const sortMeta = `<span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span><span class="provider-priority" title="生成优先级">${priorityIndex + 1}</span>`;
@@ -2399,7 +2415,29 @@ function handleProviderDragEnd(){
 function renderEditor(){
     const item = provider();
     if(!item) return;
+    const isLinkfox = item.id === LINKFOX_PROVIDER_ID || item.is_virtual;
+    document.body.classList.toggle('show-linkfox-provider', isLinkfox);
+    if(linkfoxConfigBlock){
+        linkfoxConfigBlock.hidden = !isLinkfox;
+        linkfoxConfigBlock.style.display = isLinkfox ? 'block' : 'none';
+    }
+    if(isLinkfox){
+        editorTitle.textContent = 'LinkFox';
+        const sub = document.querySelector('.content-head .editor-sub');
+        if(sub) sub.textContent = '配置 LinkFox Agent、技能网关和视频生成节点能力';
+        if(nameInput) nameInput.value = 'LinkFox';
+        if(idInput) idInput.value = LINKFOX_PROVIDER_ID;
+        updateIdPreview();
+        clearVerifyResult();
+        renderProviderList();
+        const deleteBtn = document.getElementById('deleteBtn');
+        if(deleteBtn) deleteBtn.style.display = 'none';
+        renderProviderOnboarding(null);
+        return;
+    }
     editorTitle.textContent = item.name || item.id;
+    const genericSub = document.querySelector('.content-head .editor-sub');
+    if(genericSub) genericSub.textContent = tr('api.editorSub');
     nameInput.value = item.name || '';
     idInput.value = item.id || '';
     updateIdPreview();
@@ -3472,6 +3510,10 @@ function setLinkfoxConfigStatus(text, ok=null){
 }
 function renderLinkfoxConfig(data){
     const item = data || {};
+    LINKFOX_PROVIDER.configured = item.configured === true;
+    LINKFOX_PROVIDER.installed = item.installed === true;
+    LINKFOX_PROVIDER.base_url = item.tool_gateway || 'https://tool-gateway.linkfox.com';
+    renderProviderList();
     if(linkfoxGatewayInput) linkfoxGatewayInput.value = item.tool_gateway || 'https://tool-gateway.linkfox.com';
     if(linkfoxApiKeyInput){
         linkfoxApiKeyInput.value = '';
@@ -3548,7 +3590,8 @@ async function loadProviders(){
     setStatus(tr('api.loading'));
     try {
         const data = await fetch('/api/providers').then(r => r.json());
-        providers = data.providers || [];
+        providers = (data.providers || []).filter(item => item.id !== LINKFOX_PROVIDER_ID);
+        providers.push(LINKFOX_PROVIDER);
         selectedId = sortedProviders()[0]?.id || '';
         renderEditor();
         setStatus('');
@@ -3569,6 +3612,7 @@ async function persistProviders(options={}){
         return false;
     }
     providers.forEach(item => {
+        if(item.id === LINKFOX_PROVIDER_ID || item.is_virtual) return;
         item.id = normalizeId(item.id);
         item.protocol = item.id === 'runninghub'
             ? 'runninghub'
@@ -3650,14 +3694,15 @@ async function persistProviders(options={}){
         alert(tr('api.duplicateId'));
         return false;
     }
-    const firstEnabledIndex = providers.findIndex(item => item.enabled !== false);
-    providers.forEach((item, index) => { item.primary = index === Math.max(0, firstEnabledIndex); });
+    const persistedProviders = providers.filter(item => item.id !== LINKFOX_PROVIDER_ID && !item.is_virtual);
+    const firstEnabledIndex = persistedProviders.findIndex(item => item.enabled !== false);
+    persistedProviders.forEach((item, index) => { item.primary = index === Math.max(0, firstEnabledIndex); });
     setStatus(tr('api.saving'));
     try {
         const res = await fetch('/api/providers', {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(providers.map(item => ({
+            body:JSON.stringify(persistedProviders.map(item => ({
                 id:item.id,
                 name:item.name,
                 base_url:item.base_url,
@@ -3693,7 +3738,8 @@ async function persistProviders(options={}){
         if(!res.ok) throw new Error((await res.json()).detail || tr('api.saveFailed'));
         const data = await res.json();
         const savedById = new Map((data.providers || []).map(item => [item.id, item]));
-        providers = providers.map(item => {
+        const virtualProviders = providers.filter(item => item.is_virtual);
+        providers = persistedProviders.map(item => {
             const saved = savedById.get(item.id);
             if(!saved) return item;
             return {
@@ -3709,7 +3755,7 @@ async function persistProviders(options={}){
                 has_volcengine_secret_key:saved.has_volcengine_secret_key,
                 volcengine_secret_key_preview:saved.volcengine_secret_key_preview,
             };
-        });
+        }).concat(virtualProviders);
         providers.forEach(item => {
             delete item.api_key;
             delete item.wallet_api_key;

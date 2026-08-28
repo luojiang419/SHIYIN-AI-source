@@ -5287,6 +5287,16 @@ html.studio-theme-dark body .recommend-account-invite {
 .config-status-pill.bad{background:rgba(210,65,75,.16);color:#ff9b9b}
 @media (max-width:780px){.linkfox-config-form{grid-template-columns:1fr}.linkfox-config-form .field.full,.linkfox-config-actions,.linkfox-config-message{grid-column:1}}
 
+/* LinkFox 是独立平台：选中时只显示它自己的配置面板。 */
+.linkfox-provider-card{grid-template-columns:14px 20px minmax(0,1fr) auto !important;}
+.linkfox-provider-card .provider-banner-inner{grid-column:3;}
+.linkfox-provider-card .provider-linkfox-state{grid-column:4;color:var(--muted);font-size:11px;white-space:nowrap;}
+.provider-logo-linkfox{display:inline-flex;align-items:center;gap:7px;color:#8b5cf6;}
+.show-linkfox-provider .content > .block:not(#linkfoxConfigBlock),
+.show-linkfox-provider .content > .provider-onboarding-card,
+.show-linkfox-provider .content-head .content-actions{display:none !important;}
+.show-linkfox-provider .content-head{margin-bottom:14px;}
+
 .provider-card-banner.provider-card-sortable {
     display:grid !important;
     grid-template-columns:14px 20px minmax(0,1fr) !important;

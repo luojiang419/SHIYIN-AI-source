@@ -5487,7 +5487,6 @@ function closeInactiveCanvasSubmenus(event){
         clearTimeout(canvasSubmenuCloseTimer);
         canvasSubmenuCloseTimer = 0;
     }
-    if(inFilm) closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
 }
 document.addEventListener('pointerover', closeInactiveCanvasSubmenus, true);
 if(filmMenuTrigger){

@@ -45,6 +45,8 @@ class CanvasMenuPerformanceTests(unittest.TestCase):
 
         self.assertIn("if(!inFilm)", routing)
         self.assertIn("scheduleCanvasSubmenuClose();", routing)
+        self.assertIn("if(canvasSubmenuCloseTimer)", routing)
+        self.assertNotIn("closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger)", routing)
         self.assertIn("setTimeout(() =>", closing)
         self.assertIn("filmMenuHost?.classList.remove('submenu-open','submenu-flip')", closing)
         self.assertNotIn("ecommerceMenuHost", closing)

@@ -14,7 +14,8 @@ def test_bottom_toolbar_is_data_driven_and_has_settings_entry():
     assert "const QUICK_TOOLBAR_ITEMS_KEY = 'canvas_quick_toolbar_items_v1';" in JS
     assert "function renderQuickToolbarItems()" in JS
     assert "function openCanvasSettings(mode='toolbar')" in JS
-    assert "for(let start = 0; start < items.length; start += 9)" in JS
+    assert "items.forEach(item =>" in JS
+    assert "start += 9" not in JS
     assert "if(canvasSettingsModal?.classList.contains('open')) return '__blocked__';" in JS
 
 

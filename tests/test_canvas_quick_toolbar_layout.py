@@ -14,19 +14,27 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         cls.styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         cls.i18n = (ROOT / "static" / "js" / "i18n" / "canvas.js").read_text(encoding="utf-8")
 
-    def test_toolbar_entries_are_dynamic_and_split_into_nine_item_rows(self):
+    def test_toolbar_entries_are_dynamic_and_rendered_in_one_row(self):
         self.assertIn('id="toolbarNodeItems" class="toolbar-items"', self.html)
         self.assertIn("const CLASSIC_QUICK_TOOLBAR_DEFS = [", self.javascript)
         for item_id in ("image", "video", "blenderDirector", "group"):
             self.assertIn(f"id:'{item_id}'", self.javascript)
-        self.assertIn("for(let start = 0; start < items.length; start += 9)", self.javascript)
-        self.assertIn("items.slice(start, start + 9)", self.javascript)
+        self.assertIn("const row = document.createElement('div');", self.javascript)
+        self.assertIn("items.forEach(item =>", self.javascript)
+        self.assertNotIn("start += 9", self.javascript)
 
-    def test_expanded_toolbar_uses_two_rows_without_horizontal_scrolling(self):
-        self.assertIn(".toolbar-items { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;", self.styles)
-        self.assertIn("align-items:flex-start;", self.styles)
-        self.assertIn("overflow:visible;", self.styles)
+    def test_toolbar_uses_one_row_and_allows_horizontal_scrolling_when_needed(self):
+        self.assertIn(".toolbar-items { flex:0 1 auto; min-width:0; display:flex; flex-direction:row;", self.styles)
+        self.assertIn("overflow-x:auto; overflow-y:hidden;", self.styles)
+        self.assertIn(".toolbar-row { min-width:max-content;", self.styles)
+        self.assertIn("flex-wrap:nowrap;", self.styles)
         self.assertIn(".toolbar-row {", self.styles)
+
+    def test_dock_shrinks_to_content_and_starts_with_mode_controls(self):
+        self.assertIn("width:max-content; max-width:calc(100vw - 32px);", self.styles)
+        self.assertIn("justify-content:flex-start;", self.styles)
+        self.assertLess(self.html.index('id="canvasToolSwitch"'), self.html.index('id="toolbarNodePanel"'))
+        self.assertLess(self.html.index('id="toolbarNodePanel"'), self.html.index('id="canvasToolbarSettingsBtn"'))
 
     def test_canvas_modes_stay_as_a_fixed_control_next_to_the_dynamic_node_panel(self):
         self.assertIn('id="canvasToolSwitch" class="canvas-tool-switch"', self.html)
@@ -83,10 +91,11 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         self.assertLess(body.index('id="canvasLogToggle"'), body.index('class="tool-btn toolbar-toggle"'))
         self.assertLess(body.index('class="tool-btn toolbar-toggle"'), body.index('id="canvasToolbarSettingsBtn"'))
 
-    def test_narrow_toolbar_compacts_nodes_and_wraps_before_overlap(self):
-        self.assertIn('.toolbar-items .toolbar-row > .tool-btn { width:32px; min-width:32px; }', self.styles)
+    def test_narrow_toolbar_keeps_one_row_without_wrapping(self):
+        self.assertIn('.toolbar-items .toolbar-row > .tool-btn { width:auto; min-width:32px; }', self.styles)
         self.assertIn('@media (max-width:480px)', self.styles)
-        self.assertIn('.toolbar-node-panel:not(.collapsed) { flex:1 1 100%; width:100%; }', self.styles)
+        self.assertIn('.toolbar { flex-wrap:nowrap; }', self.styles)
+        self.assertIn('.toolbar-node-panel:not(.collapsed) { flex:0 1 auto; width:auto; }', self.styles)
 
 
 if __name__ == "__main__":

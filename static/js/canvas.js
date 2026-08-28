@@ -992,20 +992,18 @@ function renderQuickToolbarItems(){
     const byId = new Map(CLASSIC_QUICK_TOOLBAR_DEFS.map(item => [item.id, item]));
     const items = quickToolbarItemIds().map(id => byId.get(id)).filter(Boolean);
     toolbarNodeItems.innerHTML = '';
-    for(let start = 0; start < items.length; start += 9){
-        const row = document.createElement('div');
-        row.className = 'toolbar-row';
-        items.slice(start, start + 9).forEach(item => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = `tool-btn${item.className ? ` ${item.className}` : ''}`;
-            button.dataset.toolbarNode = item.id;
-            button.title = item.label;
-            button.innerHTML = `<i data-lucide="${escapeAttr(item.icon)}" class="w-4 h-4"></i><span>${escapeHtml(item.label)}</span>`;
-            row.appendChild(button);
-        });
-        toolbarNodeItems.appendChild(row);
-    }
+    const row = document.createElement('div');
+    row.className = 'toolbar-row';
+    items.forEach(item => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `tool-btn${item.className ? ` ${item.className}` : ''}`;
+        button.dataset.toolbarNode = item.id;
+        button.title = item.label;
+        button.innerHTML = `<i data-lucide="${escapeAttr(item.icon)}" class="w-4 h-4"></i><span>${escapeHtml(item.label)}</span>`;
+        row.appendChild(button);
+    });
+    toolbarNodeItems.appendChild(row);
     refreshIcons(toolbarNodeItems);
 }
 let canvasSettingsMode = 'toolbar';
@@ -1020,7 +1018,7 @@ function renderCanvasSettings(){
     const selected = new Set(readCanvasPreferenceList(config.key, config.fallback, new Set(config.defs.map(item => item.id)), config.max));
     const hint = canvasSettingsMode === 'media'
         ? '顶部菜单最多保留 7 项，末尾的“更多”始终保留。不可用的操作会自动置灰。'
-        : '只显示你最常用的节点，最多 18 项，按当前顺序自动分成两行。';
+        : '只显示你最常用的节点，最多 18 项，按当前顺序排列在同一行。空间不足时可横向滚动。';
     canvasSettingsBody.innerHTML = `<div class="canvas-settings-note">${escapeHtml(hint)}</div><div class="canvas-settings-options">${config.defs.map(item => `
         <label class="canvas-settings-option"><input type="checkbox" data-canvas-setting-id="${escapeAttr(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></label>`).join('')}</div>`;
     canvasSettingsBody.querySelectorAll('[data-canvas-setting-id]').forEach(input => {

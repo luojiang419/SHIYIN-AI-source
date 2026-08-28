@@ -954,8 +954,27 @@ body.theme-dark .minimap-node.selected { background:var(--strong-text); box-shad
 body.theme-dark .minimap-viewport { border-color:var(--strong-text); background:color-mix(in srgb,var(--strong-text) 10%,transparent); box-shadow:0 0 0 1px var(--strong); }
 body.theme-dark .minimap-arrange-btn { background:var(--card-solid); color:var(--muted); border-color:var(--line); }
 body.theme-dark .minimap-arrange-btn:hover { background:var(--soft-2); color:var(--text); }
-.selection-hub { position:absolute; z-index:28; display:none; width:max-content; max-width:calc(100vw - 32px); align-items:center; justify-content:center; flex-wrap:wrap; gap:4px; padding:6px; border-radius:16px; background:var(--card-solid); border:1px solid #eceae6; box-shadow:0 14px 38px rgba(0,0,0,.16); pointer-events:auto; }
+.selection-hub { position:absolute; z-index:28; display:none; width:min(650px,calc(100vw - 32px)); max-width:calc(100vw - 32px); align-items:center; justify-content:center; flex-wrap:wrap; gap:4px; padding:8px; border-radius:16px; background:var(--card-solid); border:1px solid #eceae6; box-shadow:0 14px 38px rgba(0,0,0,.16); pointer-events:auto; }
 .selection-hub.open { display:flex; }
+.image-quick-compose { width:100%; display:flex; flex-direction:column; gap:8px; padding:4px; }
+.image-quick-compose-head { display:flex; align-items:baseline; gap:8px; padding:0 4px; color:var(--text); font-size:12px; font-weight:850; }
+.image-quick-compose-head small { color:var(--faint); font-size:10px; font-weight:650; }
+.image-quick-prompt { width:100%; min-height:64px; max-height:150px; resize:vertical; padding:10px 12px; border:1px solid var(--line); border-radius:12px; outline:none; background:var(--soft); color:var(--text); font:inherit; font-size:12px; line-height:1.5; box-sizing:border-box; }
+.image-quick-prompt:focus { border-color:var(--line-2); background:var(--card-solid); box-shadow:0 0 0 3px color-mix(in srgb,var(--strong) 10%,transparent); }
+.image-quick-settings { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.image-quick-select { min-width:92px; height:32px; padding:0 8px; border:1px solid var(--line); border-radius:9px; background:var(--soft); color:var(--text); font-size:10px; font-weight:750; outline:none; }
+.image-quick-model { flex:1 1 160px; min-width:140px; }
+.image-quick-camera,.image-quick-generate { height:32px; display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:0 10px; border:1px solid var(--line); border-radius:9px; background:var(--soft); color:var(--muted); cursor:pointer; font-size:10px; font-weight:850; }
+.image-quick-camera:hover,.image-quick-camera.active { background:var(--accent-soft); color:var(--accent); border-color:var(--accent-line); }
+.image-quick-generate { margin-left:auto; background:var(--strong); color:var(--strong-text); border-color:var(--strong); }
+.image-quick-generate:hover { filter:brightness(1.05); transform:translateY(-1px); }
+.image-quick-generate.running { opacity:.7; cursor:wait; }
+.image-quick-camera svg,.image-quick-generate svg { width:14px; height:14px; }
+.image-quick-camera-panel { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; padding:8px; border:1px solid var(--line); border-radius:11px; background:var(--soft); }
+.image-quick-camera-panel[hidden] { display:none; }
+.image-quick-camera-panel label { display:flex; flex-direction:column; gap:4px; color:var(--faint); font-size:9px; font-weight:800; }
+.image-quick-camera-panel select { width:100%; height:28px; padding:0 5px; border:1px solid var(--line); border-radius:7px; background:var(--card-solid); color:var(--text); font-size:9px; outline:none; }
+.image-quick-actions { width:100%; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:4px; }
 .media-quick-btn { height:34px; min-width:34px; display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:0 9px; border:0; border-radius:10px; background:transparent; color:var(--muted); font-size:10px; font-weight:800; white-space:nowrap; transition:background .16s var(--ease), color .16s var(--ease); }
 .media-quick-btn:hover { background:var(--soft-2); color:var(--text); }
 .media-quick-btn svg { width:14px; height:14px; flex:0 0 auto; }

@@ -360,7 +360,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "function addRelightNode(point)",
             "function addAngleNode(point)",
             "function bindClassicSpecialNode(el, node)",
-            "['panorama','dwpose','poseReference','relight','angle'].includes(node.type)",
+            "['panorama','dwpose','relight','angle'].includes(node.type)",
             "function generateClassicSpecialEdit(node, prompt, source, kind)",
             "delete copy.panoramaGenerating",
             "delete copy.specialRunning",

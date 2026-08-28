@@ -96,7 +96,6 @@
     function specialTitle(node){
         const type = node?.specialType || node?.type;
         if(type === 'dwpose') return '动作提取';
-        if(type === 'pose-reference' || type === 'poseReference') return '导演台';
         if(type === 'pose-replicate' || type === 'poseReplicate') return '一键复刻';
         if(type === 'relight') return '灯光重塑';
         if(type === 'angle') return '角度调整';
@@ -207,13 +206,6 @@
             createDirectorOutputNode: options.createDirectorOutputNode,
         });
     }
-    function poseReferenceBodyHtml(node){
-        const editor = window.PoseReferenceEditor;
-        if(!editor) return '<div class="special-empty"><strong>导演台加载失败</strong><span>请刷新页面后重试</span></div>';
-        node.poseEditorState = editor.normalizeState(node.poseEditorState || {});
-        return editor.nodeBodyHtml(node, outputItem(node));
-    }
-
     function poseReplicateImageCard(item, role, emptyIcon, emptyText){
         const url = item?.url || '';
         return `<div class="pose-replicate-column">
@@ -893,37 +885,6 @@
         if(node.poseStatus !== 'failed' || node.poseFailedSignature !== currentSignature) runPose(node, options, false).catch(() => {});
     }
 
-    function bindPoseReference(root, node, options={}){
-        if(!root || !node) return;
-        const editor = window.PoseReferenceEditor;
-        if(!editor) return;
-        node.poseEditorState = editor.normalizeState(node.poseEditorState || {});
-        const button = root.querySelector('[data-special-action="edit-pose-reference"]');
-        button?.addEventListener('pointerdown', event => event.stopPropagation());
-        button?.addEventListener('click', event => {
-            event.preventDefault();
-            event.stopPropagation();
-            editor.open({
-                state:node.poseEditorState,
-                theme:window.StudioTheme?.get?.(),
-                onSave:state => {
-                    node.poseEditorState = state;
-                    notify(options, node, false);
-                },
-                onExport:async (blob, state, meta) => {
-                    node.poseEditorState = state;
-                    const file = await uploadBlob(blob, meta?.name || 'pose-reference.png');
-                    file.natural_w = meta?.width || file.natural_w || 0;
-                    file.natural_h = meta?.height || file.natural_h || 0;
-                    setOutputItem(node, file, options);
-                    notify(options, node, true);
-                    options.toast?.('导演台参考图已导出，可连接到下游节点');
-                    return file;
-                }
-            });
-        });
-    }
-
     function poseReplicateInput(node, options, role){
         return options.getInputImage?.(node, role) || null;
     }
@@ -1334,8 +1295,8 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_RELIGHT_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, poseReferenceBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
-        bindPanorama, bindPose, bindPoseReference, bindDirector3d, bindPoseReplicate, bindRelight, bindAngle,
+        panoramaBodyHtml, poseBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
+        bindPanorama, bindPose, bindDirector3d, bindPoseReplicate, bindRelight, bindAngle,
         buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
     };

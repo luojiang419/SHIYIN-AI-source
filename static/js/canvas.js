@@ -3848,13 +3848,6 @@ function addDWPoseNode(point){
     const p = point || defaultPoint(100, 20);
     return addNode({id:uid('pose'), type:'dwpose', x:p.x, y:p.y, w:380, h:390, poseStatus:'idle'});
 }
-function addPoseReferenceNode(point){
-    const p = point || defaultPoint(110, 30);
-    return addNode({
-        id:uid('pose-ref'), type:'poseReference', x:p.x, y:p.y, w:380, h:390,
-        poseEditorState:window.PoseReferenceEditor?.normalizeState({}) || {}, images:[]
-    });
-}
 function addDirector3dNode(point){
     const p = point || defaultPoint(140, 40);
     return addNode({id:uid('director3d'), type:'director3d', x:p.x, y:p.y, w:460, h:420, directorProject:null, directorCaptures:[]});
@@ -4723,7 +4716,7 @@ function linkCreateOptions(state){
         if(node.type === 'poseReplicate'){
             return [{type:'output', label:'Output', icon:'circle-dot'}];
         }
-        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','poseReference','director3d','poseReplicate','relight','angle'].includes(node.type)){
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','director3d','poseReplicate','relight','angle'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
@@ -4745,14 +4738,14 @@ function linkCreateOptions(state){
             {type:'group', label:tr('canvas.group'), icon:'group'}
         ];
     }
-    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','poseReference','relight','angle'].includes(node.type)){
+    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','relight','angle'].includes(node.type)){
         return [
             {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
             {type:'group', label:tr('canvas.group'), icon:'group'},
             {type:'llm', label:'AI助手', icon:'message-square-text'},
             {type:'panorama', label:'720°取景器', icon:'scan-line'},
-            {type:'poseReference', label:'导演台', icon:'pencil-ruler'}, {type:'director3d', label:'3D导演台', icon:'clapperboard'},
+            {type:'director3d', label:'3D导演台', icon:'clapperboard'},
             {type:'dwpose', label:'动作提取', icon:'person-standing'},
             {type:'relight', label:'灯光重塑', icon:'sun-medium'},
             {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
@@ -5230,7 +5223,6 @@ function createNodeByType(type, point){
     if(type === 'h3-video') return addH3VideoNode(point);
     if(type === 'panorama') return addPanoramaNode(point);
     if(type === 'multiView' || type === 'multi-view') return addMultiViewNode(point);
-    if(type === 'poseReference') return addPoseReferenceNode(point);
     if(type === 'director3d') return addDirector3dNode(point);
     if(type === 'dwpose') return addDWPoseNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
@@ -5260,7 +5252,6 @@ function menuAdd(type){
         else if(type === 'h3-video') created = addH3VideoNode(point);
         else if(type === 'panorama') created = addPanoramaNode(point);
         else if(type === 'multiView') created = addMultiViewNode(point);
-        else if(type === 'poseReference') created = addPoseReferenceNode(point);
         else if(type === 'director3d') created = addDirector3dNode(point);
         else if(type === 'dwpose') created = addDWPoseNode(point);
         else if(type === 'poseReplicate') created = addPoseReplicateNode(point);
@@ -5732,10 +5723,10 @@ function layoutUploadedMediaNodes(created, base){
     const startY = Number.isFinite(Number(base?.y)) ? Number(base.y) : Math.min(...rects.map(({rect}) => rect.y));
     const colX = [];
     let cursorX = startX;
-    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + 72; });
+    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + CANVAS_NODE_LAYOUT_GAP; });
     const rowY = [];
     let cursorY = startY;
-    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + 56; });
+    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + CANVAS_NODE_LAYOUT_ROW_GAP; });
     rects.forEach(({node}, index) => {
         node.x = Math.round(colX[index % columns]);
         node.y = Math.round(rowY[Math.floor(index / columns)]);
@@ -5754,10 +5745,12 @@ function createGroupForUploadedNodes(created, point){
         x:Number.isFinite(box.x) ? box.x - 24 : fallback.x - 24,
         y:Number.isFinite(box.y) ? box.y - 58 : fallback.y - 58,
         w:Number.isFinite(box.w) ? box.w + 48 : 600,
-        h:Number.isFinite(box.h) ? box.h + 90 : 420,
+        h:Number.isFinite(box.h) ? box.h + CANVAS_GROUP_ARRANGE_HEADER + 32 : 420,
         items:targets.map(n => n.id)
     };
     nodes.push(group);
+    // 以分组自己的真实节点尺寸再次排版，避免导入后节点尺寸变化导致重叠。
+    arrangeCanvasGroupContents(group.id, {skipUndo:true});
     selected.clear();
     selected.add(group.id);
     return group;
@@ -9214,7 +9207,6 @@ function bindClassicSpecialNode(el, node){
     };
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
-    if(node.type === 'poseReference') api.bindPoseReference?.(el, node, options);
     if(node.type === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createClassicDirectorOutputNode});
     if(node.type === 'poseReplicate') api.bindPoseReplicate(el, node, options);
     if(node.type === 'relight') api.bindRelight(el, node, options);
@@ -9625,7 +9617,7 @@ function renderNode(node){
     const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
     const canvasLodSafe = ![
-        'panorama','multiView','dwpose','poseReference','director3d','poseReplicate','relight','angle','group','promptGroup'
+        'panorama','multiView','dwpose','director3d','poseReplicate','relight','angle','group','promptGroup'
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
         && !window.CanvasFilmNodes?.isType?.(node.type);
@@ -9655,7 +9647,7 @@ function renderNode(node){
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
-    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '导演台' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
@@ -9841,7 +9833,6 @@ function renderNode(node){
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
     if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
-    if(node.type === 'poseReference') body.innerHTML = window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="muted-note">姿势参考节点加载失败</div>';
     if(node.type === 'director3d') body.innerHTML = window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="muted-note">3D导演台加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="muted-note">一键复刻节点加载失败</div>';
     if(['relight','angle'].includes(node.type)){
@@ -9889,7 +9880,7 @@ function renderNode(node){
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
     const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','poseReference','director3d','poseReplicate','relight','angle'].includes(node.type);
+    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','relight','angle'].includes(node.type);
     if(filmPorts.length || rolePorts.length > 1){
         el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length){
@@ -9981,7 +9972,7 @@ function renderNode(node){
     multiViewModel?.addEventListener('change', event => { event.stopPropagation(); node.model = event.target.value; scheduleSave(); });
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
-    if(['panorama','dwpose','poseReference','director3d','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    if(['panorama','dwpose','director3d','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
     if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
@@ -10174,7 +10165,6 @@ function defaultNodeSize(type){
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
-    if(type === 'poseReference') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};
     if(type === 'relight') return {w:460, h:590};
     if(type === 'angle') return {w:460, h:660};
@@ -14044,7 +14034,7 @@ function mediaRefsFromNode(node, context={}){
         }).filter(Boolean);
     }
     if(node.type === 'director3d') return (node.directorCaptures || []).filter(item => item?.url).map((item, i) => ({...item, kind:'image', nodeId:node.id, outputIndex:i}));
-    if(['panorama','dwpose','poseReference','relight','angle'].includes(node.type)){
+    if(['panorama','dwpose','relight','angle'].includes(node.type)){
         const item = window.CanvasSpecialNodes?.outputItem(node);
         return item?.url ? [{url:item.url, name:item.name || `${node.type}.png`, kind:'image'}] : [];
     }
@@ -14077,9 +14067,9 @@ function generatorSources(gen){
                 }));
             }
         }
-        if(['panorama','dwpose','poseReference','relight','angle'].includes(n.type)){
+        if(['panorama','dwpose','relight','angle'].includes(n.type)){
             const refs = mediaRefsFromNode(n);
-            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'poseReference' ? '导演台' : n.type === 'relight' ? '灯光重塑结果' : '新视角结果';
+            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'relight' ? '灯光重塑结果' : '新视角结果';
             if(refs.length) return {id:n.id, type:n.type, label, preview:refs[0].url, refs, prompt:''};
         }
         if(n.type === 'image' && n.url) {
@@ -18818,9 +18808,9 @@ function renderSelectionHub(options={}){
             }
         }
     }
-    if(!target && node.type === 'image' && node.url && ['image','video'].includes(mediaKindForNode(node)) && !isMissingAssetUrl(node.url)){
+    if(!target && node.type === 'image' && (!node.url || (['image','video'].includes(mediaKindForNode(node)) && !isMissingAssetUrl(node.url)))){
         anchor = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`);
-        if(anchor) target = {kind:'node', mediaKind:mediaKindForNode(node), nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)};
+        if(anchor) target = {kind:'node', mediaKind:node.url ? mediaKindForNode(node) : 'image', nodeId:node.id, url:node.url || '', name:node.name || outputImageName(node.url)};
     }
     if(!target && node.type === 'group'){
         anchor = nodesEl.querySelector(`.group-node[data-id="${CSS.escape(node.id)}"]`);
@@ -18843,6 +18833,8 @@ function renderSelectionHub(options={}){
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
     ] : [
+        ...(target.url ? [] : [{id:'upload', label:langIsEn() ? 'Upload image' : '上传图片', icon:'upload'}, {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'}]),
+        ...(target.url ? [
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
         {id:'edit', label:langIsEn() ? 'Edit' : '编辑', icon:'pencil'},
         {id:'crop', label:langIsEn() ? 'Crop' : '裁切', icon:'crop'},
@@ -18856,8 +18848,11 @@ function renderSelectionHub(options={}){
         {id:'relight', label:langIsEn() ? 'Relight' : '灯光', icon:'sun-medium'},
         {id:'dwpose', label:langIsEn() ? 'Extract Pose' : '动作提取', icon:'person-standing'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
+        ] : [])
     ];
-    selectionHub.innerHTML = actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('');
+    const imageNode = target.kind === 'node' && target.mediaKind === 'image' ? sourceNodeForSelectionTarget(target) : null;
+    const promptPanel = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';
+    selectionHub.innerHTML = `${promptPanel}<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
     selectionHub.classList.add('open');
     selectionHubAnchor = anchor;
     selectionHub.dataset.targetKind = target.kind;
@@ -18869,9 +18864,153 @@ function renderSelectionHub(options={}){
             runMediaQuickAction(button.dataset.mediaAction, target);
         };
     });
+    if(imageNode) bindImageNodeQuickPrompt(imageNode);
     if(options.deferPosition) scheduleSelectionHubPosition();
     else positionSelectionHub(anchor);
     refreshIcons(selectionHub);
+}
+
+const CANVAS_IMAGE_CAMERA_DEFAULTS = {
+    enabled:false,
+    camera:'数字电影机',
+    lens:'标准变焦',
+    focalLength:50,
+    aperture:'f/2.8'
+};
+const CANVAS_IMAGE_CAMERA_OPTIONS = {
+    camera:['数字电影机','全画幅单反','胶片摄影机','手机摄影'],
+    lens:['标准变焦','广角定焦','长焦定焦','变形宽银幕'],
+    focalLength:[24,35,50,85,135],
+    aperture:['f/1.4','f/2.0','f/2.8','f/4.0','f/5.6','f/8.0']
+};
+function sourceNodeForSelectionTarget(target){
+    return nodes.find(item => item.id === target?.nodeId && item.type === 'image') || null;
+}
+function imageNodeCameraValue(node){
+    return {...CANVAS_IMAGE_CAMERA_DEFAULTS, ...(node?.cameraControl || {})};
+}
+function imageNodeCameraPrompt(node){
+    const camera = imageNodeCameraValue(node);
+    if(!camera.enabled) return '';
+    return `Camera direction: ${camera.camera}, ${camera.lens}, ${camera.focalLength}mm lens, ${camera.aperture} aperture.`;
+}
+function imageNodeQuickPromptHtml(node){
+    const camera = imageNodeCameraValue(node);
+    const providerId = resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
+    const model = node.model || allImageModels(providerId)[0] || '';
+    const ratio = node.ratio || 'square';
+    const resolution = node.resolution || defaultApiImageResolution(model);
+    const ratioOptions = [['square','1:1'],['wide','16:9'],['landscape43','4:3'],['portrait43','3:4'],['story','9:16'],['source','跟随原图']];
+    const resolutionOptions = ['auto','1k','2k','4k'];
+    return `<div class="image-quick-compose" data-image-quick-compose>
+        <div class="image-quick-compose-head"><span>${node.url ? '编辑图片' : '生成图片'}</span><small>提示词、模型和摄影机设置</small></div>
+        <textarea class="image-quick-prompt" data-image-quick-prompt rows="3" placeholder="描述要生成或修改的内容…">${escapeHtml(node.prompt || '')}</textarea>
+        <div class="image-quick-settings">
+            <select class="image-quick-select" data-image-quick-provider aria-label="图片生成平台">${providerOptions(providerId)}</select>
+            <select class="image-quick-select image-quick-model" data-image-quick-model aria-label="图片生成模型">${imageModelOptions(model, providerId)}</select>
+            <select class="image-quick-select" data-image-quick-ratio aria-label="输出画幅">${ratioOptions.map(([value,label]) => `<option value="${value}" ${value === ratio ? 'selected' : ''}>${label}</option>`).join('')}</select>
+            <select class="image-quick-select" data-image-quick-resolution aria-label="输出分辨率">${resolutionOptions.map(value => `<option value="${value}" ${value === resolution ? 'selected' : ''}>${value === 'auto' ? '自动' : value.toUpperCase()}</option>`).join('')}</select>
+            <button type="button" class="image-quick-camera ${camera.enabled ? 'active' : ''}" data-image-quick-camera title="摄影机设置"><i data-lucide="camera"></i><span>摄影机</span></button>
+            <button type="button" class="image-quick-generate" data-image-quick-generate><i data-lucide="wand-sparkles"></i><span>生成</span></button>
+        </div>
+        <div class="image-quick-camera-panel" data-image-quick-camera-panel ${camera.enabled ? '' : 'hidden'}>
+            <label>机身<select data-image-quick-camera-field="camera">${CANVAS_IMAGE_CAMERA_OPTIONS.camera.map(value => `<option value="${escapeAttr(value)}" ${value === camera.camera ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select></label>
+            <label>镜头<select data-image-quick-camera-field="lens">${CANVAS_IMAGE_CAMERA_OPTIONS.lens.map(value => `<option value="${escapeAttr(value)}" ${value === camera.lens ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select></label>
+            <label>焦距<select data-image-quick-camera-field="focalLength">${CANVAS_IMAGE_CAMERA_OPTIONS.focalLength.map(value => `<option value="${value}" ${Number(value) === Number(camera.focalLength) ? 'selected' : ''}>${value}mm</option>`).join('')}</select></label>
+            <label>光圈<select data-image-quick-camera-field="aperture">${CANVAS_IMAGE_CAMERA_OPTIONS.aperture.map(value => `<option value="${value}" ${value === camera.aperture ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+        </div>
+    </div>`;
+}
+function bindImageNodeQuickPrompt(node){
+    const root = selectionHub.querySelector('[data-image-quick-compose]');
+    if(!root || !node) return;
+    const prompt = root.querySelector('[data-image-quick-prompt]');
+    const provider = root.querySelector('[data-image-quick-provider]');
+    const model = root.querySelector('[data-image-quick-model]');
+    const ratio = root.querySelector('[data-image-quick-ratio]');
+    const resolution = root.querySelector('[data-image-quick-resolution]');
+    const cameraButton = root.querySelector('[data-image-quick-camera]');
+    const cameraPanel = root.querySelector('[data-image-quick-camera-panel]');
+    const update = () => scheduleSave();
+    prompt?.addEventListener('input', event => { event.stopPropagation(); node.prompt = prompt.value; update(); });
+    provider?.addEventListener('change', event => {
+        event.stopPropagation();
+        node.apiProvider = resolveImageProviderId(provider.value);
+        const nextModel = allImageModels(node.apiProvider)[0] || '';
+        node.model = nextModel;
+        if(model) model.innerHTML = imageModelOptions(node.model, node.apiProvider);
+        update();
+    });
+    model?.addEventListener('change', event => { event.stopPropagation(); node.model = model.value; update(); });
+    ratio?.addEventListener('change', event => { event.stopPropagation(); node.ratio = ratio.value; update(); });
+    resolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = resolution.value; node._apiResolutionUserSet = true; update(); });
+    cameraButton?.addEventListener('click', event => {
+        event.preventDefault(); event.stopPropagation();
+        const next = imageNodeCameraValue(node);
+        next.enabled = !next.enabled;
+        node.cameraControl = next;
+        cameraButton.classList.toggle('active', next.enabled);
+        cameraPanel?.toggleAttribute('hidden', !next.enabled);
+        update();
+    });
+    root.querySelectorAll('[data-image-quick-camera-field]').forEach(control => control.addEventListener('change', event => {
+        event.stopPropagation();
+        const next = imageNodeCameraValue(node);
+        const field = control.dataset.imageQuickCameraField;
+        next[field] = field === 'focalLength' ? Number(control.value) : control.value;
+        node.cameraControl = next;
+        update();
+    }));
+    root.querySelector('[data-image-quick-generate]')?.addEventListener('click', event => {
+        event.preventDefault(); event.stopPropagation();
+        runImageNodeQuickGenerate(node.id);
+    });
+    prompt?.addEventListener('keydown', event => {
+        if((event.ctrlKey || event.metaKey) && event.key === 'Enter'){
+            event.preventDefault(); event.stopPropagation(); runImageNodeQuickGenerate(node.id);
+        }
+    });
+}
+async function runImageNodeQuickGenerate(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'image');
+    if(!node || node.running) return;
+    const prompt = [String(node.prompt || '').trim(), imageNodeCameraPrompt(node)].filter(Boolean).join('\n');
+    const refs = node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)
+        ? [{url:node.url, name:node.name || 'input.png', kind:'image'}] : [];
+    if(!prompt && !refs.length){ showErrorModal('请先输入提示词或上传图片', '图片生成'); return; }
+    const button = selectionHub.querySelector('[data-image-quick-generate]');
+    node.running = true;
+    if(button){ button.disabled = true; button.classList.add('running'); button.querySelector('span').textContent = '生成中'; }
+    try {
+        const payload = {
+            prompt:prompt || 'Edit the reference image.',
+            provider_id:resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId),
+            model:resolveImageModel(node.model),
+            size:apiImageSize(node.ratio || (refs.length ? 'source' : 'square'), node.resolution || defaultApiImageResolution(node.model), node.customRatio || '', node.customSize || ''),
+            reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+        };
+        const quality = normalizedImageQuality(node.quality);
+        if(quality) payload.quality = quality;
+        const response = await fetch('/api/online-image', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '图片生成失败'));
+        const data = await response.json();
+        const images = (data.images || []).map(outputUrlValue).filter(Boolean);
+        if(!images.length) throw new Error('图片生成没有返回结果');
+        node.url = images[0];
+        node.name = outputImageName(images[0]) || 'generated-image';
+        node.mediaKind = 'image';
+        node.generatedOutputs = images;
+        node.runStatus = 'done'; node.runError = '';
+        setStatus(`图片生成完成${images.length > 1 ? `，共 ${images.length} 张` : ''}`);
+        render();
+        scheduleSave();
+    } catch(error){
+        node.runStatus = 'failed'; node.runError = error.message || String(error);
+        showErrorModal(node.runError, '图片生成失败');
+        renderSelectionHub({deferPosition:true});
+    } finally {
+        node.running = false;
+    }
 }
 function selectOutputMedia(nodeId, url, wrap=null){
     const node = nodes.find(item => item.id === nodeId);
@@ -18960,6 +19099,10 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'upload' && sourceNode?.type === 'image'){
+        pickImageForNode(sourceNode.id);
+        return;
+    }
     if(action === 'arrange-group' && target?.kind === 'group'){
         arrangeSelectedCanvasGroup(target.nodeId);
         return;
@@ -18990,10 +19133,12 @@ function runMediaQuickAction(action, target){
         return;
     }
     if(action === 'preview'){
+        if(!target?.url) return;
         openOutputLightbox(target.url, sourceNode);
         return;
     }
     if(action === 'download'){
+        if(!target?.url) return;
         downloadUrl(target.url, outputDownloadName(target.url)).catch(error => alert(error.message || '下载失败'));
         return;
     }
@@ -19855,7 +20000,7 @@ function canConnect(fromId, toId, inputRole=''){
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
             return ['prompt','promptGroup','llm'].includes(from.type) && !wouldCreateGeneratorCycle(fromId, toId);
         }
-        return ['image','group','output','panorama','dwpose','poseReference','director3d','poseReplicate','relight','angle','generator','rh','multiView'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','director3d','poseReplicate','relight','angle','generator','rh','multiView'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId, toId);
     }
     if(from.type === 'multiView'){
@@ -19866,7 +20011,7 @@ function canConnect(fromId, toId, inputRole=''){
     if(to.type === 'film-storyboard' || to.type === 'film-video' || to.type === 'film-line-art'){
         const valid = (window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole);
         if(!valid) return false;
-        return ['image','group','output','panorama','dwpose','poseReference','director3d','poseReplicate','relight','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','director3d','poseReplicate','relight','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(from.type === 'film-storyboard' || from.type === 'film-video' || from.type === 'film-line-art'){
@@ -19876,17 +20021,17 @@ function canConnect(fromId, toId, inputRole=''){
     if(['ecom-model','ecom-product','ecom-scene'].includes(to.type)){
         const valid = (window.CanvasEcommerceNodes?.inputPorts?.(to.type) || []).some(port => port.role === inputRole);
         if(!valid) return false;
-        return ['image','group','output','generator','batchGenerator','rh','panorama','dwpose','poseReference','director3d','poseReplicate','relight','angle'].includes(from.type)
+        return ['image','group','output','generator','batchGenerator','rh','panorama','dwpose','director3d','poseReplicate','relight','angle'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-compose'){
         if(!['ecom-model','ecom-product','ecom-scene','ecom-pose'].includes(inputRole)) return false;
-        const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','poseReference','director3d','poseReplicate','relight','angle','generator','rh'];
+        const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','director3d','poseReplicate','relight','angle','generator','rh'];
         return allowed.includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-video'){
         if(inputRole && inputRole !== 'video-input') return false;
-        return ['ecom-compose','image','group','output','prompt','promptGroup','loop','llm','generator','rh','panorama','dwpose','poseReference','relight','angle'].includes(from.type)
+        return ['ecom-compose','image','group','output','prompt','promptGroup','loop','llm','generator','rh','panorama','dwpose','relight','angle'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'topazVideo'){
@@ -19903,14 +20048,9 @@ function canConnect(fromId, toId, inputRole=''){
     const specialTypes = ['panorama','dwpose','relight','angle'];
     if(to.type === 'poseReplicate'){
         if(!['pose-reference','target-image'].includes(inputRole)) return false;
-        return ['image','group','output','panorama','dwpose','poseReference','relight','angle'].includes(from.type);
+        return ['image','group','output','panorama','dwpose','relight','angle'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';
-    if(from.type === 'poseReference'){
-        if(to.type === 'output') return true;
-        if(to.type === 'loop') return Boolean(to.imageInput);
-        return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
-    }
     if(from.type === 'director3d') { if(to.type === 'output') return true; if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId); return false; }
     if(from.type === 'blenderDirector'){
         if(to.type === 'output') return true;
@@ -19938,7 +20078,7 @@ function canConnect(fromId, toId, inputRole=''){
     }
     if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','poseReference','relight','angle'].includes(from.type);
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','relight','angle'].includes(from.type);
 }
 function sanitizeConnections(){
     const source = connections || [];
@@ -21215,7 +21355,7 @@ function runClassicCanvasShortcutAction(actionId){
     if(actionId.startsWith('create.')){
         const typeMap = {
             'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
-            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'poseReference',
+            'create.h3Video':'h3-video', 'create.panorama':'panorama',
             'create.dwpose':'dwpose', 'create.poseReplicate':'poseReplicate', 'create.relight':'relight',
             'create.multiView':'multiView', 'create.batch':'batchGenerator'
         };

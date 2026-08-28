@@ -43,6 +43,8 @@ def test_normal_canvas_bulk_drop_reuses_arrange_layout_before_group_bounds():
     assert "const rows = Math.ceil(list.length / columns);" in layout_body
     assert "colWidths[col] = Math.max" in layout_body
     assert "rowHeights[row] = Math.max" in layout_body
+    assert "CANVAS_NODE_LAYOUT_GAP" in layout_body
+    assert "CANVAS_NODE_LAYOUT_ROW_GAP" in layout_body
     assert "const gapX = 280;" not in layout_body
     assert "const gapY = 250;" not in layout_body
 
@@ -52,6 +54,10 @@ def test_normal_canvas_bulk_drop_reuses_arrange_layout_before_group_bounds():
     assert upload_body.index("layoutUploadedMediaNodes(created, base);") < upload_body.index(
         "createGroupForUploadedNodes(created, base)"
     )
+    group_start = CANVAS_JS.index("function createGroupForUploadedNodes(created, point)")
+    group_end = CANVAS_JS.index("async function uploadMediaFiles", group_start)
+    group_body = CANVAS_JS[group_start:group_end]
+    assert "arrangeCanvasGroupContents(group.id, {skipUndo:true});" in group_body
 
 
 def test_shared_arrange_layout_accounts_for_real_node_dimensions():

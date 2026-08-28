@@ -17,6 +17,20 @@ def test_canvas_list_has_one_canvas_entry_and_name_only_creation():
     assert "普通画布" not in CANVAS_LIST
 
 
+def test_canvas_list_supports_modal_creation_and_project_grid_arrangement():
+    page = (ROOT / "static/canvas-list.html").read_text(encoding="utf-8")
+    styles = (ROOT / "static/css/canvas-list.css").read_text(encoding="utf-8")
+    assert 'id="arrangeCanvasesBtn"' in page
+    assert "async function arrangeCanvasesInProject()" in CANVAS_LIST
+    assert "await Promise.all(ordered.map(canvas => persistMeta" in CANVAS_LIST
+    assert "className = 'ws-create-modal-backdrop'" in CANVAS_LIST
+    assert "Press Enter after naming it to open the canvas" in CANVAS_LIST
+    assert "openCanvas(nc);" in CANVAS_LIST
+    assert ".ws-create-modal-backdrop" in styles
+    assert "backdrop-filter:blur(10px)" in styles
+    assert "width:min(520px" in styles
+
+
 def test_canvas_editor_never_routes_to_smart_canvas():
     assert "smart-canvas.html" not in CANVAS_JS
     assert "createSmartCanvas" not in CANVAS_JS

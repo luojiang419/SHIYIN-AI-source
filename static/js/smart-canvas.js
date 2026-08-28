@@ -1989,17 +1989,6 @@ function createDWPoseNode(point){
     };
     return commitSmartNodeCreate(node);
 }
-function createPoseReferenceNode(point){
-    pushUndo();
-    const node = {
-        id:uid('pose-ref'), type:'smart-image', specialType:'pose-reference',
-        x:(point?.x || 0) - 190, y:(point?.y || 0) - 195, w:380, h:390,
-        title:'姿势参考', images:[],
-        poseEditorState:window.PoseReferenceEditor?.normalizeState({}) || {},
-        scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
-    };
-    return commitSmartNodeCreate(node);
-}
 function createDirector3dNode(point){
     pushUndo();
     const node = {id:uid('director3d'), type:'smart-image', specialType:'director3d', x:(point?.x||0)-230, y:(point?.y||0)-210, w:460, h:420, title:'3D导演台', images:[], directorProject:null, directorCaptures:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
@@ -2812,7 +2801,6 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'linkfox-video') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 480)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
-    if(node?.specialType === 'pose-reference') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
     if(node?.specialType === 'director3d') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(380, Math.round(Number(node.h) || 420)), thumb:96, single:true};
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
@@ -9143,7 +9131,7 @@ function runSmartCanvasShortcutAction(actionId){
     if(actionId.startsWith('create.')){
         const nodeTypeMap = {
             'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
-            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'pose-reference', 'create.director3d':'director3d',
+            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.director3d':'director3d',
             'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate', 'create.relight':'relight',
             'create.multiView':'multi-view', 'create.batch':'batch'
         };
@@ -9444,7 +9432,6 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,imageProviderOptions:filmSmartImageProviderOptions,imageModelOptions:filmSmartImageModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
-    if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">导演台节点加载失败</div>';
     if(node.specialType === 'director3d') return window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="smart-group-empty">3D导演台加载失败</div>';
     if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
     if(['relight','angle'].includes(node.specialType)){
@@ -9801,7 +9788,7 @@ function smartNodeHtml(node){
     const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
     const slotLoading = generationSlots.some(slot => slot.status === 'loading');
     const slotFailed = generationSlots.some(slot => slot.status === 'error');
-    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '导演台' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
     const scale = nodeScale(node);
     const layout = imageLayout(layoutImages, scale, node);
     const isPrompt = node.type === 'smart-prompt';
@@ -9843,7 +9830,7 @@ function smartNodeHtml(node){
         ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
         <div class="node-hint">${hint}</div>
         ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : node.specialType === 'pose-reference' ? '' : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
         <div class="node-port port-out" data-port="out" title="output"></div>
     </div>`;
 }
@@ -11951,7 +11938,6 @@ function bindSmartSpecialNode(el, node){
     };
     if(node.specialType === 'panorama') api.bindPanorama(el, node, options);
     if(node.specialType === 'dwpose') api.bindPose(el, node, options);
-    if(node.specialType === 'pose-reference') api.bindPoseReference?.(el, node, options);
     if(node.specialType === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createSmartDirectorOutputNode});
     if(node.specialType === 'pose-replicate') api.bindPoseReplicate?.(el, node, options);
     if(node.specialType === 'relight') api.bindRelight(el, node, options);
@@ -12328,10 +12314,6 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             if(nodeForControls?.specialType){
                 if(nodeForControls.specialType === 'pose-replicate'){
                     toast('一键复刻仅接受端口连线，请连接动作参考和目标图');
-                    return;
-                }
-                if(nodeForControls.specialType === 'pose-reference'){
-                    toast('姿势参考请点击“编辑动作”，无需导入图片');
                     return;
                 }
                 const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));
@@ -19618,7 +19600,6 @@ function createNodeFromMenu(type, point=null){
         if(type === 'film-storyboard' || type === 'film-video' || type === 'film-line-art') return createFilmNode(type,p);
         if(type === 'linkfox-video') return createLinkfoxVideoNode(p);
         if(type === 'panorama') return createPanoramaNode(p);
-        if(type === 'pose-reference') return createPoseReferenceNode(p);
         if(type === 'director3d') return createDirector3dNode(p);
         if(type === 'dwpose') return createDWPoseNode(p);
         if(type === 'pose-replicate') return createPoseReplicateNode(p);

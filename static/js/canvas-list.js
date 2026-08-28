@@ -60,6 +60,7 @@ const newProjectCancel = document.getElementById('newProjectCancel');
 const newCanvasBtn = document.getElementById('newCanvasBtn');
 const boardRefreshBtn = document.getElementById('boardRefresh');
 const boardResetViewBtn = document.getElementById('boardResetView');
+const arrangeCanvasesBtn = document.getElementById('arrangeCanvasesBtn');
 const pasteCanvasBtn = document.getElementById('pasteCanvasBtn');
 const emptyCreateCanvasBtn = document.getElementById('emptyCreateCanvasBtn');
 const statusEl = document.getElementById('boardStatus');
@@ -374,6 +375,39 @@ function autoLayoutNulls(items){
     });
 }
 
+async function arrangeCanvasesInProject(){
+    const items = canvasesInProject(currentProjectId);
+    if(!items.length){
+        setStatus(L('当前项目暂无画布','No canvases in this project'));
+        return;
+    }
+    const cardWidth = 248;
+    const cardHeight = 150;
+    const gapX = 40;
+    const gapY = 42;
+    const availableWidth = Math.max(cardWidth, (board?.clientWidth || 1200) - 96);
+    const columns = Math.max(1, Math.min(6, Math.floor((availableWidth + gapX) / (cardWidth + gapX))));
+    const ordered = [...items].sort((a, b) => {
+        const timeA = Number(a.updated_at || a.created_at || 0);
+        const timeB = Number(b.updated_at || b.created_at || 0);
+        if(timeA !== timeB) return timeA - timeB;
+        return String(a.title || '').localeCompare(String(b.title || ''), langIsEn() ? 'en' : 'zh-CN');
+    });
+    ordered.forEach((canvas, index) => {
+        const column = index % columns;
+        const row = Math.floor(index / columns);
+        canvas.board_x = 48 + column * (cardWidth + gapX);
+        canvas.board_y = 48 + row * (cardHeight + gapY);
+    });
+    renderBoard();
+    resetView();
+    setStatus(L(`已整理 ${ordered.length} 个画布`, `Arranged ${ordered.length} canvases`));
+    await Promise.all(ordered.map(canvas => persistMeta(canvas.id, {
+        board_x: Math.round(canvas.board_x),
+        board_y: Math.round(canvas.board_y)
+    })));
+}
+
 function renderBoard(){
     updateBoardHeader();
     const items = canvasesInProject(currentProjectId);
@@ -475,19 +509,20 @@ function openCreateCard(worldPt){
     closeCreateCard();
     closeCardMenu();
     const el = document.createElement('div');
-    el.className = 'ws-create-card';
-    el.style.left = worldPt.x + 'px';
-    el.style.top = worldPt.y + 'px';
-    el.innerHTML = `
-        <div class="ws-create-title">${L('新建画布','New canvas')}</div>
+    el.className = 'ws-create-modal-backdrop';
+    el.innerHTML = `<div class="ws-create-card" role="dialog" aria-modal="true" aria-labelledby="wsCreateTitle">
+        <div class="ws-create-title" id="wsCreateTitle">${L('新建画布','New canvas')}</div>
+        <div class="ws-create-subtitle">${L('输入名称后按回车即可进入画布','Press Enter after naming it to open the canvas')}</div>
         <input class="ws-create-input" type="text" maxlength="80" placeholder="${L('画布名称（可留空）','Canvas name (optional)')}">
         <div class="ws-create-actions">
-            <button class="ws-create-confirm" type="button">${L('创建','Create')}</button>
+            <button class="ws-create-confirm" type="button">${L('创建并进入','Create and open')}</button>
             <button class="ws-create-cancel" type="button">${L('取消','Cancel')}</button>
-        </div>`;
-    boardWorld.appendChild(el);
+        </div>
+    </div>`;
+    document.body.appendChild(el);
     createCardEl = el;
     el.addEventListener('mousedown', e => e.stopPropagation());
+    el.addEventListener('click', e => { if(e.target === el) closeCreateCard(); });
     const input = el.querySelector('.ws-create-input');
     input.focus();
     const confirm = () => createCanvasOnBoard(input.value.trim(), worldPt);
@@ -527,6 +562,7 @@ async function createCanvasOnBoard(title, worldPt){
             canvases.push(nc);
             renderBoard();
             renderProjects();
+            openCanvas(nc);
         }
     } catch(e){ console.error(e); setStatus(L('创建失败','Create failed')); }
 }
@@ -973,6 +1009,7 @@ board.addEventListener('dblclick', e => {
 });
 
 newCanvasBtn.addEventListener('click', () => openCreateCard(boardCenterWorld()));
+arrangeCanvasesBtn?.addEventListener('click', arrangeCanvasesInProject);
 emptyCreateCanvasBtn?.addEventListener('mousedown', e => e.stopPropagation());
 emptyCreateCanvasBtn?.addEventListener('click', e => {
     e.stopPropagation();

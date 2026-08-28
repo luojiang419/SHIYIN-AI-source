@@ -70,3 +70,13 @@ def test_both_canvas_runtimes_expose_linkfox_node_and_run_endpoint():
     assert "fetch('/api/linkfox-video'" in smart
     assert "entry:'img2video'" in module
 
+
+def test_api_settings_exposes_linkfox_configuration_controls():
+    root = Path(__file__).resolve().parents[1]
+    page = (root / "static" / "api-settings.html").read_text(encoding="utf-8")
+    script = (root / "static" / "js" / "api-settings.js").read_text(encoding="utf-8")
+    assert 'id="linkfoxApiKeyInput"' in page
+    assert 'id="linkfoxGatewayInput"' in page
+    assert "fetch('/api/linkfox-config'" in script
+    assert "fetch('/api/linkfox-config/check'" in script
+

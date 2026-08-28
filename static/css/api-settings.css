@@ -5277,6 +5277,16 @@ html.studio-theme-dark body .recommend-account-invite {
     cursor:grab !important;
 }
 
+.linkfox-config-block{border:1px solid color-mix(in srgb,var(--accent,#8ab4ff) 28%,var(--border,rgba(255,255,255,.1)));background:linear-gradient(135deg,color-mix(in srgb,var(--accent,#8ab4ff) 7%,transparent),transparent 55%)}
+.linkfox-config-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 18px}
+.linkfox-config-form .field.full{grid-column:1/-1}
+.linkfox-config-actions{grid-column:1/-1;display:flex;align-items:center;gap:10px}
+.linkfox-config-message{grid-column:1/-1;min-height:18px;color:var(--muted-text,#9aa4b2);font-size:12px}
+.config-status-pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;background:rgba(255,255,255,.08);color:var(--muted-text,#9aa4b2);font-size:11px;white-space:nowrap}
+.config-status-pill.ok{background:rgba(42,180,120,.16);color:#78e0af}
+.config-status-pill.bad{background:rgba(210,65,75,.16);color:#ff9b9b}
+@media (max-width:780px){.linkfox-config-form{grid-template-columns:1fr}.linkfox-config-form .field.full,.linkfox-config-actions,.linkfox-config-message{grid-column:1}}
+
 .provider-card-banner.provider-card-sortable {
     display:grid !important;
     grid-template-columns:14px 20px minmax(0,1fr) !important;

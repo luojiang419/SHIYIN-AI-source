@@ -235,6 +235,8 @@ ADMIN_ONLY_HTTP_PATHS = {
     "/admin",
     "/api/config",
     "/api/config/token",
+    "/api/linkfox-config",
+    "/api/linkfox-config/check",
     "/api/providers",
     "/api/app-settings",
     "/api/runtime/info",
@@ -413,7 +415,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.328"
+APP_VERSION = "1.0.329"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3931,6 +3933,14 @@ class LinkFoxVideoRequest(BaseModel):
     resolution: str = ""
     canvas_id: str = Field(default="", max_length=160)
     node_id: str = Field(default="", max_length=160)
+
+
+class LinkFoxConfigPayload(BaseModel):
+    """LinkFox Agent 本机配置；密钥进入安全存储，不进入画布数据。"""
+
+    api_key: Optional[str] = Field(default=None, max_length=500)
+    tool_gateway: str = Field(default="https://tool-gateway.linkfox.com", max_length=500)
+    clear_key: bool = False
 
 class CanvasVideoTaskRequest(CanvasVideoRequest):
     task_id: str = Field(min_length=8, max_length=160)
@@ -17862,11 +17872,75 @@ async def linkfox_video_capabilities():
     """返回 LinkFox 图转视频节点的稳定模型矩阵。"""
     return {
         "installed": (PROJECT_MODULE_DIR and (Path(PROJECT_MODULE_DIR) / "skills" / "linkfox-expert-aigc-videogen-image-to-video").is_dir()),
+        "configured": bool(linkfox_configured_key()),
+        "tool_gateway": linkfox_tool_gateway(),
         "models": {
             "reference": linkfox_video_models("reference"),
             "first_last_frame": linkfox_video_models("first_last_frame"),
         },
     }
+
+
+LINKFOX_DEFAULT_TOOL_GATEWAY = "https://tool-gateway.linkfox.com"
+
+
+def linkfox_configured_key() -> str:
+    return (
+        os.getenv("LINKFOX_AGENT_API_KEY", "")
+        or read_api_env_value("LINKFOX_AGENT_API_KEY")
+        or os.getenv("LINKFOXAGENT_API_KEY", "")
+        or read_api_env_value("LINKFOXAGENT_API_KEY")
+    ).strip()
+
+
+def linkfox_tool_gateway() -> str:
+    value = (os.getenv("LINKFOX_TOOL_GATEWAY", "") or read_api_env_value("LINKFOX_TOOL_GATEWAY",)).strip().rstrip("/")
+    return value or LINKFOX_DEFAULT_TOOL_GATEWAY
+
+
+def linkfox_config_response() -> dict[str, Any]:
+    key = linkfox_configured_key()
+    skill_dir = Path(PROJECT_MODULE_DIR) / "skills" / "linkfox-expert-aigc-videogen-image-to-video"
+    return {
+        "configured": bool(key),
+        "key_preview": mask_secret(key),
+        "key_env": "LINKFOX_AGENT_API_KEY",
+        "tool_gateway": linkfox_tool_gateway(),
+        "tool_gateway_env": "LINKFOX_TOOL_GATEWAY",
+        "installed": skill_dir.is_dir(),
+    }
+
+
+@app.get("/api/linkfox-config")
+def get_linkfox_config():
+    return linkfox_config_response()
+
+
+@app.put("/api/linkfox-config")
+def save_linkfox_config(payload: LinkFoxConfigPayload):
+    gateway = str(payload.tool_gateway or "").strip().rstrip("/") or LINKFOX_DEFAULT_TOOL_GATEWAY
+    parsed = urllib.parse.urlsplit(gateway)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc or any(char.isspace() for char in gateway):
+        raise HTTPException(status_code=400, detail="LinkFox 网关地址必须是有效的 HTTP(S) URL")
+    updates: dict[str, str] = {"LINKFOX_TOOL_GATEWAY": gateway}
+    if payload.clear_key:
+        updates.update({"LINKFOX_AGENT_API_KEY": "", "LINKFOXAGENT_API_KEY": ""})
+    elif payload.api_key is not None and payload.api_key.strip():
+        updates.update({"LINKFOX_AGENT_API_KEY": payload.api_key.strip(), "LINKFOXAGENT_API_KEY": ""})
+    update_env_values(updates)
+    return linkfox_config_response()
+
+
+@app.post("/api/linkfox-config/check")
+def check_linkfox_config():
+    result = linkfox_config_response()
+    result["ready"] = bool(result["configured"] and result["installed"])
+    result["message"] = (
+        "配置完整，可以生成视频"
+        if result["ready"]
+        else "请填写 LinkFox API Key，并确认目标技能已经安装"
+    )
+    return result
 
 
 @app.post("/api/linkfox-video")

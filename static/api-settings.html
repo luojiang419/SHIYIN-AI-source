@@ -25,7 +25,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.06.30.1782781876">
-    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.08.21.provider-priority.1">
+    <link rel="stylesheet" href="/static/css/api-settings.css?v=2026.08.28.linkfox-config.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -60,6 +60,38 @@
                     </div>
 
                     <section id="providerOnboardingCard" class="provider-onboarding-card" hidden></section>
+
+                    <section id="linkfoxConfigBlock" class="block linkfox-config-block">
+                        <div class="block-head">
+                            <div>
+                                <div class="block-title">LinkFox 视频生成</div>
+                                <div class="block-desc">配置 LinkFox Agent API Key 和技能网关。密钥只保存到本机安全存储，不会写入画布节点。</div>
+                            </div>
+                            <span id="linkfoxConfigStatus" class="config-status-pill">未检测</span>
+                        </div>
+                        <div class="form linkfox-config-form">
+                            <label class="field full">
+                                <span class="label">LinkFox Agent API Key</span>
+                                <div class="key-input-line">
+                                    <div class="field-frame"><input id="linkfoxApiKeyInput" type="password" placeholder="输入后保存；已保存时留空表示保持不变"></div>
+                                    <div class="key-actions">
+                                        <button id="linkfoxClearKeyBtn" class="key-btn key-clear" type="button" title="清除 LinkFox API Key"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                    </div>
+                                </div>
+                                <span id="linkfoxKeyHint" class="hint"></span>
+                            </label>
+                            <label class="field full">
+                                <span class="label">技能网关地址</span>
+                                <div class="field-frame"><input id="linkfoxGatewayInput" type="url" placeholder="https://tool-gateway.linkfox.com"></div>
+                                <span class="hint">默认使用官方网关；只有 LinkFox 提供了代理或专用网关时才需要修改。</span>
+                            </label>
+                            <div class="verify-action-row linkfox-config-actions">
+                                <button id="linkfoxSaveBtn" class="action-btn primary-btn" type="button"><i data-lucide="save" class="w-3.5 h-3.5"></i><span>保存 LinkFox 配置</span></button>
+                                <button id="linkfoxCheckBtn" class="action-btn" type="button"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i><span>检查配置</span></button>
+                            </div>
+                            <div id="linkfoxConfigMessage" class="linkfox-config-message"></div>
+                        </div>
+                    </section>
 
                     <section class="block">
                         <div class="block-head">
@@ -527,6 +559,6 @@
         </div>
     </div>
 
-    <script src="/static/js/api-settings.js?v=2026.08.21.provider-priority.1"></script>
+    <script src="/static/js/api-settings.js?v=2026.08.28.linkfox-config.1"></script>
 </body>
 </html>

@@ -48,6 +48,7 @@
                 <button type="button" class="setting-check ${node.camera==='multi'?'active':''}" data-linkfox-toggle="camera"><span class="check-dot"></span>多段运镜</button>
             </div>
             ${mode==='first_last_frame'?'<div class="linkfox-frame-note">首帧和尾帧请通过两个输入端口连接；可灵 2.6 尾帧仅支持 1080p 且关闭声音。</div>':'<div class="linkfox-frame-note">参考图模式支持多张图片，数量上限随模型变化。</div>'}
+            <div class="linkfox-config-hint">未配置 API Key 时，请打开“API 设置”中的 LinkFox 视频生成配置。</div>
             <div class="linkfox-video-input-summary" data-linkfox-input-summary>等待连接图片…</div>
             <button type="button" class="gen-btn linkfox-video-run" data-linkfox-action="run" ${node.running?'disabled':''}>${node.running?'生成中…':'生成 LinkFox 视频'}</button>
             ${node.runError?`<div class="linkfox-video-error">${esc(node.runError)}</div>`:''}

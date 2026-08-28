@@ -46,6 +46,14 @@ const settingsContent = document.getElementById('settingsContent');
 const recommendContent = document.getElementById('recommendContent');
 const recommendPanel = document.getElementById('recommendPanel');
 const providerOnboardingCard = document.getElementById('providerOnboardingCard');
+const linkfoxApiKeyInput = document.getElementById('linkfoxApiKeyInput');
+const linkfoxGatewayInput = document.getElementById('linkfoxGatewayInput');
+const linkfoxKeyHint = document.getElementById('linkfoxKeyHint');
+const linkfoxConfigStatus = document.getElementById('linkfoxConfigStatus');
+const linkfoxConfigMessage = document.getElementById('linkfoxConfigMessage');
+const linkfoxSaveBtn = document.getElementById('linkfoxSaveBtn');
+const linkfoxCheckBtn = document.getElementById('linkfoxCheckBtn');
+const linkfoxClearKeyBtn = document.getElementById('linkfoxClearKeyBtn');
 const rhWorkflowEditorOverlay = document.getElementById('rhWorkflowEditorOverlay');
 const rhWorkflowEditorTitle = document.getElementById('rhWorkflowEditorTitle');
 const rhWorkflowEditorSub = document.getElementById('rhWorkflowEditorSub');
@@ -3456,6 +3464,86 @@ function removeModel(kind, index){
     if(kind === 'image') renderMsLoras();
     scheduleProviderAutoSave(0);
 }
+function setLinkfoxConfigStatus(text, ok=null){
+    if(!linkfoxConfigStatus) return;
+    linkfoxConfigStatus.textContent = text || '未检测';
+    linkfoxConfigStatus.classList.toggle('ok', ok === true);
+    linkfoxConfigStatus.classList.toggle('bad', ok === false);
+}
+function renderLinkfoxConfig(data){
+    const item = data || {};
+    if(linkfoxGatewayInput) linkfoxGatewayInput.value = item.tool_gateway || 'https://tool-gateway.linkfox.com';
+    if(linkfoxApiKeyInput){
+        linkfoxApiKeyInput.value = '';
+        linkfoxApiKeyInput.placeholder = item.configured ? `保持当前 Key ${item.key_preview || ''}` : '输入 LinkFox Agent API Key';
+    }
+    if(linkfoxKeyHint) linkfoxKeyHint.textContent = item.configured ? `已保存：${item.key_env || 'LINKFOX_AGENT_API_KEY'} ${item.key_preview || ''}` : '尚未配置 LinkFox API Key';
+    setLinkfoxConfigStatus(item.configured && item.installed ? '已就绪' : '待配置', item.configured && item.installed);
+}
+async function loadLinkfoxConfig(){
+    try {
+        const response = await fetch('/api/linkfox-config', {cache:'no-store'});
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.detail || '读取 LinkFox 配置失败');
+        renderLinkfoxConfig(data);
+    } catch(error){
+        setLinkfoxConfigStatus('读取失败', false);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = error.message || String(error);
+    }
+}
+async function saveLinkfoxConfig(){
+    if(!linkfoxGatewayInput) return false;
+    const gateway = String(linkfoxGatewayInput.value || '').trim();
+    const apiKey = String(linkfoxApiKeyInput?.value || '').trim();
+    setLinkfoxConfigStatus('保存中…');
+    if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = '';
+    try {
+        const response = await fetch('/api/linkfox-config', {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({tool_gateway:gateway, api_key:apiKey || undefined, clear_key:false})
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.detail || '保存 LinkFox 配置失败');
+        renderLinkfoxConfig(data);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = 'LinkFox 配置已保存';
+        return true;
+    } catch(error){
+        setLinkfoxConfigStatus('保存失败', false);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = error.message || String(error);
+        return false;
+    }
+}
+async function checkLinkfoxConfig(){
+    setLinkfoxConfigStatus('检查中…');
+    if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = '';
+    try {
+        const response = await fetch('/api/linkfox-config/check', {method:'POST'});
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.detail || '检查 LinkFox 配置失败');
+        renderLinkfoxConfig(data);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = data.message || '';
+    } catch(error){
+        setLinkfoxConfigStatus('检查失败', false);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = error.message || String(error);
+    }
+}
+async function clearLinkfoxKey(){
+    if(!confirm('确认清除本机保存的 LinkFox API Key？')) return;
+    setLinkfoxConfigStatus('清除中…');
+    try {
+        const response = await fetch('/api/linkfox-config', {
+            method:'PUT', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({tool_gateway:String(linkfoxGatewayInput?.value || '').trim(), clear_key:true})
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.detail || '清除 LinkFox API Key 失败');
+        renderLinkfoxConfig(data);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = 'LinkFox API Key 已清除';
+    } catch(error){
+        setLinkfoxConfigStatus('清除失败', false);
+        if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = error.message || String(error);
+    }
+}
 async function loadProviders(){
     setStatus(tr('api.loading'));
     try {
@@ -3689,6 +3777,10 @@ window.onload = () => {
     if(window.StudioI18n) window.StudioI18n.apply();
     syncRecommendView();
     loadProviders();
+    loadLinkfoxConfig();
+    linkfoxSaveBtn?.addEventListener('click', saveLinkfoxConfig);
+    linkfoxCheckBtn?.addEventListener('click', checkLinkfoxConfig);
+    linkfoxClearKeyBtn?.addEventListener('click', clearLinkfoxKey);
     // 平台名输入时实时预览生成的 ID
     if(nameInput) nameInput.addEventListener('input', updateIdPreview);
     if(protocolInput) protocolInput.addEventListener('change', updateProtocolFromInput);

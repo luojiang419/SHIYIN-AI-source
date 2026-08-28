@@ -40,19 +40,22 @@ def test_generation_nodes_keep_prompt_and_settings_in_bottom_workspace():
     assert ".node-bottom-controls .generator-inline-prompt" in CSS
 
 
-def test_image_prompt_panel_is_separate_from_top_media_actions():
+def test_image_prompt_panel_follows_the_image_node_like_the_top_toolbar():
     render_start = JS.index("function renderSelectionHub")
     render_end = JS.index("function selectOutputMedia", render_start)
     render_source = JS[render_start:render_end]
     assert "selectionHub.classList.remove('open','image-prompt-hub')" in render_source
-    assert "const actionPanel = imageNode ? ''" in render_source
-    assert "selectionHub.classList.toggle('image-prompt-hub', Boolean(imageNode))" in render_source
-    assert "const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');" in JS
-    assert "? anchorRect.bottom - boardRect.top + gap" in JS
-    assert "const maxTop = Math.max(margin, boardRect.height - hubRect.height - margin);" in JS
-    assert "width:min(622px,calc(100vw - 24px))" in CSS
+    assert "imagePromptPanel.className = 'image-node-prompt-panel';" in JS
+    assert "imagePromptPanel.dataset.imageNodePromptPanel = '1';" in JS
+    assert "bindImageNodeQuickPrompt(node, imagePromptPanel);" in JS
+    assert "if(imageNode) return;" in render_source
+    assert ".image-node-prompt-panel { position:absolute; left:50%; top:calc(100% + 10px);" in CSS
+    assert "width:min(622px,100%)" in CSS
+    assert ".node.selected > .image-node-prompt-panel" in CSS
+    assert "container-type:inline-size" in CSS
+    assert "width:min(622px,calc(100vw - 24px))" not in CSS
     assert "height:clamp(112px,18vh,160px)" in CSS
-    assert "const gap = 16;" in JS
+    assert "function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)" in JS
 
 
 def test_canvas_preferences_preserve_an_explicit_empty_selection():

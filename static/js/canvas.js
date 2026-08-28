@@ -1766,7 +1766,7 @@ function setCanvasMode(open){
         classicSelectionFeedbackState = null;
         classicTempLinkDom = null;
         classicKnifeTrailDom = null;
-        selectionHub.classList.remove('open');
+        selectionHub.classList.remove('open','image-prompt-hub');
         closeConnectionContextMenu();
     } else if(currentCanvasTitle) {
         currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
@@ -10055,6 +10055,15 @@ function renderNode(node){
             e.stopPropagation();
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
+    }
+    if(node.type === 'image' && (!node.url || (mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)))){
+        const imagePromptPanel = document.createElement('div');
+        imagePromptPanel.className = 'image-node-prompt-panel';
+        imagePromptPanel.dataset.imageNodePromptPanel = '1';
+        imagePromptPanel.innerHTML = imageNodeQuickPromptHtml(node);
+        imagePromptPanel.addEventListener('mousedown', event => event.stopPropagation());
+        bindImageNodeQuickPrompt(node, imagePromptPanel);
+        el.appendChild(imagePromptPanel);
     }
     const mediaToolbar = classicMediaToolbarHtml(node);
     if(mediaToolbar) el.insertAdjacentHTML('beforeend', mediaToolbar);
@@ -19057,10 +19066,8 @@ function renderSelectionHub(options={}){
         ] : [])
     ];
     const imageNode = target.kind === 'node' && target.mediaKind === 'image' ? sourceNodeForSelectionTarget(target) : null;
-    const promptPanel = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';
-    const actionPanel = imageNode ? '' : `<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
-    selectionHub.innerHTML = `${promptPanel}${actionPanel}`;
-    selectionHub.classList.toggle('image-prompt-hub', Boolean(imageNode));
+    if(imageNode) return;
+    selectionHub.innerHTML = `<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
     selectionHub.classList.add('open');
     selectionHubAnchor = anchor;
     selectionHub.dataset.targetKind = target.kind;
@@ -19072,7 +19079,6 @@ function renderSelectionHub(options={}){
             runMediaQuickAction(button.dataset.mediaAction, target);
         };
     });
-    if(imageNode) bindImageNodeQuickPrompt(imageNode);
     if(options.deferPosition) scheduleSelectionHubPosition();
     else positionSelectionHub(anchor);
     refreshIcons(selectionHub);
@@ -19129,8 +19135,8 @@ function imageNodeQuickPromptHtml(node){
         </div>
     </div>`;
 }
-function bindImageNodeQuickPrompt(node){
-    const root = selectionHub.querySelector('[data-image-quick-compose]');
+function bindImageNodeQuickPrompt(node, panelRoot=selectionHub){
+    const root = panelRoot?.querySelector?.('[data-image-quick-compose]');
     if(!root || !node) return;
     const prompt = root.querySelector('[data-image-quick-prompt]');
     const provider = root.querySelector('[data-image-quick-provider]');
@@ -19186,7 +19192,7 @@ async function runImageNodeQuickGenerate(nodeId){
     const refs = node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)
         ? [{url:node.url, name:node.name || 'input.png', kind:'image'}] : [];
     if(!prompt && !refs.length){ showErrorModal('请先输入提示词或上传图片', '图片生成'); return; }
-    const button = selectionHub.querySelector('[data-image-quick-generate]');
+    const button = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-image-node-prompt-panel] [data-image-quick-generate]`);
     node.running = true;
     if(button){ button.disabled = true; button.classList.add('running'); button.querySelector('span').textContent = '生成中'; }
     try {
@@ -19239,16 +19245,8 @@ function positionSelectionHub(anchor){
     const maxLeft = Math.max(margin, boardRect.width - hubRect.width - margin);
     const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
     const gap = 16;
-    const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');
-    // 图片节点的提示词面板与节点顶部工具条分离：面板固定锚定在节点下方，
-    // 工具条继续由节点自身的 .node-media-toolbar 定位到节点上方。
-    let top = isImagePromptHub
-        ? anchorRect.bottom - boardRect.top + gap
-        : anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
-    if(isImagePromptHub){
-        const maxTop = Math.max(margin, boardRect.height - hubRect.height - margin);
-        top = Math.min(top, maxTop);
-    } else if(top < margin){
+    let top = anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
+    if(top < margin){
         top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
     }
     selectionHub.style.left = `${Math.round(left)}px`;

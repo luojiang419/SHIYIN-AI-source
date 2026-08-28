@@ -8,21 +8,20 @@ ECOMMERCE_JS = (ROOT / "static" / "js" / "canvas-ecommerce-nodes.js").read_text(
 CANVAS_CSS = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
 
 
-def test_ecommerce_nodes_live_in_a_second_level_context_menu():
-    host = HTML.index('class="menu-submenu-host" data-ecommerce-menu-host')
-    submenu = HTML.index('class="create-submenu"', host)
-    output_button = HTML.index("menuAdd('output')")
-    menu_end = HTML.index('<div id="linkCreateMenu"')
-
-    assert output_button < host < submenu < menu_end
-    assert ".create-submenu.submenu-open" in CANVAS_CSS
-    assert ".create-submenu { position:fixed" in CANVAS_CSS
-    assert "function positionEcommerceSubmenu()" in CANVAS_JS
+def test_ecommerce_nodes_are_removed_from_the_create_menu():
+    assert 'data-ecommerce-menu-host' not in HTML
+    assert "menuAdd('ecom-model')" not in HTML
+    assert "menuAdd('ecom-product')" not in HTML
+    assert "menuAdd('ecom-scene')" not in HTML
+    assert "menuAdd('ecom-compose')" not in HTML
+    assert "menuAdd('ecom-video')" not in HTML
+    assert 'ecommerceMenuHost' not in CANVAS_JS
+    assert 'ecommerceSubmenu' not in CANVAS_JS
     assert "menuCreateEcommerceWorkflow" not in HTML
     assert "menuCreateEcommerceWorkflow" not in CANVAS_JS
 
 
-def test_second_level_menu_contains_the_five_independent_nodes_without_combo_action():
+def test_ecommerce_node_implementations_remain_for_existing_canvas_data():
     expected = {
         "ecom-model": "电商模特",
         "ecom-product": "电商产品",
@@ -31,15 +30,13 @@ def test_second_level_menu_contains_the_five_independent_nodes_without_combo_act
         "ecom-video": "电商视频",
     }
     for node_type, label in expected.items():
-        assert f"menuAdd('{node_type}')" in HTML
-        assert label in HTML
         assert f"'{node_type}'" in ECOMMERCE_JS
-    assert "创建电商工作流" not in HTML
+    assert all(label not in HTML for label in expected.values())
 
 
 def test_ecommerce_nodes_can_still_be_created_individually():
     for node_type in ("ecom-model", "ecom-product", "ecom-scene", "ecom-compose", "ecom-video"):
-        assert f"menuAdd('{node_type}')" in HTML
+        assert f"'{node_type}'" in ECOMMERCE_JS
 
     assert "function createEcommerceWorkflow(point)" not in CANVAS_JS
     assert "function addEcommerceNode(type, point)" in CANVAS_JS

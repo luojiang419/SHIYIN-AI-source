@@ -12,7 +12,8 @@ class MiniMaxH3CanvasFrontendTests(unittest.TestCase):
     def test_h3_entry_is_merged_into_unified_video_node(self):
         self.assertNotIn('onclick="addH3VideoNode()"', self.html)
         self.assertNotIn("menuAdd('h3-video')", self.html)
-        self.assertIn('onclick="addVideoNode()"', self.html)
+        self.assertIn("id:'video'", self.javascript)
+        self.assertIn("addVideoNode()", self.javascript)
         self.assertIn("menuAdd('video')", self.html)
         # 保留函数和旧类型路由，兼容历史画布或外部脚本。
         self.assertIn("function addH3VideoNode(point)", self.javascript)

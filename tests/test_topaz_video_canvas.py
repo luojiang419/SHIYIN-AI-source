@@ -14,7 +14,8 @@ class TopazVideoCanvasTests(unittest.TestCase):
     def test_page_loads_topaz_node_assets_and_creation_entries(self):
         self.assertIn("/static/css/canvas-topaz-node.css", HTML)
         self.assertIn("/static/js/canvas-topaz-node.js", HTML)
-        self.assertIn("onclick=\"addTopazVideoNode()\"", HTML)
+        self.assertIn("id:'topazVideo'", CANVAS_JS)
+        self.assertIn("addTopazVideoNode()", CANVAS_JS)
         self.assertIn("menuAdd('topazVideo')", HTML)
 
     def test_node_face_has_exactly_three_common_controls(self):

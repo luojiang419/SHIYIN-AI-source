@@ -40,14 +40,14 @@ class CanvasMenuPerformanceTests(unittest.TestCase):
         self.assertNotIn("render();", linked)
 
     def test_classic_submenus_close_when_pointer_enters_other_menu_area(self):
-        routing = body(CANVAS_JS, "function closeInactiveCanvasSubmenus", "if(ecommerceMenuTrigger)")
+        routing = body(CANVAS_JS, "function closeInactiveCanvasSubmenus", "document.addEventListener('pointerover', closeInactiveCanvasSubmenus, true);")
         closing = body(CANVAS_JS, "function scheduleCanvasSubmenuClose", "function closeInactiveCanvasSubmenus")
 
-        self.assertIn("if(!inFilm && !inEcommerce)", routing)
+        self.assertIn("if(!inFilm)", routing)
         self.assertIn("scheduleCanvasSubmenuClose();", routing)
         self.assertIn("setTimeout(() =>", closing)
         self.assertIn("filmMenuHost?.classList.remove('submenu-open','submenu-flip')", closing)
-        self.assertIn("ecommerceMenuHost?.classList.remove('submenu-open','submenu-flip')", closing)
+        self.assertNotIn("ecommerceMenuHost", closing)
 
     def test_classic_menu_icon_refreshes_are_scoped_to_open_overlays(self):
         create = body(CANVAS_JS, "function openCreateMenu(", "function closeCreateMenu")

@@ -308,10 +308,6 @@ const dropOverlay = document.getElementById('dropOverlay');
 const createMenu = document.getElementById('createMenu');
 const canvasArrangeMenuBtn = document.getElementById('canvasArrangeMenuBtn');
 const canvasArrangeMenuDivider = createMenu?.querySelector('.canvas-arrange-menu-divider');
-const ecommerceMenuHost = createMenu?.querySelector('[data-ecommerce-menu-host]');
-const ecommerceMenuTrigger = ecommerceMenuHost?.querySelector('.menu-submenu-trigger');
-const ecommerceSubmenu = ecommerceMenuHost?.querySelector('.create-submenu');
-if(ecommerceSubmenu) document.body.appendChild(ecommerceSubmenu);
 const filmMenuHost = createMenu?.querySelector('[data-film-menu-host]');
 const filmMenuTrigger = filmMenuHost?.querySelector('.menu-submenu-trigger');
 const filmSubmenu = filmMenuHost?.querySelector('.create-submenu');
@@ -368,6 +364,15 @@ const promptTemplateCats = document.getElementById('promptTemplateCats');
 const promptTemplateBody = document.getElementById('promptTemplateBody');
 const canvasAssetToggle = document.getElementById('canvasAssetToggle');
 const quickToolbar = document.getElementById('quickToolbar');
+const canvasToolbarSettingsBtn = document.getElementById('canvasToolbarSettingsBtn');
+const toolbarNodeItems = document.getElementById('toolbarNodeItems');
+const canvasSettingsModal = document.getElementById('canvasSettingsModal');
+const canvasSettingsTitle = document.getElementById('canvasSettingsTitle');
+const canvasSettingsSub = document.getElementById('canvasSettingsSub');
+const canvasSettingsBody = document.getElementById('canvasSettingsBody');
+const canvasSettingsClose = document.getElementById('canvasSettingsClose');
+const canvasSettingsReset = document.getElementById('canvasSettingsReset');
+const canvasSettingsDone = document.getElementById('canvasSettingsDone');
 const canvasAssetPanel = document.getElementById('canvasAssetPanel');
 const canvasAssetCloseBtn = document.getElementById('canvasAssetCloseBtn');
 const canvasAssetLibrarySelect = document.getElementById('canvasAssetLibrarySelect');
@@ -850,6 +855,40 @@ const MANAGED_IMAGE_MODELS_KEY = 'canvas_image_models_ordered';
 const MANAGED_CHAT_MODELS_KEY = 'canvas_chat_models_ordered';
 const CANVAS_THEME_KEY = 'canvas_theme';
 const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
+const QUICK_TOOLBAR_ITEMS_KEY = 'canvas_quick_toolbar_items_v1';
+const MEDIA_TOOLBAR_ITEMS_KEY = 'canvas_media_toolbar_items_v1';
+const QUICK_TOOLBAR_MAX_ITEMS = 18;
+const MEDIA_TOOLBAR_MAX_ITEMS = 7;
+const CLASSIC_QUICK_TOOLBAR_DEFS = [
+    {id:'image', label:'图片', icon:'image-plus', action:() => addImageNode()},
+    {id:'prompt', label:'提示词', icon:'text-cursor-input', action:() => addPromptNode()},
+    {id:'llm', label:'AI助手', icon:'message-square-text', action:() => addLLMNode()},
+    {id:'generator', label:'图片生成', icon:'wand-sparkles', action:() => addGeneratorNode()},
+    {id:'video', label:'视频生成', icon:'clapperboard', action:() => addVideoNode()},
+    {id:'linkfox-video', label:'LinkFox视频', icon:'sparkles', className:'linkfox-toolbar-btn', action:() => addLinkfoxVideoNode()},
+    {id:'film-storyboard', label:'分镜合成', icon:'panels-top-left', action:() => addFilmNode('film-storyboard')},
+    {id:'film-video', label:'影视视频', icon:'clapperboard', action:() => addFilmNode('film-video')},
+    {id:'topazVideo', label:'Topaz 高清', icon:'scan-line', action:() => addTopazVideoNode()},
+    {id:'panorama', label:'720°取景器', icon:'scan-line', action:() => addPanoramaNode()},
+    {id:'director3d', label:'3D导演台', icon:'clapperboard', action:() => addDirector3dNode()},
+    {id:'dwpose', label:'动作提取', icon:'person-standing', action:() => addDWPoseNode()},
+    {id:'poseReplicate', label:'一键复刻', icon:'refresh-cw', action:() => addPoseReplicateNode()},
+    {id:'relight', label:'灯光重塑', icon:'sun-medium', action:() => addRelightNode()},
+    {id:'blenderDirector', label:'外部导演台', icon:'box', action:() => addBlenderDirectorNode()},
+    {id:'output', label:'Output', icon:'circle-dot', action:() => addOutputNode()},
+    {id:'group', label:'分组', icon:'group', action:() => groupSelectedImages()},
+    {id:'film-bridge-import', label:'导入故事板', icon:'import', action:() => importFilmBridgePackage()}
+];
+const CLASSIC_QUICK_TOOLBAR_DEFAULT = ['image','prompt','llm','generator','video','linkfox-video','film-storyboard','film-video'];
+const CLASSIC_MEDIA_TOOLBAR_DEFS = [
+    {id:'preview', label:'预览', icon:'eye'},
+    {id:'edit', label:'编辑', icon:'pencil'},
+    {id:'replace', label:'替换', icon:'image-plus'},
+    {id:'download', label:'下载', icon:'download'},
+    {id:'run', label:'运行', icon:'play'},
+    {id:'connect', label:'连接', icon:'workflow'}
+];
+const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','replace','download'];
 const CANVAS_SESSION_VIEWPORTS_KEY = 'canvas_session_viewports_v1';
 let canvasSessionViewportFallback = {};
 const DEFAULT_VIDEO_MODELS = [
@@ -932,6 +971,106 @@ function applyQuickToolbarState(){
     }
     refreshIcons();
 }
+function readCanvasPreferenceList(key, fallback, allowedIds, maxItems){
+    try {
+        const value = JSON.parse(localStorage.getItem(key) || 'null');
+        if(Array.isArray(value)){
+            const filtered = [...new Set(value.map(item => String(item || '').trim()))].filter(id => allowedIds.has(id));
+            if(filtered.length) return filtered.slice(0, maxItems);
+        }
+    } catch(e) {}
+    return fallback.filter(id => allowedIds.has(id)).slice(0, maxItems);
+}
+function saveCanvasPreferenceList(key, value){
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+}
+function quickToolbarItemIds(){
+    return readCanvasPreferenceList(QUICK_TOOLBAR_ITEMS_KEY, CLASSIC_QUICK_TOOLBAR_DEFAULT, new Set(CLASSIC_QUICK_TOOLBAR_DEFS.map(item => item.id)), QUICK_TOOLBAR_MAX_ITEMS);
+}
+function renderQuickToolbarItems(){
+    if(!toolbarNodeItems) return;
+    const byId = new Map(CLASSIC_QUICK_TOOLBAR_DEFS.map(item => [item.id, item]));
+    const items = quickToolbarItemIds().map(id => byId.get(id)).filter(Boolean);
+    toolbarNodeItems.innerHTML = '';
+    for(let start = 0; start < items.length; start += 9){
+        const row = document.createElement('div');
+        row.className = 'toolbar-row';
+        items.slice(start, start + 9).forEach(item => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `tool-btn${item.className ? ` ${item.className}` : ''}`;
+            button.dataset.toolbarNode = item.id;
+            button.title = item.label;
+            button.innerHTML = `<i data-lucide="${escapeAttr(item.icon)}" class="w-4 h-4"></i><span>${escapeHtml(item.label)}</span>`;
+            row.appendChild(button);
+        });
+        toolbarNodeItems.appendChild(row);
+    }
+    refreshIcons(toolbarNodeItems);
+}
+let canvasSettingsMode = 'toolbar';
+function canvasSettingsListForMode(mode){
+    return mode === 'media'
+        ? {key:MEDIA_TOOLBAR_ITEMS_KEY, defs:CLASSIC_MEDIA_TOOLBAR_DEFS, fallback:CLASSIC_MEDIA_TOOLBAR_DEFAULT, max:MEDIA_TOOLBAR_MAX_ITEMS}
+        : {key:QUICK_TOOLBAR_ITEMS_KEY, defs:CLASSIC_QUICK_TOOLBAR_DEFS, fallback:CLASSIC_QUICK_TOOLBAR_DEFAULT, max:QUICK_TOOLBAR_MAX_ITEMS};
+}
+function renderCanvasSettings(){
+    if(!canvasSettingsBody) return;
+    const config = canvasSettingsListForMode(canvasSettingsMode);
+    const selected = new Set(readCanvasPreferenceList(config.key, config.fallback, new Set(config.defs.map(item => item.id)), config.max));
+    const hint = canvasSettingsMode === 'media'
+        ? '顶部菜单最多保留 7 项，末尾的“更多”始终保留。不可用的操作会自动置灰。'
+        : '只显示你最常用的节点，最多 18 项，按当前顺序自动分成两行。';
+    canvasSettingsBody.innerHTML = `<div class="canvas-settings-note">${escapeHtml(hint)}</div><div class="canvas-settings-options">${config.defs.map(item => `
+        <label class="canvas-settings-option"><input type="checkbox" data-canvas-setting-id="${escapeAttr(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></label>`).join('')}</div>`;
+    canvasSettingsBody.querySelectorAll('[data-canvas-setting-id]').forEach(input => {
+        input.addEventListener('change', () => {
+            const ids = [...canvasSettingsBody.querySelectorAll('[data-canvas-setting-id]:checked')].map(item => item.dataset.canvasSettingId);
+            if(ids.length > config.max){
+                input.checked = false;
+                toast(`最多只能选择 ${config.max} 项`);
+                return;
+            }
+            saveCanvasPreferenceList(config.key, ids);
+            if(canvasSettingsMode === 'toolbar') renderQuickToolbarItems();
+            else render();
+        });
+    });
+    refreshIcons(canvasSettingsBody);
+}
+function openCanvasSettings(mode='toolbar'){
+    canvasSettingsMode = mode === 'media' ? 'media' : 'toolbar';
+    if(canvasSettingsTitle) canvasSettingsTitle.textContent = canvasSettingsMode === 'media' ? '设置图片/视频常用操作' : '设置常用功能节点';
+    if(canvasSettingsSub) canvasSettingsSub.textContent = canvasSettingsMode === 'media' ? '顶部菜单保留最常用操作，更多功能收进设置。' : '底部工具栏只保留常用节点，减少视觉干扰。';
+    renderCanvasSettings();
+    canvasSettingsModal?.classList.add('open');
+    canvasSettingsModal?.setAttribute('aria-hidden', 'false');
+    refreshIcons(canvasSettingsModal);
+}
+function closeCanvasSettings(){
+    canvasSettingsModal?.classList.remove('open');
+    canvasSettingsModal?.setAttribute('aria-hidden', 'true');
+}
+canvasSettingsClose?.addEventListener('click', closeCanvasSettings);
+canvasSettingsDone?.addEventListener('click', closeCanvasSettings);
+canvasSettingsReset?.addEventListener('click', () => {
+    const config = canvasSettingsListForMode(canvasSettingsMode);
+    saveCanvasPreferenceList(config.key, config.fallback);
+    renderCanvasSettings();
+    if(canvasSettingsMode === 'toolbar') renderQuickToolbarItems();
+});
+canvasToolbarSettingsBtn?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    openCanvasSettings('toolbar');
+});
+toolbarNodeItems?.addEventListener('click', event => {
+    const button = event.target.closest('[data-toolbar-node]');
+    if(!button) return;
+    const item = CLASSIC_QUICK_TOOLBAR_DEFS.find(def => def.id === button.dataset.toolbarNode);
+    if(item) item.action();
+});
+renderQuickToolbarItems();
 function toggleQuickToolbar(){
     const collapsed = localStorage.getItem(QUICK_TOOLBAR_COLLAPSED_KEY) === '1';
     const next = !collapsed;
@@ -4682,12 +4821,6 @@ function openCreateMenu(clientX, clientY){
     const top = Math.max(viewportMargin, Math.min(window.innerHeight - menuRect.height - viewportMargin, clientY));
     createMenu.style.left = `${left}px`;
     createMenu.style.top = `${top}px`;
-    if(ecommerceMenuHost){
-        ecommerceMenuHost.classList.remove('submenu-open');
-        ecommerceSubmenu?.classList.remove('submenu-open');
-        ecommerceMenuTrigger?.setAttribute('aria-expanded','false');
-        ecommerceMenuHost.classList.toggle('submenu-flip', left + menuRect.width + 232 > window.innerWidth - viewportMargin);
-    }
     if(filmMenuHost){
         filmMenuHost.classList.remove('submenu-open','submenu-flip');
         filmSubmenu?.classList.remove('submenu-open');
@@ -4699,29 +4832,11 @@ function openCreateMenu(clientX, clientY){
 function closeCreateMenu(){
     createMenu.classList.remove('open');
     createMenu.classList.remove('create-menu-two-column');
-    ecommerceMenuHost?.classList.remove('submenu-open','submenu-flip');
-    ecommerceSubmenu?.classList.remove('submenu-open');
-    ecommerceMenuTrigger?.setAttribute('aria-expanded','false');
     filmMenuHost?.classList.remove('submenu-open','submenu-flip');
     filmSubmenu?.classList.remove('submenu-open');
     filmMenuTrigger?.setAttribute('aria-expanded','false');
     closeLinkCreateMenu();
     closeImageNodeMenu();
-}
-function positionEcommerceSubmenu(){
-    if(!ecommerceMenuHost || !ecommerceSubmenu || !ecommerceMenuTrigger) return;
-    const margin = 10;
-    const gap = 8;
-    const triggerRect = ecommerceMenuTrigger.getBoundingClientRect();
-    const submenuRect = ecommerceSubmenu.getBoundingClientRect();
-    const width = submenuRect.width || 216;
-    const height = submenuRect.height || 286;
-    const flip = triggerRect.right + gap + width > window.innerWidth - margin;
-    ecommerceMenuHost.classList.toggle('submenu-flip',flip);
-    const viewportLeft = Math.max(margin,Math.min(window.innerWidth - width - margin,flip ? triggerRect.left - width - gap : triggerRect.right + gap));
-    const viewportTop = Math.max(margin,Math.min(window.innerHeight - height - margin,triggerRect.top - 8));
-    ecommerceSubmenu.style.left = `${viewportLeft}px`;
-    ecommerceSubmenu.style.top = `${viewportTop}px`;
 }
 function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
@@ -4842,6 +4957,54 @@ function closeLinkCreateMenu(){
     nodeInputMenu.innerHTML = '';
     nodeOutputMenu.innerHTML = '';
     linkCreateState = null;
+}
+function mediaToolbarItemsForNode(node){
+    if(!node || !['image','video'].includes(node.type)) return [];
+    const selectedIds = readCanvasPreferenceList(MEDIA_TOOLBAR_ITEMS_KEY, CLASSIC_MEDIA_TOOLBAR_DEFAULT, new Set(CLASSIC_MEDIA_TOOLBAR_DEFS.map(item => item.id)), MEDIA_TOOLBAR_MAX_ITEMS);
+    const definitions = new Map(CLASSIC_MEDIA_TOOLBAR_DEFS.map(item => [item.id, item]));
+    if(node.type === 'video'){
+        const items = selectedIds.map(id => definitions.get(id)).filter(item => item && ['run','connect'].includes(item.id));
+        return items.length ? items : ['run','connect'].map(id => definitions.get(id));
+    }
+    const kind = mediaKindForNode(node);
+    const available = new Set(['preview','replace','download']);
+    if(kind === 'image') available.add('edit');
+    return selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
+}
+function classicMediaToolbarHtml(node){
+    const items = mediaToolbarItemsForNode(node);
+    if(!items.length && node?.type !== 'video') return '';
+    const more = {id:'more', label:'更多', icon:'ellipsis'};
+    return `<div class="node-media-toolbar" data-node-media-toolbar="1" aria-label="图片视频快捷操作">${[...items, more].map(item => `
+        <button type="button" data-media-toolbar-action="${escapeAttr(item.id)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(item.label)}"><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></button>`).join('')}</div>`;
+}
+function runClassicMediaToolbarAction(nodeId, action){
+    const node = nodes.find(item => item.id === nodeId);
+    if(!node) return;
+    if(action === 'more'){ openCanvasSettings('media'); return; }
+    if(node.type === 'video'){
+        if(action === 'run') runCanvasGenerate(node.id);
+        else if(action === 'connect'){
+            const rect = nodesEl.querySelector(`.node[data-id="${CSS.escape(node.id)}"]`)?.getBoundingClientRect();
+            openGeneratorNodeMenu(node.id, rect?.left || 20, rect?.bottom || 80);
+        }
+        return;
+    }
+    const kind = mediaKindForNode(node);
+    if(action === 'preview') openImageNodePreview(node.id);
+    else if(action === 'edit' && kind === 'image') openImageEditor(node.id);
+    else if(action === 'replace') pickImageForNode(node.id);
+    else if(action === 'download' && node.url) downloadUrl(node.url, node.name || outputDownloadName(node.url)).catch(error => alert(error.message || '下载失败'));
+}
+function bindClassicMediaToolbar(el, node){
+    const toolbar = el?.querySelector?.('[data-node-media-toolbar]');
+    if(!toolbar) return;
+    toolbar.addEventListener('mousedown', event => event.stopPropagation());
+    toolbar.querySelectorAll('[data-media-toolbar-action]').forEach(button => button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        runClassicMediaToolbarAction(button.dataset.nodeId || node.id, button.dataset.mediaToolbarAction || 'more');
+    }));
 }
 function openImageNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
@@ -5312,17 +5475,13 @@ function scheduleCanvasSubmenuClose(){
         filmMenuHost?.classList.remove('submenu-open','submenu-flip');
         filmSubmenu?.classList.remove('submenu-open');
         filmMenuTrigger?.setAttribute('aria-expanded','false');
-        ecommerceMenuHost?.classList.remove('submenu-open','submenu-flip');
-        ecommerceSubmenu?.classList.remove('submenu-open');
-        ecommerceMenuTrigger?.setAttribute('aria-expanded','false');
     }, 140);
 }
 function closeInactiveCanvasSubmenus(event){
     if(!createMenu?.classList.contains('open')) return;
     const target = event.target;
     const inFilm = Boolean((filmMenuHost && filmMenuHost.contains(target)) || (filmSubmenu && filmSubmenu.contains(target)));
-    const inEcommerce = Boolean((ecommerceMenuHost && ecommerceMenuHost.contains(target)) || (ecommerceSubmenu && ecommerceSubmenu.contains(target)));
-    if(!inFilm && !inEcommerce){
+    if(!inFilm){
         scheduleCanvasSubmenuClose();
         return;
     }
@@ -5330,34 +5489,11 @@ function closeInactiveCanvasSubmenus(event){
         clearTimeout(canvasSubmenuCloseTimer);
         canvasSubmenuCloseTimer = 0;
     }
-    if(inFilm && !inEcommerce) closeCanvasSubmenu(ecommerceMenuHost,ecommerceSubmenu,ecommerceMenuTrigger);
-    if(inEcommerce && !inFilm) closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
+    if(inFilm) closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
 }
 document.addEventListener('pointerover', closeInactiveCanvasSubmenus, true);
-if(ecommerceMenuTrigger){
-    const setEcommerceSubmenuOpen = open => {
-        if(open){
-            closeCanvasSubmenu(filmMenuHost,filmSubmenu,filmMenuTrigger);
-        }
-        ecommerceMenuHost.classList.toggle('submenu-open',open);
-        ecommerceSubmenu?.classList.toggle('submenu-open',open);
-        ecommerceMenuTrigger.setAttribute('aria-expanded',open ? 'true' : 'false');
-        if(open) requestAnimationFrame(positionEcommerceSubmenu);
-    };
-    ecommerceMenuTrigger.addEventListener('click',event => {
-        event.preventDefault();
-        event.stopPropagation();
-        setEcommerceSubmenuOpen(true);
-    });
-    ecommerceMenuHost.addEventListener('pointerenter',() => setEcommerceSubmenuOpen(true));
-    ecommerceSubmenu?.addEventListener('mousedown',event => event.stopPropagation());
-    ecommerceSubmenu?.addEventListener('click',event => event.stopPropagation());
-}
 if(filmMenuTrigger){
     const setFilmSubmenuOpen = open => {
-        if(open){
-            closeCanvasSubmenu(ecommerceMenuHost,ecommerceSubmenu,ecommerceMenuTrigger);
-        }
         filmMenuHost.classList.toggle('submenu-open',open);
         filmSubmenu?.classList.toggle('submenu-open',open);
         filmMenuTrigger.setAttribute('aria-expanded',open ? 'true' : 'false');
@@ -9875,12 +10011,15 @@ function renderNode(node){
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
+    const mediaToolbar = classicMediaToolbarHtml(node);
+    if(mediaToolbar) el.insertAdjacentHTML('beforeend', mediaToolbar);
     const visualShell = document.createElement('div');
     visualShell.className = 'node-visual-shell';
     const nodeHead = el.querySelector(':scope > .node-head');
     if(nodeHead) visualShell.appendChild(nodeHead);
     visualShell.appendChild(body);
     el.appendChild(visualShell);
+    bindClassicMediaToolbar(el, node);
     el.querySelectorAll('button, select, textarea, input').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation(), true);
         control.addEventListener('click', e => e.stopPropagation());
@@ -12086,9 +12225,12 @@ function renderGeneratorBody(node){
     sanitizeImageNodeProviderModel(node);
     normalizeApiNodeSizeChoice(node);
     wrap.innerHTML = `
+        <div class="generator-canvas-content">
         <div class="prompt-list mb-3"></div>
         <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.images')}</div>
         <div class="input-list"></div>
+        </div>
+        <div class="node-bottom-controls">
         <div class="gen-settings">
             <div class="gen-settings-row">
                 <select class="select-lite provider-select">${providerOptions(node.apiProvider)}</select>
@@ -12152,6 +12294,7 @@ function renderGeneratorBody(node){
             ${isBatch ? '' : cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
+        </div>
     `;
     const providerSelect = wrap.querySelector('.provider-select');
     const modelSelect = wrap.querySelector('.model-select');
@@ -12507,6 +12650,7 @@ function renderVideoBody(node){
     const isKling = isKlingVideoNode(node);
     if(!isKling) node.model = node.model || 'veo3-fast';
     wrap.innerHTML = `
+        <div class="generator-canvas-content">
         <div class="prompt-list mb-3"></div>
         <div class="video-input-head">
             <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Media</div>
@@ -12516,6 +12660,8 @@ function renderVideoBody(node){
             </div>
         </div>
         <div class="input-list video-img-list"></div>
+        </div>
+        <div class="node-bottom-controls">
         <div class="gen-settings">
             <div class="gen-settings-row">
                 <select class="select-lite video-provider" style="flex:1">${videoProviderOptions(node.apiProvider)}</select>
@@ -12529,6 +12675,7 @@ function renderVideoBody(node){
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
+        </div>
     `;
     const providerSelect = wrap.querySelector('.video-provider');
     const modelSelect = wrap.querySelector('.video-model');
@@ -21359,6 +21506,7 @@ function runClassicEditorShortcutAction(actionId){
 function classicShortcutBlockedOverlayAction(){
     if(logModal?.classList.contains('open')) return 'canvas.toggleLogs';
     if(classicShortcutModal?.classList.contains('open')) return 'canvas.toggleShortcuts';
+    if(canvasSettingsModal?.classList.contains('open')) return '__blocked__';
     if(workflowTransferModal?.classList.contains('open')) return 'canvas.toggleWorkflow';
     if(createMenu?.classList.contains('open')) return 'canvas.createMenu';
     if(promptTemplateModal?.classList.contains('open')) return 'canvas.promptTemplates';
@@ -21483,6 +21631,7 @@ function handleClassicShortcutKeyDown(e){
         }
         return true;
     }
+    if(e.key === 'Escape' && canvasSettingsModal?.classList.contains('open')) { closeCanvasSettings(); return true; }
     if(e.key === 'Escape' && expandedPromptModal?.classList.contains('open')) { closeExpandedPromptEditor(); return true; }
     if(isEditableTarget(e.target) || e.repeat) return false;
     if(document.getElementById('imageEditModal')?.classList.contains('open') || outputLightbox?.classList.contains('open')){

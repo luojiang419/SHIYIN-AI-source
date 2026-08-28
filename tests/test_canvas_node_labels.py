@@ -20,8 +20,7 @@ class CanvasNodeLabelTests(unittest.TestCase):
         cls.api_i18n = (STATIC / "js" / "i18n" / "api-settings.js").read_text(encoding="utf-8")
 
     def test_llm_node_uses_ai_assistant_label(self):
-        self.assertIn("<span>AI助手</span>", self.classic_html)
-        self.assertIn('data-i18n="canvas.llmNode">AI助手</span>', self.classic_html)
+        self.assertIn("id:'llm', label:'AI助手'", self.classic)
         self.assertIn("node.type === 'llm' ? 'AI助手'", self.classic)
         self.assertIn("label:'AI助手'", self.classic)
         self.assertIn('"canvas.llmNode": { zh: "AI助手", en: "AI Assistant" }', self.i18n)

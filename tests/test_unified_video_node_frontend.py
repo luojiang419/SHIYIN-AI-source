@@ -13,7 +13,8 @@ class UnifiedVideoNodeFrontendTests(unittest.TestCase):
         cls.settings_javascript = (root / "static" / "js" / "api-settings.js").read_text(encoding="utf-8")
 
     def test_unified_entry_replaces_separate_h3_entry(self):
-        self.assertEqual(self.html.count('onclick="addVideoNode()"'), 1)
+        self.assertIn("id:'video'", self.javascript)
+        self.assertIn("addVideoNode()", self.javascript)
         self.assertEqual(self.html.count("menuAdd('video')"), 1)
         self.assertNotIn('onclick="addH3VideoNode()"', self.html)
         self.assertNotIn("menuAdd('h3-video')", self.html)

@@ -15,7 +15,8 @@ class BlenderDirectorCanvasTests(unittest.TestCase):
         cls.installer = (root / "tools" / "build-installer.ps1").read_text(encoding="utf-8")
 
     def test_canvas_exposes_director_node_and_render_controls(self):
-        self.assertIn("addBlenderDirectorNode()", self.html)
+        self.assertIn("id:'blenderDirector'", self.javascript)
+        self.assertIn("addBlenderDirectorNode()", self.javascript)
         self.assertIn("menuAdd('blenderDirector')", self.html)
         self.assertIn("function renderBlenderDirectorBody(node)", self.javascript)
         self.assertIn("function syncBlenderCamera(nodeId)", self.javascript)
@@ -23,8 +24,8 @@ class BlenderDirectorCanvasTests(unittest.TestCase):
         self.assertIn(".blender-director-body", self.css)
 
     def test_rendered_images_and_videos_are_downstream_media(self):
-        self.assertIn("['generator','rh','blenderDirector']", self.javascript)
-        self.assertIn("['generator','video','rh','blenderDirector']", self.javascript)
+        self.assertIn("...['generator','video','rh','blenderDirector','director3d']", self.javascript)
+        self.assertIn("'batchGenerator'", self.javascript)
         self.assertIn("mergeGeneratedOutputs(node, [item], true)", self.javascript)
         self.assertIn("appendOutputImagesWithoutDuplicates(out, [item])", self.javascript)
 

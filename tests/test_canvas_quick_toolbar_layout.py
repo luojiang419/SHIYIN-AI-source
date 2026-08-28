@@ -14,15 +14,13 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         cls.styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         cls.i18n = (ROOT / "static" / "js" / "i18n" / "canvas.js").read_text(encoding="utf-8")
 
-    def test_toolbar_entries_are_split_into_two_explicit_rows(self):
-        toolbar = re.search(r'<div id="quickToolbar"(?P<body>.*?)</div>\s*</div>\s*</div>', self.html, re.DOTALL)
-        self.assertIsNotNone(toolbar)
-        body = toolbar.group("body")
-        self.assertEqual(body.count('class="toolbar-row"'), 2)
-        self.assertIn('onclick="addImageNode()"', body)
-        self.assertIn('onclick="addVideoNode()"', body)
-        self.assertIn('onclick="addBlenderDirectorNode()"', body)
-        self.assertIn('onclick="groupSelectedImages()"', body)
+    def test_toolbar_entries_are_dynamic_and_split_into_nine_item_rows(self):
+        self.assertIn('id="toolbarNodeItems" class="toolbar-items"', self.html)
+        self.assertIn("const CLASSIC_QUICK_TOOLBAR_DEFS = [", self.javascript)
+        for item_id in ("image", "video", "blenderDirector", "group"):
+            self.assertIn(f"id:'{item_id}'", self.javascript)
+        self.assertIn("for(let start = 0; start < items.length; start += 9)", self.javascript)
+        self.assertIn("items.slice(start, start + 9)", self.javascript)
 
     def test_expanded_toolbar_uses_two_rows_without_horizontal_scrolling(self):
         self.assertIn(".toolbar-items { flex:1 1 auto; min-width:0; display:flex; flex-direction:column;", self.styles)
@@ -30,17 +28,13 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         self.assertIn("overflow:visible;", self.styles)
         self.assertIn(".toolbar-row {", self.styles)
 
-    def test_canvas_modes_join_the_first_row_so_both_rows_are_left_aligned(self):
-        toolbar = re.search(r'<div id="quickToolbar"(?P<body>.*?)</div>\s*</div>\s*</div>', self.html, re.DOTALL)
-        self.assertIsNotNone(toolbar)
-        body = toolbar.group("body")
-        first_row = body.index('class="toolbar-row"')
-        mode_switch = body.index('id="canvasToolSwitch"')
-        first_node = body.index('onclick="addImageNode()"')
-        second_row = body.index('class="toolbar-row"', first_row + 1)
-        self.assertLess(first_row, mode_switch)
-        self.assertLess(mode_switch, first_node)
-        self.assertLess(first_node, second_row)
+    def test_canvas_modes_stay_as_a_fixed_control_next_to_the_dynamic_node_panel(self):
+        self.assertIn('id="canvasToolSwitch" class="canvas-tool-switch"', self.html)
+        self.assertIn('id="canvasSelectTool"', self.html)
+        self.assertIn('id="canvasPanTool"', self.html)
+        self.assertIn("onclick=\"setCanvasToolMode('select')\"", self.html)
+        self.assertIn("onclick=\"setCanvasToolMode('pan')\"", self.html)
+        self.assertIn('id="toolbarNodePanel" class="toolbar-node-panel"', self.html)
 
     def test_collapsed_toolbar_keeps_mode_switch_and_compacts_toggle(self):
         self.assertIn('.toolbar-node-panel.collapsed .toolbar-row > .tool-btn,', self.styles)
@@ -87,6 +81,7 @@ class CanvasQuickToolbarLayoutTests(unittest.TestCase):
         body = fixed.group("body")
         self.assertLess(body.index('id="canvasAssetToggle"'), body.index('id="canvasLogToggle"'))
         self.assertLess(body.index('id="canvasLogToggle"'), body.index('class="tool-btn toolbar-toggle"'))
+        self.assertLess(body.index('class="tool-btn toolbar-toggle"'), body.index('id="canvasToolbarSettingsBtn"'))
 
     def test_narrow_toolbar_compacts_nodes_and_wraps_before_overlap(self):
         self.assertIn('.toolbar-items .toolbar-row > .tool-btn { width:32px; min-width:32px; }', self.styles)

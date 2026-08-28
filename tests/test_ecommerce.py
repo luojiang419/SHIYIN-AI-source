@@ -1966,9 +1966,10 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("parameters.count ?? task?.count ?? task?.request?.count", self.javascript)
         self.assertIn("data-task-candidate-time", self.javascript)
         self.assertIn("syncCandidateTimer()", self.javascript)
-        self.assertIn("const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation'", self.javascript)
-        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.10.universal-plan-banner-removed.1"', self.index_html)
-        self.assertIn('id="frame-free-creation" data-src="/static/ecommerce.html?workspace=free-creation&amp;v=2026.08.10.universal-plan-banner-removed.1"', self.index_html)
+        self.assertIn("const IS_FREE_CREATION = false", self.javascript)
+        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.10.universal-plan-banner-removed.1&feature=free-creation-removed.1"', self.index_html)
+        self.assertNotIn('id="frame-free-creation"', self.index_html)
+        self.assertNotIn("switchUI(this, 'free-creation')", self.index_html)
         self.assertIn('/static/js/ecommerce.js?v=2026.08.10.universal-plan-banner-removed.1', self.html)
         self.assertIn('/static/css/ecommerce.css?v=2026.08.10.universal-plan-banner-removed.1', self.html)
 
@@ -2074,38 +2075,14 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("applyIncomingSettings(String(incomingSettings))", self.javascript)
 
     def test_free_creation_reuses_universal_workspace_with_isolated_raw_prompt_mode(self):
-        self.assertIn("switchUI(this, 'free-creation')", self.index_html)
-        self.assertRegex(self.index_html, r'id="frame-free-creation"[^>]+workspace=free-creation')
-        self.assertIn("'free-creation'", self.index_html)
-        self.assertIn('"nav.freeCreation"', self.common_i18n)
-        for marker in (
-            "const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation'",
-            "studio_free_creation_settings_v1",
-            "free_creation_current_task",
-            "payload.options.prompt_policy = 'free'",
-            "function taskMatchesWorkspace(task)",
-            "configureWorkspaceVariant()",
-            "freeCreation.promptRequired",
-        ):
-            self.assertIn(marker, self.javascript)
-        for key in (
-            "freeCreation.title",
-            "freeCreation.guideHint",
-            "freeCreation.prompt",
-            "freeCreation.promptRequired",
-            "freeCreation.emptyTitle",
-            "freeCreation.emptyHint",
-            "freeCreation.sourceRatio",
-        ):
-            self.assertIn(key, self.ecommerce_i18n)
-        self.assertIn("可不上传任何图片", self.ecommerce_i18n)
-        self.assertIn("创作素材（可选）", self.ecommerce_i18n)
-        self.assertIn("跟随参考图（无图时 1:1）", self.ecommerce_i18n)
-        self.assertNotIn("freeCreation.referenceRequired", self.ecommerce_i18n)
-        self.assertIn("querySelector('h3 + p')", self.javascript)
-        self.assertIn("querySelector('option[value=\"source\"]')", self.javascript)
-        self.assertIn("2026.08.09.universal-routes.1", self.i18n_loader)
-        self.assertIn(".ec-page.is-universal.is-free-creation .ec-operation-controls { order:1; }", self.css)
+        self.assertNotIn("switchUI(this, 'free-creation')", self.index_html)
+        self.assertNotIn('id="frame-free-creation"', self.index_html)
+        self.assertIn("const requestedWorkspace", self.javascript)
+        self.assertIn("canonicalUrl.searchParams.delete('workspace')", self.javascript)
+        self.assertIn("const WORKSPACE_VARIANT = 'ecommerce'", self.javascript)
+        self.assertIn("const IS_FREE_CREATION = false", self.javascript)
+        self.assertNotIn("studio_free_creation_settings_v1", self.javascript)
+        self.assertNotIn("free_creation_current_task", self.javascript)
 
     def test_universal_tab_supports_ordered_role_aware_references(self):
         self.assertIn('data-operation="universal"', self.html)

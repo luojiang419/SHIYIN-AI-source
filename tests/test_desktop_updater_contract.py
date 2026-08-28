@@ -126,7 +126,7 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("stamp-web-cache-version.mjs", installer_build)
         self.assertIn("Web cache-version stamping failed", installer_build)
         cache_stamp = WEB_CACHE_STAMP_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("/([?&])v=[0-9A-Za-z._-]+/g", cache_stamp)
+        self.assertIn(r"\/static\/", cache_stamp)
         self.assertIn("Cache-version rewrite unexpectedly emptied web asset", cache_stamp)
         self.assertIn("function Assert-StagedWebAssets", installer_build)
         self.assertIn("Staged canvas is missing the Topaz create-menu entry", installer_build)

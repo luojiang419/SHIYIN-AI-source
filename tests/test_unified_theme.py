@@ -61,12 +61,12 @@ class UnifiedThemeTests(unittest.TestCase):
                 frame_id,
             )
         self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-neutral-no-blue\.1')
-        for frame_id in ("frame-ecommerce", "frame-free-creation"):
-            self.assertRegex(
-                source,
-                rf'id="{frame_id}"[^>]+universal-plan-banner-removed\.1',
-                frame_id,
-            )
+        self.assertRegex(
+            source,
+            r'id="frame-ecommerce"[^>]+universal-plan-banner-removed\.1',
+            "frame-ecommerce",
+        )
+        self.assertNotIn('id="frame-free-creation"', source)
 
     def test_infinite_canvas_dark_surface_is_neutral_and_cache_busted(self):
         source = UNIFIED_CSS.read_text(encoding="utf-8")

@@ -1,11 +1,17 @@
 (function(){
     'use strict';
 
-    const WORKSPACE_VARIANT = new URLSearchParams(window.location.search).get('workspace') || 'ecommerce';
-    const IS_FREE_CREATION = WORKSPACE_VARIANT === 'free-creation';
-    const SETTINGS_KEY = IS_FREE_CREATION ? 'studio_free_creation_settings_v1' : 'studio_ecommerce_settings_v2';
-    const LEGACY_SETTINGS_KEY = IS_FREE_CREATION ? '' : 'studio_ecommerce_settings_v1';
-    const CURRENT_TASK_KEY = IS_FREE_CREATION ? 'free_creation_current_task' : 'ecommerce_current_task';
+    const requestedWorkspace = new URLSearchParams(window.location.search).get('workspace');
+    if(requestedWorkspace === 'free-creation'){
+        const canonicalUrl = new URL(window.location.href);
+        canonicalUrl.searchParams.delete('workspace');
+        window.history.replaceState({}, '', canonicalUrl);
+    }
+    const WORKSPACE_VARIANT = 'ecommerce';
+    const IS_FREE_CREATION = false;
+    const SETTINGS_KEY = 'studio_ecommerce_settings_v2';
+    const LEGACY_SETTINGS_KEY = 'studio_ecommerce_settings_v1';
+    const CURRENT_TASK_KEY = 'ecommerce_current_task';
     const SETTINGS_SCHEMA_VERSION = 4;
     const DEFAULT_OPERATION = 'universal';
     const ASPECT_RATIOS = ['source','1:1','2:3','3:2','3:4','4:3','4:5','9:16','16:9'];

@@ -49,9 +49,10 @@ def test_image_prompt_panel_is_separate_from_top_media_actions():
     assert "selectionHub.classList.toggle('image-prompt-hub', Boolean(imageNode))" in render_source
     assert "const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');" in JS
     assert "? anchorRect.bottom - boardRect.top + gap" in JS
-    assert "const maxTop = boardRect.height - hubRect.height - margin;" in JS
-    assert "width:min(720px,max(296px,68vw),calc(100vw - 24px))" in CSS
-    assert "min-height:clamp(82px,12vh,150px)" in CSS
+    assert "const maxTop = Math.max(margin, boardRect.height - hubRect.height - margin);" in JS
+    assert "width:min(622px,calc(100vw - 24px))" in CSS
+    assert "height:clamp(112px,18vh,160px)" in CSS
+    assert "const gap = 16;" in JS
 
 
 def test_canvas_preferences_preserve_an_explicit_empty_selection():
@@ -63,3 +64,24 @@ def test_image_media_toolbar_exposes_grid_and_downstream_actions_with_two_row_ca
         assert f"{{id:'{action}'" in JS
     assert "['edit','grid','batchGenerator','video','panorama','angle','multi-view','relight','dwpose','download']" in JS
     assert "else if(node.url) runMediaQuickAction(action" in JS
+
+
+def test_connection_context_menu_uses_link_hit_path_and_disconnects_one_connection():
+    assert '<div id="connectionContextMenu" class="create-menu connection-context-menu"' in HTML
+    assert "const connectionContextMenu = document.getElementById('connectionContextMenu');" in JS
+    assert "const connectionHit = e.target.closest?.('.link-hit[data-connection-id]');" in JS
+    assert "openConnectionContextMenu(connectionHit.dataset.connectionId, e.clientX, e.clientY);" in JS
+    assert 'data-connection-disconnect="${escapeAttr(connectionId)}"' in JS
+    assert "deleteConnection(connectionId, event);" in JS
+    assert "setHoveredConnection(connectionId);" in JS
+    assert "hoveredConnectionId === connection.id" in JS
+    assert ".connection-context-menu { width:172px; }" in CSS
+    assert ".link-controls { position:absolute" in CSS and "display:none" in CSS
+
+
+def test_canvas_node_colors_follow_reference_neutral_palette_and_blue_selection():
+    assert "--canvas-node-fill:#e7e5df" in CSS
+    assert "--canvas-node-stroke:#d6d3ca" in CSS
+    assert "--canvas-selection:hsl(214 100% 59%)" in CSS
+    assert ".node.selected { outline:2px solid var(--canvas-selection);" in CSS
+    assert ".link.link-active { stroke:var(--canvas-selection);" in CSS

@@ -316,6 +316,7 @@ const linkCreateMenu = document.getElementById('linkCreateMenu');
 const nodeInputMenu = document.getElementById('nodeInputMenu');
 const nodeOutputMenu = document.getElementById('nodeOutputMenu');
 const imageNodeMenu = document.getElementById('imageNodeMenu');
+const connectionContextMenu = document.getElementById('connectionContextMenu');
 const selectionBox = document.getElementById('selectionBox');
 const selectionHub = document.getElementById('selectionHub');
 const canvasSelectTool = document.getElementById('canvasSelectTool');
@@ -1766,6 +1767,7 @@ function setCanvasMode(open){
         classicTempLinkDom = null;
         classicKnifeTrailDom = null;
         selectionHub.classList.remove('open');
+        closeConnectionContextMenu();
     } else if(currentCanvasTitle) {
         currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
         currentCanvasTime.textContent = formatCanvasTime(canvas?.updated_at || canvas?.created_at);
@@ -2103,7 +2105,7 @@ function renderClassicConnectionPatch(ids=[], options={}){
             linksEl.appendChild(current.path);
             linksEl.appendChild(current.hit);
         }
-        current.path.className.baseVal = `link${isConnectionSelected(connection) ? ' link-active' : ''}`;
+        current.path.className.baseVal = `link${isConnectionSelected(connection) || hoveredConnectionId === connection.id ? ' link-active' : ''}`;
         current.hit.dataset.connectionId = connection.id;
         setPathGeometry(current.path, a.x, a.y, b.x, b.y);
         setPathGeometry(current.hit, a.x, a.y, b.x, b.y);
@@ -4844,6 +4846,35 @@ function closeCreateMenu(){
     filmMenuTrigger?.setAttribute('aria-expanded','false');
     closeLinkCreateMenu();
     closeImageNodeMenu();
+    closeConnectionContextMenu();
+}
+function closeConnectionContextMenu(){
+    connectionContextMenu?.classList.remove('open');
+    if(connectionContextMenu) connectionContextMenu.innerHTML = '';
+}
+function openConnectionContextMenu(connectionId, clientX, clientY){
+    const connection = connections.find(item => item.id === connectionId);
+    if(!connection || !connectionContextMenu) return false;
+    setHoveredConnection(connectionId);
+    closeCreateMenu();
+    connectionContextMenu.innerHTML = `<button class="menu-btn" type="button" data-connection-disconnect="${escapeAttr(connectionId)}"><i data-lucide="unlink-2" class="w-4 h-4"></i><span>断开连接</span></button>`;
+    connectionContextMenu.style.left = `${clientX}px`;
+    connectionContextMenu.style.top = `${clientY}px`;
+    connectionContextMenu.classList.add('open');
+    const menuRect = connectionContextMenu.getBoundingClientRect();
+    const margin = 10;
+    const left = Math.max(margin, Math.min(window.innerWidth - menuRect.width - margin, clientX));
+    const top = Math.max(margin, Math.min(window.innerHeight - menuRect.height - margin, clientY));
+    connectionContextMenu.style.left = `${left}px`;
+    connectionContextMenu.style.top = `${top}px`;
+    connectionContextMenu.querySelector('[data-connection-disconnect]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteConnection(connectionId, event);
+        closeConnectionContextMenu();
+    });
+    refreshIcons(connectionContextMenu);
+    return true;
 }
 function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
@@ -19207,7 +19238,7 @@ function positionSelectionHub(anchor){
     const margin = 12;
     const maxLeft = Math.max(margin, boardRect.width - hubRect.width - margin);
     const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
-    const gap = 14;
+    const gap = 16;
     const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');
     // 图片节点的提示词面板与节点顶部工具条分离：面板固定锚定在节点下方，
     // 工具条继续由节点自身的 .node-media-toolbar 定位到节点上方。
@@ -19215,7 +19246,7 @@ function positionSelectionHub(anchor){
         ? anchorRect.bottom - boardRect.top + gap
         : anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
     if(isImagePromptHub){
-        const maxTop = boardRect.height - hubRect.height - margin;
+        const maxTop = Math.max(margin, boardRect.height - hubRect.height - margin);
         top = Math.min(top, maxTop);
     } else if(top < margin){
         top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
@@ -20797,7 +20828,7 @@ function renderLinks(){
         path.setAttribute('d', `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
     };
     segments.forEach(({c, a, b}) => {
-        const selectedConnection = isConnectionSelected(c);
+        const selectedConnection = isConnectionSelected(c) || hoveredConnectionId === c.id;
         const downstreamSelected = selected.has(c.from);
         const relClass = selectedConnection ? ` link-active${downstreamSelected ? ' link-breathe' : ''}` : '';
         let entry = classicLinkDom.get(c.id);
@@ -20929,11 +20960,15 @@ function setHoveredConnection(id){
     if(hoveredConnectionId === id) return;
     const oldId = hoveredConnectionId;
     hoveredConnectionId = id || '';
+    const oldConnection = classicConnectionModelIndex.get(oldId);
+    const oldEntry = classicLinkDom.get(oldId);
+    if(oldEntry?.path && oldId && !isConnectionSelected(oldConnection || {})) oldEntry.path.classList.remove('link-active');
     if(oldId){
         const oldBtn = linkControlsEl.querySelector(`[data-connection-id="${CSS.escape(oldId)}"]`);
         if(oldBtn) oldBtn.classList.remove('hover');
     }
     if(hoveredConnectionId){
+        classicLinkDom.get(hoveredConnectionId)?.path?.classList.add('link-active');
         const btn = linkControlsEl.querySelector(`[data-connection-id="${CSS.escape(hoveredConnectionId)}"]`);
         if(btn) btn.classList.add('hover');
     }
@@ -21195,7 +21230,7 @@ canvasArrangeMenuBtn?.addEventListener('click', e => {
     closeCreateMenu();
 });
 function isZoomPreviewIgnoredTarget(target){
-    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
+    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
 }
 board.addEventListener('mousedown', e => {
     if(!zoomPreviewState || e.button !== 0) return;
@@ -21214,7 +21249,7 @@ board.addEventListener('click', e => {
 }, true);
 function startBoardPan(e, opts={}){
     if(!canvas) return false;
-    if(isEditableTarget(e.target) || e.target.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, .minimap')) return false;
+    if(isEditableTarget(e.target) || e.target.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap')) return false;
     e.preventDefault();
     e.stopPropagation();
     closeCreateMenu();
@@ -21282,6 +21317,13 @@ board.oncontextmenu = e => {
         e.stopPropagation();
         return;
     }
+    const connectionHit = e.target.closest?.('.link-hit[data-connection-id]');
+    if(connectionHit?.dataset?.connectionId){
+        e.preventDefault();
+        e.stopPropagation();
+        openConnectionContextMenu(connectionHit.dataset.connectionId, e.clientX, e.clientY);
+        return;
+    }
     const selectedNodeEl = e.target.closest?.('.node[data-id]');
     if(selectedNodeEl?.dataset?.id && selected.size > 1 && selected.has(selectedNodeEl.dataset.id)){
         e.preventDefault();
@@ -21295,7 +21337,7 @@ board.oncontextmenu = e => {
     openCreateMenu(e.clientX, e.clientY);
 };
 board.addEventListener('mousedown', e => {
-    if(e.target.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu')) return;
+    if(e.target.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu')) return;
     closeCreateMenu();
 });
 board.onwheel = e => {

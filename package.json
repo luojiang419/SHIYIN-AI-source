@@ -7,6 +7,7 @@
     "desktop:dev": "npm run css:build && tauri dev",
     "desktop:host-build": "npm run css:build && tauri build --no-bundle",
     "desktop:build": "npm run installer:build",
+    "original:installer": "powershell -ExecutionPolicy Bypass -File tools/build-original-installer.ps1",
     "installer:build": "powershell -ExecutionPolicy Bypass -File tools/build-installer.ps1",
     "installer:release": "powershell -ExecutionPolicy Bypass -File tools/release-installer.ps1",
     "release:publish": "powershell -ExecutionPolicy Bypass -File tools/release-installer.ps1",

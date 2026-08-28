@@ -367,6 +367,7 @@ const promptTemplateLibrarySelect = document.getElementById('promptTemplateLibra
 const promptTemplateCats = document.getElementById('promptTemplateCats');
 const promptTemplateBody = document.getElementById('promptTemplateBody');
 const canvasAssetToggle = document.getElementById('canvasAssetToggle');
+const quickToolbar = document.getElementById('quickToolbar');
 const canvasAssetPanel = document.getElementById('canvasAssetPanel');
 const canvasAssetCloseBtn = document.getElementById('canvasAssetCloseBtn');
 const canvasAssetLibrarySelect = document.getElementById('canvasAssetLibrarySelect');
@@ -387,6 +388,12 @@ const workflowImportDropZone = document.getElementById('workflowImportDropZone')
 const workflowExportLibraryBtn = document.getElementById('workflowExportLibraryBtn');
 const assetManagerModal = document.getElementById('assetManagerModal');
 const assetManagerBody = document.getElementById('assetManagerBody');
+// 捕获工具栏点击，使所有快捷创建按钮都以当前可视区域中心为锚点；右键菜单和连线菜单仍使用各自传入的位置。
+quickToolbar?.addEventListener('click', event => {
+    if(!event.target.closest('.toolbar-items .tool-btn')) return;
+    toolbarCenterInsertPending = true;
+    queueMicrotask(() => { toolbarCenterInsertPending = false; });
+}, true);
 function revealCanvasAssetControls(){
     [canvasAssetToggle, canvasAssetPanel, assetManagerModal].forEach(el => {
         if(!el) return;
@@ -531,6 +538,7 @@ let isControlKeyDown = false;
 let classicShortcutOverrides = {};
 const classicHeldShortcutActions = new Map();
 let menuPoint = null;
+let toolbarCenterInsertPending = false;
 let linkCreateState = null;
 let canvasSubmenuCloseTimer = 0;
 let internalDrag = false;
@@ -3616,7 +3624,13 @@ function addNode(node){
     scheduleSave();
     return node;
 }
-function defaultPoint(dx=0, dy=0){ return screenToWorld(window.innerWidth / 2 + dx, window.innerHeight / 2 + dy); }
+// 新建节点默认落在当前画布可视区域中心，而不是浏览器窗口中心（窗口内可能包含边距或嵌入容器）。
+function defaultPoint(dx=0, dy=0){
+    const rect = board?.getBoundingClientRect?.() || {left:0, top:0, width:window.innerWidth, height:window.innerHeight};
+    const offsetX = toolbarCenterInsertPending ? 0 : dx;
+    const offsetY = toolbarCenterInsertPending ? 0 : dy;
+    return screenToWorld(rect.left + rect.width / 2 + offsetX, rect.top + rect.height / 2 + offsetY, rect);
+}
 function addImageNode(point){
     const p = point || defaultPoint(-120, 0);
     return addNode({id:uid('img'), type:'image', x:p.x, y:p.y, url:'', name:'空白图片'});

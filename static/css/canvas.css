@@ -150,6 +150,68 @@ body.studio-theme-dark .canvas-meta-pop .emoji-option:hover { background:#30302f
 .toolbar .toolbar-toggle[aria-expanded="false"] i { transform:rotate(180deg); }
 .toolbar .toolbar-log,
 .toolbar .toolbar-asset { width:auto; height:38px; min-width:38px; padding:0 12px; }
+/* 快捷功能栏固定在画布底部中央；节点按钮作为向上展开的二级菜单。 */
+#quickToolbar.toolbar-bottom-center {
+    position:fixed;
+    left:50%;
+    right:auto;
+    top:auto;
+    bottom:24px;
+    z-index:90;
+    width:min(1100px, calc(100vw - 32px));
+    max-width:none;
+    transform:translateX(-50%);
+    align-items:flex-end;
+    justify-content:center;
+}
+#quickToolbar.toolbar-bottom-center .toolbar-node-panel[data-toolbar-flyout] {
+    position:absolute;
+    left:0;
+    right:0;
+    bottom:calc(100% + 10px);
+    width:100%;
+    max-height:min(46vh, 430px);
+    padding:8px;
+    border:1px solid var(--line);
+    border-radius:18px;
+    background:color-mix(in srgb, var(--card-solid) 94%, transparent);
+    box-shadow:0 20px 52px var(--shadow);
+    backdrop-filter:blur(18px);
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
+    transform:translateY(8px);
+    transition:opacity .16s var(--ease), transform .16s var(--ease), visibility .16s var(--ease);
+}
+#quickToolbar.toolbar-bottom-center:hover .toolbar-node-panel[data-toolbar-flyout],
+#quickToolbar.toolbar-bottom-center:focus-within .toolbar-node-panel[data-toolbar-flyout],
+#quickToolbar.toolbar-bottom-center.toolbar-flyout-open .toolbar-node-panel[data-toolbar-flyout] {
+    opacity:1;
+    visibility:visible;
+    pointer-events:auto;
+    transform:translateY(0);
+}
+#quickToolbar.toolbar-bottom-center .toolbar-node-panel[data-toolbar-flyout] .toolbar-items {
+    width:100%;
+    max-height:min(42vh, 390px);
+    overflow:auto;
+    align-items:center;
+}
+#quickToolbar.toolbar-bottom-center .toolbar-node-panel[data-toolbar-flyout] .toolbar-row {
+    width:100%;
+    justify-content:center;
+    flex-wrap:wrap;
+}
+#quickToolbar.toolbar-bottom-center .toolbar-fixed {
+    position:relative;
+    z-index:2;
+    padding:2px;
+    border-radius:14px;
+    background:var(--card-solid);
+}
+#quickToolbar.toolbar-bottom-center .toolbar-toggle:hover,
+#quickToolbar.toolbar-bottom-center .toolbar-toggle:focus-visible { color:var(--text); border-color:var(--line-2); }
+#quickToolbar.toolbar-bottom-center .toolbar-node-panel[data-toolbar-flyout].collapsed { display:flex; }
 .tool-btn { height:38px; min-width:38px; padding:0 12px; border-radius:999px; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--muted); background:var(--card-solid); border:1px solid var(--line); font-size:11px; font-weight:700; transition:all .2s var(--ease); pointer-events:auto; }
 .tool-btn:hover { background:var(--soft-2); color:var(--text); }
 .theme-toggle.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); }
@@ -1569,6 +1631,8 @@ body.studio-theme-dark .comfy-random-btn.active,
     .topbar .canvas-nav { order:1; }
     .topbar .toolbar { order:2; }
     .toolbar { width:100%; max-width:calc(100vw - 28px); padding:5px; gap:4px; border-radius:16px; overflow:hidden; }
+    #quickToolbar.toolbar-bottom-center { left:14px; right:14px; bottom:14px; width:auto; max-width:none; transform:none; }
+    #quickToolbar.toolbar-bottom-center .toolbar-node-panel[data-toolbar-flyout] { max-height:min(58vh, 520px); }
     .toolbar .canvas-tool-btn { width:30px; padding:0; }
     .toolbar .canvas-tool-btn span { display:none; }
     .expanded-prompt-modal { padding:14px; }
@@ -1635,3 +1699,8 @@ body.studio-theme-dark .comfy-random-btn.active,
 .classic-shortcut-item kbd{min-width:34px;height:24px;padding:0 7px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(155,146,136,.38);border-radius:8px;background:var(--card);color:var(--text);box-shadow:inset 0 -1px 0 rgba(0,0,0,.08);font:900 10px 'JetBrains Mono',ui-monospace,monospace}
 .classic-shortcut-item>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:700px){.classic-shortcut-modal{padding:118px 14px 14px}.classic-shortcut-panel{width:calc(100vw - 28px);max-height:calc(100vh - 132px)}}
+
+/* 底部工具栏在窄屏也允许二级菜单越出面板显示。 */
+@media (max-width:780px){#quickToolbar.toolbar-bottom-center{overflow:visible;}.topbar .toolbar-bottom-center{position:fixed;}}
+
+\n

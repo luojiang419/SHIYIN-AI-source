@@ -19,14 +19,15 @@ def test_bottom_toolbar_is_data_driven_and_has_settings_entry():
     assert "if(canvasSettingsModal?.classList.contains('open')) return '__blocked__';" in JS
 
 
-def test_media_toolbar_has_one_row_four_item_limit_and_more_entry():
-    assert "const MEDIA_TOOLBAR_MAX_ITEMS = 3;" in JS
+def test_media_toolbar_has_responsive_click_targets_and_more_entry():
+    assert "const MEDIA_TOOLBAR_MAX_ITEMS = 8;" in JS
     assert "const more = {id:'more', label:'更多', icon:'ellipsis'};" in JS
     assert "[...items, more]" in JS
     assert ".node-media-toolbar {" in CSS
-    assert "grid-template-columns:repeat(4,minmax(60px,1fr))" in CSS
-    assert "grid-auto-rows:28px" in CSS
-    assert "max-height:44px" in CSS
+    assert "grid-template-columns:repeat(auto-fit,minmax(clamp(76px,8vw,118px),1fr))" in CSS
+    assert "grid-auto-rows:clamp(36px,3.2vw,44px)" in CSS
+    assert "max-height:min(220px,38vh)" in CSS
+    assert "min-height:36px" in CSS
     assert "toolbar.querySelectorAll('[data-media-toolbar-action]')" in JS
     assert "runClassicMediaToolbarAction(button.dataset.nodeId" in JS
 
@@ -49,6 +50,12 @@ def test_image_prompt_panel_is_separate_from_top_media_actions():
     assert "const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');" in JS
     assert "? anchorRect.bottom - boardRect.top + gap" in JS
     assert "const maxTop = boardRect.height - hubRect.height - margin;" in JS
+    assert "width:min(720px,max(296px,68vw),calc(100vw - 24px))" in CSS
+    assert "min-height:clamp(82px,12vh,150px)" in CSS
+
+
+def test_canvas_preferences_preserve_an_explicit_empty_selection():
+    assert "return filtered.slice(0, maxItems);" in JS
 
 
 def test_image_media_toolbar_exposes_grid_and_downstream_actions_with_two_row_cap():

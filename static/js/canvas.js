@@ -858,7 +858,7 @@ const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
 const QUICK_TOOLBAR_ITEMS_KEY = 'canvas_quick_toolbar_items_v1';
 const MEDIA_TOOLBAR_ITEMS_KEY = 'canvas_media_toolbar_items_v1';
 const QUICK_TOOLBAR_MAX_ITEMS = 18;
-const MEDIA_TOOLBAR_MAX_ITEMS = 3;
+const MEDIA_TOOLBAR_MAX_ITEMS = 8;
 const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'image', label:'图片', icon:'image-plus', action:() => addImageNode()},
     {id:'prompt', label:'提示词', icon:'text-cursor-input', action:() => addPromptNode()},
@@ -985,7 +985,7 @@ function readCanvasPreferenceList(key, fallback, allowedIds, maxItems){
         const value = JSON.parse(localStorage.getItem(key) || 'null');
         if(Array.isArray(value)){
             const filtered = [...new Set(value.map(item => String(item || '').trim()))].filter(id => allowedIds.has(id));
-            if(filtered.length) return filtered.slice(0, maxItems);
+            return filtered.slice(0, maxItems);
         }
     } catch(e) {}
     return fallback.filter(id => allowedIds.has(id)).slice(0, maxItems);
@@ -1026,7 +1026,7 @@ function renderCanvasSettings(){
     const config = canvasSettingsListForMode(canvasSettingsMode);
     const selected = new Set(readCanvasPreferenceList(config.key, config.fallback, new Set(config.defs.map(item => item.id)), config.max));
     const hint = canvasSettingsMode === 'media'
-        ? '图片节点顶部菜单最多保留 3 项，和“更多”一起固定为一行 4 个；不可用的操作会自动隐藏。'
+        ? '图片节点顶部菜单最多保留 8 项，和“更多”会按画面宽度自动分列；不可用的操作会自动隐藏。'
         : '只显示你最常用的节点，最多 18 项，按当前顺序排列在同一行。空间不足时可横向滚动。';
     canvasSettingsBody.innerHTML = `<div class="canvas-settings-note">${escapeHtml(hint)}</div><div class="canvas-settings-options">${config.defs.map(item => `
         <label class="canvas-settings-option"><input type="checkbox" data-canvas-setting-id="${escapeAttr(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></label>`).join('')}</div>`;
@@ -4986,7 +4986,7 @@ function mediaToolbarItemsForNode(node){
 }
 function classicMediaToolbarHtml(node){
     const items = mediaToolbarItemsForNode(node);
-    if(!items.length && node?.type !== 'video') return '';
+    if(!items.length && !['image','video'].includes(node?.type)) return '';
     const more = {id:'more', label:'更多', icon:'ellipsis'};
     return `<div class="node-media-toolbar" data-node-media-toolbar="1" aria-label="图片视频快捷操作">${[...items, more].map(item => `
         <button type="button" data-media-toolbar-action="${escapeAttr(item.id)}" data-node-id="${escapeAttr(node.id)}" title="${escapeAttr(item.label)}"><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></button>`).join('')}</div>`;

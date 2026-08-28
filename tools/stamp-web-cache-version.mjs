@@ -41,7 +41,10 @@ for (const path of assets) {
   if (!content.length) {
     throw new Error(`Refusing to stamp empty web asset: ${path}`);
   }
-  const updated = content.replace(/([?&])v=[0-9A-Za-z._-]+/g, `$1v=${version}`);
+  // 仅改写字符串中的静态资源 URL。不能对所有 `?v=` 做全局替换，
+  // 因为压缩后的 JavaScript 中也会出现条件表达式 `condition ? v = ...`，
+  // 误替换会直接破坏脚本语法，造成桌面 WebView 空白页。
+  const updated = content.replace(/(["'`][^"'`]*\/static\/[^"'`]*[?&])v=[0-9A-Za-z._-]+/g, `$1v=${version}`);
   if (!updated.length) {
     throw new Error(`Cache-version rewrite unexpectedly emptied web asset: ${path}`);
   }

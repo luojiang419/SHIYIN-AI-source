@@ -858,7 +858,7 @@ const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
 const QUICK_TOOLBAR_ITEMS_KEY = 'canvas_quick_toolbar_items_v1';
 const MEDIA_TOOLBAR_ITEMS_KEY = 'canvas_media_toolbar_items_v1';
 const QUICK_TOOLBAR_MAX_ITEMS = 18;
-const MEDIA_TOOLBAR_MAX_ITEMS = 7;
+const MEDIA_TOOLBAR_MAX_ITEMS = 3;
 const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'image', label:'图片', icon:'image-plus', action:() => addImageNode()},
     {id:'prompt', label:'提示词', icon:'text-cursor-input', action:() => addPromptNode()},
@@ -883,12 +883,21 @@ const CLASSIC_QUICK_TOOLBAR_DEFAULT = ['image','prompt','llm','generator','video
 const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'preview', label:'预览', icon:'eye'},
     {id:'edit', label:'编辑', icon:'pencil'},
+    {id:'grid', label:'宫格切分', icon:'grid-3x3'},
     {id:'replace', label:'替换', icon:'image-plus'},
+    {id:'generator', label:'图片生成', icon:'wand-sparkles'},
+    {id:'batchGenerator', label:'批量处理', icon:'layers-3'},
+    {id:'video', label:'视频生成', icon:'clapperboard'},
+    {id:'panorama', label:'全景', icon:'scan-line'},
+    {id:'angle', label:'多角度', icon:'rotate-3d'},
+    {id:'multi-view', label:'三视图', icon:'panels-top-left'},
+    {id:'relight', label:'灯光', icon:'sun-medium'},
+    {id:'dwpose', label:'动作提取', icon:'person-standing'},
     {id:'download', label:'下载', icon:'download'},
     {id:'run', label:'运行', icon:'play'},
     {id:'connect', label:'连接', icon:'workflow'}
 ];
-const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','replace','download'];
+const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','download'];
 const CANVAS_SESSION_VIEWPORTS_KEY = 'canvas_session_viewports_v1';
 let canvasSessionViewportFallback = {};
 const DEFAULT_VIDEO_MODELS = [
@@ -1017,7 +1026,7 @@ function renderCanvasSettings(){
     const config = canvasSettingsListForMode(canvasSettingsMode);
     const selected = new Set(readCanvasPreferenceList(config.key, config.fallback, new Set(config.defs.map(item => item.id)), config.max));
     const hint = canvasSettingsMode === 'media'
-        ? '顶部菜单最多保留 7 项，末尾的“更多”始终保留。不可用的操作会自动置灰。'
+        ? '图片节点顶部菜单最多保留 3 项，和“更多”一起固定为一行 4 个；不可用的操作会自动隐藏。'
         : '只显示你最常用的节点，最多 18 项，按当前顺序排列在同一行。空间不足时可横向滚动。';
     canvasSettingsBody.innerHTML = `<div class="canvas-settings-note">${escapeHtml(hint)}</div><div class="canvas-settings-options">${config.defs.map(item => `
         <label class="canvas-settings-option"><input type="checkbox" data-canvas-setting-id="${escapeAttr(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></label>`).join('')}</div>`;
@@ -4965,8 +4974,14 @@ function mediaToolbarItemsForNode(node){
         return items.length ? items : ['run','connect'].map(id => definitions.get(id));
     }
     const kind = mediaKindForNode(node);
-    const available = new Set(['preview','replace','download']);
-    if(kind === 'image') available.add('edit');
+    const hasUsableUrl = Boolean(node.url && !isMissingAssetUrl(node.url));
+    const available = new Set(['replace']);
+    if(hasUsableUrl && ['image','video'].includes(kind)) available.add('preview');
+    if(kind === 'image') available.add('generator');
+    if(hasUsableUrl && kind === 'image'){
+        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','relight','dwpose','download']
+            .forEach(id => available.add(id));
+    }
     return selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
 }
 function classicMediaToolbarHtml(node){
@@ -4992,7 +5007,9 @@ function runClassicMediaToolbarAction(nodeId, action){
     if(action === 'preview') openImageNodePreview(node.id);
     else if(action === 'edit' && kind === 'image') openImageEditor(node.id);
     else if(action === 'replace') pickImageForNode(node.id);
+    else if(action === 'generator' && !node.url) runImageNodeQuickGenerate(node.id);
     else if(action === 'download' && node.url) downloadUrl(node.url, node.name || outputDownloadName(node.url)).catch(error => alert(error.message || '下载失败'));
+    else if(node.url) runMediaQuickAction(action, {kind:'node', mediaKind:kind, nodeId:node.id, url:node.url, name:node.name || outputImageName(node.url)});
 }
 function bindClassicMediaToolbar(el, node){
     const toolbar = el?.querySelector?.('[data-node-media-toolbar]');
@@ -18945,7 +18962,7 @@ function bindVideoFrameExtractorControls(){
 bindVideoFrameExtractorControls();
 function renderSelectionHub(options={}){
     selectionHub.innerHTML = '';
-    selectionHub.classList.remove('open');
+    selectionHub.classList.remove('open','image-prompt-hub');
     selectionHubAnchor = null;
     nodesEl.querySelectorAll('.output-img-wrap.quick-selected').forEach(element => element.classList.remove('quick-selected'));
     if(!canvas || selected.size !== 1) return;
@@ -19010,7 +19027,9 @@ function renderSelectionHub(options={}){
     ];
     const imageNode = target.kind === 'node' && target.mediaKind === 'image' ? sourceNodeForSelectionTarget(target) : null;
     const promptPanel = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';
-    selectionHub.innerHTML = `${promptPanel}<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
+    const actionPanel = imageNode ? '' : `<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
+    selectionHub.innerHTML = `${promptPanel}${actionPanel}`;
+    selectionHub.classList.toggle('image-prompt-hub', Boolean(imageNode));
     selectionHub.classList.add('open');
     selectionHubAnchor = anchor;
     selectionHub.dataset.targetKind = target.kind;
@@ -19190,7 +19209,11 @@ function positionSelectionHub(anchor){
     const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
     const gap = 14;
     // 保留旧定位表达式的语义，同时额外增加 4px 安全间距。
-    let top = anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
+    const mediaToolbarRect = selectionHub.classList.contains('image-prompt-hub')
+        ? anchor.querySelector?.('[data-node-media-toolbar]')?.getBoundingClientRect?.()
+        : null;
+    const mediaToolbarGap = mediaToolbarRect?.height ? mediaToolbarRect.height + 14 : 0;
+    let top = anchorRect.top - boardRect.top - hubRect.height - 10 - 4 - mediaToolbarGap;
     if(top < margin) top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
     selectionHub.style.left = `${Math.round(left)}px`;
     selectionHub.style.top = `${Math.round(Math.max(margin, top))}px`;

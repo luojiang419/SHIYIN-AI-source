@@ -46,7 +46,9 @@ def test_image_prompt_panel_is_separate_from_top_media_actions():
     assert "selectionHub.classList.remove('open','image-prompt-hub')" in render_source
     assert "const actionPanel = imageNode ? ''" in render_source
     assert "selectionHub.classList.toggle('image-prompt-hub', Boolean(imageNode))" in render_source
-    assert "const mediaToolbarGap = mediaToolbarRect?.height ? mediaToolbarRect.height + 14 : 0;" in JS
+    assert "const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');" in JS
+    assert "? anchorRect.bottom - boardRect.top + gap" in JS
+    assert "const maxTop = boardRect.height - hubRect.height - margin;" in JS
 
 
 def test_image_media_toolbar_exposes_grid_and_downstream_actions_with_two_row_cap():

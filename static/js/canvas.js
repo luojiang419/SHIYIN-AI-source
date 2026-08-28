@@ -19208,13 +19208,18 @@ function positionSelectionHub(anchor){
     const maxLeft = Math.max(margin, boardRect.width - hubRect.width - margin);
     const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
     const gap = 14;
-    // 保留旧定位表达式的语义，同时额外增加 4px 安全间距。
-    const mediaToolbarRect = selectionHub.classList.contains('image-prompt-hub')
-        ? anchor.querySelector?.('[data-node-media-toolbar]')?.getBoundingClientRect?.()
-        : null;
-    const mediaToolbarGap = mediaToolbarRect?.height ? mediaToolbarRect.height + 14 : 0;
-    let top = anchorRect.top - boardRect.top - hubRect.height - 10 - 4 - mediaToolbarGap;
-    if(top < margin) top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
+    const isImagePromptHub = selectionHub.classList.contains('image-prompt-hub');
+    // 图片节点的提示词面板与节点顶部工具条分离：面板固定锚定在节点下方，
+    // 工具条继续由节点自身的 .node-media-toolbar 定位到节点上方。
+    let top = isImagePromptHub
+        ? anchorRect.bottom - boardRect.top + gap
+        : anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
+    if(isImagePromptHub){
+        const maxTop = boardRect.height - hubRect.height - margin;
+        top = Math.min(top, maxTop);
+    } else if(top < margin){
+        top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
+    }
     selectionHub.style.left = `${Math.round(left)}px`;
     selectionHub.style.top = `${Math.round(Math.max(margin, top))}px`;
 }

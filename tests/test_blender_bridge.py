@@ -24,12 +24,18 @@ class StubBridge:
         self.server.bind(("127.0.0.1", 0))
         self.server.listen(4)
         self.port = self.server.getsockname()[1]
+        self.server.settimeout(0.2)
         self.thread = threading.Thread(target=self._serve, daemon=True)
         self.thread.start()
 
     def _serve(self):
         for _ in range(4):
-            connection, _ = self.server.accept()
+            try:
+                connection, _ = self.server.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
             with connection:
                 raw = b""
                 while b"\n" not in raw:
@@ -48,6 +54,10 @@ class StubBridge:
                 response = {"id": request["id"], "ok": True, "data": data}
                 connection.sendall(json.dumps(response).encode() + b"\n")
 
+    def close(self):
+        self.server.close()
+        self.thread.join(timeout=1)
+
     @staticmethod
     def assert_session(request):
         if request.get("session_token") != "x" * 32:
@@ -57,13 +67,16 @@ class StubBridge:
 class BlenderBridgeTests(unittest.TestCase):
     def test_auto_authenticates_then_runs_only_whitelisted_command(self):
         stub = StubBridge()
-        client = BlenderBridgeClient()
-        self.assertTrue(client.ping(stub.port)["connected"])
-        with patch("canvas_core.blender_bridge.load_or_create_bridge_secret", return_value=stub.shared_secret):
-            self.assertTrue(client.connect(stub.port)["authenticated"])
-            self.assertEqual(client.command("scene_state", port=stub.port)["scene"], "Scene")
-        with self.assertRaises(BlenderBridgeError):
-            client.command("execute_python", port=stub.port)
+        try:
+            client = BlenderBridgeClient()
+            self.assertTrue(client.ping(stub.port)["connected"])
+            with patch("canvas_core.blender_bridge.load_or_create_bridge_secret", return_value=stub.shared_secret):
+                self.assertTrue(client.connect(stub.port)["authenticated"])
+                self.assertEqual(client.command("scene_state", port=stub.port)["scene"], "Scene")
+            with self.assertRaises(BlenderBridgeError):
+                client.command("execute_python", port=stub.port)
+        finally:
+            stub.close()
 
     def test_shared_secret_is_created_once_and_never_exposed_to_frontend(self):
         with tempfile.TemporaryDirectory() as temp_dir:

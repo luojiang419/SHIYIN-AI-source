@@ -27,6 +27,7 @@ import functools
 import html
 import ipaddress
 import xml.etree.ElementTree as ET
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from threading import Lock, Thread
@@ -415,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.341"
+APP_VERSION = "1.0.342"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -491,7 +492,6 @@ async def run_deferred_startup_maintenance():
         if STARTUP_MAINTENANCE_STATE.get("status") != "cancelled":
             STARTUP_MAINTENANCE_STATE["status"] = "complete_with_errors" if failed else "complete"
 
-@app.on_event("startup")
 async def startup_event():
     global GLOBAL_LOOP, STARTUP_MAINTENANCE_TASK
     GLOBAL_LOOP = asyncio.get_running_loop()
@@ -533,7 +533,6 @@ async def startup_event():
     STARTUP_MAINTENANCE_TASK = asyncio.create_task(run_deferred_startup_maintenance())
 
 
-@app.on_event("shutdown")
 async def shutdown_startup_maintenance():
     global STARTUP_MAINTENANCE_TASK
     task = STARTUP_MAINTENANCE_TASK
@@ -544,6 +543,18 @@ async def shutdown_startup_maintenance():
             await task
         except asyncio.CancelledError:
             pass
+
+
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_startup_maintenance()
+
+
+app.router.lifespan_context = app_lifespan
 
 @app.websocket("/ws/events")
 @app.websocket("/ws/stats")
@@ -5624,7 +5635,7 @@ async def codex_chat_text(payload, history_messages=None):
         if hasattr(payload, "images"):
             image_values.extend([{"url": item} for item in (getattr(payload, "images", None) or []) if item])
         if hasattr(payload, "reference_images"):
-            image_values.extend([ref.dict() for ref in (getattr(payload, "reference_images", None) or []) if getattr(ref, "url", "")])
+            image_values.extend([ref.model_dump() for ref in (getattr(payload, "reference_images", None) or []) if getattr(ref, "url", "")])
         image_paths, temp_paths = await codex_reference_paths(image_values)
         raw = await run_codex_cli(
             codex_chat_prompt(payload, history_messages),
@@ -14794,7 +14805,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         model=selection["model"],
         size=payload.size,
         quality=payload.quality,
-        references=[ref.dict() for ref in payload.reference_images if ref.url],
+        references=[ref.model_dump() for ref in payload.reference_images if ref.url],
         count=payload.n,
         prefix="online_",
     )
@@ -14842,7 +14853,7 @@ ONLINE_IMAGE_TASK_RESTART_ERROR = "服务已重启，本地未完成任务已中
 ONLINE_IMAGE_TASK_RECOVERY_MESSAGE = "服务已重启，已保留云端任务 ID，可继续查询"
 
 def online_image_request_snapshot(payload: OnlineImageRequest) -> Dict[str, Any]:
-    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    refs = [ref.model_dump() for ref in payload.reference_images if ref.url]
     return {
         "prompt": payload.prompt,
         "operation": payload.operation,
@@ -15487,7 +15498,7 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         options = json.loads(options_json)
         normalized = validate_ecommerce_input_roles(
             operation,
-            [item.dict() for item in payload.inputs],
+            [item.model_dump() for item in payload.inputs],
             options,
         )
     except (TypeError, ValueError) as exc:
@@ -18273,7 +18284,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                             yuli_images.append(ref_url)
                         else:
                             # 本地/dataURL 图片转成 data URL 兜底传递
-                            data_url = reference_to_data_url(ref.dict(), max_size=1536)
+                            data_url = reference_to_data_url(ref.model_dump(), max_size=1536)
                             if data_url:
                                 yuli_images.append(data_url)
                     prompt_text = str(payload.prompt or "")
@@ -18296,7 +18307,7 @@ async def canvas_video(payload: CanvasVideoRequest):
                     image_payload = []
                     for ref in payload.images[:4]:
                         if ref.url:
-                            image_payload.append(reference_to_data_url(ref.dict(), max_size=1536))
+                                image_payload.append(reference_to_data_url(ref.model_dump(), max_size=1536))
                     body = {
                         "prompt": payload.prompt,
                         "model": selected_model(payload.model, "veo3-fast"),
@@ -19878,7 +19889,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
     if not conversation.get("messages"):
         conversation["title"] = display_title(payload.message)
 
-    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    refs = [ref.model_dump() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
     user_message = {
         "id": uuid.uuid4().hex,
@@ -19981,7 +19992,7 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
     if not conversation.get("messages"):
         conversation["title"] = display_title(payload.message)
 
-    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    refs = [ref.model_dump() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
     user_message = {
         "id": uuid.uuid4().hex,
@@ -20070,7 +20081,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
     if not conversation.get("messages"):
         conversation["title"] = display_title(payload.message)
 
-    refs = [ref.dict() for ref in payload.reference_images if ref.url]
+    refs = [ref.model_dump() for ref in payload.reference_images if ref.url]
     user_message = {
         "id": uuid.uuid4().hex,
         "role": "user",
@@ -21431,7 +21442,9 @@ def runninghub_workflow_store_key(workflow_id: str) -> str:
 
 def runninghub_normalize_field(raw, fallback=None):
     fallback = fallback or {}
-    if hasattr(raw, "dict"):
+    if hasattr(raw, "model_dump"):
+        raw = raw.model_dump()
+    elif hasattr(raw, "dict"):
         raw = raw.dict()
     if not isinstance(raw, dict):
         raw = {}

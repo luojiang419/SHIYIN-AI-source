@@ -5,6 +5,7 @@ requests
 pydantic
 python-multipart
 httpx
+httpx2
 pillow
 numpy==2.4.4
 onnxruntime==1.27.0

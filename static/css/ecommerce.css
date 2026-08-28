@@ -287,7 +287,7 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-spinner { width:34px; height:34px; border:2px solid rgba(102,78,50,.15); border-top-color:var(--ec-accent); border-radius:50%; animation:ec-spin .8s linear infinite; }
 @keyframes ec-spin { to { transform:rotate(360deg); } }
 .ec-result-footer { min-width:0; min-height:96px; display:grid; grid-template-columns:minmax(0,1fr); align-items:stretch; border-top:1px solid var(--ec-border); }
-.ec-candidate-list { min-width:0; min-height:96px; display:flex; align-items:center; gap:9px; overflow-x:auto; padding:7px 10px; scrollbar-width:thin; }
+.ec-candidate-list { min-width:0; min-height:96px; display:flex; align-items:center; gap:9px; overflow-x:auto; padding:7px 10px; scrollbar-width:thin; contain:layout paint; }
 .ec-candidate { position:relative; height:82px; overflow:hidden; padding:0; border:1px solid var(--ec-border); border-radius:13px; background:var(--ec-result-soft-bg); cursor:pointer; }
 .ec-candidate { flex:0 0 96px; width:96px; }
 .ec-candidate-shell { position:relative; flex:0 0 96px; width:96px; height:82px; }
@@ -303,6 +303,8 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-candidate.status-failed .ec-candidate-state i, .ec-candidate.status-interrupted .ec-candidate-state i { border:0; animation:none; }
 .ec-candidate.status-failed .ec-candidate-state i::before, .ec-candidate.status-interrupted .ec-candidate-state i::before { content:"×"; display:block; font-size:18px; font-style:normal; line-height:18px; }
 .ec-candidate-clear { position:absolute; top:5px; right:5px; z-index:3; width:23px; height:23px; padding:0; border:1px solid color-mix(in srgb,var(--ec-danger) 28%,var(--ec-border)); border-radius:8px; background:color-mix(in srgb,var(--ec-panel) 88%,transparent); color:var(--ec-danger); font-size:14px; line-height:1; cursor:pointer; opacity:0; transform:translateY(-2px); transition:opacity .14s ease,transform .14s ease; backdrop-filter:blur(8px); }
+.ec-candidate-more { flex:0 0 34px; min-width:96px; min-height:32px; padding:0 12px; border:1px solid var(--ec-border); border-radius:10px; background:var(--ec-control); color:var(--ec-text-soft); font-size:10px; cursor:pointer; }
+.ec-candidate-more:hover, .ec-candidate-more:focus-visible { border-color:var(--ec-accent); color:var(--ec-accent); outline:none; }
 .ec-candidate-shell:hover .ec-candidate-clear,
 .ec-candidate-shell:focus-within .ec-candidate-clear { opacity:1; transform:translateY(0); }
 .ec-result-meta { min-height:52px; display:flex; align-items:center; gap:7px; overflow-x:auto; padding:8px 10px; scrollbar-width:none; }
@@ -1111,6 +1113,7 @@ html.studio-theme-dark body .ec-result-frame {
     width:min(96px,calc(var(--ec-result-rail-width) - 20px));
     height:82px;
 }
+.ec-page.is-universal .ec-candidate-more { width:100%; min-width:0; flex-basis:34px; }
 .ec-page.is-universal .ec-result-frame:hover .ec-result-meta,
 .ec-page.is-universal .ec-result-frame:focus-within .ec-result-meta {
     opacity:1;

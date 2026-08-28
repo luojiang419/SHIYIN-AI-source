@@ -104,6 +104,7 @@
         "ecommerce.sizeMeta": { zh:"分辨率", en:"Resolution" },
         "ecommerce.candidatesMeta": { zh:"候选", en:"Candidates" },
         "ecommerce.generatedSequence": { zh:"第 {count} 张生成图", en:"Generated image {count}" },
+        "ecommerce.loadMore": { zh:"更多", en:"More" },
         "ecommerce.durationMeta": { zh:"耗时", en:"Duration" },
         "ecommerce.detectedGarmentMeta": { zh:"服装识别", en:"Garment detection" },
         "ecommerce.seconds": { zh:"{count} 秒", en:"{count}s" },

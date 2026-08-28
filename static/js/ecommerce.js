@@ -12,6 +12,9 @@
     const RESOLUTIONS = ['auto','1k','2k','4k'];
     const QUALITIES = ['auto','low','medium','high'];
     const ECOMMERCE_TASK_MEMORY_LIMIT = 300;
+    const ECOMMERCE_CANDIDATE_INITIAL_LIMIT = 20;
+    const ECOMMERCE_CANDIDATE_PAGE_SIZE = 20;
+    const ECOMMERCE_CANDIDATE_MEMORY_LIMIT = ECOMMERCE_TASK_MEMORY_LIMIT * 4;
     const MAX_REFERENCE_UPLOAD_BYTES = 50 * 1024 * 1024;
     const STUDIO_REFERENCE_TYPES = [
         {id:'studio_white', labelKey:'ecommerce.studioWhite', descKey:'ecommerce.studioWhiteHint', tone:'white', colors:['#fffef8','#f1f1ec','#d7d7cf']},
@@ -135,6 +138,7 @@
         submissionsInFlight:0,
         generationTimer:null,
         candidateTimer:null,
+        candidateVisibleCount:ECOMMERCE_CANDIDATE_INITIAL_LIMIT,
         assetLibrary:null,
         assetDialogMode:'select',
         referenceSlotTypes:[],
@@ -2149,6 +2153,7 @@
         if(!OPERATION_CONFIG[operation] || operation === state.operation) return;
         captureWorkspace();
         state.operation = operation;
+        state.candidateVisibleCount = ECOMMERCE_CANDIDATE_INITIAL_LIMIT;
         const workspace = restoreWorkspace(operation);
         updateTabs();
         renderInputs();
@@ -3346,7 +3351,7 @@
     }
 
     function candidateRailItems(){
-        const tasks = state.tasks.filter(task => task.operation === state.operation && taskMatchesWorkspace(task)).slice(0,100);
+        const tasks = state.tasks.filter(task => task.operation === state.operation && taskMatchesWorkspace(task)).slice(0,ECOMMERCE_TASK_MEMORY_LIMIT);
         let completedOrder = 0;
         return tasks.flatMap(task => {
             const id = taskIdOf(task);
@@ -3360,7 +3365,7 @@
                 ...completed,
                 ...Array.from({length:pendingCount}, (_,offset) => ({id,index:images.length + offset,url:'',status:task.status || 'queued',task})),
             ];
-        }).slice(0,160);
+        }).slice(0,ECOMMERCE_CANDIDATE_MEMORY_LIMIT);
     }
 
     function requestedOutputCountForTask(task){
@@ -3420,47 +3425,29 @@
     }
 
     function renderCandidateRail(){
+        if(!el.candidateList) return;
+        const scrollTop = el.candidateList.scrollTop;
         const items = candidateRailItems();
-        el.candidateList.innerHTML = items.map(item => {
+        const visibleItems = items.slice(0, Math.max(ECOMMERCE_CANDIDATE_INITIAL_LIMIT, state.candidateVisibleCount));
+        const hasMore = visibleItems.length < items.length;
+        el.candidateList.innerHTML = visibleItems.map(item => {
             const selected = item.id === taskIdOf(state.currentTask) && (item.index < 0 || item.index === state.selectedOutput);
             const status = String(item.status || 'queued');
             const clearable = ['failed','interrupted'].includes(status);
             const running = ['queued','running'].includes(status);
             const sequence = Number(item.display_index || item.index + 1);
             const content = item.url
-                ? `<img src="${escapeHtml(item.url)}" alt=""><span>${sequence}</span>`
+                ? `<img src="${escapeHtml(item.url)}" alt="" loading="lazy" decoding="async"><span>${sequence}</span>`
                 : `<span class="ec-candidate-state"><i></i><b>${escapeHtml(t(`ecommerce.${status}`))}</b>${running ? `<em class="ec-candidate-time" data-task-candidate-time="${escapeHtml(item.id)}">${escapeHtml(formatTaskElapsed(item.task))}</em>` : ''}</span>`;
             return `<div class="ec-candidate-shell">
                 <button type="button" class="ec-candidate ${selected ? 'active':''} ${item.url ? '' : `status-${escapeHtml(status)}`}" data-task-candidate="${escapeHtml(item.id)}" data-candidate-index="${item.index}" data-candidate-sequence="${sequence}" aria-label="${escapeHtml(item.url ? t('ecommerce.generatedSequence',{count:sequence}) : t(`ecommerce.${status}`))}">${content}</button>
                 ${clearable ? `<button type="button" class="ec-candidate-clear" data-clear-task="${escapeHtml(item.id)}" title="${escapeHtml(t('ecommerce.clearFailedTask'))}" aria-label="${escapeHtml(t('ecommerce.clearFailedTask'))}">×</button>` : ''}
             </div>`;
-        }).join('');
+        }).join('') + (hasMore
+            ? `<button type="button" class="ec-candidate-more" data-candidate-more>${escapeHtml(t('ecommerce.loadMore'))}</button>`
+            : '');
+        if(scrollTop > 0) requestAnimationFrame(() => { if(el.candidateList) el.candidateList.scrollTop = scrollTop; });
         syncCandidateTimer();
-        el.candidateList.querySelectorAll('[data-task-candidate]').forEach(button => {
-            button.addEventListener('click', () => {
-                const task = state.tasksById.get(String(button.dataset.taskCandidate || ''));
-                if(!task) return;
-                const url = button.querySelector('img')?.getAttribute('src') || '';
-                if(url) {
-                    selectCandidateItem({
-                        id:taskIdOf(task),
-                        index:Number(button.dataset.candidateIndex || 0),
-                        url,
-                    });
-                    return;
-                }
-                state.selectedOutput = Math.max(0, Number(button.dataset.candidateIndex || 0));
-                activeWorkspace().selectedOutput = state.selectedOutput;
-                renderTaskResult(task);
-                persistSettings();
-            });
-        });
-        el.candidateList.querySelectorAll('[data-clear-task]').forEach(button => {
-            button.addEventListener('click', event => {
-                event.stopPropagation();
-                clearTask(button.dataset.clearTask || '');
-            });
-        });
     }
 
     function metaItem(label, value){
@@ -4051,6 +4038,34 @@
         });
         el.generateButton.addEventListener('click', () => createTask());
         document.addEventListener('keydown', handleResultNavigationKeydown);
+        el.candidateList?.addEventListener('click', event => {
+            const moreButton = event.target.closest('[data-candidate-more]');
+            if(moreButton){
+                state.candidateVisibleCount += ECOMMERCE_CANDIDATE_PAGE_SIZE;
+                renderCandidateRail();
+                return;
+            }
+            const clearButton = event.target.closest('[data-clear-task]');
+            if(clearButton){
+                event.stopPropagation();
+                clearTask(clearButton.dataset.clearTask || '');
+                return;
+            }
+            const button = event.target.closest('[data-task-candidate]');
+            if(!button) return;
+            const task = state.tasksById.get(String(button.dataset.taskCandidate || ''));
+            if(!task) return;
+            const url = button.querySelector('img')?.getAttribute('src') || '';
+            const item = {id:taskIdOf(task), index:Number(button.dataset.candidateIndex || 0), url};
+            if(url) {
+                selectCandidateItem(item);
+                return;
+            }
+            state.selectedOutput = Math.max(0, item.index);
+            activeWorkspace().selectedOutput = state.selectedOutput;
+            renderTaskResult(task);
+            persistSettings();
+        });
         el.resultErrorClear?.addEventListener('click', () => clearTask(el.resultErrorClear.dataset.clearTask || ''));
         el.historyToggle.addEventListener('click', () => setHistoryOpen(true));
         el.closeHistory.addEventListener('click', () => setHistoryOpen(false));

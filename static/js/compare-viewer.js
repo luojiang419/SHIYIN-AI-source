@@ -25,6 +25,9 @@
             this.lastPoint = null;
             this.fallbackFullscreen = false;
             this.abort = new AbortController();
+            this.dividerRect = null;
+            this.pendingDivider = null;
+            this.dividerRaf = 0;
             this.root.classList.add('compare-viewer-stage');
             this.before?.classList.add('compare-viewer-media');
             this.after?.classList.add('compare-viewer-media');
@@ -69,6 +72,7 @@
 
         pointerDown(event){
             if(event.target.closest('.compare-viewer-tools')) return;
+            this.dividerRect = this.root.getBoundingClientRect();
             if(event.button === 1){
                 event.preventDefault();
                 this.dragMode = 'pan';
@@ -76,7 +80,7 @@
                 this.root.classList.add('is-panning');
             } else if(event.button === 0){
                 this.dragMode = 'divider';
-                this.updateDividerFromPointer(event);
+                this.updateDividerFromPointer(event, true);
             } else return;
             this.pointerId = event.pointerId;
             try { this.root.setPointerCapture(event.pointerId); } catch(error) {}
@@ -95,16 +99,42 @@
 
         pointerUp(event){
             if(event.pointerId !== this.pointerId) return;
+            this.flushDivider();
             try { this.root.releasePointerCapture(event.pointerId); } catch(error) {}
             this.pointerId = null;
             this.dragMode = '';
             this.lastPoint = null;
+            this.dividerRect = null;
             this.root.classList.remove('is-panning');
         }
 
-        updateDividerFromPointer(event){
-            const rect = this.root.getBoundingClientRect();
-            if(rect.width) this.setDivider(((event.clientX - rect.left) / rect.width) * 100);
+        updateDividerFromPointer(event, immediate=false){
+            const rect = this.dividerRect || (this.dividerRect = this.root.getBoundingClientRect());
+            if(!rect.width) return;
+            const value = ((event.clientX - rect.left) / rect.width) * 100;
+            if(immediate){
+                this.pendingDivider = null;
+                if(this.dividerRaf) cancelAnimationFrame(this.dividerRaf);
+                this.dividerRaf = 0;
+                this.setDivider(value);
+                return;
+            }
+            this.pendingDivider = value;
+            if(this.dividerRaf) return;
+            this.dividerRaf = requestAnimationFrame(() => {
+                this.dividerRaf = 0;
+                const next = this.pendingDivider;
+                this.pendingDivider = null;
+                if(next !== null) this.setDivider(next);
+            });
+        }
+
+        flushDivider(){
+            if(this.dividerRaf) cancelAnimationFrame(this.dividerRaf);
+            this.dividerRaf = 0;
+            const next = this.pendingDivider;
+            this.pendingDivider = null;
+            if(next !== null) this.setDivider(next);
         }
 
         setImages(beforeUrl,afterUrl){
@@ -141,6 +171,7 @@
 
         refresh(){
             if(this.after) this.after.style.width = `${this.root.clientWidth}px`;
+            this.dividerRect = this.pointerId === null ? null : this.root.getBoundingClientRect();
         }
 
         state(){
@@ -184,6 +215,7 @@
         }
 
         destroy(){
+            this.flushDivider();
             this.abort.abort();
             this.exitFullscreen();
         }

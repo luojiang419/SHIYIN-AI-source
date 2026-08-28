@@ -3775,6 +3775,13 @@ function addVideoNode(point){
         running:false
     });
 }
+function addLinkfoxVideoNode(point){
+    const p=point || defaultPoint(180,0);
+    const api=window.CanvasLinkfoxVideo;
+    if(!api?.createNode) return null;
+    const node=api.createNode(p,{id:uid('linkfox-video')});
+    return addNode(node);
+}
 function addFilmNode(type, point){
     const api = window.CanvasFilmNodes;
     if(!api?.isType?.(type)) return null;
@@ -5231,6 +5238,7 @@ function createLinkedNode(type){
     }
 }
 function createNodeByType(type, point){
+    if(window.CanvasLinkfoxVideo?.isType?.(type)) return addLinkfoxVideoNode(point);
     if(window.CanvasEcommerceNodes?.isType?.(type)) return addEcommerceNode(type, point);
     if(window.CanvasFilmNodes?.isType?.(type)) return addFilmNode(type, point);
     if(type === 'image') return addImageNode(point);
@@ -5261,7 +5269,8 @@ function menuAdd(type){
     let created = null;
     beginCanvasMutationBatch();
     try {
-        if(window.CanvasEcommerceNodes?.isType?.(type)) created = addEcommerceNode(type, point);
+        if(window.CanvasLinkfoxVideo?.isType?.(type)) created = addLinkfoxVideoNode(point);
+        else if(window.CanvasEcommerceNodes?.isType?.(type)) created = addEcommerceNode(type, point);
         else if(window.CanvasFilmNodes?.isType?.(type)) created = addFilmNode(type, point);
         else if(type === 'image') created = addImageNode(point);
         else if(type === 'prompt') created = addPromptNode(point);
@@ -9666,14 +9675,14 @@ function renderNode(node){
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
-    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'poseReference' ? '姿势参考' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'relight' ? '灯光重塑' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '3D 导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
         : 0;
     const groupCountHtml = node.type === 'group' ? `<span class="group-image-count">${groupImageCount}张</span>` : '';
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','linkfox-video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -9837,6 +9846,7 @@ function renderNode(node){
     if(node.type === 'generator' || node.type === 'batchGenerator') body.appendChild(renderGeneratorBody(node));
     if(node.type === 'msgen') body.innerHTML = '<div class="muted-note">旧版 ModelScope 专用生成已移除，请改用图片生成节点。</div>';
     if(node.type === 'video') body.appendChild(renderVideoBody(node));
+    if(node.type === 'linkfox-video') body.innerHTML = window.CanvasLinkfoxVideo?.bodyHtml(node) || '<div class="muted-note">LinkFox 节点加载失败</div>';
     if(node.type === 'topazVideo') body.appendChild(renderTopazVideoBody(node));
     if(node.type === 'ecom-video') body.appendChild(renderVideoBody(node));
     if(window.CanvasFilmNodes?.isType?.(node.type)) body.innerHTML = window.CanvasFilmNodes.bodyHtml(node,{
@@ -9897,8 +9907,8 @@ function renderNode(node){
     const filmPorts = window.CanvasFilmNodes?.inputPorts?.(node) || [];
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
-    const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
+    const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','relight','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','output','panorama','multiView','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type);
     if(filmPorts.length || rolePorts.length > 1){
         el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length){
@@ -9993,6 +10003,7 @@ function renderNode(node){
     if(['panorama','dwpose','poseReference','poseReplicate','relight','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
+    if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -10171,6 +10182,7 @@ function defaultNodeSize(type){
     if(type === 'generator' || type === 'batchGenerator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:400, h:0};
+    if(type === 'linkfox-video') return {w:480, h:0};
     if(type === 'topazVideo') return {w:400, h:0};
     if(type === 'blenderDirector') return {w:440, h:0};
     if(type === 'rh') return {w:430, h:0};
@@ -13920,6 +13932,8 @@ function updateComfyField(node, input, event){
 const CANVAS_GENERATOR_TYPES = ['generator','batchGenerator','video','topazVideo','rh','ecom-compose','ecom-video','film-storyboard','film-video','film-line-art'];
 const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector'],'batchGenerator','ecom-compose','film-storyboard','film-line-art','multiView'];
 const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector'],'batchGenerator','topazVideo','ecom-compose','ecom-video','film-storyboard','film-line-art','film-video','multiView'];
+CANVAS_GENERATOR_TYPES.push('linkfox-video');
+CANVAS_MEDIA_OUTPUT_TYPES.push('linkfox-video');
 function hasExplicitOutputConnection(nodeId){
     return connections.some(c => {
         if(c.from !== nodeId) return false;
@@ -13995,7 +14009,7 @@ function syncConnectedOutputsFromGenerated(node, outputs){
     outputNodesForSource(node.id).forEach(out => appendOutputImagesWithoutDuplicates(out, list));
 }
 function generatedImageRefs(node){
-    const keepGeneratedMedia = ['rh','ltxDirector','video','ecom-video','film-video','blenderDirector'].includes(node?.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','linkfox-video','ecom-video','film-video','blenderDirector'].includes(node?.type);
     return (node?.generatedOutputs || [])
         .map((item, i) => {
             const url = outputUrlValue(item);
@@ -15524,6 +15538,29 @@ function bindCascadeButtons(wrap, nodeId){
         b.onclick = e => { e.stopPropagation(); cancelCascade(nodeId); };
     });
 }
+async function runLinkfoxVideoNode(nodeId, opts={}){
+    const node=nodes.find(item=>item.id===nodeId);
+    if(!node || (node.running && !opts.cascade)) return;
+    const refs=mediaRefsFromNode(node).filter(ref=>ref.kind==='image' || !ref.kind);
+    const payload=window.CanvasLinkfoxVideo?.buildRequest?.(node,refs) || {};
+    const out=outputForNode(node,460);
+    node.running=true; node.runStatus='running'; node.runError=''; render(); scheduleSave();
+    try {
+        const response=await fetch('/api/linkfox-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,canvas_id:canvas?.id||'',node_id:node.id})});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.detail || 'LinkFox 视频生成失败');
+        const urls=(data.videos||[]).map(url=>typeof url==='object'?{...url,url:url.url||url.path||'',kind:'video'}:{url,kind:'video'}).filter(item=>item.url);
+        if(!urls.length) throw new Error('LinkFox 没有返回视频结果');
+        node.generatedOutputs=urls; node.runStatus='done'; node.runError='';
+        if(out) appendOutputImages(out,urls,refs[0]||null,[{kind:'video'}]);
+        syncConnectedOutputsFromGenerated(node,urls); scheduleSave(); render();
+        return urls;
+    } catch(error){
+        node.runStatus='failed'; node.runError=error.message||String(error); scheduleSave(); render();
+        if(opts.cascade) throw error;
+        alert(node.runError);
+    } finally { node.running=false; render(); }
+}
 // —— 一键运行：从目标节点反向追溯到所有上游生成节点，按拓扑顺序串行执行 ——
 function runCascadeNodeByType(node, opts={}){
     const runOpts = {cascade:true, ...opts};
@@ -15531,6 +15568,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'batchGenerator') return runBatchGenerator(node.id, runOpts);
     if(node.type === 'llm') return runLLMNode(node.id, runOpts);
     if(node.type === 'video') return runVideoNode(node.id, runOpts);
+    if(node.type === 'linkfox-video') return runLinkfoxVideoNode(node.id, runOpts);
     if(node.type === 'topazVideo') return runTopazVideoNode(node.id, runOpts);
     if(node.type === 'ecom-video') return runVideoNode(node.id, runOpts);
     if(node.type === 'ecom-compose') return runEcommerceComposeNode(node.id, runOpts);
@@ -15809,6 +15847,7 @@ async function runOneCascadePass(order, options={}){
             else if(node.type === 'batchGenerator') await runBatchGenerator(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'llm') await runLLMNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'video' || node.type === 'ecom-video') await runVideoNode(id, {cascade:true, cascadeTargetId:targetId});
+            else if(node.type === 'linkfox-video') await runLinkfoxVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'topazVideo') await runTopazVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'ecom-compose') await runEcommerceComposeNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'rh') await runRhNode(id, {cascade:true, cascadeTargetId:targetId});
@@ -16378,11 +16417,11 @@ function makePendingForRun(id, run, node, options={}, task={}){
 }
 function mergeGeneratedOutputs(node, outputs, append=false){
     if(!node) return;
-    const keepGeneratedMedia = ['rh','ltxDirector','video','topazVideo','ecom-video','film-video','blenderDirector'].includes(node.type);
+    const keepGeneratedMedia = ['rh','ltxDirector','video','linkfox-video','topazVideo','ecom-video','film-video','blenderDirector'].includes(node.type);
     const clean = (outputs || []).map(item => {
         const url = outputUrlValue(item);
         if(!url) return null;
-        const kind = ['video','topazVideo','ecom-video','film-video'].includes(node.type)
+        const kind = ['video','linkfox-video','topazVideo','ecom-video','film-video'].includes(node.type)
             ? 'video'
             : ['rh','ltxDirector'].includes(node.type) && isVideoUrl(url)
                 ? 'video'

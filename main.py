@@ -113,6 +113,11 @@ from canvas_core.kling_cli import (
     resolve_kling_cli,
     start_kling_login,
 )
+from canvas_core.linkfox_video import (
+    LinkFoxVideoError,
+    available_models as linkfox_video_models,
+    run_skill as run_linkfox_video_skill,
+)
 from canvas_core.blender_bridge import (
     DEFAULT_PORT as BLENDER_DEFAULT_PORT,
     BlenderBridgeClient,
@@ -408,7 +413,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.327"
+APP_VERSION = "1.0.328"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3903,6 +3908,27 @@ class CanvasVideoRequest(BaseModel):
     steps: int = Field(default=12, ge=4, le=30)
     model_parameters: Dict[str, Any] = Field(default_factory=dict)
     trusted_asset: bool = False
+    canvas_id: str = Field(default="", max_length=160)
+    node_id: str = Field(default="", max_length=160)
+
+
+class LinkFoxVideoRequest(BaseModel):
+    """LinkFox 图转视频节点的业务参数；入口字段由适配器再次严格校验。"""
+
+    entry: str = "img2video"
+    mode: str = "reference"
+    imageList: List[str] = Field(default_factory=list)
+    imageUrl: str = ""
+    lastFrameImageUrl: str = ""
+    videoType: str = ""
+    videoTime: int = 5
+    prompt: str = ""
+    promptOptimizer: bool = False
+    isPro: bool = False
+    voice: bool = True
+    aspectRatio: str = ""
+    camera: str = "single"
+    resolution: str = ""
     canvas_id: str = Field(default="", max_length=160)
     node_id: str = Field(default="", max_length=160)
 
@@ -17829,6 +17855,51 @@ async def kling_cli_login(request: Request):
     except KlingCliError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"ok": True, "started": True, "pid": pid}
+
+
+@app.get("/api/linkfox-video/capabilities")
+async def linkfox_video_capabilities():
+    """返回 LinkFox 图转视频节点的稳定模型矩阵。"""
+    return {
+        "installed": (PROJECT_MODULE_DIR and (Path(PROJECT_MODULE_DIR) / "skills" / "linkfox-expert-aigc-videogen-image-to-video").is_dir()),
+        "models": {
+            "reference": linkfox_video_models("reference"),
+            "first_last_frame": linkfox_video_models("first_last_frame"),
+        },
+    }
+
+
+@app.post("/api/linkfox-video")
+async def linkfox_video(payload: LinkFoxVideoRequest):
+    """调用已安装的 LinkFox 编排技能并返回画布可用的本地视频 URL。"""
+    try:
+        request_data = payload.model_dump()
+        # 画布内部素材通常是 /assets/...；若已配置公网媒体基址，先转换成
+        # LinkFox 可抓取的 HTTPS 地址。没有公网基址时保留原值，由适配器给出明确提示。
+        request_data["imageList"] = [local_asset_public_url(item) or item for item in request_data.get("imageList") or []]
+        for key in ("imageUrl", "lastFrameImageUrl"):
+            request_data[key] = local_asset_public_url(request_data.get(key) or "") or request_data.get(key) or ""
+        result = await asyncio.to_thread(
+            run_linkfox_video_skill,
+            request_data,
+            project_root=PROJECT_MODULE_DIR,
+            output_dir=OUTPUT_OUTPUT_DIR,
+            timeout=VIDEO_POLL_TIMEOUT,
+        )
+    except LinkFoxVideoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LinkFox 视频调用失败：{exc}") from exc
+    videos = []
+    for path in result.get("paths") or []:
+        url = media_url_from_path(path)
+        if not url:
+            continue
+        register_internal_media_object(url, "output", "video", "linkfox-video")
+        videos.append(url)
+    if not videos:
+        raise HTTPException(status_code=502, detail="LinkFox 已返回结果，但没有可用的视频文件")
+    return {"videos": videos, "request": result.get("payload") or {}, "skill": result.get("kind") or "single"}
 
 def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     text = str(prompt or "").strip()

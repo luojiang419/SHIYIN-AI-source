@@ -164,6 +164,11 @@
         Object.entries(vars).forEach(([name,replacement]) => { value = value.replaceAll(`{${name}}`, String(replacement)); });
         return value;
     };
+    const localizedFallback = (key, zh, en) => {
+        const value = t(key);
+        if(value !== key) return value;
+        return window.StudioI18n?.lang?.() === 'en' ? en : zh;
+    };
     const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
     const formatName = value => {
         const clean = String(value || '').trim();
@@ -3444,7 +3449,7 @@
                 ${clearable ? `<button type="button" class="ec-candidate-clear" data-clear-task="${escapeHtml(item.id)}" title="${escapeHtml(t('ecommerce.clearFailedTask'))}" aria-label="${escapeHtml(t('ecommerce.clearFailedTask'))}">×</button>` : ''}
             </div>`;
         }).join('') + (hasMore
-            ? `<button type="button" class="ec-candidate-more" data-candidate-more>${escapeHtml(t('ecommerce.loadMore'))}</button>`
+            ? `<button type="button" class="ec-candidate-more" data-candidate-more>${escapeHtml(localizedFallback('ecommerce.loadMore','更多','More'))}</button>`
             : '');
         if(scrollTop > 0) requestAnimationFrame(() => { if(el.candidateList) el.candidateList.scrollTop = scrollTop; });
         syncCandidateTimer();

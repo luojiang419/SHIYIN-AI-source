@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from canvas_core.linkfox_video import LinkFoxVideoError, normalize_request
+from main import LinkFoxConfigPayload, LINKFOX_API_KEY_MAX_LENGTH
 
 
 IMG = "https://example.com/product.jpg"
@@ -79,4 +80,21 @@ def test_api_settings_exposes_linkfox_configuration_controls():
     assert 'id="linkfoxGatewayInput"' in page
     assert "fetch('/api/linkfox-config'" in script
     assert "fetch('/api/linkfox-config/check'" in script
+
+
+def test_linkfox_api_key_accepts_8096_chars_and_rejects_longer_values():
+    key = 'k' * LINKFOX_API_KEY_MAX_LENGTH
+    assert len(LinkFoxConfigPayload(api_key=key).api_key) == 8096
+    with pytest.raises(ValueError):
+        LinkFoxConfigPayload(api_key=key + 'x')
+
+
+def test_linkfox_node_styles_are_theme_only_without_blue_fallbacks():
+    root = Path(__file__).resolve().parents[1]
+    css = (root / 'static' / 'css' / 'canvas-linkfox-video.css').read_text(encoding='utf-8').lower()
+    assert 'rgba(' not in css
+    assert '#8ab4ff' not in css
+    assert '#3b82f6' not in css
+    assert 'background:transparent' in css
+    assert 'var(--strong)' in css
 

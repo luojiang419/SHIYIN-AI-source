@@ -1,4 +1,5 @@
-# SHIYIN AI v1.0.330
+# SHIYIN AI v1.0.331
+- LinkFox API Key 长度上限提升到 8096 字符；彻底移除 LinkFox 节点的蓝色回退背景和硬编码颜色，提示词框、开关、状态提示和生成按钮统一跟随三套主题变量。
 - LinkFox 现在作为 API 设置里的独立平台卡片展示；普通 API 平台不再显示 LinkFox 配置项，选中 LinkFox 后仅显示 Agent Key、技能网关和就绪状态。经典画布工具栏新增直接可见的 LinkFox 视频节点入口，避免藏在影视制作二级菜单中。
 - API 设置页新增 LinkFox 视频生成配置区，可安全保存或清除 LinkFox Agent API Key、修改技能网关并检查技能安装状态；画布节点会提示前往 API 设置完成配置。
 - 新增 LinkFox 视频生成节点：支持参考图/首尾帧模式、Seedance/可灵/HAPPY_HORSE/海螺/Wan 模型选择、时长/分辨率/比例/声音/提示词优化/Pro/运镜参数，并接入经典画布与智能画布。

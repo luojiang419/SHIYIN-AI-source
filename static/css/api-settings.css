@@ -5277,7 +5277,7 @@ html.studio-theme-dark body .recommend-account-invite {
     cursor:grab !important;
 }
 
-.linkfox-config-block{border:1px solid color-mix(in srgb,var(--accent,#8ab4ff) 28%,var(--border,rgba(255,255,255,.1)));background:linear-gradient(135deg,color-mix(in srgb,var(--accent,#8ab4ff) 7%,transparent),transparent 55%)}
+.linkfox-config-block{border:1px solid var(--line);background:var(--panel)}
 .linkfox-config-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 18px}
 .linkfox-config-form .field.full{grid-column:1/-1}
 .linkfox-config-actions{grid-column:1/-1;display:flex;align-items:center;gap:10px}
@@ -5291,7 +5291,7 @@ html.studio-theme-dark body .recommend-account-invite {
 .linkfox-provider-card{grid-template-columns:14px 20px minmax(0,1fr) auto !important;}
 .linkfox-provider-card .provider-banner-inner{grid-column:3;}
 .linkfox-provider-card .provider-linkfox-state{grid-column:4;color:var(--muted);font-size:11px;white-space:nowrap;}
-.provider-logo-linkfox{display:inline-flex;align-items:center;gap:7px;color:#8b5cf6;}
+.provider-logo-linkfox{display:inline-flex;align-items:center;gap:7px;color:var(--text);}
 .show-linkfox-provider .content > .block:not(#linkfoxConfigBlock),
 .show-linkfox-provider .content > .provider-onboarding-card,
 .show-linkfox-provider .content-head .content-actions{display:none !important;}

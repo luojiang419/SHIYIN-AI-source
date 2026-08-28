@@ -1,3 +1,169 @@
-.linkfox-video-body{display:flex;flex-direction:column;gap:9px;padding:10px 12px 12px;background:var(--node-body-bg,rgba(20,24,32,.72));border-radius:0 0 12px 12px}.linkfox-video-badge{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent,#8ab4ff);font-weight:700}.linkfox-video-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.linkfox-video-toggles{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.linkfox-video-toggles .setting-check{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.linkfox-video-prompt{width:100%;resize:vertical;min-height:64px}.linkfox-frame-note{font-size:10px;line-height:1.45;color:var(--muted-text,#9aa4b2);padding:6px 8px;border:1px solid var(--node-border,rgba(255,255,255,.09));border-radius:7px}.linkfox-video-input-summary{font-size:10px;color:var(--muted-text,#9aa4b2);padding:5px 2px}.linkfox-video-run{width:100%;justify-content:center}.linkfox-video-error{font-size:11px;line-height:1.4;color:#ff9b9b;background:rgba(160,30,45,.15);border-radius:6px;padding:7px 8px}.smart-linkfox-video-node .linkfox-video-body{padding:11px 12px}.smart-linkfox-video-node .node-body{overflow:visible}
+.linkfox-video-body {
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+    padding:10px 12px 12px;
+    color:var(--text);
+    background:transparent;
+    border-radius:0 0 12px 12px;
+}
 
-.linkfox-config-hint{font-size:10px;line-height:1.4;color:var(--muted-text,#9aa4b2)}
+.linkfox-video-body .field {
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    min-width:0;
+}
+
+.linkfox-video-badge {
+    color:var(--muted);
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+}
+
+.linkfox-video-grid {
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:7px;
+}
+
+.linkfox-video-toggles {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:6px;
+}
+
+.linkfox-video-body .select-lite,
+.linkfox-video-prompt {
+    width:100%;
+    min-width:0;
+    color:var(--text);
+    background:var(--card-solid,var(--card));
+    border:1px solid var(--line-2,var(--line));
+    box-shadow:none;
+    outline:none;
+}
+
+.linkfox-video-prompt {
+    min-height:64px;
+    padding:8px 10px;
+    border-radius:12px;
+    resize:vertical;
+}
+
+.linkfox-video-body .select-lite:focus,
+.linkfox-video-prompt:focus {
+    border-color:var(--text);
+}
+
+.linkfox-video-body .setting-check {
+    min-width:0;
+    height:32px;
+    padding:0 10px;
+    display:flex;
+    align-items:center;
+    gap:7px;
+    overflow:hidden;
+    color:var(--muted);
+    background:var(--card-solid,var(--card));
+    border:1px solid var(--line-2,var(--line));
+    border-radius:999px;
+    font-size:11px;
+    font-weight:800;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.linkfox-video-body .setting-check.active {
+    color:var(--strong-text);
+    background:var(--strong);
+    border-color:var(--strong);
+}
+
+.linkfox-video-body .setting-check:disabled {
+    cursor:not-allowed;
+    opacity:.58;
+}
+
+.linkfox-video-body .check-dot {
+    width:12px;
+    height:12px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+    border:1px solid currentColor;
+    border-radius:4px;
+}
+
+.linkfox-video-body .setting-check.active .check-dot::after {
+    width:6px;
+    height:6px;
+    content:"";
+    background:currentColor;
+    border-radius:2px;
+}
+
+.linkfox-frame-note {
+    padding:6px 8px;
+    color:var(--muted);
+    background:var(--soft);
+    border:1px solid var(--line);
+    border-radius:7px;
+    font-size:10px;
+    line-height:1.45;
+}
+
+.linkfox-config-hint,
+.linkfox-video-input-summary {
+    color:var(--muted);
+    font-size:10px;
+    line-height:1.4;
+}
+
+.linkfox-video-input-summary {
+    padding:5px 2px;
+}
+
+.linkfox-video-run {
+    width:100%;
+    justify-content:center;
+    color:var(--strong-text);
+    background:var(--strong);
+    border-color:var(--strong);
+}
+
+.linkfox-video-run:disabled {
+    color:var(--faint);
+    background:var(--soft-2,var(--soft));
+    border-color:var(--line);
+}
+
+.linkfox-video-error {
+    padding:7px 8px;
+    color:var(--studio-danger,var(--text));
+    background:var(--studio-danger-soft,var(--soft));
+    border:1px solid var(--studio-border,var(--line));
+    border-radius:6px;
+    font-size:11px;
+    line-height:1.4;
+}
+
+.smart-linkfox-video-node .linkfox-video-body {
+    padding:11px 12px;
+}
+
+.smart-linkfox-video-node .node-body {
+    overflow:visible;
+}
+
+@media (max-width:720px) {
+    .linkfox-video-grid {
+        grid-template-columns:1fr;
+    }
+
+    .linkfox-video-toggles {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+}

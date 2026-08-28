@@ -415,7 +415,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.330"
+APP_VERSION = "1.0.331"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3935,10 +3935,13 @@ class LinkFoxVideoRequest(BaseModel):
     node_id: str = Field(default="", max_length=160)
 
 
+LINKFOX_API_KEY_MAX_LENGTH = 8096
+
+
 class LinkFoxConfigPayload(BaseModel):
     """LinkFox Agent 本机配置；密钥进入安全存储，不进入画布数据。"""
 
-    api_key: Optional[str] = Field(default=None, max_length=500)
+    api_key: Optional[str] = Field(default=None, max_length=LINKFOX_API_KEY_MAX_LENGTH)
     tool_gateway: str = Field(default="https://tool-gateway.linkfox.com", max_length=500)
     clear_key: bool = False
 

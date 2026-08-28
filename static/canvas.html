@@ -34,6 +34,7 @@
     <link rel="stylesheet" href="/static/css/canvas-topaz-node.css?v=2026.08.19.topaz-video.1">
     <link rel="stylesheet" href="/static/css/pose-reference-editor.css?v=2026.08.18.pose-reference.4">
     <link rel="stylesheet" href="/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2">
+    <link rel="stylesheet" href="/static/css/director-3d.css?v=2026.08.28.director-3d.1">
     <link rel="stylesheet" href="/static/css/canvas-film-nodes.css?v=2026.08.24.film-nodes.3">
     <link rel="stylesheet" href="/static/css/canvas-linkfox-video.css?v=2026.08.28.linkfox-video.3">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1">
@@ -69,11 +70,12 @@
                         <button class="tool-btn" onclick="addPanoramaNode()"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
                     </div>
                     <div class="toolbar-row">
-                        <button class="tool-btn" onclick="addPoseReferenceNode()"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>姿势参考</span></button>
+                        <button class="tool-btn" onclick="addPoseReferenceNode()"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>导演台</span></button>
+                        <button class="tool-btn" onclick="addDirector3dNode()"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
                         <button class="tool-btn" onclick="addDWPoseNode()"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
                         <button class="tool-btn" onclick="addPoseReplicateNode()"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
                         <button class="tool-btn" onclick="addRelightNode()"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
-                        <button class="tool-btn" onclick="addBlenderDirectorNode()"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
+                        <button class="tool-btn" onclick="addBlenderDirectorNode()"><i data-lucide="box" class="w-4 h-4"></i><span>外部导演台</span></button>
                         <button class="tool-btn" onclick="addOutputNode()"><i data-lucide="circle-dot" class="w-4 h-4"></i><span>Output</span></button>
                         <button class="tool-btn" onclick="groupSelectedImages()"><i data-lucide="group" class="w-4 h-4"></i><span data-i18n="canvas.group">分组</span></button>
                         <button id="filmBridgeImportBtn" class="tool-btn" onclick="importFilmBridgePackage()" title="导入 filmstoryboard 故事板"><i data-lucide="import" class="w-4 h-4"></i><span>导入故事板</span></button>
@@ -117,11 +119,12 @@
                 <button class="menu-btn" onclick="menuAdd('topazVideo')"><i data-lucide="scan-line" class="w-4 h-4"></i><span>Topaz 高清放大</span></button>
                 <button class="menu-btn" onclick="menuAdd('panorama')"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
                 <button class="menu-btn" onclick="menuAdd('multiView')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>创建三视图</span></button>
-                <button class="menu-btn" onclick="menuAdd('poseReference')"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>姿势参考</span></button>
+                <button class="menu-btn" onclick="menuAdd('poseReference')"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>导演台</span></button>
+                <button class="menu-btn" onclick="menuAdd('director3d')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
                 <button class="menu-btn" onclick="menuAdd('dwpose')"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
                 <button class="menu-btn" onclick="menuAdd('poseReplicate')"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
                 <button class="menu-btn" onclick="menuAdd('relight')"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
-                <button class="menu-btn" onclick="menuAdd('blenderDirector')"><i data-lucide="box" class="w-4 h-4"></i><span>3D 导演台</span></button>
+                <button class="menu-btn" onclick="menuAdd('blenderDirector')"><i data-lucide="box" class="w-4 h-4"></i><span>外部导演台</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
                 <div class="menu-submenu-host" data-ecommerce-menu-host>
                     <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
@@ -520,6 +523,7 @@
 
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
     <script src="/static/js/pose-reference-editor.js?v=2026.08.18.pose-reference.2"></script>
+    <script src="/static/js/director-3d.js?v=2026.08.28.director-3d.1"></script>
     <script src="/static/js/canvas-special-nodes.js?v=2026.08.27.relight-v2.1&rev=20260827.3&feature=angle-consistency.1&feature=relight-preview.4"></script>
     <script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>

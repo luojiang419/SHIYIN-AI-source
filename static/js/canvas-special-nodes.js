@@ -96,7 +96,7 @@
     function specialTitle(node){
         const type = node?.specialType || node?.type;
         if(type === 'dwpose') return '动作提取';
-        if(type === 'pose-reference' || type === 'poseReference') return '姿势参考';
+        if(type === 'pose-reference' || type === 'poseReference') return '导演台';
         if(type === 'pose-replicate' || type === 'poseReplicate') return '一键复刻';
         if(type === 'relight') return '灯光重塑';
         if(type === 'angle') return '角度调整';
@@ -195,9 +195,21 @@
         </div>`;
     }
 
+    function director3dBodyHtml(node){
+        return window.Director3DNode?.bodyHtml?.(node) || '<div class="special-empty"><strong>3D导演台加载失败</strong><span>请刷新页面后重试</span></div>';
+    }
+
+    function bindDirector3d(root, node, options={}){
+        if(!root || !node || !window.Director3DNode) return;
+        window.Director3DNode.bind(root, node, {
+            ...options,
+            uploadBlob: options.uploadBlob || uploadBlob,
+            createDirectorOutputNode: options.createDirectorOutputNode,
+        });
+    }
     function poseReferenceBodyHtml(node){
         const editor = window.PoseReferenceEditor;
-        if(!editor) return '<div class="special-empty"><strong>姿势参考编辑器加载失败</strong><span>请刷新页面后重试</span></div>';
+        if(!editor) return '<div class="special-empty"><strong>导演台加载失败</strong><span>请刷新页面后重试</span></div>';
         node.poseEditorState = editor.normalizeState(node.poseEditorState || {});
         return editor.nodeBodyHtml(node, outputItem(node));
     }
@@ -905,7 +917,7 @@
                     file.natural_h = meta?.height || file.natural_h || 0;
                     setOutputItem(node, file, options);
                     notify(options, node, true);
-                    options.toast?.('姿势参考图已导出，可连接到下游节点');
+                    options.toast?.('导演台参考图已导出，可连接到下游节点');
                     return file;
                 }
             });
@@ -1322,8 +1334,8 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_RELIGHT_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, poseReferenceBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
-        bindPanorama, bindPose, bindPoseReference, bindPoseReplicate, bindRelight, bindAngle,
+        panoramaBodyHtml, poseBodyHtml, poseReferenceBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
+        bindPanorama, bindPose, bindPoseReference, bindDirector3d, bindPoseReplicate, bindRelight, bindAngle,
         buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
     };

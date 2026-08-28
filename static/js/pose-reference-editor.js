@@ -174,9 +174,9 @@
     }
     function editorHtml(state, theme){
         const selected = BONE_MAP.get(state.selectedBone) || BONE_MAP.get(DEFAULT_SELECTED_BONE);
-        return `<div class="pose-ref-editor" data-theme="${resolveTheme(theme)}" role="dialog" aria-modal="true" aria-label="姿势参考编辑器">
+        return `<div class="pose-ref-editor" data-theme="${resolveTheme(theme)}" role="dialog" aria-modal="true" aria-label="导演台">
             <header class="pose-ref-editor-head">
-                <div class="pose-ref-editor-brand"><span class="pose-ref-brand-icon"><i data-lucide="person-standing"></i></span><div><strong>姿势参考编辑器</strong><small>3D 人形 · 关节微调 · 高清导出</small></div></div>
+                <div class="pose-ref-editor-brand"><span class="pose-ref-brand-icon"><i data-lucide="person-standing"></i></span><div><strong>导演台</strong><small>3D 人形 · 关节微调 · 高清导出</small></div></div>
                 <div class="pose-ref-head-actions">
                     <button type="button" data-pose-action="mirror" title="左右镜像"><i data-lucide="flip-horizontal-2"></i><span>镜像</span></button>
                     <button type="button" data-pose-action="reset" title="恢复自然站立"><i data-lucide="rotate-ccw"></i><span>复位</span></button>
@@ -223,7 +223,7 @@
             </div>
             <footer class="pose-ref-editor-foot">
                 <div class="pose-ref-export-status" data-pose-status><i data-lucide="info"></i><span>姿势参数会随画布自动保存</span></div>
-                <div><button type="button" data-pose-action="save-close">保存并关闭</button><button type="button" class="pose-ref-primary" data-pose-action="export"><i data-lucide="camera"></i><span>导出姿势参考图</span></button></div>
+                <div><button type="button" data-pose-action="save-close">保存并关闭</button><button type="button" class="pose-ref-primary" data-pose-action="export"><i data-lucide="camera"></i><span>导出导演台参考图</span></button></div>
             </footer>
         </div>`;
     }
@@ -232,11 +232,11 @@
         const item = output?.url ? output : null;
         return `<div class="special-node pose-reference-special" data-special-node="pose-reference">
             <div class="pose-reference-preview ${item ? 'has-output' : ''}">
-                ${item ? `<img src="${esc(item.url)}" alt="姿势参考图" draggable="false">` : `<div class="special-empty"><i data-lucide="person-standing"></i><strong>创建 3D 姿势</strong><span>预设动作 · 关节微调 · 自由镜头</span></div>`}
+                ${item ? `<img src="${esc(item.url)}" alt="导演台参考图" draggable="false">` : `<div class="special-empty"><i data-lucide="person-standing"></i><strong>创建 3D 姿势</strong><span>预设动作 · 关节微调 · 自由镜头</span></div>`}
                 <button type="button" class="pose-reference-edit" data-special-action="edit-pose-reference"><i data-lucide="pencil-ruler"></i><span>${item ? '编辑动作' : '开始编辑'}</span></button>
             </div>
             <div class="pose-reference-meta"><span><i data-lucide="box"></i>${node.poseEditorState?.selectedBone ? '可继续编辑' : '尚未设置姿势'}</span><b>${esc(node.poseEditorState?.aspect || '1:1')} · ${Number(node.poseEditorState?.resolution) || 1536}px</b></div>
-            <div class="special-output-row"><span>${item ? `姿势参考图已就绪 · ${esc(item.name || 'pose-reference.png')}` : '导出后可直接连接图片/视频生成节点'}</span>${item ? '<i data-lucide="check-circle-2"></i>' : ''}</div>
+            <div class="special-output-row"><span>${item ? `导演台参考图已就绪 · ${esc(item.name || 'pose-reference.png')}` : '导出后可直接连接图片/视频生成节点'}</span>${item ? '<i data-lucide="check-circle-2"></i>' : ''}</div>
         </div>`;
     }
 
@@ -373,16 +373,16 @@
             if(!runtime?.exportBlob || exportButton.disabled) return;
             exportButton.disabled = true;
             exportButton.classList.add('loading');
-            setStatus('正在渲染高清姿势参考图…');
+            setStatus('正在渲染高清导演台参考图…');
             try {
                 const [width,height] = exportDimensions(state);
                 const blob = await runtime.exportBlob(width, height);
                 if(!blob) throw new Error('浏览器没有生成图片数据');
                 options.onSave?.(clone(state));
                 await options.onExport?.(blob, clone(state), {width,height, name:`pose-reference-${width}x${height}.png`});
-                setStatus(`已导出 ${width}×${height} 姿势参考图`);
+                setStatus(`已导出 ${width}×${height} 导演台参考图`);
                 if(options.closeAfterExport !== false) close({save:true});
-            } catch(error){ setStatus(error?.message || '姿势参考图导出失败', true); }
+            } catch(error){ setStatus(error?.message || '导演台参考图导出失败', true); }
             finally { exportButton.disabled = false; exportButton.classList.remove('loading'); }
         });
 

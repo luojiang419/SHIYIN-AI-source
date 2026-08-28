@@ -34,7 +34,7 @@
         {id:'create.prompt', category:'创建节点', name:'创建提示词节点', context:'canvas', defaultBinding:''},
         {id:'create.h3Video', category:'创建节点', name:'创建 MiniMax H3 视频节点', context:'canvas', defaultBinding:''},
         {id:'create.panorama', category:'创建节点', name:'创建 720° 取景器节点', context:'canvas', defaultBinding:''},
-        {id:'create.poseReference', category:'创建节点', name:'创建姿势参考节点', context:'canvas', defaultBinding:''},
+        {id:'create.poseReference', category:'创建节点', name:'创建导演台节点', context:'canvas', defaultBinding:''},
         {id:'create.dwpose', category:'创建节点', name:'创建动作提取节点', context:'canvas', defaultBinding:''},
         {id:'create.poseReplicate', category:'创建节点', name:'创建一键复刻节点', context:'canvas', defaultBinding:''},
         {id:'create.relight', category:'创建节点', name:'创建灯光重塑节点', context:'canvas', defaultBinding:''},

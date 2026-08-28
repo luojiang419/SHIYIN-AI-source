@@ -2000,6 +2000,11 @@ function createPoseReferenceNode(point){
     };
     return commitSmartNodeCreate(node);
 }
+function createDirector3dNode(point){
+    pushUndo();
+    const node = {id:uid('director3d'), type:'smart-image', specialType:'director3d', x:(point?.x||0)-230, y:(point?.y||0)-210, w:460, h:420, title:'3D导演台', images:[], directorProject:null, directorCaptures:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+    return commitSmartNodeCreate(node);
+}
 function createPoseReplicateNode(point){
     pushUndo();
     const node = {
@@ -2808,6 +2813,7 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
     if(node?.specialType === 'pose-reference') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
+    if(node?.specialType === 'director3d') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(380, Math.round(Number(node.h) || 420)), thumb:96, single:true};
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
@@ -9137,7 +9143,7 @@ function runSmartCanvasShortcutAction(actionId){
     if(actionId.startsWith('create.')){
         const nodeTypeMap = {
             'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
-            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'pose-reference',
+            'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.poseReference':'pose-reference', 'create.director3d':'director3d',
             'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate', 'create.relight':'relight',
             'create.multiView':'multi-view', 'create.batch':'batch'
         };
@@ -9438,7 +9444,8 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,imageProviderOptions:filmSmartImageProviderOptions,imageModelOptions:filmSmartImageModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
-    if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">姿势参考节点加载失败</div>';
+    if(node.specialType === 'pose-reference') return window.CanvasSpecialNodes?.poseReferenceBodyHtml?.(node) || '<div class="smart-group-empty">导演台节点加载失败</div>';
+    if(node.specialType === 'director3d') return window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="smart-group-empty">3D导演台加载失败</div>';
     if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
     if(['relight','angle'].includes(node.specialType)){
         const source = smartSpecialInputImage(node);
@@ -9794,7 +9801,7 @@ function smartNodeHtml(node){
     const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
     const slotLoading = generationSlots.some(slot => slot.status === 'loading');
     const slotFailed = generationSlots.some(slot => slot.status === 'error');
-    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '姿势参考' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'pose-reference' ? '导演台' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
     const scale = nodeScale(node);
     const layout = imageLayout(layoutImages, scale, node);
     const isPrompt = node.type === 'smart-prompt';
@@ -11775,6 +11782,15 @@ function createSmartPoseOutputNode(sourceNode, item){
     scheduleSave();
     return output;
 }
+function createSmartDirectorOutputNode(sourceNode, item){
+    if(!sourceNode?.id || !item?.url) return null;
+    pushUndo();
+    const output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:'导演台截图', images:[{...item, kind:'image'}], directorSourceNodeId:sourceNode.id, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+    const point = smartFreeNodePoint(sourceNode, output, 'downstream'); output.x = point.x; output.y = point.y;
+    nodes.push(output); connectInputNode(sourceNode.id, output.id);
+    selectedId = output.id; selectedIds = []; selectedImage = {nodeId:output.id, index:0}; render(); scheduleSave();
+    return output;
+}
 function createSmartSpecialOutputNode(sourceNode, item, kind){
     if(!sourceNode?.id || !item?.url) return null;
     let output = nodes.find(candidate => candidate.id === sourceNode.specialOutputNodeId && isSmartImageNode(candidate) && !candidate.specialType)
@@ -11935,6 +11951,7 @@ function bindSmartSpecialNode(el, node){
     if(node.specialType === 'panorama') api.bindPanorama(el, node, options);
     if(node.specialType === 'dwpose') api.bindPose(el, node, options);
     if(node.specialType === 'pose-reference') api.bindPoseReference?.(el, node, options);
+    if(node.specialType === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createSmartDirectorOutputNode});
     if(node.specialType === 'pose-replicate') api.bindPoseReplicate?.(el, node, options);
     if(node.specialType === 'relight') api.bindRelight(el, node, options);
     if(node.specialType === 'angle') api.bindAngle(el, node, options);
@@ -19601,6 +19618,7 @@ function createNodeFromMenu(type, point=null){
         if(type === 'linkfox-video') return createLinkfoxVideoNode(p);
         if(type === 'panorama') return createPanoramaNode(p);
         if(type === 'pose-reference') return createPoseReferenceNode(p);
+        if(type === 'director3d') return createDirector3dNode(p);
         if(type === 'dwpose') return createDWPoseNode(p);
         if(type === 'pose-replicate') return createPoseReplicateNode(p);
         if(type === 'relight') return createRelightNode(p);

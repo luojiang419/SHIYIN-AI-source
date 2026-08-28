@@ -14,6 +14,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -466,6 +468,8 @@ fn spawn_backend(
             .env("PYTHONPATH", root)
             .current_dir(root);
     }
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
     command
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))

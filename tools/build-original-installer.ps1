@@ -69,11 +69,17 @@ if (-not $SkipDesktop) {
     $config.identifier = 'com.shiyingai.originalcanvas.desktop'
     $configJson = $config | ConvertTo-Json -Depth 20
     [IO.File]::WriteAllText($configPath, $configJson, [Text.UTF8Encoding]::new($false))
+    $cargoPath = Join-Path $tauriRoot 'Cargo.toml'
+    $cargoText = [IO.File]::ReadAllText($cargoPath)
+    $cargoText = $cargoText -replace '(?m)^version = "[^"]+"', "version = `"$version`""
+    [IO.File]::WriteAllText($cargoPath, $cargoText, [Text.UTF8Encoding]::new($false))
     $libPath = Join-Path $tauriRoot 'src\lib.rs'
     $lib = [IO.File]::ReadAllText($libPath)
     $lib = $lib -replace 'SHIYIN AI', 'ShiYingAI-原版画布'
     $lib = $lib -replace '3000', '3001'
     $lib = $lib -replace '/api/health', '/api/app-info'
+    $lib = $lib -replace 'const APP_DISPLAY_NAME: &str = concat!\("ShiYingAI-原版画布 V", env!\("CARGO_PKG_VERSION"\)\);', 'const APP_DISPLAY_NAME: &str = "ShiYingAI-原版画布";'
+    $lib = $lib -replace 'http://127\.0\.0\.1:\{\}/api/auth/bootstrap\?token=\{token\}', 'http://127.0.0.1:{}/'
     [IO.File]::WriteAllText($libPath, $lib, [Text.UTF8Encoding]::new($false))
     $updaterPath = Join-Path $tauriRoot 'src\updater.rs'
     $updater = [IO.File]::ReadAllText($updaterPath)

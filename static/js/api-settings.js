@@ -131,6 +131,7 @@ let rhWorkflowEditorState = { open:false, index:-1, entry:null, config:null, exp
 let rhEditorMode = 'workflow';
 let recommendInlineOpen = false;
 let providerDragId = '';
+const PROVIDER_ORDER_STORAGE_KEY = 'studio_api_provider_order_v1';
 let providerAutoSaveTimer = null;
 let providerSaveChain = Promise.resolve();
 const RECOMMENDED_APIS = [
@@ -308,6 +309,24 @@ function isProviderTemporarilyHidden(item){
 }
 function visibleProviders(){
     return (providers || []).filter(item => !isProviderTemporarilyHidden(item));
+}
+function restoreProviderOrder(){
+    try {
+        const stored = JSON.parse(localStorage.getItem(PROVIDER_ORDER_STORAGE_KEY) || '[]');
+        if(!Array.isArray(stored) || !stored.length) return;
+        const rank = new Map(stored.map((id, index) => [String(id), index]));
+        providers.sort((a, b) => {
+            const ar = rank.has(a.id) ? rank.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const br = rank.has(b.id) ? rank.get(b.id) : Number.MAX_SAFE_INTEGER;
+            return ar - br;
+        });
+    } catch(error) {
+        console.warn('恢复平台排序失败', error);
+    }
+}
+function saveProviderOrder(){
+    try { localStorage.setItem(PROVIDER_ORDER_STORAGE_KEY, JSON.stringify(providers.map(item => item.id))); }
+    catch(error) { console.warn('保存平台排序失败', error); }
 }
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
@@ -2279,13 +2298,20 @@ function renderProviderList(){
         const active = item.id === selectedId ? 'active' : '';
         if(item.id === LINKFOX_PROVIDER_ID || item.is_virtual){
             const foxState = item.configured && item.installed ? 'has-key' : 'missing-key';
+            const sortMeta = `<span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span><span class="provider-priority" title="生成优先级">${priorityIndex + 1}</span>`;
+            const gateway = item.base_url || '未配置地址';
             return `
-                <button class="provider-card provider-card-banner provider-card-sortable linkfox-provider-card ${active} ${foxState}" type="button" onclick="selectProvider('${LINKFOX_PROVIDER_ID}')">
-                    <span class="provider-banner-inner">
-                        <span class="provider-logo-wrap provider-logo-linkfox"><i data-lucide="sparkles" class="w-5 h-5"></i><span class="provider-logo-fallback">LinkFox</span></span>
+                <button class="provider-card provider-card-sortable linkfox-provider-card ${active} ${foxState}" type="button" onclick="selectProvider('${LINKFOX_PROVIDER_ID}')"${providerDragAttrs(item)}>
+                    ${sortMeta}
+                    <span class="provider-mark"><i data-lucide="sparkles" class="w-4 h-4"></i></span>
+                    <span class="provider-info">
+                        <div class="provider-name">LinkFox</div>
+                        <div class="provider-meta">${escapeHtml(gateway)}</div>
+                    </span>
+                    <span class="provider-side-meta">
+                        <span class="provider-status-dot"></span>
                         <span class="provider-protocol-pill">视频</span>
                     </span>
-                    <span class="provider-linkfox-state">${item.configured && item.installed ? '已就绪' : '待配置'}</span>
                 </button>
             `;
         }
@@ -2403,6 +2429,7 @@ function handleProviderDrop(event, targetId){
     providers.splice(targetAfterRemoval + (insertAfter ? 1 : 0), 0, moved);
     const firstEnabledIndex = providers.findIndex(item => item.enabled !== false);
     providers.forEach((item, index) => { item.primary = index === Math.max(0, firstEnabledIndex); });
+    saveProviderOrder();
     renderProviderList();
     saveProviders();
 }
@@ -3592,6 +3619,7 @@ async function loadProviders(){
         const data = await fetch('/api/providers').then(r => r.json());
         providers = (data.providers || []).filter(item => item.id !== LINKFOX_PROVIDER_ID);
         providers.push(LINKFOX_PROVIDER);
+        restoreProviderOrder();
         selectedId = sortedProviders()[0]?.id || '';
         renderEditor();
         setStatus('');
@@ -3738,8 +3766,8 @@ async function persistProviders(options={}){
         if(!res.ok) throw new Error((await res.json()).detail || tr('api.saveFailed'));
         const data = await res.json();
         const savedById = new Map((data.providers || []).map(item => [item.id, item]));
-        const virtualProviders = providers.filter(item => item.is_virtual);
-        providers = persistedProviders.map(item => {
+        const mergeSavedProvider = item => {
+            if(item.is_virtual) return item;
             const saved = savedById.get(item.id);
             if(!saved) return item;
             return {
@@ -3755,7 +3783,10 @@ async function persistProviders(options={}){
                 has_volcengine_secret_key:saved.has_volcengine_secret_key,
                 volcengine_secret_key_preview:saved.volcengine_secret_key_preview,
             };
-        }).concat(virtualProviders);
+        };
+        // 保留拖拽后的完整顺序；LinkFox 虽是虚拟平台，也不能在保存后被强制移回末尾。
+        providers = providers.map(mergeSavedProvider);
+        saveProviderOrder();
         providers.forEach(item => {
             delete item.api_key;
             delete item.wallet_api_key;

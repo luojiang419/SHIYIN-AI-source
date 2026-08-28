@@ -551,14 +551,16 @@ fn stop_backend(app: &AppHandle) {
         return;
     }
     save_window_placement(app);
+    // 当前最新版后端支持 runtime/shutdown，原始版后端没有该接口。
+    // 只做一次很短的尝试，避免在窗口关闭事件线程中等待网络超时。
     let url = format!("http://127.0.0.1:{}/api/runtime/shutdown", state.port);
     let _ = ureq::post(&url)
         .header("X-Desktop-Token", &state.desktop_token)
         .config()
-        .timeout_global(Some(Duration::from_secs(2)))
+        .timeout_global(Some(Duration::from_millis(250)))
         .build()
         .send_empty();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_millis(500);
     while Instant::now() < deadline {
         let exited = state
             .backend
@@ -577,9 +579,12 @@ fn stop_backend(app: &AppHandle) {
     }
     if let Ok(mut guard) = state.backend.lock() {
         if let Some(child) = guard.as_mut() {
+            // 原版服务没有 shutdown 路由，超时后直接终止 sidecar，
+            // 防止退出流程继续卡住桌面窗口。
             let _ = child.kill();
             let _ = child.wait();
         }
+        *guard = None;
     };
 }
 

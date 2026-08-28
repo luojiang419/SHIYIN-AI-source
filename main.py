@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.350"
+APP_VERSION = "1.0.351"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -1195,6 +1195,23 @@ def api_provider_templates():
             "ms_defaults_version": 0,
         },
         {
+            "id": "ecommerce-vision",
+            "name": "电商专用",
+            "base_url": LOCAL_VISION_DEFAULT_BASE_URL,
+            "protocol": "openai",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": [],
+            "chat_models": [LOCAL_VISION_DEFAULT_MODEL],
+            "video_models": [],
+            "model_protocols": {},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
             "id": "minimax-h3",
             "name": "MiniMax H3",
             "base_url": MINIMAX_H3_DEFAULT_BASE_URL,
@@ -1265,7 +1282,7 @@ def api_provider_templates():
 
 
 def default_api_providers():
-    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "minimax-h3", "kling-cli"}]
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"}]
 
 
 def normalize_minimax_h3_base_url(value: Any = "") -> str:
@@ -1374,6 +1391,18 @@ def merge_default_api_providers(providers):
             current["protocol"] = "openai"
             current["image_models"] = []
             current["chat_models"] = model_list_from_values(current.get("chat_models") or local_vision_default["chat_models"])
+            current["video_models"] = []
+    ecommerce_vision_default = next((d for d in default_api_providers() if d["id"] == "ecommerce-vision"), None)
+    if ecommerce_vision_default:
+        current = next((item for item in merged if item.get("id") == "ecommerce-vision"), None)
+        if not current:
+            merged.append(ecommerce_vision_default)
+        else:
+            current["name"] = str(current.get("name") or ecommerce_vision_default["name"])
+            current["base_url"] = str(current.get("base_url") or ecommerce_vision_default["base_url"])
+            current["protocol"] = "openai"
+            current["image_models"] = []
+            current["chat_models"] = model_list_from_values(current.get("chat_models") or ecommerce_vision_default["chat_models"])
             current["video_models"] = []
     minimax_h3_default = next((d for d in default_api_providers() if d["id"] == "minimax-h3"), None)
     if minimax_h3_default:
@@ -1787,7 +1816,7 @@ def normalize_provider(item):
         raise HTTPException(status_code=400, detail=f"API 平台 ID 不合法：{provider_id or '(empty)'}")
     name = re.sub(r"\s+", " ", str(item.get("name") or provider_id).strip())[:60] or provider_id
     base_url = str(item.get("base_url") or "").strip().rstrip("/")
-    if provider_id == "local-vision":
+    if provider_id in {"local-vision", "ecommerce-vision"}:
         base_url = normalize_openai_compatible_base_url(base_url or LOCAL_VISION_DEFAULT_BASE_URL)
     if base_url and not re.match(r"^https?://", base_url):
         raise HTTPException(status_code=400, detail=f"{name} 的 Base URL 需要以 http:// 或 https:// 开头")
@@ -1819,7 +1848,7 @@ def normalize_provider(item):
         protocol = "openai"
         base_url = normalize_grsai_base_url(base_url or GRSAI_DEFAULT_BASE_URL)
         image_request_mode = "openai"
-    if provider_id == "local-vision":
+    if provider_id in {"local-vision", "ecommerce-vision"}:
         protocol = "openai"
         image_request_mode = "openai"
     if provider_id == "minimax-h3":
@@ -1843,9 +1872,9 @@ def normalize_provider(item):
         "image_edit_endpoint": image_edit_endpoint,
         "enabled": bool(item.get("enabled", True)),
         "primary": bool(item.get("primary", False)),
-        "image_models": [] if provider_id in {"local-vision", "minimax-h3", "kling-cli"} else model_list_from_values(item.get("image_models") or []),
+        "image_models": [] if provider_id in {"local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"} else model_list_from_values(item.get("image_models") or []),
         "chat_models": [] if provider_id in {"minimax-h3", "kling-cli"} else model_list_from_values(item.get("chat_models") or []),
-        "video_models": [] if provider_id == "local-vision" else model_list_from_values(
+        "video_models": [] if provider_id in {"local-vision", "ecommerce-vision"} else model_list_from_values(
             item.get("video_models")
             or (MINIMAX_H3_DEFAULT_VIDEO_MODELS if provider_id == "minimax-h3" else [])
             or (KLING_CLI_PLACEHOLDER_VIDEO_MODELS if provider_id == "kling-cli" else [])
@@ -5308,7 +5337,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（OpenAI Chat Completions、Responses、Gemini 可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "responses", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3", "kling-cli"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留支持的文本协议。"""
@@ -15225,7 +15254,7 @@ def update_ecommerce_task(task_id: str, changes: Dict[str, Any]):
 
 def configured_ecommerce_vision_route(providers: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, str]]:
     candidates = []
-    preferred_provider_id = str(os.getenv("ECOMMERCE_VISION_PROVIDER_ID", "local-vision") or "").strip().lower()
+    preferred_provider_id = str(os.getenv("ECOMMERCE_VISION_PROVIDER_ID", "ecommerce-vision") or "").strip().lower()
     for provider_index, provider in enumerate(providers if providers is not None else load_api_providers()):
         if not isinstance(provider, dict) or not provider.get("enabled", True):
             continue
@@ -15235,7 +15264,9 @@ def configured_ecommerce_vision_route(providers: Optional[List[Dict[str, Any]]] 
         provider_name = str(provider.get("name") or provider_id)
         for model_index, model in enumerate(provider.get("chat_models") or []):
             model_name = str(model or "").strip()
-            if not looks_like_vision_chat_model(model_name):
+            # “电商专用”平台的聊天模型就是给商品/模特/场景解析使用的，
+            # 即使模型名称没有包含 vision/vlm，也应允许它参与电商视觉路由。
+            if provider_id != "ecommerce-vision" and not looks_like_vision_chat_model(model_name):
                 continue
             name_hint = f"{provider_id} {provider_name}".lower()
             candidates.append((

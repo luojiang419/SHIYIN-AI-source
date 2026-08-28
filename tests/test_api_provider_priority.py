@@ -77,6 +77,23 @@ class ApiProviderPriorityTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("没有有效的图片生成配置", raised.exception.detail)
 
+    def test_ecommerce_vision_provider_is_preferred_for_ecommerce_analysis(self):
+        providers = [
+            {**self.provider("local-vision"), "chat_models": ["qwen-vl"]},
+            {**self.provider("ecommerce-vision"), "name": "电商专用", "chat_models": ["custom-caption-model"]},
+        ]
+        with patch.object(self.main, "provider_env_key_value", return_value="configured-key"):
+            route = self.main.configured_ecommerce_vision_route(providers)
+        self.assertEqual(route["provider_id"], "ecommerce-vision")
+        self.assertEqual(route["model"], "custom-caption-model")
+
+    def test_default_provider_templates_include_ecommerce_vision(self):
+        providers = self.main.default_api_providers()
+        item = next((provider for provider in providers if provider["id"] == "ecommerce-vision"), None)
+        self.assertIsNotNone(item)
+        self.assertEqual(item["name"], "电商专用")
+        self.assertTrue(item["chat_models"])
+
 
 if __name__ == "__main__":
     unittest.main()

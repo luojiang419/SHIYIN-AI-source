@@ -278,6 +278,10 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node.sized { display:flex; flex-direction:column; }
 .node.sized > .node-visual-shell { flex:1; min-height:0; display:flex; flex-direction:column; }
 .node.selected { outline:2px solid var(--canvas-selection); outline-offset:2px; }
+/* 图片节点的快捷面板位于节点外部；提升节点自身层级，避免被相邻节点的视觉壳遮挡。 */
+.node.image-node:hover,
+.node.image-node.selected,
+.node.image-node:focus-within { z-index:1000; }
 .image-node.has-image .node-visual-shell { background:transparent; border-color:transparent; }
 .node-media-toolbar { position:absolute; left:50%; bottom:calc(100% + 10px); z-index:22; display:grid; grid-template-columns:repeat(auto-fit,minmax(clamp(76px,8vw,118px),1fr)); grid-auto-rows:clamp(36px,3.2vw,44px); gap:clamp(4px,.55vw,8px); width:min(560px,max(296px,calc(100vw - 24px))); max-height:min(220px,38vh); overflow-x:hidden; overflow-y:auto; padding:clamp(6px,.8vw,10px); border:1px solid var(--line); border-radius:clamp(13px,1.2vw,18px); background:var(--card-solid); box-shadow:0 16px 38px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translate(-50%,5px); transition:opacity .14s var(--ease),transform .14s var(--ease),visibility .14s var(--ease); }
 .node:hover > .node-media-toolbar,.node.selected > .node-media-toolbar { opacity:1; visibility:visible; pointer-events:auto; transform:translate(-50%,0); }

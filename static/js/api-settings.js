@@ -1,5 +1,7 @@
 let providers = [];
 const LINKFOX_PROVIDER_ID = 'linkfox';
+const ECOMMERCE_VISION_PROVIDER_ID = 'ecommerce-vision';
+const isVisionProviderId = id => ['local-vision', ECOMMERCE_VISION_PROVIDER_ID].includes(String(id || '').toLowerCase());
 const LINKFOX_PROVIDER = {id:LINKFOX_PROVIDER_ID, name:'LinkFox', protocol:'linkfox', base_url:'https://tool-gateway.linkfox.com', enabled:true, primary:false, is_virtual:true, configured:false, installed:false};
 let selectedId = '';
 const providerList = document.getElementById('providerList');
@@ -292,7 +294,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === LINKFOX_PROVIDER_ID || item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision' || item.id === 'minimax-h3' || item.id === 'kling-cli';
+    const isBuiltin = item.id === LINKFOX_PROVIDER_ID || item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id) || item.id === 'minimax-h3' || item.id === 'kling-cli';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -331,7 +333,7 @@ function saveProviderOrder(){
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     // 即梦 CLI 不再是固定平台：可删除、可排序，未添加则不存在。
-    return id === LINKFOX_PROVIDER_ID || id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || id === 'local-vision';
+    return id === LINKFOX_PROVIDER_ID || id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || isVisionProviderId(id);
 }
 function unique(values){
     const seen = new Set();
@@ -360,7 +362,7 @@ function normalizeOpenAiCompatibleBaseUrl(value){
 }
 function normalizeLocalVisionBaseInput(showStatus=false){
     const item = provider();
-    if(item?.id !== 'local-vision') return baseInput?.value.trim() || '';
+    if(!isVisionProviderId(item?.id)) return baseInput?.value.trim() || '';
     const normalized = normalizeOpenAiCompatibleBaseUrl(baseInput?.value || item.base_url || LOCAL_VISION_DEFAULT_BASE_URL);
     if(baseInput) baseInput.value = normalized;
     item.base_url = normalized;
@@ -763,26 +765,26 @@ function syncEditor(){
     if(!item) return;
     if(item.id === LINKFOX_PROVIDER_ID || item.is_virtual) return;
     const oldId = item.id;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id);
     // 内置和自定义平台的 ID 都保持稳定；新建时若没有 ID 才生成一次。
     const nextId = isBuiltin ? item.id : deriveIdFromName(nameInput.value, item.id);
     item.id = nextId;
     if(oldId !== item.id) selectedId = item.id;
     item.name = nameInput.value.trim() || item.id;
-    const selectedProtocol = item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : (protocolInput?.value || 'openai');
-    item.base_url = ['jimeng', 'codex'].includes(selectedProtocol) ? '' : (item.id === 'local-vision' ? normalizeOpenAiCompatibleBaseUrl(baseInput.value || LOCAL_VISION_DEFAULT_BASE_URL) : baseInput.value.trim());
-    if(item.id === 'local-vision') baseInput.value = item.base_url;
+    const selectedProtocol = item.id === 'modelscope' || item.id === 'grsai' || isVisionProviderId(item.id) ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : (protocolInput?.value || 'openai');
+    item.base_url = ['jimeng', 'codex'].includes(selectedProtocol) ? '' : (isVisionProviderId(item.id) ? normalizeOpenAiCompatibleBaseUrl(baseInput.value || LOCAL_VISION_DEFAULT_BASE_URL) : baseInput.value.trim());
+    if(isVisionProviderId(item.id)) baseInput.value = item.base_url;
     // 固定平台不从协议下拉读取
     item.protocol = selectedProtocol;
     item.request_protocol = selectedProtocol === 'responses' ? 'responses' : 'chat_completions';
     item.responses_endpoint = (responsesEndpointInput?.value || item.responses_endpoint || '/v1/responses').trim() || '/v1/responses';
     item.image_request_mode = normalizeImageRequestMode(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id)
             ? 'openai'
             : (imageRequestModeInput?.value || item.image_request_mode)
     );
     item.image_edit_route = normalizeImageEditRoute(
-        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id)
             ? 'general'
             : (imageEditRouteInput?.value || item.image_edit_route)
     );
@@ -2316,7 +2318,7 @@ function renderProviderList(){
             `;
         }
         const stateClass = item.enabled === false ? 'is-disabled' : (item.has_key || item.has_wallet_key ? 'has-key' : 'missing-key');
-        const protocolLabel = item.id === 'local-vision' ? 'VISION' : item.id === 'runninghub' ? 'RH' : String(item.protocol || 'openai').toUpperCase();
+        const protocolLabel = isVisionProviderId(item.id) ? 'VISION' : item.id === 'runninghub' ? 'RH' : String(item.protocol || 'openai').toUpperCase();
         const sortMeta = `<span class="provider-drag-handle" aria-hidden="true"><i data-lucide="grip-vertical" class="w-3.5 h-3.5"></i></span><span class="provider-priority" title="生成优先级">${priorityIndex + 1}</span>`;
         if(item.id === 'modelscope'){
             return `
@@ -2381,7 +2383,7 @@ function renderProviderList(){
         return `
             <button class="provider-card provider-card-sortable ${active} ${stateClass}" type="button" onclick="selectProvider('${escapeHtml(item.id)}')"${providerDragAttrs(item)}>
                 ${sortMeta}
-                <span class="provider-mark"><i data-lucide="${item.id === 'local-vision' ? 'scan-eye' : item.has_key ? 'key-round' : 'key'}" class="w-4 h-4"></i></span>
+                <span class="provider-mark"><i data-lucide="${isVisionProviderId(item.id) ? 'scan-eye' : item.has_key ? 'key-round' : 'key'}" class="w-4 h-4"></i></span>
                 <span class="provider-info">
                     <div class="provider-name">${escapeHtml(item.name || item.id)}</div>
                     <div class="provider-meta">${escapeHtml(item.base_url || '未配置地址')}</div>
@@ -2474,7 +2476,7 @@ function renderEditor(){
     if(protocolInput){
         const storedProtocol = String(item.protocol || 'openai').toLowerCase();
         const editableProtocol = storedProtocol === 'responses' || (storedProtocol === 'openai' && item.request_protocol === 'responses') ? 'responses' : storedProtocol;
-        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : item.id === 'grsai' || item.id === 'local-vision' ? 'openai' : editableProtocol;
+        protocolInput.value = item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : item.id === 'minimax-h3' ? 'minimax-h3' : item.id === 'kling-cli' ? 'kling-cli' : item.id === 'grsai' || isVisionProviderId(item.id) ? 'openai' : editableProtocol;
         protocolInput.disabled = FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
         protocolInput.title = protocolInput.disabled ? '内置平台使用固定协议' : '';
     }
@@ -2482,11 +2484,11 @@ function renderEditor(){
     syncResponsesEndpointVisibility();
     if(imageRequestModeInput){
         imageRequestModeInput.value = normalizeImageRequestMode(item.image_request_mode);
-        imageRequestModeInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+        imageRequestModeInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id);
     }
     if(imageEditRouteInput){
         imageEditRouteInput.value = normalizeImageEditRoute(item.image_edit_route);
-        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision';
+        imageEditRouteInput.disabled = item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id);
     }
     keyInput.value = '';
     keyInput.placeholder = item.has_key ? `${tr('api.keepCurrentKey')} ${item.key_preview || ''}` : tr('api.enterKey');
@@ -2498,7 +2500,7 @@ function renderEditor(){
     const isJimeng = item.id === 'jimeng' || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'jimeng';
     const isCodex = item.id === 'codex' || String(protocolInput?.value || item.protocol || '').toLowerCase() === 'codex';
     const isGrsai = item.id === 'grsai';
-    const isLocalVision = item.id === 'local-vision';
+    const isLocalVision = isVisionProviderId(item.id);
     if(isRunningHub){
         ensureRunningHubLists(item);
         if(rhFreeKeyInput){
@@ -2605,10 +2607,11 @@ function renderEditor(){
     const modelsDesc = document.getElementById('modelsDesc');
     const chatModelsTitle = document.getElementById('chatModelsTitle');
     const chatModelsDesc = document.getElementById('chatModelsDesc');
-    if(modelsTitle) modelsTitle.textContent = isLocalVision ? '视觉模型配置' : tr('api.modelsTitle');
-    if(modelsDesc) modelsDesc.textContent = isLocalVision ? '用于全能模式参考图识别，地址按 OpenAI 兼容接口自动补齐。' : tr('api.modelsDesc');
-    if(chatModelsTitle) chatModelsTitle.textContent = isLocalVision ? '视觉模型' : tr('api.chatModels');
-    if(chatModelsDesc) chatModelsDesc.textContent = isLocalVision ? '输入支持图片理解的 VLM 模型名称。' : tr('api.chatHint');
+    const isEcommerceVision = item.id === ECOMMERCE_VISION_PROVIDER_ID;
+    if(modelsTitle) modelsTitle.textContent = isEcommerceVision ? '电商视觉模型配置' : isLocalVision ? '视觉模型配置' : tr('api.modelsTitle');
+    if(modelsDesc) modelsDesc.textContent = isEcommerceVision ? '电商专用页面使用这里配置的视觉模型解析商品、模特与场景图片。' : isLocalVision ? '用于全能模式参考图识别，地址按 OpenAI 兼容接口自动补齐。' : tr('api.modelsDesc');
+    if(chatModelsTitle) chatModelsTitle.textContent = isEcommerceVision ? '视觉模型' : isLocalVision ? '视觉模型' : tr('api.chatModels');
+    if(chatModelsDesc) chatModelsDesc.textContent = isEcommerceVision ? '电商专用页面将使用这里配置的模型解析商品、模特与场景图片' : isLocalVision ? '输入支持图片理解的 VLM 模型名称。' : tr('api.chatHint');
     const deleteBtn = document.getElementById('deleteBtn');
     if(deleteBtn) deleteBtn.style.display = isFixedProvider(item) ? 'none' : 'inline-flex';
     renderModels('image');
@@ -3026,7 +3029,7 @@ async function testConnection(){
     if(!item) return;
     const btn = document.getElementById('testUrlBtn');
     let baseUrl = baseInput.value.trim();
-    if(item.id === 'local-vision'){
+    if(isVisionProviderId(item.id)){
         try { baseUrl = normalizeLocalVisionBaseInput(); }
         catch(error) { alert(error.message || '视觉模型请求地址不合法'); return; }
     }
@@ -3284,7 +3287,7 @@ async function clearKeyOnly(){
     const ok = await saveProviders();
     if(ok) keyInput.value = '';
 }
-const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub', 'codex', 'local-vision', 'minimax-h3', 'kling-cli']);
+const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub', 'codex', 'local-vision', 'ecommerce-vision', 'minimax-h3', 'kling-cli']);
 function providerSupportsModelProtocol(item){
     return Boolean(item) && !FIXED_PROTOCOL_PROVIDER_IDS.has(item.id);
 }
@@ -3648,7 +3651,7 @@ async function persistProviders(options={}){
             ? 'volcengine'
             : item.id === 'grsai'
             ? 'openai'
-            : item.id === 'local-vision'
+            : isVisionProviderId(item.id)
             ? 'openai'
             : item.id === 'jimeng'
             ? 'jimeng'
@@ -3662,12 +3665,12 @@ async function persistProviders(options={}){
         item.request_protocol = item.protocol === 'responses' ? 'responses' : 'chat_completions';
         item.responses_endpoint = item.responses_endpoint || '/v1/responses';
         item.image_request_mode = normalizeImageRequestMode(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id)
                 ? 'openai'
                 : item.image_request_mode
         );
         item.image_edit_route = normalizeImageEditRoute(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || item.id === 'local-vision'
+            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id)
                 ? 'general'
                 : item.image_edit_route
         );
@@ -3693,7 +3696,7 @@ async function persistProviders(options={}){
             item.chat_models = unique(item.chat_models || []);
             item.video_models = unique(item.video_models || []);
         }
-        if(item.id === 'local-vision'){
+        if(isVisionProviderId(item.id)){
             item.base_url = normalizeOpenAiCompatibleBaseUrl(item.base_url || LOCAL_VISION_DEFAULT_BASE_URL);
             item.protocol = 'openai';
             item.image_request_mode = 'openai';
@@ -3734,7 +3737,7 @@ async function persistProviders(options={}){
                 id:item.id,
                 name:item.name,
                 base_url:item.base_url,
-                protocol:(item.id === 'modelscope' || item.id === 'grsai' || item.id === 'local-vision') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (item.protocol || 'openai'),
+                protocol:(item.id === 'modelscope' || item.id === 'grsai' || isVisionProviderId(item.id)) ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : item.id === 'jimeng' ? 'jimeng' : item.id === 'codex' ? 'codex' : (item.protocol || 'openai'),
                 request_protocol:item.request_protocol || ((item.protocol || 'openai') === 'responses' ? 'responses' : 'chat_completions'),
                 responses_endpoint:item.responses_endpoint || '/v1/responses',
                 image_request_mode:item.image_request_mode || 'openai',
@@ -3863,7 +3866,7 @@ window.onload = () => {
     if(protocolInput) protocolInput.addEventListener('change', updateProtocolFromInput);
     if(baseInput) baseInput.addEventListener('input', () => updateApimartDomesticHint());
     if(baseInput) baseInput.addEventListener('blur', () => {
-        if(provider()?.id !== 'local-vision') return;
+        if(!isVisionProviderId(provider()?.id)) return;
         try { normalizeLocalVisionBaseInput(true); }
         catch(error) { setStatus(error.message || '视觉模型请求地址不合法'); }
         scheduleProviderAutoSave(0);

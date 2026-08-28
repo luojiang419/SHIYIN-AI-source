@@ -1002,13 +1002,15 @@ class EcommerceBackendTests(unittest.TestCase):
             providers = self.main.load_api_providers()
         self.assertEqual(
             [item["id"] for item in providers],
-            ["modelscope", "grsai", "lingjing", "shiying", "local-vision", "minimax-h3", "kling-cli"],
+            ["modelscope", "grsai", "lingjing", "shiying", "local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"],
         )
         self.assertEqual(providers[3]["base_url"], "https://www.shiying-api.com")
         self.assertEqual(providers[3]["model_protocols"]["gemini-3-pro-image-preview"], "gemini")
         self.assertEqual(providers[4]["chat_models"], ["qwen3.5-9b-vlm"])
         self.assertEqual(providers[4]["image_models"], [])
-        self.assertEqual(providers[5]["video_models"], ["MiniMax H3"])
+        self.assertEqual(providers[5]["name"], "电商专用")
+        self.assertEqual(providers[5]["chat_models"], ["qwen3.5-9b-vlm"])
+        self.assertEqual(providers[6]["video_models"], ["MiniMax H3"])
 
     def test_grsai_builtin_provider_uses_documented_root_and_models(self):
         provider = self.main.normalize_provider({

@@ -5928,8 +5928,27 @@ function layoutUploadedMediaNodes(created, base){
     });
     return true;
 }
+function scheduleCanvasGroupAutoFit(groupId){
+    if(!groupId) return;
+    // 图片/视频使用 lazy 预览时，首次 render 可能还拿不到真实内容高度。
+    // 在浏览器完成一轮布局和媒体解码后再复测一次，保证间距与组背景板同步更新。
+    const run = () => {
+        const group = nodes.find(node => node.id === groupId && node.type === 'group');
+        if(!group) return;
+        const before = {x:Number(group.x)||0, y:Number(group.y)||0, w:Number(group.w)||0, h:Number(group.h)||0};
+        if(!arrangeCanvasGroupContents(groupId, {skipUndo:true})) return;
+        const changed = before.w !== Number(group.w)||before.h !== Number(group.h)
+            || before.x !== Number(group.x)||before.y !== Number(group.y);
+        if(changed){
+            render();
+            scheduleSave();
+        }
+    };
+    requestAnimationFrame(() => requestAnimationFrame(run));
+    setTimeout(run, 180);
+}
 function createGroupForUploadedNodes(created, point){
-    const targets = [...(created || [])].filter(n => n?.type === 'image');
+    const targets = [...(created || [])].filter(n => n?.type === 'image' && ['image','video','audio'].includes(mediaKindForNode(n)));
     if(targets.length < 2) return null;
     render();
     const box = nodeBounds(targets.map(n => n.id));
@@ -5946,6 +5965,7 @@ function createGroupForUploadedNodes(created, point){
     nodes.push(group);
     // 以分组自己的真实节点尺寸再次排版，避免导入后节点尺寸变化导致重叠。
     arrangeCanvasGroupContents(group.id, {skipUndo:true});
+    scheduleCanvasGroupAutoFit(group.id);
     selected.clear();
     selected.add(group.id);
     return group;
@@ -20338,8 +20358,12 @@ function endDrag(event=null){
 }
 function nodeRect(n){
     const el = nodesEl.querySelector(`.node[data-id="${n.id}"]`);
-    const w = el?.offsetWidth || n.w || 260;
-    const h = el?.offsetHeight || n.h || 200;
+    const size = defaultNodeSize(n.type);
+    const w = el?.offsetWidth || n.w || size.w || 260;
+    let h = el?.offsetHeight || n.h || size.h || 200;
+    // lazy 图片尚未解码时 offsetHeight 可能只有节点最小高度；使用固定节点高度作为布局下限，
+    // 避免批量导入/分组整理时把卡片排成叠卡片。
+    if(n.type === 'image' && !n.h && h < 150) h = Math.max(h, Number(size.h) || 336);
     return {x:n.x, y:n.y, w, h, cx:n.x + w/2, cy:n.y + h/2};
 }
 const CANVAS_NODE_LAYOUT_GAP = 72;

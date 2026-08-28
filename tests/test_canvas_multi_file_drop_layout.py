@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CANVAS_JS = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
 SMART_JS = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
+CANVAS_CSS = (ROOT / "static/css/canvas.css").read_text(encoding="utf-8")
 
 
 def test_both_canvases_use_stable_numeric_filename_sorting():
@@ -104,3 +105,9 @@ def test_group_headers_show_image_count_next_to_group_title():
     assert "const smartGroupImageCount = isSmartGroup ? smartGroupImageRefs(node).length" in SMART_JS
     assert "<span class=\"group-image-count\">${smartGroupImageCount}张</span>" in SMART_JS
     assert "<div class=\"node-title-wrap\"><div class=\"node-title\">${title}</div>${smartGroupCountHtml}" in SMART_JS
+
+
+def test_selected_or_hovered_image_node_raises_its_floating_controls_above_neighbors():
+    assert ".node.image-node:hover" in CANVAS_CSS
+    assert ".node.image-node.selected" in CANVAS_CSS
+    assert "z-index:1000" in CANVAS_CSS

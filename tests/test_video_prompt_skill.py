@@ -24,3 +24,7 @@ def test_kling_skill_has_source_note():
     assert source.exists()
     assert "kling.ai/quickstart" in source.read_text(encoding="utf-8")
 
+    text, skill_id = _video_prompt_skill("kling-cli", "Kling VIDEO 3.0 Omni")
+    assert skill_id == "kling-cli"
+    assert "<<<element_1>>>" in text
+    assert "latest-official-syntax-2.0.txt" in text

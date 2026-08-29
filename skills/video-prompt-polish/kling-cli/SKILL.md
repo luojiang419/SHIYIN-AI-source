@@ -1,22 +1,49 @@
-# 可灵 CLI 视频提示词规范
+---
+name: kling-cli-prompt-writing
+description: Rewrite prompts for Kling VIDEO 3.0 and VIDEO 3.0 Omni using the latest official Kling prompt syntax and reference-tag guidance.
+source_status: official-guide-derived-adapter
+---
 
-## 目标
+# Kling VIDEO 3.0 / 3.0 Omni Prompt Writing
 
-将用户原始意图整理为可直接提交给可灵 CLI（含 3.0 Omni）的简洁视频提示词。只做结构化和必要补全，不改变主体、动作、运镜方向、时长意图、情绪或否定要求。
+This is the project's local adapter for the latest publicly available Kling official prompt guides. It is not a claim that Kling publishes a standalone downloadable `SKILL.md` package.
 
-## 组织顺序
+## Mode selection
 
-1. 场景与主体（参考素材是事实依据）。
-2. 动作及动作先后、身体朝向和视线。
-3. 景别/视角与镜头运动；运动写明类型，必要时写幅度和速度。
-4. 必要的光线、环境声或对白。
+- **Text-to-Video**: write a concise scene direction with subject, environment, visible action, camera, lighting, mood, and optional audio.
+- **Image-to-Video / start frame**: treat the supplied image as the visual fact and describe only how the scene evolves from it.
+- **Start-and-end frames**: describe the continuous transition between the two supplied frames.
+- **Multi-Shot / Custom Multi-Shot**: organize the prompt as `Shot 1`, `Shot 2`, etc.; each shot gets duration when known, framing, perspective, subject action, and one main camera move.
+- **Omni reference workflow**: preserve the role of every element, image, video, and voice reference across all shots.
 
-## 镜头运动词汇
+## Prompt order
 
-固定、推进、拉远、跟拍、水平摇移、垂直摇移、环绕、升降、轻微/强烈手持。用户只写“镜头向上摇”时，结合画面主体推断最少量的拍摄对象和运动终点，不扩写无关剧情。
+Use this order unless the user's wording requires otherwise:
 
-## 引用与输出
+`[scene/environment] + [subject and visible appearance] + [action timeline] + [camera/framing] + [lighting/mood] + [audio/dialogue] + [technical constraints]`
 
-- 可灵 Omni 的参考图使用 `@图N`，编号按输入顺序，不改写为泛称。
-- 保留用户已有的素材引用、对白和否定要求，不虚构新主体或道具。
-- 只输出一段可生成提示词，不输出分析、标题或 Markdown。
+Describe what the audience can see and hear. Use concrete motion verbs and real light sources. Keep one primary camera move per shot; avoid contradictory or overloaded movement instructions. A short prompt is preferred when the user supplied only a camera instruction.
+
+## Latest official Omni reference syntax
+
+Use the exact triple-angle tags when the selected Kling workflow supports Omni references:
+
+- `<<<element_1>>>` — character, product, prop, or recurring subject identity.
+- `<<<image_1>>>` — reference image, style, composition, or starting frame.
+- `<<<video_1>>>` — motion or video-element reference.
+- `<<<voice_1>>>` — voice binding for a referenced character.
+
+Keep tag numbering and meaning stable. Do not invent a tag that is not backed by an input asset. Preserve the user's existing asset references when they are already present.
+
+## Camera and physical motion
+
+Prefer official plain-language directions such as `push in`, `pull back`, `pan left/right`, `tilt up/down`, `track`, `orbit`, or `static camera`, tied to a subject or reveal purpose. State speed and stability only when useful. For physics, describe visible cause and effect (gravity, collision, fluid, fabric, smoke) rather than abstract claims.
+
+## Native audio and dialogue
+
+Kling VIDEO 3.0 / 3.0 Omni can combine visuals, dialogue, ambience, and sound effects. Keep speaker label, line, language, and delivery together; preserve exact user dialogue. Do not add dialogue or music that the user did not request.
+
+## User-intent guardrails
+
+Do not change the user's subject, action, camera direction, timing, emotion, dialogue, negative constraints, or reference role. Infer only the minimum visual context needed to execute an underspecified instruction. Output only the final Kling-ready prompt, with no analysis, title, or Markdown fence.
+

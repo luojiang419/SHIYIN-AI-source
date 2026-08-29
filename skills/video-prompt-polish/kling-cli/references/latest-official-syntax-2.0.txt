@@ -1,0 +1,20 @@
+Kling official latest public prompt guidance (operational summary)
+
+Source pages:
+- https://kling.ai/blog/kling-3-prompt-syntax-omni-reference-tags-video-physics
+- https://kling.ai/blog/kling-ai-prompt-guide
+- https://kling.ai/blog/kling-ai-camera-control-video-guide
+- https://kling.ai/quickstart/klingai-video-3-omni-model-user-guide
+
+Official syntax points to preserve:
+- Omni reference tags use triple angle brackets: <<<element_1>>>, <<<image_1>>>, <<<video_1>>>, <<<voice_1>>>.
+- Element tags preserve character/product/prop identity; image tags provide visual or start-frame reference; video tags anchor motion or video elements; voice tags bind a voice to a subject.
+- Keep each tag's number and semantic role stable across every shot. Never create a tag without a corresponding input asset.
+- A clear prompt identifies subject, environment, visible action, camera/framing, lighting/mood, and audio/dialogue.
+- Camera instructions should name a concrete move and its target: push in, pull back, pan left/right, tilt up/down, track, orbit, or static camera.
+- Prefer one main camera move per shot and connect it to the subject or reveal; avoid contradictory combinations.
+- Multi-Shot can be written shot by shot with shot order, duration, framing, perspective, narrative action, and camera movement.
+- VIDEO 3.0 and VIDEO 3.0 Omni support native audio workflows; keep speaker, line, delivery, ambience, and sound effects explicit when requested.
+- Reference-driven prompts must keep character, product, prop, and scene descriptions stable while camera angle or action changes.
+- Rewrite conservatively: preserve the user's original intent and add only the minimum context required for executable motion.
+

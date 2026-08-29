@@ -126,7 +126,7 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
     assert "class CanvasPromptPolishRequest" in MAIN
     assert "duration: Optional[float] = None" in MAIN
     assert "本次视频节点控制参数（仅供内部规划，不得原样输出）" in MAIN
-    assert "最终提示词不得出现视频模型名称、画幅、分辨率" in MAIN
+    assert "最终提示词不得出现视频模型名称、时长数值、画幅、分辨率" in MAIN
 
 
 def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():

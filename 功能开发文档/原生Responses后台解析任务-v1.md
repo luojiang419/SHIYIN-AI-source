@@ -26,6 +26,7 @@
 - 前端画布、智能画布和 film 节点统一提交后台任务并轮询，最长等待 30 分钟。
 - 联网搜索先以无图片文本请求执行，再把摘要交给同一 provider/model 的视觉解析请求；视觉请求不再同时附加搜索工具。
 - 真实安装目录配置验证：`ecommerce-vision + gpt-5.6-sol`，搜索请求日志 `tools=1`，视觉请求日志 `tools=0`，最终自动解析返回 200。
+- 严格真实验证：4 张参考图 + 完整长导演规则 + 原生 Responses 联网搜索，后台任务约 111.5 秒完成，返回 974 字符并完整覆盖 `<<<image_1>>>` 至 `<<<image_4>>>`；搜索和视觉阶段均保持 `ecommerce-vision / gpt-5.6-sol`。
 - 静态检查：`python -m py_compile main.py`；测试：163 passed。
 - 安装包构建：PyInstaller、Tauri、运行时 smoke、Inno Setup 全部通过。
 

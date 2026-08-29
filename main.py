@@ -4182,6 +4182,8 @@ class CanvasLLMRequest(BaseModel):
     image_labels: List[str] = []  # 与 images 同序的影视资产映射标签
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
     web_search: bool = False  # Responses 协议下允许模型调用内置联网搜索
+    # 视频润色/自动解析可在首次复杂请求失败后使用紧凑提示词重试；普通调用保持默认 2 次 524 重试。
+    retry_524: int = Field(default=2, ge=0, le=2)
 
 class CanvasPromptPolishRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=LLM_MESSAGE_MAX_LENGTH)
@@ -5017,7 +5019,7 @@ def build_llm_request_body(transport, messages, stream=False):
         body["stream"] = False
     return body
 
-async def request_llm_json(transport, messages):
+async def request_llm_json(transport, messages, retry_524=2):
     """执行一次非流式文本请求，旧协议和 Responses 共用同一入口。"""
     async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
         body = build_llm_request_body(transport, messages)
@@ -5035,7 +5037,8 @@ async def request_llm_json(transport, messages):
         # 部分兼容 Responses 的代理在大尺寸视觉请求上会偶发返回 Cloudflare 524。
         # 该状态表示网关等待上游超时，不代表 API Key 或模型配置错误；短暂退避后重试，
         # 避免用户必须反复点击按钮。仅重试 524，防止鉴权/参数错误造成重复请求。
-        for attempt in range(3):
+        retry_limit = max(0, min(2, int(retry_524 or 0)))
+        for attempt in range(retry_limit + 1):
             try:
                 response = await client.post(
                     transport["url"],
@@ -5043,25 +5046,25 @@ async def request_llm_json(transport, messages):
                     json=body,
                 )
             except httpx.HTTPError as exc:
-                if attempt >= 2:
+                if attempt >= retry_limit:
                     raise HTTPException(
                         status_code=504,
                         detail=(
                             "连接电商视觉上游失败，未收到有效响应。"
-                            f"已自动重试 2 次（{type(exc).__name__}），请检查网络或稍后重试。"
+                            f"已自动重试 {retry_limit} 次（{type(exc).__name__}），请检查网络或稍后重试。"
                         ),
                     ) from exc
                 print(
-                    f"[llm-retry] upstream network error, retry={attempt + 1}/2 "
+                    f"[llm-retry] upstream network error, retry={attempt + 1}/{retry_limit} "
                     f"model={transport.get('model', '')} error={type(exc).__name__}",
                     flush=True,
                 )
                 await asyncio.sleep(1.5 * (attempt + 1))
                 continue
-            if response.status_code != 524 or attempt >= 2:
+            if response.status_code != 524 or attempt >= retry_limit:
                 break
             print(
-                f"[llm-retry] upstream 524, retry={attempt + 1}/2 model={transport.get('model', '')} "
+                f"[llm-retry] upstream 524, retry={attempt + 1}/{retry_limit} model={transport.get('model', '')} "
                 f"provider={(transport.get('provider') or {}).get('id', '')}",
                 flush=True,
             )
@@ -19120,6 +19123,16 @@ def _video_auto_parse_system_prompt(
         f"\n\n===== 当前视频模型必须执行的 skill（{skill_id}）=====\n{skill_text}"
     )
 
+def _video_compact_fallback_system_prompt(video_provider, video_model, reference_context):
+    """复杂导演提示词触发代理超时时使用的紧凑版本，保留模型格式和引用约束。"""
+    _, skill_id = _video_prompt_skill(video_provider, video_model)
+    return (
+        f"你是 {video_model or '视频'} 提示词导演。只输出最终可直接生成的视频提示词，不要解释。"
+        "必须综合全部参考图片，严格按上传顺序逐一使用每个规范图片引用标签；"
+        "不得臆造画面外主体。明确时间推进、主体动作先后、身体朝向/视线、景别、机位、镜头运动、光线和必要声音。"
+        f"当前模型格式：{skill_id}。\n{reference_context}"
+    )
+
 
 @app.post("/api/canvas-video-auto-parse")
 async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
@@ -19173,8 +19186,24 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         image_labels=canonical_labels,
         videos=[],
         web_search=True,
+        retry_524=0,
     )
-    result = await canvas_llm(request)
+    try:
+        result = await canvas_llm(request)
+    except HTTPException as exc:
+        if exc.status_code not in {524, 502, 504}:
+            raise
+        # 电商代理对长导演规则偶发超时：保留同一模型/全部图片，仅压缩系统提示词后重试。
+        request.system_prompt = _video_compact_fallback_system_prompt(
+            payload.video_provider, payload.video_model, reference_context
+        )
+        request.message = (
+            "请根据全部参考图片生成一段连续视频提示词，必须逐一使用 "
+            + "、".join(f"<<<image_{index}>>>" for index in range(1, len(images) + 1))
+            + "，只输出提示词。"
+        )
+        request.retry_524 = 2
+        result = await canvas_llm(request)
     text = clean_video_prompt_output(
         str(result.get("text") or "").strip(),
     )
@@ -19268,7 +19297,7 @@ async def canvas_llm(payload: CanvasLLMRequest):
         upstream_messages.append({"role": "user", "content": payload.message})
     raw = None
     try:
-        raw = await request_llm_json(_llm_transport, upstream_messages)
+            raw = await request_llm_json(_llm_transport, upstream_messages, payload.retry_524)
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, model, _llm_provider)
@@ -19332,8 +19361,18 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         image_labels=canonical_image_labels,
         videos=payload.videos,
         web_search=True,
+        retry_524=0,
     )
-    result = await canvas_llm(request_payload)
+    try:
+        result = await canvas_llm(request_payload)
+    except HTTPException as exc:
+        if exc.status_code not in {524, 502, 504}:
+            raise
+        request_payload.system_prompt = _video_compact_fallback_system_prompt(
+            payload.video_provider, payload.video_model, reference_context
+        )
+        request_payload.retry_524 = 2
+        result = await canvas_llm(request_payload)
     text = str(result.get("text") or "").strip()
     if text.startswith("```") and text.endswith("```"):
         text = text.strip("`").strip()

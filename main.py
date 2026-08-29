@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.355"
+APP_VERSION = "1.0.356"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4154,6 +4154,18 @@ class CanvasLLMRequest(BaseModel):
     images: List[str] = []   # 可以是 /output/*.png、/assets/*.png 本地路径 或 http(s) URL 或 data URL
     image_labels: List[str] = []  # 与 images 同序的影视资产映射标签
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
+
+class CanvasPromptPolishRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=LLM_MESSAGE_MAX_LENGTH)
+    provider: str = ""
+    model: str = ""
+    ms_model: str = ""
+    video_provider: str = ""
+    video_model: str = ""
+    text_to_video: bool = False
+    images: List[str] = []
+    image_labels: List[str] = []
+    videos: List[str] = []
 
 class BuildingMultiViewReference(BaseModel):
     role: str = Field(min_length=1, max_length=32)
@@ -18696,6 +18708,37 @@ async def building_multi_view_plan(payload: BuildingMultiViewPlanRequest):
 
 # --- Canvas LLM ---
 
+def video_prompt_polish_system_prompt(video_provider: str = "", video_model: str = "", text_to_video: bool = False) -> str:
+    """集中维护视频模型提示词润色规则，供经典/智能画布统一调用。"""
+    provider = str(video_provider or "").strip().lower()
+    model = str(video_model or "").strip()
+    model_hint = f"当前视频模型：{model}。" if model else ""
+    if provider == "kling-cli" or "kling" in model.lower() or "可灵" in model:
+        spec = (
+            "按可灵视频 3.0/Omni 的简洁镜头提示词习惯组织：先写场景与主体，再写动作先后、身体朝向/视线、景别与镜头运动（固定、推进、跟拍、摇移、环绕、拉远）及速度，最后补充必要的光线、环境和声音。"
+            "严格保留并规范 @图N 引用，不新增未提供的主体、道具或情节。"
+        )
+    elif provider == "minimax-h3" or "minimax" in model.lower() or "h3" in model.lower():
+        spec = (
+            "按 MiniMax H3 视频提示词习惯组织为简洁、连续、可执行的镜头描述：主体/场景 → 动作与时间顺序 → 摄影机运动与节奏 → 光线和必要声音。"
+            "保留原文中的画面事实与素材引用，不堆砌形容词，不虚构对白或剧情。"
+        )
+    else:
+        spec = (
+            "按当前视频模型的通用官方提示词习惯进行轻量结构化：明确主体和场景、动作先后、镜头运动与速度，以及必要的光线/声音。"
+            "只做规范化，不添加用户没有表达的关键事实。"
+        )
+    expansion = (
+        "这是纯文本生成视频，可在不改变原意的前提下补足最少量的镜头上下文，使单句运镜指令可执行。"
+        if text_to_video else
+        "已有参考图/视频时，以参考素材为画面事实依据，禁止臆造其外观和身份。"
+    )
+    return (
+        "你是视频生成提示词润色器。只输出最终可直接提交给视频模型的一段提示词，不要解释、不要加标题、不要使用 Markdown 代码块。"
+        "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
+        f"{model_hint}{spec}{expansion}整体保持简洁，通常 1-4 句即可。"
+    )
+
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):
     _llm_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
@@ -18768,6 +18811,30 @@ async def canvas_llm(payload: CanvasLLMRequest):
         raise HTTPException(status_code=502, detail=f"解析回复内容失败：{exc}") from exc
     raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else {}
     return {"text": text, "model": model, "raw_usage": raw_data.get("usage")}
+
+@app.post("/api/canvas-prompt-polish")
+async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
+    """根据所选视频模型规范，调用多模态视觉模型轻量润色提示词。"""
+    system_prompt = video_prompt_polish_system_prompt(
+        payload.video_provider, payload.video_model, payload.text_to_video
+    )
+    request_payload = CanvasLLMRequest(
+        message=payload.prompt,
+        system_prompt=system_prompt,
+        provider=payload.provider or "comfly",
+        model=payload.model,
+        ms_model=payload.ms_model,
+        images=payload.images,
+        image_labels=payload.image_labels,
+        videos=payload.videos,
+    )
+    result = await canvas_llm(request_payload)
+    text = str(result.get("text") or "").strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.strip("`").strip()
+        if text.lower().startswith("text"):
+            text = text[4:].lstrip(":\n ")
+    return {**result, "text": text, "video_provider": payload.video_provider, "video_model": payload.video_model}
 
 # --- 对话管理 ---
 

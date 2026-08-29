@@ -164,8 +164,8 @@ function openExpandedPromptEditor(source){
         expandedPromptRich.innerHTML = source.innerHTML;
         expandedPromptRich.contentEditable = source.dataset.promptLocked === '1' ? 'false' : 'true';
     } else {
-        expandedPromptTextarea.value = source.value || '';
-        expandedPromptTextarea.readOnly = Boolean(source.readOnly || source.disabled);
+        expandedPromptTextarea.value = source.isContentEditable ? (source.innerText || '') : (source.value || '');
+        expandedPromptTextarea.readOnly = Boolean(source.readOnly || source.disabled || (source.isContentEditable && source.contentEditable === 'false'));
     }
     expandedPromptModal.classList.add('open');
     expandedPromptModal.setAttribute('aria-hidden', 'false');
@@ -182,7 +182,8 @@ function closeExpandedPromptEditor(){
 }
 expandedPromptTextarea?.addEventListener('input', () => {
     if(!expandedPromptSource?.isConnected || expandedPromptTextarea.readOnly) return;
-    expandedPromptSource.value = expandedPromptTextarea.value;
+    if(expandedPromptSource.isContentEditable) expandedPromptSource.textContent = expandedPromptTextarea.value;
+    else expandedPromptSource.value = expandedPromptTextarea.value;
     expandedPromptSource.dispatchEvent(new Event('input', {bubbles:true}));
 });
 expandedPromptRich?.addEventListener('input', () => {
@@ -9231,7 +9232,7 @@ function promptNodeBodyHtml(node){
             ${node.llmSystemEnabled ? `<textarea class="prompt-node-control prompt-llm-system" placeholder="${escapeHtml(tr('smart.promptLlmSystemPlaceholder'))}">${escapeHtml(systemPrompt || 'You are a helpful prompt assistant.')}</textarea>` : ''}
         </div>` : '';
     return `<div class="prompt-node-card">
-        <textarea class="prompt-node-text prompt-node-control" ${readonly} placeholder="${escapeHtml(tr('smart.promptPlaceholderNode'))}">${escapeHtml(node.text || '')}</textarea>
+        <div class="prompt-node-text prompt-node-control" contenteditable="${readonly ? 'false' : 'true'}" role="textbox" aria-multiline="true" data-placeholder="${escapeAttr(tr('smart.promptPlaceholderNode'))}" spellcheck="false">${escapeHtml(node.text || '')}</div>
         <div class="prompt-node-tools">
             <button class="prompt-node-pill prompt-node-control prompt-expand-open" type="button" title="${escapeHtml(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button>
             <button class="prompt-node-pill prompt-node-control prompt-preset-edit ${templateActive ? 'active' : ''}" type="button"><i data-lucide="library"></i><span>模板库</span></button>
@@ -10291,13 +10292,13 @@ function bindPromptNodeControls(el, node){
         control.addEventListener('click', e => e.stopPropagation());
         control.addEventListener('dblclick', e => e.stopPropagation());
     });
-    const fitPromptNode = () => fitAutoTextNode(node, el, [el.querySelector('.prompt-node-text'), el.querySelector('.prompt-llm-instruction'), el.querySelector('.prompt-llm-system')], {minLines:3});
+    const fitPromptNode = () => fitAutoTextNode(node, el, [el.querySelector('.prompt-node-text'), el.querySelector('.prompt-llm-instruction'), el.querySelector('.prompt-llm-system')], {minLines:3, allowShrink:true});
     const textEl = el.querySelector('.prompt-node-text');
     if(textEl) {
         bindScrollableText(textEl);
         textEl.oninput = e => {
             const prevExtra = promptNodeSplitExtraHeight(node);
-            node.text = e.target.value;
+            node.text = e.target.innerText || '';
             refreshPromptNodeSegmentsUi(el, node);
             fitPromptNode();
             if(node.promptSplitEnabled === true){
@@ -10689,8 +10690,8 @@ function fitAutoTextNode(node, nodeEl, controls=[], options={}){
     const borderY = parseAutoFitPx(style.borderTopWidth) + parseAutoFitPx(style.borderBottomWidth);
     const current = parseAutoFitPx(nodeEl.style.height, node.h || nodeEl.getBoundingClientRect().height || 0);
     const measured = Math.ceil((nodeEl.scrollHeight || current) + borderY);
-    const next = Math.max(current, measured);
-    if(next > current + 1){
+    const next = options.allowShrink ? measured : Math.max(current, measured);
+    if(Math.abs(next - current) > 1){
         node.h = Math.round(next);
         nodeEl.style.height = `${node.h}px`;
         invalidateSmartGeometry([node.id]);
@@ -11800,6 +11801,33 @@ function createSmartSpecialOutputNode(sourceNode, item, kind){
     scheduleSave();
     return output;
 }
+function smartFilmPromptReferences(assets=[]){
+    return (assets || []).map(item => {
+        const ref = item?.ref || item;
+        const url = ref?.url || ref?.path || ref;
+        if(!url || typeof url !== 'string') return null;
+        const kind = mediaKindForItem(ref);
+        return ['image','video'].includes(kind) ? {url, kind, label:item?.role || item?.inputRole || ref?.name || ''} : null;
+    }).filter(Boolean).filter((item,index,array) => array.findIndex(other => other.url === item.url) === index);
+}
+async function polishSmartVideoPrompt(node, prompt, refs=[]){
+    const text = String(prompt || '').trim();
+    if(!text) throw new Error('请先输入需要润色的提示词');
+    const visionProvider = resolveChatProviderId(node?.visionProvider || '');
+    const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
+    const images = refs.filter(item => item.kind === 'image').map(item => item.url).slice(0,20);
+    const videos = refs.filter(item => item.kind === 'video').map(item => item.url).slice(0,3);
+    const labels = refs.filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
+    const response = await fetch('/api/canvas-prompt-polish', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || node?.runSettings?.videoProvider || '', video_model:node?.model || node?.runSettings?.videoModel || '',
+        text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
+    })});
+    const data = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(data.detail || '提示词润色失败');
+    const polished = String(data.text || '').trim();
+    if(!polished) throw new Error('润色模型返回了空提示词');
+    return polished;
+}
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(node?.specialType === 'linkfox-video'){
@@ -11820,6 +11848,7 @@ function bindSmartSpecialNode(el, node){
             model:node.model || node.runSettings?.videoModel || '',
             visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
             visionModel:changed => resolveChatModel(changed.visionModel || '', resolveChatProviderId(changed.visionProvider || '')),
+            polishPrompt:(changed,prompt,assets) => polishSmartVideoPrompt(changed,prompt,smartFilmPromptReferences(assets)),
             run:changed => runSmartFilmNode(changed),
             toast:message => toast(String(message || '').slice(0,180)),
             onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },

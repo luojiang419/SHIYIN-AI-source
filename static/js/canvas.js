@@ -594,8 +594,8 @@ function startCanvasStatsLoop(){
 function openExpandedPromptEditor(source){
     if(!source || !expandedPromptModal || !expandedPromptTextarea) return;
     expandedPromptSource = source;
-    expandedPromptTextarea.value = source.value || '';
-    expandedPromptTextarea.readOnly = Boolean(source.readOnly || source.disabled);
+    expandedPromptTextarea.value = source.isContentEditable ? (source.innerText || '') : (source.value || '');
+    expandedPromptTextarea.readOnly = Boolean(source.readOnly || source.disabled || (source.isContentEditable && source.contentEditable === 'false'));
     expandedPromptModal.classList.add('open');
     expandedPromptModal.setAttribute('aria-hidden', 'false');
     requestAnimationFrame(() => {
@@ -610,7 +610,8 @@ function closeExpandedPromptEditor(){
 }
 expandedPromptTextarea?.addEventListener('input', () => {
     if(!expandedPromptSource?.isConnected || expandedPromptTextarea.readOnly) return;
-    expandedPromptSource.value = expandedPromptTextarea.value;
+    if(expandedPromptSource.isContentEditable) expandedPromptSource.textContent = expandedPromptTextarea.value;
+    else expandedPromptSource.value = expandedPromptTextarea.value;
     expandedPromptSource.dispatchEvent(new Event('input', {bubbles:true}));
 });
 function activeCanvasTool(event=null){
@@ -9685,6 +9686,7 @@ function bindClassicFilmNode(el,node){
         model:node.model,
         visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
         visionModel:changed => resolveChatModel(changed.visionModel || '', resolveChatProviderId(changed.visionProvider || '')),
+        polishPrompt:(changed,prompt,assets) => polishCanvasVideoPrompt(changed,prompt,canvasFilmPromptReferences(assets)),
         run:changed => runFilmNode(changed.id),
         toast:message => setStatus(String(message || '').slice(0,180)),
         onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },
@@ -9970,11 +9972,11 @@ function renderNode(node){
     }
     if(node.type === 'prompt') {
         const templateActive = promptTemplateModal?.classList.contains('open') && promptTemplateNodeId === node.id;
-        body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><div class="prompt-toolbar-actions"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button><button class="prompt-template-btn" type="button" data-prompt-expand title="${escapeAttr(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button></div>${promptCounterHtml(node.text || '')}</div><textarea placeholder="${tr('canvas.promptPlaceholder')}">${escapeHtml(node.text || '')}</textarea></div>`;
-        const textarea = body.querySelector('textarea');
+        body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><div class="prompt-toolbar-actions"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button><button class="prompt-template-btn" type="button" data-prompt-expand title="${escapeAttr(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button></div>${promptCounterHtml(node.text || '')}</div><div class="prompt-node-text prompt-node-control" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="${escapeAttr(tr('canvas.promptPlaceholder'))}" spellcheck="false">${escapeHtml(node.text || '')}</div></div>`;
+        const textarea = body.querySelector('.prompt-node-text');
         const templateBtn = body.querySelector('[data-prompt-template-open]');
         const expandBtn = body.querySelector('[data-prompt-expand]');
-        const fitPromptText = () => fitAutoTextNode(node, el, [textarea], {minLines:3});
+        const fitPromptText = () => fitAutoTextNode(node, el, [textarea], {minLines:3, allowShrink:true});
         templateBtn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
@@ -9987,7 +9989,7 @@ function renderNode(node){
             openExpandedPromptEditor(textarea);
         };
         textarea.oninput = e => {
-            node.text = e.target.value;
+            node.text = e.target.innerText || '';
             refreshPromptCounter(body, node.text);
             fitPromptText();
             scheduleSave();
@@ -12153,8 +12155,8 @@ function fitAutoTextNode(node, nodeEl, controls=[], options={}){
     const borderY = parseAutoFitPx(style.borderTopWidth) + parseAutoFitPx(style.borderBottomWidth);
     const current = parseAutoFitPx(nodeEl.style.height, node.h || nodeEl.getBoundingClientRect().height || 0);
     const measured = Math.ceil((nodeEl.scrollHeight || current) + borderY);
-    const next = Math.max(current, measured);
-    if(next > current + 1){
+    const next = options.allowShrink ? measured : Math.max(current, measured);
+    if(Math.abs(next - current) > 1){
         node.h = Math.round(next);
         nodeEl.style.height = `${node.h}px`;
         nodeEl.classList.add('sized');
@@ -12243,14 +12245,15 @@ function combinedGeneratorPrompt(node, sources=[]){
         .filter(Boolean)
         .join('\n\n');
 }
-function generatorInlinePromptHtml(node, connectedPromptCount=0){
+function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
     const count = Math.max(0, Number(connectedPromptCount || 0));
+    const polishButton = (options.polish || node?.type === 'video' || node?.type === 'ecom-video') ? `<button type="button" class="prompt-polish-btn" data-video-prompt-polish title="按当前视频模型规范润色提示词"><i data-lucide="wand-sparkles"></i><span>润色</span></button>` : '';
     return `<div class="generator-inline-prompt">
         <div class="generator-inline-prompt-head">
             <span>${escapeHtml(tr('canvas.prompt'))}</span>
             <span class="generator-inline-prompt-meta" data-generator-prompt-meta>${count ? trf('canvas.connectedPromptCount', {n:count}) : tr('canvas.generatorPromptHint')}</span>
         </div>
-        <textarea class="generator-prompt-input" rows="4" placeholder="${escapeAttr(tr('canvas.generatorPromptPlaceholder'))}">${escapeHtml(node?.prompt || '')}</textarea>
+        <div class="generator-prompt-editor-wrap"> <textarea class="generator-prompt-input" rows="4" placeholder="${escapeAttr(tr('canvas.generatorPromptPlaceholder'))}">${escapeHtml(node?.prompt || '')}</textarea>${polishButton}</div>
     </div>`;
 }
 function bindGeneratorInlinePrompt(wrap, node){
@@ -12876,6 +12879,7 @@ function renderVideoBody(node){
     renderVideoImageInputs(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     bindGeneratorInlinePrompt(wrap, node);
+    bindVideoPromptPolish(wrap, node, canvasVideoPromptReferences(node));
     wrap.querySelector('.gen-btn').onclick = e => { e.stopPropagation(); runCanvasGenerate(node.id); };
     bindCascadeButtons(wrap, node.id);
     return wrap;
@@ -19284,6 +19288,66 @@ async function runImageNodeQuickGenerate(nodeId){
         node.running = false;
         refreshRunNodes(node, out);
     }
+}
+function canvasVideoPromptReferences(node){
+    const refs = [];
+    (generatorSources(node) || []).forEach(source => (source.refs || []).forEach(ref => {
+        const url = ref?.url || ref?.path || ref;
+        if(!url || typeof url !== 'string') return;
+        const kind = mediaKindForRef(ref);
+        if(!['image','video'].includes(kind)) return;
+        refs.push({url, kind, label:source.label || ref.name || ''});
+    }));
+    return refs.filter((item,index,array) => array.findIndex(other => other.url === item.url) === index);
+}
+function canvasFilmPromptReferences(assets=[]){
+    return (assets || []).map(item => {
+        const ref = item?.ref || item;
+        const url = ref?.url || ref?.path || ref;
+        if(!url || typeof url !== 'string') return null;
+        const kind = mediaKindForRef(ref);
+        return ['image','video'].includes(kind) ? {url, kind, label:item?.role || item?.inputRole || ref?.name || ''} : null;
+    }).filter(Boolean).filter((item,index,array) => array.findIndex(other => other.url === item.url) === index);
+}
+async function polishCanvasVideoPrompt(node, prompt, refs=[]){
+    const text = String(prompt || '').trim();
+    if(!text) throw new Error('请先输入需要润色的提示词');
+    const visionProvider = resolveChatProviderId(node?.visionProvider || '');
+    const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
+    const images = refs.filter(item => item.kind === 'image').map(item => item.url).slice(0,20);
+    const videos = refs.filter(item => item.kind === 'video').map(item => item.url).slice(0,3);
+    const labels = refs.filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
+    const response = await fetch('/api/canvas-prompt-polish', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || '', video_model:node?.model || '',
+        text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
+    })});
+    const data = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(data.detail || '提示词润色失败');
+    const polished = String(data.text || '').trim();
+    if(!polished) throw new Error('润色模型返回了空提示词');
+    return polished;
+}
+function bindVideoPromptPolish(wrap, node, refs=[]){
+    const input = wrap?.querySelector?.('.generator-prompt-input');
+    const button = wrap?.querySelector?.('[data-video-prompt-polish]');
+    if(!input || !button || !node) return;
+    button.onmousedown = e => e.stopPropagation();
+    button.onclick = async e => {
+        e.preventDefault(); e.stopPropagation();
+        if(button.disabled) return;
+        const original = input.value;
+        button.disabled = true; button.classList.add('is-loading');
+        const label = button.querySelector('span'); if(label) label.textContent = '润色中…';
+        try {
+            input.value = await polishCanvasVideoPrompt(node, original, refs);
+            input.dispatchEvent(new Event('input', {bubbles:true}));
+        } catch(error) {
+            showErrorModal(error.message || '提示词润色失败', '提示词润色');
+        } finally {
+            button.disabled = false; button.classList.remove('is-loading');
+            if(label) label.textContent = '润色';
+        }
+    };
 }
 function selectOutputMedia(nodeId, url, wrap=null){
     const node = nodes.find(item => item.id === nodeId);

@@ -202,7 +202,8 @@
         return `<div class="film-mapping-list">${map.refs.map((ref,index) => `<span class="film-mapping-chip"><b>${index + 1}. ${esc(ref.roleLabel || '参考资产')}</b><i>${itemPreview(ref)}</i><em>${esc(ref.name || '已连接')}</em></span>`).join('')}</div>`;
     }
     function promptHtml(node){
-        return `<label class="film-prompt-field"><span>生成需求</span><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea></label>`;
+        const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish" data-film-action="polish" title="按当前视频模型规范润色提示词"><i data-lucide="wand-sparkles"></i><span>润色</span></button>` : '';
+        return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>`;
     }
     function inputSlotHtml(node, port, options={}){
         const assets = options.assets?.(node) || [];
@@ -358,6 +359,21 @@
         normalize(node);
         const prompt=root.querySelector('[data-film-field="prompt"]');
         if(prompt) bindMentionMenu(root,prompt,node,options);
+        const polishButton=root.querySelector('[data-film-action="polish"]');
+        if(polishButton && prompt && options.polishPrompt){
+            polishButton.addEventListener('mousedown',event=>event.stopPropagation());
+            polishButton.addEventListener('click',async event=>{
+                event.preventDefault(); event.stopPropagation();
+                if(polishButton.disabled) return;
+                polishButton.disabled=true; polishButton.classList.add('is-loading');
+                const label=polishButton.querySelector('span'); if(label) label.textContent='润色中…';
+                try {
+                    prompt.value=await options.polishPrompt(node,prompt.value,options.assets?.(node)||[]);
+                    prompt.dispatchEvent(new Event('input',{bubbles:true}));
+                } catch(error){ options.toast?.(error.message || '提示词润色失败'); }
+                finally { polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent='润色'; }
+            });
+        }
         root.querySelectorAll('[data-film-field]').forEach(control=>{
             if(control===prompt) return;
             const eventName=control.matches('input')?'input':'change';

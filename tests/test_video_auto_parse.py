@@ -186,6 +186,37 @@ def test_no_prompt_auto_parse_requests_continuous_action_acting_and_moving_camer
     assert result["reference_coverage"]["complete"] is True
 
 
+def test_auto_parse_requires_temporal_action_choreography_and_causal_camera_response():
+    system = _video_auto_parse_system_prompt("minimax-h3", "MiniMax H3", "mapping", duration=13)
+    assert "每个镜头至少包含 3 个连续微节拍" in system
+    assert "准备/蓄势" in system
+    assert "启动与加速/减速" in system
+    assert "互动、碰撞或空间关系变化" in system
+    assert "反应与收束" in system
+    assert "触发者" in system
+    assert "镜头不能只写‘轻微跟随/静态保持/展示动态’" in system
+    assert "H3 Ref2VA 生成任务的 detailed_description 通常写 350-500 个英文词" in system
+
+
+def test_no_prompt_message_explicitly_requests_three_action_beats(monkeypatch):
+    captured = {}
+
+    async def fake_canvas_llm(request):
+        captured["request"] = request
+        return {"text": "<Picture 1> <Subject 1> moves with preparation, interaction, and settle beats."}
+
+    monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
+    payload = main.CanvasVideoAutoParseRequest(
+        prompt="",
+        images=["https://example.test/1.png"],
+        video_provider="minimax-h3",
+        video_model="MiniMax H3",
+        duration=6,
+    )
+    asyncio.run(main.canvas_video_auto_parse(payload))
+    assert "每个镜头至少写出准备、执行/互动、反应/收束三个连续节拍" in captured["request"].message
+
+
 def test_director_rules_are_content_driven_not_case_template_driven():
     system = _video_auto_parse_system_prompt("kling-cli", "kling-v3-omni", "mapping")
     assert "这是内容无关的导演决策" in system

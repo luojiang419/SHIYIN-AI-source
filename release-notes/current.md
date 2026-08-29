@@ -1,4 +1,6 @@
-# SHIYIN AI v1.0.361
+# SHIYIN AI v1.0.362
+- 视频提示词润色与实际生成提交现在会把“图1/图片1/视频1”转换为所选 skill 的规范引用；可灵使用 `<<<image_N>>>`、`<<<video_N>>>`、`<<<element_N>>>`，MiniMax H3 使用 `<Picture N>`、`<Video N>`、`<Subject N>`。
+- 润色请求增加稳定参考素材清单，视觉模型必须检查对应画面并按主体证据合并或拆分主体标签，结果附带规范化输入和参考映射。
 - 可灵适配器更新到官方公开的 Kling 3.0 Prompt Syntax 2.0：支持 Omni 三角引用标签、VIDEO 3.0/Omni 多镜头、原生音频、运镜与物理描述规范，并通过 `references/latest-official-syntax-2.0.txt` 完整注入润色模型。
 - 修正 skill 安装包复制目录层级，最终资源固定落在 `app/skills/video-prompt-polish`，避免发布版出现重复嵌套路径。
 - 安装包与浏览器 smoke staging 现在会复制 `skills/video-prompt-polish` 到 `app/skills`，并在构建断言中验证 MiniMax H3 完整 skill 与参考文档，确保发布版运行时不会因资源未打包而降级。

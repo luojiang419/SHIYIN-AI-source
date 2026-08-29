@@ -140,9 +140,9 @@ def test_classic_and_smart_film_ports_allow_multiple_reference_connections():
     assert "&& !isFilmInput" in SMART
 
 
-def test_film_kling_mapping_uses_official_at_reference_and_input_names():
-    assert "template:'@图{index}={role}'" in FILM
-    assert "禁止使用“年轻女性”“模特”“人物”等泛化称谓" in FILM
+def test_film_kling_mapping_uses_official_omni_reference_and_input_names():
+    assert "template:'<<<image_{index}>>>={role}'" in FILM
+    assert "画面中可复用的演员、服装、道具或产品主体按首次出现顺序使用" in FILM
     assert "normalizeKlingPrompt" in FILM
     assert "image_labels" in FILM
 

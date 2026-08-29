@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.361"
+APP_VERSION = "1.0.362"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -16872,7 +16872,12 @@ async def minimax_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[
     use_references = bool((image_refs or video_refs) and (payload.multimodal or video_refs or len(image_refs) > 2))
     body = {
         "mode": "references" if use_references else "keyframes",
-        "prompt": str(payload.prompt or "").strip(),
+        "prompt": normalize_video_prompt_references(
+            str(payload.prompt or "").strip(),
+            "minimax-h3",
+            image_count=len(image_refs),
+            video_count=len(video_refs),
+        ),
         "resolution": minimax_h3_resolution(payload.aspect_ratio, payload.resolution),
         "duration": max(1, min(15, int(payload.duration or 5))),
         "steps": max(4, min(30, int(payload.steps or 12))),
@@ -17041,7 +17046,12 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
             invoke_kwargs = {
                 "command": command,
                 "model": model,
-                "prompt": str(payload.prompt or "").strip(),
+                "prompt": normalize_video_prompt_references(
+                    str(payload.prompt or "").strip(),
+                    "kling-cli",
+                    image_count=len(images),
+                    video_count=0,
+                ),
                 "images": images,
                 "parameters": parameters,
             }
@@ -18735,7 +18745,133 @@ def _video_prompt_skill(provider: str, model: str) -> tuple[str, str]:
     return content or "请按当前视频模型官方提示词格式进行简洁结构化，保持用户原意。", skill_id
 
 
-def video_prompt_polish_system_prompt(video_provider: str = "", video_model: str = "", text_to_video: bool = False) -> str:
+def _video_prompt_reference_tag(skill_id: str, kind: str, index: int) -> str:
+    """返回当前视频模型 skill 使用的官方资产/主体标签。"""
+    number = max(1, int(index or 1))
+    if skill_id == "kling-cli":
+        tag_kind = {"image": "image", "video": "video", "subject": "element", "audio": "voice"}.get(kind, kind)
+        return f"<<<{tag_kind}_{number}>>>"
+    if skill_id == "minimax-h3":
+        tag_kind = {"image": "Picture", "video": "Video", "subject": "Subject", "audio": "Audio"}.get(kind, kind.title())
+        return f"<{tag_kind} {number}>"
+    return f"{kind.title()} {number}"
+
+
+def _replace_numbered_prompt_mentions(text: str, patterns: List[str], replacement, maximum: int = 0) -> str:
+    output = str(text or "")
+    for pattern in patterns:
+        def replace_match(match):
+            index = int(match.group(1))
+            if maximum and not 1 <= index <= maximum:
+                return match.group(0)
+            return replacement(index)
+        output = re.sub(pattern, replace_match, output, flags=re.IGNORECASE)
+    return output
+
+
+def normalize_video_prompt_references(
+    prompt: str,
+    skill_id: str,
+    image_count: int = 0,
+    video_count: int = 0,
+) -> str:
+    """将图1/图片1/视频1等自然引用确定性转换为所选 skill 的标签。"""
+    output = str(prompt or "")
+    image_patterns = [r"<<<\s*image_(\d+)\s*>>>"]
+    video_patterns = [r"<<<\s*video_(\d+)\s*>>>"]
+    if skill_id == "kling-cli":
+        image_patterns.append(r"<\s*Picture\s+(\d+)\s*>")
+        video_patterns.append(r"<\s*Video\s+(\d+)\s*>")
+    image_patterns.extend([
+        r"第\s*(\d+)\s*张\s*(?:参考)?(?:图片|图)",
+        r"@?(?:参考)?(?:图片|图)\s*(\d+)",
+        r"(?<!<)\b(?:image|picture)\s*#?\s*(\d+)\b",
+    ])
+    video_patterns.extend([
+        r"第\s*(\d+)\s*(?:个|段)\s*(?:参考)?视频",
+        r"@?(?:参考)?视频\s*(\d+)",
+        r"(?<!<)\bvideo\s*#?\s*(\d+)\b",
+    ])
+    if image_count > 0:
+        output = _replace_numbered_prompt_mentions(
+            output, image_patterns, lambda index: _video_prompt_reference_tag(skill_id, "image", index), image_count
+        )
+    if video_count > 0:
+        output = _replace_numbered_prompt_mentions(
+            output, video_patterns, lambda index: _video_prompt_reference_tag(skill_id, "video", index), video_count
+        )
+    if skill_id == "kling-cli":
+        subject_patterns = [r"<\s*Subject\s+(\d+)\s*>", r"@?(?:主体|人物)\s*(\d+)", r"(?<!<)\bsubject\s*#?\s*(\d+)\b"]
+    elif skill_id == "minimax-h3":
+        subject_patterns = [r"<<<\s*element_(\d+)\s*>>>", r"(?:主体|人物)\s*(\d+)", r"(?<!<)\belement\s*#?\s*(\d+)\b"]
+    else:
+        subject_patterns = []
+    if subject_patterns:
+        output = _replace_numbered_prompt_mentions(
+            output, subject_patterns, lambda index: _video_prompt_reference_tag(skill_id, "subject", index)
+        )
+    return output
+
+
+def video_prompt_reference_manifest(
+    skill_id: str,
+    image_count: int,
+    video_count: int,
+    image_labels: Optional[List[str]] = None,
+) -> tuple[str, List[Dict[str, Any]], List[str]]:
+    """创建稳定的参考素材编号、视觉解析要求和多模态标签。"""
+    entries: List[Dict[str, Any]] = []
+    canonical_image_labels: List[str] = []
+    labels = image_labels or []
+    for index in range(1, max(0, image_count) + 1):
+        tag = _video_prompt_reference_tag(skill_id, "image", index)
+        label = str(labels[index - 1] or "").strip() if index <= len(labels) else ""
+        entries.append({"kind": "image", "index": index, "tag": tag, "label": label})
+        canonical_image_labels.append(f"{tag}；用户口语图{index}/图片{index}" + (f"；{label}" if label else ""))
+    for index in range(1, max(0, video_count) + 1):
+        entries.append({
+            "kind": "video",
+            "index": index,
+            "tag": _video_prompt_reference_tag(skill_id, "video", index),
+            "label": "",
+        })
+    if not entries:
+        return "", entries, canonical_image_labels
+    mapping_lines = [
+        f"- 用户提到{'图/图片' if item['kind'] == 'image' else '视频'}{item['index']}时，必须写成 {item['tag']}。"
+        + (f" 资产说明：{item['label']}。" if item.get("label") else "")
+        for item in entries
+    ]
+    if skill_id == "minimax-h3":
+        subject_rule = (
+            "逐张检查画面：当用户提到图片中的人物、动物、产品、道具、场景或其他可复用可见主体时，"
+            "必须按首次出现顺序分配 <Subject N>，并在 subject_definitions 中写明其来自哪个 <Picture N> 及可见识别特征。"
+            "只有有充分视觉证据是同一主体时才合并多张图片来源；不同主体不得共用标签。"
+            "如果启用了 <Subject N>，按 Ref2VA 六段结构输出；单纯作为首尾帧锚点且未抽取主体时才保持 I2VA/FL2VA/L2VA。"
+        )
+    elif skill_id == "kling-cli":
+        subject_rule = (
+            "逐张检查画面：当用户提到图片中的人物、动物、产品、道具、场景或其他可复用主体时，"
+            "必须按首次出现顺序分配 <<<element_N>>>，并在首次出现处用简短可见特征说明它来自哪个 <<<image_N>>>。"
+            "只有有充分视觉证据是同一主体时才合并；不同主体不得共用 element 标签。"
+        )
+    else:
+        subject_rule = "结合参考画面识别用户提到的主体，保持编号和身份一致，不得臆造画面外主体。"
+    context = (
+        "\n参考资产强制映射（编号严格按本次传入顺序，禁止重排）：\n"
+        + "\n".join(mapping_lines)
+        + f"\n主体解析与绑定规则：{subject_rule}"
+        + "\n最终输出中禁止残留‘图1’‘图片2’‘视频1’等自然引用；必须全部使用当前 skill 的规范标签。"
+    )
+    return context, entries, canonical_image_labels
+
+
+def video_prompt_polish_system_prompt(
+    video_provider: str = "",
+    video_model: str = "",
+    text_to_video: bool = False,
+    reference_context: str = "",
+) -> str:
     """按当前视频模型选择项目内置 skill，并生成润色器系统提示词。"""
     provider = str(video_provider or "").strip().lower()
     model = str(video_model or "").strip()
@@ -18759,7 +18895,7 @@ def video_prompt_polish_system_prompt(video_provider: str = "", video_model: str
         "你是视频生成提示词润色器。只输出最终可直接提交给视频模型的一段提示词，不要解释、不要加标题、不要使用 Markdown 代码块。"
         "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
         f"{model_hint}当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
-        f"{expansion}{output_constraint}"
+        f"{expansion}{output_constraint}{reference_context}"
     )
 
 @app.post("/api/canvas-llm")
@@ -18838,18 +18974,30 @@ async def canvas_llm(payload: CanvasLLMRequest):
 @app.post("/api/canvas-prompt-polish")
 async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
     """根据所选视频模型规范，调用多模态视觉模型轻量润色提示词。"""
-    system_prompt = video_prompt_polish_system_prompt(
-        payload.video_provider, payload.video_model, payload.text_to_video
-    )
     _, skill_id = _video_prompt_skill(payload.video_provider, payload.video_model)
+    normalized_prompt = normalize_video_prompt_references(
+        payload.prompt,
+        skill_id,
+        image_count=len(payload.images or []),
+        video_count=len(payload.videos or []),
+    )
+    reference_context, reference_manifest, canonical_image_labels = video_prompt_reference_manifest(
+        skill_id,
+        image_count=len(payload.images or []),
+        video_count=len(payload.videos or []),
+        image_labels=payload.image_labels,
+    )
+    system_prompt = video_prompt_polish_system_prompt(
+        payload.video_provider, payload.video_model, payload.text_to_video, reference_context
+    )
     request_payload = CanvasLLMRequest(
-        message=payload.prompt,
+        message=normalized_prompt,
         system_prompt=system_prompt,
         provider=payload.provider or "comfly",
         model=payload.model,
         ms_model=payload.ms_model,
         images=payload.images,
-        image_labels=payload.image_labels,
+        image_labels=canonical_image_labels,
         videos=payload.videos,
     )
     result = await canvas_llm(request_payload)
@@ -18858,7 +19006,21 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         text = text.strip("`").strip()
         if text.lower().startswith("text"):
             text = text[4:].lstrip(":\n ")
-    return {**result, "text": text, "video_provider": payload.video_provider, "video_model": payload.video_model, "skill_id": skill_id}
+    text = normalize_video_prompt_references(
+        text,
+        skill_id,
+        image_count=len(payload.images or []),
+        video_count=len(payload.videos or []),
+    )
+    return {
+        **result,
+        "text": text,
+        "video_provider": payload.video_provider,
+        "video_model": payload.video_model,
+        "skill_id": skill_id,
+        "normalized_input": normalized_prompt,
+        "reference_manifest": reference_manifest,
+    }
 
 # --- 对话管理 ---
 

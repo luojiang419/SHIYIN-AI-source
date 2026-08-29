@@ -21,9 +21,9 @@
     const MODEL_RULES = {
         default: {id:'default', name:'通用', prefix:'图', template:'{ref}是{role}', maxImages:20},
         jimeng: {id:'jimeng', name:'即梦', prefix:'图', template:'{ref}是{role}', maxImages:12},
-        // 可灵 3.0 Omni 官方示例使用 @图N / @图片 形式引用素材；编号必须
-        // 与真实输入端口的上传顺序一致，不能再用“参考图2”这种脱离端口的名称。
-        kling: {id:'kling', name:'可灵', prefix:'@图', template:'@图{index}={role}', maxImages:12},
+        // 可灵最新 Prompt Syntax 2.0 使用 <<<image_N>>> 等 Omni 引用标签；编号
+        // 必须与真实输入端口的上传顺序一致，不能再用脱离端口的自然图号。
+        kling: {id:'kling', name:'可灵', prefix:'<<<image_', template:'<<<image_{index}>>>={role}', maxImages:12},
         minimax: {id:'minimax', name:'MiniMax H3', prefix:'Picture ', template:'<Picture {index}> is {role}', maxImages:9},
     };
     const LINE_ART_PROMPT = '这是导演审阅用的专业黑白线稿分镜转换任务。请把参考视频帧重绘为标准电影分镜线稿，不是照片滤镜，也不是简单边缘检测。必须保留景别、机位、透视、主体位置与大小、人物数量、人物距离与朝向、肢体动作、视线方向、必要道具和场景空间关系。人物统一替换为无身份、无外貌、无服装特征的中性分镜人偶：光滑空白椭圆头部、完全留白的脸、简洁几何体块和圆柱四肢，只用外轮廓、关节转折和少量结构线表达动作；禁止脸部、发型、肤色、服装、配饰和写实人体细节。背景只保留机位、景别、主体位置、前中后景、主要灯架、摄影机和遮挡关系所必需的长轮廓与几何形状，使用白底细黑线和少量排线，移除颜色、照片纹理、品牌、水印、字幕和无关杂物。禁止添加分镜编号、镜头参数、对白框、箭头、边框、表格或任何文字，只输出单张纯黑白分镜画面。';
@@ -274,7 +274,7 @@
             input.setSelectionRange(start,end);
             const built=buildPrompt(node,options.assets?.(node)||[],options);
             const mention = built.map.rule.id === 'kling'
-                ? `@图${ref.assetIndex || (built.map.refs.indexOf(ref) + 1)}`
+                ? `<<<image_${ref.assetIndex || (built.map.refs.indexOf(ref) + 1)}>>>`
                 : (ref.roleLabel || ref.name || '参考资产');
             insertAtCursor(input,mention);
             close();
@@ -319,9 +319,15 @@
     function normalizeKlingPrompt(text, refs=[]){
         let output=String(text || '').trim();
         if(!output) return output;
-        // 模型偶尔会把官方 @图N 写成“图N/图片N”，统一修正为可灵可识别的
-        // 引用形式，并将泛化的人物称谓收敛到真实输入端名称。
-        output=output.replace(/@图片(\d+)/g, '@图$1').replace(/(^|[^@])(?:图片|图)(\d+)/g, '$1@图$2');
+        // 将旧版 @图N、图N/图片N 以及自然语言主体编号统一为 Kling
+        // Prompt Syntax 2.0 的 Omni 标签。
+        output=output
+            .replace(/<<<\s*image_(\d+)\s*>>>/gi, '<<<image_$1>>>')
+            .replace(/@图片(\d+)/g, '<<<image_$1>>>')
+            .replace(/@图(\d+)/g, '<<<image_$1>>>')
+            .replace(/(^|[^@\w])(?:图片|图)(\d+)/g, '$1<<<image_$2>>>')
+            .replace(/<<<\s*element_(\d+)\s*>>>/gi, '<<<element_$1>>>')
+            .replace(/(^|[^@\w])(?:主体|人物)(\d+)/g, '$1<<<element_$2>>>');
         const actors=refs.filter(ref=>/^actor-\d+$/.test(String(ref.inputRole || ''))).map(ref=>ref.roleLabel).filter(Boolean);
         if(actors.length){
             const generic=/一位年轻女性|年轻女性|一名女性|女性角色|女主角|女孩|女生|女子|一位年轻男性|年轻男性|一名男性|男性角色|男主角|男孩|男生|模特|人物/g;
@@ -341,15 +347,15 @@
         // 道具仍须传给模型以保持资产一致性，但它们的数量不能决定镜头数量。
         const storyboardRefs=mappedRefs.filter(item=>item.inputRole === 'storyboard');
         const shouldParseMultipleShots=node.type === 'film-video' && storyboardRefs.length > 1;
-        const manifest=mappedRefs.map((item,index)=>`${isKling ? `@图${index+1}` : `图${index+1}`}=${item.roleLabel || '参考资产'}`).join('；');
+        const manifest=mappedRefs.map((item,index)=>`${isKling ? `<<<image_${index+1}>>>` : `图${index+1}`}=${item.roleLabel || '参考资产'}`).join('；');
         const message=node.type==='film-video'
             ? (isKling
-                ? `你将收到按真实影视制作输入端顺序排列的参考资产：${manifest}。${shouldParseMultipleShots ? '分镜图输入端已连接多张参考图，请仅按这些分镜图的端口内顺序解析多镜头，并按“镜头1、镜头2……”组织连续动作。' : '分镜图输入端未连接多张参考图，请只解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}请按可灵视频 3.0 Omni 官方提示词习惯输出可直接生成的视频提示词：先交代场景与主体；${shouldParseMultipleShots ? '每个镜头' : '该镜头'}写明时长、景别/视角、主体动作与动作先后、身体朝向和视线、镜头运动（如固定、推进、跟拍、摇移、环绕、拉远）及速度、光线/环境和必要声音。引用素材必须使用 @图N，且每个演员/服装/道具只能使用输入端名称（例如演员A、服装A、道具A），禁止使用“年轻女性”“模特”“人物”等泛化称谓。只输出提示词，不解释分析过程。`
+                ? `你将收到按真实影视制作输入端顺序排列的参考资产：${manifest}。${shouldParseMultipleShots ? '分镜图输入端已连接多张参考图，请仅按这些分镜图的端口内顺序解析多镜头，并按“镜头1、镜头2……”组织连续动作。' : '分镜图输入端未连接多张参考图，请只解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}请按可灵 VIDEO 3.0 Omni 最新官方提示词规范输出可直接生成的视频提示词：先交代场景与主体；${shouldParseMultipleShots ? '每个镜头' : '该镜头'}写明时长、景别/视角、主体动作与动作先后、身体朝向和视线、镜头运动及速度、光线/环境和必要声音。图片引用必须使用 <<<image_N>>>；画面中可复用的演员、服装、道具或产品主体按首次出现顺序使用 <<<element_N>>>，并说明其来自哪个 <<<image_N>>>。只输出提示词，不解释分析过程。`
                 : `你将收到一组已按顺序编号的影视资产（${manifest}）。${shouldParseMultipleShots ? '请仅按分镜图输入端中多张参考图的顺序解析多镜头。' : '请仅解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}再结合演员、服装和道具参考，预测镜头运镜、人物动作先后、身体朝向、视线、节奏与互动关系。输出一段可直接用于视频生成的中文动作描述，明确镜头运动和关键动作触发时机；不要解释分析过程。`)
             : `你将收到一组已按顺序编号的影视资产（${manifest}），其中演员、场景和线稿分镜必须在同一次综合解析中互相校验。请输出一段可直接用于图像生成的中文画面描述：明确每张图对应的角色/场景/分镜关系、人物身份与动作、道具位置、构图角度、光线和环境，并要求画面构图严格参照线稿分镜图；不要解释分析过程。`;
         const provider=options.visionProvider?.(node) || node.visionProvider || '';
         const model=options.visionModel?.(node) || node.visionModel || '';
-        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),image_labels:mappedRefs.map((item,index)=>`${isKling ? `@图${index+1}` : `图${index+1}`}=${item.roleLabel || '参考资产'}`),videos:[],provider,model,system_prompt:isKling ? `你是可灵视频 3.0 Omni 提示词导演。严格使用 @图N 引用素材，严格使用输入端资产名称。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析镜头编号、时长、景别、动作、运镜和声音。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}预测连续运动而不是静态画面。` : `你是影视分镜与动作分析助手。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析多镜头。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。`})});
+        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),image_labels:mappedRefs.map((item,index)=>`${isKling ? `<<<image_${index+1}>>>` : `图${index+1}`}=${item.roleLabel || '参考资产'}`),videos:[],provider,model,system_prompt:isKling ? `你是可灵 VIDEO 3.0 Omni 提示词导演。严格使用 <<<image_N>>> 引用图片，按首次出现顺序使用 <<<element_N>>> 绑定从画面解析出的稳定主体；每个主体必须说明来自哪个 <<<image_N>>>，不能把没有视觉证据的主体写入提示词。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析镜头编号、时长、景别、动作、运镜和声音。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}预测连续运动而不是静态画面。` : `你是影视分镜与动作分析助手。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析多镜头。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。`})});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.detail || '视觉解析失败');
         node.prompt=isKling ? normalizeKlingPrompt(data.text,mappedRefs) : String(data.text || '').trim();

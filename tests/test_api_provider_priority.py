@@ -109,6 +109,18 @@ class ApiProviderPriorityTests(unittest.TestCase):
         self.assertEqual(item["chat_models"], ["vision-chat-model"])
         self.assertEqual(item["video_models"], ["video-model"])
 
+    def test_ecommerce_provider_is_not_fixed_protocol_backend(self):
+        self.assertNotIn("ecommerce-vision", self.main.FIXED_PROTOCOL_PROVIDER_IDS)
+        provider = self.main.normalize_provider({
+            "id": "ecommerce-vision",
+            "name": "电商专用",
+            "base_url": "https://api.example.com/v1",
+            "protocol": "responses",
+            "request_protocol": "responses",
+            "chat_models": ["vision-chat-model"],
+        })
+        self.assertEqual(self.main.effective_protocol(provider, "vision-chat-model"), "responses")
+
 
 if __name__ == "__main__":
     unittest.main()

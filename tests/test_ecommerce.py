@@ -2049,6 +2049,24 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("settingsContent?.addEventListener('input'", self.api_javascript)
         self.assertIn("saveProviders({render:false, auto:true})", self.api_javascript)
 
+    def test_ecommerce_provider_uses_standard_protocol_controls(self):
+        """电商专用必须和普通 API 平台一样允许切换协议及单模型协议。"""
+        fixed_protocol = re.search(
+            r"const FIXED_PROTOCOL_PROVIDER_IDS = new Set\(\[(.*?)\]\);",
+            self.api_javascript,
+            re.S,
+        )
+        self.assertIsNotNone(fixed_protocol)
+        self.assertNotIn("'ecommerce-vision'", fixed_protocol.group(1))
+        protocol_handler = re.search(
+            r"function updateProtocolFromInput\(\)\{(.*?)\n\}",
+            self.api_javascript,
+            re.S,
+        )
+        self.assertIsNotNone(protocol_handler)
+        self.assertNotIn("item.id === 'ecommerce-vision'", protocol_handler.group(1))
+        self.assertIn("providerSupportsModelProtocol(item)", self.api_javascript)
+
     def test_all_generation_pages_use_enabled_provider_model_lists_without_id_blacklists(self):
         readiness_filter = "p.enabled !== false && p.image_generation_ready !== false && (p.image_models || []).length"
         self.assertIn(readiness_filter, self.canvas_javascript)

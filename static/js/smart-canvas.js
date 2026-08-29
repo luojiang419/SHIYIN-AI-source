@@ -11816,15 +11816,30 @@ async function polishSmartVideoPrompt(node, prompt, refs=[]){
     const images = refs.filter(item => item.kind === 'image').map(item => item.url).slice(0,20);
     const videos = refs.filter(item => item.kind === 'video').map(item => item.url).slice(0,3);
     const labels = refs.filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
-    const response = await fetch('/api/canvas-prompt-polish', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    const data = await submitSmartCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || node?.runSettings?.videoProvider || '', video_model:node?.model || node?.runSettings?.videoModel || '',
         text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
-    })});
-    const data = await response.json().catch(() => ({}));
-    if(!response.ok) throw new Error(data.detail || '提示词润色失败');
+    }, '提示词润色');
     const polished = String(data.text || '').trim();
     if(!polished) throw new Error('润色模型返回了空提示词');
     return polished;
+}
+async function submitSmartCanvasPromptTask(endpoint, payload, label='提示词任务'){
+    const response = await fetch(endpoint, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const created = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(created.detail || `${label}提交失败`);
+    const taskId = String(created.task_id || '').trim();
+    if(!taskId) throw new Error(`${label}未返回任务编号`);
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while(Date.now() < deadline){
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        const statusResponse = await fetch(`/api/canvas-prompt-tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
+        const task = await statusResponse.json().catch(() => ({}));
+        if(!statusResponse.ok) throw new Error(task.detail || `${label}状态查询失败`);
+        if(task.status === 'succeeded') return task.result || {};
+        if(task.status === 'failed') throw new Error(task.error || `${label}失败`);
+    }
+    throw new Error(`${label}等待超时（超过 30 分钟）`);
 }
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;

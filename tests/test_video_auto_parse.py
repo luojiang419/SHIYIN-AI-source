@@ -75,7 +75,7 @@ def test_classic_video_button_switches_to_auto_parse_for_images_without_prompt()
     assert "自动解析" in CANVAS
     assert "connectedMedia.every(kind => kind === 'image')" in CANVAS
     assert "autoParseCanvasVideoPrompt" in CANVAS
-    assert "fetch('/api/canvas-video-auto-parse'" in CANVAS
+    assert "'/api/canvas-video-auto-parse-tasks'" in CANVAS
     assert "mode === 'auto-parse'" in CANVAS
 
 

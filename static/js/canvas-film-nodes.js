@@ -370,17 +370,32 @@
         if(!refs.length) throw new Error('自动解析至少需要一张图片');
         const provider = options.visionProvider?.(node) || node.visionProvider || '';
         const model = options.visionModel?.(node) || node.visionModel || '';
-        const response = await fetch('/api/canvas-video-auto-parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        const data = await submitFilmPromptTask('/api/canvas-video-auto-parse-tasks', {
             provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
             prompt:String(node.prompt || '').trim(),
             images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
-        })});
-        const data=await response.json().catch(()=>({}));
-        if(!response.ok) throw new Error(data.detail || '自动解析失败');
+        }, '自动解析');
         const text=String(data.text || '').trim();
         if(!text) throw new Error('自动解析未返回视频提示词');
         return text;
+    }
+    async function submitFilmPromptTask(endpoint,payload,label='提示词任务'){
+        const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        const created=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(created.detail || `${label}提交失败`);
+        const taskId=String(created.task_id || '').trim();
+        if(!taskId) throw new Error(`${label}未返回任务编号`);
+        const deadline=Date.now()+30*60*1000;
+        while(Date.now()<deadline){
+            await new Promise(resolve=>setTimeout(resolve,1200));
+            const statusResponse=await fetch(`/api/canvas-prompt-tasks/${encodeURIComponent(taskId)}`,{cache:'no-store'});
+            const task=await statusResponse.json().catch(()=>({}));
+            if(!statusResponse.ok) throw new Error(task.detail || `${label}状态查询失败`);
+            if(task.status==='succeeded') return task.result || {};
+            if(task.status==='failed') throw new Error(task.error || `${label}失败`);
+        }
+        throw new Error(`${label}等待超时（超过 30 分钟）`);
     }
     function bind(root,node,options={}){
         normalize(node);

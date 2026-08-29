@@ -174,9 +174,10 @@ class ResponsesProtocolTests(unittest.TestCase):
         )
         self.assertEqual(body["tools"], [{"type": "web_search"}])
 
-    def test_ecommerce_proxy_disables_builtin_web_search_for_visual_requests(self):
-        self.assertFalse(self.main.provider_supports_builtin_web_search({
+    def test_ecommerce_native_responses_allows_builtin_web_search_for_text_requests(self):
+        self.assertTrue(self.main.provider_supports_builtin_web_search({
             "id": "ecommerce-vision",
+            "protocol": "responses",
             "base_url": "https://xsy-proxy.shiyingai.com/v1",
         }))
         self.assertTrue(self.main.provider_supports_builtin_web_search({

@@ -3885,6 +3885,9 @@ CANVAS_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
 CANVAS_VIDEO_FRAME_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_VIDEO_FRAME_TASK_LOCK = Lock()
 CANVAS_VIDEO_FRAME_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
+CANVAS_PROMPT_TASKS: Dict[str, Dict[str, Any]] = {}
+CANVAS_PROMPT_TASK_LOCK = Lock()
+CANVAS_PROMPT_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
 TOPAZ_VIDEO_TASKS: Dict[str, Dict[str, Any]] = {}
 TOPAZ_VIDEO_TASK_LOCK = Lock()
 TOPAZ_VIDEO_TASK_RUNNERS: Dict[str, asyncio.Task] = {}
@@ -3901,6 +3904,7 @@ ECOMMERCE_VISION_CACHE_LOCK = Lock()
 CANVAS_TASK_MEMORY_LIMIT = 200
 CANVAS_VIDEO_TASK_MEMORY_LIMIT = 500
 CANVAS_VIDEO_FRAME_TASK_MEMORY_LIMIT = 200
+CANVAS_PROMPT_TASK_MEMORY_LIMIT = 200
 TOPAZ_VIDEO_TASK_MEMORY_LIMIT = 200
 ONLINE_IMAGE_TASK_MEMORY_LIMIT = 500
 ECOMMERCE_TASK_MEMORY_LIMIT = 1000
@@ -4196,6 +4200,8 @@ class CanvasPromptPolishRequest(BaseModel):
     images: List[str] = []
     image_labels: List[str] = []
     videos: List[str] = []
+    web_search: bool = True
+    search_context: str = Field(default="", max_length=12000)
 
 class CanvasVideoAutoParseRequest(BaseModel):
     """仅有图片输入时，为视频节点自动解析并生成规范化提示词。"""
@@ -4210,6 +4216,8 @@ class CanvasVideoAutoParseRequest(BaseModel):
     duration: Optional[float] = None
     aspect_ratio: str = ""
     resolution: str = ""
+    web_search: bool = True
+    search_context: str = Field(default="", max_length=12000)
 
 class BuildingMultiViewReference(BaseModel):
     role: str = Field(min_length=1, max_length=32)
@@ -4924,15 +4932,13 @@ def resolve_chat_transport(provider: str, model: str, ms_model: str):
 def provider_supports_builtin_web_search(provider) -> bool:
     """判断 Responses 上游是否适合附加 OpenAI 内置 web_search 工具。
 
-    电商专用代理虽然使用 Responses 协议，但当前网关对「视觉 + web_search」组合请求
-    会等待超时并返回 524；普通聊天请求和不带该工具的视觉请求均正常。保留默认开启
-    行为给其它 Responses 提供商，仅对该代理做兼容降级。
+    电商专用代理的原生 Responses 文本请求可以使用 web_search；视觉请求仍由调用方
+    采用“先搜索、后视觉解析”的两步模式，避免「视觉 + web_search」组合触发网关超时。
     """
     if not isinstance(provider, dict):
         return True
-    provider_id = str(provider.get("id") or "").strip().lower()
-    base_url = str(provider.get("base_url") or "").strip().lower()
-    return provider_id != "ecommerce-vision" and "xsy-proxy.shiyingai.com" not in base_url
+    protocol = str(provider.get("request_protocol") or provider.get("protocol") or "").strip().lower()
+    return not protocol or protocol in {"responses", "openai"}
 
 def responses_input_from_messages(messages):
     """将内部消息记录转换为 Responses 原生 input，兼容已有 OpenAI 多模态片段。"""
@@ -19168,6 +19174,11 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
             "创作一段有清晰时间推进、主体动作、镜头调度、节奏变化与收束点的精彩视频提示词，"
             "并严格按当前视频模型 skill 的官方结构输出；最终必须逐一使用所有图片标签。"
         )
+    if payload.search_context.strip():
+        user_message += (
+            "\n\n联网检索得到的案例方法摘要（只吸收镜头组织、节奏和动作编排方法，"
+            "不得复制其中主体、场景或措辞）：\n" + payload.search_context.strip()
+        )
     final_system = _video_auto_parse_system_prompt(
         payload.video_provider,
         payload.video_model,
@@ -19185,7 +19196,8 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         images=images,
         image_labels=canonical_labels,
         videos=[],
-        web_search=True,
+        # 图片请求不直接附加搜索工具；后台任务会先用同一模型完成文本搜索。
+        web_search=False,
         retry_524=0,
     )
     try:
@@ -19351,6 +19363,11 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
     system_prompt = video_prompt_polish_system_prompt(
         payload.video_provider, payload.video_model, payload.text_to_video, reference_context
     )
+    if payload.search_context.strip():
+        normalized_prompt += (
+            "\n\n联网检索得到的案例方法摘要（仅借鉴方法，不复制内容）：\n"
+            + payload.search_context.strip()
+        )
     request_payload = CanvasLLMRequest(
         message=normalized_prompt,
         system_prompt=system_prompt,
@@ -19360,7 +19377,8 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         images=payload.images,
         image_labels=canonical_image_labels,
         videos=payload.videos,
-        web_search=True,
+        # 图片请求不直接附加搜索工具；后台任务会先用同一模型完成文本搜索。
+        web_search=False,
         retry_524=0,
     )
     try:
@@ -19402,6 +19420,139 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         "reference_manifest": reference_manifest,
         "reference_coverage": coverage,
     }
+
+
+def _canvas_prompt_task_view(task: Dict[str, Any]) -> Dict[str, Any]:
+    view = dict(task)
+    view.pop("_account_id", None)
+    return view
+
+
+async def _canvas_prompt_web_search(payload: Any) -> str:
+    """用请求中指定的同一 provider/model 做文本联网检索，结果供后续视觉请求参考。"""
+    provider = str(getattr(payload, "provider", "") or "").strip()
+    model = str(getattr(payload, "model", "") or "").strip()
+    if not provider or not model or not bool(getattr(payload, "web_search", True)):
+        return ""
+    user_prompt = str(getattr(payload, "prompt", "") or "").strip()
+    query = user_prompt or "视频提示词中的连续动作、镜头运镜、节拍和多图参考素材编排"
+    search_request = CanvasLLMRequest(
+        message=(
+            "请使用联网搜索，检索与下列视频创意相关的公开提示词、分镜和运镜案例。"
+            "只总结可迁移的方法（动作节拍、镜头组织、视线和物理反馈），不要复制案例主体、场景或原文。"
+            f"\n视频创意：{query[:4000]}"
+        ),
+        system_prompt="你是视频提示词研究助手。联网后只输出简短的方法摘要，不要编造来源。",
+        provider=provider,
+        model=model,
+        ms_model=str(getattr(payload, "ms_model", "") or ""),
+        images=[],
+        videos=[],
+        web_search=True,
+        retry_524=1,
+    )
+    result = await canvas_llm(search_request)
+    text = str(result.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="联网搜索未返回有效摘要")
+    return text[:12000]
+
+
+async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
+    with CANVAS_PROMPT_TASK_LOCK:
+        task = CANVAS_PROMPT_TASKS.get(task_id)
+        if not task:
+            return
+        task.update({"status": "queued", "stage": "queued", "updated_at": time.time()})
+    try:
+        if bool(getattr(payload, "web_search", True)):
+            with CANVAS_PROMPT_TASK_LOCK:
+                task = CANVAS_PROMPT_TASKS.get(task_id)
+                if task:
+                    task.update({"status": "running", "stage": "web-search", "updated_at": time.time()})
+            search_context = await _canvas_prompt_web_search(payload)
+            payload = payload.model_copy(update={"search_context": search_context})
+        with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if task:
+                task.update({"status": "running", "stage": "visual-parse", "updated_at": time.time()})
+        result = (
+            await canvas_video_auto_parse(payload)
+            if kind == "auto-parse"
+            else await canvas_prompt_polish(payload)
+        )
+        with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if task:
+                task.update({"status": "succeeded", "result": result, "error": "", "updated_at": time.time()})
+    except HTTPException as exc:
+        with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if task:
+                task.update({
+                    "status": "failed",
+                    "error": str(exc.detail or exc),
+                    "status_code": exc.status_code,
+                    "updated_at": time.time(),
+                })
+    except Exception as exc:
+        with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if task:
+                task.update({"status": "failed", "error": str(exc), "status_code": 500, "updated_at": time.time()})
+    finally:
+        with CANVAS_PROMPT_TASK_LOCK:
+            prune_current_account_tasks_locked(
+                CANVAS_PROMPT_TASKS,
+                {"queued", "running"},
+                CANVAS_PROMPT_TASK_MEMORY_LIMIT,
+            )
+
+
+def _create_canvas_prompt_task(kind: str, payload: Any) -> Dict[str, Any]:
+    task_id = f"canvas_prompt_{uuid.uuid4().hex}"
+    provider = str(getattr(payload, "provider", "") or "")
+    model = str(getattr(payload, "model", "") or "")
+    with CANVAS_PROMPT_TASK_LOCK:
+        CANVAS_PROMPT_TASKS[task_id] = {
+            "id": task_id,
+            "type": kind,
+            "status": "queued",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "provider": provider,
+            "model": model,
+            "result": None,
+            "error": "",
+            "_account_id": current_account_id(),
+        }
+        prune_current_account_tasks_locked(
+            CANVAS_PROMPT_TASKS,
+            {"queued", "running"},
+            CANVAS_PROMPT_TASK_MEMORY_LIMIT,
+        )
+    runner = asyncio.create_task(_run_canvas_prompt_task(task_id, kind, payload))
+    CANVAS_PROMPT_TASK_RUNNERS[task_id] = runner
+    return {"task_id": task_id, "status": "queued", "provider": provider, "model": model}
+
+
+@app.post("/api/canvas-prompt-polish-tasks")
+async def create_canvas_prompt_polish_task(payload: CanvasPromptPolishRequest):
+    return _create_canvas_prompt_task("polish", payload.model_copy(deep=True))
+
+
+@app.post("/api/canvas-video-auto-parse-tasks")
+async def create_canvas_video_auto_parse_task(payload: CanvasVideoAutoParseRequest):
+    return _create_canvas_prompt_task("auto-parse", payload.model_copy(deep=True))
+
+
+@app.get("/api/canvas-prompt-tasks/{task_id}")
+async def get_canvas_prompt_task(task_id: str):
+    with CANVAS_PROMPT_TASK_LOCK:
+        task = dict(current_account_task(CANVAS_PROMPT_TASKS, task_id))
+    if not task:
+        raise HTTPException(status_code=404, detail="提示词任务不存在，可能服务已重启或任务已过期")
+    return _canvas_prompt_task_view(task)
 
 # --- 对话管理 ---
 

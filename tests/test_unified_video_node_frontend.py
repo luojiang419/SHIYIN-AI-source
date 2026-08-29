@@ -63,6 +63,13 @@ class UnifiedVideoNodeFrontendTests(unittest.TestCase):
         self.assertIn("await saveCanvas();\n            const task = await createCanvasVideoTask", self.javascript)
         self.assertIn("node._videoPending", self.javascript)
 
+    def test_video_prompt_editor_is_scrollable_and_height_capped(self):
+        self.assertIn("bindScrollableText(input);", self.javascript)
+        self.assertIn("maxLines:12", self.javascript)
+        self.assertIn("allowShrink:true", self.javascript)
+        self.assertIn("max-height:260px", self.styles)
+        self.assertIn("overscroll-behavior:contain", self.styles)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11860,6 +11860,12 @@ function bindSmartSpecialNode(el, node){
             defaultImageModel:provider => providerImageModels(provider)[0] || '',
             provider:node.apiProvider || node.runSettings?.videoProvider || '',
             model:node.model || node.runSettings?.videoModel || '',
+            bindScrollableText,
+            fitPrompt:(input, targetNode, root) => fitAutoTextNode(targetNode, root, [input], {
+                minLines:3,
+                maxLines:12,
+                allowShrink:true
+            }),
             visionProvider:changed => resolveVideoVisionProviderId(changed.visionProvider || ''),
             visionModel:changed => resolveChatModel(changed.visionModel || '', resolveVideoVisionProviderId(changed.visionProvider || '')),
             promptConnected:target => (canvas?.connections || []).some(connection => connection.to === target.id && (() => {
@@ -20274,7 +20280,7 @@ window.onmouseup = e => {
     }
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll]')) return;
+    if(e.target.closest('.composer,.smart-back,.smart-canvas-tool-switch,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,[data-thumb-scroll],[data-film-field="prompt"]')) return;
     e.preventDefault();
     if(!window.CanvasPerformance?.isInteractionActive?.('smart.zoom')) window.CanvasPerformance?.beginInteraction?.('smart.zoom', {nodes:nodes.length, connections:(canvas?.connections || []).length});
     const rect = shell.getBoundingClientRect();

@@ -9732,6 +9732,12 @@ function bindClassicFilmNode(el,node){
         defaultImageModel:provider => providerImageModels(resolveImageProviderId(provider))[0] || '',
         provider:node.apiProvider,
         model:node.model,
+        bindScrollableText,
+        fitPrompt:(input, targetNode, root) => fitAutoTextNode(targetNode, root, [input], {
+            minLines:3,
+            maxLines:12,
+            allowShrink:true
+        }),
         visionProvider:changed => resolveVideoVisionProviderId(changed.visionProvider || ''),
         visionModel:changed => resolveChatModel(changed.visionModel || '', resolveVideoVisionProviderId(changed.visionProvider || '')),
         promptConnected:target => connections.some(connection => connection.to === target.id && (() => {
@@ -12321,7 +12327,13 @@ function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
 function bindGeneratorInlinePrompt(wrap, node){
     const input = wrap?.querySelector?.('.generator-prompt-input');
     if(!input || !node) return;
-    const fitPrompt = () => fitAutoTextNode(node, wrap.closest('.node'), [input], {minLines:3});
+    const fitPrompt = () => fitAutoTextNode(node, wrap.closest('.node'), [input], {
+        minLines:3,
+        maxLines:12,
+        allowShrink:true
+    });
+    // 文字编辑区内的滚轮必须由 textarea 自己消费，不能冒泡到画布缩放层。
+    bindScrollableText(input);
     input.onmousedown = event => event.stopPropagation();
     input.onclick = event => event.stopPropagation();
     input.oninput = event => {

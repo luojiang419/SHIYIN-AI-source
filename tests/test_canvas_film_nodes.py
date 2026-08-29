@@ -258,6 +258,20 @@ def test_film_connected_input_status_has_a_green_indicator_and_connected_label()
     assert "background:#2fbf71" in FILM_CSS
 
 
+def test_film_prompt_and_actions_use_scrollable_content_and_fixed_footer_hooks():
+    assert 'class="film-node-scroll"' in FILM
+    assert 'class="film-node-actions"' in FILM
+    assert "bindScrollableText" in FILM
+    assert "fitPrompt" in FILM
+    assert ".film-node-scroll" in FILM_CSS
+    assert "overflow-y:auto" in FILM_CSS
+    assert "max-height:260px" in FILM_CSS
+
+
+def test_smart_canvas_does_not_zoom_when_wheeling_film_prompt():
+    assert '[data-film-field="prompt"]' in SMART
+
+
 def test_video_preview_ffmpeg_uses_hidden_windows_process_flags():
     assert "def hidden_subprocess_window_kwargs()" in MAIN
     assert "getattr(subprocess, \"CREATE_NO_WINDOW\", 0x08000000)" in MAIN

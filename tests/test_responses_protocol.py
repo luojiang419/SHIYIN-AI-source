@@ -9,12 +9,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class FakeResponse:
-    def __init__(self, status_code, payload=None, text=None, headers=None):
+    def __init__(self, status_code, payload=None, text=None, headers=None, stream_lines=None):
         self.status_code = status_code
         self._payload = payload
         self.text = text if text is not None else (json.dumps(payload, ensure_ascii=False) if payload is not None else "")
-        self.headers = headers or {}
+        self._stream_lines = list(stream_lines or [])
+        self.headers = dict(headers or {})
+        if self._stream_lines:
+            self.headers.setdefault("content-type", "text/event-stream")
         self.content = self.text.encode("utf-8")
+        self.request = None
 
     def json(self):
         if self._payload is None:
@@ -24,6 +28,26 @@ class FakeResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             raise AssertionError(f"unexpected HTTP {self.status_code}")
+
+    async def aread(self):
+        return self.content
+
+    def aiter_lines(self):
+        async def iterator():
+            for line in self._stream_lines:
+                yield line
+        return iterator()
+
+
+class FakeStreamContext:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class FakeAsyncClient:
@@ -45,6 +69,10 @@ class FakeAsyncClient:
     async def post(self, url, **kwargs):
         self.requests.append(("POST", url, kwargs))
         return self.post_responses.pop(0)
+
+    def stream(self, method, url, **kwargs):
+        self.requests.append((method, url, kwargs))
+        return FakeStreamContext(self.post_responses.pop(0))
 
 
 class ResponsesProtocolTests(unittest.TestCase):
@@ -261,6 +289,37 @@ class ResponsesProtocolTests(unittest.TestCase):
             user_message["content"][1],
             {"type": "input_image", "image_url": "https://example.test/cat.png"},
         )
+
+    def test_responses_sse_is_aggregated_into_standard_response(self):
+        client = FakeAsyncClient(post_responses=[FakeResponse(
+            200,
+            stream_lines=[
+                "event: response.created",
+                'data: {"type":"response.created","response":{"id":"resp_stream","status":"in_progress"}}',
+                'data: {"type":"response.output_text.delta","delta":"第一段"}',
+                'data: {"type":"response.output_text.delta","delta":"第二段"}',
+                'data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed","usage":{"total_tokens":7}}}',
+            ],
+        )])
+        transport = {
+            "provider": {"id": "responses-provider"},
+            "protocol": "responses",
+            "url": "https://relay.test/v1/responses",
+            "headers": {"Authorization": "Bearer test-key"},
+            "model": "gpt-5.6-sol",
+        }
+
+        with patch.object(self.main.httpx, "AsyncClient", return_value=client):
+            result = asyncio.run(self.main.request_llm_json(
+                transport,
+                [{"role": "user", "content": "继续执行"}],
+                retry_524=0,
+            ))
+
+        self.assertEqual(result["id"], "resp_stream")
+        self.assertEqual(result["output_text"], "第一段第二段")
+        self.assertEqual(result["usage"]["total_tokens"], 7)
+        self.assertEqual(client.requests[0][2]["json"]["stream"], True)
 
 
 if __name__ == "__main__":

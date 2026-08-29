@@ -4186,7 +4186,8 @@ class CanvasLLMRequest(BaseModel):
     image_labels: List[str] = []  # 与 images 同序的影视资产映射标签
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
     web_search: bool = False  # Responses 协议下允许模型调用内置联网搜索
-    # 视频润色/自动解析可在首次复杂请求失败后使用紧凑提示词重试；普通调用保持默认 2 次 524 重试。
+    # 视频润色/自动解析始终使用完整版导演规则；Responses 请求通过 SSE 保持长任务连接，
+    # retry_524 仅用于上游明确返回 524 时对同一请求重试。
     retry_524: int = Field(default=2, ge=0, le=2)
 
 class CanvasPromptPolishRequest(BaseModel):
@@ -5025,10 +5026,96 @@ def build_llm_request_body(transport, messages, stream=False):
         body["stream"] = False
     return body
 
+async def request_responses_stream_json(client, transport, body):
+    """消费 Responses SSE，并聚合成现有解析器可使用的响应对象。
+
+    第三方电商代理不支持原生 ``background:true``，但支持 Responses SSE。
+    先收到 ``response.created`` 后，网关连接保持活跃，长视觉推理不再被
+    单个同步响应体卡在代理读超时上。
+    """
+    async with client.stream(
+        "POST",
+        transport["url"],
+        headers=transport["headers"],
+        json=body,
+    ) as response:
+        if response.status_code >= 400:
+            content = await response.aread()
+            error_response = httpx.Response(
+                response.status_code,
+                headers=response.headers,
+                content=content,
+                request=response.request,
+            )
+            raise httpx.HTTPStatusError(
+                f"Responses upstream returned HTTP {response.status_code}",
+                request=response.request,
+                response=error_response,
+            )
+
+        content_type = str(response.headers.get("content-type") or "").lower()
+        if "text/event-stream" not in content_type:
+            content = await response.aread()
+            if not content:
+                raise HTTPException(status_code=502, detail="Responses 上游返回了空响应")
+            try:
+                return json.loads(content.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=502, detail="Responses 上游返回了无法解析的响应") from exc
+
+        output_text_parts = []
+        final_response = None
+        usage = None
+        async for line in response.aiter_lines():
+            line = str(line or "").strip()
+            if not line or line.startswith("event:"):
+                continue
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            if line == "[DONE]":
+                break
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or "").strip().lower()
+            if event_type == "response.output_text.delta":
+                delta = event.get("delta")
+                if isinstance(delta, str) and delta:
+                    output_text_parts.append(delta)
+            elif event_type == "response.output_text.done":
+                text = event.get("text")
+                if isinstance(text, str) and text and not output_text_parts:
+                    output_text_parts.append(text)
+            response_payload = event.get("response")
+            if isinstance(response_payload, dict):
+                final_response = response_payload
+                if isinstance(response_payload.get("usage"), dict):
+                    usage = response_payload.get("usage")
+            if isinstance(event.get("usage"), dict):
+                usage = event.get("usage")
+
+        if isinstance(final_response, dict):
+            result = dict(final_response)
+        else:
+            result = {}
+        merged_text = "".join(output_text_parts).strip()
+        if merged_text and not str(result.get("output_text") or "").strip():
+            result["output_text"] = merged_text
+        if usage is not None and not isinstance(result.get("usage"), dict):
+            result["usage"] = usage
+        if not result.get("output_text") and not result.get("output"):
+            raise HTTPException(status_code=502, detail="Responses 上游未返回有效文本")
+        return result
+
+
 async def request_llm_json(transport, messages, retry_524=2):
-    """执行一次非流式文本请求，旧协议和 Responses 共用同一入口。"""
+    """执行一次文本请求；Responses 使用 SSE，旧协议保持原有 JSON POST。"""
     async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-        body = build_llm_request_body(transport, messages)
+        use_responses_stream = str(transport.get("protocol") or "").strip().lower() == "responses"
+        body = build_llm_request_body(transport, messages, stream=use_responses_stream)
         try:
             body_size = len(json.dumps(body, ensure_ascii=False, separators=(",", ":")))
         except Exception:
@@ -5036,7 +5123,7 @@ async def request_llm_json(transport, messages, retry_524=2):
         print(
             f"[llm-request] provider={(transport.get('provider') or {}).get('id', '')} "
             f"model={transport.get('model', '')} protocol={transport.get('protocol', '')} "
-            f"bytes={body_size} tools={len(body.get('tools') or [])}",
+            f"bytes={body_size} tools={len(body.get('tools') or [])} stream={use_responses_stream}",
             flush=True,
         )
         response = None
@@ -5046,11 +5133,23 @@ async def request_llm_json(transport, messages, retry_524=2):
         retry_limit = max(0, min(2, int(retry_524 or 0)))
         for attempt in range(retry_limit + 1):
             try:
+                if use_responses_stream:
+                    return await request_responses_stream_json(client, transport, body)
                 response = await client.post(
                     transport["url"],
                     headers=transport["headers"],
                     json=body,
                 )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 524 or attempt >= retry_limit:
+                    raise
+                print(
+                    f"[llm-retry] upstream 524, retry={attempt + 1}/{retry_limit} model={transport.get('model', '')} "
+                    f"provider={(transport.get('provider') or {}).get('id', '')} stream={use_responses_stream}",
+                    flush=True,
+                )
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
             except httpx.HTTPError as exc:
                 if attempt >= retry_limit:
                     raise HTTPException(
@@ -5062,7 +5161,7 @@ async def request_llm_json(transport, messages, retry_524=2):
                     ) from exc
                 print(
                     f"[llm-retry] upstream network error, retry={attempt + 1}/{retry_limit} "
-                    f"model={transport.get('model', '')} error={type(exc).__name__}",
+                    f"model={transport.get('model', '')} error={type(exc).__name__} stream={use_responses_stream}",
                     flush=True,
                 )
                 await asyncio.sleep(1.5 * (attempt + 1))

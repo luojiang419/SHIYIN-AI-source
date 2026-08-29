@@ -474,6 +474,7 @@ body.canvas-selecting .node .llm-bubble { pointer-events:none !important; }
 .generator-prompt-editor-wrap .generator-prompt-input { padding-right:68px; }
 .prompt-polish-btn { position:absolute; right:7px; bottom:7px; z-index:2; height:24px; padding:0 8px; display:inline-flex; align-items:center; gap:4px; border:1px solid var(--line-2); border-radius:999px; background:var(--card-solid); color:var(--muted); font-size:10px; font-weight:800; box-shadow:0 2px 8px rgba(0,0,0,.08); cursor:pointer; }
 .prompt-polish-btn:hover:not(:disabled) { color:var(--text); border-color:var(--strong); background:var(--soft-2); }
+.prompt-polish-btn.auto-parse { color:var(--strong); border-color:var(--line-2); background:var(--soft-2); }
 .prompt-polish-btn:disabled { opacity:.62; cursor:wait; }
 .prompt-polish-btn.is-loading i { animation:prompt-polish-spin .9s linear infinite; }
 .prompt-polish-btn i,.prompt-polish-btn svg { width:12px !important; height:12px !important; }

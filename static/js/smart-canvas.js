@@ -11835,6 +11835,10 @@ function bindSmartSpecialNode(el, node){
             model:node.model || node.runSettings?.videoModel || '',
             visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
             visionModel:changed => resolveChatModel(changed.visionModel || '', resolveChatProviderId(changed.visionProvider || '')),
+            promptConnected:target => (canvas?.connections || []).some(connection => connection.to === target.id && (() => {
+                const source = nodes.find(item => item.id === connection.from);
+                return source?.type === 'smart-prompt' || source?.type === 'smart-loop' || (source?.type === 'smart-group' && promptTextItemsForNode(source).some(Boolean));
+            })()),
             polishPrompt:(changed,prompt,assets) => polishSmartVideoPrompt(changed,prompt,smartFilmPromptReferences(assets)),
             run:changed => runSmartFilmNode(changed),
             toast:message => toast(String(message || '').slice(0,180)),

@@ -9718,6 +9718,10 @@ function bindClassicFilmNode(el,node){
         model:node.model,
         visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
         visionModel:changed => resolveChatModel(changed.visionModel || '', resolveChatProviderId(changed.visionProvider || '')),
+        promptConnected:target => connections.some(connection => connection.to === target.id && (() => {
+            const source = nodes.find(item => item.id === connection.from);
+            return ['prompt','promptGroup','loop','llm'].includes(source?.type) && String(source?.text || source?.outputText || '').trim();
+        })()),
         polishPrompt:(changed,prompt,assets) => polishCanvasVideoPrompt(changed,prompt,canvasFilmPromptReferences(assets)),
         run:changed => runFilmNode(changed.id),
         toast:message => setStatus(String(message || '').slice(0,180)),
@@ -12277,7 +12281,17 @@ function combinedGeneratorPrompt(node, sources=[]){
 }
 function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
     const count = Math.max(0, Number(connectedPromptCount || 0));
-    const polishButton = (options.polish || node?.type === 'video' || node?.type === 'ecom-video') ? `<button type="button" class="prompt-polish-btn" data-video-prompt-polish title="按当前视频模型规范润色提示词"><i data-lucide="wand-sparkles"></i><span>润色</span></button>` : '';
+    const connectedMedia = (node?.type === 'video' || node?.type === 'ecom-video')
+        ? generatorSources(node).flatMap(source => source.refs || []).map(ref => mediaKindForRef(ref))
+        : [];
+    const autoParse = node?.type === 'video'
+        && !String(node?.prompt || '').trim()
+        && count === 0
+        && connectedMedia.includes('image')
+        && connectedMedia.every(kind => kind === 'image');
+    const polishButton = (options.polish || node?.type === 'video' || node?.type === 'ecom-video')
+        ? `<button type="button" class="prompt-polish-btn${autoParse ? ' auto-parse' : ''}" data-video-prompt-polish data-video-prompt-mode="${autoParse ? 'auto-parse' : 'polish'}" title="${autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词'}"><i data-lucide="${autoParse ? 'scan-eye' : 'wand-sparkles'}"></i><span>${autoParse ? '自动解析' : '润色'}</span></button>`
+        : '';
     return `<div class="generator-inline-prompt">
         <div class="generator-inline-prompt-head">
             <span>${escapeHtml(tr('canvas.prompt'))}</span>
@@ -12295,6 +12309,7 @@ function bindGeneratorInlinePrompt(wrap, node){
     input.oninput = event => {
         event.stopPropagation();
         node.prompt = input.value;
+        syncVideoPromptActionButton(wrap, node);
         fitPrompt();
         scheduleSave();
     };
@@ -12306,6 +12321,19 @@ function bindGeneratorInlinePrompt(wrap, node){
         }
     };
     requestAnimationFrame(fitPrompt);
+}
+function syncVideoPromptActionButton(wrap, node){
+    const button = wrap?.querySelector?.('[data-video-prompt-polish]');
+    if(!button || node?.type !== 'video') return;
+    const connectedMedia = generatorSources(node).flatMap(source => source.refs || []).map(ref => mediaKindForRef(ref));
+    const promptInputs = generatorSources(node).filter(source => source.prompt && !source.refs?.length);
+    const autoParse = !String(node.prompt || '').trim() && !promptInputs.length && connectedMedia.includes('image') && connectedMedia.every(kind => kind === 'image');
+    button.dataset.videoPromptMode = autoParse ? 'auto-parse' : 'polish';
+    button.classList.toggle('auto-parse', autoParse);
+    button.title = autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词';
+    const label = button.querySelector('span'); if(label) label.textContent = autoParse ? '自动解析' : '润色';
+    const icon = button.querySelector('[data-lucide]'); if(icon) icon.setAttribute('data-lucide', autoParse ? 'scan-eye' : 'wand-sparkles');
+    if(typeof refreshIcons === 'function') refreshIcons();
 }
 function renderGeneratorBody(node){
     const wrap = document.createElement('div');
@@ -19356,6 +19384,22 @@ async function polishCanvasVideoPrompt(node, prompt, refs=[]){
     if(!polished) throw new Error('润色模型返回了空提示词');
     return polished;
 }
+async function autoParseCanvasVideoPrompt(node, refs=[]){
+    const images = (refs || []).filter(item => item.kind === 'image').map(item => item.url).filter(Boolean).slice(0,20);
+    if(!images.length) throw new Error('自动解析至少需要一张图片');
+    const labels = (refs || []).filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
+    const visionProvider = resolveChatProviderId(node?.visionProvider || '');
+    const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
+    const response = await fetch('/api/canvas-video-auto-parse', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        provider:visionProvider, model:visionModel, ms_model:'', video_provider:node?.apiProvider || '', video_model:node?.model || '',
+        images, image_labels:labels, duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
+    })});
+    const data = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(data.detail || '自动解析失败');
+    const text = String(data.text || '').trim();
+    if(!text) throw new Error('自动解析未返回视频提示词');
+    return text;
+}
 function bindVideoPromptPolish(wrap, node, refs=[]){
     const input = wrap?.querySelector?.('.generator-prompt-input');
     const button = wrap?.querySelector?.('[data-video-prompt-polish]');
@@ -19365,16 +19409,19 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         e.preventDefault(); e.stopPropagation();
         if(button.disabled) return;
         const original = input.value;
+        const mode = button.dataset.videoPromptMode || 'polish';
         button.disabled = true; button.classList.add('is-loading');
-        const label = button.querySelector('span'); if(label) label.textContent = '润色中…';
+        const label = button.querySelector('span'); if(label) label.textContent = mode === 'auto-parse' ? '解析中…' : '润色中…';
         try {
-            input.value = await polishCanvasVideoPrompt(node, original, refs);
+            input.value = mode === 'auto-parse'
+                ? await autoParseCanvasVideoPrompt(node, refs)
+                : await polishCanvasVideoPrompt(node, original, refs);
             input.dispatchEvent(new Event('input', {bubbles:true}));
         } catch(error) {
-            showErrorModal(error.message || '提示词润色失败', '提示词润色');
+            showErrorModal(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败'), mode === 'auto-parse' ? '自动解析' : '提示词润色');
         } finally {
             button.disabled = false; button.classList.remove('is-loading');
-            if(label) label.textContent = '润色';
+            if(label) label.textContent = mode === 'auto-parse' ? '自动解析' : '润色';
         }
     };
 }

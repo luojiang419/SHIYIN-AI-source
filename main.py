@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.364"
+APP_VERSION = "1.0.365"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4168,6 +4168,19 @@ class CanvasPromptPolishRequest(BaseModel):
     images: List[str] = []
     image_labels: List[str] = []
     videos: List[str] = []
+
+class CanvasVideoAutoParseRequest(BaseModel):
+    """仅有图片输入时，为视频节点自动解析并生成规范化提示词。"""
+    provider: str = ""
+    model: str = ""
+    ms_model: str = ""
+    video_provider: str = ""
+    video_model: str = ""
+    images: List[str] = []
+    image_labels: List[str] = []
+    duration: Optional[float] = None
+    aspect_ratio: str = ""
+    resolution: str = ""
 
 class BuildingMultiViewReference(BaseModel):
     role: str = Field(min_length=1, max_length=32)
@@ -18899,6 +18912,143 @@ def video_prompt_polish_system_prompt(
         f"{model_hint}当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
         f"{expansion}{output_constraint}{reference_context}"
     )
+
+
+def _video_prompt_case_context(query: str = "", limit: int = 4) -> str:
+    """从项目案例目录检索可追溯的提示词经验，返回有限长度上下文。"""
+    root = Path(PROJECT_MODULE_DIR) / "案例"
+    if not root.is_dir():
+        return ""
+    terms = [part.casefold() for part in re.findall(r"[\w一-鿿]+", str(query or "")) if len(part) > 1]
+    candidates: List[tuple[int, Path, str]] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".md", ".txt", ".json"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            continue
+        if not text:
+            continue
+        lowered = text.casefold()
+        score = sum(lowered.count(term) for term in terms) if terms else 0
+        # 提示词/报告优先；文件名命中也作为轻量相关性信号。
+        name = path.name.casefold()
+        score += sum(2 for term in terms if term in name)
+        if "提示词" in path.name or "prompt" in name:
+            score += 3
+        candidates.append((score, path, text))
+    candidates.sort(key=lambda item: (-item[0], str(item[1])))
+    excerpts: List[str] = []
+    for _, path, text in candidates[: max(1, min(8, int(limit or 4)))]:
+        compact = re.sub(r"\s+", " ", text)
+        excerpts.append(f"案例文件：{path.relative_to(root)}\n{compact[:1800]}")
+    return "\n\n".join(excerpts)
+
+
+def _video_auto_parse_system_prompt(
+    video_provider: str,
+    video_model: str,
+    reference_context: str,
+    case_context: str,
+    duration: Optional[float] = None,
+    aspect_ratio: str = "",
+    resolution: str = "",
+) -> str:
+    """自动解析第二阶段的导演提示词约束。"""
+    _, skill_id = _video_prompt_skill(video_provider, video_model)
+    model_hint = f"当前视频模型：{video_model}（skill={skill_id}）。"
+    settings_hint = "；".join(filter(None, [
+        f"目标时长 {duration:g} 秒" if duration else "",
+        f"画幅 {aspect_ratio}" if aspect_ratio else "",
+        f"分辨率 {resolution}" if resolution else "",
+    ]))
+    return (
+        "你是资深影视分镜导演和视频模型提示词工程师。只输出最终可直接提交给视频模型的一段提示词，不要解释分析过程、不要输出案例摘要。"
+        "你已获得按用户输入顺序排列的图片，以及上一阶段的逐图画面分析。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
+        "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
+        f"{model_hint}{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
+        "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；最终不得残留‘图1/图片2’等自然编号。"
+        f"\n{reference_context}\n"
+        f"优秀案例经验（仅作方法参考）：\n{case_context or '暂无可用本地案例，请依据 skill 与影视常规完成调度。'}"
+    )
+
+
+@app.post("/api/canvas-video-auto-parse")
+async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
+    """图片无提示词场景：串行执行视觉分析、案例检索和最终提示词生成。"""
+    images = [str(item or "").strip() for item in (payload.images or []) if str(item or "").strip()][:20]
+    if not images:
+        raise HTTPException(status_code=400, detail="自动解析至少需要一张图片")
+    _, skill_id = _video_prompt_skill(payload.video_provider, payload.video_model)
+    labels = [str(item or "").strip() for item in (payload.image_labels or [])]
+    reference_context, manifest, canonical_labels = video_prompt_reference_manifest(
+        skill_id, image_count=len(images), video_count=0, image_labels=labels
+    )
+    analysis_system = (
+        "你是视觉分析助手。按图片输入顺序逐张分析，只输出结构化纯文本，不写创作提示词。"
+        "每张图片必须包含：可见主体与身份线索、服装/道具、场景空间、构图与景别、机位/视角、光线色彩、主体动作/朝向/视线、可连续运动的证据和不确定项。"
+        "严禁猜测不可见文字、品牌或人物身份；编号严格对应输入顺序。"
+        f"\n{reference_context}"
+    )
+    analysis_request = CanvasLLMRequest(
+        message="请按顺序完成逐图画面分析。",
+        system_prompt=analysis_system,
+        provider=payload.provider or "comfly",
+        model=payload.model,
+        ms_model=payload.ms_model,
+        images=images,
+        image_labels=canonical_labels,
+        videos=[],
+    )
+    analysis_result = await canvas_llm(analysis_request)
+    analysis_text = str(analysis_result.get("text") or "").strip()
+    if not analysis_text:
+        raise HTTPException(status_code=502, detail="视觉模型未返回画面分析")
+    case_context = _video_prompt_case_context(analysis_text)
+    final_system = _video_auto_parse_system_prompt(
+        payload.video_provider,
+        payload.video_model,
+        reference_context,
+        case_context,
+        payload.duration,
+        payload.aspect_ratio,
+        payload.resolution,
+    )
+    final_message = (
+        "上一阶段逐图画面分析（仅作为事实依据）：\n"
+        f"{analysis_text}\n\n"
+        "请基于这些事实和案例方法，生成最终视频提示词。"
+    )
+    final_request = CanvasLLMRequest(
+        message=final_message,
+        system_prompt=final_system,
+        provider=payload.provider or "comfly",
+        model=payload.model,
+        ms_model=payload.ms_model,
+        images=images,
+        image_labels=canonical_labels,
+        videos=[],
+    )
+    final_result = await canvas_llm(final_request)
+    text = normalize_video_prompt_references(
+        str(final_result.get("text") or "").strip(),
+        skill_id,
+        image_count=len(images),
+        video_count=0,
+    )
+    if not text:
+        raise HTTPException(status_code=502, detail="视觉模型未返回最终视频提示词")
+    return {
+        **final_result,
+        "text": text,
+        "analysis": analysis_text,
+        "case_files": [line.split("\n", 1)[0].replace("案例文件：", "") for line in case_context.split("\n\n") if line],
+        "video_provider": payload.video_provider,
+        "video_model": payload.video_model,
+        "skill_id": skill_id,
+        "reference_manifest": manifest,
+    }
 
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):

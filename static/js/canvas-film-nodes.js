@@ -201,8 +201,12 @@
         if(!map.refs.length) return '<div class="film-empty-note">连接资产后会自动建立图像映射</div>';
         return `<div class="film-mapping-list">${map.refs.map((ref,index) => `<span class="film-mapping-chip"><b>${index + 1}. ${esc(ref.roleLabel || '参考资产')}</b><i>${itemPreview(ref)}</i><em>${esc(ref.name || '已连接')}</em></span>`).join('')}</div>`;
     }
-    function promptHtml(node){
-        const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish" data-film-action="polish" title="按当前视频模型规范润色提示词"><i data-lucide="wand-sparkles"></i><span>润色</span></button>` : '';
+    function promptHtml(node, options={}){
+        const refs = (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url);
+        const kinds = refs.map(item => String((item?.ref || item)?.kind || 'image').toLowerCase());
+        const hasPrompt = Boolean(String(node?.prompt || '').trim() || options.promptConnected?.(node));
+        const autoParse = node.type === 'film-video' && !hasPrompt && kinds.includes('image') && kinds.every(kind => kind === 'image');
+        const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish${autoParse ? ' auto-parse' : ''}" data-film-action="polish" data-film-prompt-mode="${autoParse ? 'auto-parse' : 'polish'}" title="${autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词'}"><i data-lucide="${autoParse ? 'scan-eye' : 'wand-sparkles'}"></i><span>${autoParse ? '自动解析' : '润色'}</span></button>` : '';
         return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>`;
     }
     function inputSlotHtml(node, port, options={}){
@@ -237,7 +241,7 @@
             <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
             ${isLineArt ? `<div class="film-line-art-batch-summary"><strong>${esc(lineArtStatus)}</strong><small>每张图片独立提交，批量并行生成</small></div>` : ''}
             <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
-            ${promptHtml(node)}
+            ${promptHtml(node, options)}
             <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
             ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label><label>分辨率<select data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P（推荐）</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label></div>` : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
             ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
@@ -361,23 +365,55 @@
         node.prompt=isKling ? normalizeKlingPrompt(data.text,mappedRefs) : String(data.text || '').trim();
         return node.prompt;
     }
+    async function autoParseVideoPrompt(node, assets=[], options={}){
+        const refs = mapping(node, assets, options).refs.filter(item => item.url && (item.kind || 'image') === 'image').slice(0,20);
+        if(!refs.length) throw new Error('自动解析至少需要一张图片');
+        const provider = options.visionProvider?.(node) || node.visionProvider || '';
+        const model = options.visionModel?.(node) || node.visionModel || '';
+        const response = await fetch('/api/canvas-video-auto-parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
+            images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
+            duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
+        })});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.detail || '自动解析失败');
+        const text=String(data.text || '').trim();
+        if(!text) throw new Error('自动解析未返回视频提示词');
+        return text;
+    }
     function bind(root,node,options={}){
         normalize(node);
         const prompt=root.querySelector('[data-film-field="prompt"]');
         if(prompt) bindMentionMenu(root,prompt,node,options);
         const polishButton=root.querySelector('[data-film-action="polish"]');
         if(polishButton && prompt && options.polishPrompt){
+            const syncAction=()=>{
+                const refs=(options.assets?.(node)||[]).filter(item=>(item?.ref||item)?.url);
+                const kinds=refs.map(item=>String((item?.ref||item)?.kind||'image').toLowerCase());
+                const hasPrompt=Boolean(String(node.prompt||'').trim() || options.promptConnected?.(node));
+                const autoParse=!hasPrompt && kinds.includes('image') && kinds.every(kind=>kind==='image');
+                polishButton.dataset.filmPromptMode=autoParse?'auto-parse':'polish';
+                polishButton.classList.toggle('auto-parse',autoParse);
+                polishButton.title=autoParse?'按图片顺序分析画面并生成视频提示词':'按当前视频模型规范润色提示词';
+                const label=polishButton.querySelector('span'); if(label && !polishButton.disabled) label.textContent=autoParse?'自动解析':'润色';
+                const icon=polishButton.querySelector('[data-lucide]'); if(icon) icon.setAttribute('data-lucide',autoParse?'scan-eye':'wand-sparkles');
+            };
+            prompt.addEventListener('input',syncAction);
+            syncAction();
             polishButton.addEventListener('mousedown',event=>event.stopPropagation());
             polishButton.addEventListener('click',async event=>{
                 event.preventDefault(); event.stopPropagation();
                 if(polishButton.disabled) return;
                 polishButton.disabled=true; polishButton.classList.add('is-loading');
-                const label=polishButton.querySelector('span'); if(label) label.textContent='润色中…';
+                const mode=polishButton.dataset.filmPromptMode || 'polish';
+                const label=polishButton.querySelector('span'); if(label) label.textContent=mode === 'auto-parse' ? '解析中…' : '润色中…';
                 try {
-                    prompt.value=await options.polishPrompt(node,prompt.value,options.assets?.(node)||[]);
+                    prompt.value=mode === 'auto-parse'
+                        ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[]) : autoParseVideoPrompt(node,options.assets?.(node)||[],options))
+                        : await options.polishPrompt(node,prompt.value,options.assets?.(node)||[]);
                     prompt.dispatchEvent(new Event('input',{bubbles:true}));
-                } catch(error){ options.toast?.(error.message || '提示词润色失败'); }
-                finally { polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent='润色'; }
+                } catch(error){ options.toast?.(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败')); }
+                finally { polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent=mode === 'auto-parse' ? '自动解析' : '润色'; }
             });
         }
         root.querySelectorAll('[data-film-field]').forEach(control=>{
@@ -414,5 +450,5 @@
         const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
     }
 
-    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,lineArtPrompt,bodyHtml,bind,parseScene};
+    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,lineArtPrompt,bodyHtml,bind,parseScene,autoParseVideoPrompt};
 })();

@@ -1,7 +1,9 @@
 let providers = [];
 const LINKFOX_PROVIDER_ID = 'linkfox';
 const ECOMMERCE_VISION_PROVIDER_ID = 'ecommerce-vision';
-const isVisionProviderId = id => ['local-vision', ECOMMERCE_VISION_PROVIDER_ID].includes(String(id || '').toLowerCase());
+// 只有“本地视觉模型”使用视觉专用表单；“电商专用”是正常的 OpenAI 兼容平台，
+// 需要完整展示地址、Key、协议以及图片/聊天/视频模型配置。
+const isVisionProviderId = id => String(id || '').toLowerCase() === 'local-vision';
 const LINKFOX_PROVIDER = {id:LINKFOX_PROVIDER_ID, name:'LinkFox', protocol:'linkfox', base_url:'https://tool-gateway.linkfox.com', enabled:true, primary:false, is_virtual:true, configured:false, installed:false};
 let selectedId = '';
 const providerList = document.getElementById('providerList');
@@ -294,7 +296,7 @@ function deriveIdFromName(name, existingId){
 function updateIdPreview(){
     const item = provider();
     if(!item) return;
-    const isBuiltin = item.id === LINKFOX_PROVIDER_ID || item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id) || item.id === 'minimax-h3' || item.id === 'kling-cli';
+    const isBuiltin = item.id === LINKFOX_PROVIDER_ID || item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === ECOMMERCE_VISION_PROVIDER_ID || isVisionProviderId(item.id) || item.id === 'minimax-h3' || item.id === 'kling-cli';
     const idPreview = document.getElementById('idPreview');
     if(!idPreview) return;
     if(isBuiltin){
@@ -333,7 +335,7 @@ function saveProviderOrder(){
 function isFixedProvider(itemOrId){
     const id = typeof itemOrId === 'string' ? itemOrId : itemOrId?.id;
     // 即梦 CLI 不再是固定平台：可删除、可排序，未添加则不存在。
-    return id === LINKFOX_PROVIDER_ID || id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || isVisionProviderId(id);
+    return id === LINKFOX_PROVIDER_ID || id === 'modelscope' || id === 'runninghub' || id === 'volcengine' || id === 'grsai' || id === 'lingjing' || id === 'codex' || id === ECOMMERCE_VISION_PROVIDER_ID || isVisionProviderId(id);
 }
 function unique(values){
     const seen = new Set();
@@ -765,7 +767,7 @@ function syncEditor(){
     if(!item) return;
     if(item.id === LINKFOX_PROVIDER_ID || item.is_virtual) return;
     const oldId = item.id;
-    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || isVisionProviderId(item.id);
+    const isBuiltin = item.id === 'comfly' || item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || item.id === 'grsai' || item.id === 'lingjing' || item.id === 'jimeng' || item.id === 'codex' || item.id === ECOMMERCE_VISION_PROVIDER_ID || isVisionProviderId(item.id);
     // 内置和自定义平台的 ID 都保持稳定；新建时若没有 ID 才生成一次。
     const nextId = isBuiltin ? item.id : deriveIdFromName(nameInput.value, item.id);
     item.id = nextId;
@@ -2607,11 +2609,10 @@ function renderEditor(){
     const modelsDesc = document.getElementById('modelsDesc');
     const chatModelsTitle = document.getElementById('chatModelsTitle');
     const chatModelsDesc = document.getElementById('chatModelsDesc');
-    const isEcommerceVision = item.id === ECOMMERCE_VISION_PROVIDER_ID;
-    if(modelsTitle) modelsTitle.textContent = isEcommerceVision ? '电商视觉模型配置' : isLocalVision ? '视觉模型配置' : tr('api.modelsTitle');
-    if(modelsDesc) modelsDesc.textContent = isEcommerceVision ? '电商专用页面使用这里配置的视觉模型解析商品、模特与场景图片。' : isLocalVision ? '用于全能模式参考图识别，地址按 OpenAI 兼容接口自动补齐。' : tr('api.modelsDesc');
-    if(chatModelsTitle) chatModelsTitle.textContent = isEcommerceVision ? '视觉模型' : isLocalVision ? '视觉模型' : tr('api.chatModels');
-    if(chatModelsDesc) chatModelsDesc.textContent = isEcommerceVision ? '电商专用页面将使用这里配置的模型解析商品、模特与场景图片' : isLocalVision ? '输入支持图片理解的 VLM 模型名称。' : tr('api.chatHint');
+    if(modelsTitle) modelsTitle.textContent = isLocalVision ? '视觉模型配置' : tr('api.modelsTitle');
+    if(modelsDesc) modelsDesc.textContent = isLocalVision ? '用于全能模式参考图识别，地址按 OpenAI 兼容接口自动补齐。' : tr('api.modelsDesc');
+    if(chatModelsTitle) chatModelsTitle.textContent = isLocalVision ? '视觉模型' : tr('api.chatModels');
+    if(chatModelsDesc) chatModelsDesc.textContent = isLocalVision ? '输入支持图片理解的 VLM 模型名称。' : tr('api.chatHint');
     const deleteBtn = document.getElementById('deleteBtn');
     if(deleteBtn) deleteBtn.style.display = isFixedProvider(item) ? 'none' : 'inline-flex';
     renderModels('image');

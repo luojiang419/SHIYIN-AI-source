@@ -19356,11 +19356,11 @@ def _video_auto_parse_system_prompt(
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{'H3 Ref2VA 生成任务的 detailed_description 通常写 350-500 个英文词；在不牺牲时间节拍和动作因果的前提下，按镜头信息量充分展开，禁止压缩成每镜头一两句静态摘要。' if skill_id == 'minimax-h3' else ''}"
         f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
-        f"{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
+        f"{('内部规划约束（仅供导演思考，不得原样输出）：' + settings_hint + '。请用这些参数控制镜头节奏和构图比例，但最终提示词不得出现视频模型名称、画幅、分辨率或‘目标时长/节点参数’等设置说明；模型要求的镜头时间标记可按 skill 保留。') if settings_hint else ''}"
         "请先使用模型可用的联网搜索工具检索优秀的视频提示词、分镜和运镜案例，吸收可迁移的方法后再写结果；不要输出检索过程或来源列表。"
         "案例仅用于提取镜头组织、节奏和可执行动作的方法，严禁复制案例中的主体、场景、道具、故事或措辞；最终内容必须完全围绕本次图片和用户输入。"
         "禁止输出或追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed 等），也不要以这类短语单独成句收尾。"
-        "输出前在内部逐项检查：内容是否全部来自本次素材、是否有明确可执行的时间推进和镜头运动、引用编号是否正确、格式是否严格匹配当前模型；只输出通过检查后的最终提示词。"
+        "输出前在内部逐项检查：内容是否全部来自本次素材、是否有明确可执行的时间推进和镜头运动、引用编号是否正确、格式是否严格匹配当前模型；只输出通过检查后的最终提示词。最终输出不得泄露视频模型名称、画幅、分辨率或节点参数字段。"
         "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；最终不得残留‘图1/图片2’等自然编号。"
         f"\n{reference_context}"
         f"\n\n===== 当前视频模型必须执行的 skill（{skill_id}）=====\n{skill_text}"
@@ -19651,9 +19651,10 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
         f"分辨率 {payload.resolution}" if payload.resolution else "",
     ]))
     if settings_hint:
-        normalized_prompt = (
-            f"视频节点参数约束（必须遵守）：{settings_hint}。请把镜头数量、每镜头时长、动作节拍和收束点规划在目标总时长内，不得超时。\n\n"
-            + normalized_prompt
+        system_prompt += (
+            f"本次视频节点控制参数（仅供内部规划，不得原样输出）：{settings_hint}。"
+            "请据此调整镜头数量、动作节拍、收束点和构图比例；最终提示词不得出现视频模型名称、画幅、分辨率或‘目标时长/节点参数’等设置说明，"
+            "模型 skill 要求的镜头时间标记可按其格式保留。"
         )
     if payload.search_context.strip():
         normalized_prompt += (

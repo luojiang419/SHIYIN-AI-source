@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.366"
+APP_VERSION = "1.0.367"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -18833,6 +18833,45 @@ def normalize_video_prompt_references(
     return output
 
 
+# 自动解析/润色模型偶尔会在正文末尾追加来自图片生成领域的泛化质量标签。
+# 这些词不是视频模型的镜头指令，且常与官方视频案例的结构无关；只清理
+# 独立的质量短语，避免误删用户正文中作为主体外观一部分的描述。
+_GENERIC_VIDEO_QUALITY_ATOM = (
+    r"(?:photorealistic|hyperrealistic|ultra[- ]?realistic|"
+    r"(?:8|16)k(?:\s+resolution)?|4k(?:\s+resolution)?|"
+    r"ultra\s*hd|high[- ]quality|best[- ]quality|masterpiece|"
+    r"highly\s+detailed|ultra[- ]detailed|sharp\s+focus|hdr)"
+)
+
+
+def clean_video_prompt_output(text: str) -> str:
+    """移除模型散装的泛化质量词，保留可执行的视频提示词正文。"""
+    output = str(text or "").strip()
+    if not output:
+        return ""
+    # 去掉偶发的 Markdown 围栏，和润色接口保持一致。
+    if output.startswith("```") and output.endswith("```"):
+        output = output.strip("`").strip()
+        if output.lower().startswith("text"):
+            output = output[4:].lstrip(":\n ")
+    # 最常见情况：正文后单独追加 “Photorealistic, 8k resolution.”。
+    trailing = re.compile(
+        # 不吞掉正文已有的句号；逗号/分号等连接符则一并移除。
+        rf"(?i)(?:\s*[,;:：，、]\s*)?{_GENERIC_VIDEO_QUALITY_ATOM}"
+        rf"(?:\s*(?:,|，|;|、|and)\s*{_GENERIC_VIDEO_QUALITY_ATOM})*\s*[.!?。！？;,:：，、]*\s*$"
+    )
+    output = trailing.sub("", output).rstrip()
+    # 清理正文中被逗号单独插入的质量短语，例如 “..., photorealistic, 8k, ...”。
+    inline = re.compile(
+        rf"(?i)([,;:：])\s*{_GENERIC_VIDEO_QUALITY_ATOM}"
+        rf"(?:\s*(?:,|，|;|、|and)\s*{_GENERIC_VIDEO_QUALITY_ATOM})*(?=\s*[,;:：]|\s*$)"
+    )
+    output = inline.sub(r"\1", output)
+    output = re.sub(r"[ \t]{2,}", " ", output)
+    output = re.sub(r"\s+([,.!?;:：，。！？])", r"\1", output)
+    return output.strip()
+
+
 def video_prompt_reference_manifest(
     skill_id: str,
     image_count: int,
@@ -18914,6 +18953,7 @@ def video_prompt_polish_system_prompt(
     return (
         "你是视频生成提示词润色器。只输出最终可直接提交给视频模型的一段提示词，不要解释、不要加标题、不要使用 Markdown 代码块。"
         "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
+        "禁止追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed），案例经验只能迁移方法，不能复制案例内容。"
         f"{model_hint}当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
         f"{expansion}{output_constraint}{reference_context}"
     )
@@ -18928,7 +18968,7 @@ def _video_auto_parse_system_prompt(
     resolution: str = "",
 ) -> str:
     """自动解析单次多模态请求的导演提示词约束。"""
-    _, skill_id = _video_prompt_skill(video_provider, video_model)
+    skill_text, skill_id = _video_prompt_skill(video_provider, video_model)
     model_hint = f"当前视频模型：{video_model}（skill={skill_id}）。"
     settings_hint = "；".join(filter(None, [
         f"目标时长 {duration:g} 秒" if duration else "",
@@ -18938,11 +18978,17 @@ def _video_auto_parse_system_prompt(
     return (
         "你是资深影视分镜导演和视频模型提示词工程师。只输出最终可直接提交给视频模型的一段提示词，不要解释分析过程、不要输出案例摘要。"
         "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须同时结合用户提示词、全部图片和本 skill 生成结果。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
+        "当用户没有提供任何文字提示词时，进入自主导演模式：不要复述静态画面，不要只写素材清单；先在内部识别主体、空间关系、可延展动作和最有戏剧张力的视觉变化，再设计一个有开场、发展、转折或揭示、收束的短时叙事。"
+        "自主设计必须由画面可见事实自然延展：可创作运动、镜头调度、节奏、环境变化和合理声音，但不得擅自更换主体、服装、产品、时代、地点或添加无视觉依据的新角色。"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{model_hint}{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
         "请先使用模型可用的联网搜索工具检索优秀的视频提示词、分镜和运镜案例，吸收可迁移的方法后再写结果；不要输出检索过程或来源列表。"
+        "案例仅用于提取镜头组织、节奏和可执行动作的方法，严禁复制案例中的主体、场景、道具、故事或措辞；最终内容必须完全围绕本次图片和用户输入。"
+        "禁止输出或追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed 等），也不要以这类短语单独成句收尾。"
+        "输出前在内部逐项检查：内容是否全部来自本次素材、是否有明确可执行的时间推进和镜头运动、引用编号是否正确、格式是否严格匹配当前模型；只输出通过检查后的最终提示词。"
         "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；最终不得残留‘图1/图片2’等自然编号。"
         f"\n{reference_context}"
+        f"\n\n===== 当前视频模型必须执行的 skill（{skill_id}）=====\n{skill_text}"
     )
 
 
@@ -18967,7 +19013,11 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         payload.resolution,
     )
     request = CanvasLLMRequest(
-        message=user_prompt or "请联合分析全部图片并生成最终视频提示词。",
+        message=user_prompt or (
+            "用户没有提供文字提示词。请启动自主导演模式：完全依据本次全部图片，"
+            "创作一段有清晰时间推进、主体动作、镜头调度、节奏变化与收束点的精彩视频提示词，"
+            "并严格按当前视频模型 skill 的官方结构输出。"
+        ),
         system_prompt=final_system,
         provider=payload.provider or "comfly",
         model=payload.model,
@@ -18978,8 +19028,11 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         web_search=True,
     )
     result = await canvas_llm(request)
-    text = normalize_video_prompt_references(
+    text = clean_video_prompt_output(
         str(result.get("text") or "").strip(),
+    )
+    text = normalize_video_prompt_references(
+        text,
         skill_id,
         image_count=len(images),
         video_count=0,
@@ -19105,6 +19158,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         text = text.strip("`").strip()
         if text.lower().startswith("text"):
             text = text[4:].lstrip(":\n ")
+    text = clean_video_prompt_output(text)
     text = normalize_video_prompt_references(
         text,
         skill_id,

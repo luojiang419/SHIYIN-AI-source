@@ -159,6 +159,7 @@
         preferenceWriteChain:Promise.resolve(),
         preferenceEchoGuardUntil:0,
         lastPointerDownAt:0,
+        analysisPreview:null,
         initializing:true,
     };
 
@@ -188,7 +189,7 @@
             'operationTabs','modeToggle','capabilityStatus','routeSummary','inputSlots','inputProgress',
             'operationControls','advancedSettings','modelPanelToggle','modelPanelBody',
             'modelPanelSelection','providerSelect','modelSelect','ratioSelect','resolutionSelect','qualitySelect','countSelect',
-            'addUniversalReference','formError','generateButton','emptyResult','emptyResultNotice','emptyResultNoticeTitle','emptyResultNoticeMessage',
+            'addUniversalReference','formError','analysisPreview','analysisPreviewTitle','analysisPreviewMode','analysisPreviewMessage','analysisPreviewOrder','analysisPreviewPrompt','generateButton','emptyResult','emptyResultNotice','emptyResultNoticeTitle','emptyResultNoticeMessage',
             'resultWorkspace','compareReset','historyToggle',
             'compareStage','afterClip','compareHandle','beforeBackdrop','beforeImage','afterBackdrop','afterImage','compareBeforeLabel','candidateList','resultMeta',
             'generationOverlay','generationTimer','generationMessage','resultErrorOverlay','resultErrorTitle','resultErrorMessage','resultErrorClear',
@@ -569,6 +570,7 @@
     }
 
     function renderInputs(){
+        clearAnalysisPreview();
         if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(el.inputSlots)) {
             window.StudioFocusGuard.deferDomUpdate('ecommerce-render-inputs', renderInputs);
             return;
@@ -2164,6 +2166,7 @@
         if(!OPERATION_CONFIG[operation] || operation === state.operation) return;
         captureWorkspace();
         state.operation = operation;
+        clearAnalysisPreview();
         state.candidateVisibleCount = ECOMMERCE_CANDIDATE_INITIAL_LIMIT;
         const workspace = restoreWorkspace(operation);
         updateTabs();
@@ -3039,6 +3042,50 @@
         showResultPreviewError(message, task);
     }
 
+    function clearAnalysisPreview(){
+        state.analysisPreview = null;
+        el.analysisPreview?.classList.add('hidden');
+        if(el.analysisPreviewTitle) el.analysisPreviewTitle.textContent = '';
+        if(el.analysisPreviewMode) el.analysisPreviewMode.textContent = '';
+        if(el.analysisPreviewMessage) el.analysisPreviewMessage.textContent = '';
+        if(el.analysisPreviewOrder) el.analysisPreviewOrder.innerHTML = '';
+        if(el.analysisPreviewPrompt) el.analysisPreviewPrompt.textContent = '';
+    }
+
+    function renderAnalysisPreview(result){
+        state.analysisPreview = result || null;
+        if(!result || !el.analysisPreview) return;
+        const status = String(result.status || '').toLowerCase();
+        const title = status === 'succeeded' ? t('ecommerce.analysisCompleted') : status === 'skipped' ? t('ecommerce.analysisRulePreview') : status === 'not_required' ? t('ecommerce.analysisRuleOnly') : t('ecommerce.analysisResult');
+        if(el.analysisPreviewTitle) el.analysisPreviewTitle.textContent = title;
+        if(el.analysisPreviewMode) el.analysisPreviewMode.textContent = result.composition_mode || result.operation || '';
+        if(el.analysisPreviewMessage) el.analysisPreviewMessage.textContent = result.message || '';
+        const ordered = Array.isArray(result.reference_plan?.ordered_reference_ids) ? result.reference_plan.ordered_reference_ids : [];
+        if(el.analysisPreviewOrder) {
+            el.analysisPreviewOrder.innerHTML = ordered.map((id,index) => `<span>${index + 1}. ${escapeHtml(id || 'reference')}</span>`).join('');
+        }
+        if(el.analysisPreviewPrompt) el.analysisPreviewPrompt.textContent = String(result.prompt_preview || '');
+        el.analysisPreview.classList.remove('hidden');
+    }
+
+    async function analyzeBeforeGenerate(payload){
+        if(IS_FREE_CREATION) return payload;
+        const result = await fetchJson('/api/ecommerce/analyze', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload),
+        });
+        renderAnalysisPreview(result);
+        // 后端已按用户类型完成排序；将证据带入任务，避免任务执行时重复请求视觉模型。
+        if(payload.operation === 'universal' && result.analysis?.status === 'succeeded' && result.analysis.items && typeof result.analysis.items === 'object') {
+            payload.options = {...(payload.options || {}), reference_analysis:result.analysis.items};
+        }
+        if(payload.operation === 'try_on' && result.analysis?.status === 'succeeded' && result.analysis.category && result.analysis.category !== 'auto') {
+            payload.options = {...(payload.options || {}), garment_category:result.analysis.category, garment_type:result.analysis.garment_type || ''};
+        }
+        return payload;
+    }
+
     function showFormError(message){ el.formError.textContent = message; el.formError.classList.remove('hidden'); }
     function clearFormError(){ el.formError.textContent = ''; el.formError.classList.add('hidden'); }
     function hideResult(){
@@ -3493,7 +3540,8 @@
         state.submissionsInFlight += 1;
         el.generateButton.classList.add('submitting');
         try {
-            const payload = JSON.parse(JSON.stringify(ecommerceTaskPayload(parentTaskId)));
+            let payload = JSON.parse(JSON.stringify(ecommerceTaskPayload(parentTaskId)));
+            payload = await analyzeBeforeGenerate(payload);
             const task = await fetchJson('/api/ecommerce/tasks', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},

@@ -1668,6 +1668,44 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["aspect_ratio"], "16:9")
         self.assertTrue(snapshot["route_candidates"])
 
+    def test_ecommerce_analysis_preview_keeps_user_type_and_role_order(self):
+        payload = self.main.EcommerceAnalyzeRequest(
+            operation="universal",
+            inputs=[
+                {"reference_id": "scene", "reference_type": "scene", "role": "scene", "url": "/assets/input/scene.png"},
+                {"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/subject.png"},
+                {"reference_id": "pose", "reference_type": "pose", "role": "pose", "url": "/assets/input/pose.png"},
+                {"reference_id": "product", "reference_type": "full_garment", "role": "full_garment", "url": "/assets/input/product.png"},
+            ],
+        )
+        analysis = {"status": "succeeded", "items": {}}
+        with (
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(payload.model_dump()["inputs"], (900, 1200))),
+            patch.object(self.main, "analyze_ecommerce_universal_references", new=AsyncMock(return_value=analysis)),
+            patch.object(self.main, "configured_ecommerce_vision_route", return_value={"provider_id": "ecommerce-vision", "provider_name": "电商专用", "model": "qwen3.5-9b-vlm"}),
+        ):
+            result = asyncio.run(self.main.prepare_ecommerce_analysis(payload))
+        self.assertEqual(result["user_selected_type"], "universal")
+        self.assertEqual(result["type_priority"], "user_selected_type")
+        self.assertEqual(result["reference_plan"]["ordered_reference_ids"], ["subject", "product", "pose", "scene"])
+        self.assertEqual(result["vision_route"]["provider_id"], "ecommerce-vision")
+        self.assertIn("reference type is the only edit authority", result["prompt_preview"])
+
+    def test_ecommerce_analysis_preview_is_recoverable_without_vision_key(self):
+        payload = self.main.EcommerceAnalyzeRequest(
+            operation="universal",
+            inputs=[{"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/subject.png"}],
+        )
+        with (
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(payload.model_dump()["inputs"], (100, 80))),
+            patch.object(self.main, "configured_ecommerce_vision_route", return_value=None),
+        ):
+            result = asyncio.run(self.main.prepare_ecommerce_analysis(payload))
+        self.assertEqual(result["status"], "skipped")
+        self.assertIsNone(result["vision_route"])
+        self.assertIn("未配置 API Key", result["message"])
+        self.assertTrue(result["prompt_preview"])
+
     def test_approval_requires_every_quality_check(self):
         task_id = "ecommerce_test_approval"
         self.main.ECOMMERCE_TASKS[task_id] = {
@@ -1992,6 +2030,13 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("async function fetchJsonWithTimeout", self.javascript)
         self.assertIn("fetchJsonWithTimeout('/api/ecommerce/tasks?limit=500')", self.javascript)
         self.assertIn("fetchJsonWithTimeout('/api/ecommerce/capabilities')", self.javascript)
+
+    def test_generation_runs_visual_analysis_before_task_submit(self):
+        self.assertIn('id="analysisPreview"', self.html)
+        self.assertIn("async function analyzeBeforeGenerate(payload)", self.javascript)
+        self.assertIn("fetchJson('/api/ecommerce/analyze'", self.javascript)
+        self.assertIn("payload = await analyzeBeforeGenerate(payload)", self.javascript)
+        self.assertIn("reference_analysis:result.analysis.items", self.javascript)
 
     def test_api_settings_auto_save_without_confirmation_buttons(self):
         self.assertNotIn('api-page-save-btn', self.api_html)

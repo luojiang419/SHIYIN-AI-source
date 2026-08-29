@@ -110,6 +110,12 @@
                     <section id="generateActions" class="ec-generate-actions">
                         <button id="addUniversalReference" class="ec-add-reference ec-add-reference-action hidden" type="button"></button>
                         <div id="formError" class="ec-inline-error hidden" role="alert"></div>
+                        <div id="analysisPreview" class="ec-analysis-preview hidden" role="status" aria-live="polite">
+                            <div class="ec-analysis-preview-head"><strong id="analysisPreviewTitle"></strong><span id="analysisPreviewMode"></span></div>
+                            <p id="analysisPreviewMessage"></p>
+                            <div id="analysisPreviewOrder" class="ec-analysis-preview-order"></div>
+                            <details><summary data-i18n="ecommerce.analysisPromptPreview">提示词预览</summary><pre id="analysisPreviewPrompt"></pre></details>
+                        </div>
                         <button id="generateButton" class="ec-primary-button" type="button">
                             <span data-i18n="ecommerce.generate">开始生成</span>
                             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3ZM18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg>

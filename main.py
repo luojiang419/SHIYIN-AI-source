@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.351"
+APP_VERSION = "1.0.352"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -3774,6 +3774,20 @@ class EcommerceTaskRequest(BaseModel):
     quality: str = "auto"
     count: int = Field(default=0, ge=0, le=4)
     parent_task_id: str = ""
+
+class EcommerceAnalyzeRequest(BaseModel):
+    """生成前的电商视觉分析请求。
+
+    该请求只负责解析参考图并生成可审阅的组合方案，不会调用图片生成接口。
+    provider_id/model 保留在请求模型中用于回显当前页面选择，但视觉分析始终走
+    已配置的“电商专用”平台，避免用户误选普通聊天平台导致规则漂移。
+    """
+    operation: str
+    mode: str = "standard"
+    inputs: List[AIReference] = Field(default_factory=list)
+    options: Dict[str, Any] = Field(default_factory=dict)
+    provider_id: str = ""
+    model: str = ""
 
 class EcommerceTaskStatusRequest(BaseModel):
     ids: List[str] = Field(default_factory=list, max_length=2000)
@@ -15426,7 +15440,17 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
         return working, None
     if str(working["options"].get("prompt_policy") or "").strip().lower() == "free":
         return working, None
-    analysis = await analyze_ecommerce_universal_references(working["inputs"])
+    supplied_items = working["options"].get("reference_analysis")
+    if isinstance(supplied_items, dict) and supplied_items:
+        analysis = {
+            "status": "succeeded",
+            "source": "preview",
+            "succeeded": sum(1 for value in supplied_items.values() if isinstance(value, dict) and value.get("status") == "succeeded"),
+            "total": len(supplied_items),
+            "items": supplied_items,
+        }
+    else:
+        analysis = await analyze_ecommerce_universal_references(working["inputs"])
     items = analysis.get("items") if isinstance(analysis, dict) else {}
     if isinstance(items, dict) and any((value or {}).get("status") == "succeeded" for value in items.values() if isinstance(value, dict)):
         working["options"]["reference_analysis"] = items
@@ -15860,6 +15884,73 @@ def configured_ecommerce_providers() -> List[Dict[str, Any]]:
         if provider.get("enabled", True) and bool(provider_env_key_value(provider.get("id") or ""))
     ]
 
+async def prepare_ecommerce_analysis(payload: EcommerceAnalyzeRequest) -> Dict[str, Any]:
+    """按用户选定类型生成分析预览，视觉模型只补充证据，不改变路由决策。"""
+    try:
+        operation = validate_ecommerce_operation(payload.operation)
+        mode = validate_ecommerce_mode(payload.mode)
+        options_json = json.dumps(payload.options or {}, ensure_ascii=False)
+        if len(options_json.encode("utf-8")) > 20 * 1024:
+            raise ValueError("功能参数过大")
+        options = json.loads(options_json)
+        normalized = validate_ecommerce_input_roles(
+            operation,
+            [item.model_dump() for item in payload.inputs],
+            options,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() == "free"
+    if free_creation and not normalized:
+        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True, options=options)
+    else:
+        inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, options=options)
+
+    base = {
+        "operation": operation,
+        "mode": mode,
+        "inputs": inputs,
+        "options": options,
+        "prompt": "",
+    }
+    analysis: Optional[Dict[str, Any]] = None
+    if operation == "universal" and not free_creation:
+        base, analysis = await enrich_ecommerce_snapshot_with_universal_analysis(base)
+    elif operation == "try_on" and str(options.get("garment_category") or "auto") == "auto":
+        base, analysis = await enrich_ecommerce_snapshot_with_garment_analysis(base)
+    else:
+        base["prompt"] = build_ecommerce_prompt(operation, inputs, options)
+
+    route = configured_ecommerce_vision_route()
+    plan = base.get("reference_plan") or {}
+    if operation == "universal" and not plan and not free_creation:
+        plan = public_ecommerce_reference_plan(
+            resolve_ecommerce_universal_reference_plan(inputs, base.get("options") or {})
+        )
+    analysis_status = str((analysis or {}).get("status") or "not_required")
+    return {
+        "status": analysis_status,
+        "operation": operation,
+        "mode": mode,
+        "user_selected_type": operation,
+        "type_priority": "user_selected_type",
+        "vision_route": public_ecommerce_route(route) if route else None,
+        "analysis": analysis,
+        "composition_mode": str(base.get("composition_mode") or ""),
+        "reference_plan": plan,
+        "ordered_inputs": base.get("inputs") or [],
+        "prompt_preview": str(base.get("prompt") or ""),
+        "source_dimensions": {"width": source_dimensions[0], "height": source_dimensions[1]},
+        "message": (
+            "视觉模型未配置 API Key，已生成规则组合预览；配置后再次分析即可补充图片证据。"
+            if analysis_status == "skipped" and not route
+            else "视觉分析完成，用户选择的类型与参考角色顺序保持不变。"
+            if analysis_status in {"succeeded", "unrecognized"}
+            else "当前操作不需要额外视觉分析，已按内置规则生成提示词预览。"
+        ),
+    }
+
 @app.get("/api/ecommerce/capabilities")
 async def get_ecommerce_capabilities():
     capabilities = ecommerce_public_capabilities(configured_ecommerce_providers())
@@ -15867,6 +15958,11 @@ async def get_ecommerce_capabilities():
     capabilities["reference_slot_types"] = slot_types
     capabilities["universal_reference_roles"] = reference_slot_type_capability_roles(slot_types)
     return capabilities
+
+@app.post("/api/ecommerce/analyze")
+async def analyze_ecommerce_request(payload: EcommerceAnalyzeRequest):
+    """返回生成前的视觉证据、用户类型优先的组合计划和最终提示词预览。"""
+    return await prepare_ecommerce_analysis(payload)
 
 @app.post("/api/ecommerce/tasks")
 async def create_ecommerce_task(payload: EcommerceTaskRequest):

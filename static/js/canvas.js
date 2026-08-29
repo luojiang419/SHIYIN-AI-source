@@ -19405,7 +19405,10 @@ function renderCanvasPromptTaskProgress(input, original, task){
     if(!input || !task) return;
     const draft = String(task.progress_text || '');
     const status = String(task.progress_status || '').trim();
-    const next = draft || (String(original || '').trim() ? String(original || '') : (status ? `【${status}】` : ''));
+    // 即使模型尚未吐出首个 token，也把当前阶段写入提示词框，避免已有原文时看起来像“没有工作”。
+    const next = draft || (status
+        ? `${status}${String(original || '').trim() ? `\n\n${String(original || '')}` : ''}`
+        : String(original || ''));
     if(next && input.value !== next){
         input.value = next;
         input.dispatchEvent(new Event('input', {bubbles:true}));

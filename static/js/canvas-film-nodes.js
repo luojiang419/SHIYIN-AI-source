@@ -428,16 +428,17 @@
                     const showProgress=task=>{
                         const draft=String(task?.progress_text || '');
                         const status=String(task?.progress_status || '').trim();
-                        const original=String(prompt.value || '');
-                        const next=draft || (original.trim() ? original : (status ? `【${status}】` : ''));
+                        const original=String(prompt.dataset.taskOriginal || prompt.value || '');
+                        const next=draft || (status ? `${status}${original.trim() ? `\n\n${original}` : ''}` : original);
                         if(next && prompt.value!==next){ prompt.value=next; prompt.dispatchEvent(new Event('input',{bubbles:true})); }
                     };
+                    prompt.dataset.taskOriginal=prompt.value;
                     prompt.value=mode === 'auto-parse'
                         ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[],showProgress) : autoParseVideoPrompt(node,options.assets?.(node)||[],options,showProgress))
                         : await options.polishPrompt(node,prompt.value,options.assets?.(node)||[],showProgress);
                     prompt.dispatchEvent(new Event('input',{bubbles:true}));
                 } catch(error){ options.toast?.(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败')); }
-                finally { polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent=mode === 'auto-parse' ? '自动解析' : '润色'; }
+                finally { delete prompt.dataset.taskOriginal; polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent=mode === 'auto-parse' ? '自动解析' : '润色'; }
             });
         }
         root.querySelectorAll('[data-film-field]').forEach(control=>{

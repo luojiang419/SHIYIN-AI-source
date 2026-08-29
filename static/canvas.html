@@ -101,7 +101,6 @@
                 </div>
                 <button class="menu-btn" onclick="menuAdd('director3d')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
                 <button class="menu-btn" onclick="menuAdd('poseReplicate')"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
-                <button class="menu-btn" onclick="menuAdd('relight')"><i data-lucide="sun-medium" class="w-4 h-4"></i><span>灯光重塑</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
             <div id="linkCreateMenu" class="create-menu"></div>
@@ -303,9 +302,18 @@
                     <button class="image-edit-btn primary" type="button" data-brush-tool="free" onclick="setBrushTool('free')" title="自由画笔"><i data-lucide="paintbrush" class="w-4 h-4"></i></button>
                     <button class="image-edit-btn secondary" type="button" data-brush-tool="rect" onclick="setBrushTool('rect')" title="矩形"><i data-lucide="square" class="w-4 h-4"></i></button>
                     <button class="image-edit-btn secondary" type="button" data-brush-tool="ellipse" onclick="setBrushTool('ellipse')" title="椭圆"><i data-lucide="circle" class="w-4 h-4"></i></button>
+                    <button class="image-edit-btn secondary" type="button" data-brush-tool="arrow" onclick="setBrushTool('arrow')" title="弯曲箭头"><i data-lucide="corner-up-right" class="w-4 h-4"></i></button>
                     <button class="image-edit-btn secondary" type="button" data-brush-tool="label" onclick="setBrushTool('label')" title="数字标签"><i data-lucide="list-ordered" class="w-4 h-4"></i></button>
                     <button class="image-edit-btn secondary" type="button" data-brush-tool="text" onclick="setBrushTool('text')" title="文字标签"><i data-lucide="type" class="w-4 h-4"></i></button>
-                    <label><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" value="#ff2d55"></label>
+                    <label class="brush-color-control"><span data-i18n="canvas.color">颜色</span> <input id="paintBrushColor" type="color" value="#ff2d55"></label>
+                    <div class="brush-color-presets" role="group" aria-label="常用颜色">
+                        <button type="button" class="brush-color-swatch" data-brush-color="#ef4444" style="--brush-color:#ef4444" title="红色" aria-label="红色"></button>
+                        <button type="button" class="brush-color-swatch" data-brush-color="#facc15" style="--brush-color:#facc15" title="黄色" aria-label="黄色"></button>
+                        <button type="button" class="brush-color-swatch" data-brush-color="#22c55e" style="--brush-color:#22c55e" title="绿色" aria-label="绿色"></button>
+                        <button type="button" class="brush-color-swatch" data-brush-color="#3b82f6" style="--brush-color:#3b82f6" title="蓝色" aria-label="蓝色"></button>
+                        <button type="button" class="brush-color-swatch" data-brush-color="#111827" style="--brush-color:#111827" title="黑色" aria-label="黑色"></button>
+                        <button type="button" class="brush-color-swatch" data-brush-color="#ffffff" style="--brush-color:#ffffff" title="白色" aria-label="白色"></button>
+                    </div>
                     <label><span data-i18n="canvas.brushSize">笔刷</span> <input id="paintBrushSize" type="range" min="2" max="80" value="14"></label>
                     <button id="brushUndoBtn" class="image-edit-btn secondary" type="button" onclick="undoEditDrawing()" title="撤销"><i data-lucide="undo-2" class="w-4 h-4"></i></button>
                     <button id="brushRedoBtn" class="image-edit-btn secondary" type="button" onclick="redoEditDrawing()" title="恢复"><i data-lucide="redo-2" class="w-4 h-4"></i></button>
@@ -505,12 +513,12 @@
 
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
     <script src="/static/js/director-3d.js?v=2026.08.28.director-3d.1"></script>
-    <script src="/static/js/canvas-special-nodes.js?v=2026.08.27.relight-v2.1&rev=20260827.3&feature=angle-consistency.1&feature=relight-preview.4"></script>
+    <script src="/static/js/canvas-special-nodes.js?v=2026.08.29.angle-only.1&rev=20260829.1&feature=angle-consistency.1"></script>
     <script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>
     <script src="/static/js/canvas-film-nodes.js?v=2026.08.24.film-nodes.3"></script>
     <script src="/static/js/canvas-linkfox-video.js?v=2026.08.28.linkfox-video.3"></script>
     <script src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
-    <script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260828.12&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-output.1&app-version=1.0.351"></script>
+    <script src="/static/js/canvas.js?v=2026.08.29.brush-arrow.1&rev=20260829.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&app-version=1.0.363"></script>
 </body>
 </html>

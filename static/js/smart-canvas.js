@@ -2005,17 +2005,6 @@ function createPoseReplicateNode(point){
     };
     return commitSmartNodeCreate(node);
 }
-function createRelightNode(point){
-    pushUndo();
-    const node = {
-        id:uid('relight'), type:'smart-image', specialType:'relight',
-        x:(point?.x || 0) - 230, y:(point?.y || 0) - 295, w:460, h:590,
-        title:'灯光重塑', images:[], created_at:Date.now(), scale:MEDIA_NODE_DEFAULT_SCALE,
-        relightDirection:'left', relightTemperature:18, relightIntensity:68,
-        relightSoftness:'balanced', relightMood:'cinematic', relightPreserve:true, relightNotes:''
-    };
-    return commitSmartNodeCreate(node);
-}
 function createAngleNode(point){
     pushUndo();
     const node = {
@@ -2804,7 +2793,6 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
     if(node?.specialType === 'director3d') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(380, Math.round(Number(node.h) || 420)), thumb:96, single:true};
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
-    if(node?.specialType === 'relight') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(520, Math.round(Number(node.h) || 590)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
     if(node?.specialType === 'batch-generator') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 440)), height:Math.max(470, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'multi-view') {
@@ -9133,7 +9121,7 @@ function runSmartCanvasShortcutAction(actionId){
         const nodeTypeMap = {
             'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
             'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.director3d':'director3d',
-            'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate', 'create.relight':'relight',
+            'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate',
             'create.multiView':'multi-view', 'create.batch':'batch'
         };
         createNodeFromMenu(nodeTypeMap[actionId], viewportCenter());
@@ -9435,7 +9423,7 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
     if(node.specialType === 'director3d') return window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="smart-group-empty">3D导演台加载失败</div>';
     if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
-    if(['relight','angle'].includes(node.specialType)){
+    if(node.specialType === 'angle'){
         const source = smartSpecialInputImage(node);
         if(source?.url){
             node[`${node.specialType}SourceUrl`] = source.url;
@@ -9444,7 +9432,6 @@ function nodeBodyHtml(node, layout){
             node[`${node.specialType}SourceHeight`] = Number(source.natural_h || source.height || 0);
         }
     }
-    if(node.specialType === 'relight') return window.CanvasSpecialNodes?.relightBodyHtml(node) || '<div class="smart-group-empty">灯光重塑节点加载失败</div>';
     if(node.specialType === 'angle') return window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="smart-group-empty">角度调整节点加载失败</div>';
     if(node.specialType === 'multi-view') return multiViewBodyHtml(node);
     if(node.specialType === 'batch-generator') return smartBatchBodyHtml(node);
@@ -9789,7 +9776,7 @@ function smartNodeHtml(node){
     const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
     const slotLoading = generationSlots.some(slot => slot.status === 'loading');
     const slotFailed = generationSlots.some(slot => slot.status === 'error');
-    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'relight' ? '灯光重塑' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
     const scale = nodeScale(node);
     const layout = imageLayout(layoutImages, scale, node);
     const isPrompt = node.type === 'smart-prompt';
@@ -9808,7 +9795,7 @@ function smartNodeHtml(node){
     const smartGroupCountHtml = smartGroupImageCount > 0 ? `<span class="group-image-count">${smartGroupImageCount}张</span>` : '';
     const isPending = Boolean(slotLoading || ((node.pending || isQueued || isJimengPending) && displayCount === 0));
     const smartLodSafe = !isSpecial && !isSmartGroup && !isPrompt && !isLoop && !isGroup && !isHistory;
-    if(['relight','angle'].includes(node.specialType)){
+    if(node.specialType === 'angle'){
         const prefix = node.specialType;
         const connectedSource = smartSpecialInputImage(node);
         if(connectedSource?.url){
@@ -10897,12 +10884,12 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
     const task = await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
     const taskId = task?.taskIds?.[0];
-    if(!taskId) throw new Error(kind === 'relight' ? '灯光重塑任务创建失败' : '角度调整任务创建失败');
+    if(!taskId) throw new Error('角度调整任务创建失败');
     const result = await pollSmartCanvasTask(taskId);
     const raw = result?.image_items?.[0] || result?.images?.[0] || resultMediaUrls(result)[0];
     const url = typeof raw === 'string' ? raw : raw?.url || '';
-    if(!url) throw new Error(kind === 'relight' ? '灯光重塑没有返回图片' : '角度调整没有返回图片');
-    const fallbackName = kind === 'relight' ? 'relight-result.png' : 'angle-result.png';
+    if(!url) throw new Error('角度调整没有返回图片');
+    const fallbackName = 'angle-result.png';
     return raw && typeof raw === 'object' ? {...raw, url, name:raw.name || fallbackName, kind:'image'} : {url, name:fallbackName, kind:'image'};
 }
 function createSmartSpecialPendingOutputNode(sourceNode, kind){
@@ -10911,13 +10898,13 @@ function createSmartSpecialPendingOutputNode(sourceNode, kind){
         || (canvas?.connections || []).filter(connection => connection.from === sourceNode.id).map(connection => nodes.find(item => item.id === connection.to)).find(candidate => candidate && isSmartImageNode(candidate) && !candidate.specialType);
     if(!output){
         pushUndo();
-        output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:kind === 'relight' ? '灯光重塑结果（生成中）' : '角度调整结果（生成中）', images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, specialPending:true, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+        output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:'角度调整结果（生成中）', images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, specialPending:true, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
         const point = smartFreeNodePoint(sourceNode, output, 'downstream');
         output.x = point.x; output.y = point.y;
         nodes.push(output);
     }
     if(!(canvas?.connections || []).some(connection => connection.from === sourceNode.id && connection.to === output.id)) connectInputNode(sourceNode.id, output.id);
-    output.title = kind === 'relight' ? '灯光重塑结果（生成中）' : '角度调整结果（生成中）';
+    output.title = '角度调整结果（生成中）';
     output.specialSourceNodeId = sourceNode.id;
     output.specialKind = kind;
     output.specialPending = true;
@@ -11786,13 +11773,13 @@ function createSmartSpecialOutputNode(sourceNode, item, kind){
         || (canvas?.connections || []).filter(connection => connection.from === sourceNode.id).map(connection => nodes.find(item => item.id === connection.to)).find(candidate => candidate && isSmartImageNode(candidate) && !candidate.specialType);
     if(!output){
         pushUndo();
-        output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:kind === 'relight' ? '灯光重塑结果' : '角度调整结果', images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
+        output = {id:uid('smart'), type:'smart-image', x:0, y:0, title:'角度调整结果', images:[], specialSourceNodeId:sourceNode.id, specialKind:kind, scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
         const point = smartFreeNodePoint(sourceNode, output, 'downstream');
         output.x = point.x; output.y = point.y;
         nodes.push(output);
     }
     if(!(canvas?.connections || []).some(connection => connection.from === sourceNode.id && connection.to === output.id)) connectInputNode(sourceNode.id, output.id);
-    output.title = kind === 'relight' ? '灯光重塑结果' : '角度调整结果';
+    output.title = '角度调整结果';
     output.specialSourceNodeId = sourceNode.id;
     output.specialKind = kind;
     delete output.specialPending;
@@ -11969,7 +11956,6 @@ function bindSmartSpecialNode(el, node){
     if(node.specialType === 'dwpose') api.bindPose(el, node, options);
     if(node.specialType === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createSmartDirectorOutputNode});
     if(node.specialType === 'pose-replicate') api.bindPoseReplicate?.(el, node, options);
-    if(node.specialType === 'relight') api.bindRelight(el, node, options);
     if(node.specialType === 'angle') api.bindAngle(el, node, options);
 }
 function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), nodeIds=null){
@@ -13835,7 +13821,7 @@ function resetEditDrawingHistory(){
 }
 function setBrushTool(tool){
     if(tool !== 'text') removeEditTextInlineEditor(true);
-    brushTool = ['free','rect','ellipse','label','text'].includes(tool) ? tool : 'free';
+    brushTool = ['free','rect','ellipse','arrow','label','text'].includes(tool) ? tool : 'free';
     syncBrushToolButtons();
     syncTextToolState(true);
 }
@@ -13926,7 +13912,26 @@ function circledNumber(n){ return n >= 1 && n <= 20 ? String.fromCharCode(0x2460
 function drawBrushShape(ctx, start, end){
     setupDrawStyle(ctx);
     const x = Math.min(start.x, end.x), y = Math.min(start.y, end.y), w = Math.abs(end.x - start.x), h = Math.abs(end.y - start.y);
-    if(brushTool === 'rect') ctx.strokeRect(x, y, w, h);
+    if(brushTool === 'arrow'){
+        const points = Array.isArray(editDrawState?.points) && editDrawState.points.length ? editDrawState.points : [start, end];
+        const dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx, dy);
+        if(length < 1) return;
+        let signedOffset = 0;
+        points.forEach(point => {
+            const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (length * length)));
+            const px = start.x + dx * t, py = start.y + dy * t;
+            const offset = ((point.x - px) * (-dy) + (point.y - py) * dx) / length;
+            if(Math.abs(offset) > Math.abs(signedOffset)) signedOffset = offset;
+        });
+        const offset = Math.max(-length * .82, Math.min(length * .82, signedOffset * 2));
+        const cx = (start.x + end.x) / 2 - dy / length * offset, cy = (start.y + end.y) / 2 + dx / length * offset;
+        ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.quadraticCurveTo(cx, cy, end.x, end.y); ctx.stroke();
+        const angle = Math.atan2(end.y - cy, end.x - cx), head = Math.max(10, editBrushSize() * 2.6);
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y); ctx.lineTo(end.x - head * Math.cos(angle - Math.PI / 7), end.y - head * Math.sin(angle - Math.PI / 7));
+        ctx.moveTo(end.x, end.y); ctx.lineTo(end.x - head * Math.cos(angle + Math.PI / 7), end.y - head * Math.sin(angle + Math.PI / 7));
+        ctx.stroke();
+    } else if(brushTool === 'rect') ctx.strokeRect(x, y, w, h);
     else if(brushTool === 'ellipse'){ ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, Math.max(1, w / 2), Math.max(1, h / 2), 0, 0, Math.PI * 2); ctx.stroke(); }
 }
 function drawNumberLabel(point){
@@ -13955,7 +13960,7 @@ function beginEditDraw(event){
     const ctx = canvasEl.getContext('2d');
     pushEditDrawHistory();
     if(imageEditMode === 'brush' && brushTool === 'label'){ drawNumberLabel(p); editDrawState = null; canvasEl.releasePointerCapture?.(event.pointerId); return; }
-    editDrawState = {x:p.x, y:p.y, sx:p.x, sy:p.y, pointerId:event.pointerId, snapshot:(imageEditMode === 'brush' && brushTool !== 'free') ? editDrawSnapshot() : null};
+    editDrawState = {x:p.x, y:p.y, sx:p.x, sy:p.y, points:[p], pointerId:event.pointerId, snapshot:(imageEditMode === 'brush' && brushTool !== 'free') ? editDrawSnapshot() : null};
     setupDrawStyle(ctx);
     ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + .01, p.y + .01);
     if(imageEditMode === 'mask' || brushTool === 'free') ctx.stroke();
@@ -13968,7 +13973,7 @@ function moveEditDraw(event){
     event.preventDefault(); event.stopPropagation();
     const ctx = editDrawCanvas().getContext('2d');
     const p = editDrawPoint(event);
-    if(imageEditMode === 'brush' && brushTool !== 'free'){ restoreEditDrawSnapshot(editDrawState.snapshot); drawBrushShape(ctx, {x:editDrawState.sx, y:editDrawState.sy}, p); return; }
+    if(imageEditMode === 'brush' && brushTool !== 'free'){ if(brushTool === 'arrow') editDrawState.points.push(p); restoreEditDrawSnapshot(editDrawState.snapshot); drawBrushShape(ctx, {x:editDrawState.sx, y:editDrawState.sy}, p); return; }
     const events = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
     if(events.length){
         events.forEach(ev => strokeFreeDrawPoint(editDrawPoint(ev)));
@@ -19632,7 +19637,6 @@ function createNodeFromMenu(type, point=null){
         if(type === 'director3d') return createDirector3dNode(p);
         if(type === 'dwpose') return createDWPoseNode(p);
         if(type === 'pose-replicate') return createPoseReplicateNode(p);
-        if(type === 'relight') return createRelightNode(p);
         if(type === 'multi-view') return createMultiViewNode(p);
         if(type === 'batch') return createSmartBatchGeneratorNode(null, p);
         let created = null;
@@ -21038,7 +21042,20 @@ document.getElementById('editTextCanvas')?.addEventListener('dblclick', event =>
     const control = document.getElementById(id);
     if(!control) return;
     control.addEventListener('input', syncSelectedEditTextStyleFromBrush);
+    if(id === 'paintBrushColor') control.addEventListener('input', () => {
+        const value = String(control.value || '').toLowerCase();
+        document.querySelectorAll('[data-brush-color]').forEach(item => item.classList.toggle('active', String(item.dataset.brushColor || '').toLowerCase() === value));
+    });
     control.addEventListener('change', () => { editTextDirty = false; });
+});
+document.querySelectorAll('[data-brush-color]').forEach(button => {
+    button.addEventListener('click', event => {
+        event.preventDefault(); event.stopPropagation();
+        const input = document.getElementById('paintBrushColor'), color = button.dataset.brushColor;
+        if(!input || !color) return;
+        input.value = color;
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+    });
 });
 ['gridHorizontalLines','gridVerticalLines','gridGapSize'].forEach(id => {
     document.getElementById(id).addEventListener('input', () => {

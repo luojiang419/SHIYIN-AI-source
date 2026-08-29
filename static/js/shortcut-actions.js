@@ -36,7 +36,6 @@
         {id:'create.panorama', category:'创建节点', name:'创建 720° 取景器节点', context:'canvas', defaultBinding:''},
         {id:'create.dwpose', category:'创建节点', name:'创建动作提取节点', context:'canvas', defaultBinding:''},
         {id:'create.poseReplicate', category:'创建节点', name:'创建一键复刻节点', context:'canvas', defaultBinding:''},
-        {id:'create.relight', category:'创建节点', name:'创建灯光重塑节点', context:'canvas', defaultBinding:''},
         {id:'create.multiView', category:'创建节点', name:'创建三视图节点', context:'canvas', defaultBinding:''},
         {id:'create.batch', category:'创建节点', name:'创建批量处理节点', context:'canvas', defaultBinding:''},
 

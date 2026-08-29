@@ -1294,10 +1294,10 @@
     function bindAngle(root, node, options={}){ bindEditNode(root, node, options, 'angle'); }
 
     window.CanvasSpecialNodes = {
-        DEFAULT_PANORAMA_PROMPT, DEFAULT_RELIGHT_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, relightBodyHtml, angleBodyHtml,
-        bindPanorama, bindPose, bindDirector3d, bindPoseReplicate, bindRelight, bindAngle,
-        buildRelightPrompt, buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeRelight, normalizeAngle,
+        DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
+        panoramaBodyHtml, poseBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml,
+        bindPanorama, bindPose, bindDirector3d, bindPoseReplicate, bindAngle,
+        buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
     };
 })();

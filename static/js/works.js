@@ -73,6 +73,11 @@
         }
         return `/api/download-output?inline=1&url=${encodeURIComponent(raw)}&name=${encodeURIComponent(filename)}`;
     }
+    // 图片与视频统一经过后端资源代理，避免桌面 WebView 将 /assets、/output
+    // 解析到错误的页面 origin，或因远程站点缺少 CORS 而显示损坏图标。
+    function mediaDisplayUrl(url, name='image.png'){
+        return mediaPlaybackUrl(url, name || 'image.png');
+    }
 
     function cache(){
         ['worksCount','worksTabs','worksSearch','worksKind','worksMediaFilter','worksSortOrder','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksSelectionModeToggle','worksSelectionActions','worksSelectionCount','worksBatchFavorite','worksBatchDelete','worksBatchTrash','worksClearSelection','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','compareWork','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewVideo','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
@@ -154,7 +159,7 @@
         const selected = state.selectedIds.has(item.id);
         return `<article class="works-card ${item.trashed?'trashed':''} ${selected?'selected':''}" data-work-id="${escapeHtml(item.id)}" aria-selected="${selected?'true':'false'}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
             <label class="works-card-checkbox" title="选择作品"><input type="checkbox" data-select-work="${escapeHtml(item.id)}" ${selected?'checked':''}><span aria-hidden="true">${selected?'✓':''}</span></label>
-            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${isVideo ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
+            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${isVideo ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(mediaDisplayUrl(item.url, item.name))}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
                 <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
@@ -406,7 +411,7 @@
         state.compareWork=target && !target.local ? target : null;
         const baseUrl=el.compareBaseSelect.selectedOptions[0]?.dataset?.url || '';
         const targetUrl=target?.url || '';
-        state.compareViewer.setImages(baseUrl,targetUrl);
+        state.compareViewer.setImages(mediaDisplayUrl(baseUrl, 'compare-base.png'), mediaDisplayUrl(targetUrl, target?.name || 'compare-target.png'));
         if(reset) state.compareViewer.reset();
         el.compareWorkName.textContent=target?.name || t('works.freeCompare');
         el.compareHint.textContent=baseUrl&&targetUrl?t('works.compareHint'):t('works.chooseTwoImages');
@@ -427,7 +432,7 @@
         el.worksPreviewImage.hidden=isVideo;
         el.worksPreviewVideo.hidden=!isVideo;
         if(isVideo) { el.worksPreviewVideo.src=mediaPlaybackUrl(work.url, work.name); el.worksPreviewVideo.load(); }
-        else { el.worksPreviewVideo.removeAttribute('src'); el.worksPreviewImage.src=work.url; }
+        else { el.worksPreviewVideo.removeAttribute('src'); el.worksPreviewImage.src=mediaDisplayUrl(work.url, work.name); }
         el.worksPreviewImage.alt=work.name || t('works.work');
         el.worksPreviewName.textContent=work.name || t('works.work');
         el.worksPreviewMeta.innerHTML=[kindLabel(work),work.model || '',work.width&&work.height?`${work.width}x${work.height}`:'',dateText(work.created_at)].filter(Boolean).map(value=>`<span>${escapeHtml(value)}</span>`).join('');

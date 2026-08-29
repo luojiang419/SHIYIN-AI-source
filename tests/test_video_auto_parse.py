@@ -17,14 +17,15 @@ FILM = (ROOT / "static" / "js" / "canvas-film-nodes.js").read_text(encoding="utf
 SMART = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 
 
-def test_backend_auto_parse_uses_ordered_multimodal_request_with_compact_timeout_fallback():
+def test_backend_auto_parse_uses_ordered_multimodal_request_and_never_compacts_rules():
     assert "class CanvasVideoAutoParseRequest" in MAIN
     assert '@app.post("/api/canvas-video-auto-parse")' in MAIN
     endpoint = MAIN[MAIN.index('@app.post("/api/canvas-video-auto-parse")'):MAIN.index('@app.post("/api/canvas-llm")')]
     assert "result = await canvas_llm(request)" in endpoint
-    assert endpoint.count("await canvas_llm(") == 2
-    assert "retry_524=0" in endpoint
-    assert "_video_compact_fallback_system_prompt" in endpoint
+    assert endpoint.count("await canvas_llm(") == 1
+    assert "retry_524=2" in endpoint
+    assert "始终使用完整版导演规则" in endpoint
+    assert "_video_compact_fallback_system_prompt" not in MAIN
     assert "images=images" in endpoint
     assert "message=user_message" in endpoint
     assert "严格遵循下方当前模型 skill" in MAIN

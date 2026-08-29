@@ -19129,17 +19129,6 @@ def _video_auto_parse_system_prompt(
         f"\n\n===== 当前视频模型必须执行的 skill（{skill_id}）=====\n{skill_text}"
     )
 
-def _video_compact_fallback_system_prompt(video_provider, video_model, reference_context):
-    """复杂导演提示词触发代理超时时使用的紧凑版本，保留模型格式和引用约束。"""
-    _, skill_id = _video_prompt_skill(video_provider, video_model)
-    return (
-        f"你是 {video_model or '视频'} 提示词导演。只输出最终可直接生成的视频提示词，不要解释。"
-        "必须综合全部参考图片，严格按上传顺序逐一使用每个规范图片引用标签；"
-        "不得臆造画面外主体。明确时间推进、主体动作先后、身体朝向/视线、景别、机位、镜头运动、光线和必要声音。"
-        f"当前模型格式：{skill_id}。\n{reference_context}"
-    )
-
-
 @app.post("/api/canvas-video-auto-parse")
 async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     """将全部图片按顺序与用户提示词、模型 skill 合并到同一个多模态请求。"""
@@ -19198,24 +19187,10 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         videos=[],
         # 图片请求不直接附加搜索工具；后台任务会先用同一模型完成文本搜索。
         web_search=False,
-        retry_524=0,
+        retry_524=2,
     )
-    try:
-        result = await canvas_llm(request)
-    except HTTPException as exc:
-        if exc.status_code not in {524, 502, 504}:
-            raise
-        # 电商代理对长导演规则偶发超时：保留同一模型/全部图片，仅压缩系统提示词后重试。
-        request.system_prompt = _video_compact_fallback_system_prompt(
-            payload.video_provider, payload.video_model, reference_context
-        )
-        request.message = (
-            "请根据全部参考图片生成一段连续视频提示词，必须逐一使用 "
-            + "、".join(f"<<<image_{index}>>>" for index in range(1, len(images) + 1))
-            + "，只输出提示词。"
-        )
-        request.retry_524 = 2
-        result = await canvas_llm(request)
+    # 始终使用完整版导演规则；524 只在同一请求上重试，不降级提示词。
+    result = await canvas_llm(request)
     text = clean_video_prompt_output(
         str(result.get("text") or "").strip(),
     )
@@ -19379,18 +19354,10 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         videos=payload.videos,
         # 图片请求不直接附加搜索工具；后台任务会先用同一模型完成文本搜索。
         web_search=False,
-        retry_524=0,
+        retry_524=2,
     )
-    try:
-        result = await canvas_llm(request_payload)
-    except HTTPException as exc:
-        if exc.status_code not in {524, 502, 504}:
-            raise
-        request_payload.system_prompt = _video_compact_fallback_system_prompt(
-            payload.video_provider, payload.video_model, reference_context
-        )
-        request_payload.retry_524 = 2
-        result = await canvas_llm(request_payload)
+    # 始终使用完整版导演规则；524 只在同一请求上重试，不降级提示词。
+    result = await canvas_llm(request_payload)
     text = str(result.get("text") or "").strip()
     if text.startswith("```") and text.endswith("```"):
         text = text.strip("`").strip()

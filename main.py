@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.368"
+APP_VERSION = "1.0.369"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -18872,6 +18872,35 @@ def clean_video_prompt_output(text: str) -> str:
     return output.strip()
 
 
+# 跨模型通用的“自动导演”规则：参考图负责事实，提示词负责可执行运动。
+# 具体的 H3/Kling 字段与标签仍由各自 skill 控制，这里只补齐表演、节拍、
+# 物理反馈和镜头动机，避免无提示词时退化成静态画面复述。
+_VIDEO_DIRECTOR_EXPANSION_RULES = (
+    "自动导演扩展规则（不得改变用户原意）："
+    "先锁定参考图可证实的主体身份、数量、位置、材质、服装、道具和环境事实；用户明确写出的故事、动作、情绪、镜头与否定要求是不可覆盖的主线。"
+    "把每个重要主体写成可观察的表演链：当下意图或注意力、起始姿态与重心、一个主动作、动作中的细微反应（眼神/表情/头部/呼吸/手脚/步态/停顿）、动作后的余韵。不要只写‘开心/紧张/悠闲’，必须写观众能看到的行为。"
+    "人物要有眼神先行、眨眼、视线转移和身体重心变化；动物或拟动物要按可见形态和场景语境设计嗅闻、甩耳、抬头警觉、打滚、侧躺、伸懒腰、踢地、追随或避让等合理行为；拟人化物体也要有惯性、停顿、回弹和与环境的接触反馈。"
+    "多主体不要同步机械重复同一动作：分配主次、错峰节拍和波纹式反应，让一个主体先行动、另一个迟半拍观察或跟随，背景主体保持低强度但不同步的生活感。"
+    "每个镜头只承载一个主动作和一个主导运镜；复杂变化写成起始构图→运动中构图/揭示→收束构图，不要堆叠互相冲突的运镜动词。"
+    "用户未指定固定机位时，禁止默认静止镜头；根据动作和叙事目的自动选择跟随、前推、后拉、横移、环绕、低机位抬升、俯拍下降、摇摄、手持微漂移或穿越前景，并明确方向、速度、景别/视角、镜头与主体的关系，以及运动最终揭示的信息。"
+    "靠近用于强调表情、反应和材质，拉远用于交代群体关系，环绕用于展示空间与主体互动，低角度用于强化重量，升降用于揭示环境；镜头运动必须服务于信息或情绪变化。"
+    "加入少量可见的二级环境运动和物理反馈：草叶/尘土/水面/烟雾/阴影随动作变化，衣物或毛发有惯性延迟，脚步有接地、摩擦和重量转移，道具发生真实碰撞；不得凭空添加参考图外的新主体、品牌、文字、时代或地点。"
+    "按目标时长规划开场、发展、变化或揭示、收束；时长不足时优先保留用户主线、一个清晰主动作、一个反应和一个有动机的运镜。声音只用于动作节奏辅助。"
+)
+
+
+def video_prompt_reference_coverage(text: str, skill_id: str, image_count: int) -> Dict[str, Any]:
+    """确定性检查最终提示词是否覆盖全部规范图片标签。"""
+    output = str(text or "")
+    expected = [
+        _video_prompt_reference_tag(skill_id, "image", index)
+        for index in range(1, max(0, int(image_count or 0)) + 1)
+    ]
+    found = [tag for tag in expected if tag in output]
+    missing = [tag for tag in expected if tag not in output]
+    return {"expected": expected, "found": found, "missing": missing, "complete": not missing}
+
+
 def video_prompt_reference_manifest(
     skill_id: str,
     image_count: int,
@@ -18959,7 +18988,7 @@ def video_prompt_polish_system_prompt(
         "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
         "禁止追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed），案例经验只能迁移方法，不能复制案例内容。"
         f"{model_hint}当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
-        f"{expansion}{output_constraint}{reference_context}"
+        f"{expansion}{_VIDEO_DIRECTOR_EXPANSION_RULES}{output_constraint}{reference_context}"
     )
 
 
@@ -18985,6 +19014,7 @@ def _video_auto_parse_system_prompt(
         "逐张建立图片使用清单：最终提示词必须逐一出现本次所有图片的规范引用标签；即使多张图片属于同一主体，也要列出全部来源并说明各自提供的可见证据，禁止仅保留第一张和最后一张或静默省略中间图片。"
         "当用户没有提供任何文字提示词时，进入自主导演模式：不要复述静态画面，不要只写素材清单；先在内部识别主体、空间关系、可延展动作和最有戏剧张力的视觉变化，再设计一个有开场、发展、转折或揭示、收束的短时叙事。"
         "自主设计必须由画面可见事实自然延展：可创作运动、镜头调度、节奏、环境变化和合理声音，但不得擅自更换主体、服装、产品、时代、地点或添加无视觉依据的新角色。"
+        f"{_VIDEO_DIRECTOR_EXPANSION_RULES}"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{model_hint}{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
         "请先使用模型可用的联网搜索工具检索优秀的视频提示词、分镜和运镜案例，吸收可迁移的方法后再写结果；不要输出检索过程或来源列表。"
@@ -19024,6 +19054,9 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     else:
         user_message = (
             "用户没有提供文字提示词。请启动自主导演模式：完全依据本次全部图片，"
+            "先识别画面中可连续延展的主体行为，再以导演思维编排开场、发展、变化/揭示和收束；"
+            "为人物、动物、拟人化物体分别设计合理的表情/视线、动作先后、错峰反应、环境反馈和重量感，"
+            "自动选择有叙事目的且不是固定机位的自然运镜，"
             "创作一段有清晰时间推进、主体动作、镜头调度、节奏变化与收束点的精彩视频提示词，"
             "并严格按当前视频模型 skill 的官方结构输出；最终必须逐一使用所有图片标签。"
         )
@@ -19058,6 +19091,13 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     )
     if not text:
         raise HTTPException(status_code=502, detail="视觉模型未返回最终视频提示词")
+    coverage = video_prompt_reference_coverage(text, skill_id, len(images))
+    if not coverage["complete"]:
+        missing = "、".join(coverage["missing"])
+        raise HTTPException(
+            status_code=422,
+            detail=f"最终提示词未覆盖全部参考图，缺少：{missing}。请重试自动解析，系统不会静默交付不完整引用。",
+        )
     return {
         **result,
         "text": text,
@@ -19067,6 +19107,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         "input_prompt": raw_user_prompt,
         "image_count": len(images),
         "reference_manifest": manifest,
+        "reference_coverage": coverage,
     }
 
 @app.post("/api/canvas-llm")
@@ -19198,6 +19239,13 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         image_count=len(payload.images or []),
         video_count=len(payload.videos or []),
     )
+    coverage = video_prompt_reference_coverage(text, skill_id, len(payload.images or []))
+    if not coverage["complete"]:
+        missing = "、".join(coverage["missing"])
+        raise HTTPException(
+            status_code=422,
+            detail=f"润色后的提示词未覆盖全部参考图，缺少：{missing}。请重试，系统不会静默交付不完整引用。",
+        )
     return {
         **result,
         "text": text,
@@ -19206,6 +19254,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         "skill_id": skill_id,
         "normalized_input": normalized_prompt,
         "reference_manifest": reference_manifest,
+        "reference_coverage": coverage,
     }
 
 # --- 对话管理 ---

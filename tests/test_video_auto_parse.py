@@ -2,7 +2,12 @@ from pathlib import Path
 import asyncio
 
 import main
-from main import _video_auto_parse_system_prompt, clean_video_prompt_output
+from main import (
+    _video_auto_parse_system_prompt,
+    clean_video_prompt_output,
+    video_prompt_polish_system_prompt,
+    video_prompt_reference_coverage,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,11 +44,27 @@ def test_auto_parse_system_prompt_injects_selected_video_skill_content():
     assert "<<<element_1>>>" in kling
     assert "自主导演模式" in kling
     assert "禁止输出或追加与镜头无关的泛化质量标签" in kling
+    assert "多主体不要同步机械重复同一动作" in kling
+    assert "禁止默认静止镜头" in kling
+    assert "运动最终揭示的信息" in kling
+    assert "脚步有接地、摩擦和重量转移" in kling
 
     h3 = _video_auto_parse_system_prompt("minimax-h3", "MiniMax H3", "mapping", duration=6)
     assert "当前视频模型必须执行的 skill（minimax-h3）" in h3
     assert "subject_definitions" in h3
     assert "integrated_multimodal_description" in h3
+    assert "开场、发展、变化或揭示、收束" in h3
+
+
+def test_prompt_polish_injects_director_rules_without_overriding_user_intent():
+    prompt = video_prompt_polish_system_prompt(
+        "minimax-h3", "MiniMax H3", text_to_video=False, reference_context="mapping"
+    )
+    assert "用户原意优先" in prompt
+    assert "用户明确写出的故事、动作、情绪、镜头与否定要求是不可覆盖的主线" in prompt
+    assert "人物要有眼神先行" in prompt
+    assert "动物或拟动物" in prompt
+    assert "每个镜头只承载一个主动作和一个主导运镜" in prompt
 
 
 def test_classic_video_button_switches_to_auto_parse_for_images_without_prompt():
@@ -76,6 +97,8 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
     assert "逐张建立图片使用清单" in MAIN
     assert "参考图载入不完整" in MAIN
     assert '"used_images": min(len(image_inputs), 20)' in MAIN
+    assert "video_prompt_reference_coverage" in MAIN
+    assert "系统不会静默交付不完整引用" in MAIN
 
 
 def test_auto_parse_endpoint_keeps_four_images_and_story_prompt_together(monkeypatch):
@@ -100,6 +123,66 @@ def test_auto_parse_endpoint_keeps_four_images_and_story_prompt_together(monkeyp
     assert "牛仔裤" in request.message
     assert "所有图片标签" in request.message
     assert result["image_count"] == 4
+    assert result["reference_coverage"]["complete"] is True
+
+
+def test_reference_coverage_uses_current_model_tags():
+    h3 = video_prompt_reference_coverage("<Picture 1> then <Picture 3>", "minimax-h3", 3)
+    assert h3["found"] == ["<Picture 1>", "<Picture 3>"]
+    assert h3["missing"] == ["<Picture 2>"]
+    assert h3["complete"] is False
+
+    kling = video_prompt_reference_coverage(
+        "<<<image_1>>> and <<<image_2>>>", "kling-cli", 2
+    )
+    assert kling["complete"] is True
+
+
+def test_auto_parse_rejects_missing_reference_tags(monkeypatch):
+    async def fake_canvas_llm(_request):
+        return {"text": "<Picture 1> and <Picture 3> are used in a moving camera shot."}
+
+    monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
+    payload = main.CanvasVideoAutoParseRequest(
+        images=[
+            "https://example.test/1.png",
+            "https://example.test/2.png",
+            "https://example.test/3.png",
+        ],
+        video_provider="minimax-h3",
+        video_model="MiniMax H3",
+    )
+    try:
+        asyncio.run(main.canvas_video_auto_parse(payload))
+    except main.HTTPException as exc:
+        assert exc.status_code == 422
+        assert "<Picture 2>" in str(exc.detail)
+    else:
+        raise AssertionError("缺少图片标签时必须拒绝交付")
+
+
+def test_no_prompt_auto_parse_requests_continuous_action_acting_and_moving_camera(monkeypatch):
+    captured = {}
+
+    async def fake_canvas_llm(request):
+        captured["request"] = request
+        return {"text": "<Picture 1> becomes <Subject 1>; the camera tracks its grounded movement."}
+
+    monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
+    payload = main.CanvasVideoAutoParseRequest(
+        prompt="",
+        images=["https://example.test/1.png"],
+        video_provider="minimax-h3",
+        video_model="MiniMax H3",
+        duration=6,
+    )
+    result = asyncio.run(main.canvas_video_auto_parse(payload))
+    request = captured["request"]
+    assert "先识别画面中可连续延展的主体行为" in request.message
+    assert "人物、动物、拟人化物体" in request.message
+    assert "错峰反应、环境反馈和重量感" in request.message
+    assert "不是固定机位的自然运镜" in request.message
+    assert result["reference_coverage"]["complete"] is True
 
 
 def test_video_prompt_output_removes_generic_quality_suffix_without_touching_scene_text():

@@ -19230,11 +19230,24 @@ async function runImageNodeQuickGenerate(nodeId){
         const data = await response.json();
         const images = (data.images || []).map(outputUrlValue).filter(Boolean);
         if(!images.length) throw new Error('图片生成没有返回结果');
-        node.url = images[0];
-        node.name = outputImageName(images[0]) || 'generated-image';
-        node.mediaKind = 'image';
-        node.generatedOutputs = images;
+        // 图片节点是生成请求的输入/源素材，生成结果必须落到独立的输出节点，
+        // 不能覆盖 node.url，否则原图会在生成后丢失，也无法继续作为参考图复用。
+        const historyTx = beginClassicHistoryTransaction('image-quick-generate');
+        const out = outputForNode(node, 460, true);
+        if(!out) throw new Error('无法创建图片生成输出节点');
+        const outputItems = images.map(url => ({
+            url,
+            name:outputImageName(url) || 'generated-image',
+            kind:'image'
+        }));
+        appendOutputImagesWithoutDuplicates(out, outputItems, {
+            url:node.url,
+            name:node.name || 'source image'
+        });
+        commitClassicHistoryTransaction(historyTx, {selectionAfter:{ids:[out.id]}});
         node.runStatus = 'done'; node.runError = '';
+        selected.clear();
+        selected.add(out.id);
         setStatus(`图片生成完成${images.length > 1 ? `，共 ${images.length} 张` : ''}`);
         render();
         scheduleSave();

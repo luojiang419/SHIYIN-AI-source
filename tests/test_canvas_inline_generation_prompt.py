@@ -38,6 +38,21 @@ class CanvasInlineGenerationPromptTests(unittest.TestCase):
         self.assertIn('"canvas.generatorPromptPlaceholder"', self.i18n)
         self.assertIn('"canvas.connectedPromptCount"', self.i18n)
 
+    def test_image_quick_generate_preserves_source_and_creates_output_node(self):
+        run = re.search(
+            r"async function runImageNodeQuickGenerate\(nodeId\)\{(?P<body>.*?)\n\}",
+            self.javascript,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(run)
+        body = run.group("body")
+        self.assertIn("const historyTx = beginClassicHistoryTransaction('image-quick-generate')", body)
+        self.assertIn("const out = outputForNode(node, 460, true)", body)
+        self.assertIn("appendOutputImagesWithoutDuplicates(out, outputItems", body)
+        self.assertIn("selected.add(out.id)", body)
+        self.assertNotIn("node.url = images[0]", body)
+        self.assertNotIn("node.generatedOutputs = images", body)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8262,6 +8262,9 @@ function render(){
         return;
     }
     const perfEnd = window.CanvasPerformance?.start?.('classic.render', {nodes:nodes.length, connections:connections.length});
+    // 多选时节点自身的悬浮操作层必须统一收起；render() 也会被“全选”等快捷键直接调用，
+    // 因此不能只依赖 refreshSelectionVisuals() 更新这个状态。
+    board?.classList.toggle('selection-multiple', Boolean(canvas && selected.size > 1));
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
     updateCanvasStats();
     nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
@@ -9889,7 +9892,9 @@ function renderNode(node){
         && !window.CanvasFilmNodes?.isType?.(node.type);
     const nodeTypeClass = node.type === 'batchGenerator'
         ? 'batchGenerator-node batch-generator-node generator-node'
-        : `${node.type}-node`;
+        : node.type === 'prompt'
+            ? 'prompt-node prompt-text-node'
+            : `${node.type}-node`;
     el.className = `node ${nodeTypeClass} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
@@ -10021,7 +10026,7 @@ function renderNode(node){
     }
     if(node.type === 'prompt') {
         const templateActive = promptTemplateModal?.classList.contains('open') && promptTemplateNodeId === node.id;
-        body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><div class="prompt-toolbar-actions"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button><button class="prompt-template-btn" type="button" data-prompt-expand title="${escapeAttr(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button></div>${promptCounterHtml(node.text || '')}</div><div class="prompt-node-text prompt-node-control" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="${escapeAttr(tr('canvas.promptPlaceholder'))}" spellcheck="false">${escapeHtml(node.text || '')}</div></div>`;
+        body.innerHTML = `<div class="prompt-editor prompt-node-text-layout"><div class="prompt-node-text prompt-node-control" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="${escapeAttr(tr('canvas.promptPlaceholder'))}" spellcheck="false">${escapeHtml(node.text || '')}</div><div class="prompt-node-footer"><div class="prompt-counter-wrap">${promptCounterHtml(node.text || '')}</div><div class="prompt-node-actions"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button><button class="prompt-template-btn" type="button" data-prompt-expand title="${escapeAttr(tr('canvas.promptExpandTitle'))}"><i data-lucide="maximize-2"></i><span>${escapeHtml(tr('canvas.promptExpandTitle'))}</span></button></div></div></div>`;
         const textarea = body.querySelector('.prompt-node-text');
         const templateBtn = body.querySelector('[data-prompt-template-open]');
         const expandBtn = body.querySelector('[data-prompt-expand]');
@@ -21294,6 +21299,7 @@ function refreshSelectionVisuals(options={}){
         });
     }
     if(options?.syncResolution !== false) syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
+    board?.classList.toggle('selection-multiple', Boolean(canvas && nextSelected.size > 1));
     syncConnectionSelectionVisuals();
     classicSelectionFeedbackState = {ids:nextSelected};
     scheduleClassicSafeLod([...affectedNodeIds]);

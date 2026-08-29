@@ -1840,6 +1840,15 @@ body.theme-dark #shell.shell > .board {
     box-shadow:none !important;
 }
 
+/* 经典提示词节点采用 infinite-canvas 文本节点式透明内容区；不能被通用控件规则重新刷成色块。 */
+#shell .prompt-node.prompt-text-node .node-body,
+#shell .prompt-node.prompt-text-node .prompt-node-text-layout,
+#shell .prompt-node.prompt-text-node .prompt-node-text {
+    background:transparent !important;
+    border-color:transparent !important;
+    box-shadow:none !important;
+}
+
 #shell .llm-input-area[readonly],
 #shell .llm-chat-log,
 #shell .llm-output,

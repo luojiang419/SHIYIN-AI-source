@@ -19388,8 +19388,20 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
             "请将上述故事与全部参考图片综合为最终视频提示词，并逐一使用所有图片标签。"
         )
     else:
+        if len(images) > 1:
+            sequence_hint = (
+                f"本次共有 {len(images)} 张图片，图片顺序就是用户希望保留的叙事/时间顺序："
+                "第 1 张作为开场视觉锚点，随后图片依次作为发展、动作变化、揭示或收束的视觉依据；"
+                "不要把图片当成互不相关的素材清单，也不要重排、跳过或只使用首尾图片。"
+            )
+        else:
+            sequence_hint = (
+                "本次只有 1 张图片：把它作为开场视觉锚点，在同一主体和空间事实基础上设计可连续延展的动作、"
+                "反应、环境反馈与有动机的运镜，不要虚构画面外的新主体。"
+            )
         user_message = (
             "用户没有提供文字提示词。请启动自主导演模式：完全依据本次全部图片，"
+            f"{sequence_hint}"
             "先识别画面中可连续延展的主体行为，再以导演思维编排开场、发展、变化/揭示和收束；"
             "为人物、动物、拟人化物体分别设计合理的表情/视线、动作先后、错峰反应、环境反馈和重量感，"
             "每个镜头至少写出准备、执行/互动、反应/收束三个连续节拍，并用先后顺序和触发因果连接起来，"
@@ -19456,11 +19468,43 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
         text = _hard_limit_video_prompt(text, prompt_limit)
     coverage = video_prompt_reference_coverage(text, skill_id, len(images))
     if not coverage["complete"]:
-        missing = "、".join(coverage["missing"])
-        raise HTTPException(
-            status_code=422,
-            detail=f"最终提示词未覆盖全部参考图，缺少：{missing}。请重试自动解析，系统不会静默交付不完整引用。",
+        # 模型偶尔会完成故事却漏写一个规范图片标签；用同一 provider/model 做一次
+        # 轻量格式修复，保留原故事和图片顺序，避免用户因一次格式疏漏反复点击。
+        repair_system = (
+            final_system
+            + "\n现在进入引用修复模式：只修复最终提示词中的图片引用覆盖，不改变主体、动作、故事、"
+            "时序、镜头或声音。必须保留原文，并在合适的主体/镜头描述处补齐所有缺失的规范图片标签；"
+            "每张图片只能使用当前映射中的标签，禁止添加未收到的图片。只输出修复后的完整最终提示词。"
         )
+        missing_tags = "、".join(coverage["missing"])
+        repair_request = CanvasLLMRequest(
+            message=(
+                f"下方是刚生成但缺少图片引用 {missing_tags} 的视频提示词。请按要求修复并完整输出：\n\n{text}"
+            ),
+            system_prompt=repair_system,
+            provider=payload.provider or "comfly",
+            model=payload.model,
+            ms_model=payload.ms_model,
+            images=images,
+            image_labels=canonical_labels,
+            videos=[],
+            web_search=False,
+            retry_524=1,
+        )
+        repaired_result = await llm_call(repair_request)
+        repaired_text = clean_video_prompt_output(str(repaired_result.get("text") or "").strip())
+        repaired_text = normalize_video_prompt_references(
+            repaired_text, skill_id, image_count=len(images), video_count=0
+        )
+        if repaired_text:
+            text = repaired_text
+            coverage = video_prompt_reference_coverage(text, skill_id, len(images))
+        if not coverage["complete"]:
+            missing = "、".join(coverage["missing"])
+            raise HTTPException(
+                status_code=422,
+                detail=f"最终提示词未覆盖全部参考图，缺少：{missing}。请重试自动解析，系统不会静默交付不完整引用。",
+            )
     return {
         **result,
         "text": text,

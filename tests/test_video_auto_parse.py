@@ -244,6 +244,48 @@ def test_no_prompt_message_explicitly_requests_three_action_beats(monkeypatch):
     assert "每个镜头至少写出准备、执行/互动、反应/收束三个连续节拍" in captured["request"].message
 
 
+def test_no_prompt_message_preserves_image_order_as_story_timeline(monkeypatch):
+    captured = {}
+
+    async def fake_canvas_llm(request):
+        captured["request"] = request
+        return {"text": "<Picture 1> then <Picture 2> then <Picture 3> in a continuous sequence."}
+
+    monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
+    payload = main.CanvasVideoAutoParseRequest(
+        images=[
+            "https://example.test/1.png",
+            "https://example.test/2.png",
+            "https://example.test/3.png",
+        ],
+        video_provider="minimax-h3",
+        video_model="MiniMax H3",
+    )
+    asyncio.run(main.canvas_video_auto_parse(payload))
+    assert "图片顺序就是用户希望保留的叙事/时间顺序" in captured["request"].message
+    assert "第 1 张作为开场视觉锚点" in captured["request"].message
+
+
+def test_auto_parse_repairs_missing_reference_tags_once(monkeypatch):
+    calls = []
+
+    async def fake_canvas_llm(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return {"text": "<Picture 1> A continuous moving shot."}
+        return {"text": "<Picture 1> and <Picture 2> A continuous moving shot."}
+
+    monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
+    payload = main.CanvasVideoAutoParseRequest(
+        images=["https://example.test/1.png", "https://example.test/2.png"],
+        video_provider="minimax-h3",
+        video_model="MiniMax H3",
+    )
+    result = asyncio.run(main.canvas_video_auto_parse(payload))
+    assert len(calls) == 2
+    assert result["reference_coverage"]["complete"] is True
+
+
 def test_director_rules_are_content_driven_not_case_template_driven():
     system = _video_auto_parse_system_prompt("kling-cli", "kling-v3-omni", "mapping")
     assert "这是内容无关的导演决策" in system

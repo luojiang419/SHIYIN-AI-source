@@ -5026,11 +5026,22 @@ async def request_llm_json(transport, messages):
         # 该状态表示网关等待上游超时，不代表 API Key 或模型配置错误；短暂退避后重试，
         # 避免用户必须反复点击按钮。仅重试 524，防止鉴权/参数错误造成重复请求。
         for attempt in range(3):
-            response = await client.post(
-                transport["url"],
-                headers=transport["headers"],
-                json=body,
-            )
+            try:
+                response = await client.post(
+                    transport["url"],
+                    headers=transport["headers"],
+                    json=body,
+                )
+            except httpx.HTTPError as exc:
+                if attempt >= 2:
+                    raise
+                print(
+                    f"[llm-retry] upstream network error, retry={attempt + 1}/2 "
+                    f"model={transport.get('model', '')} error={type(exc).__name__}",
+                    flush=True,
+                )
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
             if response.status_code != 524 or attempt >= 2:
                 break
             print(
@@ -19249,6 +19260,11 @@ async def canvas_llm(payload: CanvasLLMRequest):
             friendly = (
                 "电商视觉上游网关等待超时（524）。API Key 和模型已正确命中电商专用平台，"
                 "系统已自动重试仍未在网关时限内返回；请稍后重试，或减少一次解析的参考图数量。"
+            )
+        elif exc.response.status_code >= 500 and not body.strip():
+            friendly = (
+                f"上游接口返回 HTTP {exc.response.status_code}，但没有返回错误说明。"
+                "请稍后重试；这不是模型自动切换导致的错误。"
             )
         raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body}") from exc
     except httpx.HTTPError as exc:

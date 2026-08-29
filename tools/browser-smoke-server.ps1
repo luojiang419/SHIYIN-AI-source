@@ -46,10 +46,13 @@ $logRoot = Join-Path $stageRoot "logs"
 New-Item -ItemType Directory -Force $appRoot, $dataRoot, $logRoot | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "static") -Destination (Join-Path $appRoot "web") -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot "VERSION") -Destination (Join-Path $stageRoot "VERSION")
-$promptSkillSource = Join-Path $projectRoot "skills\video-prompt-polish"
-$promptSkillTargetRoot = Join-Path $appRoot "skills"
+$promptSkillSourcePath = [IO.Path]::GetFullPath((Join-Path -Path ([string]$projectRoot) -ChildPath "skills\video-prompt-polish"))
+$promptSkillTargetRoot = Join-Path -Path ([string]$appRoot) -ChildPath "skills"
+if (-not (Test-Path -LiteralPath $promptSkillSourcePath -PathType Container)) {
+    throw "Video prompt skill source is missing: $promptSkillSourcePath"
+}
 New-Item -ItemType Directory -Force $promptSkillTargetRoot | Out-Null
-Copy-Item -LiteralPath $promptSkillSource -Destination $promptSkillTargetRoot -Recurse
+Copy-Item -LiteralPath $promptSkillSourcePath -Destination $promptSkillTargetRoot -Recurse -Force
 
 $token = "browser-smoke-token"
 $python = Join-Path $projectRoot "python\python.exe"

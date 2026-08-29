@@ -113,6 +113,7 @@
         if(node.type === 'film-video'){
             return [
                 {role:'storyboard',label:'分镜图',title:'连接分镜图或首帧参考'},
+                {role:'prompt',label:'提示词',title:'连接外部提示词、提示词组或 AI 输出'},
                 ...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat(),
             ];
         }
@@ -134,9 +135,9 @@
         }
         return withProductDetail(node.type === 'film-storyboard'
             ? ({scene:'场景',sketch:'线稿分镜'}[role] || role)
-            : node.type === LINE_ART_TYPE
-                ? ({source:'视频帧 / 分镜组'}[role] || role)
-                : ({storyboard:'分镜图'}[role] || role));
+                : node.type === LINE_ART_TYPE
+                    ? ({source:'视频帧 / 分镜组'}[role] || role)
+                : ({storyboard:'分镜图',prompt:'提示词'}[role] || role));
     }
     function modelRule(provider='', model=''){
         const text = `${provider} ${model}`.toLowerCase();
@@ -181,9 +182,16 @@
         });
         return {rule, refs, lines, text:lines.join(rule.id === 'minimax' ? '; ' : '，')};
     }
+    function externalPromptText(node, options={}){
+        const value = typeof options.promptText === 'function' ? options.promptText(node) : options.promptText;
+        return String(value || '').trim();
+    }
+    function effectivePrompt(node, options={}){
+        return [externalPromptText(node, options), String(node?.prompt || '').trim()].filter(Boolean).join('\n\n');
+    }
     function buildPrompt(node, assets=[], options={}){
         const map = mapping(node, assets, options);
-        const prompt = String(node.prompt || '').trim();
+        const prompt = effectivePrompt(node, options);
         const hasProductDetail = map.refs.some(ref => ref.sourceRole === 'detail' || ref.isProductDetail === true);
         const prefix = map.text ? `资产映射：${map.text}。${hasProductDetail ? '产品主图与产品细节均为同一产品的证据，生成时必须优先保持产品结构、材质、颜色、Logo和文字真实一致。' : ''}` : '';
         return {prompt:[prefix,prompt].filter(Boolean).join('\n'), refs:map.refs, map};
@@ -204,7 +212,7 @@
     function promptHtml(node, options={}){
         const refs = (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url);
         const kinds = refs.map(item => String((item?.ref || item)?.kind || 'image').toLowerCase());
-        const hasPrompt = Boolean(String(node?.prompt || '').trim() || options.promptConnected?.(node));
+        const hasPrompt = Boolean(effectivePrompt(node, options) || options.promptConnected?.(node));
         const autoParse = node.type === 'film-video' && !hasPrompt && kinds.includes('image') && kinds.every(kind => kind === 'image');
         const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish${autoParse ? ' auto-parse' : ''}" data-film-action="polish" data-film-prompt-mode="${autoParse ? 'auto-parse' : 'polish'}" title="${autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词'}"><i data-lucide="${autoParse ? 'scan-eye' : 'wand-sparkles'}"></i><span>${autoParse ? '自动解析' : '润色'}</span></button>` : '';
         return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>`;
@@ -354,14 +362,19 @@
         const storyboardRefs=mappedRefs.filter(item=>item.inputRole === 'storyboard');
         const shouldParseMultipleShots=node.type === 'film-video' && storyboardRefs.length > 1;
         const manifest=mappedRefs.map((item,index)=>`${isKling ? `<<<image_${index+1}>>>` : `图${index+1}`}=${item.roleLabel || '参考资产'}`).join('；');
+        const promptText=effectivePrompt(node, options);
+        const duration=Number(node.duration || 0) || 0;
+        const videoModel=String(node.model || options.model || '').trim();
+        const durationGuide=duration ? `目标视频总时长为 ${duration} 秒（视频模型：${videoModel || '当前节点模型'}），所有镜头时长、动作节奏和转场必须规划在这一总时长内，禁止超出总时长。` : '';
+        const promptGuide=promptText ? `外部/手动提示词要求：${promptText}。请保留其核心意图并结合参考资产进行规划。` : '';
         const message=node.type==='film-video'
             ? (isKling
-                ? `你将收到按真实影视制作输入端顺序排列的参考资产：${manifest}。${shouldParseMultipleShots ? '分镜图输入端已连接多张参考图，请仅按这些分镜图的端口内顺序解析多镜头，并按“镜头1、镜头2……”组织连续动作。' : '分镜图输入端未连接多张参考图，请只解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}请按可灵 VIDEO 3.0 Omni 最新官方提示词规范输出可直接生成的视频提示词：先交代场景与主体；${shouldParseMultipleShots ? '每个镜头' : '该镜头'}写明时长、景别/视角、主体动作与动作先后、身体朝向和视线、镜头运动及速度、光线/环境和必要声音。图片引用必须使用 <<<image_N>>>；画面中可复用的演员、服装、道具或产品主体按首次出现顺序使用 <<<element_N>>>，并说明其来自哪个 <<<image_N>>>。只输出提示词，不解释分析过程。`
-                : `你将收到一组已按顺序编号的影视资产（${manifest}）。${shouldParseMultipleShots ? '请仅按分镜图输入端中多张参考图的顺序解析多镜头。' : '请仅解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}再结合演员、服装和道具参考，预测镜头运镜、人物动作先后、身体朝向、视线、节奏与互动关系。输出一段可直接用于视频生成的中文动作描述，明确镜头运动和关键动作触发时机；不要解释分析过程。`)
+                ? `${durationGuide}${promptGuide}你将收到按真实影视制作输入端顺序排列的参考资产：${manifest}。${shouldParseMultipleShots ? '分镜图输入端已连接多张参考图，请仅按这些分镜图的端口内顺序解析多镜头，并按“镜头1、镜头2……”组织连续动作。' : '分镜图输入端未连接多张参考图，请只解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}请按可灵 VIDEO 3.0 Omni 最新官方提示词规范输出可直接生成的视频提示词：先交代场景与主体；${shouldParseMultipleShots ? '每个镜头' : '该镜头'}写明时长、景别/视角、主体动作与动作先后、身体朝向和视线、镜头运动及速度、光线/环境和必要声音。图片引用必须使用 <<<image_N>>>；画面中可复用的演员、服装、道具或产品主体按首次出现顺序使用 <<<element_N>>>，并说明其来自哪个 <<<image_N>>>。只输出提示词，不解释分析过程。`
+                : `${durationGuide}${promptGuide}你将收到一组已按顺序编号的影视资产（${manifest}）。${shouldParseMultipleShots ? '请仅按分镜图输入端中多张参考图的顺序解析多镜头。' : '请仅解析一个连续镜头；演员、服装和道具仅用于资产一致性绑定，不得因其数量拆分多镜头。'}再结合演员、服装和道具参考，预测镜头运镜、人物动作先后、身体朝向、视线、节奏与互动关系。输出一段可直接用于视频生成的中文动作描述，明确镜头运动和关键动作触发时机；不要解释分析过程。`)
             : `你将收到一组已按顺序编号的影视资产（${manifest}），其中演员、场景和线稿分镜必须在同一次综合解析中互相校验。请输出一段可直接用于图像生成的中文画面描述：明确每张图对应的角色/场景/分镜关系、人物身份与动作、道具位置、构图角度、光线和环境，并要求画面构图严格参照线稿分镜图；不要解释分析过程。`;
         const provider=options.visionProvider?.(node) || node.visionProvider || '';
         const model=options.visionModel?.(node) || node.visionModel || '';
-        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),image_labels:mappedRefs.map((item,index)=>`${isKling ? `<<<image_${index+1}>>>` : `图${index+1}`}=${item.roleLabel || '参考资产'}`),videos:[],provider,model,system_prompt:isKling ? `你是可灵 VIDEO 3.0 Omni 提示词导演。严格使用 <<<image_N>>> 引用图片，按首次出现顺序使用 <<<element_N>>> 绑定从画面解析出的稳定主体；每个主体必须说明来自哪个 <<<image_N>>>，不能把没有视觉证据的主体写入提示词。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析镜头编号、时长、景别、动作、运镜和声音。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}预测连续运动而不是静态画面。` : `你是影视分镜与动作分析助手。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析多镜头。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。`})});
+        const response=await fetch('/api/canvas-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,images:refs.slice(0,20),image_labels:mappedRefs.map((item,index)=>`${isKling ? `<<<image_${index+1}>>>` : `图${index+1}`}=${item.roleLabel || '参考资产'}`),videos:[],provider,model,video_provider:node.apiProvider || '',video_model:videoModel,duration:duration || null,aspect_ratio:node.aspectRatio || '',resolution:node.resolution || '',system_prompt:isKling ? `你是可灵 VIDEO 3.0 Omni 提示词导演。${durationGuide}${promptGuide}严格使用 <<<image_N>>> 引用图片，按首次出现顺序使用 <<<element_N>>> 绑定从画面解析出的稳定主体；每个主体必须说明来自哪个 <<<image_N>>>，不能把没有视觉证据的主体写入提示词。${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析镜头编号、时长、景别、动作、运镜和声音。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}预测连续运动而不是静态画面。` : `你是影视分镜与动作分析助手。${durationGuide}${promptGuide}${shouldParseMultipleShots ? '只按分镜图输入端的多张参考图解析多镜头。' : '只输出一个连续镜头；演员、服装和道具图片均为资产绑定，不得因其数量拆分多镜头。'}输出简洁、准确、可执行的中文生成提示词。必须保留并正确使用图号与资产映射关系。`})});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.detail || '视觉解析失败');
         node.prompt=isKling ? normalizeKlingPrompt(data.text,mappedRefs) : String(data.text || '').trim();
@@ -374,7 +387,7 @@
         const model = options.visionModel?.(node) || node.visionModel || '';
         const data = await submitFilmPromptTask('/api/canvas-video-auto-parse-tasks', {
             provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
-            prompt:String(node.prompt || '').trim(),
+            prompt:effectivePrompt(node, options),
             images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
         }, '自动解析', onProgress);
@@ -424,7 +437,7 @@
             const syncAction=()=>{
                 const refs=(options.assets?.(node)||[]).filter(item=>(item?.ref||item)?.url);
                 const kinds=refs.map(item=>String((item?.ref||item)?.kind||'image').toLowerCase());
-                const hasPrompt=Boolean(String(node.prompt||'').trim() || options.promptConnected?.(node));
+                const hasPrompt=Boolean(effectivePrompt(node, options) || options.promptConnected?.(node));
                 const autoParse=!hasPrompt && kinds.includes('image') && kinds.every(kind=>kind==='image');
                 polishButton.dataset.filmPromptMode=autoParse?'auto-parse':'polish';
                 polishButton.classList.toggle('auto-parse',autoParse);
@@ -441,7 +454,7 @@
                 polishButton.disabled=true; polishButton.classList.add('is-loading');
                 // 连接关系和输入框可能在重绘间隙尚未反映到按钮 data 属性；
                 // 点击时再次判断，避免空提示词误走润色接口。
-                const currentPrompt=String(prompt.value || node.prompt || '').trim();
+                const currentPrompt=[String(prompt.value || '').trim(), externalPromptText(node, options)].filter(Boolean).join('\n\n');
                 const currentAssets=options.assets?.(node)||[];
                 const currentRefs=currentAssets
                     .map(item=>item?.ref||item)
@@ -462,7 +475,7 @@
                     prompt.dataset.taskOriginal=prompt.value;
                     prompt.value=mode === 'auto-parse'
                         ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[],showProgress) : autoParseVideoPrompt(node,options.assets?.(node)||[],options,showProgress))
-                        : await options.polishPrompt(node,prompt.value,options.assets?.(node)||[],showProgress);
+                        : await options.polishPrompt(node,currentPrompt,options.assets?.(node)||[],showProgress);
                     prompt.dispatchEvent(new Event('input',{bubbles:true}));
                 } catch(error){ options.toast?.(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败')); }
                 finally { delete prompt.dataset.taskOriginal; polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent=mode === 'auto-parse' ? '自动解析' : '润色'; }

@@ -100,14 +100,17 @@ def test_film_video_and_smart_canvas_use_ordered_auto_parse_flow():
     assert "images:refs.map(item=>item.url)" in FILM
     assert "promptConnected:target =>" in SMART
     assert "polishPrompt:(changed,prompt,assets)" in SMART
+    assert "{role:'prompt',label:'提示词'" in FILM
+    assert "promptText:target => connectedCanvasPromptText(target)" in CANVAS
+    assert "promptText:target => smartFilmConnectedPromptText(target)" in SMART
 
 
 def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
-    assert "const prompt = String(node?.prompt || '').trim();" in CANVAS
+    assert "connectedCanvasPromptText(node)" in CANVAS
     assert "prompt, images, image_labels:labels" in CANVAS
     assert "提示词解析必须看到 output/group 中连接的全部图片" in CANVAS
     assert "mediaRefsFromNode(source)" in CANVAS
-    assert "prompt:String(node.prompt || '').trim()," in FILM
+    assert "prompt:effectivePrompt(node, options)," in FILM
     assert "images:refs.map(item=>item.url)" in FILM
     assert "必须逐张检查并在最终提示词中实际使用本次收到的每一张图片" in MAIN
     assert "不能只使用第一张和最后一张" in MAIN
@@ -116,15 +119,22 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
     assert '"used_images": min(len(image_inputs), 20)' in MAIN
     assert "video_prompt_reference_coverage" in MAIN
     assert "系统不会静默交付不完整引用" in MAIN
+    assert "duration:Number(node.duration || 0) || null" in FILM
+    assert "duration:Number(node?.duration || 0) || null" in CANVAS
+    assert "duration:Number(node?.duration || node?.runSettings?.videoDuration || 0) || null" in SMART
+    assert "目标视频总时长为" in FILM
+    assert "class CanvasPromptPolishRequest" in MAIN
+    assert "duration: Optional[float] = None" in MAIN
+    assert "视频节点参数约束（必须遵守）" in MAIN
 
 
 def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():
     # 按钮的 data 属性来自上一次渲染，连接关系变化后可能短暂过期；
     # 点击时必须依据当前输入和参考图再次选择自动解析。
-    assert "const currentPrompt = String(original || node.prompt || '').trim();" in CANVAS
+    assert "const currentPrompt = [String(original || node.prompt || '').trim(), connectedCanvasPromptText(node)]" in CANVAS
     assert "const autoParseNow = !currentPrompt && imageRefs.length > 0" in CANVAS
     assert "const mode = autoParseNow ? 'auto-parse'" in CANVAS
-    assert "const currentPrompt=String(prompt.value || node.prompt || '').trim();" in FILM
+    assert "const currentPrompt=[String(prompt.value || '').trim(), externalPromptText(node, options)]" in FILM
     assert "const autoParseNow=!currentPrompt && currentImageRefs.length>0" in FILM
     assert "const mode=autoParseNow ? 'auto-parse'" in FILM
 

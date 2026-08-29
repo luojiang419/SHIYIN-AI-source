@@ -4230,6 +4230,9 @@ class CanvasPromptPolishRequest(BaseModel):
     images: List[str] = []
     image_labels: List[str] = []
     videos: List[str] = []
+    duration: Optional[float] = None
+    aspect_ratio: str = ""
+    resolution: str = ""
     web_search: bool = True
     search_context: str = Field(default="", max_length=12000)
 
@@ -19642,6 +19645,16 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
     system_prompt = video_prompt_polish_system_prompt(
         payload.video_provider, payload.video_model, payload.text_to_video, reference_context
     )
+    settings_hint = "；".join(filter(None, [
+        f"目标视频总时长 {payload.duration:g} 秒" if payload.duration else "",
+        f"画幅 {payload.aspect_ratio}" if payload.aspect_ratio else "",
+        f"分辨率 {payload.resolution}" if payload.resolution else "",
+    ]))
+    if settings_hint:
+        normalized_prompt = (
+            f"视频节点参数约束（必须遵守）：{settings_hint}。请把镜头数量、每镜头时长、动作节拍和收束点规划在目标总时长内，不得超时。\n\n"
+            + normalized_prompt
+        )
     if payload.search_context.strip():
         normalized_prompt += (
             "\n\n联网检索得到的案例方法摘要（仅借鉴方法，不复制内容）：\n"

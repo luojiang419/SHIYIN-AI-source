@@ -1776,6 +1776,13 @@ function filmSmartAssets(node){
     const connectedFilmRoles = new Set(direct.filter(item => /^(actor|outfit|prop)-\d+$/.test(item.role || '') && item.ref?.url).map(item => item.role));
     return [...direct, ...inherited.filter(item => !connectedFilmRoles.has(item.role))];
 }
+function smartFilmConnectedPromptText(node){
+    if(!node) return '';
+    return (canvas?.connections || []).filter(connection => connection.to === node.id).map(connection => {
+        const source=nodes.find(item => item.id === connection.from);
+        return promptTextItemsForNode(source);
+    }).flat().map(text => String(text || '').trim()).filter(Boolean).join('\n\n');
+}
 function smartFilmStoryboardAncestors(sourceId, seen=new Set()){
     if(!sourceId || seen.has(sourceId)) return [];
     seen.add(sourceId);
@@ -1923,7 +1930,7 @@ async function runSmartFilmNode(node){
     const api=window.CanvasFilmNodes;
     const assets=filmSmartAssets(node);
     const settingsForNodeRun=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
-    const built=api.buildPrompt({...node,apiProvider:node.apiProvider || settingsForNodeRun.videoProvider || settingsForNodeRun.provider_id,model:node.model || settingsForNodeRun.videoModel || settingsForNodeRun.model},assets,{provider:node.apiProvider,model:node.model});
+    const built=api.buildPrompt({...node,apiProvider:node.apiProvider || settingsForNodeRun.videoProvider || settingsForNodeRun.provider_id,model:node.model || settingsForNodeRun.videoModel || settingsForNodeRun.model},assets,{provider:node.apiProvider,model:node.model,promptText:target => smartFilmConnectedPromptText(target)});
     if(!built.prompt){ toast('请先输入生成需求或连接影视参考资产'); return; }
     const meta=snapshotRunMeta(built.prompt,node.id,built.prompt,built.refs);
     meta.settings=settingsForStorage(settingsForNodeRun);
@@ -11818,7 +11825,10 @@ async function polishSmartVideoPrompt(node, prompt, refs=[], onProgress=null){
     const labels = refs.filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
     const data = await submitSmartCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || node?.runSettings?.videoProvider || '', video_model:node?.model || node?.runSettings?.videoModel || '',
-        text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
+        text_to_video:!images.length && !videos.length, images, image_labels:labels, videos,
+        duration:Number(node?.duration || node?.runSettings?.videoDuration || 0) || null,
+        aspect_ratio:node?.aspectRatio || node?.runSettings?.videoAspect || '',
+        resolution:node?.resolution || node?.runSettings?.videoResolution || ''
     }, '提示词润色', onProgress);
     const polished = String(data.text || '').trim();
     if(!polished) throw new Error('润色模型返回了空提示词');
@@ -11868,6 +11878,7 @@ function bindSmartSpecialNode(el, node){
             }),
             visionProvider:changed => resolveVideoVisionProviderId(changed.visionProvider || ''),
             visionModel:changed => resolveChatModel(changed.visionModel || '', resolveVideoVisionProviderId(changed.visionProvider || '')),
+            promptText:target => smartFilmConnectedPromptText(target),
             promptConnected:target => (canvas?.connections || []).some(connection => connection.to === target.id && (() => {
                 const source = nodes.find(item => item.id === connection.from);
                 return source?.type === 'smart-prompt' || source?.type === 'smart-loop' || (source?.type === 'smart-group' && promptTextItemsForNode(source).some(Boolean));
@@ -16247,7 +16258,11 @@ function connectInputNode(fromId, toId, inputRole=''){
     }
     if(to.specialType === 'film-storyboard' || to.specialType === 'film-video' || to.specialType === 'film-line-art'){
         if(!(window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole)) return false;
-        if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
+        if(to.specialType === 'film-video' && inputRole === 'prompt'){
+            const hasPrompt = ['smart-prompt','smart-loop'].includes(from.type)
+                || (isSmartGroupNode(from) && promptTextItemsForNode(from).some(Boolean));
+            if(!hasPrompt) return false;
+        } else if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.specialType === 'pose-replicate'){
         if(!['pose-reference','target-image'].includes(inputRole)) return false;

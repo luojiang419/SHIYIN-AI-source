@@ -9740,11 +9740,12 @@ function bindClassicFilmNode(el,node){
         }),
         visionProvider:changed => resolveVideoVisionProviderId(changed.visionProvider || ''),
         visionModel:changed => resolveChatModel(changed.visionModel || '', resolveVideoVisionProviderId(changed.visionProvider || '')),
+        promptText:target => connectedCanvasPromptText(target),
         promptConnected:target => connections.some(connection => connection.to === target.id && (() => {
             const source = nodes.find(item => item.id === connection.from);
             return ['prompt','promptGroup','loop','llm'].includes(source?.type) && String(source?.text || source?.outputText || '').trim();
         })()),
-        polishPrompt:(changed,prompt,assets) => polishCanvasVideoPrompt(changed,prompt,canvasFilmPromptReferences(assets)),
+        polishPrompt:(changed,prompt,assets,onProgress) => polishCanvasVideoPrompt(changed,prompt,canvasFilmPromptReferences(assets),onProgress),
         run:changed => runFilmNode(changed.id),
         toast:message => setStatus(String(message || '').slice(0,180)),
         onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },
@@ -9830,7 +9831,7 @@ async function runFilmNode(nodeId, opts={}){
     if(!node) return;
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
     const api=window.CanvasFilmNodes;
-    const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model});
+    const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptText(target)});
     if(!built.prompt){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
     const refs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `图${index+1}`}));
     const out=outputForNode(node,560,true);
@@ -12300,6 +12301,13 @@ function combinedGeneratorPrompt(node, sources=[]){
         .filter(Boolean)
         .join('\n\n');
 }
+function connectedCanvasPromptText(node){
+    if(!node) return '';
+    return orderedSources(node, generatorSources(node))
+        .map(source => String(source?.prompt || '').trim())
+        .filter(Boolean)
+        .join('\n\n');
+}
 function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
     const count = Math.max(0, Number(connectedPromptCount || 0));
     const connectedMedia = (node?.type === 'video' || node?.type === 'ecom-video')
@@ -12354,7 +12362,7 @@ function syncVideoPromptActionButton(wrap, node){
     if(!button || node?.type !== 'video') return;
     const connectedMedia = generatorSources(node).flatMap(source => source.refs || []).map(ref => mediaKindForRef(ref));
     const promptInputs = generatorSources(node).filter(source => source.prompt && !source.refs?.length);
-    const autoParse = !String(node.prompt || '').trim() && !promptInputs.length && connectedMedia.includes('image') && connectedMedia.every(kind => kind === 'image');
+    const autoParse = !String(node.prompt || '').trim() && !connectedCanvasPromptText(node) && !promptInputs.length && connectedMedia.includes('image') && connectedMedia.every(kind => kind === 'image');
     button.dataset.videoPromptMode = autoParse ? 'auto-parse' : 'polish';
     button.classList.toggle('auto-parse', autoParse);
     button.title = autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词';
@@ -19409,7 +19417,8 @@ async function polishCanvasVideoPrompt(node, prompt, refs=[], onProgress=null){
     const labels = refs.filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
     const data = await submitCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || '', video_model:node?.model || '',
-        text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
+        text_to_video:!images.length && !videos.length, images, image_labels:labels, videos,
+        duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
     }, '提示词润色', onProgress);
     const polished = String(data.text || '').trim();
     if(!polished) throw new Error('润色模型返回了空提示词');
@@ -19446,11 +19455,11 @@ async function submitCanvasPromptTask(endpoint, payload, label='提示词任务'
     }
     throw new Error(`${label}等待超时（超过 30 分钟）`);
 }
-async function autoParseCanvasVideoPrompt(node, refs=[], onProgress=null){
+async function autoParseCanvasVideoPrompt(node, refs=[], onProgress=null, promptOverride=''){
     const images = (refs || []).filter(item => item.kind === 'image').map(item => item.url).filter(Boolean).slice(0,20);
     if(!images.length) throw new Error('自动解析至少需要一张图片');
     const labels = (refs || []).filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
-    const prompt = String(node?.prompt || '').trim();
+    const prompt = String(promptOverride || [String(node?.prompt || '').trim(), connectedCanvasPromptText(node)].filter(Boolean).join('\n\n')).trim();
     const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const data = await submitCanvasPromptTask('/api/canvas-video-auto-parse-tasks', {
@@ -19473,7 +19482,7 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         // 渲染时的 data-video-prompt-mode 可能因连接关系或输入框状态尚未同步而过期。
         // 点击瞬间重新判断：空提示词且仅连接图片时必须走自动解析，不能误调用
         // 需要非空文本的润色接口。
-        const currentPrompt = String(original || node.prompt || '').trim();
+        const currentPrompt = [String(original || node.prompt || '').trim(), connectedCanvasPromptText(node)].filter(Boolean).join('\n\n');
         const imageRefs = (refs || []).filter(item => item?.kind === 'image' && item?.url);
         const autoParseNow = !currentPrompt && imageRefs.length > 0
             && (refs || []).filter(item => item?.url).every(item => item?.kind === 'image');
@@ -19483,8 +19492,8 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         try {
             const showProgress = task => renderCanvasPromptTaskProgress(input, original, task);
             input.value = mode === 'auto-parse'
-                ? await autoParseCanvasVideoPrompt(node, refs, showProgress)
-                : await polishCanvasVideoPrompt(node, original, refs, showProgress);
+                ? await autoParseCanvasVideoPrompt(node, refs, showProgress, currentPrompt)
+                : await polishCanvasVideoPrompt(node, currentPrompt, refs, showProgress);
             input.dispatchEvent(new Event('input', {bubbles:true}));
         } catch(error) {
             showErrorModal(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败'), mode === 'auto-parse' ? '自动解析' : '提示词润色');
@@ -20494,6 +20503,10 @@ function canConnect(fromId, toId, inputRole=''){
     if(to.type === 'film-storyboard' || to.type === 'film-video' || to.type === 'film-line-art'){
         const valid = (window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole);
         if(!valid) return false;
+        if(to.type === 'film-video' && inputRole === 'prompt'){
+            return ['prompt','promptGroup','loop','llm','group'].includes(from.type)
+                && !wouldCreateGeneratorCycle(fromId,toId);
+        }
         return ['image','group','output','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }

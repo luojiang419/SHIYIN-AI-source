@@ -118,6 +118,17 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
     assert "系统不会静默交付不完整引用" in MAIN
 
 
+def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():
+    # 按钮的 data 属性来自上一次渲染，连接关系变化后可能短暂过期；
+    # 点击时必须依据当前输入和参考图再次选择自动解析。
+    assert "const currentPrompt = String(original || node.prompt || '').trim();" in CANVAS
+    assert "const autoParseNow = !currentPrompt && imageRefs.length > 0" in CANVAS
+    assert "const mode = autoParseNow ? 'auto-parse'" in CANVAS
+    assert "const currentPrompt=String(prompt.value || node.prompt || '').trim();" in FILM
+    assert "const autoParseNow=!currentPrompt && currentImageRefs.length>0" in FILM
+    assert "const mode=autoParseNow ? 'auto-parse'" in FILM
+
+
 def test_auto_parse_endpoint_keeps_four_images_and_story_prompt_together(monkeypatch):
     captured = {}
 

@@ -2520,6 +2520,7 @@ function serializableCanvasNode(node){
     delete copy.runError;
     delete copy._cascadeIdx;
     delete copy._cascadeFailed;
+    delete copy._quickGenerateActive;
     delete copy._activeLoopCtx;
     delete copy._blenderState;
     delete copy._blenderStatusRequested;
@@ -14275,15 +14276,20 @@ function shouldCreateOutputForNode(node){
 }
 function outputForNode(node, dx=460, force=false){
     if(!node || (!force && !shouldCreateOutputForNode(node))) return null;
-    let out = connections
-        .filter(c => c.from === node.id)
-        .map(c => nodes.find(n => n.id === c.to))
-        .find(n => n?.type === 'output');
+    const sourceConnection = connections.find(c => c.from === node.id && nodes.find(n => n.id === c.to)?.type === 'output');
+    let out = sourceConnection ? nodes.find(n => n.id === sourceConnection.to) : null;
+    // 旧数据或其它创建入口可能已经有连接，但尚未进入增量连线索引；
+    // 生成前补齐索引，避免输出节点存在而连线层找不到它。
+    if(sourceConnection) indexClassicConnectionModel(sourceConnection);
     if(!out){
         out = {id:uid('out'), type:'output', x:node.x + dx, y:node.y, images:[]};
         nodes.push(out);
         positionCanvasNodeRelative(out, node, 'downstream');
-        connections.push({id:uid('c'), from:node.id, to:out.id});
+        const connection = {id:uid('c'), from:node.id, to:out.id};
+        connections.push(connection);
+        indexClassicConnectionModel(connection);
+        markClassicConnectionStructureDirty();
+        scheduleClassicRender();
     }
     return out;
 }
@@ -16422,6 +16428,7 @@ function runSnapshot(node, prompt, refs=[]){
     delete clone.running;
     delete clone.runStatus;
     delete clone.runError;
+    delete clone._quickGenerateActive;
     delete clone.inputs;
     return {
         nodeType: node?.type || '',
@@ -19242,7 +19249,7 @@ function imageNodeQuickPromptHtml(node){
             <select class="image-quick-select" data-image-quick-ratio aria-label="输出画幅">${ratioOptions.map(([value,label]) => `<option value="${value}" ${value === ratio ? 'selected' : ''}>${label}</option>`).join('')}</select>
             <select class="image-quick-select" data-image-quick-resolution aria-label="输出分辨率">${resolutionOptions.map(value => `<option value="${value}" ${value === resolution ? 'selected' : ''}>${value === 'auto' ? '自动' : value.toUpperCase()}</option>`).join('')}</select>
             <button type="button" class="image-quick-camera ${camera.enabled ? 'active' : ''}" data-image-quick-camera title="摄影机设置"><i data-lucide="camera"></i><span>摄影机</span></button>
-            <button type="button" class="image-quick-generate ${running ? 'running' : ''}" data-image-quick-generate ${running ? 'disabled' : ''}><i data-lucide="${running ? 'loader-2' : 'wand-sparkles'}"></i><span>${running ? '生成中' : '生成'}</span></button>
+            <button type="button" class="image-quick-generate ${running ? 'running' : ''}" data-image-quick-generate data-running-state="${running ? 'disabled' : ''}" aria-busy="${running ? 'true' : 'false'}"><i data-lucide="${running ? 'loader-2' : 'wand-sparkles'}"></i><span>${running ? '生成中' : '生成'}</span></button>
         </div>
         <div class="image-quick-camera-panel" data-image-quick-camera-panel ${camera.enabled ? '' : 'hidden'}>
             <label>机身<select data-image-quick-camera-field="camera">${CANVAS_IMAGE_CAMERA_OPTIONS.camera.map(value => `<option value="${escapeAttr(value)}" ${value === camera.camera ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select></label>
@@ -19304,14 +19311,23 @@ function bindImageNodeQuickPrompt(node, panelRoot=selectionHub){
 }
 async function runImageNodeQuickGenerate(nodeId){
     const node = nodes.find(item => item.id === nodeId && item.type === 'image');
-    if(!node || node.running) return;
+    if(!node) return;
     const prompt = [String(node.prompt || '').trim(), imageNodeCameraPrompt(node)].filter(Boolean).join('\n');
     const refs = node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)
         ? [{url:node.url, name:node.name || 'input.png', kind:'image'}] : [];
     if(!prompt && !refs.length){ showErrorModal('请先输入提示词或上传图片', '图片生成'); return; }
-    const button = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-image-node-prompt-panel] [data-image-quick-generate]`);
+    node._quickGenerateActive = Math.max(0, Number(node._quickGenerateActive || 0)) + 1;
     node.running = true;
-    if(button){ button.disabled = true; button.classList.add('running'); button.querySelector('span').textContent = '生成中'; }
+    node.runStatus = 'running';
+    node.runError = '';
+    const button = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-image-node-prompt-panel] [data-image-quick-generate]`);
+    if(button){
+        // 允许在已有任务进行时再次点击；每次点击都会创建独立 pending 任务。
+        button.disabled = false;
+        button.classList.add('running');
+        button.setAttribute('aria-busy', 'true');
+        button.querySelector('span').textContent = '生成中（可继续）';
+    }
     let out = null;
     let pendingId = '';
     let run = null;
@@ -19362,7 +19378,8 @@ async function runImageNodeQuickGenerate(nodeId){
             name:node.name || 'source image'
         }, [meta]);
         addGenerationLog({run, outputs:outputItems, runMs:meta.runMs || 0});
-        node.runStatus = 'done'; node.runError = '';
+        node.runStatus = Number(node._quickGenerateActive || 0) > 1 ? 'running' : 'done';
+        node.runError = '';
         setStatus(`图片生成完成${images.length > 1 ? `，共 ${images.length} 张` : ''}`);
         refreshRunNodes(node, out);
         scheduleSave();
@@ -19373,11 +19390,14 @@ async function runImageNodeQuickGenerate(nodeId){
             addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:error.message || String(error)});
             refreshRunNodes(node, out);
         }
-        node.runStatus = 'failed'; node.runError = error.message || String(error);
+        node.runStatus = Number(node._quickGenerateActive || 0) > 1 ? 'running' : 'failed';
+        node.runError = error.message || String(error);
         showErrorModal(node.runError, '图片生成失败');
         renderSelectionHub({deferPosition:true});
     } finally {
-        node.running = false;
+        node._quickGenerateActive = Math.max(0, Number(node._quickGenerateActive || 1) - 1);
+        node.running = node._quickGenerateActive > 0;
+        if(!node._quickGenerateActive) delete node._quickGenerateActive;
         refreshRunNodes(node, out);
     }
 }

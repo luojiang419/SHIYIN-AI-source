@@ -3069,7 +3069,8 @@
     }
 
     async function analyzeBeforeGenerate(payload){
-        if(IS_FREE_CREATION) return payload;
+        // 视觉辅助是可选能力：只有 API 设置中存在可用的电商视觉路由才调用。
+        if(IS_FREE_CREATION || state.capabilities?.vision_analysis?.enabled !== true) return payload;
         const result = await fetchJson('/api/ecommerce/analyze', {
             method:'POST',
             headers:{'Content-Type':'application/json'},

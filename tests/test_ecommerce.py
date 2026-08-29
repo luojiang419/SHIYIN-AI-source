@@ -1190,6 +1190,8 @@ class EcommerceBackendTests(unittest.TestCase):
             patch.object(self.main, "provider_env_key_value", side_effect=lambda provider_id: "configured" if provider_id == "grsai" else ""),
         ):
             capabilities = asyncio.run(self.main.get_ecommerce_capabilities())
+            self.assertIn("vision_analysis", capabilities)
+            self.assertFalse(capabilities["vision_analysis"]["enabled"])
         self.assertEqual(capabilities["providers"], [{"id": "grsai", "name": "Grsai"}])
         self.assertTrue(capabilities["models"])
         self.assertEqual({item["provider_id"] for item in capabilities["models"]}, {"grsai"})

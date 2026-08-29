@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.352"
+APP_VERSION = "1.0.353"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -15957,6 +15957,11 @@ async def get_ecommerce_capabilities():
     slot_types = load_reference_slot_types()
     capabilities["reference_slot_types"] = slot_types
     capabilities["universal_reference_roles"] = reference_slot_type_capability_roles(slot_types)
+    vision_route = configured_ecommerce_vision_route()
+    capabilities["vision_analysis"] = {
+        "enabled": bool(vision_route),
+        "route": public_ecommerce_route(vision_route) if vision_route else None,
+    }
     return capabilities
 
 @app.post("/api/ecommerce/analyze")

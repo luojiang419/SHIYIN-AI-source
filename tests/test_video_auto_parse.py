@@ -64,6 +64,7 @@ def test_prompt_polish_injects_director_rules_without_overriding_user_intent():
     assert "用户明确写出的故事、动作、情绪、镜头与否定要求是不可覆盖的主线" in prompt
     assert "人物要有眼神先行" in prompt
     assert "动物或拟动物" in prompt
+    assert "不得预设牛仔裤、牧场、动物或任何示例主体" in prompt
     assert "每个镜头只承载一个主动作和一个主导运镜" in prompt
 
 
@@ -183,6 +184,14 @@ def test_no_prompt_auto_parse_requests_continuous_action_acting_and_moving_camer
     assert "错峰反应、环境反馈和重量感" in request.message
     assert "不是固定机位的自然运镜" in request.message
     assert result["reference_coverage"]["complete"] is True
+
+
+def test_director_rules_are_content_driven_not_case_template_driven():
+    system = _video_auto_parse_system_prompt("kling-cli", "kling-v3-omni", "mapping")
+    assert "这是内容无关的导演决策" in system
+    assert "先识别当前参考图与用户描述的真实语境" in system
+    assert "没有充分视觉或叙事依据时，宁可保持克制" in system
+    assert "不得预设牛仔裤、牧场、动物或任何示例主体" in system
 
 
 def test_video_prompt_output_removes_generic_quality_suffix_without_touching_scene_text():

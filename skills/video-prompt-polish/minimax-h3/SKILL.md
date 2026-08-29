@@ -1,27 +1,40 @@
-# MiniMax H3 视频提示词规范
+---
+name: h3-prompt-writing
+description: Write MiniMax H3 video generation prompts for T2VA, I2VA, FL2VA, L2VA, and Ref2VA. Use when rewriting multimodal requests into H3 prompt structures, composing integrated_multimodal_description, overall_soundscape, and non_diegetic_music, aligning keyframes, or defining reference labels for images, videos, and audio.
+compatibility: Portable to any agent that can read local files — no external API calls, MiniMax Hub tools, or proprietary runtime required. The agents/openai.yaml file only adds optional ChatGPT/Codex UI metadata; it does not restrict the skill to OpenAI agents.
+---
 
-## 任务模式
+# H3 Prompt Writing
 
-根据参考素材判断 T2VA（纯文本）、I2VA（首帧）、FL2VA（首尾帧）、L2VA（尾帧）或 Ref2VA（全参考）。有参考图片/视频时以素材为画面事实依据；没有参考素材时只在不改变原意的前提下补足最少量上下文。
+## Workflow
 
-## 基础模式输出结构
+1. Identify the input mode: T2VA, I2VA, FL2VA, L2VA, or full-reference Ref2VA.
+2. For base text/keyframe modes, read `references/base-en.txt` and follow its final prompt structure.
+3. For full-reference mode, read `references/ref-en.txt` and follow its six-section rewrite format.
+4. Preserve the exact field names, section order, labels, and timing notation from the selected guide.
 
-按顺序输出三个字段：
+## Base Modes
 
-`integrated_multimodal_description: [Shot 1] ...`
+- T2VA: build the full audiovisual timeline from text.
+- I2VA: start from the first frame and develop forward from it.
+- FL2VA: describe the continuous path between the first and last frames.
+- L2VA: infer a plausible opening and converge to the supplied last frame.
 
-`overall_soundscape: ...`
+Use `integrated_multimodal_description`, `overall_soundscape`, and `non_diegetic_music` in the order shown in `references/base-en.txt`.
 
-`non_diegetic_music: ...`
+## Full-Reference Mode
 
-正文按时间线写场景、主体、动作先后、镜头运动、声音和必要对白；后续镜头使用 `[Shot N] At MM:SS.mmm`。摄影机运动包含类型，只有有意义时才补幅度和速度。无环境音或非剧情音乐时分别写 `N/A`。
+Ref2VA rewrites use `subject_definitions`, `summary`, `retention_analysis`, `detailed_description`, `overall_soundscape`, and `non_diegetic_music` in that order. Reference labels stay consistent across all sections.
 
-## 引用标签
+Read `references/ref-en.txt` for label rules, retention analysis, and complete examples.
 
-- 图片帧锚点使用 `<Picture N>`，视频级来源使用 `<Video N>`，独立音频使用 `<Audio N>`。
-- 全参考 Ref2VA 才使用六段：`subject_definitions`、`summary`、`retention_analysis`、`detailed_description`、`overall_soundscape`、`non_diegetic_music`。
-- 保持 `<Picture N>`、`<Video N>`、`<Audio N>` 和 `<Subject N>` 的编号及含义一致。
+## Output Rules
 
-## 输出限制
-
-使用 MiniMax H3 可识别的结构化格式；只输出最终提示词，不解释过程。优先简洁和可执行，保留用户原意，不堆砌形容词或虚构剧情。
+- Write rewrite sections in English; preserve dialogue, lyrics, and visible scene text in their original language.
+- Describe each shot by composition, subjects, environment, actions, camera, sound, and the exact point where referenced content appears.
+- Avoid plot summaries, unresolved reference labels, and timing that does not match the requested duration.
+## Tips for Better Results
+- Always match the total duration of the description to the requested video length (4–15 seconds).
+- Keep reference labels consistent (e.g. `<Picture 1>`, `<Video 1>`, `<Audio 1>`) across every section.
+- Prefer concrete visual and audio details over abstract words like "cinematic" or "beautiful".
+- When using keyframes (I2VA / FL2VA / L2VA), clearly state how the first and/or last frame connects to the timeline.

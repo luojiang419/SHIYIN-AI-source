@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.357"
+APP_VERSION = "1.0.358"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -18709,7 +18709,7 @@ async def building_multi_view_plan(payload: BuildingMultiViewPlanRequest):
 # --- Canvas LLM ---
 
 def _video_prompt_skill(provider: str, model: str) -> tuple[str, str]:
-    """读取项目内置的视频提示词 skill；文件缺失时返回安全的通用降级规则。"""
+    """读取项目内置的视频提示词 skill 及其 references，完整注入润色器。"""
     provider_key = str(provider or "").strip().lower()
     model_key = str(model or "").strip().lower()
     if provider_key == "kling-cli" or "kling" in model_key or "可灵" in model_key:
@@ -18720,7 +18720,16 @@ def _video_prompt_skill(provider: str, model: str) -> tuple[str, str]:
         return "通用视频提示词规范：场景与主体 → 动作先后 → 景别/视角与镜头运动 → 必要光线、环境声或对白。保持简洁，不虚构用户未表达的事实。", "generic"
     path = os.path.join(BASE_DIR, relative)
     try:
-        content = Path(path).read_text(encoding="utf-8").strip()
+        skill_path = Path(path)
+        content = skill_path.read_text(encoding="utf-8").strip()
+        # MiniMax H3 的官方 skill 将完整规则拆分到 references 中；不能只读
+        # SKILL.md 的摘要，否则模型无法获得字段、标签、关键帧和完整示例。
+        references_dir = skill_path.parent / "references"
+        if references_dir.is_dir():
+            for reference_path in sorted(references_dir.glob("*.txt")):
+                reference_text = reference_path.read_text(encoding="utf-8").strip()
+                if reference_text:
+                    content += f"\n\n===== {reference_path.name} =====\n{reference_text}"
     except (OSError, UnicodeError):
         content = ""
     return content or "请按当前视频模型官方提示词格式进行简洁结构化，保持用户原意。", skill_id
@@ -18737,11 +18746,20 @@ def video_prompt_polish_system_prompt(video_provider: str = "", video_model: str
         if text_to_video else
         "已有参考图/视频时，以参考素材为画面事实依据，禁止臆造其外观和身份。"
     )
+    if skill_id == "minimax-h3":
+        # H3 官方 skill 的字段、模式和引用标签优先级高于通用的简洁约束。
+        # 特别是 Ref2VA 需要完整六段结构，不能被压缩成 1-4 句摘要。
+        output_constraint = (
+            "严格执行上述官方 H3 skill：根据收到的文本及参考素材选择 T2VA、I2VA、FL2VA、L2VA 或 Ref2VA，"
+            "保留字段名、章节顺序、时间标记和引用标签；使用 skill 规定的英文结构，仅保留用户原意及素材可证实的事实。"
+        )
+    else:
+        output_constraint = "整体保持简洁，通常 1-4 句即可。"
     return (
         "你是视频生成提示词润色器。只输出最终可直接提交给视频模型的一段提示词，不要解释、不要加标题、不要使用 Markdown 代码块。"
         "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
         f"{model_hint}当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
-        f"{expansion}整体保持简洁，通常 1-4 句即可。"
+        f"{expansion}{output_constraint}"
     )
 
 @app.post("/api/canvas-llm")

@@ -4176,6 +4176,7 @@ class CanvasVideoAutoParseRequest(BaseModel):
     ms_model: str = ""
     video_provider: str = ""
     video_model: str = ""
+    prompt: str = Field(default="", max_length=LLM_MESSAGE_MAX_LENGTH)
     images: List[str] = []
     image_labels: List[str] = []
     duration: Optional[float] = None
@@ -18965,7 +18966,7 @@ def _video_auto_parse_system_prompt(
     ]))
     return (
         "你是资深影视分镜导演和视频模型提示词工程师。只输出最终可直接提交给视频模型的一段提示词，不要解释分析过程、不要输出案例摘要。"
-        "你已获得按用户输入顺序排列的图片，以及上一阶段的逐图画面分析。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
+        "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须同时结合用户提示词、全部图片和本 skill 生成结果。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{model_hint}{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
         "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；最终不得残留‘图1/图片2’等自然编号。"
@@ -18976,7 +18977,7 @@ def _video_auto_parse_system_prompt(
 
 @app.post("/api/canvas-video-auto-parse")
 async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
-    """图片无提示词场景：串行执行视觉分析、案例检索和最终提示词生成。"""
+    """将全部图片按顺序与用户提示词、模型 skill 合并到同一个多模态请求。"""
     images = [str(item or "").strip() for item in (payload.images or []) if str(item or "").strip()][:20]
     if not images:
         raise HTTPException(status_code=400, detail="自动解析至少需要一张图片")
@@ -18985,27 +18986,9 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     reference_context, manifest, canonical_labels = video_prompt_reference_manifest(
         skill_id, image_count=len(images), video_count=0, image_labels=labels
     )
-    analysis_system = (
-        "你是视觉分析助手。按图片输入顺序逐张分析，只输出结构化纯文本，不写创作提示词。"
-        "每张图片必须包含：可见主体与身份线索、服装/道具、场景空间、构图与景别、机位/视角、光线色彩、主体动作/朝向/视线、可连续运动的证据和不确定项。"
-        "严禁猜测不可见文字、品牌或人物身份；编号严格对应输入顺序。"
-        f"\n{reference_context}"
-    )
-    analysis_request = CanvasLLMRequest(
-        message="请按顺序完成逐图画面分析。",
-        system_prompt=analysis_system,
-        provider=payload.provider or "comfly",
-        model=payload.model,
-        ms_model=payload.ms_model,
-        images=images,
-        image_labels=canonical_labels,
-        videos=[],
-    )
-    analysis_result = await canvas_llm(analysis_request)
-    analysis_text = str(analysis_result.get("text") or "").strip()
-    if not analysis_text:
-        raise HTTPException(status_code=502, detail="视觉模型未返回画面分析")
-    case_context = _video_prompt_case_context(analysis_text)
+    user_prompt = str(payload.prompt or "").strip()
+    case_query = " ".join([user_prompt, *labels]).strip()
+    case_context = _video_prompt_case_context(case_query)
     final_system = _video_auto_parse_system_prompt(
         payload.video_provider,
         payload.video_model,
@@ -19015,13 +18998,8 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         payload.aspect_ratio,
         payload.resolution,
     )
-    final_message = (
-        "上一阶段逐图画面分析（仅作为事实依据）：\n"
-        f"{analysis_text}\n\n"
-        "请基于这些事实和案例方法，生成最终视频提示词。"
-    )
-    final_request = CanvasLLMRequest(
-        message=final_message,
+    request = CanvasLLMRequest(
+        message=user_prompt or "请联合分析全部图片并生成最终视频提示词。",
         system_prompt=final_system,
         provider=payload.provider or "comfly",
         model=payload.model,
@@ -19030,9 +19008,9 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         image_labels=canonical_labels,
         videos=[],
     )
-    final_result = await canvas_llm(final_request)
+    result = await canvas_llm(request)
     text = normalize_video_prompt_references(
-        str(final_result.get("text") or "").strip(),
+        str(result.get("text") or "").strip(),
         skill_id,
         image_count=len(images),
         video_count=0,
@@ -19040,9 +19018,8 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     if not text:
         raise HTTPException(status_code=502, detail="视觉模型未返回最终视频提示词")
     return {
-        **final_result,
+        **result,
         "text": text,
-        "analysis": analysis_text,
         "case_files": [line.split("\n", 1)[0].replace("案例文件：", "") for line in case_context.split("\n\n") if line],
         "video_provider": payload.video_provider,
         "video_model": payload.video_model,

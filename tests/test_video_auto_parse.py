@@ -8,15 +8,17 @@ FILM = (ROOT / "static" / "js" / "canvas-film-nodes.js").read_text(encoding="utf
 SMART = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 
 
-def test_backend_auto_parse_is_serial_analysis_case_search_then_skill_generation():
+def test_backend_auto_parse_uses_one_ordered_multimodal_request_with_skill_and_cases():
     assert "class CanvasVideoAutoParseRequest" in MAIN
     assert '@app.post("/api/canvas-video-auto-parse")' in MAIN
-    endpoint = MAIN[MAIN.index('@app.post("/api/canvas-video-auto-parse")'):]
-    assert "analysis_result = await canvas_llm(analysis_request)" in endpoint
-    assert "case_context = _video_prompt_case_context(analysis_text)" in endpoint
-    assert "final_result = await canvas_llm(final_request)" in endpoint
-    assert endpoint.index("analysis_result = await canvas_llm(analysis_request)") < endpoint.index("case_context = _video_prompt_case_context(analysis_text)") < endpoint.index("final_result = await canvas_llm(final_request)")
+    endpoint = MAIN[MAIN.index('@app.post("/api/canvas-video-auto-parse")'):MAIN.index('@app.post("/api/canvas-llm")')]
+    assert "case_context = _video_prompt_case_context(case_query)" in endpoint
+    assert "result = await canvas_llm(request)" in endpoint
+    assert endpoint.count("await canvas_llm(") == 1
+    assert "images=images" in endpoint
+    assert "message=user_prompt or" in endpoint
     assert "严格遵循下方当前模型 skill" in MAIN
+    assert "全部图片已经按用户输入顺序一次性上传" in MAIN
     assert "优秀案例经验（仅作方法参考）" in MAIN
     assert "Path(PROJECT_MODULE_DIR) / \"案例\"" in MAIN
 
@@ -37,4 +39,3 @@ def test_film_video_and_smart_canvas_use_ordered_auto_parse_flow():
     assert "images:refs.map(item=>item.url)" in FILM
     assert "promptConnected:target =>" in SMART
     assert "polishPrompt:(changed,prompt,assets)" in SMART
-

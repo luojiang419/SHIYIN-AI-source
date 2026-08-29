@@ -422,7 +422,17 @@
                 event.preventDefault(); event.stopPropagation();
                 if(polishButton.disabled) return;
                 polishButton.disabled=true; polishButton.classList.add('is-loading');
-                const mode=polishButton.dataset.filmPromptMode || 'polish';
+                // 连接关系和输入框可能在重绘间隙尚未反映到按钮 data 属性；
+                // 点击时再次判断，避免空提示词误走润色接口。
+                const currentPrompt=String(prompt.value || node.prompt || '').trim();
+                const currentAssets=options.assets?.(node)||[];
+                const currentRefs=currentAssets
+                    .map(item=>item?.ref||item)
+                    .filter(item=>item?.url);
+                const currentImageRefs=currentRefs.filter(item=>String(item?.kind || 'image').toLowerCase()==='image');
+                const autoParseNow=!currentPrompt && currentImageRefs.length>0
+                    && currentRefs.every(item=>String(item?.kind || 'image').toLowerCase()==='image');
+                const mode=autoParseNow ? 'auto-parse' : (polishButton.dataset.filmPromptMode || 'polish');
                 const label=polishButton.querySelector('span'); if(label) label.textContent=mode === 'auto-parse' ? '解析中…' : '润色中…';
                 try {
                     const showProgress=task=>{

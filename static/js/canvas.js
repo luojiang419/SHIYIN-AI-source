@@ -19456,7 +19456,14 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         e.preventDefault(); e.stopPropagation();
         if(button.disabled) return;
         const original = input.value;
-        const mode = button.dataset.videoPromptMode || 'polish';
+        // 渲染时的 data-video-prompt-mode 可能因连接关系或输入框状态尚未同步而过期。
+        // 点击瞬间重新判断：空提示词且仅连接图片时必须走自动解析，不能误调用
+        // 需要非空文本的润色接口。
+        const currentPrompt = String(original || node.prompt || '').trim();
+        const imageRefs = (refs || []).filter(item => item?.kind === 'image' && item?.url);
+        const autoParseNow = !currentPrompt && imageRefs.length > 0
+            && (refs || []).filter(item => item?.url).every(item => item?.kind === 'image');
+        const mode = autoParseNow ? 'auto-parse' : (button.dataset.videoPromptMode || 'polish');
         button.disabled = true; button.classList.add('is-loading');
         const label = button.querySelector('span'); if(label) label.textContent = mode === 'auto-parse' ? '解析中…' : '润色中…';
         try {

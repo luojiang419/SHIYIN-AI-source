@@ -94,6 +94,21 @@ class ApiProviderPriorityTests(unittest.TestCase):
         self.assertEqual(item["name"], "电商专用")
         self.assertTrue(item["chat_models"])
 
+    def test_ecommerce_provider_keeps_standard_model_fields(self):
+        item = self.main.normalize_provider({
+            "id": "ecommerce-vision",
+            "name": "电商专用",
+            "base_url": "https://api.example.com/v1",
+            "protocol": "gemini",
+            "image_models": ["image-model"],
+            "chat_models": ["vision-chat-model"],
+            "video_models": ["video-model"],
+        })
+        self.assertEqual(item["protocol"], "gemini")
+        self.assertEqual(item["image_models"], ["image-model"])
+        self.assertEqual(item["chat_models"], ["vision-chat-model"])
+        self.assertEqual(item["video_models"], ["video-model"])
+
 
 if __name__ == "__main__":
     unittest.main()

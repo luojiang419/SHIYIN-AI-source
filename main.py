@@ -5021,6 +5021,16 @@ async def request_llm_json(transport, messages):
     """执行一次非流式文本请求，旧协议和 Responses 共用同一入口。"""
     async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
         body = build_llm_request_body(transport, messages)
+        try:
+            body_size = len(json.dumps(body, ensure_ascii=False, separators=(",", ":")))
+        except Exception:
+            body_size = 0
+        print(
+            f"[llm-request] provider={(transport.get('provider') or {}).get('id', '')} "
+            f"model={transport.get('model', '')} protocol={transport.get('protocol', '')} "
+            f"bytes={body_size} tools={len(body.get('tools') or [])}",
+            flush=True,
+        )
         response = None
         # 部分兼容 Responses 的代理在大尺寸视觉请求上会偶发返回 Cloudflare 524。
         # 该状态表示网关等待上游超时，不代表 API Key 或模型配置错误；短暂退避后重试，
@@ -5034,7 +5044,13 @@ async def request_llm_json(transport, messages):
                 )
             except httpx.HTTPError as exc:
                 if attempt >= 2:
-                    raise
+                    raise HTTPException(
+                        status_code=504,
+                        detail=(
+                            "连接电商视觉上游失败，未收到有效响应。"
+                            f"已自动重试 2 次（{type(exc).__name__}），请检查网络或稍后重试。"
+                        ),
+                    ) from exc
                 print(
                     f"[llm-retry] upstream network error, retry={attempt + 1}/2 "
                     f"model={transport.get('model', '')} error={type(exc).__name__}",

@@ -10036,7 +10036,6 @@ function renderNode(node){
         const textarea = body.querySelector('.prompt-node-text');
         const templateBtn = body.querySelector('[data-prompt-template-open]');
         const expandBtn = body.querySelector('[data-prompt-expand]');
-        const fitPromptText = () => fitAutoTextNode(node, el, [textarea], {minLines:3, allowShrink:true});
         templateBtn.onclick = e => {
             e.preventDefault();
             e.stopPropagation();
@@ -10051,11 +10050,9 @@ function renderNode(node){
         textarea.oninput = e => {
             node.text = e.target.innerText || '';
             refreshPromptCounter(body, node.text);
-            fitPromptText();
             scheduleSave();
             scheduleGeneratorInputSync();
         };
-        requestAnimationFrame(fitPromptText);
     }
     if(node.type === 'loop') body.appendChild(renderLoopBody(node));
     if(node.type === 'group') {

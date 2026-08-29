@@ -32,10 +32,20 @@ class ClassicPromptNodeFrontendTests(unittest.TestCase):
             "prompt-node-actions",
             "data-prompt-template-open",
             "data-prompt-expand",
-            "fitAutoTextNode(node, el, [textarea]",
         ):
             self.assertIn(marker, prompt_render)
+        self.assertNotIn("fitAutoTextNode(node, el, [textarea]", prompt_render)
         self.assertIn("node.type === 'prompt'", self.javascript[self.javascript.index("const nodeTypeClass"):])
+
+    def test_classic_prompt_editor_fills_resized_node_and_keeps_footer_at_bottom(self):
+        for marker in (
+            ".prompt-node .node-body { display:flex",
+            ".prompt-node .prompt-node-text { width:100%; height:auto",
+            ".prompt-node:not(.sized) .prompt-node-text { min-height:140px",
+            ".node.sized.prompt-node .prompt-editor { min-height:0",
+            ".node.sized.prompt-node .prompt-node-text { flex:1 1 auto",
+        ):
+            self.assertIn(marker, self.styles)
 
     def test_prompt_text_surfaces_are_theme_neutral(self):
         for marker in (

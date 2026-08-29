@@ -19385,7 +19385,7 @@ function canvasFilmPromptReferences(assets=[]){
         return ['image','video'].includes(kind) ? {url, kind, label:item?.role || item?.inputRole || ref?.name || ''} : null;
     }).filter(Boolean).filter((item,index,array) => array.findIndex(other => other.url === item.url) === index);
 }
-async function polishCanvasVideoPrompt(node, prompt, refs=[]){
+async function polishCanvasVideoPrompt(node, prompt, refs=[], onProgress=null){
     const text = String(prompt || '').trim();
     if(!text) throw new Error('请先输入需要润色的提示词');
     const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
@@ -19396,12 +19396,22 @@ async function polishCanvasVideoPrompt(node, prompt, refs=[]){
     const data = await submitCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || '', video_model:node?.model || '',
         text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
-    }, '提示词润色');
+    }, '提示词润色', onProgress);
     const polished = String(data.text || '').trim();
     if(!polished) throw new Error('润色模型返回了空提示词');
     return polished;
 }
-async function submitCanvasPromptTask(endpoint, payload, label='提示词任务'){
+function renderCanvasPromptTaskProgress(input, original, task){
+    if(!input || !task) return;
+    const draft = String(task.progress_text || '');
+    const status = String(task.progress_status || '').trim();
+    const next = draft || (String(original || '').trim() ? String(original || '') : (status ? `【${status}】` : ''));
+    if(next && input.value !== next){
+        input.value = next;
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+}
+async function submitCanvasPromptTask(endpoint, payload, label='提示词任务', onProgress=null){
     const response = await fetch(endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     const created = await response.json().catch(() => ({}));
     if(!response.ok) throw new Error(created.detail || `${label}提交失败`);
@@ -19413,12 +19423,13 @@ async function submitCanvasPromptTask(endpoint, payload, label='提示词任务'
         const statusResponse = await fetch(`/api/canvas-prompt-tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
         const task = await statusResponse.json().catch(() => ({}));
         if(!statusResponse.ok) throw new Error(task.detail || `${label}状态查询失败`);
+        onProgress?.(task);
         if(task.status === 'succeeded') return task.result || {};
         if(task.status === 'failed') throw new Error(task.error || `${label}失败`);
     }
     throw new Error(`${label}等待超时（超过 30 分钟）`);
 }
-async function autoParseCanvasVideoPrompt(node, refs=[]){
+async function autoParseCanvasVideoPrompt(node, refs=[], onProgress=null){
     const images = (refs || []).filter(item => item.kind === 'image').map(item => item.url).filter(Boolean).slice(0,20);
     if(!images.length) throw new Error('自动解析至少需要一张图片');
     const labels = (refs || []).filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
@@ -19428,7 +19439,7 @@ async function autoParseCanvasVideoPrompt(node, refs=[]){
     const data = await submitCanvasPromptTask('/api/canvas-video-auto-parse-tasks', {
         provider:visionProvider, model:visionModel, ms_model:'', video_provider:node?.apiProvider || '', video_model:node?.model || '',
         prompt, images, image_labels:labels, duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
-    }, '自动解析');
+    }, '自动解析', onProgress);
     const text = String(data.text || '').trim();
     if(!text) throw new Error('自动解析未返回视频提示词');
     return text;
@@ -19446,9 +19457,10 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         button.disabled = true; button.classList.add('is-loading');
         const label = button.querySelector('span'); if(label) label.textContent = mode === 'auto-parse' ? '解析中…' : '润色中…';
         try {
+            const showProgress = task => renderCanvasPromptTaskProgress(input, original, task);
             input.value = mode === 'auto-parse'
-                ? await autoParseCanvasVideoPrompt(node, refs)
-                : await polishCanvasVideoPrompt(node, original, refs);
+                ? await autoParseCanvasVideoPrompt(node, refs, showProgress)
+                : await polishCanvasVideoPrompt(node, original, refs, showProgress);
             input.dispatchEvent(new Event('input', {bubbles:true}));
         } catch(error) {
             showErrorModal(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败'), mode === 'auto-parse' ? '自动解析' : '提示词润色');

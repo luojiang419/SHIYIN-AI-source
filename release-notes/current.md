@@ -1,4 +1,5 @@
-# SHIYIN AI v1.0.372
+# SHIYIN AI v1.0.373
+- 新增润色/自动解析流式进度回填：Responses SSE 的可见输出增量会实时显示在提示词框，阶段状态提示联网检索和视觉分析进度；任务完成后用最终提示词覆盖回填，失败时保留已生成草稿便于诊断。不暴露模型隐藏思维链，也不切换 provider/model。
 - 电商视觉润色/自动解析改为 Responses SSE 连续任务：先返回事件并持续聚合结果，避免完整版导演规则、多图视觉请求在同步响应体阶段触发网关 524；保持电商专用 provider/model，不进行模型降级。
 - 本地后台任务继续提供 queued、web-search、visual-parse、succeeded、failed 状态轮询；已验证原生 `background:true` 不被电商代理接受，因此不发送不兼容参数。
 - 修复电商专用 API 平台协议下拉被错误禁用的问题；现在可自由选择 OpenAI 直连、Responses、异步、Gemini 等协议，并维护图片/聊天/视频模型。

@@ -309,16 +309,19 @@ class ResponsesProtocolTests(unittest.TestCase):
             "model": "gpt-5.6-sol",
         }
 
+        deltas = []
         with patch.object(self.main.httpx, "AsyncClient", return_value=client):
             result = asyncio.run(self.main.request_llm_json(
                 transport,
                 [{"role": "user", "content": "继续执行"}],
                 retry_524=0,
+                on_text_delta=deltas.append,
             ))
 
         self.assertEqual(result["id"], "resp_stream")
         self.assertEqual(result["output_text"], "第一段第二段")
         self.assertEqual(result["usage"]["total_tokens"], 7)
+        self.assertEqual(deltas, ["第一段", "第二段"])
         self.assertEqual(client.requests[0][2]["json"]["stream"], True)
 
 

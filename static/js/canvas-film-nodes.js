@@ -365,7 +365,7 @@
         node.prompt=isKling ? normalizeKlingPrompt(data.text,mappedRefs) : String(data.text || '').trim();
         return node.prompt;
     }
-    async function autoParseVideoPrompt(node, assets=[], options={}){
+    async function autoParseVideoPrompt(node, assets=[], options={}, onProgress=null){
         const refs = mapping(node, assets, options).refs.filter(item => item.url && (item.kind || 'image') === 'image').slice(0,20);
         if(!refs.length) throw new Error('自动解析至少需要一张图片');
         const provider = options.visionProvider?.(node) || node.visionProvider || '';
@@ -375,12 +375,12 @@
             prompt:String(node.prompt || '').trim(),
             images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
-        }, '自动解析');
+        }, '自动解析', onProgress);
         const text=String(data.text || '').trim();
         if(!text) throw new Error('自动解析未返回视频提示词');
         return text;
     }
-    async function submitFilmPromptTask(endpoint,payload,label='提示词任务'){
+    async function submitFilmPromptTask(endpoint,payload,label='提示词任务',onProgress=null){
         const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         const created=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(created.detail || `${label}提交失败`);
@@ -392,6 +392,7 @@
             const statusResponse=await fetch(`/api/canvas-prompt-tasks/${encodeURIComponent(taskId)}`,{cache:'no-store'});
             const task=await statusResponse.json().catch(()=>({}));
             if(!statusResponse.ok) throw new Error(task.detail || `${label}状态查询失败`);
+            onProgress?.(task);
             if(task.status==='succeeded') return task.result || {};
             if(task.status==='failed') throw new Error(task.error || `${label}失败`);
         }
@@ -424,9 +425,16 @@
                 const mode=polishButton.dataset.filmPromptMode || 'polish';
                 const label=polishButton.querySelector('span'); if(label) label.textContent=mode === 'auto-parse' ? '解析中…' : '润色中…';
                 try {
+                    const showProgress=task=>{
+                        const draft=String(task?.progress_text || '');
+                        const status=String(task?.progress_status || '').trim();
+                        const original=String(prompt.value || '');
+                        const next=draft || (original.trim() ? original : (status ? `【${status}】` : ''));
+                        if(next && prompt.value!==next){ prompt.value=next; prompt.dispatchEvent(new Event('input',{bubbles:true})); }
+                    };
                     prompt.value=mode === 'auto-parse'
-                        ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[]) : autoParseVideoPrompt(node,options.assets?.(node)||[],options))
-                        : await options.polishPrompt(node,prompt.value,options.assets?.(node)||[]);
+                        ? await (options.autoParsePrompt ? options.autoParsePrompt(node,options.assets?.(node)||[],showProgress) : autoParseVideoPrompt(node,options.assets?.(node)||[],options,showProgress))
+                        : await options.polishPrompt(node,prompt.value,options.assets?.(node)||[],showProgress);
                     prompt.dispatchEvent(new Event('input',{bubbles:true}));
                 } catch(error){ options.toast?.(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败')); }
                 finally { polishButton.disabled=false; polishButton.classList.remove('is-loading'); if(label) label.textContent=mode === 'auto-parse' ? '自动解析' : '润色'; }

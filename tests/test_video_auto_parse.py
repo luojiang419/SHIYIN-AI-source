@@ -80,6 +80,16 @@ def test_classic_video_button_switches_to_auto_parse_for_images_without_prompt()
     assert "mode === 'auto-parse'" in CANVAS
 
 
+def test_prompt_task_stream_progress_is_rendered_and_final_result_can_overwrite_draft():
+    assert "progress_text" in MAIN
+    assert "progress_status" in MAIN
+    assert "on_text_delta=on_text_delta" in MAIN
+    assert "renderCanvasPromptTaskProgress" in CANVAS
+    assert "onProgress?.(task)" in CANVAS
+    assert "progress_text" in FILM
+    assert "onProgress" in SMART
+
+
 def test_film_video_and_smart_canvas_use_ordered_auto_parse_flow():
     assert "data-film-prompt-mode" in FILM
     assert "autoParseVideoPrompt" in FILM

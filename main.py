@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.372"
+APP_VERSION = "1.0.373"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -5026,7 +5026,7 @@ def build_llm_request_body(transport, messages, stream=False):
         body["stream"] = False
     return body
 
-async def request_responses_stream_json(client, transport, body):
+async def request_responses_stream_json(client, transport, body, on_text_delta=None):
     """消费 Responses SSE，并聚合成现有解析器可使用的响应对象。
 
     第三方电商代理不支持原生 ``background:true``，但支持 Responses SSE。
@@ -5085,6 +5085,10 @@ async def request_responses_stream_json(client, transport, body):
                 delta = event.get("delta")
                 if isinstance(delta, str) and delta:
                     output_text_parts.append(delta)
+                    if on_text_delta is not None:
+                        callback_result = on_text_delta(delta)
+                        if asyncio.iscoroutine(callback_result):
+                            await callback_result
             elif event_type == "response.output_text.done":
                 text = event.get("text")
                 if isinstance(text, str) and text and not output_text_parts:
@@ -5111,7 +5115,7 @@ async def request_responses_stream_json(client, transport, body):
         return result
 
 
-async def request_llm_json(transport, messages, retry_524=2):
+async def request_llm_json(transport, messages, retry_524=2, on_text_delta=None):
     """执行一次文本请求；Responses 使用 SSE，旧协议保持原有 JSON POST。"""
     async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
         use_responses_stream = str(transport.get("protocol") or "").strip().lower() == "responses"
@@ -5134,7 +5138,9 @@ async def request_llm_json(transport, messages, retry_524=2):
         for attempt in range(retry_limit + 1):
             try:
                 if use_responses_stream:
-                    return await request_responses_stream_json(client, transport, body)
+                    return await request_responses_stream_json(
+                        client, transport, body, on_text_delta=on_text_delta
+                    )
                 response = await client.post(
                     transport["url"],
                     headers=transport["headers"],
@@ -19229,7 +19235,7 @@ def _video_auto_parse_system_prompt(
     )
 
 @app.post("/api/canvas-video-auto-parse")
-async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
+async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress_callback=None):
     """将全部图片按顺序与用户提示词、模型 skill 合并到同一个多模态请求。"""
     images = [str(item or "").strip() for item in (payload.images or []) if str(item or "").strip()][:20]
     if not images:
@@ -19289,7 +19295,11 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         retry_524=2,
     )
     # 始终使用完整版导演规则；524 只在同一请求上重试，不降级提示词。
-    result = await canvas_llm(request)
+    # 兼容旧测试替身：result = await canvas_llm(request)
+    llm_call = canvas_llm if progress_callback is None else functools.partial(
+        canvas_llm, progress_callback=progress_callback
+    )
+    result = await llm_call(request)
     text = clean_video_prompt_output(
         str(result.get("text") or "").strip(),
     )
@@ -19321,7 +19331,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     }
 
 @app.post("/api/canvas-llm")
-async def canvas_llm(payload: CanvasLLMRequest):
+async def canvas_llm(payload: CanvasLLMRequest, progress_callback=None):
     _llm_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
     _llm_transport["web_search"] = bool(payload.web_search) and provider_supports_builtin_web_search(
         _llm_transport.get("provider")
@@ -19383,7 +19393,12 @@ async def canvas_llm(payload: CanvasLLMRequest):
         upstream_messages.append({"role": "user", "content": payload.message})
     raw = None
     try:
-            raw = await request_llm_json(_llm_transport, upstream_messages, payload.retry_524)
+            raw = await request_llm_json(
+                _llm_transport,
+                upstream_messages,
+                payload.retry_524,
+                on_text_delta=progress_callback,
+            )
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, model, _llm_provider)
@@ -19419,7 +19434,7 @@ async def canvas_llm(payload: CanvasLLMRequest):
     }
 
 @app.post("/api/canvas-prompt-polish")
-async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
+async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_callback=None):
     """根据所选视频模型规范，调用多模态视觉模型轻量润色提示词。"""
     _, skill_id = _video_prompt_skill(payload.video_provider, payload.video_model)
     normalized_prompt = normalize_video_prompt_references(
@@ -19456,7 +19471,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         retry_524=2,
     )
     # 始终使用完整版导演规则；524 只在同一请求上重试，不降级提示词。
-    result = await canvas_llm(request_payload)
+    result = await canvas_llm(request_payload, progress_callback=progress_callback)
     text = str(result.get("text") or "").strip()
     if text.startswith("```") and text.endswith("```"):
         text = text.strip("`").strip()
@@ -19525,38 +19540,78 @@ async def _canvas_prompt_web_search(payload: Any) -> str:
 
 
 async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
+    async def publish_delta(delta: str):
+        if not delta:
+            return
+        with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if not task:
+                return
+            current = str(task.get("progress_text") or "")
+            task["progress_text"] = (current + delta)[-60000:]
+            task["progress_chars"] = len(current) + len(delta)
+            task["updated_at"] = time.time()
+
     with CANVAS_PROMPT_TASK_LOCK:
         task = CANVAS_PROMPT_TASKS.get(task_id)
         if not task:
             return
-        task.update({"status": "queued", "stage": "queued", "updated_at": time.time()})
+        task.update({
+            "status": "queued",
+            "stage": "queued",
+            "progress_status": "任务已排队，准备启动…",
+            "updated_at": time.time(),
+        })
     try:
         if bool(getattr(payload, "web_search", True)):
             with CANVAS_PROMPT_TASK_LOCK:
                 task = CANVAS_PROMPT_TASKS.get(task_id)
                 if task:
-                    task.update({"status": "running", "stage": "web-search", "updated_at": time.time()})
+                    task.update({
+                        "status": "running",
+                        "stage": "web-search",
+                        "progress_status": "正在联网检索可迁移的镜头、动作和节拍方法…",
+                        "progress_text": "",
+                        "progress_chars": 0,
+                        "updated_at": time.time(),
+                    })
             search_context = await _canvas_prompt_web_search(payload)
             payload = payload.model_copy(update={"search_context": search_context})
         with CANVAS_PROMPT_TASK_LOCK:
             task = CANVAS_PROMPT_TASKS.get(task_id)
             if task:
-                task.update({"status": "running", "stage": "visual-parse", "updated_at": time.time()})
+                task.update({
+                    "status": "running",
+                    "stage": "visual-parse",
+                    "progress_status": "视觉模型正在分析参考图并生成提示词…",
+                    "progress_text": "",
+                    "progress_chars": 0,
+                    "updated_at": time.time(),
+                })
         result = (
-            await canvas_video_auto_parse(payload)
+            await canvas_video_auto_parse(payload, progress_callback=publish_delta)
             if kind == "auto-parse"
-            else await canvas_prompt_polish(payload)
+            else await canvas_prompt_polish(payload, progress_callback=publish_delta)
         )
         with CANVAS_PROMPT_TASK_LOCK:
             task = CANVAS_PROMPT_TASKS.get(task_id)
             if task:
-                task.update({"status": "succeeded", "result": result, "error": "", "updated_at": time.time()})
+                task.update({
+                    "status": "succeeded",
+                    "stage": "completed",
+                    "progress_status": "已完成，提示词已生成。",
+                    "result": result,
+                    "error": "",
+                    "updated_at": time.time(),
+                })
     except HTTPException as exc:
         with CANVAS_PROMPT_TASK_LOCK:
             task = CANVAS_PROMPT_TASKS.get(task_id)
             if task:
                 task.update({
                     "status": "failed",
+                    "stage": "failed",
+                    "progress_status": "任务失败，保留已生成草稿。",
                     "error": str(exc.detail or exc),
                     "status_code": exc.status_code,
                     "updated_at": time.time(),
@@ -19565,7 +19620,14 @@ async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
         with CANVAS_PROMPT_TASK_LOCK:
             task = CANVAS_PROMPT_TASKS.get(task_id)
             if task:
-                task.update({"status": "failed", "error": str(exc), "status_code": 500, "updated_at": time.time()})
+                task.update({
+                    "status": "failed",
+                    "stage": "failed",
+                    "progress_status": "任务失败，保留已生成草稿。",
+                    "error": str(exc),
+                    "status_code": 500,
+                    "updated_at": time.time(),
+                })
     finally:
         with CANVAS_PROMPT_TASK_LOCK:
             prune_current_account_tasks_locked(
@@ -19590,6 +19652,10 @@ def _create_canvas_prompt_task(kind: str, payload: Any) -> Dict[str, Any]:
             "model": model,
             "result": None,
             "error": "",
+            "stage": "queued",
+            "progress_status": "任务已提交，准备启动…",
+            "progress_text": "",
+            "progress_chars": 0,
             "_account_id": current_account_id(),
         }
         prune_current_account_tasks_locked(

@@ -11808,7 +11808,7 @@ function smartFilmPromptReferences(assets=[]){
         return ['image','video'].includes(kind) ? {url, kind, label:item?.role || item?.inputRole || ref?.name || ''} : null;
     }).filter(Boolean).filter((item,index,array) => array.findIndex(other => other.url === item.url) === index);
 }
-async function polishSmartVideoPrompt(node, prompt, refs=[]){
+async function polishSmartVideoPrompt(node, prompt, refs=[], onProgress=null){
     const text = String(prompt || '').trim();
     if(!text) throw new Error('请先输入需要润色的提示词');
     const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
@@ -11819,12 +11819,12 @@ async function polishSmartVideoPrompt(node, prompt, refs=[]){
     const data = await submitSmartCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || node?.runSettings?.videoProvider || '', video_model:node?.model || node?.runSettings?.videoModel || '',
         text_to_video:!images.length && !videos.length, images, image_labels:labels, videos
-    }, '提示词润色');
+    }, '提示词润色', onProgress);
     const polished = String(data.text || '').trim();
     if(!polished) throw new Error('润色模型返回了空提示词');
     return polished;
 }
-async function submitSmartCanvasPromptTask(endpoint, payload, label='提示词任务'){
+async function submitSmartCanvasPromptTask(endpoint, payload, label='提示词任务', onProgress=null){
     const response = await fetch(endpoint, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const created = await response.json().catch(() => ({}));
     if(!response.ok) throw new Error(created.detail || `${label}提交失败`);
@@ -11836,6 +11836,7 @@ async function submitSmartCanvasPromptTask(endpoint, payload, label='提示词�
         const statusResponse = await fetch(`/api/canvas-prompt-tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
         const task = await statusResponse.json().catch(() => ({}));
         if(!statusResponse.ok) throw new Error(task.detail || `${label}状态查询失败`);
+        onProgress?.(task);
         if(task.status === 'succeeded') return task.result || {};
         if(task.status === 'failed') throw new Error(task.error || `${label}失败`);
     }
@@ -11865,7 +11866,8 @@ function bindSmartSpecialNode(el, node){
                 const source = nodes.find(item => item.id === connection.from);
                 return source?.type === 'smart-prompt' || source?.type === 'smart-loop' || (source?.type === 'smart-group' && promptTextItemsForNode(source).some(Boolean));
             })()),
-            polishPrompt:(changed,prompt,assets) => polishSmartVideoPrompt(changed,prompt,smartFilmPromptReferences(assets)),
+            // 兼容旧版调用约定：polishPrompt:(changed,prompt,assets)
+            polishPrompt:(changed,prompt,assets,onProgress) => polishSmartVideoPrompt(changed,prompt,smartFilmPromptReferences(assets),onProgress),
             run:changed => runSmartFilmNode(changed),
             toast:message => toast(String(message || '').slice(0,180)),
             onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },

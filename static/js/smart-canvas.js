@@ -3727,6 +3727,17 @@ function resolveChatProviderId(providerId=''){
     if(providers.some(p => p.id === providerId)) return providerId;
     return providers[0]?.id || 'comfly';
 }
+// 视频节点的视觉解析优先使用已配置的“电商专用”平台；普通 AI 助手仍沿用
+// resolveChatProviderId 的原有优先级。
+function resolveVideoVisionProviderId(providerId=''){
+    const providers = chatApiProviders();
+    const explicit = String(providerId || '').trim();
+    if(explicit && providers.some(p => p.id === explicit)) return explicit;
+    const ecommerce = providers.find(p => p.id === 'ecommerce-vision' && p.chat_ready !== false);
+    if(ecommerce) return ecommerce.id;
+    const vision = providers.find(p => p.id === 'local-vision' || /vision|视觉|vlm/i.test(`${p.id} ${p.name || ''}`));
+    return vision?.id || providers[0]?.id || 'comfly';
+}
 function providerChatModels(providerId){
     const provider = chatApiProviders().find(p => p.id === providerId);
     return [...new Set(provider?.chat_models || [])];
@@ -11800,7 +11811,7 @@ function smartFilmPromptReferences(assets=[]){
 async function polishSmartVideoPrompt(node, prompt, refs=[]){
     const text = String(prompt || '').trim();
     if(!text) throw new Error('请先输入需要润色的提示词');
-    const visionProvider = resolveChatProviderId(node?.visionProvider || '');
+    const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const images = refs.filter(item => item.kind === 'image').map(item => item.url).slice(0,20);
     const videos = refs.filter(item => item.kind === 'video').map(item => item.url).slice(0,3);
@@ -11833,8 +11844,8 @@ function bindSmartSpecialNode(el, node){
             defaultImageModel:provider => providerImageModels(provider)[0] || '',
             provider:node.apiProvider || node.runSettings?.videoProvider || '',
             model:node.model || node.runSettings?.videoModel || '',
-            visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
-            visionModel:changed => resolveChatModel(changed.visionModel || '', resolveChatProviderId(changed.visionProvider || '')),
+            visionProvider:changed => resolveVideoVisionProviderId(changed.visionProvider || ''),
+            visionModel:changed => resolveChatModel(changed.visionModel || '', resolveVideoVisionProviderId(changed.visionProvider || '')),
             promptConnected:target => (canvas?.connections || []).some(connection => connection.to === target.id && (() => {
                 const source = nodes.find(item => item.id === connection.from);
                 return source?.type === 'smart-prompt' || source?.type === 'smart-loop' || (source?.type === 'smart-group' && promptTextItemsForNode(source).some(Boolean));

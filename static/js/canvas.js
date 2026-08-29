@@ -1144,6 +1144,19 @@ function resolveChatProviderId(id){
     const providers = chatApiProviders();
     return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
 }
+// 视频节点的视觉解析优先使用“电商专用”平台（若已配置），避免空的
+// visionProvider 被普通聊天平台（例如本地 qwen VLM）抢先占用。
+function resolveVideoVisionProviderId(id){
+    const providers = chatApiProviders();
+    const explicit = String(id || '').trim();
+    if(explicit && providers.some(p => p.id === explicit)) return explicit;
+    // 旧版后端没有 chat_ready 字段时仍兼容已保存的电商配置；新版后端会
+    // 将未配置 Key 的预置平台明确标记为 false 并跳过。
+    const ecommerce = providers.find(p => p.id === 'ecommerce-vision' && p.chat_ready !== false);
+    if(ecommerce) return ecommerce.id;
+    const vision = providers.find(p => p.id === 'local-vision' || /vision|视觉|vlm/i.test(`${p.id} ${p.name || ''}`));
+    return vision?.id || providers[0]?.id || 'comfly';
+}
 function chatProviderOptions(selectedId){
     const selected = resolveChatProviderId(selectedId);
     return chatApiProviders().map(provider => `<option value="${escapeHtml(provider.id)}" ${provider.id === selected ? 'selected' : ''}>${escapeHtml(provider.name || provider.id)}</option>`).join('');
@@ -9716,8 +9729,8 @@ function bindClassicFilmNode(el,node){
         defaultImageModel:provider => providerImageModels(resolveImageProviderId(provider))[0] || '',
         provider:node.apiProvider,
         model:node.model,
-        visionProvider:changed => resolveChatProviderId(changed.visionProvider || ''),
-        visionModel:changed => resolveChatModel(changed.visionModel || '', resolveChatProviderId(changed.visionProvider || '')),
+        visionProvider:changed => resolveVideoVisionProviderId(changed.visionProvider || ''),
+        visionModel:changed => resolveChatModel(changed.visionModel || '', resolveVideoVisionProviderId(changed.visionProvider || '')),
         promptConnected:target => connections.some(connection => connection.to === target.id && (() => {
             const source = nodes.find(item => item.id === connection.from);
             return ['prompt','promptGroup','loop','llm'].includes(source?.type) && String(source?.text || source?.outputText || '').trim();
@@ -19375,7 +19388,7 @@ function canvasFilmPromptReferences(assets=[]){
 async function polishCanvasVideoPrompt(node, prompt, refs=[]){
     const text = String(prompt || '').trim();
     if(!text) throw new Error('请先输入需要润色的提示词');
-    const visionProvider = resolveChatProviderId(node?.visionProvider || '');
+    const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const images = refs.filter(item => item.kind === 'image').map(item => item.url).slice(0,20);
     const videos = refs.filter(item => item.kind === 'video').map(item => item.url).slice(0,3);
@@ -19395,7 +19408,7 @@ async function autoParseCanvasVideoPrompt(node, refs=[]){
     if(!images.length) throw new Error('自动解析至少需要一张图片');
     const labels = (refs || []).filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
     const prompt = String(node?.prompt || '').trim();
-    const visionProvider = resolveChatProviderId(node?.visionProvider || '');
+    const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const response = await fetch('/api/canvas-video-auto-parse', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         provider:visionProvider, model:visionModel, ms_model:'', video_provider:node?.apiProvider || '', video_model:node?.model || '',

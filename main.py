@@ -1971,6 +1971,26 @@ def image_generation_readiness(provider: Dict[str, Any]) -> Dict[str, Any]:
     return {"ready": True, "reason": ""}
 
 
+def chat_generation_readiness(provider: Dict[str, Any]) -> Dict[str, Any]:
+    """判断聊天/视觉模型是否具备实际调用条件（不发送探测请求）。"""
+    provider = provider or {}
+    provider_id = str(provider.get("id") or "").strip().lower()
+    if not provider.get("enabled", True):
+        return {"ready": False, "reason": "平台已禁用"}
+    if not list(provider.get("chat_models") or []):
+        return {"ready": False, "reason": "未配置聊天模型"}
+    if provider_id == "codex":
+        ready = executable_is_available(codex_cli_executable())
+        return {"ready": ready, "reason": "" if ready else "未找到 Codex CLI"}
+    base_url = str(provider.get("base_url") or "").strip()
+    if not base_url:
+        return {"ready": False, "reason": "未配置请求地址"}
+    hostname = urllib.parse.urlsplit(base_url).hostname or ""
+    if not provider_env_key_value(provider_id) and not (hostname and is_loopback_address(hostname)):
+        return {"ready": False, "reason": "未配置 API Key"}
+    return {"ready": True, "reason": ""}
+
+
 def resolve_image_generation_selection(
     provider_id: str = "",
     model: str = "",
@@ -2074,6 +2094,8 @@ RUNTIME_PROVIDER_FIELDS = (
     "rh_workflows",
     "image_generation_ready",
     "image_generation_unavailable_reason",
+    "chat_ready",
+    "chat_unavailable_reason",
 )
 
 
@@ -2084,9 +2106,12 @@ def runtime_api_provider(provider: Dict[str, Any]) -> Dict[str, Any]:
         if field in provider
     }
     readiness = image_generation_readiness(provider)
+    chat_readiness = chat_generation_readiness(provider)
     item.update({
         "image_generation_ready": readiness["ready"],
         "image_generation_unavailable_reason": readiness["reason"],
+        "chat_ready": chat_readiness["ready"],
+        "chat_unavailable_reason": chat_readiness["reason"],
     })
     return item
 

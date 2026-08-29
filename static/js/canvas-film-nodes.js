@@ -372,6 +372,7 @@
         const model = options.visionModel?.(node) || node.visionModel || '';
         const response = await fetch('/api/canvas-video-auto-parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
             provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
+            prompt:String(node.prompt || '').trim(),
             images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
         })});

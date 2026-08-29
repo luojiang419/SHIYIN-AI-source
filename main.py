@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.367"
+APP_VERSION = "1.0.368"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -18920,6 +18920,10 @@ def video_prompt_reference_manifest(
         "\n参考资产强制映射（编号严格按本次传入顺序，禁止重排）：\n"
         + "\n".join(mapping_lines)
         + f"\n主体解析与绑定规则：{subject_rule}"
+        + "\n多图综合使用硬性要求：必须逐张检查并在最终提示词中实际使用本次收到的每一张图片；"
+        "不能只使用第一张和最后一张，也不能因为多张图片看起来属于同一主体而静默丢弃中间图片。"
+        "若多张图片共同定义同一主体，必须在主体定义中列出全部来源图片标签，并在镜头描述中说明每张图片提供的外观、动作、构图或细节证据；"
+        "每个图片标签至少在最终输出中出现一次，且不得凭空添加未收到的图片。"
         + "\n最终输出中禁止残留‘图1’‘图片2’‘视频1’等自然引用；必须全部使用当前 skill 的规范标签。"
     )
     return context, entries, canonical_image_labels
@@ -18977,7 +18981,8 @@ def _video_auto_parse_system_prompt(
     ]))
     return (
         "你是资深影视分镜导演和视频模型提示词工程师。只输出最终可直接提交给视频模型的一段提示词，不要解释分析过程、不要输出案例摘要。"
-        "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须同时结合用户提示词、全部图片和本 skill 生成结果。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
+        "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须把用户提示词中的故事情节、角色关系、动作和情绪作为叙事主线，同时结合全部图片和本 skill 生成结果；不得只参考提示词或只参考首尾图片。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
+        "逐张建立图片使用清单：最终提示词必须逐一出现本次所有图片的规范引用标签；即使多张图片属于同一主体，也要列出全部来源并说明各自提供的可见证据，禁止仅保留第一张和最后一张或静默省略中间图片。"
         "当用户没有提供任何文字提示词时，进入自主导演模式：不要复述静态画面，不要只写素材清单；先在内部识别主体、空间关系、可延展动作和最有戏剧张力的视觉变化，再设计一个有开场、发展、转折或揭示、收束的短时叙事。"
         "自主设计必须由画面可见事实自然延展：可创作运动、镜头调度、节奏、环境变化和合理声音，但不得擅自更换主体、服装、产品、时代、地点或添加无视觉依据的新角色。"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
@@ -19003,7 +19008,25 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     reference_context, manifest, canonical_labels = video_prompt_reference_manifest(
         skill_id, image_count=len(images), video_count=0, image_labels=labels
     )
-    user_prompt = str(payload.prompt or "").strip()
+    raw_user_prompt = str(payload.prompt or "").strip()
+    user_prompt = normalize_video_prompt_references(
+        raw_user_prompt,
+        skill_id,
+        image_count=len(images),
+        video_count=0,
+    )
+    if user_prompt:
+        user_message = (
+            "用户创作提示词（故事情节与创作意图，必须作为叙事主线）：\n"
+            f"{user_prompt}\n\n"
+            "请将上述故事与全部参考图片综合为最终视频提示词，并逐一使用所有图片标签。"
+        )
+    else:
+        user_message = (
+            "用户没有提供文字提示词。请启动自主导演模式：完全依据本次全部图片，"
+            "创作一段有清晰时间推进、主体动作、镜头调度、节奏变化与收束点的精彩视频提示词，"
+            "并严格按当前视频模型 skill 的官方结构输出；最终必须逐一使用所有图片标签。"
+        )
     final_system = _video_auto_parse_system_prompt(
         payload.video_provider,
         payload.video_model,
@@ -19013,11 +19036,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         payload.resolution,
     )
     request = CanvasLLMRequest(
-        message=user_prompt or (
-            "用户没有提供文字提示词。请启动自主导演模式：完全依据本次全部图片，"
-            "创作一段有清晰时间推进、主体动作、镜头调度、节奏变化与收束点的精彩视频提示词，"
-            "并严格按当前视频模型 skill 的官方结构输出。"
-        ),
+        message=user_message,
         system_prompt=final_system,
         provider=payload.provider or "comfly",
         model=payload.model,
@@ -19045,6 +19064,8 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         "video_provider": payload.video_provider,
         "video_model": payload.video_model,
         "skill_id": skill_id,
+        "input_prompt": raw_user_prompt,
+        "image_count": len(images),
         "reference_manifest": manifest,
     }
 
@@ -19098,6 +19119,12 @@ async def canvas_llm(payload: CanvasLLMRequest):
                 content_parts.append({"type": "video_url", "video_url": {"url": ref_url}})
                 ok_videos += 1
         print(f"[canvas-llm] model={model} provider={payload.provider} text_len={len(payload.message)} images={ok_imgs}/{len(payload.images)} videos={ok_videos}/{len(payload.videos)}")
+        expected_images = min(len(image_inputs), 20)
+        if expected_images and ok_imgs != expected_images:
+            raise HTTPException(
+                status_code=422,
+                detail=f"参考图载入不完整：已载入 {ok_imgs}/{expected_images} 张。请检查连接的图片仍可访问后重试，避免模型只分析部分参考图。",
+            )
         upstream_messages.append({"role": "user", "content": content_parts})
     else:
         upstream_messages.append({"role": "user", "content": payload.message})
@@ -19120,7 +19147,13 @@ async def canvas_llm(payload: CanvasLLMRequest):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"解析回复内容失败：{exc}") from exc
     raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else {}
-    return {"text": text, "model": model, "raw_usage": raw_data.get("usage")}
+    return {
+        "text": text,
+        "model": model,
+        "raw_usage": raw_data.get("usage"),
+        "used_images": min(len(image_inputs), 20) if image_inputs else 0,
+        "used_videos": min(len(video_inputs), 3) if video_inputs else 0,
+    }
 
 @app.post("/api/canvas-prompt-polish")
 async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):

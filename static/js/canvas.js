@@ -19348,13 +19348,19 @@ async function runImageNodeQuickGenerate(nodeId){
 }
 function canvasVideoPromptReferences(node){
     const refs = [];
-    (generatorSources(node) || []).forEach(source => (source.refs || []).forEach(ref => {
-        const url = ref?.url || ref?.path || ref;
-        if(!url || typeof url !== 'string') return;
-        const kind = mediaKindForRef(ref);
-        if(!['image','video'].includes(kind)) return;
-        refs.push({url, kind, label:source.label || ref.name || ''});
-    }));
+    // 不复用 generatorSources：它为实际生成任务保留 output 节点的“最新一张”，
+    // 但提示词解析必须看到 output/group 中连接的全部图片，不能因为该策略丢掉前几张。
+    (connections || []).filter(connection => connection.to === node?.id).forEach(connection => {
+        const source = nodes.find(item => item.id === connection.from);
+        if(!source) return;
+        (mediaRefsFromNode(source) || []).forEach(ref => {
+            const url = ref?.url || ref?.path || ref;
+            if(!url || typeof url !== 'string') return;
+            const kind = mediaKindForRef(ref);
+            if(!['image','video'].includes(kind)) return;
+            refs.push({url, kind, label:source.title || source.name || ref.name || ''});
+        });
+    });
     return refs.filter((item,index,array) => array.findIndex(other => other.url === item.url) === index);
 }
 function canvasFilmPromptReferences(assets=[]){
@@ -19388,11 +19394,12 @@ async function autoParseCanvasVideoPrompt(node, refs=[]){
     const images = (refs || []).filter(item => item.kind === 'image').map(item => item.url).filter(Boolean).slice(0,20);
     if(!images.length) throw new Error('自动解析至少需要一张图片');
     const labels = (refs || []).filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
+    const prompt = String(node?.prompt || '').trim();
     const visionProvider = resolveChatProviderId(node?.visionProvider || '');
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const response = await fetch('/api/canvas-video-auto-parse', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         provider:visionProvider, model:visionModel, ms_model:'', video_provider:node?.apiProvider || '', video_model:node?.model || '',
-        images, image_labels:labels, duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
+        prompt, images, image_labels:labels, duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
     })});
     const data = await response.json().catch(() => ({}));
     if(!response.ok) throw new Error(data.detail || '自动解析失败');

@@ -19136,6 +19136,7 @@ function imageNodeQuickPromptHtml(node){
     const resolution = node.resolution || defaultApiImageResolution(model);
     const ratioOptions = [['square','1:1'],['wide','16:9'],['landscape43','4:3'],['portrait43','3:4'],['story','9:16'],['source','跟随原图']];
     const resolutionOptions = ['auto','1k','2k','4k'];
+    const running = Boolean(node.running);
     return `<div class="image-quick-compose" data-image-quick-compose>
         <div class="image-quick-compose-head"><span>${node.url ? '编辑图片' : '生成图片'}</span><small>提示词、模型和摄影机设置</small></div>
         <textarea class="image-quick-prompt" data-image-quick-prompt rows="3" placeholder="描述要生成或修改的内容…">${escapeHtml(node.prompt || '')}</textarea>
@@ -19145,7 +19146,7 @@ function imageNodeQuickPromptHtml(node){
             <select class="image-quick-select" data-image-quick-ratio aria-label="输出画幅">${ratioOptions.map(([value,label]) => `<option value="${value}" ${value === ratio ? 'selected' : ''}>${label}</option>`).join('')}</select>
             <select class="image-quick-select" data-image-quick-resolution aria-label="输出分辨率">${resolutionOptions.map(value => `<option value="${value}" ${value === resolution ? 'selected' : ''}>${value === 'auto' ? '自动' : value.toUpperCase()}</option>`).join('')}</select>
             <button type="button" class="image-quick-camera ${camera.enabled ? 'active' : ''}" data-image-quick-camera title="摄影机设置"><i data-lucide="camera"></i><span>摄影机</span></button>
-            <button type="button" class="image-quick-generate" data-image-quick-generate><i data-lucide="wand-sparkles"></i><span>生成</span></button>
+            <button type="button" class="image-quick-generate ${running ? 'running' : ''}" data-image-quick-generate ${running ? 'disabled' : ''}><i data-lucide="${running ? 'loader-2' : 'wand-sparkles'}"></i><span>${running ? '生成中' : '生成'}</span></button>
         </div>
         <div class="image-quick-camera-panel" data-image-quick-camera-panel ${camera.enabled ? '' : 'hidden'}>
             <label>机身<select data-image-quick-camera-field="camera">${CANVAS_IMAGE_CAMERA_OPTIONS.camera.map(value => `<option value="${escapeAttr(value)}" ${value === camera.camera ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select></label>
@@ -19215,6 +19216,9 @@ async function runImageNodeQuickGenerate(nodeId){
     const button = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-image-node-prompt-panel] [data-image-quick-generate]`);
     node.running = true;
     if(button){ button.disabled = true; button.classList.add('running'); button.querySelector('span').textContent = '生成中'; }
+    let out = null;
+    let pendingId = '';
+    let run = null;
     try {
         const payload = {
             prompt:prompt || 'Edit the reference image.',
@@ -19225,16 +19229,33 @@ async function runImageNodeQuickGenerate(nodeId){
         };
         const quality = normalizedImageQuality(node.quality);
         if(quality) payload.quality = quality;
+
+        // 与普通图片生成节点保持一致：点击生成后立即准备输出节点和占位卡片，
+        // 让用户在等待 API 时就能看到独立的输出位置，同时保留源图片节点不变。
+        out = outputForNode(node, 460, true);
+        if(!out) throw new Error('无法创建图片生成输出节点');
+        pendingId = uid('p');
+        run = runSnapshot(node, prompt || 'Edit the reference image.', refs);
+        run.taskLabel = '图片生成';
+        out._pending = [
+            ...(out._pending || []),
+            makePendingForRun(pendingId, run, node, {refs, requestSize:payload.size}, {
+                canvasTaskType:'online-image',
+                providerId:payload.provider_id,
+                model:payload.model
+            })
+        ];
+        refreshRunNodes(node, out);
+        scheduleSave();
+
         const response = await fetch('/api/online-image', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
         if(!response.ok) throw new Error(await responseErrorMessage(response, '图片生成失败'));
         const data = await response.json();
         const images = (data.images || []).map(outputUrlValue).filter(Boolean);
         if(!images.length) throw new Error('图片生成没有返回结果');
-        // 图片节点是生成请求的输入/源素材，生成结果必须落到独立的输出节点，
-        // 不能覆盖 node.url，否则原图会在生成后丢失，也无法继续作为参考图复用。
-        const historyTx = beginClassicHistoryTransaction('image-quick-generate');
-        const out = outputForNode(node, 460, true);
-        if(!out) throw new Error('无法创建图片生成输出节点');
+        const meta = pendingId ? collectRunMeta(out, pendingId) : {runMs:0, run};
+        if(run) run.request = data ? requestMetaFromResult(data) : {};
+        if(out && pendingId) out._pending = (out._pending || []).filter(item => item.id !== pendingId);
         const outputItems = images.map(url => ({
             url,
             name:outputImageName(url) || 'generated-image',
@@ -19243,20 +19264,25 @@ async function runImageNodeQuickGenerate(nodeId){
         appendOutputImagesWithoutDuplicates(out, outputItems, {
             url:node.url,
             name:node.name || 'source image'
-        });
-        commitClassicHistoryTransaction(historyTx, {selectionAfter:{ids:[out.id]}});
+        }, [meta]);
+        addGenerationLog({run, outputs:outputItems, runMs:meta.runMs || 0});
         node.runStatus = 'done'; node.runError = '';
-        selected.clear();
-        selected.add(out.id);
         setStatus(`图片生成完成${images.length > 1 ? `，共 ${images.length} 张` : ''}`);
-        render();
+        refreshRunNodes(node, out);
         scheduleSave();
     } catch(error){
+        if(out && pendingId){
+            const meta = collectRunMeta(out, pendingId);
+            out._pending = (out._pending || []).filter(item => item.id !== pendingId);
+            addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:error.message || String(error)});
+            refreshRunNodes(node, out);
+        }
         node.runStatus = 'failed'; node.runError = error.message || String(error);
         showErrorModal(node.runError, '图片生成失败');
         renderSelectionHub({deferPosition:true});
     } finally {
         node.running = false;
+        refreshRunNodes(node, out);
     }
 }
 function selectOutputMedia(nodeId, url, wrap=null){

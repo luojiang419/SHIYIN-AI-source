@@ -46,12 +46,27 @@ class CanvasInlineGenerationPromptTests(unittest.TestCase):
         )
         self.assertIsNotNone(run)
         body = run.group("body")
-        self.assertIn("const historyTx = beginClassicHistoryTransaction('image-quick-generate')", body)
-        self.assertIn("const out = outputForNode(node, 460, true)", body)
+        self.assertIn("out = outputForNode(node, 460, true)", body)
+        self.assertIn("makePendingForRun(pendingId, run, node", body)
+        self.assertLess(body.index("out = outputForNode(node, 460, true)"), body.index("fetch('/api/online-image'"))
+        self.assertLess(body.index("refreshRunNodes(node, out)"), body.index("fetch('/api/online-image'"))
+        self.assertLess(body.index("scheduleSave()"), body.index("fetch('/api/online-image'"))
         self.assertIn("appendOutputImagesWithoutDuplicates(out, outputItems", body)
-        self.assertIn("selected.add(out.id)", body)
+        self.assertIn("out._pending = (out._pending || []).filter", body)
         self.assertNotIn("node.url = images[0]", body)
         self.assertNotIn("node.generatedOutputs = images", body)
+
+    def test_image_quick_generate_button_reflects_running_state(self):
+        prompt = re.search(
+            r"function imageNodeQuickPromptHtml\(node\)\{(?P<body>.*?)\n\}",
+            self.javascript,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(prompt)
+        body = prompt.group("body")
+        self.assertIn("const running = Boolean(node.running)", body)
+        self.assertIn("${running ? 'disabled' : ''}", body)
+        self.assertIn("${running ? '生成中' : '生成'}", body)
 
 
 if __name__ == "__main__":

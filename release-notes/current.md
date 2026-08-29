@@ -1,4 +1,5 @@
-# SHIYIN AI v1.0.362
+# SHIYIN AI v1.0.364
+- 电商专用平台改为标准 API 配置页，支持请求地址、API Key、协议及图片/聊天/视频模型列表的完整配置；电商视觉解析路由保持兼容。
 - 视频提示词润色与实际生成提交现在会把“图1/图片1/视频1”转换为所选 skill 的规范引用；可灵使用 `<<<image_N>>>`、`<<<video_N>>>`、`<<<element_N>>>`，MiniMax H3 使用 `<Picture N>`、`<Video N>`、`<Subject N>`。
 - 润色请求增加稳定参考素材清单，视觉模型必须检查对应画面并按主体证据合并或拆分主体标签，结果附带规范化输入和参考映射。
 - 可灵适配器更新到官方公开的 Kling 3.0 Prompt Syntax 2.0：支持 Omni 三角引用标签、VIDEO 3.0/Omni 多镜头、原生音频、运镜与物理描述规范，并通过 `references/latest-official-syntax-2.0.txt` 完整注入润色模型。

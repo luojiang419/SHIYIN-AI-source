@@ -101,13 +101,8 @@ Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $stageRoot 'SHIYIN AI
 Copy-Item -LiteralPath $backendSource -Destination (Join-Path $stageRoot 'app\backend\canvas-backend') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path $stageRoot 'app\web') -Recurse
 # 视频提示词 skill 由后端按 app_root/skills 读取，必须随安装包一起发布。
-$promptSkillSourcePath = [IO.Path]::GetFullPath((Join-Path -Path ([string]$projectRoot) -ChildPath 'skills\video-prompt-polish'))
-$promptSkillTargetRoot = Join-Path -Path ([string]$stageRoot) -ChildPath 'app\skills'
-if (-not (Test-Path -LiteralPath $promptSkillSourcePath -PathType Container)) {
-    throw "Video prompt skill source is missing: $promptSkillSourcePath"
-}
-New-Item -ItemType Directory -Force $promptSkillTargetRoot | Out-Null
-Copy-Item -LiteralPath $promptSkillSourcePath -Destination $promptSkillTargetRoot -Recurse -Force
+New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills') | Out-Null
+Copy-Item -LiteralPath ($projectRoot + '\skills\video-prompt-polish') -Destination (Join-Path (Join-Path $stageRoot 'app\skills') 'video-prompt-polish') -Recurse -Force
 $connectors = Join-Path $stageRoot 'app\connectors'
 New-Item -ItemType Directory -Force $connectors | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\chrome-local-asset-importer') -Destination (Join-Path $connectors 'chrome') -Recurse

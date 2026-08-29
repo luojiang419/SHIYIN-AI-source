@@ -12,15 +12,14 @@ def test_backend_auto_parse_uses_one_ordered_multimodal_request_with_skill_and_c
     assert "class CanvasVideoAutoParseRequest" in MAIN
     assert '@app.post("/api/canvas-video-auto-parse")' in MAIN
     endpoint = MAIN[MAIN.index('@app.post("/api/canvas-video-auto-parse")'):MAIN.index('@app.post("/api/canvas-llm")')]
-    assert "case_context = _video_prompt_case_context(case_query)" in endpoint
     assert "result = await canvas_llm(request)" in endpoint
     assert endpoint.count("await canvas_llm(") == 1
     assert "images=images" in endpoint
     assert "message=user_prompt or" in endpoint
     assert "严格遵循下方当前模型 skill" in MAIN
     assert "全部图片已经按用户输入顺序一次性上传" in MAIN
-    assert "优秀案例经验（仅作方法参考）" in MAIN
-    assert "Path(PROJECT_MODULE_DIR) / \"案例\"" in MAIN
+    assert "请先使用模型可用的联网搜索工具检索优秀的视频提示词" in MAIN
+    assert 'body["tools"] = [{"type": "web_search"}]' in MAIN
 
 
 def test_classic_video_button_switches_to_auto_parse_for_images_without_prompt():

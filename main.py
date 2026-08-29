@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.365"
+APP_VERSION = "1.0.366"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4156,6 +4156,7 @@ class CanvasLLMRequest(BaseModel):
     images: List[str] = []   # 可以是 /output/*.png、/assets/*.png 本地路径 或 http(s) URL 或 data URL
     image_labels: List[str] = []  # 与 images 同序的影视资产映射标签
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
+    web_search: bool = False  # Responses 协议下允许模型调用内置联网搜索
 
 class CanvasPromptPolishRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=LLM_MESSAGE_MAX_LENGTH)
@@ -4967,6 +4968,9 @@ def build_llm_request_body(transport, messages, stream=False):
         merged_instructions = "\n\n".join(dict.fromkeys(instructions))
         if merged_instructions:
             body["instructions"] = merged_instructions
+        if transport.get("web_search"):
+            # GPT-5.6 Sol 等 Responses 模型可直接调用 OpenAI 内置联网搜索。
+            body["tools"] = [{"type": "web_search"}]
     else:
         body["messages"] = messages
     if stream:
@@ -18915,48 +18919,15 @@ def video_prompt_polish_system_prompt(
     )
 
 
-def _video_prompt_case_context(query: str = "", limit: int = 4) -> str:
-    """从项目案例目录检索可追溯的提示词经验，返回有限长度上下文。"""
-    root = Path(PROJECT_MODULE_DIR) / "案例"
-    if not root.is_dir():
-        return ""
-    terms = [part.casefold() for part in re.findall(r"[\w一-鿿]+", str(query or "")) if len(part) > 1]
-    candidates: List[tuple[int, Path, str]] = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in {".md", ".txt", ".json"}:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore").strip()
-        except OSError:
-            continue
-        if not text:
-            continue
-        lowered = text.casefold()
-        score = sum(lowered.count(term) for term in terms) if terms else 0
-        # 提示词/报告优先；文件名命中也作为轻量相关性信号。
-        name = path.name.casefold()
-        score += sum(2 for term in terms if term in name)
-        if "提示词" in path.name or "prompt" in name:
-            score += 3
-        candidates.append((score, path, text))
-    candidates.sort(key=lambda item: (-item[0], str(item[1])))
-    excerpts: List[str] = []
-    for _, path, text in candidates[: max(1, min(8, int(limit or 4)))]:
-        compact = re.sub(r"\s+", " ", text)
-        excerpts.append(f"案例文件：{path.relative_to(root)}\n{compact[:1800]}")
-    return "\n\n".join(excerpts)
-
-
 def _video_auto_parse_system_prompt(
     video_provider: str,
     video_model: str,
     reference_context: str,
-    case_context: str,
     duration: Optional[float] = None,
     aspect_ratio: str = "",
     resolution: str = "",
 ) -> str:
-    """自动解析第二阶段的导演提示词约束。"""
+    """自动解析单次多模态请求的导演提示词约束。"""
     _, skill_id = _video_prompt_skill(video_provider, video_model)
     model_hint = f"当前视频模型：{video_model}（skill={skill_id}）。"
     settings_hint = "；".join(filter(None, [
@@ -18969,9 +18940,9 @@ def _video_auto_parse_system_prompt(
         "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须同时结合用户提示词、全部图片和本 skill 生成结果。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{model_hint}{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
+        "请先使用模型可用的联网搜索工具检索优秀的视频提示词、分镜和运镜案例，吸收可迁移的方法后再写结果；不要输出检索过程或来源列表。"
         "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；最终不得残留‘图1/图片2’等自然编号。"
-        f"\n{reference_context}\n"
-        f"优秀案例经验（仅作方法参考）：\n{case_context or '暂无可用本地案例，请依据 skill 与影视常规完成调度。'}"
+        f"\n{reference_context}"
     )
 
 
@@ -18987,13 +18958,10 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         skill_id, image_count=len(images), video_count=0, image_labels=labels
     )
     user_prompt = str(payload.prompt or "").strip()
-    case_query = " ".join([user_prompt, *labels]).strip()
-    case_context = _video_prompt_case_context(case_query)
     final_system = _video_auto_parse_system_prompt(
         payload.video_provider,
         payload.video_model,
         reference_context,
-        case_context,
         payload.duration,
         payload.aspect_ratio,
         payload.resolution,
@@ -19007,6 +18975,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
         images=images,
         image_labels=canonical_labels,
         videos=[],
+        web_search=True,
     )
     result = await canvas_llm(request)
     text = normalize_video_prompt_references(
@@ -19020,7 +18989,6 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
     return {
         **result,
         "text": text,
-        "case_files": [line.split("\n", 1)[0].replace("案例文件：", "") for line in case_context.split("\n\n") if line],
         "video_provider": payload.video_provider,
         "video_model": payload.video_model,
         "skill_id": skill_id,
@@ -19030,6 +18998,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):
     _llm_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
+    _llm_transport["web_search"] = bool(payload.web_search)
     model = _llm_transport["model"]
     _llm_provider = _llm_transport["provider"]
     _llm_protocol = _llm_transport["protocol"]
@@ -19128,6 +19097,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest):
         images=payload.images,
         image_labels=canonical_image_labels,
         videos=payload.videos,
+        web_search=True,
     )
     result = await canvas_llm(request_payload)
     text = str(result.get("text") or "").strip()

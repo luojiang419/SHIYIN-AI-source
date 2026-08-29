@@ -167,6 +167,13 @@ class ResponsesProtocolTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("关键帧", raised.exception.detail)
 
+    def test_responses_can_attach_builtin_web_search_tool(self):
+        body = self.main.build_llm_request_body(
+            {"model": "gpt-5.6-sol", "protocol": "responses", "provider": {}, "web_search": True},
+            [{"role": "user", "content": "检索优秀视频分镜案例并总结方法"}],
+        )
+        self.assertEqual(body["tools"], [{"type": "web_search"}])
+
     def test_resolve_chat_transport_uses_configured_responses_endpoint(self):
         provider = {
             "id": "responses-provider",

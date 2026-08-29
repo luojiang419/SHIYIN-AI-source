@@ -53,6 +53,17 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     if (-not $canvasHtml.Contains("menuAdd('topazVideo')")) {
         throw 'Staged canvas is missing the Topaz create-menu entry.'
     }
+    $h3SkillPath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\SKILL.md'
+    $h3BaseGuidePath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\references\base-en.txt'
+    $h3RefGuidePath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\references\ref-en.txt'
+    foreach ($requiredSkillPath in @($h3SkillPath, $h3BaseGuidePath, $h3RefGuidePath)) {
+        if (-not (Test-Path -LiteralPath $requiredSkillPath -PathType Leaf)) {
+            throw "Staged video prompt skill is missing: $requiredSkillPath"
+        }
+        if ((Get-Item -LiteralPath $requiredSkillPath).Length -le 0) {
+            throw "Staged video prompt skill is empty: $requiredSkillPath"
+        }
+    }
     if (-not $canvasHtml.Contains("canvas-topaz-node.js?v=$ExpectedVersion")) {
         throw "Staged canvas Topaz script cache version is not $ExpectedVersion."
     }
@@ -89,6 +100,11 @@ New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\backend') | Out-N
 Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $stageRoot 'SHIYIN AI.exe')
 Copy-Item -LiteralPath $backendSource -Destination (Join-Path $stageRoot 'app\backend\canvas-backend') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path $stageRoot 'app\web') -Recurse
+# 视频提示词 skill 由后端按 app_root/skills 读取，必须随安装包一起发布。
+$promptSkillSource = Join-Path $projectRoot 'skills\video-prompt-polish'
+$promptSkillTarget = Join-Path $stageRoot 'app\skills\video-prompt-polish'
+New-Item -ItemType Directory -Force $promptSkillTarget | Out-Null
+Copy-Item -LiteralPath $promptSkillSource -Destination $promptSkillTarget -Recurse
 $connectors = Join-Path $stageRoot 'app\connectors'
 New-Item -ItemType Directory -Force $connectors | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\chrome-local-asset-importer') -Destination (Join-Path $connectors 'chrome') -Recurse

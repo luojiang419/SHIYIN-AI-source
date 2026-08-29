@@ -1,4 +1,5 @@
-# SHIYIN AI v1.0.358
+# SHIYIN AI v1.0.359
+- 安装包与浏览器 smoke staging 现在会复制 `skills/video-prompt-polish` 到 `app/skills`，并在构建断言中验证 MiniMax H3 完整 skill 与参考文档，确保发布版运行时不会因资源未打包而降级。
 - MiniMax H3 润色器现已完整内置官方 `h3-prompt-writing` skill 及 `base-en.txt`、`ref-en.txt` 参考规范；选择 MiniMax H3 时会将完整规则与用户提示词、参考素材一起提交给视觉模型，并按官方模式回填结果。
 - 视频提示词 skill 加载器支持读取 skill 目录下的全部 `references/*.txt`；可灵 CLI 保留官方指南适配器并附带来源说明，未冒充不存在的独立官方 skill 包。
 - 视频提示词润色改为按当前模型自动加载项目内置 skill 规范；新增可灵 CLI 与 MiniMax H3 独立规范文件，并在响应中返回 skill 标识。

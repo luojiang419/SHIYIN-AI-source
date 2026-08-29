@@ -5,6 +5,9 @@ import main
 from main import (
     _video_auto_parse_system_prompt,
     clean_video_prompt_output,
+    video_prompt_limit,
+    video_prompt_limit_rule,
+    validate_video_prompt_for_model,
     video_prompt_polish_system_prompt,
     video_prompt_reference_coverage,
 )
@@ -258,3 +261,47 @@ def test_video_prompt_output_keeps_reference_tags_when_cleaning_quality_terms():
     assert "<<<image_1>>>" in cleaned
     assert "photorealistic" not in cleaned.lower()
     assert "8k" not in cleaned.lower()
+
+
+def test_video_prompt_limits_are_model_specific_and_no_longer_fixed_at_4000():
+    assert video_prompt_limit("minimax-h3", "MiniMax H3") == 7000
+    assert video_prompt_limit("kling-cli", "kling-v3-omni") == 2500
+    assert video_prompt_limit("comfly", "veo3-fast") == 20000
+    assert "7000 个字符" in video_prompt_limit_rule("minimax-h3", "MiniMax H3")
+    assert "2500 个字符" in video_prompt_limit_rule("kling-cli", "kling-v3-omni")
+    assert 'VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))' not in MAIN
+    # H3 的合法 4000～7000 字符提示词应能通过统一请求体模型。
+    h3_request = main.CanvasVideoRequest(prompt="x" * 5000, provider_id="minimax-h3", model="MiniMax H3")
+    assert validate_video_prompt_for_model(h3_request) == 7000
+    try:
+        validate_video_prompt_for_model(
+            main.CanvasVideoRequest(prompt="x" * 2501, provider_id="kling-cli", model="kling-v3-omni")
+        )
+    except main.HTTPException as exc:
+        assert exc.status_code == 422
+        assert "不能超过 2500 个字符" in str(exc.detail)
+    else:
+        raise AssertionError("Kling 超限必须返回模型级限长错误")
+
+
+def test_overlong_auto_parse_is_compacted_to_h3_limit(monkeypatch):
+    calls = []
+
+    async def fake_canvas_llm(request, progress_callback=None):
+        calls.append(request)
+        if len(calls) == 1:
+            return {"text": "<Picture 1> " + ("重复细节 " * 1400)}
+        return {"text": "<Picture 1> A concise moving shot with a clear action beat."}
+
+    monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
+    payload = main.CanvasVideoAutoParseRequest(
+        images=["https://example.test/1.png"],
+        video_provider="minimax-h3",
+        video_model="MiniMax H3",
+    )
+    result = asyncio.run(main.canvas_video_auto_parse(payload))
+    assert len(calls) == 2
+    assert result["prompt_compacted"] is True
+    assert result["prompt_limit"] == 7000
+    assert result["prompt_chars"] <= 7000
+    assert result["reference_coverage"]["complete"] is True

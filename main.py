@@ -416,7 +416,7 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
-APP_VERSION = "1.0.374"
+APP_VERSION = "1.0.375"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -918,7 +918,12 @@ APIMART_IMAGE_POLL_INTERVAL = float(os.getenv("APIMART_IMAGE_POLL_INTERVAL", "5"
 APIMART_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("APIMART_IMAGE_INITIAL_POLL_DELAY", "10"))
 VIDEO_POLL_TIMEOUT = float(os.getenv("VIDEO_POLL_TIMEOUT", "1800"))
 ONLINE_IMAGE_PROMPT_MAX_LENGTH = int(os.getenv("ONLINE_IMAGE_PROMPT_MAX_LENGTH", "20000"))
-VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
+# 这是画布内部传输字段的安全上限，不再冒充某一个视频模型的上游限制。
+# 上游限制由 video_prompt_limit() 按 provider/model 动态解析，避免 H3 被旧的
+# 4000 字符统一校验错误拦截。
+VIDEO_PROMPT_MAX_LENGTH = max(20000, int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "20000")))
+MINIMAX_H3_VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("MINIMAX_H3_VIDEO_PROMPT_MAX_LENGTH", "7000"))
+KLING_VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("KLING_VIDEO_PROMPT_MAX_LENGTH", "2500"))
 LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
 CHAT_ATTACHMENT_MAX = int(os.getenv("CHAT_ATTACHMENT_MAX", "20"))
 ONLINE_IMAGE_REFERENCE_MAX = int(os.getenv("ONLINE_IMAGE_REFERENCE_MAX", "20"))
@@ -928,6 +933,30 @@ FIELD_LABELS = {
     "message": "文本",
     "system_prompt": "系统提示词",
 }
+
+
+def video_prompt_limit(provider_id: str = "", model: str = "") -> int:
+    """返回当前视频上游接受的 prompt 字符上限。
+
+    provider 可能是自定义平台 ID，因此同时检查模型名；这样用户即使把 H3/Kling
+    配置在兼容网关下，自动解析、润色和最终提交仍会采用正确的限长。
+    """
+    provider_key = str(provider_id or "").strip().lower()
+    model_key = str(model or "").strip().lower()
+    if provider_key == "minimax-h3" or "minimax-h3" in model_key or model_key == "h3" or "h3" in model_key:
+        return max(1, MINIMAX_H3_VIDEO_PROMPT_MAX_LENGTH)
+    if provider_key == "kling-cli" or "kling" in provider_key or "kling" in model_key or "可灵" in model_key:
+        return max(1, KLING_VIDEO_PROMPT_MAX_LENGTH)
+    return max(1, VIDEO_PROMPT_MAX_LENGTH)
+
+
+def video_prompt_limit_rule(provider_id: str = "", model: str = "") -> str:
+    limit = video_prompt_limit(provider_id, model)
+    return (
+        f"最终提示词长度硬约束：必须不超过 {limit} 个字符（空格、标点和换行也计入）。"
+        "在输出前先删除重复、低优先级和无法影响画面/声音的细节；绝不能输出超限草稿，"
+        "也不要为了补充细节突破该上限。"
+    )
 
 def friendly_validation_error(errors):
     parts = []
@@ -18063,6 +18092,7 @@ def resume_canvas_video_tasks():
 
 @app.post("/api/canvas-video-tasks")
 async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
+    validate_video_prompt_for_model(payload)
     ensure_canvas_video_tasks_loaded()
     task_id = str(payload.task_id or "").strip()
     if not re.fullmatch(r"canvas_video_[A-Za-z0-9_-]{1,140}", task_id):
@@ -18358,8 +18388,25 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     suffix_text = " ".join(suffixes)
     return f"{text} {suffix_text}".strip() if text else suffix_text
 
+
+def validate_video_prompt_for_model(payload: CanvasVideoRequest) -> int:
+    """在真正提交上游前按模型校验，避免统一 4000 字符错误误导用户。"""
+    limit = video_prompt_limit(payload.provider_id, payload.model)
+    actual = len(str(payload.prompt or ""))
+    if actual > limit:
+        model_label = str(payload.model or payload.provider_id or "当前视频模型").strip()
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{model_label} 的提示词不能超过 {limit} 个字符，当前为 {actual} 个字符。"
+                "请点击“润色”自动压缩后再生成。"
+            ),
+        )
+    return limit
+
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest):
+    validate_video_prompt_for_model(payload)
     provider = get_api_provider(payload.provider_id)
     if is_kling_cli_provider(provider):
         return await generate_kling_cli_video(payload)
@@ -19065,6 +19112,86 @@ def clean_video_prompt_output(text: str) -> str:
     return output.strip()
 
 
+def _hard_limit_video_prompt(text: str, limit: int) -> str:
+    """模型压缩仍超限时的最后兜底；优先在句子/段落边界截断。"""
+    output = str(text or "").strip()
+    max_chars = max(1, int(limit or 1))
+    if len(output) <= max_chars:
+        return output
+    candidate = output[:max_chars].rstrip()
+    boundary = max(
+        candidate.rfind("\n"),
+        candidate.rfind("。"),
+        candidate.rfind("！"),
+        candidate.rfind("？"),
+        candidate.rfind("."),
+        candidate.rfind("!"),
+        candidate.rfind("?"),
+        candidate.rfind(";"),
+        candidate.rfind("；"),
+    )
+    # 太短的首句不应导致大段内容被丢弃。
+    if boundary >= max(80, int(max_chars * 0.55)):
+        candidate = candidate[: boundary + 1].rstrip()
+    return candidate
+
+
+async def compact_video_prompt_if_needed(
+    text: str,
+    *,
+    video_provider: str,
+    video_model: str,
+    llm_provider: str,
+    llm_model: str,
+    ms_model: str = "",
+    images: Optional[List[str]] = None,
+    videos: Optional[List[str]] = None,
+    progress_callback=None,
+) -> tuple[str, bool, int]:
+    """将自动解析/润色结果压缩到当前视频模型的真实上限内。"""
+    limit = video_prompt_limit(video_provider, video_model)
+    cleaned = clean_video_prompt_output(text)
+    if len(cleaned) <= limit:
+        return cleaned, False, limit
+
+    compact_system = (
+        "你是视频提示词压缩器。只输出压缩后的最终视频提示词，不要解释、标题或 Markdown。"
+        f"必须严格控制在 {limit} 个字符以内（空格、标点和换行均计入）。"
+        "保留原提示词的主体身份、故事主线、动作因果、时间顺序、镜头运动、对白/歌词、否定要求、"
+        "模型字段和全部规范引用标签；优先删除重复形容词、泛化质量词、冗余环境细节和同义句，"
+        "不要改写或丢失任何 <<<image_N>>>、<<<video_N>>>、<<<element_N>>>、"
+        "<Picture N>、<Video N>、<Subject N> 等引用标签。"
+    )
+    compact_request = CanvasLLMRequest(
+        message=(
+            f"请将下方视频提示词压缩到 {limit} 个字符以内，保留所有可执行信息和引用标签：\n\n"
+            + cleaned[:LLM_MESSAGE_MAX_LENGTH]
+        ),
+        system_prompt=compact_system,
+        provider=llm_provider or "comfly",
+        model=llm_model,
+        ms_model=ms_model,
+        images=list(images or []),
+        videos=list(videos or []),
+        web_search=False,
+        retry_524=1,
+    )
+    try:
+        try:
+            compact_result = await canvas_llm(compact_request, progress_callback=progress_callback)
+        except TypeError as exc:
+            # 兼容旧版测试替身/插件函数仍只接受一个 request 参数。
+            if "progress_callback" not in str(exc):
+                raise
+            compact_result = await canvas_llm(compact_request)
+        compacted = clean_video_prompt_output(str(compact_result.get("text") or ""))
+    except Exception:
+        compacted = ""
+    if not compacted:
+        compacted = cleaned
+    return _hard_limit_video_prompt(compacted, limit), True, limit
+
+
 # 跨模型通用的“自动导演”规则：参考图负责事实，提示词负责可执行运动。
 # 具体的 H3/Kling 字段与标签仍由各自 skill 控制，这里只补齐表演、节拍、
 # 物理反馈和镜头动机，避免无提示词时退化成静态画面复述。
@@ -19193,7 +19320,8 @@ def video_prompt_polish_system_prompt(
         "你是视频生成提示词润色器。只输出最终可直接提交给视频模型的一段提示词，不要解释、不要加标题、不要使用 Markdown 代码块。"
         "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
         "禁止追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed），案例经验只能迁移方法，不能复制案例内容。"
-        f"{model_hint}当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
+        f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
+        f"当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
         f"{expansion}{_VIDEO_DIRECTOR_EXPANSION_RULES}{output_constraint}{reference_context}"
     )
 
@@ -19224,7 +19352,8 @@ def _video_auto_parse_system_prompt(
         f"{_VIDEO_ACTION_CHOREOGRAPHY_REQUIREMENTS}"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{'H3 Ref2VA 生成任务的 detailed_description 通常写 350-500 个英文词；在不牺牲时间节拍和动作因果的前提下，按镜头信息量充分展开，禁止压缩成每镜头一两句静态摘要。' if skill_id == 'minimax-h3' else ''}"
-        f"{model_hint}{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
+        f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
+        f"{('生成约束：' + settings_hint + '。') if settings_hint else ''}"
         "请先使用模型可用的联网搜索工具检索优秀的视频提示词、分镜和运镜案例，吸收可迁移的方法后再写结果；不要输出检索过程或来源列表。"
         "案例仅用于提取镜头组织、节奏和可执行动作的方法，严禁复制案例中的主体、场景、道具、故事或措辞；最终内容必须完全围绕本次图片和用户输入。"
         "禁止输出或追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed 等），也不要以这类短语单独成句收尾。"
@@ -19311,6 +19440,20 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
     )
     if not text:
         raise HTTPException(status_code=502, detail="视觉模型未返回最终视频提示词")
+    text, was_compacted, prompt_limit = await compact_video_prompt_if_needed(
+        text,
+        video_provider=payload.video_provider,
+        video_model=payload.video_model,
+        llm_provider=payload.provider,
+        llm_model=payload.model,
+        ms_model=payload.ms_model,
+        images=images,
+        videos=[],
+        progress_callback=progress_callback,
+    )
+    text = normalize_video_prompt_references(text, skill_id, image_count=len(images), video_count=0)
+    if len(text) > prompt_limit:
+        text = _hard_limit_video_prompt(text, prompt_limit)
     coverage = video_prompt_reference_coverage(text, skill_id, len(images))
     if not coverage["complete"]:
         missing = "、".join(coverage["missing"])
@@ -19328,6 +19471,9 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
         "image_count": len(images),
         "reference_manifest": manifest,
         "reference_coverage": coverage,
+        "prompt_limit": prompt_limit,
+        "prompt_chars": len(text),
+        "prompt_compacted": was_compacted,
     }
 
 @app.post("/api/canvas-llm")
@@ -19484,6 +19630,25 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
         image_count=len(payload.images or []),
         video_count=len(payload.videos or []),
     )
+    text, was_compacted, prompt_limit = await compact_video_prompt_if_needed(
+        text,
+        video_provider=payload.video_provider,
+        video_model=payload.video_model,
+        llm_provider=payload.provider,
+        llm_model=payload.model,
+        ms_model=payload.ms_model,
+        images=payload.images,
+        videos=payload.videos,
+        progress_callback=progress_callback,
+    )
+    text = normalize_video_prompt_references(
+        text,
+        skill_id,
+        image_count=len(payload.images or []),
+        video_count=len(payload.videos or []),
+    )
+    if len(text) > prompt_limit:
+        text = _hard_limit_video_prompt(text, prompt_limit)
     coverage = video_prompt_reference_coverage(text, skill_id, len(payload.images or []))
     if not coverage["complete"]:
         missing = "、".join(coverage["missing"])
@@ -19500,6 +19665,9 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
         "normalized_input": normalized_prompt,
         "reference_manifest": reference_manifest,
         "reference_coverage": coverage,
+        "prompt_limit": prompt_limit,
+        "prompt_chars": len(text),
+        "prompt_compacted": was_compacted,
     }
 
 

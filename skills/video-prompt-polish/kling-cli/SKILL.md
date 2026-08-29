@@ -47,3 +47,4 @@ Kling VIDEO 3.0 / 3.0 Omni can combine visuals, dialogue, ambience, and sound ef
 
 Do not change the user's subject, action, camera direction, timing, emotion, dialogue, negative constraints, or reference role. Infer only the minimum visual context needed to execute an underspecified instruction. Output only the final Kling-ready prompt, with no analysis, title, or Markdown fence.
 
+Keep the final prompt within **2500 characters**, including spaces, punctuation, and line breaks. For custom multi-shot prompts, keep each `multi_prompt.prompt` segment within **512 characters**. Remove repetition and low-priority detail before output; never emit an over-limit draft.

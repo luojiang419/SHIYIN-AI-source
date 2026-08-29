@@ -4919,6 +4919,19 @@ def resolve_chat_transport(provider: str, model: str, ms_model: str):
         "model": resolved_model,
     }
 
+def provider_supports_builtin_web_search(provider) -> bool:
+    """判断 Responses 上游是否适合附加 OpenAI 内置 web_search 工具。
+
+    电商专用代理虽然使用 Responses 协议，但当前网关对「视觉 + web_search」组合请求
+    会等待超时并返回 524；普通聊天请求和不带该工具的视觉请求均正常。保留默认开启
+    行为给其它 Responses 提供商，仅对该代理做兼容降级。
+    """
+    if not isinstance(provider, dict):
+        return True
+    provider_id = str(provider.get("id") or "").strip().lower()
+    base_url = str(provider.get("base_url") or "").strip().lower()
+    return provider_id != "ecommerce-vision" and "xsy-proxy.shiyingai.com" not in base_url
+
 def responses_input_from_messages(messages):
     """将内部消息记录转换为 Responses 原生 input，兼容已有 OpenAI 多模态片段。"""
     result = []
@@ -5007,11 +5020,25 @@ def build_llm_request_body(transport, messages, stream=False):
 async def request_llm_json(transport, messages):
     """执行一次非流式文本请求，旧协议和 Responses 共用同一入口。"""
     async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-        response = await client.post(
-            transport["url"],
-            headers=transport["headers"],
-            json=build_llm_request_body(transport, messages),
-        )
+        body = build_llm_request_body(transport, messages)
+        response = None
+        # 部分兼容 Responses 的代理在大尺寸视觉请求上会偶发返回 Cloudflare 524。
+        # 该状态表示网关等待上游超时，不代表 API Key 或模型配置错误；短暂退避后重试，
+        # 避免用户必须反复点击按钮。仅重试 524，防止鉴权/参数错误造成重复请求。
+        for attempt in range(3):
+            response = await client.post(
+                transport["url"],
+                headers=transport["headers"],
+                json=body,
+            )
+            if response.status_code != 524 or attempt >= 2:
+                break
+            print(
+                f"[llm-retry] upstream 524, retry={attempt + 1}/2 model={transport.get('model', '')} "
+                f"provider={(transport.get('provider') or {}).get('id', '')}",
+                flush=True,
+            )
+            await asyncio.sleep(1.5 * (attempt + 1))
         response.raise_for_status()
         if not response.content:
             raise HTTPException(status_code=502, detail="上游接口返回了空响应")
@@ -19154,7 +19181,9 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest):
 @app.post("/api/canvas-llm")
 async def canvas_llm(payload: CanvasLLMRequest):
     _llm_transport = resolve_chat_transport(payload.provider, payload.model, payload.ms_model)
-    _llm_transport["web_search"] = bool(payload.web_search)
+    _llm_transport["web_search"] = bool(payload.web_search) and provider_supports_builtin_web_search(
+        _llm_transport.get("provider")
+    )
     model = _llm_transport["model"]
     _llm_provider = _llm_transport["provider"]
     _llm_protocol = _llm_transport["protocol"]
@@ -19216,6 +19245,11 @@ async def canvas_llm(payload: CanvasLLMRequest):
     except httpx.HTTPStatusError as exc:
         body = exc.response.text or ""
         friendly = friendly_chat_error_detail(body, model, _llm_provider)
+        if exc.response.status_code == 524:
+            friendly = (
+                "电商视觉上游网关等待超时（524）。API Key 和模型已正确命中电商专用平台，"
+                "系统已自动重试仍未在网关时限内返回；请稍后重试，或减少一次解析的参考图数量。"
+            )
         raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body}") from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc

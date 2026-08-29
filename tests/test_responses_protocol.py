@@ -174,6 +174,16 @@ class ResponsesProtocolTests(unittest.TestCase):
         )
         self.assertEqual(body["tools"], [{"type": "web_search"}])
 
+    def test_ecommerce_proxy_disables_builtin_web_search_for_visual_requests(self):
+        self.assertFalse(self.main.provider_supports_builtin_web_search({
+            "id": "ecommerce-vision",
+            "base_url": "https://xsy-proxy.shiyingai.com/v1",
+        }))
+        self.assertTrue(self.main.provider_supports_builtin_web_search({
+            "id": "another-responses-provider",
+            "base_url": "https://relay.test/v1",
+        }))
+
     def test_resolve_chat_transport_uses_configured_responses_endpoint(self):
         provider = {
             "id": "responses-provider",

@@ -164,6 +164,25 @@ async function networkFirstImageRequest(request) {
     }
 }
 
+function isMediaPreviewRequest(request) {
+    try { return new URL(request.url).pathname === '/api/media-preview'; }
+    catch (error) { return false; }
+}
+
+async function staleWhileRevalidateMediaPreview(request, event) {
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request);
+    const refresh = fetch(new Request(request, {cache: 'no-store'}))
+        .then(response => cacheResponse(request, response).then(() => response));
+    if (cached) {
+        // 首屏直接复用已有缩略图；刷新请求由 fetch event 托管，下一次进入即可得到最新结果。
+        event.waitUntil(refresh.catch(() => {}));
+        return cached;
+    }
+    try { return await refresh; }
+    catch (error) { return Response.error(); }
+}
+
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
     const keys = await caches.keys();
@@ -178,9 +197,13 @@ self.addEventListener('fetch', event => {
         return;
     }
     if (isCacheableRequest(event.request)) {
-        event.respondWith(needsFreshNetwork(event.request)
-            ? networkFirstImageRequest(event.request)
-            : handleImageRequest(event.request));
+        if (isMediaPreviewRequest(event.request)) {
+            event.respondWith(staleWhileRevalidateMediaPreview(event.request, event));
+        } else {
+            event.respondWith(needsFreshNetwork(event.request)
+                ? networkFirstImageRequest(event.request)
+                : handleImageRequest(event.request));
+        }
     }
 });
 

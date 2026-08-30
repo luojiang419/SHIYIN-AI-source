@@ -3304,7 +3304,9 @@ async function openCanvas(id){
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
         clearClassicHistory();
-        nodes = canvas.nodes || [];
+        const legacyMigration = migrateLegacySmartCanvasNodes(canvas.nodes || []);
+        nodes = legacyMigration.nodes;
+        if(legacyMigration.changed) canvas.kind = 'classic';
         connections = canvas.connections || [];
         const prunedRuntimeCollections = pruneCanvasRuntimeCollections({dropOrphanPending:true});
         viewport = localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1});
@@ -3317,7 +3319,7 @@ async function openCanvas(id){
         setCanvasMode(true);
         renderCanvasList();
         render();
-        if(prunedRuntimeCollections) scheduleSave();
+        if(prunedRuntimeCollections || legacyMigration.changed) scheduleSave();
         resumeCanvasImageTasks();
         resumeCanvasVideoTasks();
         resumeTopazVideoTasks();
@@ -3337,6 +3339,15 @@ async function openCanvas(id){
         console.error(e);
         // 打开失败（id 无效/已删除）：回到选画布页面，避免停在空白编辑器。
         window.location.replace(canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject()));
+    }
+}
+function migrateLegacySmartCanvasNodes(sourceNodes){
+    const helper = window.CanvasLegacySmartMigration;
+    if(!helper || typeof helper.migrate !== 'function') return {nodes:Array.isArray(sourceNodes) ? sourceNodes : [], changed:false};
+    try { return helper.migrate(sourceNodes); }
+    catch(error){
+        console.warn('legacy smart canvas migration failed', error);
+        return {nodes:Array.isArray(sourceNodes) ? sourceNodes : [], changed:false};
     }
 }
 function classicCanvasRenderFingerprint(value={}){
@@ -3370,7 +3381,9 @@ function applyRemoteCanvasData(remote){
         const localViewport = localViewportForCanvas(canvas.id, viewport || remote.viewport || {x:0, y:0, scale:1});
         const localSelectedIds = new Set(selected);
         canvas = remote;
-        nodes = canvas.nodes || [];
+        const legacyMigration = migrateLegacySmartCanvasNodes(canvas.nodes || []);
+        nodes = legacyMigration.nodes;
+        if(legacyMigration.changed) canvas.kind = 'classic';
         connections = canvas.connections || [];
         pruneCanvasRuntimeCollections();
         viewport = localViewport;
@@ -3387,7 +3400,8 @@ function applyRemoteCanvasData(remote){
         });
         selected = new Set([...localSelectedIds].filter(id => nodes.some(node => node.id === id)));
         renderCanvasList();
-        if(contentChanged) render();
+        if(contentChanged || legacyMigration.changed) render();
+        if(legacyMigration.changed) scheduleSave();
         resumeCanvasImageTasks();
         resumeCanvasVideoTasks();
         resumeTopazVideoTasks();

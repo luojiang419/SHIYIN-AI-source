@@ -8642,15 +8642,18 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const ratioParts = requestedRatio === 'source'
         ? (width > 0 && height > 0 ? ratioPartsFromDimensions(width, height) : {width:1, height:1})
         : (() => { const [w,h] = requestedRatio.split(':').map(Number); return {width:Math.max(1,w || 1), height:Math.max(1,h || 1)}; })();
+    const previous = node?.outputUrl && node.outputUrl !== source.url
+        ? {url:node.outputUrl, name:node.outputName || 'previous-angle.png', kind:'image'}
+        : null;
     const payload = {
         prompt,
-        operation:'angle_change',
-        style_reference_url:source.url,
+        operation:kind === 'angle' ? 'angle_change' : 'relight',
+        style_reference_url:kind === 'angle' ? source.url : '',
         provider_id:resolveImageProviderId(providerId),
         model:resolveImageModel(node.editModel || model),
         size:apiImageSize('custom', node.editResolution || '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
         quality:node.editQuality || 'high',
-        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}]
+        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}].concat(previous ? [previous] : [])
     };
     const task = await createCanvasImageTask(payload);
     const result = await waitCanvasImageTaskResult(task.task_id);

@@ -10900,7 +10900,13 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
         runSettings.style_reference_url = source.url;
     }
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
-    const task = await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
+    const previous = Array.isArray(node?.images)
+        ? node.images.find(item => item?.url && item.url !== source.url)
+        : null;
+    const refs = [{...source, kind:'image'}, ...(previous ? [{...previous, kind:'image'}] : [])];
+    const task = previous
+        ? await runApiGeneration(prompt, refs, runSettings)
+        : await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
     const taskId = task?.taskIds?.[0];
     if(!taskId) throw new Error('角度调整任务创建失败');
     const result = await pollSmartCanvasTask(taskId);

@@ -429,6 +429,9 @@
     ];
     function normalizeAngle(node){
         node.angleAzimuth = ((Number.isFinite(Number(node.angleAzimuth)) ? Number(node.angleAzimuth) : 45) % 360 + 360) % 360;
+        // NBP 语义模式使用有符号水平角：左侧为负，右侧为正；保留 angleAzimuth 兼容旧画布。
+        node.angleYaw = clamp(Number.isFinite(Number(node.angleYaw)) ? Number(node.angleYaw) : signedAngleAzimuth(node.angleAzimuth), -180, 180);
+        node.angleAzimuth = (node.angleYaw + 360) % 360;
         node.angleElevation = clamp(Number.isFinite(Number(node.angleElevation)) ? node.angleElevation : 0, -30, 60);
         node.angleDistance = ['close','medium','wide'].includes(node.angleDistance) ? node.angleDistance : 'medium';
         node.angleLens = ['24','35','50','85'].includes(String(node.angleLens)) ? String(node.angleLens) : '50';
@@ -452,7 +455,7 @@
         return ['高俯视','high-angle shot'];
     }
     function angleControlSignature(node){
-        return [Math.round(Number(node.angleAzimuth)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
+        return [Math.round(Number(node.angleYaw)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
     }
     function signedAngleAzimuth(value){
         const normalized = ((Number(value) || 0) % 360 + 360) % 360;
@@ -482,29 +485,30 @@
         if(subject === 'scene') return 'SCENE TOPOLOGY LOCK: Keep walls, windows, doors, mirrors, furniture and props at fixed world coordinates. Preserve adjacency; complete newly visible architecture conservatively.';
         return 'ANATOMICAL CHIRALITY LOCK: Preserve anatomical left/right, head/body/gaze direction, hair part, jewelry side, hand-to-prop assignment, grip and crossed-leg order. Keep the person motionless; let the new camera change facial and body occlusion.';
     }
+    function angleDirectionText(value){
+        const yaw = Number(value) || 0;
+        if(Math.abs(yaw) < 0.5) return '正面';
+        return yaw < 0 ? `左侧 ${Math.abs(Math.round(yaw))}°` : `右侧 ${Math.abs(Math.round(yaw))}°`;
+    }
     function buildAnglePrompt(node){
         normalizeAngle(node);
+        const yaw = Math.round(Number(node.angleYaw) || 0);
         const azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
         const distance = node.angleDistance === 'close' ? ['近景','close-up'] : node.angleDistance === 'wide' ? ['远景','wide shot'] : ['中景','medium shot'];
-        const subject = node.angleSubject === 'product' ? '产品/物体' : node.angleSubject === 'scene' ? '场景空间' : '人物主体';
-        const preserve = node.anglePreserve
-            ? 'CONTENT LOCK: Preserve identity, facial geometry, proportions, pose, expression, wardrobe, materials, object count, lighting and environment. Preserve physical content, not Image 1 pixel positions.'
-            : 'CONTENT LOCK: Preserve identity, design, world-space pose and scene while reprojecting them from the target camera.';
+        const subject = node.angleSubject === 'product' ? 'the product and its asymmetric details' : node.angleSubject === 'scene' ? 'the same physical room and world layout' : 'the same person, identity and pose';
+        const side = yaw < 0 ? 'camera-left' : yaw > 0 ? 'camera-right' : 'straight-on';
+        const view = yaw === 0 ? 'front view' : `${Math.abs(yaw)}-degree ${side} three-quarter view`;
+        const preserve = node.anglePreserve ? 'Keep identity, proportions, pose, clothing, materials, lighting and background consistent.' : 'Keep the design and world layout consistent while changing the viewpoint.';
         return [
-            DEFAULT_ANGLE_PROMPT,
-            'EXECUTION: Infer a coarse 3D scene from Image 1, discard its 2D projection, then render a fresh image from the target camera.',
-            'CAMERA COORDINATE SYSTEM: Image 1 defines azimuth 0°, elevation 0° and camera-right +X. Every world object remains fixed.',
-            `CAMERA TRANSFORM: ${angleOrbitInstruction(node.angleAzimuth)} Set camera elevation to ${Math.round(node.angleElevation)}° (${elevation[1]}). Target view: ${azimuth[2]}.`,
-            angleParallaxInstruction(node.angleAzimuth),
-            `OPTICS: ${distance[1]}, ${node.angleLens}mm lens. Keep approximately the same subject scale and image region; use the new camera’s perspective and horizon.`,
-            'WORLD COORDINATE LOCK: Preserve each object’s world position, orientation and topology. Screen position may change only by reprojection; never exchange physical left and right.',
-            angleSubjectLock(node.angleSubject),
-            'MIRROR LOCK: Existing mirror/glass stays fixed. Show ray-consistent content only inside it; never add a mirror, reflected room or duplicate subject.',
-            'STYLE CONSISTENCY LOCK: Image 1 is the sole color-grade reference. Preserve its white balance, exposure, contrast curve, saturation, hue relationships, shadow density, highlight rolloff, grain/noise, lens rendering and illumination direction. Reuse the same LUT-like grade across the new view; do not introduce a new golden/blue cast or relight the scene.',
-            'COLOR MATCH CHECK: Before returning, compare the new view against Image 1 and correct global RGB/luminance statistics so the palette and tonal mood remain indistinguishable while only the camera viewpoint changes.',
+            'CAMERA COORDINATE SYSTEM: Image 1 is the original reference; camera-right +X, left is camera-left and right is camera-right.',
+            `Recreate ${subject} from a new camera position: ${view}. Place the camera at the same height and distance, ${elevation[1]}, ${distance[1]}, ${node.angleLens}mm perspective.`,
+            `Show the target ${azimuth[2]} clearly; reveal the correct near-side surfaces and natural occlusion. Keep the horizon and perspective physically plausible.`,
             preserve,
-            'VALIDITY TEST: Never flip, mirror or rotate Image 1 in 2D. Each signed orbit is a new camera ray through the same frozen world.',
-            node.angleNotes ? `补充要求：${node.angleNotes.trim()}` : ''
+            'WORLD COORDINATE LOCK: Preserve physical content, not Image 1 pixel positions. Each signed orbit is a new camera ray.',
+            'MIRROR LOCK: Never flip, mirror or rotate Image 1; a source-matching or near-copy view is invalid.',
+            'STYLE CONSISTENCY LOCK: Keep Image 1 color, lighting and material response consistent. COLOR MATCH CHECK: correct only global tone, never the camera viewpoint.',
+            'If Image 2 is provided, use it only as continuity reference for the previous accepted angle.',
+            node.angleNotes ? `Additional requirements: ${node.angleNotes.trim()}` : ''
         ].filter(Boolean).join('\n');
     }
     function angleBodyHtml(node){
@@ -528,13 +532,13 @@
                     <div class="angle-camera-marker" data-angle-marker><i data-lucide="camera"></i><span class="angle-camera-depth" data-angle-depth>前</span></div>
                     <span class="angle-front-label">正面 0°</span><span class="angle-back-label">背面 180°</span><span class="angle-left-label">左侧 270°</span><span class="angle-right-label">右侧 90°</span>
                 </div>
-                <div class="angle-readout"><strong data-angle-azimuth>水平 ${Math.round(node.angleAzimuth)}° · ${azimuth[1]}</strong><span data-angle-elevation>俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}</span><em>拖拽视图：左右=水平，上下=俯仰</em></div>
+                <div class="angle-readout"><strong data-angle-azimuth>水平 ${esc(angleDirectionText(node.angleYaw))} · ${azimuth[1]}</strong><span data-angle-elevation>俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}</span><em>左侧为负角度，右侧为正角度；拖拽视图可微调机位</em></div>
             </div>
             ${editGenerationControlsHtml(node)}
-            <div class="special-toolbar"><button type="button" data-special-action="upload-angle"><i data-lucide="upload"></i><span>导入图片</span></button><span class="special-model-hint"><i data-lucide="cloud-cog"></i>画布默认图片模型</span></div>
+            <div class="special-toolbar"><button type="button" data-special-action="upload-angle"><i data-lucide="upload"></i><span>导入图片</span></button><span class="special-model-hint"><i data-lucide="cloud-cog"></i>Nano Banana Pro 语义机位模式</span></div>
             <div class="angle-preset-row">${ANGLE_AZIMUTHS.map(item => `<button type="button" data-angle-preset="${item[0]}" class="${nearestAzimuth(node.angleAzimuth)[0] === item[0] ? 'active' : ''}">${item[0]}°</button>`).join('')}</div>
             <div class="special-settings-grid edit-settings-grid">
-                <label class="special-range wide"><span>水平环绕</span><input type="range" min="0" max="359" step="1" value="${node.angleAzimuth}" data-edit-field="angleAzimuth"></label>
+                <label class="special-range wide"><span>水平角（左负右正）</span><input type="range" min="-180" max="180" step="1" value="${Math.round(node.angleYaw)}" data-edit-field="angleYaw"></label>
                 <label class="special-range wide"><span>俯仰角</span><input type="range" min="-30" max="60" step="1" value="${node.angleElevation}" data-edit-field="angleElevation"></label>
                 <label><span>景别</span><select data-edit-field="angleDistance"><option value="close" ${node.angleDistance === 'close' ? 'selected' : ''}>近景</option><option value="medium" ${node.angleDistance === 'medium' ? 'selected' : ''}>中景</option><option value="wide" ${node.angleDistance === 'wide' ? 'selected' : ''}>远景</option></select></label>
                 <label><span>镜头</span><select data-edit-field="angleLens"><option value="24" ${node.angleLens === '24' ? 'selected' : ''}>24mm 广角</option><option value="35" ${node.angleLens === '35' ? 'selected' : ''}>35mm</option><option value="50" ${node.angleLens === '50' ? 'selected' : ''}>50mm 标准</option><option value="85" ${node.angleLens === '85' ? 'selected' : ''}>85mm 人像</option></select></label>
@@ -1029,7 +1033,7 @@
         }
         const azimuth = nearestAzimuth(node.angleAzimuth), elevation = angleElevationText(node.angleElevation);
         const azimuthEl = root.querySelector('[data-angle-azimuth]'), elevationEl = root.querySelector('[data-angle-elevation]');
-        if(azimuthEl) azimuthEl.textContent = `水平 ${Math.round(node.angleAzimuth)}° · ${azimuth[1]}`;
+        if(azimuthEl) azimuthEl.textContent = `水平 ${angleDirectionText(node.angleYaw)} · ${azimuth[1]}`;
         if(elevationEl) elevationEl.textContent = `俯仰 ${Math.round(node.angleElevation)}° · ${elevation[0]}`;
         root.querySelectorAll('[data-angle-preset]').forEach(button => button.classList.toggle('active', Number(button.dataset.anglePreset) === azimuth[0]));
     }
@@ -1114,7 +1118,12 @@
             control.addEventListener(eventName, event => {
                 event.stopPropagation(); const key = control.dataset.editField;
                 let value = control.type === 'checkbox' ? control.checked : control.value;
-                if(['relightTemperature','relightIntensity','angleAzimuth','angleElevation'].includes(key)) value = Number(value);
+                if(['relightTemperature','relightIntensity','angleAzimuth','angleYaw','angleElevation'].includes(key)) value = Number(value);
+                if(key === 'angleYaw'){
+                    value = clamp(value, -180, 180);
+                    node.angleYaw = value;
+                    node.angleAzimuth = (value + 360) % 360;
+                }
                 node[key] = value; source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
         });
@@ -1129,8 +1138,8 @@
         root.querySelectorAll('[data-angle-preset]').forEach(button => {
             button.addEventListener('pointerdown', event => event.stopPropagation());
             button.addEventListener('click', event => {
-                event.preventDefault(); event.stopPropagation(); node.angleAzimuth = Number(button.dataset.anglePreset || 0);
-                const slider = root.querySelector('[data-edit-field="angleAzimuth"]'); if(slider) slider.value = node.angleAzimuth;
+                event.preventDefault(); event.stopPropagation(); node.angleAzimuth = Number(button.dataset.anglePreset || 0); node.angleYaw = signedAngleAzimuth(node.angleAzimuth);
+                const slider = root.querySelector('[data-edit-field="angleYaw"]'); if(slider) slider.value = node.angleYaw;
                 source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
         });
@@ -1142,10 +1151,11 @@
                 const deltaX = event.clientX - lastX, deltaY = event.clientY - lastY;
                 if(!initial){
                     node.angleAzimuth = ((Number(node.angleAzimuth || 0) + deltaX * 0.85) % 360 + 360) % 360;
+                    node.angleYaw = signedAngleAzimuth(node.angleAzimuth);
                     node.angleElevation = clamp(Number(node.angleElevation || 0) - deltaY * 0.55, -30, 60);
                     orbit.dataset.lastX = String(event.clientX); orbit.dataset.lastY = String(event.clientY);
                 }
-                const slider = root.querySelector('[data-edit-field="angleAzimuth"]'); if(slider) slider.value = Math.round(node.angleAzimuth);
+                const slider = root.querySelector('[data-edit-field="angleYaw"]'); if(slider) slider.value = Math.round(node.angleYaw);
                 const pitch = root.querySelector('[data-edit-field="angleElevation"]'); if(pitch) pitch.value = Math.round(node.angleElevation);
                 source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             };

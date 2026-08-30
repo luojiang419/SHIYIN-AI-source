@@ -18,8 +18,8 @@ from .data_layout import atomic_write_json
 DEPTH_MODEL_URL = "https://huggingface.co/Heliosoph/midas-small-onnx/resolve/main/midas_v21_small_256.onnx"
 DEPTH_MODEL_NAME = "midas_v21_small_256.onnx"
 DEPTH_MODEL_SIZE = 66_389_153
-# Hugging Face LFS ETag for this immutable model file; it is a SHA-256 digest.
-DEPTH_MODEL_SHA256 = "a97c4f93e8066901cb3874048071c8bc2442ff28c844e4aee2b48bc8ecf2861d"
+# SHA-256 of the pinned model file downloaded from the official Hugging Face resolve URL.
+DEPTH_MODEL_SHA256 = "b0a5b3f12625137e626805167907fe0410665bec671685d59daaa2daab19f977"
 DEPTH_MODEL_SET_VERSION = "midas-small-onnx-v21"
 
 

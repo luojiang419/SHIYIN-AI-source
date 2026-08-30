@@ -28,7 +28,7 @@
 
 - 静态检查：`py_compile`、3 个 `node --check` 已通过
 - 单元测试：`pytest -q tests/test_depth_reference.py tests/test_nbp_angle_mode.py`，7 passed
-- 运行测试：未下载 66MB 权重，未做真实深度推理 smoke test
+- 运行测试：已下载并校验 66MB 权重，真实深度推理输出 1792×2400；imgx 深度参考角度测试 4/4 成功
 - 最近 Git commit：`ef6fde1 feat: 增加角度节点深度与3D几何参考`
 - Git push：已推送到 `origin/feat/storyboard-merge-node`
 
@@ -92,3 +92,7 @@
 - `static/js/canvas-special-nodes.js`：新增几何参考选择、深度生成和导演台截图同步。
 - `static/js/canvas.js`、`static/js/smart-canvas.js`：固定多参考图顺序并避免导演台截图抢占原图主输入。
 - `static/canvas.html`、`static/smart-canvas.html`、CSS：更新缓存版本和节点样式。
+
+## 追加验证
+
+- 2026-08-30：使用 `D:\data\图片\20260820-195103.png` 和真实 MiDaS 深度图进行左 40°、右 40°、背面 180°、顶部约 35° 四角度 imgx 测试，3:4、2K、4 张，4/4 成功。详细结果见 `开发文档/NBP深度参考四角度测试报告-20260830.md`。左侧、背面、顶部命中明显，右侧 40° 偏正面，验证深度图是软几何约束。

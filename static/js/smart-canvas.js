@@ -10825,6 +10825,14 @@ function pickMediaForSmartNode(nodeId){
     document.body.appendChild(input);
     input.click();
 }
+function smartAngleGeometryReference(node){
+    const director = [...(canvas?.connections || [])].filter(connection => connection.to === node?.id)
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .filter(item => item?.specialType === 'director3d')
+        .reverse()[0];
+    const captures = Array.isArray(director?.directorCaptures) ? director.directorCaptures.filter(item => item?.url) : [];
+    return captures.length ? {...captures[captures.length - 1], kind:'image'} : null;
+}
 function smartSpecialInputImage(node, inputRole=''){
     if(inputRole){
         const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && (
@@ -10840,9 +10848,17 @@ function smartSpecialInputImage(node, inputRole=''){
         }
         return null;
     }
-    const connected = inputImagesFor(node).find(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image');
+    const connectedCandidates = inputImagesFor(node).filter(item => item?.url && (item.kind || mediaKindForItem(item)) === 'image');
+    const connected = node?.specialType === 'angle'
+        ? (connectedCandidates.find(item => item.nodeId && nodes.find(candidate => candidate.id === item.nodeId)?.specialType !== 'director3d') || connectedCandidates[0])
+        : connectedCandidates[0];
     if(connected) return connected;
     const connections = [...(canvas?.connections || [])].filter(item => item.to === node.id).reverse();
+    if(node?.specialType === 'angle') connections.sort((a, b) => {
+        const ad = nodes.find(item => item.id === a.from)?.specialType === 'director3d' ? 1 : 0;
+        const bd = nodes.find(item => item.id === b.from)?.specialType === 'director3d' ? 1 : 0;
+        return ad - bd;
+    });
     for(const connection of connections){
         const source = nodes.find(item => item.id === connection.from);
         const fallback = source ? imagesForNode(source).find(item => item?.url && mediaKindForItem(item) === 'image') : null;
@@ -10903,8 +10919,13 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     const previous = Array.isArray(node?.images)
         ? node.images.find(item => item?.url && item.url !== source.url)
         : null;
-    const refs = [{...source, kind:'image'}, ...(previous ? [{...previous, kind:'image'}] : [])];
-    const task = previous
+    const geometry = kind === 'angle' && node.angleGeometryMode === 'depth' && node.angleDepthUrl
+        ? {url:node.angleDepthUrl, name:node.angleDepthName || 'depth.png', kind:'image', natural_w:node.angleDepthWidth || 0, natural_h:node.angleDepthHeight || 0}
+        : kind === 'angle' && node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl
+            ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image', natural_w:node.angleDirectorCaptureWidth || 0, natural_h:node.angleDirectorCaptureHeight || 0}
+            : null;
+    const refs = [{...source, kind:'image'}, ...(geometry ? [{...geometry, kind:'image'}] : []), ...(previous ? [{...previous, kind:'image'}] : [])];
+    const task = previous || geometry
         ? await runApiGeneration(prompt, refs, runSettings)
         : await runApiGeneration(prompt, [{...source, kind:'image'}], runSettings);
     const taskId = task?.taskIds?.[0];
@@ -11990,6 +12011,7 @@ function bindSmartSpecialNode(el, node){
         smart:true,
         canvasKey:`smart:${canvas?.id || ''}`,
         getInputImage:smartSpecialInputImage,
+        getAngleGeometryReference:smartAngleGeometryReference,
         resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
         generatePanorama:generateSmartPanorama,
         generateImageEdit:generateSmartSpecialEdit,

@@ -7,6 +7,7 @@ from .maintenance import MaintenanceManager
 from .paths import APP_PATHS
 from .secrets import SecretStore
 from .dwpose_models import DWPoseModelManager
+from .depth_models import DepthModelManager
 
 
 ADMIN_DATA_LAYOUT = DataLayout.from_app_paths(APP_PATHS)
@@ -30,6 +31,7 @@ SECRET_STORE.load_into_environ()
 ACCOUNT_STORE = AccountStore(APP_PATHS.data_root)
 ACCOUNT_STORE.initialize()
 DWPOSE_MODEL_MANAGER = DWPoseModelManager(ACCOUNT_STORE.system_root / "models" / "dwpose")
+DEPTH_MODEL_MANAGER = DepthModelManager(ACCOUNT_STORE.system_root / "models" / "depth")
 ACCOUNT_STORAGE = AccountStorageRegistry(ACCOUNT_STORE, ADMIN_DATA_LAYOUT, ADMIN_DATABASE)
 DATA_LAYOUT = ScopedDataLayoutProxy(ACCOUNT_STORAGE)
 DATABASE = ScopedDatabaseProxy(ACCOUNT_STORAGE)

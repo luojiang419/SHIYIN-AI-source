@@ -437,6 +437,11 @@
         node.angleLens = ['24','35','50','85'].includes(String(node.angleLens)) ? String(node.angleLens) : '50';
         node.angleSubject = ['person','product','scene'].includes(node.angleSubject) ? node.angleSubject : 'person';
         node.anglePreserve = node.anglePreserve !== false;
+        node.angleGeometryMode = ['none','depth','director3d'].includes(node.angleGeometryMode) ? node.angleGeometryMode : 'none';
+        node.angleDepthUrl = String(node.angleDepthUrl || '');
+        node.angleDepthName = String(node.angleDepthName || '');
+        node.angleDirectorCaptureUrl = String(node.angleDirectorCaptureUrl || '');
+        node.angleDirectorCaptureName = String(node.angleDirectorCaptureName || '');
         node.angleNotes = String(node.angleNotes || '');
         return node;
     }
@@ -455,7 +460,7 @@
         return ['高俯视','high-angle shot'];
     }
     function angleControlSignature(node){
-        return [Math.round(Number(node.angleYaw)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
+        return [Math.round(Number(node.angleYaw)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes,node.angleGeometryMode,node.angleDepthUrl,node.angleDirectorCaptureUrl,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
     }
     function signedAngleAzimuth(value){
         const normalized = ((Number(value) || 0) % 360 + 360) % 360;
@@ -507,7 +512,9 @@
             'WORLD COORDINATE LOCK: Preserve physical content, not Image 1 pixel positions. Each signed orbit is a new camera ray.',
             'MIRROR LOCK: Never flip, mirror or rotate Image 1; a source-matching or near-copy view is invalid.',
             'STYLE CONSISTENCY LOCK: Keep Image 1 color, lighting and material response consistent. COLOR MATCH CHECK: correct only global tone, never the camera viewpoint.',
-            'If Image 2 is provided, use it only as continuity reference for the previous accepted angle.',
+            node.angleGeometryMode === 'depth' && node.angleDepthUrl ? 'GEOMETRY REFERENCE: Image 2 is a grayscale MiDaS relative-depth map. Use it only for near/far ordering, silhouette, occlusion and parallax; ignore its colors and do not reproduce it.' : '',
+            node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl ? 'GEOMETRY REFERENCE: Image 2 is a 3D director render from the same character/scene. Use it for camera projection, proportions and occlusion; preserve Image 1 identity, clothing and materials.' : '',
+            'If a previous accepted angle is provided after the geometry reference, use it only as continuity reference.',
             node.angleNotes ? `Additional requirements: ${node.angleNotes.trim()}` : ''
         ].filter(Boolean).join('\n');
     }
@@ -538,6 +545,7 @@
             <div class="special-toolbar"><button type="button" data-special-action="upload-angle"><i data-lucide="upload"></i><span>导入图片</span></button><span class="special-model-hint"><i data-lucide="cloud-cog"></i>Nano Banana Pro 语义机位模式</span></div>
             <div class="angle-preset-row">${ANGLE_AZIMUTHS.map(item => `<button type="button" data-angle-preset="${item[0]}" class="${nearestAzimuth(node.angleAzimuth)[0] === item[0] ? 'active' : ''}">${item[0]}°</button>`).join('')}</div>
             <div class="special-settings-grid edit-settings-grid">
+                <label><span>几何参考</span><select data-edit-field="angleGeometryMode"><option value="none" ${node.angleGeometryMode === 'none' ? 'selected' : ''}>无（语义模式）</option><option value="depth" ${node.angleGeometryMode === 'depth' ? 'selected' : ''}>自动深度图</option><option value="director3d" ${node.angleGeometryMode === 'director3d' ? 'selected' : ''}>3D导演台截图</option></select></label>
                 <label class="special-range wide"><span>水平角（左负右正）</span><input type="range" min="-180" max="180" step="1" value="${Math.round(node.angleYaw)}" data-edit-field="angleYaw"></label>
                 <label class="special-range wide"><span>俯仰角</span><input type="range" min="-30" max="60" step="1" value="${node.angleElevation}" data-edit-field="angleElevation"></label>
                 <label><span>景别</span><select data-edit-field="angleDistance"><option value="close" ${node.angleDistance === 'close' ? 'selected' : ''}>近景</option><option value="medium" ${node.angleDistance === 'medium' ? 'selected' : ''}>中景</option><option value="wide" ${node.angleDistance === 'wide' ? 'selected' : ''}>远景</option></select></label>
@@ -546,6 +554,7 @@
             </div>
             <label class="special-check"><input type="checkbox" data-edit-field="anglePreserve" ${node.anglePreserve ? 'checked' : ''}><span>严格锁定主体身份、造型与环境连续性</span></label>
             <textarea class="special-prompt" data-edit-field="angleNotes" rows="2" placeholder="可选：补充动作、视线或构图要求">${esc(node.angleNotes)}</textarea>
+            <div class="angle-geometry-row"><span>${node.angleGeometryMode === 'depth' && node.angleDepthUrl ? `深度图已就绪 · ${esc(node.angleDepthName || 'depth.png')}` : node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl ? `导演台参考已就绪 · ${esc(node.angleDirectorCaptureName || 'director.png')}` : '可选：为更稳定的遮挡和透视生成几何参考'}</span><button type="button" data-special-action="generate-angle-depth" ${node.angleDepthGenerating ? 'disabled' : ''}><i data-lucide="${node.angleDepthGenerating ? 'loader-2' : 'layers-2'}"></i><span>${node.angleDepthGenerating ? '生成深度中' : '生成深度图'}</span></button></div>
             <div class="special-output-row"><span data-edit-status>${output?.url ? `新视角结果已就绪 · ${esc(output.name || 'angle.png')}` : '拖动圆环选机位，点击后才会调用 API'}</span><button type="button" class="special-primary" data-special-action="run-angle" ${node.specialRunning ? 'disabled' : ''}><i data-lucide="${node.specialRunning ? 'loader-2' : 'camera'}"></i><span>${node.specialRunning ? '生成中' : '生成新视角'}</span></button></div>
         </div>`;
     }
@@ -1089,10 +1098,40 @@
         });
         return changed;
     }
+    async function generateAngleDepth(node, options, source){
+        if(!source?.url) throw new Error('请先连接或导入原图');
+        const form = new FormData();
+        const response = await fetch(source.url, {credentials:'include'});
+        if(!response.ok) throw new Error('原图读取失败，无法生成深度图');
+        form.append('file', await response.blob(), source.name || 'angle-source.png');
+        const result = await fetch('/api/depth/estimate', {method:'POST', body:form});
+        if(!result.ok) throw new Error(await responseError(result, '深度模型尚未就绪，请稍后重试'));
+        const width = Number(result.headers.get('X-Depth-Width') || source.natural_w || 0);
+        const height = Number(result.headers.get('X-Depth-Height') || source.natural_h || 0);
+        const file = await uploadBlob(await result.blob(), `depth-${Date.now()}.png`);
+        file.natural_w = width || file.natural_w || 0; file.natural_h = height || file.natural_h || 0;
+        node.angleDepthUrl = file.url; node.angleDepthName = file.name || 'depth.png';
+        node.angleDepthWidth = file.natural_w; node.angleDepthHeight = file.natural_h;
+        node.angleGeometryMode = 'depth'; node.angleDepthGenerating = false; node.angleDepthError = '';
+        options.onChange?.(node, {render:true});
+        return file;
+    }
+    function syncDirectorReference(node, options){
+        if(node.angleGeometryMode !== 'director3d') return null;
+        const ref = options.getAngleGeometryReference?.(node);
+        if(ref?.url){
+            node.angleDirectorCaptureUrl = ref.url; node.angleDirectorCaptureName = ref.name || 'director-3d.png';
+            node.angleDirectorCaptureWidth = Number(ref.natural_w || ref.width || 0); node.angleDirectorCaptureHeight = Number(ref.natural_h || ref.height || 0);
+            return ref;
+        }
+        return node.angleDirectorCaptureUrl ? {url:node.angleDirectorCaptureUrl,name:node.angleDirectorCaptureName || 'director-3d.png',kind:'image',natural_w:node.angleDirectorCaptureWidth || 0,natural_h:node.angleDirectorCaptureHeight || 0} : null;
+    }
+
     function bindEditNode(root, node, options, prefix){
         if(!root || !node) return;
         if(prefix === 'relight') normalizeRelight(node); else normalizeAngle(node);
         normalizeEditGeneration(node);
+        if(prefix === 'angle') syncDirectorReference(node, options);
         let source = editSource(node, options, prefix);
         // 上游端口是输入真相；同时把解析到的图片快照写回节点，避免刷新/重绘时只剩空占位。
         if(persistEditSource(node, prefix, source)) notify(options, node, false);
@@ -1169,10 +1208,21 @@
             button.addEventListener('click', async event => {
                 event.preventDefault(); event.stopPropagation(); const action = button.dataset.specialAction;
                 if(action === `upload-${prefix}`){ fileInput?.click(); return; }
+                if(action === 'generate-angle-depth' && prefix === 'angle'){
+                    try {
+                        source = editSource(node, options, prefix); persistEditSource(node, prefix, source);
+                        if(!source?.url) throw new Error('请先连接或导入原图');
+                        node.angleDepthGenerating = true; node.angleDepthError = ''; notify(options, node, true);
+                        await generateAngleDepth(node, options, source);
+                        notify(options, node, true); options.toast?.('深度参考图已生成，下一次角度请求会自动携带');
+                    } catch(error){ node.angleDepthGenerating = false; node.angleDepthError = error.message || '深度图生成失败'; notify(options, node, true); options.toast?.(node.angleDepthError); }
+                    return;
+                }
                 if(action !== `run-${prefix}`) return;
                 try {
                     source = editSource(node, options, prefix);
                     persistEditSource(node, prefix, source);
+                    if(prefix === 'angle') syncDirectorReference(node, options);
                     if(!source?.url) throw new Error('请先连接或导入一张图片');
                     if(!options.generateImageEdit) throw new Error('当前画布未配置图片 API 生成能力');
                     node.specialRunning = true;

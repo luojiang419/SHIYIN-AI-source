@@ -8583,20 +8583,30 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
+function classicAngleGeometryReference(node){
+    const director = connections.filter(connection => connection.to === node?.id)
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .filter(item => item?.type === 'director3d')
+        .reverse()[0];
+    const captures = Array.isArray(director?.directorCaptures) ? director.directorCaptures.filter(item => item?.url) : [];
+    return captures.length ? {...captures[captures.length - 1], kind:'image'} : null;
+}
 function classicSpecialInputImage(node, inputRole=''){
     const sources = connections
         .filter(connection => connection.to === node.id && (!inputRole || connection.inputRole === inputRole))
         .map(connection => nodes.find(item => item.id === connection.from))
         .filter(Boolean)
         .reverse();
-    if(!sources.length && !inputRole && Array.isArray(node?.inputNodeIds)){
+    // 角度节点可以同时连接原图和 3D 导演台；导演台截图只做几何参考，不能抢走原图主输入。
+    const orderedSources = node?.type === 'angle' ? [...sources.filter(item => item.type !== 'director3d'), ...sources.filter(item => item.type === 'director3d')] : sources;
+    if(!orderedSources.length && !inputRole && Array.isArray(node?.inputNodeIds)){
         node.inputNodeIds
             .map(id => nodes.find(item => item.id === id))
             .filter(Boolean)
             .reverse()
             .forEach(source => sources.push(source));
     }
-    for(const source of sources){
+    for(const source of orderedSources){
         const refs = [
             ...mediaRefsFromNode(source),
             ...(source.type === 'image' && source.url ? [{url:source.url, name:source.name || 'image', kind:'image'}] : []),
@@ -8645,6 +8655,11 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const previous = node?.outputUrl && node.outputUrl !== source.url
         ? {url:node.outputUrl, name:node.outputName || 'previous-angle.png', kind:'image'}
         : null;
+    const geometry = kind === 'angle' && node.angleGeometryMode === 'depth' && node.angleDepthUrl
+        ? {url:node.angleDepthUrl, name:node.angleDepthName || 'depth.png', kind:'image', natural_w:node.angleDepthWidth || 0, natural_h:node.angleDepthHeight || 0}
+        : kind === 'angle' && node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl
+            ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image', natural_w:node.angleDirectorCaptureWidth || 0, natural_h:node.angleDirectorCaptureHeight || 0}
+            : null;
     const payload = {
         prompt,
         operation:kind === 'angle' ? 'angle_change' : 'relight',
@@ -8653,7 +8668,7 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
         model:resolveImageModel(node.editModel || model),
         size:apiImageSize('custom', node.editResolution || '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
         quality:node.editQuality || 'high',
-        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}].concat(previous ? [previous] : [])
+        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}].concat(geometry ? [geometry] : []).concat(previous ? [previous] : [])
     };
     const task = await createCanvasImageTask(payload);
     const result = await waitCanvasImageTaskResult(task.task_id);
@@ -9481,6 +9496,7 @@ function bindClassicSpecialNode(el, node){
         smart:false,
         canvasKey:`classic:${canvas?.id || ''}`,
         getInputImage:classicSpecialInputImage,
+        getAngleGeometryReference:classicAngleGeometryReference,
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
         generateImageEdit:generateClassicSpecialEdit,

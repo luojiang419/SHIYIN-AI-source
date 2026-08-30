@@ -53,6 +53,7 @@ from canvas_core.storage_bootstrap import (
     ADMIN_DATABASE,
     DATA_LAYOUT,
     DATABASE,
+    DEPTH_MODEL_MANAGER,
     DWPOSE_MODEL_MANAGER,
     MAINTENANCE,
     MIGRATION_REPORT,
@@ -71,6 +72,7 @@ from canvas_core.accounts import (
 from canvas_core.account_storage import ScopedPath, current_account_id, reset_current_account, set_current_account
 from canvas_core.account_resources import AccountResourceService
 from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
+from canvas_core.depth_inference import DepthInference, DepthUnavailableError
 from canvas_core.database import RevisionConflict
 from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
@@ -176,6 +178,11 @@ DWPOSE_AUTO_DOWNLOAD_ENABLED = str(os.getenv("CANVAS_DWPOSE_AUTO_DOWNLOAD", "1")
     "no",
     "off",
 }
+DEPTH_INFERENCE = None
+DEPTH_INFERENCE_LOCK = Lock()
+DEPTH_AUTO_DOWNLOAD_ENABLED = str(os.getenv("CANVAS_DEPTH_AUTO_DOWNLOAD", "1")).strip().lower() not in {
+    "0", "false", "no", "off",
+}
 
 
 def render_dwpose_image(image: Image.Image):
@@ -187,6 +194,15 @@ def render_dwpose_image(image: Image.Image):
         if DWPOSE_INFERENCE is None:
             DWPOSE_INFERENCE = DWPoseInference(DWPOSE_MODEL_MANAGER)
     return DWPOSE_INFERENCE.render(np.asarray(image, dtype=np.uint8))
+
+
+def render_depth_image(image: Image.Image):
+    global DEPTH_INFERENCE
+    import numpy as np
+    with DEPTH_INFERENCE_LOCK:
+        if DEPTH_INFERENCE is None:
+            DEPTH_INFERENCE = DepthInference(DEPTH_MODEL_MANAGER)
+    return DEPTH_INFERENCE.render(np.asarray(image, dtype=np.uint8))
 
 QUIET_ACCESS_PATHS = {
     "/api/canvases",
@@ -497,6 +513,8 @@ async def startup_event():
     GLOBAL_LOOP = asyncio.get_running_loop()
     if DWPOSE_AUTO_DOWNLOAD_ENABLED:
         DWPOSE_MODEL_MANAGER.start_background()
+    if DEPTH_AUTO_DOWNLOAD_ENABLED:
+        DEPTH_MODEL_MANAGER.start_background()
     try:
         report = await asyncio.to_thread(prune_removed_provider_presets_once)
         if report.get("removed"):
@@ -22822,6 +22840,75 @@ def runninghub_collect_workflow_fields(workflow_json):
                 "required": field_type == "IMAGE",
             })
     return fields
+
+# Optional geometry reference service.  It is deliberately CPU-only and does not
+# participate in ordinary image generation unless the angle node opts in.
+@app.get("/api/admin/depth/status")
+def admin_depth_status(request: Request):
+    require_admin(request)
+    return DEPTH_MODEL_MANAGER.status()
+
+
+@app.post("/api/admin/depth/retry", status_code=202)
+def admin_depth_retry(request: Request):
+    require_admin(request)
+    started = DEPTH_MODEL_MANAGER.start_background()
+    return {"started": started, "status": DEPTH_MODEL_MANAGER.status()}
+
+
+@app.get("/api/depth/status")
+def depth_status(request: Request):
+    request_identity(request)
+    return DEPTH_MODEL_MANAGER.public_status()
+
+
+@app.post("/api/depth/estimate")
+async def estimate_depth(request: Request, file: UploadFile = File(...)):
+    request_identity(request)
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="深度输入图片为空")
+    if len(content) > DWPOSE_INPUT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="深度输入图片不能超过 25MB")
+    try:
+        image = prepare_dwpose_input(
+            content,
+            decode_max_pixels=DWPOSE_INPUT_MAX_PIXELS,
+            inference_max_pixels=DWPOSE_INFERENCE_MAX_PIXELS,
+            inference_max_edge=DWPOSE_INFERENCE_MAX_EDGE,
+        )
+    except DWPoseInputTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc).replace("DWPose", "深度")) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="深度输入图片无法读取") from exc
+    status = DEPTH_MODEL_MANAGER.status()
+    if not status.get("ready") and not await asyncio.to_thread(DEPTH_MODEL_MANAGER.verify_installed):
+        if DEPTH_AUTO_DOWNLOAD_ENABLED:
+            DEPTH_MODEL_MANAGER.start_background()
+        detail = str(DEPTH_MODEL_MANAGER.status().get("message") or "深度模型尚未下载完成")
+        raise HTTPException(status_code=503, detail=detail)
+    try:
+        result = await asyncio.to_thread(render_depth_image, image)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DepthUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        print(f"深度本地推理失败: {exc}")
+        raise HTTPException(status_code=500, detail="深度本地推理失败，请重试") from exc
+    output = BytesIO()
+    Image.fromarray(result.image_gray, mode="L").save(output, format="PNG", compress_level=4)
+    return Response(
+        output.getvalue(),
+        media_type="image/png",
+        headers={
+            "X-Depth-Width": str(result.width),
+            "X-Depth-Height": str(result.height),
+            "X-Depth-Model": "midas_v21_small_256",
+            "Cache-Control": "no-store",
+        },
+    )
+
 
 if __name__ == "__main__":
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，

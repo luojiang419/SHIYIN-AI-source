@@ -116,3 +116,33 @@ Place the camera 40 degrees to the subject's left (camera-left), at the same hei
 
 对“必须精准得到任意 40°/90°/180°产品视角”的需求，最高可行性是**真实 3D/深度代理确定几何，再由 NBP 做外观精修**。如果不接受 3D 资产准备，则应接受角度为离散近似，并优先考虑 Qwen 多角度 LoRA 这类真正经过姿态训练的模型，而不是继续增加 NBP 节点中的数字和否定词。
 
+## 8. LoRA 对画质与 16GB 显存的影响
+
+### 8.1 LoRA 会不会降低画质
+
+多角度 LoRA 是约 295MB 级别的适配器，主要改变相机姿态条件，不会像把主模型换成低清模型那样必然降低画质。正确加载在 Qwen-Image-Edit-2511 上、强度从 0.8–0.9 开始时，通常能换来更稳定的视角命中；但它可能带来轻微的构图偏置、细节重绘或纹理变化，尤其是目标角度不在训练的 96 个离散组合内时。[模型卡](https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA)
+
+画质的主要决定因素是主模型精度和工作流设置：社区测试认为 FP8 主模型质量高于低位数 GGUF，Q6 及以下量化会出现可见质量下降；Lightning 蒸馏 LoRA 可能造成塑料皮肤和过度平滑，应先用普通 20 步工作流验证角度，再考虑加速。[Qwen Edit 质量测试](https://www.reddit.com/r/comfyui/comments/1tqm4pb/cracked_the_case_on_high_res_quality_qwen_edit/)
+
+### 8.2 16GB 显存能否运行
+
+可以运行，但要区分“能启动”和“高质量、速度可接受”：
+
+| 配置 | 16GB 显存可行性 | 预期 |
+|---|---|---|
+| Qwen Edit 2511 BF16/FP8 全量 + 多角度 LoRA | 不推荐直接全显存运行 | 通常需要更大显存或大量系统内存 offload |
+| Q4/Q5 GGUF + 多角度 LoRA | 可以 | 角度功能可用，速度中等，画质低于 FP8 |
+| Q3 GGUF + 多角度 LoRA | 可以，最稳妥的低显存方案 | 画质进一步下降，但社区已有 16GB 显卡成功运行案例 |
+| 低分辨率预览后再高分辨率精修 | 推荐 | 先验证角度，减少显存和等待时间 |
+
+社区有 16GB RTX 5060 Ti 使用 Q3 量化运行多角度工作流的案例；另有测试指出 FP8 模型约 22GB，依靠 ComfyUI block swapping 可以在低于 24GB 显存上运行，但系统内存越少越慢，建议至少 32GB RAM。[16GB 运行案例](https://www.reddit.com/r/StableDiffusion/comments/1v576c1/qwen_multi_angle_workflow/)、[FP8/GGUF 显存测试](https://www.reddit.com/r/comfyui/comments/1tqm4pb/cracked_the_case_on_high_res_quality_qwen_edit/)
+
+### 8.3 推荐的 16GB 配置
+
+* 主模型：Qwen-Image-Edit-2511 的 Q4_K_M 或 Q3 GGUF；如果系统内存达到 32GB 以上，可尝试 FP8 + block swapping。
+* 多角度 LoRA：`fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`，强度从 0.85–0.9 开始。
+* 文本编码器：尽量使用官方 FP8 `qwen_2.5_vl_7b_fp8_scaled`，不要再叠加低精度文本编码器。
+* 生成策略：先用 768–1024 边长、10–15 步测试角度；确认方向正确后再提高到 1K/2K 和 20 步。
+* 不建议一开始叠加 Lightning LoRA；它虽然省时间，但可能明显损失皮肤和材质质感。
+
+因此，16GB 显卡适合把该 LoRA 当作“角度验证和批量预览工具”。若最终交付要求最高纹理质量，建议用 16GB 本地显卡确定角度，再用更高显存机器或云端 FP8/BF16 工作流完成最终渲染。

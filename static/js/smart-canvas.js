@@ -1783,6 +1783,11 @@ function smartFilmConnectedPromptText(node){
         return promptTextItemsForNode(source);
     }).flat().map(text => String(text || '').trim()).filter(Boolean).join('\n\n');
 }
+function smartFilmConnectedPromptTextForSubmission(node){
+    const connected = smartFilmConnectedPromptText(node);
+    const consumed = String(node?._videoPromptExternalSnapshot || '').trim();
+    return consumed && connected === consumed ? '' : connected;
+}
 function smartFilmStoryboardAncestors(sourceId, seen=new Set()){
     if(!sourceId || seen.has(sourceId)) return [];
     seen.add(sourceId);
@@ -1930,7 +1935,7 @@ async function runSmartFilmNode(node){
     const api=window.CanvasFilmNodes;
     const assets=filmSmartAssets(node);
     const settingsForNodeRun=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
-    const built=api.buildPrompt({...node,apiProvider:node.apiProvider || settingsForNodeRun.videoProvider || settingsForNodeRun.provider_id,model:node.model || settingsForNodeRun.videoModel || settingsForNodeRun.model},assets,{provider:node.apiProvider,model:node.model,promptText:target => smartFilmConnectedPromptText(target)});
+    const built=api.buildPrompt({...node,apiProvider:node.apiProvider || settingsForNodeRun.videoProvider || settingsForNodeRun.provider_id,model:node.model || settingsForNodeRun.videoModel || settingsForNodeRun.model},assets,{provider:node.apiProvider,model:node.model,promptText:target => smartFilmConnectedPromptTextForSubmission(target)});
     if(!built.prompt){ toast('请先输入生成需求或连接影视参考资产'); return; }
     const meta=snapshotRunMeta(built.prompt,node.id,built.prompt,built.refs);
     meta.settings=settingsForStorage(settingsForNodeRun);

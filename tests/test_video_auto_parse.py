@@ -140,6 +140,18 @@ def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():
     assert "const mode=autoParseNow ? 'auto-parse'" in FILM
 
 
+def test_refilled_prompt_does_not_resubmit_unchanged_connected_prompt():
+    # 解析/润色结果已经吸收外部提示词后，生成请求应跳过同一份已消费文本；
+    # 相关快照只在外部文本未变化时生效，修改外部节点后仍会重新提交新要求。
+    assert "_videoPromptExternalSnapshot" in CANVAS
+    assert "connectedCanvasPromptTextForSubmission" in CANVAS
+    assert "const external = ['video','ecom-video'].includes(node?.type)" in CANVAS
+    assert "if(connectedPromptBeforeTask) node._videoPromptExternalSnapshot = connectedPromptBeforeTask" in CANVAS
+    assert "rememberExternalPromptSnapshot(node, options)" in FILM
+    assert "smartFilmConnectedPromptTextForSubmission" in SMART
+    assert "promptText:target => smartFilmConnectedPromptTextForSubmission(target)" in SMART
+
+
 def test_auto_parse_endpoint_keeps_four_images_and_story_prompt_together(monkeypatch):
     captured = {}
 

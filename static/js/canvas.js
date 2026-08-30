@@ -9981,7 +9981,7 @@ async function runFilmNode(nodeId, opts={}){
     if(!node) return;
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
     const api=window.CanvasFilmNodes;
-    const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptText(target)});
+    const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptTextForSubmission(target)});
     if(!built.prompt){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
     const refs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `图${index+1}`}));
     const out=outputForNode(node,560,true);
@@ -12512,7 +12512,16 @@ function llmInputVideos(node){
     return urls;
 }
 function combinedGeneratorPrompt(node, sources=[]){
-    return [String(node?.prompt || '').trim(), ...(sources || []).map(source => String(source?.prompt || '').trim())]
+    const promptParts = [String(node?.prompt || '').trim(), ...(sources || []).map(source => String(source?.prompt || '').trim())];
+    const connected = promptParts.slice(1).filter(Boolean).join('\n\n');
+    // 视频提示词解析/润色会把当时的外部提示词吸收到回填结果中。
+    // 外部文本未变化时不能再次拼接，否则同一要求会被提交两遍；外部文本
+    // 后续变化则保留新的文本，让用户修改后的要求仍能生效。
+    const consumed = String(node?._videoPromptExternalSnapshot || '').trim();
+    const external = ['video','ecom-video'].includes(node?.type) && consumed && connected === consumed
+        ? ''
+        : connected;
+    return [promptParts[0], external]
         .filter(Boolean)
         .join('\n\n');
 }
@@ -12522,6 +12531,11 @@ function connectedCanvasPromptText(node){
         .map(source => String(source?.prompt || '').trim())
         .filter(Boolean)
         .join('\n\n');
+}
+function connectedCanvasPromptTextForSubmission(node){
+    const connected = connectedCanvasPromptText(node);
+    const consumed = String(node?._videoPromptExternalSnapshot || '').trim();
+    return consumed && connected === consumed ? '' : connected;
 }
 function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
     const count = Math.max(0, Number(connectedPromptCount || 0));
@@ -19751,6 +19765,8 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         e.preventDefault(); e.stopPropagation();
         if(button.disabled) return;
         const original = input.value;
+        const connectedPromptBeforeTask = connectedCanvasPromptText(node);
+        const connectedPromptForTask = connectedCanvasPromptTextForSubmission(node);
         // 渲染时的 data-video-prompt-mode 可能因连接关系或输入框状态尚未同步而过期。
         // 点击瞬间重新判断：空提示词且仅连接图片时必须走自动解析，不能误调用
         // 需要非空文本的润色接口。
@@ -19765,7 +19781,9 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
             const showProgress = task => renderCanvasPromptTaskProgress(input, original, task);
             input.value = mode === 'auto-parse'
                 ? await autoParseCanvasVideoPrompt(node, refs, showProgress, currentPrompt)
-                : await polishCanvasVideoPrompt(node, currentPrompt, refs, showProgress);
+                : await polishCanvasVideoPrompt(node, [String(original || node.prompt || '').trim(), connectedPromptForTask].filter(Boolean).join('\n\n'), refs, showProgress);
+            if(connectedPromptBeforeTask) node._videoPromptExternalSnapshot = connectedPromptBeforeTask;
+            else delete node._videoPromptExternalSnapshot;
             input.dispatchEvent(new Event('input', {bubbles:true}));
         } catch(error) {
             showErrorModal(error.message || (mode === 'auto-parse' ? '自动解析失败' : '提示词润色失败'), mode === 'auto-parse' ? '自动解析' : '提示词润色');

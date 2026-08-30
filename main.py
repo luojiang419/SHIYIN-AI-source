@@ -422,6 +422,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 GLOBAL_LOOP = None
 STARTUP_MAINTENANCE_TASK = None
+STARTUP_RECOVERY_TASK = None
 STARTUP_MAINTENANCE_DELAY_SECONDS = 0.75
 STARTUP_MAINTENANCE_STATE = {
     "status": "pending",
@@ -508,8 +509,27 @@ async def run_deferred_startup_maintenance():
         if STARTUP_MAINTENANCE_STATE.get("status") != "cancelled":
             STARTUP_MAINTENANCE_STATE["status"] = "complete_with_errors" if failed else "complete"
 
+async def run_deferred_task_recovery():
+    """Restore persisted task state after the health endpoint is available."""
+    operations = (
+        ("在线生图任务", load_online_image_tasks_from_disk),
+        ("电商专用任务", load_ecommerce_tasks_from_disk),
+        ("画布视频任务", load_canvas_video_tasks_from_disk),
+    )
+    try:
+        for label, operation in operations:
+            try:
+                await asyncio.to_thread(operation)
+                if operation is load_canvas_video_tasks_from_disk:
+                    resume_canvas_video_tasks()
+            except Exception as exc:  # noqa: BLE001 - recovery must not block service readiness
+                print(f"{label}恢复失败: {exc}")
+    except asyncio.CancelledError:
+        raise
+
+
 async def startup_event():
-    global GLOBAL_LOOP, STARTUP_MAINTENANCE_TASK
+    global GLOBAL_LOOP, STARTUP_MAINTENANCE_TASK, STARTUP_RECOVERY_TASK
     GLOBAL_LOOP = asyncio.get_running_loop()
     if DWPOSE_AUTO_DOWNLOAD_ENABLED:
         DWPOSE_MODEL_MANAGER.start_background()
@@ -534,25 +554,22 @@ async def startup_event():
             )
     except Exception as exc:
         print(f"升级前输出占位清理失败: {exc}")
-    try:
-        await asyncio.to_thread(load_online_image_tasks_from_disk)
-    except Exception as exc:
-        print(f"在线生图任务恢复失败: {exc}")
-    try:
-        await asyncio.to_thread(load_ecommerce_tasks_from_disk)
-    except Exception as exc:
-        print(f"电商专用任务恢复失败: {exc}")
-    try:
-        await asyncio.to_thread(load_canvas_video_tasks_from_disk)
-        resume_canvas_video_tasks()
-    except Exception as exc:
-        print(f"画布视频任务恢复失败: {exc}")
-    # 文件遍历、历史素材修复和索引补偿不阻塞 /api/health；服务就绪后在后台顺序执行。
+    # 历史任务恢复可能读取大量持久化记录，不阻塞 /api/health 和首屏窗口。
+    STARTUP_RECOVERY_TASK = asyncio.create_task(run_deferred_task_recovery())
+    # 文件遍历、历史素材修复和索引补偿同样不阻塞 /api/health；服务就绪后在后台顺序执行。
     STARTUP_MAINTENANCE_TASK = asyncio.create_task(run_deferred_startup_maintenance())
 
 
 async def shutdown_startup_maintenance():
-    global STARTUP_MAINTENANCE_TASK
+    global STARTUP_MAINTENANCE_TASK, STARTUP_RECOVERY_TASK
+    recovery_task = STARTUP_RECOVERY_TASK
+    STARTUP_RECOVERY_TASK = None
+    if recovery_task and not recovery_task.done():
+        recovery_task.cancel()
+        try:
+            await recovery_task
+        except asyncio.CancelledError:
+            pass
     task = STARTUP_MAINTENANCE_TASK
     STARTUP_MAINTENANCE_TASK = None
     if task and not task.done():

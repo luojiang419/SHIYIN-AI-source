@@ -69,9 +69,11 @@ class DeferredBackendMaintenanceTests(unittest.TestCase):
             self.startup_body,
         )
 
-    def test_task_recovery_remains_ready_before_health(self):
-        self.assertIn("load_online_image_tasks_from_disk", self.startup_body)
-        self.assertIn("load_ecommerce_tasks_from_disk", self.startup_body)
+    def test_task_recovery_is_deferred_after_health(self):
+        self.assertNotIn("await asyncio.to_thread(load_online_image_tasks_from_disk)", self.startup_body)
+        self.assertNotIn("await asyncio.to_thread(load_ecommerce_tasks_from_disk)", self.startup_body)
+        self.assertIn("asyncio.create_task(run_deferred_task_recovery())", self.startup_body)
+        self.assertIn("async def run_deferred_task_recovery()", self.source)
 
     def test_deferred_maintenance_is_observable_and_failure_isolated(self):
         self.assertIn("async def run_deferred_startup_maintenance()", self.source)

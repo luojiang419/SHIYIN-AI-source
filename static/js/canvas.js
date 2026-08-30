@@ -4838,6 +4838,7 @@ function addStoryboardMergeNode(point){
         w:460,
         gap:32,
         images:[],
+        addSequence:false,
         runStatus:'',
         runError:''
     });
@@ -9862,6 +9863,29 @@ function loadStoryboardMergeImage(entry){
     });
 }
 
+function drawStoryboardSequenceBadge(ctx, index, x, y, height){
+    if(!ctx) return;
+    const badgeSize = Math.max(24, Math.min(72, Math.round(height * 0.055)));
+    const paddingX = Math.max(8, Math.round(badgeSize * 0.34));
+    const radius = Math.max(6, Math.round(badgeSize * 0.22));
+    const label = String(index + 1);
+    ctx.save();
+    ctx.font = `900 ${badgeSize}px Inter, Arial, sans-serif`;
+    ctx.textBaseline = 'middle';
+    const textWidth = Math.ceil(ctx.measureText(label).width);
+    const boxWidth = textWidth + paddingX * 2;
+    const boxHeight = badgeSize + Math.max(8, Math.round(badgeSize * 0.46));
+    const left = x + Math.max(12, Math.round(badgeSize * 0.34));
+    const top = y + Math.max(12, Math.round(badgeSize * 0.34));
+    ctx.beginPath();
+    ctx.roundRect(left, top, boxWidth, boxHeight, radius);
+    ctx.fillStyle = 'rgba(20, 20, 20, 0.78)';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, left + paddingX, top + boxHeight / 2);
+    ctx.restore();
+}
+
 async function runStoryboardMergeNode(nodeId){
     const node = nodes.find(item => item.id === nodeId && item.type === 'storyboardMerge');
     if(!node || node.running) return;
@@ -9899,6 +9923,7 @@ async function runStoryboardMergeNode(nodeId){
             const width = Math.max(1, Math.round(widths[index] * contentScale));
             const height = canvasHeight;
             ctx.drawImage(image, x, 0, width, height);
+            if(node.addSequence) drawStoryboardSequenceBadge(ctx, index, x, 0, height);
             x += width + drawGap;
         });
         const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
@@ -10038,7 +10063,10 @@ function renderNode(node){
         return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
     })() : '';
     const multiViewModeHtml = node.type === 'multiView' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${classicMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${classicMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${classicMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${classicMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
-    el.innerHTML = `<div class="node-head"><div class="node-title-wrap"><span class="node-title">${displayTitle}</span>${groupCountHtml}</div><div style="display:flex;align-items:center;gap:8px">${multiViewModeHtml}${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    const storyboardMergeSequenceHtml = node.type === 'storyboardMerge'
+        ? `<button type="button" class="storyboard-merge-sequence-toggle ${node.addSequence ? 'active' : ''}" data-storyboard-merge-sequence-toggle="${escapeAttr(node.id)}" role="switch" aria-checked="${Boolean(node.addSequence)}" title="${node.addSequence ? '关闭图片序号' : '开启图片序号'}"><i data-lucide="list-ordered"></i><span>添加序号</span></button>`
+        : '';
+    el.innerHTML = `<div class="node-head"><div class="node-title-wrap"><span class="node-title">${displayTitle}</span>${groupCountHtml}</div><div class="node-head-actions" style="display:flex;align-items:center;gap:8px">${multiViewModeHtml}${statusHtml}${storyboardMergeSequenceHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
     const body = document.createElement('div');
     body.className = 'node-body';
     if(node.type === 'image') {
@@ -10254,6 +10282,15 @@ function renderNode(node){
     el.appendChild(visualShell);
     bindClassicMediaToolbar(el, node);
     if(node.type === 'storyboardMerge') bindStoryboardMergeNode(el, node);
+    const storyboardMergeSequenceToggle = el.querySelector('[data-storyboard-merge-sequence-toggle]');
+    storyboardMergeSequenceToggle?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        pushUndo();
+        node.addSequence = !node.addSequence;
+        render();
+        scheduleSave();
+    });
     el.querySelectorAll('button, select, textarea, input').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation(), true);
         control.addEventListener('click', e => e.stopPropagation());

@@ -17,6 +17,9 @@ def test_storyboard_merge_has_ordered_thumbnails_and_output_pipeline():
         "function storyboardMergeEntries(node)",
         "storyboard-merge-index",
         "function runStoryboardMergeNode(nodeId)",
+        "data-storyboard-merge-sequence-toggle",
+        "function drawStoryboardSequenceBadge(ctx, index, x, y, height)",
+        "if(node.addSequence) drawStoryboardSequenceBadge(ctx, index, x, 0, height)",
         "ctx.fillStyle = '#ffffff'",
         "uploadCroppedBlob(blob",
         "outputForNode(node, 520, true)",
@@ -32,3 +35,9 @@ def test_storyboard_merge_uses_theme_variables_for_new_visuals():
     assert "var(--soft)" in css_block
     assert "#3b82f6" not in css_block.lower()
     assert "#2563eb" not in css_block.lower()
+
+
+def test_storyboard_merge_sequence_toggle_defaults_off_and_is_theme_styled():
+    assert "addSequence:false" in CANVAS_JS
+    assert ".storyboard-merge-sequence-toggle.active" in CANVAS_CSS
+    assert "var(--strong)" in CANVAS_CSS[CANVAS_CSS.index(".storyboard-merge-sequence-toggle") : CANVAS_CSS.index(".storyboard-merge-body")]

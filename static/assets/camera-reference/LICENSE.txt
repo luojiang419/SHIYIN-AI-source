@@ -1,0 +1,7 @@
+# Camera reference assets
+
+Source: OpenGameArt - Fem Mannequin
+URL: https://opengameart.org/content/fem-mannequin
+License: CC0
+
+The preview images are used as temporary open reference cards. They are not a calibrated camera dataset; replace with a unified CC0 render set when available.

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "title": "开放许可 3D 人偶机位参考",
+  "source": {
+    "name": "OpenGameArt · Fem Mannequin",
+    "url": "https://opengameart.org/content/fem-mannequin",
+    "license": "CC0"
+  },
+  "note": "当前素材是公开预览图候选集，未经过统一姿势和镜头标定；用于机位方向提示，不作为精确 3D 几何数据。",
+  "references": [
+    {"id":"front","label":"正面 / 平视","yawMin":-22.5,"yawMax":22.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-front.png","kind":"image"},
+    {"id":"front-left","label":"左前 45°","yawMin":-67.5,"yawMax":-22.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-oblique.png","kind":"image"},
+    {"id":"front-right","label":"右前 45°","yawMin":22.5,"yawMax":67.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-oblique.png","kind":"image"},
+    {"id":"side-right","label":"右侧 90°","yawMin":67.5,"yawMax":112.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
+    {"id":"rear-right","label":"右后 135°","yawMin":112.5,"yawMax":157.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
+    {"id":"back","label":"背面 180°","yawMin":157.5,"yawMax":-157.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-detail.png","kind":"image"},
+    {"id":"rear-left","label":"左后 225°","yawMin":-157.5,"yawMax":-112.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
+    {"id":"side-left","label":"左侧 270°","yawMin":-112.5,"yawMax":-67.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
+    {"id":"high","label":"高机位","yawMin":-180,"yawMax":180,"elevationMin":30,"elevationMax":60,"url":"/static/assets/camera-reference/fem-mannequin-detail.png","kind":"image"},
+    {"id":"low","label":"低机位","yawMin":-180,"yawMax":180,"elevationMin":-30,"elevationMax":-30,"url":"/static/assets/camera-reference/fem-mannequin-oblique.png","kind":"image"}
+  ]
+}

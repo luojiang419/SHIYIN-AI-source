@@ -8591,20 +8591,6 @@ function classicAngleGeometryReference(node){
     const captures = Array.isArray(director?.directorCaptures) ? director.directorCaptures.filter(item => item?.url) : [];
     return captures.length ? {...captures[captures.length - 1], kind:'image'} : null;
 }
-async function classicCaptureDirectorReference(node){
-    const director = connections.filter(connection => connection.to === node?.id)
-        .map(connection => nodes.find(item => item.id === connection.from))
-        .find(item => item?.type === 'director3d');
-    if(!director || !window.Director3DNode?.capture) throw new Error('请先连接一个 3D导演台节点');
-    return window.Director3DNode.capture(director, {
-        uploadBlob:window.CanvasSpecialNodes?.uploadBlob,
-        onChange:(_changed, meta={}) => {
-            scheduleSave();
-            if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === director.id)) render(); }, 0);
-        },
-        toast:message => setStatus(String(message || '').slice(0, 120))
-    }, {source:'angle-node'});
-}
 function classicSpecialInputImage(node, inputRole=''){
     const sources = connections
         .filter(connection => connection.to === node.id && (!inputRole || connection.inputRole === inputRole))
@@ -8669,9 +8655,7 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const previous = node?.outputUrl && node.outputUrl !== source.url
         ? {url:node.outputUrl, name:node.outputName || 'previous-angle.png', kind:'image'}
         : null;
-    const geometry = kind === 'angle' && node.angleGeometryMode === 'depth' && node.angleDepthUrl
-        ? {url:node.angleDepthUrl, name:node.angleDepthName || 'depth.png', kind:'image', natural_w:node.angleDepthWidth || 0, natural_h:node.angleDepthHeight || 0}
-        : kind === 'angle' && node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl
+    const geometry = kind === 'angle' && node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl
             ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image', natural_w:node.angleDirectorCaptureWidth || 0, natural_h:node.angleDirectorCaptureHeight || 0}
             : null;
     const payload = {
@@ -9511,7 +9495,6 @@ function bindClassicSpecialNode(el, node){
         canvasKey:`classic:${canvas?.id || ''}`,
         getInputImage:classicSpecialInputImage,
         getAngleGeometryReference:classicAngleGeometryReference,
-        captureDirectorReference:classicCaptureDirectorReference,
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
         generateImageEdit:generateClassicSpecialEdit,

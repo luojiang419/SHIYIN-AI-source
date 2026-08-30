@@ -26,10 +26,11 @@ def test_depth_routes_and_angle_geometry_reference_contract_exist():
     assert '@app.post("/api/depth/estimate")' in main
     assert '@app.get("/api/depth/status")' in main
     assert "angleGeometryMode" in shared
-    assert "generate-angle-depth" in shared
+    assert "generate-angle-depth" not in shared
+    assert "ANGLE_REFERENCE_CARDS" in shared
     assert "GEOMETRY REFERENCE" in shared
-    assert "node.angleDepthUrl" in classic and "node.angleDirectorCaptureUrl" in classic
-    assert "node.angleDepthUrl" in smart and "node.angleDirectorCaptureUrl" in smart
+    assert "node.angleDirectorCaptureUrl" in classic
+    assert "node.angleDirectorCaptureUrl" in smart
 
 
 def test_angle_reference_order_keeps_source_before_geometry_before_previous():

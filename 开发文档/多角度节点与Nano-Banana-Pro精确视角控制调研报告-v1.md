@@ -196,12 +196,12 @@ Use the uploaded image as the identity and material reference. Place the camera 
 五轮成功率为 5/5，但这组测试也验证了：NBP 可以可靠区分“前方、侧面、背面”三个大区间，不能把连续角度数字当作物理旋转量。20°–60°更适合被解释为“轻微/中等左侧三分之四”，90°以上应使用 `true left side view` 或 `rear-left three-quarter view` 等结果导向语义。测试输出目录为 `E:\APP\SHIYIN-AI\generated-images\20260830-nbp-angle-5rounds`，详细 manifest 记录了每轮提示词和文件。
 
 
-## 11. 不使用 LoRA 的节点内深度/3D 参考增强
+## 11. 轻量静态 3D 机位参考图
 
-本项目已落地一条不依赖 LoRA 的几何参考路径：角度节点提供“无（语义模式）/自动深度图/3D 导演台截图”三种模式。自动深度图使用 MiDaS Small ONNX，首次启动或首次调用时下载约 66 MB 权重，CPU ONNX 推理输出与原图同尺寸的相对深度灰度 PNG。模型输入输出和 MIT 许可信息以 [MiDaS Small ONNX 模型卡](https://huggingface.co/Heliosoph/midas-small-onnx) 为准；后续若更重视远处细节，可评估 [Depth Anything V2 官方实现](https://github.com/DepthAnything/Depth-Anything-V2)，但其部署体积、许可和 CPU 成本更高。
+角度节点暂时隐藏深度图方案，只保留“3D参考图”和“无（仅语义）”两种模式。3D参考图来自 OpenGameArt 的 Fem Mannequin 公开素材，页面标注 CC0；资源在 `static/assets/camera-reference/`，通过 manifest 记录来源、许可证和 yaw/pitch 区间。角度面板右侧显示当前区间对应的参考图，拖动水平角或俯仰角时实时切换。
 
-3D 路径默认在角度生成前向已连接的 3D 导演台请求当前活动视角的实时渲染图。父子窗口通过 `storyai:director-capture-request` / `storyai:director-capture-response` 传递 `preset:"current"` 截图；父窗口上传后写入导演台节点捕获列表和角度节点的 `angleDirectorCaptureUrl`。导演台未打开时会临时打开并在截图完成后关闭；超时或渲染失败时回退到最近一次已保存截图，不阻断普通生成。角度节点可同时连接原图和导演台节点：原图始终是 Image 1，导演台截图作为 Image 2 的几何参考，不会抢走人物身份输入。请求顺序为“原图 → 深度图/导演台截图 → 上一轮已接受结果”，提示词明确第二张图只约束轮廓、近远层次、遮挡和透视。这样能让 Nano Banana Pro 使用现有图像参考接口，不需要把 GLB 直接上传给模型。
+生成请求顺序固定为“原图 → 静态 3D 参考图 → 上一轮已接受结果”，3D图只承担方向、透视、遮挡和景别提示，主体身份仍由 Image 1 控制。静态资源不需要 WebGL、iframe、模型下载或实时截图，启动和生成前准备开销很低。
 
-当前仍有两项边界：第一，NBP 对深度图和导演台截图都是软条件，不能像 ControlNet 一样逐像素锁定相机射线；第二，导演台场景与原图主体不一致时，模型仍可能需要补洞或重建材质。社区对“3D 渲染/深度图先定几何，再由编辑模型补材质”的反馈普遍优于纯提示词，但也反复提到遮挡补洞和材质重建仍会出错。因此这条路径适合把 40°/90°/120° 的大方向和遮挡关系稳定下来，不能宣称任意角度达到真实渲染级精度。
+当前边界是公开预览素材并非统一标定的相机数据集，左右小角度可能受参考图姿势差异影响。后续应使用同一 CC0 人偶、同一站姿、同一背景和固定焦距重新制作对齐卡片，才能提高区间切换的一致性；不能把静态卡片当作真实 3D 相机或逐像素 ControlNet。
 
 在 16GB 显存机器上，深度模型本身走 CPU，不占用生成模型显存；显存瓶颈仍来自远端或本地的图像生成模型。若使用远端 Nano Banana Pro，节点几何参考不会额外占用本机显存，只会增加参考图上传和上游推理时间。

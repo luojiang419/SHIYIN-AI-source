@@ -508,6 +508,11 @@
             : yaw > 0
                 ? 'her LEFT shoulder is the near shoulder and must appear larger on image-right, while her RIGHT shoulder recedes toward image-left'
                 : 'both shoulders remain symmetric';
+        const gazeInstruction = yaw < 0
+            ? 'If the eyes are visible, gaze past the frame toward image-right and away from the lens; create no eye contact.'
+            : yaw > 0
+                ? 'If the eyes are visible, gaze past the frame toward image-left and away from the lens; create no eye contact.'
+                : 'Keep the gaze neutral and away from the lens.';
         const view = yaw === 0 ? 'front view' : `${Math.abs(yaw)}-degree ${side} three-quarter view`;
         const preserve = node.anglePreserve ? 'Keep identity, proportions, pose, clothing, materials, lighting and background consistent.' : 'Keep the design and world layout consistent while changing the viewpoint.';
         return [
@@ -518,7 +523,8 @@
             `Show the target ${azimuth[2]} clearly; reveal the correct near-side surfaces and natural occlusion created by the camera move. Keep the horizon and perspective physically plausible.`,
             angleParallaxInstruction(yaw),
             angleSubjectLock(node.angleSubject),
-            'RIGID SUBJECT LOCK: Keep the head, neck, shoulders, spine, hips, arms, hands and torso in the exact orientation and pose of Image 1. Keep the head yaw and gaze direction unchanged relative to the torso; a side view must come from camera relocation and occlusion, never from turning or twisting the person.',
+            'RIGID SUBJECT LOCK: Keep the head, neck, shoulders, spine, hips, arms, hands and torso in the exact orientation and pose of Image 1. Keep the head yaw unchanged relative to the torso; a side view must come from camera relocation and occlusion, never from turning or twisting the person.',
+            gazeInstruction,
             preserve,
             'CAMERA-ONLY CHANGE: Move the camera around a motionless subject and fixed world. Do not rotate, turn, twist, lean or re-pose the subject.',
             'WORLD COORDINATE LOCK: Preserve physical content, not Image 1 pixel positions. Each signed orbit is a new camera ray.',

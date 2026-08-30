@@ -62,6 +62,15 @@ class UnifiedVideoNodeFrontendTests(unittest.TestCase):
         self.assertIn("resumeCanvasVideoTasks();", self.javascript)
         self.assertIn("await saveCanvas();\n            const task = await createCanvasVideoTask", self.javascript)
         self.assertIn("node._videoPending", self.javascript)
+        self.assertIn("if(dropOrphanPending && Array.isArray(node._videoPending))", self.javascript)
+
+    def test_video_generation_button_stays_available_for_parallel_runs(self):
+        self.assertIn("!['video','ecom-video'].includes(node.type)", self.javascript)
+        self.assertIn("canvasTaskType:'online-video'", self.javascript)
+        self.assertIn("canvasTaskType:'legacy-video'", self.javascript)
+        self.assertIn("function hasActiveVideoRuns(node)", self.javascript)
+        self.assertNotIn('${node.running ? \'disabled\' : \'\'}"><i data-lucide="clapperboard"', self.javascript)
+        self.assertIn("/api/canvas-video-tasks/${encodeURIComponent(id)}/cancel", self.javascript)
 
     def test_video_prompt_editor_is_scrollable_and_height_capped(self):
         self.assertIn("bindScrollableText(input);", self.javascript)

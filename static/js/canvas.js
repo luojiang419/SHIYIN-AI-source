@@ -772,6 +772,14 @@ function pruneCanvasRuntimeCollections(options={}){
                 changed = true;
             }
         }
+        if(dropOrphanPending && Array.isArray(node._videoPending)){
+            const pending = node._videoPending;
+            const retainedPending = pending.filter(item => item?.canvasTaskId || item?.recoverTaskId);
+            if(retainedPending.length !== pending.length){
+                node._videoPending = retainedPending;
+                changed = true;
+            }
+        }
         if(Array.isArray(node.generatedOutputs) && node.generatedOutputs.length > CANVAS_OUTPUT_MEDIA_LIMIT){
             node.generatedOutputs = node.generatedOutputs.slice(-CANVAS_OUTPUT_MEDIA_LIMIT);
             changed = true;
@@ -8536,7 +8544,8 @@ function renderPendingOutput(pending, useGridLayout=false){
             <button class="output-del" title="${tr('common.delete')}">×</button>
         </div>`;
     }
-    return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending, useGridLayout)}><span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span><div class="output-spinner"></div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    const canCancel = pending?.canvasTaskType === 'online-video' && pending?.canvasTaskId;
+    return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending, useGridLayout)}><span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span><div class="output-spinner"></div>${canCancel ? `<button class="output-cancel-task" type="button" title="取消视频任务" aria-label="取消视频任务">×</button>` : `<button class="output-del" title="${tr('common.delete')}">×</button>`}</div>`;
 }
 function captureOutputScrolls(){
     const state = new Map();
@@ -10426,6 +10435,7 @@ function bindOutputWrap(wrap, node){
     const fileCard = wrap.querySelector('.output-file-card');
     const playBtn = wrap.querySelector('.canvas-video-play');
     const del = wrap.querySelector('.output-del');
+    const cancelTask = wrap.querySelector('.output-cancel-task');
     const recoverQuery = wrap.querySelector('.output-recover-query');
     const mediaUrl = wrap.dataset.outputUrl || img?.dataset.url || video?.dataset.url || '';
     const mediaKind = mediaKindForRef({url:mediaUrl});
@@ -10478,6 +10488,19 @@ function bindOutputWrap(wrap, node){
                 scheduleSave();
             }
             refreshNodes([node.id]);
+        };
+    }
+    if(cancelTask){
+        cancelTask.onmousedown = e => { e.preventDefault(); e.stopPropagation(); };
+        cancelTask.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const pid = wrap.dataset.pendingId;
+            const pending = pid ? (node._pending || []).find(item => item.id === pid) : null;
+            if(!pending) return;
+            try { await cancelCanvasVideoTask(pending.canvasTaskId); }
+            catch(error){ setStatus(error.message || '取消视频任务失败'); return; }
+            removePendingCanvasVideoTask(pending.canvasTaskId, node, pending);
         };
     }
     if(playBtn && img){
@@ -13033,7 +13056,7 @@ function renderVideoBody(node){
         </div>
         ${generatorInlinePromptHtml(node, promptInputs.length)}
         <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.videoGenerate')}</button>
+            <button class="gen-btn ${node.running ? 'running' : ''}"><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? '再次生成视频' : tr('canvas.videoGenerate')}</button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -14973,7 +14996,7 @@ async function runGeneratorLegacy(genId, opts={}){
 }
 async function runVideoNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node || (node.running && !opts.cascade && !['video','ecom-video'].includes(node.type))) return;
     const isH3 = isMiniMaxH3VideoNode(node);
     const isKling = isKlingVideoNode(node);
     if(isH3){
@@ -15025,7 +15048,7 @@ async function runVideoNode(nodeId, opts={}){
             providerId:resolveVideoProviderId(node.apiProvider || 'comfly'),
             model:node.model || '',
             appendGenerated:Boolean(opts.cascade)
-        } : {}
+        } : {canvasTaskType:'legacy-video'}
     );
     if(out) out._pending = [...(out._pending || []), pendingRecord];
     else if(persistentVideoTask) node._videoPending = [...(node._videoPending || []), pendingRecord];
@@ -15107,7 +15130,8 @@ async function runVideoNode(nodeId, opts={}){
         if(opts.cascade) throw err;
         alert(err.message || tr('canvas.videoFailed'));
     } finally {
-        node.running = false;
+        node.running = hasActiveVideoRuns(node);
+        if(node.running && ['done','failed'].includes(node.runStatus)) node.runStatus = 'running';
         refreshRunNodes(node, out);
     }
 }
@@ -16167,7 +16191,7 @@ function computeConnectedWorkflowOrder(anchorId){
 }
 async function runCanvasGenerate(nodeId){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.running || cascadeRunningIds.has(nodeId)) return;
+    if(!node || (node.running && !['video','ecom-video'].includes(node.type)) || cascadeRunningIds.has(nodeId)) return;
     return runCascadeNodeByType(node, {cascade:false});
 }
 function computeCascadeOrder(targetId){
@@ -16980,6 +17004,22 @@ function findPendingTask(taskId){
     }
     return null;
 }
+function videoPendingForNode(node){
+    if(!node?.id) return [];
+    const matches = [];
+    nodes.filter(item => item.type === 'output').forEach(out => {
+        (out._pending || []).forEach(pending => {
+            if(pending?.run?.node?.id === node.id && ['online-video','legacy-video'].includes(pending.canvasTaskType)) matches.push(pending);
+        });
+    });
+    (node._videoPending || []).forEach(pending => {
+        if(['online-video','legacy-video'].includes(pending.canvasTaskType)) matches.push(pending);
+    });
+    return matches;
+}
+function hasActiveVideoRuns(node){
+    return videoPendingForNode(node).some(pending => !pending.failed && pending.canvasTaskStatus !== 'canceled');
+}
 async function createCanvasImageTask(payload, options={}){
     const res = await cascadeFetch('/api/canvas-image-tasks', {
         method:'POST',
@@ -17223,6 +17263,27 @@ async function createCanvasVideoTask(payload, options={}){
     if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.videoFailed')));
     return res.json();
 }
+async function cancelCanvasVideoTask(taskId){
+    const id = String(taskId || '').trim();
+    if(!id) return null;
+    const res = await fetch(`/api/canvas-video-tasks/${encodeURIComponent(id)}/cancel`, {method:'POST'});
+    if(!res.ok && res.status !== 404) throw new Error(await responseErrorMessage(res, '取消视频任务失败'));
+    return res.status === 404 ? null : res.json();
+}
+function removePendingCanvasVideoTask(taskId, node=null, pending=null){
+    const found = pending ? {out:node?.type === 'output' ? node : null, pending, host:node?.type === 'output' ? null : node} : findPendingTask(taskId);
+    if(!found) return;
+    const {out, host} = found;
+    if(out) out._pending = (out._pending || []).filter(item => item !== found.pending);
+    else if(host) host._videoPending = (host._videoPending || []).filter(item => item !== found.pending);
+    const gen = nodes.find(item => item.id === found.pending?.run?.node?.id);
+    if(gen) {
+        gen.running = hasActiveVideoRuns(gen);
+        if(!gen.running && gen.runStatus === 'running') gen.runStatus = 'canceled';
+        refreshRunNodes(gen, out);
+    } else if(out) refreshNodes([out.id]);
+    scheduleSave();
+}
 function completeCanvasVideoTask(taskId, result){
     const found = findPendingTask(taskId);
     if(!found) return;
@@ -17245,9 +17306,9 @@ function completeCanvasVideoTask(taskId, result){
     const gen = nodes.find(node => node.id === meta.run?.node?.id);
     if(gen){
         mergeGeneratedOutputs(gen, videos, Boolean(pending.appendGenerated));
-        gen.runStatus = 'done';
+        gen.running = hasActiveVideoRuns(gen);
+        gen.runStatus = gen.running ? 'running' : 'done';
         gen.runError = '';
-        gen.running = false;
     }
     addGenerationLog({run:meta.run, outputs:videos, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
@@ -17263,9 +17324,9 @@ function failCanvasVideoTask(taskId, message){
     else if(host) host._videoPending = (host._videoPending || []).filter(item => item.id !== pending.id);
     const gen = nodes.find(node => node.id === run?.node?.id);
     if(gen){
-        gen.runStatus = 'failed';
+        gen.running = hasActiveVideoRuns(gen);
+        gen.runStatus = gen.running ? 'running' : 'failed';
         gen.runError = message || tr('canvas.videoFailed');
-        gen.running = false;
     }
     addGenerationLog({run, outputs:[], runMs, error:message || tr('canvas.videoFailed')});
     refreshRunNodes(gen, out);
@@ -17295,7 +17356,7 @@ async function pollCanvasVideoTask(taskId, options={}){
                     completeCanvasVideoTask(taskId, task.result || {});
                     return 'succeeded';
                 }
-                if(['failed','interrupted'].includes(String(task.status || ''))){
+                if(['failed','interrupted','canceled','cancelled'].includes(String(task.status || ''))){
                     failCanvasVideoTask(taskId, task.error || tr('canvas.videoFailed'));
                     return 'failed';
                 }

@@ -17430,6 +17430,7 @@ async def generate_kling_cli_video(payload: CanvasVideoRequest):
 
 
 CANVAS_VIDEO_ACTIVE_STATUSES = {"submitting", "queued", "running", "recovery_pending", "finalizing"}
+CANVAS_VIDEO_TERMINAL_STATUSES = {"succeeded", "failed", "interrupted", "canceled", "cancelled"}
 CANVAS_VIDEO_RESTART_MESSAGE = "服务已重启，正在根据已保存的上游任务 ID 继续查询"
 CANVAS_VIDEO_INTERRUPTED_ERROR = "服务在上游任务 ID 保存前退出；为避免重复扣费，系统不会自动重新提交"
 
@@ -17962,15 +17963,20 @@ def load_canvas_video_tasks_from_disk():
         task["id"] = task_id
         task["task_id"] = task_id
         task["_account_id"] = account_id
+        # 失败/中断/已取消任务只用于运行期反馈，不应在重启后继续占据任务列表。
+        # 画布端再次查询时会收到 404，并自动移除对应的残留占位。
+        if str(task.get("status") or "").lower() in {"failed", "interrupted", "canceled", "cancelled"}:
+            changed = True
+            continue
         if str(task.get("status") or "") in CANVAS_VIDEO_ACTIVE_STATUSES:
             if str(task.get("upstream_task_id") or "").strip():
                 task["status"] = "recovery_pending"
                 task["message"] = CANVAS_VIDEO_RESTART_MESSAGE
                 task["error"] = ""
             else:
-                task["status"] = "interrupted"
-                task["error"] = CANVAS_VIDEO_INTERRUPTED_ERROR
-                task["message"] = ""
+                # 没有上游任务 ID 时无法安全续查或取消，直接从持久化列表清除。
+                changed = True
+                continue
             task["updated_at"] = now
             changed = True
         restored[task_id] = task
@@ -18183,6 +18189,10 @@ async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
         write_canvas_video_tasks_locked(task)
     try:
         submitted = await submit_canvas_video_upstream(payload, provider)
+        with CANVAS_VIDEO_TASK_LOCK:
+            current = current_account_task(CANVAS_VIDEO_TASKS, task_id)
+            if str(current.get("status") or "").lower() in {"canceled", "cancelled"} or current.get("cancel_requested"):
+                return public_canvas_video_task(current)
         upstream_task_id = str(submitted.get("upstream_task_id") or "").strip()
         if not upstream_task_id:
             raise HTTPException(status_code=502, detail="视频平台未返回可恢复的上游任务 ID")
@@ -18226,6 +18236,33 @@ async def get_canvas_video_task(task_id: str):
     if not task.get("id"):
         raise HTTPException(status_code=404, detail="画布视频任务不存在或已过期")
     return task
+
+
+@app.post("/api/canvas-video-tasks/{task_id}/cancel")
+async def cancel_canvas_video_task(task_id: str):
+    """停止本地续查并清理画布视频任务；上游平台若不提供取消 API，不再继续轮询。"""
+    ensure_canvas_video_tasks_loaded()
+    with CANVAS_VIDEO_TASK_LOCK:
+        existing = dict(current_account_task(CANVAS_VIDEO_TASKS, task_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="画布视频任务不存在或已清理")
+    status = str(existing.get("status") or "").lower()
+    if status in CANVAS_VIDEO_TERMINAL_STATUSES:
+        return public_canvas_video_task(existing)
+    update_canvas_video_task(
+        task_id,
+        {
+            "status": "canceled",
+            "cancel_requested": True,
+            "message": "视频任务已取消",
+            "error": "",
+        },
+    )
+    runner = CANVAS_VIDEO_TASK_RUNNERS.get(task_id)
+    if runner and not runner.done():
+        runner.cancel()
+    with CANVAS_VIDEO_TASK_LOCK:
+        return public_canvas_video_task(current_account_task(CANVAS_VIDEO_TASKS, task_id))
 
 
 @app.get("/api/minimax-h3/status")

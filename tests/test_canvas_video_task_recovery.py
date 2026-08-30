@@ -1,7 +1,7 @@
 import asyncio
 import time
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class MemoryTaskDatabase:
@@ -74,11 +74,23 @@ class CanvasVideoTaskRecoveryTests(unittest.TestCase):
             self.main.load_canvas_video_tasks_from_disk()
 
         recovered = self.main.CANVAS_VIDEO_TASKS["canvas_video_saved"]
-        interrupted = self.main.CANVAS_VIDEO_TASKS["canvas_video_unknown"]
         self.assertEqual(recovered["status"], "recovery_pending")
         self.assertEqual(recovered["upstream_task_id"], "generation-saved")
-        self.assertEqual(interrupted["status"], "interrupted")
-        self.assertIn("不会自动重新提交", interrupted["error"])
+        self.assertNotIn("canvas_video_unknown", self.main.CANVAS_VIDEO_TASKS)
+
+    def test_restart_cleans_terminal_failed_tasks(self):
+        database = MemoryTaskDatabase([{
+            "id": "canvas_video_failed",
+            "task_id": "canvas_video_failed",
+            "status": "failed",
+            "created_at": time.time() - 30,
+            "updated_at": time.time() - 10,
+            "_account_id": "admin",
+        }])
+        with patch.object(self.main, "DATABASE", database):
+            self.main.load_canvas_video_tasks_from_disk()
+        self.assertNotIn("canvas_video_failed", self.main.CANVAS_VIDEO_TASKS)
+        self.assertNotIn("canvas_video_failed", database.tasks)
 
     def test_recovered_task_downloads_once_and_becomes_succeeded(self):
         now = time.time()
@@ -170,6 +182,27 @@ class CanvasVideoTaskRecoveryTests(unittest.TestCase):
         self.assertEqual(result["upstream_status"], "retired")
         self.assertIn("不会继续调用开放平台 API", result["error"])
         resolve.assert_not_called()
+
+    def test_cancel_endpoint_marks_task_canceled_and_stops_runner(self):
+        task = {
+            "id": "canvas_video_cancel",
+            "task_id": "canvas_video_cancel",
+            "status": "running",
+            "provider_id": "kling-cli",
+            "upstream_task_id": "generation-cancel",
+            "_account_id": "admin",
+        }
+        database = MemoryTaskDatabase([task])
+        self.main.CANVAS_VIDEO_TASKS[task["id"]] = dict(task)
+        self.main.CANVAS_VIDEO_TASKS_LOADED_ACCOUNTS.add("admin")
+        runner = MagicMock()
+        runner.done.return_value = False
+        self.main.CANVAS_VIDEO_TASK_RUNNERS[task["id"]] = runner
+        with patch.object(self.main, "DATABASE", database):
+            canceled = asyncio.run(self.main.cancel_canvas_video_task(task["id"]))
+        self.assertEqual(canceled["status"], "canceled")
+        self.assertTrue(canceled["cancel_requested"])
+        runner.cancel.assert_called_once_with()
 
 
 if __name__ == "__main__":

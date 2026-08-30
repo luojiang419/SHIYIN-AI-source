@@ -146,3 +146,37 @@ Place the camera 40 degrees to the subject's left (camera-left), at the same hei
 * 不建议一开始叠加 Lightning LoRA；它虽然省时间，但可能明显损失皮肤和材质质感。
 
 因此，16GB 显卡适合把该 LoRA 当作“角度验证和批量预览工具”。若最终交付要求最高纹理质量，建议用 16GB 本地显卡确定角度，再用更高显存机器或云端 FP8/BF16 工作流完成最终渲染。
+
+## 9. 不使用 LoRA 的方案与社区试验反馈
+
+### 9.1 方案对比
+
+| 路线 | 是否需要 LoRA | 角度控制上限 | 社区反馈 | 主要问题 |
+|---|---:|---|---|---|
+| NBP 短提示词 + 单角度逐次生成 | 否 | 语义近似，不能保证精确 40° | 易用，简单提示常能命中左/右三分之四视角 | 大角度、背面和遮挡区域会漂移 |
+| Qwen-Image-Edit-2511 原生模型 + 提示词 | 否 | 比 NBP 更适合编辑，但仍是生成式近似 | 有用户反馈单图“move the camera angle”效果很好；90°时加“to obtain the side view”更容易成功 | 不同图像、量化和采样设置差异大，没有 96 个离散姿态 token 的稳定性 |
+| 深度/法线/线稿 ControlNet + 编辑模型 | 否（但通常不是 NBP 原生能力） | 结构约束较强 | 社区认为比 LoRA 更接近真实相机/镜头控制 | 需要额外结构图；深度错误会把错误透视带入结果 |
+| Blender/Load3D/NeRF/TripoSplat 先定机位，再用 NBP 精修 | 否 | 几何最强，可任意角度 | “works pretty well”，是产品、建筑和机械件最稳路线；TripoSplat + Qwen/NBP 被反馈为快速得到新角度 | 建模、遮挡补洞和人工操作成本最高 |
+
+### 9.2 社区试验的真实结论
+
+* **纯提示词是“能用”，不是“可验收的精确控制”。** Qwen 2511 社区有人在有无 LoRA 两种情况下得到近似相同结果，说明基础模型本身具备视角编辑能力；但 90°等大变化需要补充“side view”等画面语义，结果仍会随主体和构图变化。[Qwen 2511 无 LoRA 讨论](https://www.reddit.com/r/comfyui/comments/1pvj4u6/qwenimageedit2511_workflow_that_actually_works/)
+* **NBP 的短、具体机位描述通常优于节点生成的长抽象指令。** 用户试验建议写最终相机所在位置、朝向和可见地标，少写“旋转 120°、自然视差”等模型无法直接执行的抽象约束；这与 Gemini 官方提供的“camera angle + subject + lighting + composition”提示结构一致。[NBP 社区试验](https://www.reddit.com/r/nanobanana/comments/1vvmj71/i_made_a_nano_banana_2_prompt_for_getting/)、[Gemini 图像生成文档](https://ai.google.dev/gemini-api/docs/generate-content/image-generation)
+* **深度/3D 路线的反馈最接近“真正换相机”。** Load3D 用户用 3D 渲染图加深度图作为参考，反馈整体“works pretty well”，但遮挡处仍会出错；TripoSplat 方案则先从单图估计 Gaussian Splat，再旋转 GLB 相机，最后让编辑模型补材质和缺失区域。[Load3D + 深度讨论](https://www.reddit.com/r/comfyui/comments/1polrne/qwen_edit_camera_control_angle/)、[TripoSplat + Qwen 讨论](https://www.reddit.com/r/comfyui/comments/1tx5ynt/triposplat_qwen_w_lora_move_to_any_new_camera/)
+* **多角度拼图/六宫格能保持大致身份，但不能替代逐张生成。** 社区展示过 NBP 一次生成多角度网格的成功案例，适合选方案和做概念板；它会牺牲单格分辨率，并增加角度、文字和身份漂移，不适合作为产品多视图交付。[NBP 多角度试验](https://www.reddit.com/r/AiGeminiPhotoPrompts/comments/1qxx91n/how_to_create_6_different_camera_angles_from_a/)
+
+### 9.3 对当前项目的推荐
+
+如果坚持 **不使用 LoRA 且必须使用 Nano Banana Pro**，建议采用“**语义机位编译器 + 单角度多轮参考 + 可选深度/3D 结构参考**”三层模式：
+
+1. 节点把 `left/right`、目标角度、机位高度、距离和镜头感翻译成 45–90 个英文词；提示词明确 `camera-left` 或 `camera-right`，并写出“应露出的侧面”和“自然遮挡”。
+2. 每次只生成一个角度；通过验收的角度作为下一轮的第二参考图，减少从原图直接猜背面的漂移。
+3. 需要 90°以上、产品非对称细节或可复现相机轨迹时，先接入 3D/深度渲染，再让 NBP 负责外观重建。
+
+推荐测试提示词：
+
+```text
+Use the uploaded image as the identity and material reference. Place the camera 40 degrees to the subject's left (camera-left), at the same height and distance, eye-level, 50mm perspective. Show a clear left three-quarter view; reveal the subject's left-side surfaces and natural occlusion. Keep identity, proportions, clothing, materials, lighting and background consistent. Do not mirror the image.
+```
+
+该路线的可行性高于当前“把 40°数字直接传给节点”的做法，但仍不能承诺每张图都严格等于物理 40°。若验收标准是可重复的任意角度，必须引入深度/3D 几何约束，或接受 Qwen 多角度 LoRA 的离散角度方案。

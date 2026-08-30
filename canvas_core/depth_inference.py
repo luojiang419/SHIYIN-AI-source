@@ -3,10 +3,6 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-import cv2
-import numpy as np
-import onnxruntime as ort
-
 from .depth_models import DEPTH_MODEL_NAME, DepthModelManager
 
 DEPTH_TARGET_SHORT_EDGE = 518
@@ -32,6 +28,8 @@ class DepthInference:
         self._session: ort.InferenceSession | None = None
 
     def _ensure_session(self) -> ort.InferenceSession:
+        import onnxruntime as ort
+
         with self._session_lock:
             if self._session is not None:
                 return self._session
@@ -50,6 +48,9 @@ class DepthInference:
             return self._session
 
     def render(self, image_rgb: np.ndarray) -> DepthResult:
+        import cv2
+        import numpy as np
+
         if image_rgb.ndim != 3 or image_rgb.shape[2] != 3 or not image_rgb.size:
             raise ValueError("输入必须是非空 RGB 图片")
         session = self._ensure_session()

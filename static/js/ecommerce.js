@@ -4211,7 +4211,8 @@
         cacheElements();
         configureWorkspaceVariant();
         renderInitialWorkspace();
-        await waitForPreferenceBootstrap();
+        // 偏好同步不能阻塞首屏；服务端值到达后通过 canvas.preferences 事件覆盖本地快照。
+        void waitForPreferenceBootstrap().catch(() => {});
         loadSettings();
         restoreWorkspace(state.operation);
         state.settingsNeedsMigration = false;
@@ -4223,12 +4224,19 @@
         bindUniversalDockDrop();
         bindReferencePreview();
         bindComparison();
-        await Promise.all([loadCapabilities(), loadTasks()]);
-        const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem(CURRENT_TASK_KEY);
-        if(savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
+        // 能力和历史任务在后台并行加载，先让页面退出 busy 状态，避免慢接口造成整页空白。
+        const capabilitiesTask = loadCapabilities();
+        const tasksTask = loadTasks();
         state.initializing = false;
-        if(el.generateButton) el.generateButton.disabled = false;
         el.ecommercePage?.setAttribute('aria-busy', 'false');
+        void Promise.allSettled([capabilitiesTask, tasksTask]).then(async () => {
+            const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem(CURRENT_TASK_KEY);
+            if(savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
+            if(el.generateButton) el.generateButton.disabled = false;
+        }).catch(error => {
+            console.warn('ecommerce deferred bootstrap failed', error);
+            if(el.generateButton) el.generateButton.disabled = false;
+        });
     }
 
     window.EcommerceStudio = {

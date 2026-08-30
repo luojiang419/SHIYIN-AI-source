@@ -91,11 +91,11 @@ class CanvasPlaceholderMigrationTests(unittest.TestCase):
         })
         self.assertEqual(database.get_canvas("later")["nodes"][0]["_pending"], [{"id": "newer-orphan"}])
 
-    def test_backend_startup_runs_the_persistent_placeholder_migration(self):
+    def test_backend_startup_defers_the_persistent_placeholder_migration(self):
         source = (ROOT / "main.py").read_text(encoding="utf-8")
         self.assertIn("from canvas_core.canvas_placeholder_migration import migrate_orphan_output_pending_once", source)
         self.assertIn(
-            "await asyncio.to_thread(migrate_orphan_output_pending_once, DATABASE, APP_VERSION)",
+            '("orphan_output_cleanup", run_deferred_orphan_output_cleanup)',
             source,
         )
 

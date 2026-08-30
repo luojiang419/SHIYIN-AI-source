@@ -2015,14 +2015,16 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn('/static/js/ecommerce.js?v=2026.08.10.universal-plan-banner-removed.1', self.html)
         self.assertIn('/static/css/ecommerce.css?v=2026.08.10.universal-plan-banner-removed.1', self.html)
 
-    def test_generation_parameters_wait_for_server_preferences_before_initial_defaults(self):
+    def test_generation_parameters_render_before_slow_server_bootstrap(self):
         self.assertIn("initializing:true", self.javascript)
         self.assertIn("async function waitForPreferenceBootstrap", self.javascript)
         init_body = re.search(r"async function init\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(init_body)
-        self.assertLess(init_body.group(1).index("renderInitialWorkspace()"), init_body.group(1).index("await waitForPreferenceBootstrap()"))
-        self.assertLess(init_body.group(1).index("await waitForPreferenceBootstrap()"), init_body.group(1).index("loadSettings()"))
-        self.assertIn("await Promise.all([loadCapabilities(), loadTasks()])", init_body.group(1))
+        self.assertLess(init_body.group(1).index("renderInitialWorkspace()"), init_body.group(1).index("loadSettings()"))
+        self.assertIn("void waitForPreferenceBootstrap().catch(() => {})", init_body.group(1))
+        self.assertIn("const capabilitiesTask = loadCapabilities()", init_body.group(1))
+        self.assertIn("const tasksTask = loadTasks()", init_body.group(1))
+        self.assertIn("Promise.allSettled([capabilitiesTask, tasksTask])", init_body.group(1))
         self.assertIn("el.ecommercePage?.setAttribute('aria-busy', 'false')", init_body.group(1))
         populate = re.search(r"function populateModelSelectors\(\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(populate)

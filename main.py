@@ -423,7 +423,9 @@ manager = ConnectionManager()
 GLOBAL_LOOP = None
 STARTUP_MAINTENANCE_TASK = None
 STARTUP_RECOVERY_TASK = None
-STARTUP_MAINTENANCE_DELAY_SECONDS = 0.75
+# 首屏接口先完成一轮读请求，再开始可能触发大量磁盘/SQLite 操作的后台工作。
+STARTUP_MAINTENANCE_DELAY_SECONDS = 2.5
+STARTUP_RECOVERY_DELAY_SECONDS = 4.0
 STARTUP_MAINTENANCE_STATE = {
     "status": "pending",
     "current": "",
@@ -459,6 +461,27 @@ def startup_maintenance_public_state():
     }
 
 
+def run_deferred_provider_preset_cleanup():
+    report = prune_removed_provider_presets_once()
+    if report.get("removed"):
+        print(f"已移除未使用的预置 API 平台：{', '.join(report['removed'])}")
+    return report
+
+
+def run_deferred_local_vision_secret_seed():
+    return seed_builtin_local_vision_secret_once()
+
+
+def run_deferred_orphan_output_cleanup():
+    report = migrate_orphan_output_pending_once(DATABASE, APP_VERSION)
+    if report.get("removed"):
+        print(
+            "已清理升级前不可恢复的输出占位："
+            f"{report['removed']} 个，涉及 {report['canvases']} 个画布"
+        )
+    return report
+
+
 async def run_deferred_startup_maintenance():
     await asyncio.sleep(STARTUP_MAINTENANCE_DELAY_SECONDS)
     STARTUP_MAINTENANCE_STATE.update({
@@ -469,6 +492,9 @@ async def run_deferred_startup_maintenance():
         "steps": {},
     })
     steps = (
+        ("provider_preset_cleanup", run_deferred_provider_preset_cleanup),
+        ("local_vision_secret_seed", run_deferred_local_vision_secret_seed),
+        ("orphan_output_cleanup", run_deferred_orphan_output_cleanup),
         ("disposable_storage", MAINTENANCE.run_once),
         ("asset_library_migration", migrate_asset_library_into_dirs),
         ("double_extension_migration", migrate_double_extension_uploads),
@@ -511,6 +537,9 @@ async def run_deferred_startup_maintenance():
 
 async def run_deferred_task_recovery():
     """Restore persisted task state after the health endpoint is available."""
+    # 给桌面宿主和首个页面留出时间完成账号、偏好和能力接口请求，
+    # 避免历史任务恢复在冷启动瞬间争用线程池和 SQLite。
+    await asyncio.sleep(STARTUP_RECOVERY_DELAY_SECONDS)
     operations = (
         ("在线生图任务", load_online_image_tasks_from_disk),
         ("电商专用任务", load_ecommerce_tasks_from_disk),
@@ -522,6 +551,7 @@ async def run_deferred_task_recovery():
                 await asyncio.to_thread(operation)
                 if operation is load_canvas_video_tasks_from_disk:
                     resume_canvas_video_tasks()
+                await asyncio.sleep(0)
             except Exception as exc:  # noqa: BLE001 - recovery must not block service readiness
                 print(f"{label}恢复失败: {exc}")
     except asyncio.CancelledError:
@@ -535,26 +565,9 @@ async def startup_event():
         DWPOSE_MODEL_MANAGER.start_background()
     if DEPTH_AUTO_DOWNLOAD_ENABLED:
         DEPTH_MODEL_MANAGER.start_background()
-    try:
-        report = await asyncio.to_thread(prune_removed_provider_presets_once)
-        if report.get("removed"):
-            print(f"已移除未使用的预置 API 平台：{', '.join(report['removed'])}")
-    except Exception as exc:
-        print(f"清理未使用预置 API 平台失败: {exc}")
-    try:
-        await asyncio.to_thread(seed_builtin_local_vision_secret_once)
-    except Exception as exc:
-        print(f"初始化内置视觉模型失败: {exc}")
-    try:
-        placeholder_cleanup = await asyncio.to_thread(migrate_orphan_output_pending_once, DATABASE, APP_VERSION)
-        if placeholder_cleanup.get("removed"):
-            print(
-                "已清理升级前不可恢复的输出占位："
-                f"{placeholder_cleanup['removed']} 个，涉及 {placeholder_cleanup['canvases']} 个画布"
-            )
-    except Exception as exc:
-        print(f"升级前输出占位清理失败: {exc}")
-    # 历史任务恢复可能读取大量持久化记录，不阻塞 /api/health 和首屏窗口。
+    # 供应商清理、密钥初始化和遗留占位修复都不是服务就绪的必要条件，
+    # 与文件扫描一起延后到健康检查之后，避免桌面宿主等待这些磁盘操作。
+    # 历史任务恢复可能读取大量持久化记录，同样不阻塞 /api/health 和首屏窗口。
     STARTUP_RECOVERY_TASK = asyncio.create_task(run_deferred_task_recovery())
     # 文件遍历、历史素材修复和索引补偿同样不阻塞 /api/health；服务就绪后在后台顺序执行。
     STARTUP_MAINTENANCE_TASK = asyncio.create_task(run_deferred_startup_maintenance())

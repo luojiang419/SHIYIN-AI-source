@@ -74,6 +74,19 @@ class DeferredBackendMaintenanceTests(unittest.TestCase):
         self.assertNotIn("await asyncio.to_thread(load_ecommerce_tasks_from_disk)", self.startup_body)
         self.assertIn("asyncio.create_task(run_deferred_task_recovery())", self.startup_body)
         self.assertIn("async def run_deferred_task_recovery()", self.source)
+        self.assertIn("STARTUP_RECOVERY_DELAY_SECONDS", self.source)
+        self.assertIn("await asyncio.sleep(STARTUP_RECOVERY_DELAY_SECONDS)", self.source)
+
+    def test_noncritical_database_bootstrap_is_deferred_after_health(self):
+        for operation in (
+            "prune_removed_provider_presets_once",
+            "seed_builtin_local_vision_secret_once",
+            "migrate_orphan_output_pending_once",
+        ):
+            self.assertNotIn(f"await asyncio.to_thread({operation}", self.startup_body)
+        self.assertIn('("provider_preset_cleanup", run_deferred_provider_preset_cleanup)', self.source)
+        self.assertIn('("local_vision_secret_seed", run_deferred_local_vision_secret_seed)', self.source)
+        self.assertIn('("orphan_output_cleanup", run_deferred_orphan_output_cleanup)', self.source)
 
     def test_deferred_maintenance_is_observable_and_failure_isolated(self):
         self.assertIn("async def run_deferred_startup_maintenance()", self.source)

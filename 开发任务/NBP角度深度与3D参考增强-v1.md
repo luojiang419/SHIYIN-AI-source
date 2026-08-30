@@ -1,7 +1,7 @@
 # NBP角度深度与3D参考增强-v1
 
-状态：开发中
-当前阶段：4/5
+状态：已完成（首版）
+当前阶段：5/5
 最后更新：2026-08-30
 
 ## 当前状态
@@ -29,7 +29,8 @@
 - 静态检查：`py_compile`、3 个 `node --check` 已通过
 - 单元测试：`pytest -q tests/test_depth_reference.py tests/test_nbp_angle_mode.py`，7 passed
 - 运行测试：未下载 66MB 权重，未做真实深度推理 smoke test
-- 最近 Git commit：待提交
+- 最近 Git commit：`ef6fde1 feat: 增加角度节点深度与3D几何参考`
+- Git push：已推送到 `origin/feat/storyboard-merge-node`
 
 ---
 
@@ -80,3 +81,14 @@
 - NBP 接收深度图和 3D 截图仍是软条件，不是 ControlNet/原生深度通道。
 - 导演台复用的是最近导出截图，尚未做到根据 `directorProject` 在角度节点内自动按任意相机重渲染。
 - 首次下载需要网络；未下载完成时深度按钮返回 503，普通语义角度仍可继续使用。
+
+## 开发日志
+
+- 2026-08-30：完成 MiDaS Small ONNX 管理、深度接口、角度节点几何参考模式、3D 导演台截图引用和测试；提交 `ef6fde1` 并推送。
+
+## 当前关键修改
+
+- `main.py`、`canvas_core/depth_models.py`、`canvas_core/depth_inference.py`：新增深度模型生命周期和 CPU 推理。
+- `static/js/canvas-special-nodes.js`：新增几何参考选择、深度生成和导演台截图同步。
+- `static/js/canvas.js`、`static/js/smart-canvas.js`：固定多参考图顺序并避免导演台截图抢占原图主输入。
+- `static/canvas.html`、`static/smart-canvas.html`、CSS：更新缓存版本和节点样式。

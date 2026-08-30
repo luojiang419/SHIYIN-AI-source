@@ -27,6 +27,7 @@ import functools
 import html
 import ipaddress
 import xml.etree.ElementTree as ET
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
@@ -7182,6 +7183,14 @@ def media_preview_cache_paths(path: str, width: int):
         os.path.join(MEDIA_PREVIEW_DIR, f"{key}.png"),
     )
 
+
+# 预览生成是进入画布时最容易形成请求风暴的路径。使用独立线程池，
+# 避免 PIL/ffmpeg 抢占默认 asyncio 线程池；同一个文件+尺寸的并发请求共享
+# 一个 Future，防止多个请求重复解码、抽帧和写盘。
+MEDIA_PREVIEW_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="media-preview")
+MEDIA_PREVIEW_INFLIGHT_LOCK = Lock()
+MEDIA_PREVIEW_INFLIGHT: Dict[str, Future] = {}
+
 def is_video_preview_file(path: str) -> bool:
     return os.path.splitext(str(path or "").split("?", 1)[0])[1].lower() in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"}
 
@@ -7219,6 +7228,48 @@ def generate_video_preview_image(path: str, width: int) -> Image.Image:
         except OSError:
             pass
 
+
+def build_media_preview(path: str, width: int, webp_path: str, png_path: str):
+    """生成单个媒体缩略图；重复请求进入此函数前已在 keyed Future 层合并。"""
+    # 在排队期间可能已经由其他进程或旧任务生成，提交线程再次检查文件。
+    if os.path.exists(webp_path):
+        return webp_path, "image/webp"
+    if os.path.exists(png_path):
+        return png_path, "image/png"
+    os.makedirs(MEDIA_PREVIEW_DIR, exist_ok=True)
+    if is_video_preview_file(path):
+        img = generate_video_preview_image(path, width)
+    else:
+        with Image.open(path) as source:
+            img = ImageOps.exif_transpose(source)
+            img.thumbnail((width, width), Image.LANCZOS)
+            img = img.convert("RGBA" if image_has_alpha(img) else "RGB")
+    try:
+        img.save(webp_path, format="WEBP", quality=80, method=1)
+        return webp_path, "image/webp"
+    except Exception:
+        img.save(png_path, format="PNG")
+        return png_path, "image/png"
+
+
+async def get_or_build_media_preview(path: str, width: int, webp_path: str, png_path: str):
+    """返回预览文件路径，并合并相同预览键的并发生成任务。"""
+    key = f"{os.path.abspath(path)}|{os.path.getmtime(path)}|{os.path.getsize(path)}|{width}"
+    with MEDIA_PREVIEW_INFLIGHT_LOCK:
+        future = MEDIA_PREVIEW_INFLIGHT.get(key)
+        if future is None:
+            future = MEDIA_PREVIEW_EXECUTOR.submit(build_media_preview, path, width, webp_path, png_path)
+            MEDIA_PREVIEW_INFLIGHT[key] = future
+
+            def forget(done: Future, cache_key=key):
+                with MEDIA_PREVIEW_INFLIGHT_LOCK:
+                    if MEDIA_PREVIEW_INFLIGHT.get(cache_key) is done:
+                        MEDIA_PREVIEW_INFLIGHT.pop(cache_key, None)
+
+            future.add_done_callback(forget)
+    # shield 防止某个浏览器请求取消时连带取消共享的底层生成任务。
+    return await asyncio.shield(asyncio.wrap_future(future))
+
 @app.get("/api/media-preview")
 async def media_preview(url: str, w: int = 512):
     path = output_file_from_url(url)
@@ -7233,25 +7284,8 @@ async def media_preview(url: str, w: int = 512):
     if os.path.exists(png_path):
         return FileResponse(png_path, media_type="image/png")
 
-    def _build_preview():
-        # 同步 PIL 处理 + 落盘，放到线程里执行，避免阻塞事件循环（几十张首次生成会卡死整个 loop → 缩略图全空白）
-        os.makedirs(MEDIA_PREVIEW_DIR, exist_ok=True)
-        if is_video_preview_file(path):
-            img = generate_video_preview_image(path, width)
-        else:
-            with Image.open(path) as source:
-                img = ImageOps.exif_transpose(source)
-                img.thumbnail((width, width), Image.LANCZOS)
-                img = img.convert("RGBA" if image_has_alpha(img) else "RGB")
-        try:
-            img.save(webp_path, format="WEBP", quality=80, method=1)   # method=1 生成更快（缩略图不追求极致压缩）
-            return webp_path, "image/webp"
-        except Exception:
-            img.save(png_path, format="PNG")
-            return png_path, "image/png"
-
     try:
-        out_path, media_type = await asyncio.to_thread(_build_preview)
+        out_path, media_type = await get_or_build_media_preview(path, width, webp_path, png_path)
         return FileResponse(out_path, media_type=media_type)
     except Exception as exc:
         raise HTTPException(status_code=415, detail=f"无法生成预览图：{exc}") from exc

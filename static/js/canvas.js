@@ -54,12 +54,18 @@ function canvasMediaPreviewUrl(url, size=512){
     const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
 }
+function canvasEagerMediaAttrs(attrs=''){
+    return String(attrs || '')
+        .replace(/\sloading\s*=\s*(['"])[^'"]*\1/ig, '')
+        .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
+}
 function canvasPreviewImgHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
-    // loading=lazy：画布内容多时，视口外的缩略图不加载/不解码，避免一次性解码上百张图卡顿；
-    // decoding=async：解码放到主线程外，渲染时不阻塞。
-    return `<img loading="lazy" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}"${attrs ? ` ${attrs}` : ''}>`;
+    // 画布进入后立即发起全部预览请求；服务端通过 keyed Future + 专用线程池限流，
+    // 避免 lazy 在变换后的无限世界坐标中延迟或误判大量节点。
+    const safeAttrs = canvasEagerMediaAttrs(attrs);
+    return `<img loading="eager" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function loadCanvasOriginalImageDimensions(url){
     const src = String(url || '');
@@ -74,7 +80,8 @@ function loadCanvasOriginalImageDimensions(url){
 function canvasVideoPreviewHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
-    return `<img loading="lazy" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${attrs ? ` ${attrs}` : ''}>`;
+    const safeAttrs = canvasEagerMediaAttrs(attrs);
+    return `<img loading="eager" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function canvasVideoFallbackHtml(url, attrs=''){
     const original = canvasOriginalMediaUrl(url);
@@ -8256,6 +8263,9 @@ function measureCanvasOriginalImageNodesNow(root=nodesEl){
         const nodeEl = imgEl.closest('.image-node');
         const node = nodes.find(n => n.id === nodeEl?.dataset.id);
         if(!node || node.type !== 'image' || !node.url || node.natural_w || node.natural_h || node._naturalSizeLoading) return;
+        // 首屏只需要缩略图即可完成布局；原图尺寸在用户选中节点时再取，
+        // 避免进入画布后为每张资源再发起一次大图请求。
+        if(!selected.has(node.id)) return;
         const original = imgEl.dataset.originalSrc || node.url;
         if(!original) return;
         node._naturalSizeLoading = true;

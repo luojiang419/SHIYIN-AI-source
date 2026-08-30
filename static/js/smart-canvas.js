@@ -817,10 +817,16 @@ function smartMediaPreviewUrl(itemOrUrl, size=512){
     const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
 }
+function smartEagerMediaAttrs(attrs=''){
+    return String(attrs || '')
+        .replace(/\sloading\s*=\s*(['"])[^'"]*\1/ig, '')
+        .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
+}
 function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
-    return `<img src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}"${attrs ? ` ${attrs}` : ''}>`;
+    const safeAttrs = smartEagerMediaAttrs(attrs);
+    return `<img loading="eager" decoding="async" src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function loadSmartOriginalImageDimensions(url){
     const src = displayMediaUrl({url:smartOriginalMediaUrl(url)});
@@ -835,7 +841,8 @@ function loadSmartOriginalImageDimensions(url){
 function smartVideoPreviewHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
-    return `<img src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${attrs ? ` ${attrs}` : ''}>`;
+    const safeAttrs = smartEagerMediaAttrs(attrs);
+    return `<img loading="eager" decoding="async" src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function smartVideoFallbackHtml(url, attrs=''){
     const original = smartOriginalMediaUrl(url);
@@ -10164,7 +10171,7 @@ function measureSmartNodeImagesNow(nodeIndex=new Map(nodes.map(node => [node.id,
         if(!node || !image || image.natural_w || image.natural_h) return;
         const isPreview = isSmartPreviewImage(imgEl);
         const originalSrc = imgEl.dataset?.originalSrc || image.url || '';
-        if(isPreview && imgEl.dataset?.previewKind !== 'video' && originalSrc && !image._naturalSizeLoading){
+        if(isPreview && imgEl.dataset?.previewKind !== 'video' && originalSrc && !image._naturalSizeLoading && isNodeSelected(node.id)){
             image._naturalSizeLoading = true;
             loadSmartOriginalImageDimensions(originalSrc).then(size => {
                 image._naturalSizeLoading = false;

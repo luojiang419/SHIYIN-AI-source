@@ -2249,13 +2249,13 @@
         </script>
 
         <main class="stage">
-            <iframe id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.10.universal-plan-banner-removed.1&feature=free-creation-removed.1" class="active" scrolling="yes" allowfullscreen></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.08.02.ivory-surfaces.1" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.02.ivory-surfaces.1" scrolling="yes"></iframe>
-            <iframe id="frame-works" data-src="/static/works.html?v=2026.08.02.ivory-surfaces.1" scrolling="yes" allowfullscreen></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.02.ivory-surfaces.1" scrolling="yes"></iframe>
-            <iframe id="frame-app-settings" data-src="/static/app-settings.html?v=2026.08.02.ivory-surfaces.1&amp;feature=shortcuts-runtime.2" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.14.canvas-neutral-no-blue.1&amp;feature=shortcuts-runtime.2" scrolling="yes"></iframe>
+            <iframe id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.10.universal-plan-banner-removed.1&feature=free-creation-removed.1" class="active" loading="eager" scrolling="yes" allowfullscreen></iframe>
+            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-works" data-src="/static/works.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes" allowfullscreen></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-app-settings" data-src="/static/app-settings.html?v=2026.08.02.ivory-surfaces.1&amp;feature=shortcuts-runtime.2" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.14.canvas-neutral-no-blue.1&amp;feature=shortcuts-runtime.2" loading="eager" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -2644,13 +2644,85 @@
         const IFRAME_IDLE_UNLOAD_MS = 15 * 60 * 1000;
         const IFRAME_KEEP_RECENT = 2;
         const IFRAME_PROTECTED_PAGES = new Set(['ecommerce','canvas']);
+        // 页面切换的“无等待”依赖 iframe 文档已经初始化。首屏只等待当前页面，
+        // 其它页面在遮罩解除后分批预加载，避免多个重量级画布脚本同时争用主线程。
+        const STUDIO_FRAME_READY_TIMEOUT_MS = 1800;
+        const STUDIO_FRAME_PRELOAD_GAP_MS = 120;
+        const STUDIO_KEEP_PRELOADED_FRAMES = true;
+        let studioFramePreloadStarted = false;
 
         function touchFrameUsage(id) {
             const frame = document.getElementById('frame-' + id);
             if(frame) frame.dataset.lastActiveAt = String(Date.now());
         }
 
+        function ensureStudioFrameSource(frame) {
+            if(!frame) return false;
+            if(!frame.src) {
+                const source = frame.dataset.src || '';
+                if(!source) return false;
+                frame.src = source;
+            }
+            return true;
+        }
+
+        function waitForStudioFrame(frame, timeout = STUDIO_FRAME_READY_TIMEOUT_MS) {
+            if(!frame) return Promise.resolve(false);
+            ensureStudioFrameSource(frame);
+            if(frame.dataset.frameReady === '1') return Promise.resolve(true);
+            try {
+                if(frame.contentDocument?.readyState === 'complete') {
+                    frame.dataset.frameReady = '1';
+                    return Promise.resolve(true);
+                }
+            } catch(e) {}
+            return new Promise(resolve => {
+                let settled = false;
+                const done = (ready) => {
+                    if(settled) return;
+                    settled = true;
+                    window.clearTimeout(timer);
+                    frame.removeEventListener('load', onLoad);
+                    frame.removeEventListener('error', onError);
+                    resolve(ready);
+                };
+                const onLoad = () => {
+                    frame.dataset.frameReady = '1';
+                    done(true);
+                };
+                const onError = () => done(false);
+                const timer = window.setTimeout(() => done(false), timeout);
+                frame.addEventListener('load', onLoad, {once:true});
+                frame.addEventListener('error', onError, {once:true});
+            });
+        }
+
+        function preloadStudioFrames(activeId) {
+            if(studioFramePreloadStarted) return;
+            studioFramePreloadStarted = true;
+            const queue = PAGE_IDS.filter(id => {
+                if(id === activeId) return false;
+                if(ADMIN_PAGE_IDS.has(id) && !currentStudioAccount?.is_admin) return false;
+                return true;
+            });
+            let index = 0;
+            const loadNext = () => {
+                const id = queue[index++];
+                if(!id) return;
+                const frame = document.getElementById('frame-' + id);
+                if(frame) {
+                    frame.dataset.preload = '1';
+                    ensureStudioFrameSource(frame);
+                    touchFrameUsage(id);
+                }
+                window.setTimeout(loadNext, STUDIO_FRAME_PRELOAD_GAP_MS);
+            };
+            // 先让首屏完成一帧绘制，再开始其余页面，保证预加载不会遮挡首屏交互。
+            window.setTimeout(loadNext, STUDIO_FRAME_PRELOAD_GAP_MS);
+        }
+
         function maybeUnloadIdleFrames() {
+            if(STUDIO_KEEP_PRELOADED_FRAMES) return;
             const now = Date.now();
             const frames = [...document.querySelectorAll('iframe')]
                 .filter(frame => frame.src && !frame.classList.contains('active'))
@@ -2690,7 +2762,7 @@
             document.querySelectorAll('iframe').forEach(f => f.classList.remove('active'));
             const target = document.getElementById('frame-' + id);
             target.classList.add('active');
-            if (!target.src) target.src = target.dataset.src;
+            ensureStudioFrameSource(target);
             touchFrameUsage(id);
             broadcastRouteState();
             maybeUnloadIdleFrames();
@@ -2843,7 +2915,12 @@
             restoreSidebarSettings(id);
             const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
             switchUI(trigger, id, { skipRemember:true });
+            // 只为当前入口页等待一次就绪，避免启动后看到空白舞台；超时后仍解除遮罩，
+            // 页面自身的错误态和重试逻辑继续负责后续反馈，不把启动流程永久卡住。
+            const activeFrame = document.getElementById('frame-' + id);
+            await waitForStudioFrame(activeFrame);
             finishStudioBoot();
+            preloadStudioFrames(id);
             studioBootInFlight = false;
             if(currentStudioAccount.is_admin) {
                 ensureShiyingApiKeyOnboarding();
@@ -3010,6 +3087,7 @@
         // sync theme when iframe loads
         document.querySelectorAll('iframe').forEach(f => {
             f.addEventListener('load', () => {
+                f.dataset.frameReady = '1';
                 syncThemeToFrame(f);
                 syncLanguageToFrame(f);
                 syncRouteStateToFrame(f);

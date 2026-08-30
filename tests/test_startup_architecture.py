@@ -40,6 +40,32 @@ class VisibleShellStartupTests(unittest.TestCase):
         self.assertIn("function retryStudioBoot()", self.source)
         self.assertIn("finishStudioBoot();", self.source)
 
+    def test_all_pages_are_eager_iframes_for_zero_wait_navigation(self):
+        for page_id in (
+            "ecommerce",
+            "gpt-chat",
+            "canvas",
+            "asset-manager",
+            "works",
+            "api-settings",
+            "app-settings",
+        ):
+            self.assertRegex(
+                self.source,
+                rf'<iframe id="frame-{page_id}"[^>]*loading="eager"',
+            )
+        self.assertIn("function preloadStudioFrames(activeId)", self.source)
+        self.assertIn("ensureStudioFrameSource(frame)", self.source)
+        self.assertIn("await waitForStudioFrame(activeFrame);", self.source)
+        self.assertIn("preloadStudioFrames(id);", self.source)
+
+    def test_preloaded_frames_are_not_evicted(self):
+        self.assertIn("const STUDIO_KEEP_PRELOADED_FRAMES = true;", self.source)
+        self.assertRegex(
+            self.source,
+            re.compile(r"function maybeUnloadIdleFrames\(\)\s*\{\s*if\(STUDIO_KEEP_PRELOADED_FRAMES\) return;", re.S),
+        )
+
 
 class DeferredBackendMaintenanceTests(unittest.TestCase):
     @classmethod

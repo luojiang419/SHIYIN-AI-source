@@ -28,6 +28,16 @@ def test_smart_canvas_sorts_files_before_upload_and_uploaded_results_afterward()
     assert "const fileList = sortSmartMediaByFilename([...(files || [])].filter(isSupportedUploadFile))" in SMART_JS
 
 
+def test_both_canvases_merge_data_transfer_files_and_item_files_for_webview2_video_drop():
+    for javascript in (CANVAS_JS, SMART_JS):
+        assert "function uniqueDataTransferFiles(files)" in javascript
+        assert "item.getAsFile?.()" in javascript
+        assert "...(dataTransfer?.files || [])," in javascript
+        assert "...itemFiles," in javascript
+        assert "...entryFiles," in javascript
+        assert "const raw = uniqueDataTransferFiles([" in javascript
+
+
 def test_local_path_drop_is_sorted_in_both_canvases():
     assert "const orderedPaths = sortCanvasMediaByFilename(paths);" in CANVAS_JS
     assert "body:JSON.stringify({paths:orderedPaths})" in CANVAS_JS

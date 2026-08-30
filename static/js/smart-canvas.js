@@ -15813,12 +15813,31 @@ async function filesFromEntry(entry){
     const nested = await Promise.all(children.map(filesFromEntry));
     return nested.flat();
 }
+function uniqueDataTransferFiles(files){
+    const seenObjects = new Set();
+    const seenKeys = new Set();
+    return [...(files || [])].filter(file => {
+        if(!file) return false;
+        if(seenObjects.has(file)) return false;
+        seenObjects.add(file);
+        const key = [file.name || '', file.webkitRelativePath || '', file.size || 0, file.lastModified || 0, file.type || ''].join('|');
+        if(seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
+    });
+}
 async function uploadFilesFromDataTransfer(dataTransfer){
     const items = [...(dataTransfer?.items || [])];
     const entries = items.map(dataTransferItemEntry).filter(Boolean);
-    const raw = entries.length
-        ? (await Promise.all(entries.map(filesFromEntry))).flat()
-        : [...(dataTransfer?.files || [])];
+    const itemFiles = items.filter(item => item?.kind === 'file').map(item => {
+        try { return item.getAsFile?.() || null; } catch(_) { return null; }
+    });
+    const entryFiles = entries.length ? (await Promise.all(entries.map(filesFromEntry))).flat() : [];
+    const raw = uniqueDataTransferFiles([
+        ...(dataTransfer?.files || []),
+        ...itemFiles,
+        ...entryFiles,
+    ]);
     return sortSmartMediaByFilename(raw.filter(isSupportedUploadFile));
 }
 function uploadTitleForItems(items, fallback='Upload'){

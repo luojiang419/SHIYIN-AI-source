@@ -502,12 +502,19 @@
         const distance = node.angleDistance === 'close' ? ['近景','close-up'] : node.angleDistance === 'wide' ? ['远景','wide shot'] : ['中景','medium shot'];
         const subject = node.angleSubject === 'product' ? 'the product and its asymmetric details' : node.angleSubject === 'scene' ? 'the same physical room and world layout' : 'the same person, identity and pose';
         const side = yaw < 0 ? 'camera-left' : yaw > 0 ? 'camera-right' : 'straight-on';
+        const observerSide = yaw < 0 ? 'the viewer’s LEFT side of the subject' : yaw > 0 ? 'the viewer’s RIGHT side of the subject' : 'straight in front of the subject';
+        const screenOcclusion = yaw < 0
+            ? 'the near shoulder and near jacket edge must be on the image-left side while the opposite shoulder recedes toward image-right'
+            : yaw > 0
+                ? 'the near shoulder and near jacket edge must be on the image-right side while the opposite shoulder recedes toward image-left'
+                : 'both shoulders remain symmetric';
         const view = yaw === 0 ? 'front view' : `${Math.abs(yaw)}-degree ${side} three-quarter view`;
         const preserve = node.anglePreserve ? 'Keep identity, proportions, pose, clothing, materials, lighting and background consistent.' : 'Keep the design and world layout consistent while changing the viewpoint.';
         return [
             'CAMERA COORDINATE SYSTEM: Image 1 is the original reference; camera-right +X, left is camera-left and right is camera-right.',
             `Recreate ${subject} from a new camera position: ${view}. Place the camera at the same height and distance, ${elevation[1]}, ${distance[1]}, ${node.angleLens}mm perspective.`,
             angleOrbitInstruction(yaw),
+            `OBSERVATION-SIDE ANCHOR: Place the camera on ${observerSide}; this is an observer/world coordinate, not a request to turn the subject. ${screenOcclusion}.`,
             `Show the target ${azimuth[2]} clearly; reveal the correct near-side surfaces and natural occlusion created by the camera move. Keep the horizon and perspective physically plausible.`,
             angleParallaxInstruction(yaw),
             angleSubjectLock(node.angleSubject),

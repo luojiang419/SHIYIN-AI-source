@@ -8591,6 +8591,20 @@ function classicAngleGeometryReference(node){
     const captures = Array.isArray(director?.directorCaptures) ? director.directorCaptures.filter(item => item?.url) : [];
     return captures.length ? {...captures[captures.length - 1], kind:'image'} : null;
 }
+async function classicCaptureDirectorReference(node){
+    const director = connections.filter(connection => connection.to === node?.id)
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .find(item => item?.type === 'director3d');
+    if(!director || !window.Director3DNode?.capture) throw new Error('请先连接一个 3D导演台节点');
+    return window.Director3DNode.capture(director, {
+        uploadBlob:window.CanvasSpecialNodes?.uploadBlob,
+        onChange:(_changed, meta={}) => {
+            scheduleSave();
+            if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === director.id)) render(); }, 0);
+        },
+        toast:message => setStatus(String(message || '').slice(0, 120))
+    }, {source:'angle-node'});
+}
 function classicSpecialInputImage(node, inputRole=''){
     const sources = connections
         .filter(connection => connection.to === node.id && (!inputRole || connection.inputRole === inputRole))
@@ -9497,6 +9511,7 @@ function bindClassicSpecialNode(el, node){
         canvasKey:`classic:${canvas?.id || ''}`,
         getInputImage:classicSpecialInputImage,
         getAngleGeometryReference:classicAngleGeometryReference,
+        captureDirectorReference:classicCaptureDirectorReference,
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
         generateImageEdit:generateClassicSpecialEdit,

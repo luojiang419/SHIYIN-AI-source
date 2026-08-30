@@ -577,7 +577,7 @@
             </div>
             <label class="special-check"><input type="checkbox" data-edit-field="anglePreserve" ${node.anglePreserve ? 'checked' : ''}><span>严格锁定主体身份、造型与环境连续性</span></label>
             <textarea class="special-prompt" data-edit-field="angleNotes" rows="2" placeholder="可选：补充动作、视线或构图要求">${esc(node.angleNotes)}</textarea>
-            <div class="angle-geometry-row"><span>${node.angleGeometryMode === 'depth' && node.angleDepthUrl ? `深度图已就绪 · ${esc(node.angleDepthName || 'depth.png')}` : node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl ? `导演台参考已就绪 · ${esc(node.angleDirectorCaptureName || 'director.png')}` : '可选：为更稳定的遮挡和透视生成几何参考'}</span><button type="button" data-special-action="generate-angle-depth" ${node.angleDepthGenerating ? 'disabled' : ''}><i data-lucide="${node.angleDepthGenerating ? 'loader-2' : 'layers-2'}"></i><span>${node.angleDepthGenerating ? '生成深度中' : '生成深度图'}</span></button></div>
+            <div class="angle-geometry-row"><span>${node.angleGeometryMode === 'depth' && node.angleDepthUrl ? `深度图已就绪 · ${esc(node.angleDepthName || 'depth.png')}` : node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl ? `导演台参考已就绪 · ${esc(node.angleDirectorCaptureName || 'director.png')}` : '可选：为更稳定的遮挡和透视生成几何参考'}</span><div class="angle-geometry-actions"><button type="button" data-special-action="generate-angle-depth" ${node.angleDepthGenerating ? 'disabled' : ''}><i data-lucide="${node.angleDepthGenerating ? 'loader-2' : 'layers-2'}"></i><span>${node.angleDepthGenerating ? '生成深度中' : '生成深度图'}</span></button>${node.angleGeometryMode === 'director3d' ? '<button type="button" data-special-action="capture-angle-director"><i data-lucide="camera"></i><span>获取当前机位</span></button>' : ''}</div></div>
             <div class="special-output-row"><span data-edit-status>${output?.url ? `新视角结果已就绪 · ${esc(output.name || 'angle.png')}` : '拖动圆环选机位，点击后才会调用 API'}</span><button type="button" class="special-primary" data-special-action="run-angle" ${node.specialRunning ? 'disabled' : ''}><i data-lucide="${node.specialRunning ? 'loader-2' : 'camera'}"></i><span>${node.specialRunning ? '生成中' : '生成新视角'}</span></button></div>
         </div>`;
     }
@@ -1241,6 +1241,22 @@
                     } catch(error){ node.angleDepthGenerating = false; node.angleDepthError = error.message || '深度图生成失败'; notify(options, node, true); options.toast?.(node.angleDepthError); }
                     return;
                 }
+                if(action === 'capture-angle-director' && prefix === 'angle'){
+                    try {
+                        if(!options.captureDirectorReference) throw new Error('请先连接一个 3D导演台节点');
+                        source = editSource(node, options, prefix); persistEditSource(node, prefix, source);
+                        const reference = await options.captureDirectorReference(node);
+                        if(!reference?.url) throw new Error('导演台没有返回当前机位截图');
+                        node.angleDirectorCaptureUrl = reference.url;
+                        node.angleDirectorCaptureName = reference.name || 'director-current-camera.png';
+                        node.angleDirectorCaptureWidth = Number(reference.natural_w || reference.width || 0);
+                        node.angleDirectorCaptureHeight = Number(reference.natural_h || reference.height || 0);
+                        node.angleDirectorCaptureError = '';
+                        notify(options, node, true);
+                        options.toast?.('已获取导演台当前机位，下一次角度请求会自动携带');
+                    } catch(error){ node.angleDirectorCaptureError = error.message || '导演台截图失败'; notify(options, node, true); options.toast?.(node.angleDirectorCaptureError); }
+                    return;
+                }
                 if(action !== `run-${prefix}`) return;
                 try {
                     source = editSource(node, options, prefix);
@@ -1249,6 +1265,23 @@
                     if(!source?.url) throw new Error('请先连接或导入一张图片');
                     if(!options.generateImageEdit) throw new Error('当前画布未配置图片 API 生成能力');
                     node.specialRunning = true;
+                    if(prefix === 'angle' && node.angleGeometryMode === 'director3d' && options.captureDirectorReference){
+                        try {
+                            const reference = await options.captureDirectorReference(node);
+                            if(reference?.url){
+                                node.angleDirectorCaptureUrl = reference.url;
+                                node.angleDirectorCaptureName = reference.name || 'director-current-camera.png';
+                                node.angleDirectorCaptureWidth = Number(reference.natural_w || reference.width || 0);
+                                node.angleDirectorCaptureHeight = Number(reference.natural_h || reference.height || 0);
+                                node.angleDirectorCaptureError = '';
+                                syncDirectorReference(node, options);
+                            }
+                        } catch(error){
+                            node.angleDirectorCaptureError = error.message || '导演台当前机位获取失败';
+                            // 当前机位不可用时继续使用已保存的最近截图，不阻断普通角度生成。
+                            options.toast?.('导演台当前机位获取失败，已回退到最近截图');
+                        }
+                    }
                     // 先创建可恢复的下游占位节点，再等待远端任务；长任务期间用户仍能看到并继续连接输出。
                     if(options.createEditPendingOutputNode){
                         try {

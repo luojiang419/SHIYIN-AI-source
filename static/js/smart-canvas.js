@@ -10833,6 +10833,20 @@ function smartAngleGeometryReference(node){
     const captures = Array.isArray(director?.directorCaptures) ? director.directorCaptures.filter(item => item?.url) : [];
     return captures.length ? {...captures[captures.length - 1], kind:'image'} : null;
 }
+async function smartCaptureDirectorReference(node){
+    const director = [...(canvas?.connections || [])].filter(connection => connection.to === node?.id)
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .find(item => item?.specialType === 'director3d');
+    if(!director || !window.Director3DNode?.capture) throw new Error('请先连接一个 3D导演台节点');
+    return window.Director3DNode.capture(director, {
+        uploadBlob:window.CanvasSpecialNodes?.uploadBlob,
+        onChange:(_changed, meta={}) => {
+            scheduleSave?.();
+            if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === director.id)) render?.(); }, 0);
+        },
+        toast:message => toast(String(message || '').slice(0, 120))
+    }, {source:'angle-node'});
+}
 function smartSpecialInputImage(node, inputRole=''){
     if(inputRole){
         const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && (
@@ -12012,6 +12026,7 @@ function bindSmartSpecialNode(el, node){
         canvasKey:`smart:${canvas?.id || ''}`,
         getInputImage:smartSpecialInputImage,
         getAngleGeometryReference:smartAngleGeometryReference,
+        captureDirectorReference:smartCaptureDirectorReference,
         resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
         generatePanorama:generateSmartPanorama,
         generateImageEdit:generateSmartSpecialEdit,

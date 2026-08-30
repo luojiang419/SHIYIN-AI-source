@@ -514,6 +514,10 @@
                 ? 'If the eyes are visible, gaze past the frame toward image-left and away from the lens; create no eye contact.'
                 : 'Keep the gaze neutral and away from the lens.';
         const view = yaw === 0 ? 'front view' : `${Math.abs(yaw)}-degree ${side} three-quarter view`;
+        const elevationNumber = Math.round(Number(node.angleElevation) || 0);
+        const elevationLock = elevationNumber >= 30
+            ? `HIGH-CAMERA PITCH LOCK: the camera is ${elevationNumber} degrees above the subject and its optical axis points downward by ${elevationNumber} degrees. This is a steep elevated view, never an eye-level side view. The top crown of the hat, both shoulder tops, the inside of the collar, necklace layers and the top plane of the belt must be visible with strong foreshortening; if these top planes are not visible, the requested view is wrong.`
+            : '';
         const preserve = node.anglePreserve ? 'Keep identity, proportions, pose, clothing, materials, lighting and background consistent.' : 'Keep the design and world layout consistent while changing the viewpoint.';
         return [
             'CAMERA COORDINATE SYSTEM: Image 1 is the original reference; camera-right +X, left is camera-left and right is camera-right.',
@@ -521,6 +525,7 @@
             angleOrbitInstruction(yaw),
             `OBSERVATION-SIDE ANCHOR: Place the camera on ${observerSide}; this is an observer/world coordinate, not a request to turn the subject. ${screenOcclusion}.`,
             `Show the target ${azimuth[2]} clearly; reveal the correct near-side surfaces and natural occlusion created by the camera move. Keep the horizon and perspective physically plausible.`,
+            elevationLock,
             angleParallaxInstruction(yaw),
             angleSubjectLock(node.angleSubject),
             'RIGID SUBJECT LOCK: Keep the head, neck, shoulders, spine, hips, arms, hands and torso in the exact orientation and pose of Image 1. Keep the head yaw unchanged relative to the torso; a side view must come from camera relocation and occlusion, never from turning or twisting the person.',

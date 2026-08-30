@@ -502,11 +502,11 @@
         const distance = node.angleDistance === 'close' ? ['近景','close-up'] : node.angleDistance === 'wide' ? ['远景','wide shot'] : ['中景','medium shot'];
         const subject = node.angleSubject === 'product' ? 'the product and its asymmetric details' : node.angleSubject === 'scene' ? 'the same physical room and world layout' : 'the same person, identity and pose';
         const side = yaw < 0 ? 'camera-left' : yaw > 0 ? 'camera-right' : 'straight-on';
-        const observerSide = yaw < 0 ? 'the viewer’s LEFT side of the subject' : yaw > 0 ? 'the viewer’s RIGHT side of the subject' : 'straight in front of the subject';
+        const observerSide = yaw < 0 ? 'the subject’s anatomical LEFT side, looking diagonally across her body toward her RIGHT' : yaw > 0 ? 'the subject’s anatomical RIGHT side, looking diagonally across her body toward her LEFT' : 'straight in front of the subject';
         const screenOcclusion = yaw < 0
-            ? 'the near shoulder and near jacket edge must be on the image-left side while the opposite shoulder recedes toward image-right'
+            ? 'her RIGHT shoulder is the near shoulder and must appear larger on image-left, while her LEFT shoulder recedes toward image-right'
             : yaw > 0
-                ? 'the near shoulder and near jacket edge must be on the image-right side while the opposite shoulder recedes toward image-left'
+                ? 'her LEFT shoulder is the near shoulder and must appear larger on image-right, while her RIGHT shoulder recedes toward image-left'
                 : 'both shoulders remain symmetric';
         const view = yaw === 0 ? 'front view' : `${Math.abs(yaw)}-degree ${side} three-quarter view`;
         const preserve = node.anglePreserve ? 'Keep identity, proportions, pose, clothing, materials, lighting and background consistent.' : 'Keep the design and world layout consistent while changing the viewpoint.';

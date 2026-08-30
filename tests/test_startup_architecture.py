@@ -66,6 +66,12 @@ class VisibleShellStartupTests(unittest.TestCase):
             re.compile(r"function maybeUnloadIdleFrames\(\)\s*\{\s*if\(STUDIO_KEEP_PRELOADED_FRAMES\) return;", re.S),
         )
 
+    def test_preload_tracks_each_frame_and_completes_with_readiness_event(self):
+        self.assertIn("const STUDIO_FRAME_PRELOAD_CONCURRENCY = 3;", self.source)
+        self.assertIn("studioFramePreloadPromise = Promise.all(", self.source)
+        self.assertIn("studioFrameReadyState[id] = ready ? 'ready' : 'error';", self.source)
+        self.assertIn("studio-all-frames-ready", self.source)
+
 
 class DeferredBackendMaintenanceTests(unittest.TestCase):
     @classmethod

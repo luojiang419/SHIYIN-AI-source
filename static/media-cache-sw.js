@@ -1,10 +1,12 @@
 /* SHIYIN-AI generated-image cache service worker. */
 const CACHE_PREFIX = 'shiyin-generated-images-';
+const STATIC_CACHE_PREFIX = 'shiyin-static-assets-';
 const WORKER_VERSION = (() => {
     try { return new URL(self.location.href).searchParams.get('v') || 'v2'; }
     catch (error) { return 'v2'; }
 })();
 const CACHE_NAME = `${CACHE_PREFIX}${WORKER_VERSION}`;
+const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}${WORKER_VERSION}`;
 const MAX_ENTRIES = 500;
 const MAX_BYTES = 512 * 1024 * 1024;
 const DB_NAME = 'shiyin-generated-image-cache';
@@ -24,6 +26,31 @@ function isCacheableRequest(request) {
     if (request.method !== 'GET' || !isSameOrigin(request)) return false;
     if (request.destination && request.destination !== 'image') return false;
     try { return isCacheablePath(new URL(request.url)); } catch (error) { return false; }
+}
+
+function isVersionedStaticAssetRequest(request) {
+    if (request.method !== 'GET' || !isSameOrigin(request)) return false;
+    if (!['script', 'style', 'font', 'image'].includes(request.destination)) return false;
+    try {
+        const url = new URL(request.url);
+        if (!url.pathname.startsWith('/static/') || url.pathname === '/media-cache-sw.js') return false;
+        return hasContentRevision(url);
+    } catch (error) {
+        return false;
+    }
+}
+
+async function handleStaticAssetRequest(request) {
+    const cache = await caches.open(STATIC_CACHE_NAME);
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    try {
+        const response = await fetch(request);
+        if (response.ok) await cache.put(request, response.clone());
+        return response;
+    } catch (error) {
+        return cached || Response.error();
+    }
 }
 
 function hasContentRevision(url) {
@@ -141,14 +168,20 @@ self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
     const keys = await caches.keys();
     await Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key)));
+    await Promise.all(keys.filter(key => key.startsWith(STATIC_CACHE_PREFIX) && key !== STATIC_CACHE_NAME).map(key => caches.delete(key)));
     await self.clients.claim();
 })()));
 
 self.addEventListener('fetch', event => {
-    if (!isCacheableRequest(event.request)) return;
-    event.respondWith(needsFreshNetwork(event.request)
-        ? networkFirstImageRequest(event.request)
-        : handleImageRequest(event.request));
+    if (isVersionedStaticAssetRequest(event.request)) {
+        event.respondWith(handleStaticAssetRequest(event.request));
+        return;
+    }
+    if (isCacheableRequest(event.request)) {
+        event.respondWith(needsFreshNetwork(event.request)
+            ? networkFirstImageRequest(event.request)
+            : handleImageRequest(event.request));
+    }
 });
 
 self.addEventListener('message', event => {

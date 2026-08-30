@@ -49,6 +49,14 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
         self.assertIn("cache: 'no-store'", text)
         self.assertIn("content-type", text)
 
+    def test_service_worker_caches_versioned_static_assets_for_second_open(self):
+        text = (ROOT / "static" / "media-cache-sw.js").read_text(encoding="utf-8")
+        self.assertIn("STATIC_CACHE_PREFIX = 'shiyin-static-assets-'", text)
+        self.assertIn("isVersionedStaticAssetRequest", text)
+        self.assertIn("STATIC_CACHE_NAME", text)
+        self.assertIn("request.destination", text)
+        self.assertIn("cache.put(request, response.clone())", text)
+
 
 if __name__ == "__main__":
     unittest.main()

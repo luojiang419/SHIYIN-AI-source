@@ -3,9 +3,9 @@
     const CACHE_VERSION = (() => {
         try {
             return new URL(document.currentScript?.src || location.href, location.href).searchParams.get('v')
-                || '2026.08.23.media-cache-refresh.1';
+                || '2026.08.30.static-assets-cache.1';
         } catch (error) {
-            return '2026.08.23.media-cache-refresh.1';
+            return '2026.08.30.static-assets-cache.1';
         }
     })();
     const workerUrl = `/media-cache-sw.js?v=${CACHE_VERSION}`;

@@ -63,4 +63,3 @@ def test_depth_inference_normalizes_fake_relative_depth_without_loading_weights(
     assert result.image_gray.dtype == np.uint8
     assert int(result.image_gray.min()) == 0
     assert int(result.image_gray.max()) == 255
-

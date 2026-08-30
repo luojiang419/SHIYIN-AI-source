@@ -100,3 +100,5 @@
 ## 第二轮精度升级
 
 - 2026-08-30：将 MiDaS Small 替换为 Depth Anything V2 Small FP16 ONNX，增加外部权重文件校验；按 `keep_aspect_ratio` 等比例缩放，真实复测右侧 40°、背面和顶部视角。右侧小角度明显改善，3D 导演台仍按计划留到下一阶段。
+
+- 2026-08-30：修复“人物扭头代替相机移动”问题，加入 CAMERA-ONLY/RIGID SUBJECT LOCK，并完成左右 40°复测。

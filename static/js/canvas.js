@@ -869,6 +869,7 @@ const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'video', label:'视频生成', icon:'clapperboard', action:() => addVideoNode()},
     {id:'linkfox-video', label:'LinkFox视频', icon:'sparkles', className:'linkfox-toolbar-btn', action:() => addLinkfoxVideoNode()},
     {id:'film-storyboard', label:'分镜合成', icon:'panels-top-left', action:() => addFilmNode('film-storyboard')},
+    {id:'storyboardMerge', label:'合并分镜', icon:'columns-3', action:() => addStoryboardMergeNode()},
     {id:'film-video', label:'影视视频', icon:'clapperboard', action:() => addFilmNode('film-video')},
     {id:'topazVideo', label:'Topaz 高清', icon:'scan-line', action:() => addTopazVideoNode()},
     {id:'panorama', label:'720°取景器', icon:'scan-line', action:() => addPanoramaNode()},
@@ -892,12 +893,13 @@ const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'panorama', label:'全景', icon:'scan-line'},
     {id:'angle', label:'多角度', icon:'rotate-3d'},
     {id:'multi-view', label:'三视图', icon:'panels-top-left'},
+    {id:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
     {id:'dwpose', label:'动作提取', icon:'person-standing'},
     {id:'download', label:'下载', icon:'download'},
     {id:'run', label:'运行', icon:'play'},
     {id:'connect', label:'连接', icon:'workflow'}
 ];
-const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','download'];
+const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','storyboardMerge','download'];
 const CANVAS_SESSION_VIEWPORTS_KEY = 'canvas_session_viewports_v1';
 let canvasSessionViewportFallback = {};
 const DEFAULT_VIDEO_MODELS = [
@@ -4826,6 +4828,20 @@ function addOutputNode(point){
     const p = point || defaultPoint(260, 0);
     return addNode({id:uid('out'), type:'output', x:p.x, y:p.y, images:[]});
 }
+function addStoryboardMergeNode(point){
+    const p = point || defaultPoint(520, 0);
+    return addNode({
+        id:uid('storyboard-merge'),
+        type:'storyboardMerge',
+        x:p.x,
+        y:p.y,
+        w:460,
+        gap:32,
+        images:[],
+        runStatus:'',
+        runError:''
+    });
+}
 function estimateClassicCreateMenuSingleColumnHeight(){
     const visibleItems = [...createMenu.children].filter(item => !item.hidden);
     const itemHeight = item => item.classList.contains('menu-divider') ? 13 : 38;
@@ -4904,12 +4920,16 @@ function linkCreateOptions(state){
         if(node.type === 'poseReplicate'){
             return [{type:'output', label:'Output', icon:'circle-dot'}];
         }
-        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','director3d','poseReplicate','angle'].includes(node.type)){
+        if(node.type === 'storyboardMerge'){
+            return [{type:'output', label:'Output', icon:'circle-dot'}];
+        }
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
-                {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
-                {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
+            {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
+            {type:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
+            {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
                 {type:'film-video', label:'影视视频', icon:'clapperboard'},
                 {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'AI助手', icon:'message-square-text'}])
@@ -4935,8 +4955,9 @@ function linkCreateOptions(state){
             {type:'panorama', label:'720°取景器', icon:'scan-line'},
             {type:'director3d', label:'3D导演台', icon:'clapperboard'},
             {type:'dwpose', label:'动作提取', icon:'person-standing'},
-            {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
-            {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
+                {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
+                {type:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
+                {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
             {type:'film-video', label:'影视视频', icon:'clapperboard'}
         ];
     }
@@ -5030,7 +5051,7 @@ function mediaToolbarItemsForNode(node){
     if(hasUsableUrl && ['image','video'].includes(kind)) available.add('preview');
     if(kind === 'image') available.add('generator');
     if(hasUsableUrl && kind === 'image'){
-        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','download']
+        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','storyboardMerge','download']
             .forEach(id => available.add(id));
     }
     return selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
@@ -5472,6 +5493,7 @@ function createNodeByType(type, point){
     if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
     if(type === 'output') return addOutputNode(point);
+    if(type === 'storyboardMerge') return addStoryboardMergeNode(point);
     return null;
 }
 function menuAdd(type){
@@ -5500,6 +5522,7 @@ function menuAdd(type){
         else if(type === 'blenderDirector') created = addBlenderDirectorNode(point);
         else if(type === 'rh') created = addRhNode(point);
         else if(type === 'output') created = addOutputNode(point);
+        else if(type === 'storyboardMerge') created = addStoryboardMergeNode(point);
     } finally {
         endCanvasMutationBatch();
         commitClassicHistoryTransaction(historyTx);
@@ -9827,6 +9850,81 @@ async function runFilmLineArtNode(node, opts={}){
         node.running=classicFilmHasActiveRun(node,out); refreshRunNodes(node,out);
     }
 }
+function loadStoryboardMergeImage(entry){
+    const url = entry?.ref?.url || '';
+    return new Promise((resolve, reject) => {
+        if(!url) return reject(new Error('图片节点尚未上传图片'));
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => image.naturalWidth && image.naturalHeight ? resolve(image) : reject(new Error('图片尺寸无效'));
+        image.onerror = () => reject(new Error(`图片加载失败：${entry.ref.name || '未知图片'}`));
+        image.src = canvasDisplayMediaUrl(url, entry.ref.name || 'storyboard.png');
+    });
+}
+
+async function runStoryboardMergeNode(nodeId){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'storyboardMerge');
+    if(!node || node.running) return;
+    const entries = storyboardMergeEntries(node);
+    const usable = entries.filter(entry => entry.ref?.url);
+    if(usable.length < 2){
+        showErrorModal('请至少连接 2 个已上传图片的图片节点', '合并分镜');
+        return;
+    }
+    pushUndo();
+    node.running = true;
+    node.runStatus = 'running';
+    node.runError = '';
+    refreshNodes([node.id]);
+    try {
+        const loaded = await Promise.all(usable.map(loadStoryboardMergeImage));
+        const gap = Math.max(8, Math.min(128, Number(node.gap) || 32));
+        const maxHeight = Math.max(...loaded.map(image => image.naturalHeight));
+        const targetHeight = Math.max(1, Math.min(2048, maxHeight));
+        const widths = loaded.map(image => Math.max(1, Math.round(image.naturalWidth * targetHeight / image.naturalHeight)));
+        const rawWidth = widths.reduce((sum, width) => sum + width, 0) + gap * Math.max(0, widths.length - 1);
+        const maxCanvasSize = 16384;
+        const contentScale = rawWidth > maxCanvasSize ? Math.max(.1, (maxCanvasSize - gap * Math.max(0, widths.length - 1)) / Math.max(1, widths.reduce((sum, width) => sum + width, 0))) : 1;
+        const drawGap = Math.max(1, Math.round(gap * contentScale));
+        const canvasWidth = Math.max(1, widths.reduce((sum, width) => sum + Math.max(1, Math.round(width * contentScale)), 0) + drawGap * Math.max(0, widths.length - 1));
+        const canvasHeight = Math.max(1, Math.round(targetHeight * contentScale));
+        const canvasEl = document.createElement('canvas');
+        canvasEl.width = canvasWidth;
+        canvasEl.height = canvasHeight;
+        const ctx = canvasEl.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        let x = 0;
+        loaded.forEach((image, index) => {
+            const width = Math.max(1, Math.round(widths[index] * contentScale));
+            const height = canvasHeight;
+            ctx.drawImage(image, x, 0, width, height);
+            x += width + drawGap;
+        });
+        const blob = await new Promise(resolve => canvasEl.toBlob(resolve, 'image/png'));
+        if(!blob) throw new Error('拼图导出失败');
+        const file = await uploadCroppedBlob(blob, `storyboard_merge_${Date.now()}.png`);
+        if(!file?.url) throw new Error('拼图上传失败');
+        const out = outputForNode(node, 520, true);
+        out.images = [{url:file.url, name:file.name || 'storyboard_merge.png', kind:'image', natural_w:canvasWidth, natural_h:canvasHeight}];
+        out._pending = [];
+        node.outputUrl = file.url;
+        node.outputName = file.name || 'storyboard_merge.png';
+        node.runStatus = 'done';
+        setStatus(`合并分镜完成，共 ${usable.length} 张`);
+        render();
+        scheduleSave();
+    } catch(error){
+        node.runStatus = 'failed';
+        node.runError = error.message || String(error);
+        showErrorModal(node.runError, '合并分镜失败');
+        refreshNodes([node.id]);
+    } finally {
+        node.running = false;
+        refreshNodes([node.id]);
+    }
+}
+
 async function runFilmNode(nodeId, opts={}){
     const node=nodes.find(item => item.id === nodeId && window.CanvasFilmNodes?.isType?.(item.type));
     if(!node) return;
@@ -9926,14 +10024,14 @@ function renderNode(node){
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
-    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
         : 0;
     const groupCountHtml = node.type === 'group' ? `<span class="group-image-count">${groupImageCount}张</span>` : '';
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','linkfox-video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','linkfox-video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video','storyboardMerge'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -10136,6 +10234,7 @@ function renderNode(node){
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
+    if(node.type === 'storyboardMerge') body.innerHTML = storyboardMergeBodyHtml(node);
     if(node.type === 'image' && (!node.url || (mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)))){
         const imagePromptPanel = document.createElement('div');
         imagePromptPanel.className = 'image-node-prompt-panel';
@@ -10154,6 +10253,7 @@ function renderNode(node){
     visualShell.appendChild(body);
     el.appendChild(visualShell);
     bindClassicMediaToolbar(el, node);
+    if(node.type === 'storyboardMerge') bindStoryboardMergeNode(el, node);
     el.querySelectorAll('button, select, textarea, input').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation(), true);
         control.addEventListener('click', e => e.stopPropagation());
@@ -10166,8 +10266,8 @@ function renderNode(node){
     const filmPorts = window.CanvasFilmNodes?.inputPorts?.(node) || [];
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
-    const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','angle'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','angle'].includes(node.type);
+    const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','angle','storyboardMerge'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
     if(filmPorts.length || rolePorts.length > 1){
         el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length){
@@ -10454,7 +10554,44 @@ function defaultNodeSize(type){
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'poseReplicate') return {w:560, h:520};
     if(type === 'angle') return {w:460, h:660};
+    if(type === 'storyboardMerge') return {w:460, h:0};
     return {w:260, h:0};
+}
+
+function storyboardMergeEntries(node){
+    if(!node) return [];
+    return connections.filter(connection => connection.to === node.id).map((connection, index) => {
+        const source = nodes.find(item => item.id === connection.from);
+        const ref = source?.type === 'image' && source.url && mediaKindForNode(source) === 'image'
+            ? {url:source.url, name:source.name || `图片 ${index + 1}`, sourceId:source.id}
+            : null;
+        return {connection, source, ref, index};
+    }).filter(entry => entry.source?.type === 'image');
+}
+
+function storyboardMergeBodyHtml(node){
+    const entries = storyboardMergeEntries(node);
+    const usable = entries.filter(entry => entry.ref?.url);
+    const gap = Math.max(8, Math.min(128, Number(node.gap) || 32));
+    const disabled = usable.length < 2 || node.running;
+    const thumbs = entries.length
+        ? entries.map((entry, index) => entry.ref?.url
+            ? `<div class="storyboard-merge-thumb" title="${escapeAttr(entry.ref.name)}"><div class="storyboard-merge-thumb-media">${canvasPreviewImgHtml(entry.ref.url, 256, 'alt="" loading="lazy"')}</div><span class="storyboard-merge-index">${index + 1}</span></div>`
+            : `<div class="storyboard-merge-thumb is-empty" title="图片节点尚未上传图片"><div class="storyboard-merge-thumb-media"><i data-lucide="image-off"></i></div><span class="storyboard-merge-index">${index + 1}</span></div>`).join('')
+        : '<div class="storyboard-merge-empty">从图片节点连接至少 2 张分镜图</div>';
+    const message = node.runError ? `<div class="storyboard-merge-error">${escapeHtml(node.runError)}</div>` : `<div class="storyboard-merge-note">${usable.length} 张图片 · 横向排列 · 白色间隙 ${gap}px</div>`;
+    return `<div class="storyboard-merge-body"><div class="storyboard-merge-summary"><span>连接顺序</span><b>${usable.length}/${entries.length}</b></div><div class="storyboard-merge-thumbs">${thumbs}</div>${message}<button type="button" class="storyboard-merge-run" data-storyboard-merge-run="${escapeAttr(node.id)}" ${disabled ? 'disabled' : ''}><i data-lucide="columns-3"></i><span>${node.running ? '合并中…' : '合并分镜'}</span></button></div>`;
+}
+
+function bindStoryboardMergeNode(el, node){
+    const button = el?.querySelector?.('[data-storyboard-merge-run]');
+    if(!button || !node) return;
+    button.addEventListener('mousedown', event => event.stopPropagation());
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        runStoryboardMergeNode(node.id);
+    });
 }
 function loopCount(node){
     return Math.max(1, Math.min(100, Number(node?.count || 1) || 1));
@@ -20530,10 +20667,14 @@ function canConnect(fromId, toId, inputRole=''){
         return ['image','group','output','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
+    if(to.type === 'storyboardMerge'){
+        return from.type === 'image' && (mediaKindForNode(from) === 'image' || !from.url) && !wouldCreateGeneratorCycle(fromId,toId);
+    }
     if(from.type === 'film-storyboard' || from.type === 'film-video' || from.type === 'film-line-art'){
         if(to.type === 'output') return true;
         return CANVAS_GENERATOR_TYPES.includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
+    if(from.type === 'storyboardMerge') return to.type === 'output';
     if(['ecom-model','ecom-product','ecom-scene'].includes(to.type)){
         const valid = (window.CanvasEcommerceNodes?.inputPorts?.(to.type) || []).some(port => port.role === inputRole);
         if(!valid) return false;

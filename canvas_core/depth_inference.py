@@ -9,7 +9,8 @@ import onnxruntime as ort
 
 from .depth_models import DEPTH_MODEL_NAME, DepthModelManager
 
-DEPTH_INPUT_SIZE = (256, 256)
+DEPTH_TARGET_SHORT_EDGE = 518
+DEPTH_SIZE_DIVISOR = 14
 
 
 class DepthUnavailableError(RuntimeError):
@@ -53,10 +54,15 @@ class DepthInference:
             raise ValueError("输入必须是非空 RGB 图片")
         session = self._ensure_session()
         height, width = image_rgb.shape[:2]
-        resized = cv2.resize(image_rgb, DEPTH_INPUT_SIZE, interpolation=cv2.INTER_AREA)
-        # MiDaS Small ONNX expects BGR with ImageNet normalization.
-        bgr = cv2.cvtColor(resized, cv2.COLOR_RGB2BGR).astype(np.float32) / 255.0
-        normalized = (bgr - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        short_edge = max(1, min(height, width))
+        scale = DEPTH_TARGET_SHORT_EDGE / float(short_edge)
+        resized_width = max(DEPTH_SIZE_DIVISOR, int(round(width * scale / DEPTH_SIZE_DIVISOR)) * DEPTH_SIZE_DIVISOR)
+        resized_height = max(DEPTH_SIZE_DIVISOR, int(round(height * scale / DEPTH_SIZE_DIVISOR)) * DEPTH_SIZE_DIVISOR)
+        resized = cv2.resize(image_rgb, (resized_width, resized_height), interpolation=cv2.INTER_AREA)
+        # Depth Anything V2 expects RGB values with ImageNet normalization and preserves aspect ratio.
+
+        rgb = resized.astype(np.float32) / 255.0
+        normalized = (rgb - np.array([0.485, 0.456, 0.406], dtype=np.float32)) / np.array([0.229, 0.224, 0.225], dtype=np.float32)
         tensor = np.ascontiguousarray(normalized.transpose(2, 0, 1)[None], dtype=np.float32)
         with self._inference_lock:
             output = session.run(None, {session.get_inputs()[0].name: tensor})[0]

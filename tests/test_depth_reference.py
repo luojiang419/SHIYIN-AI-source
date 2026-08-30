@@ -3,10 +3,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_depth_model_manager_uses_verified_midas_small_spec():
+def test_depth_model_manager_uses_verified_depth_anything_v2_spec():
     source = (ROOT / 'canvas_core/depth_models.py').read_text(encoding='utf-8')
-    assert 'midas_v21_small_256.onnx' in source
-    assert '66_389_153' in source
+    assert 'model_fp16.onnx' in source
+    assert '50_392_064' in source
     assert 'sha256' in source
     assert 'verify_installed' in source
 
@@ -14,7 +14,7 @@ def test_depth_model_manager_uses_verified_midas_small_spec():
 def test_depth_inference_is_cpu_only_and_preserves_original_dimensions():
     source = (ROOT / 'canvas_core/depth_inference.py').read_text(encoding='utf-8')
     assert 'CPUExecutionProvider' in source
-    assert 'DEPTH_INPUT_SIZE = (256, 256)' in source
+    assert 'DEPTH_TARGET_SHORT_EDGE = 518' in source
     assert 'return DepthResult(image_gray=gray, width=width, height=height)' in source
 
 
@@ -63,3 +63,4 @@ def test_depth_inference_normalizes_fake_relative_depth_without_loading_weights(
     assert result.image_gray.dtype == np.uint8
     assert int(result.image_gray.min()) == 0
     assert int(result.image_gray.max()) == 255
+

@@ -15,12 +15,10 @@ import requests
 from .data_layout import atomic_write_json
 
 
-DEPTH_MODEL_URL = "https://huggingface.co/Heliosoph/midas-small-onnx/resolve/main/midas_v21_small_256.onnx"
-DEPTH_MODEL_NAME = "midas_v21_small_256.onnx"
-DEPTH_MODEL_SIZE = 66_389_153
-# SHA-256 of the pinned model file downloaded from the official Hugging Face resolve URL.
-DEPTH_MODEL_SHA256 = "b0a5b3f12625137e626805167907fe0410665bec671685d59daaa2daab19f977"
-DEPTH_MODEL_SET_VERSION = "midas-small-onnx-v21"
+DEPTH_MODEL_BASE_URL = "https://huggingface.co/onnx-community/depth-anything-v2-small-ONNX/resolve/main/onnx/"
+DEPTH_MODEL_NAME = "model_fp16.onnx"
+DEPTH_MODEL_DATA_NAME = "model_fp16.onnx_data"
+DEPTH_MODEL_SET_VERSION = "depth-anything-v2-small-onnx-fp16"
 
 
 @dataclass(frozen=True)
@@ -33,10 +31,14 @@ class DepthModelSpec:
 
 DEPTH_MODEL_SPECS = (
     DepthModelSpec(
-        name=DEPTH_MODEL_NAME,
-        size=DEPTH_MODEL_SIZE,
-        sha256=DEPTH_MODEL_SHA256,
-        official_url=DEPTH_MODEL_URL,
+        name=DEPTH_MODEL_NAME, size=180_471,
+        sha256="3f220770bf259ef0cc1a8253f4f29419d4d15092902d78ded851669291d876e2",
+        official_url=DEPTH_MODEL_BASE_URL + DEPTH_MODEL_NAME,
+    ),
+    DepthModelSpec(
+        name=DEPTH_MODEL_DATA_NAME, size=50_392_064,
+        sha256="4c3b600a87aa247593ceaafb11cd1f40568dc391cd1305d6ad01075079297ddd",
+        official_url=DEPTH_MODEL_BASE_URL + DEPTH_MODEL_DATA_NAME,
     ),
 )
 

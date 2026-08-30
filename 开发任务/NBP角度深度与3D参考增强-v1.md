@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-已完成后端深度模型管理、CPU ONNX 推理、深度接口和角度节点几何参考 UI。角度节点现在支持自动生成 MiDaS 深度图，或从相连的 3D 导演台节点读取最近一次导出截图，并按原图→几何参考→上一轮结果顺序传给 Nano Banana Pro。新方案不使用 LoRA。当前尚未实现从 directorProject 在角度节点内按任意相机自动重渲染，仍复用导演台已导出的 2D 截图。
+已完成后端深度模型管理、CPU ONNX 推理、深度接口和角度节点几何参考 UI。角度节点现在支持自动生成 Depth Anything V2 深度图，或从相连的 3D 导演台节点读取最近一次导出截图，并按原图→几何参考→上一轮结果顺序传给 Nano Banana Pro。新方案不使用 LoRA。当前尚未实现从 directorProject 在角度节点内按任意相机自动重渲染，仍复用导演台已导出的 2D 截图。
 
 ## 下一步
 
@@ -17,7 +17,7 @@
 
 ## 当前 TODO
 
-- [x] 深度模型管理器与 MiDaS Small ONNX 推理
+- [x] 深度模型管理器与 Depth Anything V2 Small FP16 ONNX 推理
 - [x] `/api/depth/status` 与 `/api/depth/estimate`
 - [x] 角度节点深度参考 UI 与节点字段
 - [x] 3D 导演台截图作为结构参考
@@ -28,7 +28,7 @@
 
 - 静态检查：`py_compile`、3 个 `node --check` 已通过
 - 单元测试：`pytest -q tests/test_depth_reference.py tests/test_nbp_angle_mode.py`，7 passed
-- 运行测试：已下载并校验 66MB 权重，真实深度推理输出 1792×2400；imgx 深度参考角度测试 4/4 成功
+- 运行测试：已下载并校验约 50MB 权重，真实深度推理输出 1792×2400；imgx 深度参考角度测试 4/4 成功
 - 最近 Git commit：`ef6fde1 feat: 增加角度节点深度与3D几何参考`
 - Git push：已推送到 `origin/feat/storyboard-merge-node`
 
@@ -47,7 +47,7 @@
 
 ## 技术方案
 
-- 首选 MiDaS Small ONNX：约 66 MB、CPU 友好、MIT 许可，首请求自动下载，输入 256×256，输出相对深度灰度 PNG。后续可替换为 Depth Anything V2。
+- 首选 Depth Anything V2 Small FP16 ONNX：约 50 MB、CPU 友好、Apache-2.0 许可，首请求自动下载，输入按比例缩放到 518 短边，输出相对深度灰度 PNG。
 - 新增 `DepthModelManager` 和 `DepthInference`，模型存储在账号系统模型目录的 `depth` 子目录。
 - 新增深度状态、管理员重试和估计接口；接口返回 PNG，前端再上传到现有媒体服务获得持久 URL。
 - 角度节点新增 `angleGeometryMode: none|depth|director3d`、`angleDepthUrl`、`angleDirectorCaptureUrl` 等字段。
@@ -70,7 +70,7 @@
 
 ## 已完成内容
 
-- 新增 `canvas_core/depth_models.py`：MiDaS Small ONNX 权重下载、SHA-256/大小校验、状态与重试。
+- 新增 `canvas_core/depth_models.py`：Depth Anything V2 Small FP16 ONNX 权重下载、SHA-256/大小校验、状态与重试。
 - 新增 `canvas_core/depth_inference.py`：CPUExecutionProvider 推理和同尺寸灰度深度图输出。
 - `main.py` 新增深度状态、管理员重试和 `/api/depth/estimate` 接口，启动时可按环境变量自动补齐模型。
 - 角度节点新增几何参考模式、深度生成按钮、director3d 最近截图引用和几何参考提示词；经典/智能画布均按固定顺序提交参考图。
@@ -84,7 +84,7 @@
 
 ## 开发日志
 
-- 2026-08-30：完成 MiDaS Small ONNX 管理、深度接口、角度节点几何参考模式、3D 导演台截图引用和测试；提交 `ef6fde1` 并推送。
+- 2026-08-30：完成 Depth Anything V2 Small FP16 ONNX 管理、深度接口、角度节点几何参考模式、3D 导演台截图引用和测试；提交 `ef6fde1` 并推送。
 
 ## 当前关键修改
 
@@ -95,4 +95,8 @@
 
 ## 追加验证
 
-- 2026-08-30：使用 `D:\data\图片\20260820-195103.png` 和真实 MiDaS 深度图进行左 40°、右 40°、背面 180°、顶部约 35° 四角度 imgx 测试，3:4、2K、4 张，4/4 成功。详细结果见 `开发文档/NBP深度参考四角度测试报告-20260830.md`。左侧、背面、顶部命中明显，右侧 40° 偏正面，验证深度图是软几何约束。
+- 2026-08-30：使用 `D:\data\图片\20260820-195103.png` 和真实 Depth Anything V2 深度图进行左 40°、右 40°、背面 180°、顶部约 35° 四角度 imgx 测试，3:4、2K、4 张，4/4 成功。详细结果见 `开发文档/NBP深度参考四角度测试报告-20260830.md`。左侧、背面、顶部命中明显，右侧 40° 偏正面，验证深度图是软几何约束。
+
+## 第二轮精度升级
+
+- 2026-08-30：将 MiDaS Small 替换为 Depth Anything V2 Small FP16 ONNX，增加外部权重文件校验；按 `keep_aspect_ratio` 等比例缩放，真实复测右侧 40°、背面和顶部视角。右侧小角度明显改善，3D 导演台仍按计划留到下一阶段。

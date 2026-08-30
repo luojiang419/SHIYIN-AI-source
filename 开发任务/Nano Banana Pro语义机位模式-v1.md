@@ -26,7 +26,7 @@
 - 静态检查：`node --check` 三个脚本通过
 - 单元测试：NBP 角度测试 2 passed；相关特殊节点测试 4 passed
 - imgx 图生图：5/5 成功，`image-to-image`、`gemini-3-pro-image-preview`、`3:4`、`2K`
-- 最近 Git commit：`9e6baea`
+- 最近 Git commit：`791bbc8`
 
 ## 任务目标
 

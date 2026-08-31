@@ -2,6 +2,8 @@ import re
 import unittest
 from pathlib import Path
 
+import main
+
 
 ROOT = Path(__file__).resolve().parent.parent
 INDEX_HTML = ROOT / "static" / "index.html"
@@ -71,6 +73,14 @@ class VisibleShellStartupTests(unittest.TestCase):
         self.assertIn("studioFramePreloadPromise = Promise.all(", self.source)
         self.assertIn("studioFrameReadyState[id] = ready ? 'ready' : 'error';", self.source)
         self.assertIn("studio-all-frames-ready", self.source)
+
+    def test_versioning_rewrites_iframe_data_src_assets(self):
+        # 页面入口使用 data-src 延迟初始化 iframe；它也必须随应用版本换资源键，
+        # 否则 Service Worker 会把升级后的页面和旧版脚本/CSS 重新拼在一起。
+        source = '<iframe data-src="/static/gpt-chat.html?v=2026.08.02.ivory-surfaces.1"></iframe>'
+        rewritten = main.versioned_static_html(source)
+        self.assertIn(f"/static/gpt-chat.html?v={main.current_app_version()}", rewritten)
+        self.assertNotIn('v=2026.08.02.ivory-surfaces.1', rewritten)
 
 
 class DeferredBackendMaintenanceTests(unittest.TestCase):

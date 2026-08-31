@@ -2305,16 +2305,30 @@ UNVERSIONED_STATIC_CACHE_CONTROL = "no-cache, max-age=0, must-revalidate"
 
 
 class VersionedStaticFiles(StaticFiles):
-    """只让带 v 参数的静态资源长缓存，避免直接访问的资源长期滞后。"""
+    """只让带 v 参数的静态资源长缓存，并给 HTML 内嵌资源统一换版本键。"""
 
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
         if response.status_code < 200 or response.status_code >= 300:
             return response
         if path.lower().endswith((".html", ".htm")):
-            response.headers["Cache-Control"] = HTML_CACHE_CONTROL
-            response.headers["Pragma"] = "no-cache"
-            return response
+            # iframe 页面里的 data-src/src/href 可能仍保留历史构建查询串。
+            # 这些 HTML 本身不进 Service Worker 静态缓存，但它们引用的脚本和 CSS
+            # 会按查询串缓存；不重写会让升级后的页面继续组合旧版资源。
+            try:
+                html_path = os.path.join(STATIC_DIR, path.replace("/", os.sep))
+                with open(html_path, "r", encoding="utf-8") as handle:
+                    html = versioned_static_html(handle.read())
+                rewritten = Response(html, media_type="text/html; charset=utf-8")
+                rewritten.headers["Cache-Control"] = HTML_CACHE_CONTROL
+                rewritten.headers["Pragma"] = "no-cache"
+                return rewritten
+            except (OSError, UnicodeDecodeError):
+                # 非 UTF-8 或读取失败时保留 StaticFiles 的原始响应，避免静态资源
+                # 版本处理反过来阻断页面打开。
+                response.headers["Cache-Control"] = HTML_CACHE_CONTROL
+                response.headers["Pragma"] = "no-cache"
+                return response
         raw_query = scope.get("query_string", b"")
         query = urllib.parse.parse_qs(raw_query.decode("latin-1", errors="ignore"), keep_blank_values=True)
         response.headers["Cache-Control"] = (

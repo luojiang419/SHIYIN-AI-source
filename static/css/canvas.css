@@ -291,7 +291,7 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node-media-toolbar button svg { width:clamp(14px,1.1vw,18px); height:clamp(14px,1.1vw,18px); flex:0 0 auto; }
 .node-media-toolbar button:last-child { color:var(--strong); background:color-mix(in srgb,var(--strong) 10%,transparent); }
 .node-media-toolbar button:last-child:hover { color:var(--strong); background:color-mix(in srgb,var(--strong) 18%,transparent); }
-.image-node-prompt-panel { position:absolute; left:50%; top:calc(100% + 8px); z-index:22; width:min(520px,100%); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); box-sizing:border-box; container-type:inline-size; overflow:auto; padding:7px; border:1px solid var(--line); border-radius:13px; background:var(--card-solid); box-shadow:0 12px 30px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translate(-50%,-5px); transition:opacity .14s var(--ease),transform .14s var(--ease),visibility .14s var(--ease); }
+.image-node-prompt-panel { position:absolute; left:50%; top:calc(100% + 8px); z-index:22; width:min(520px,100%); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); box-sizing:border-box; container-type:inline-size; overflow:visible; padding:7px; border:1px solid var(--line); border-radius:13px; background:var(--card-solid); box-shadow:0 12px 30px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translate(-50%,-5px); transition:opacity .14s var(--ease),transform .14s var(--ease),visibility .14s var(--ease); }
 .node:hover > .image-node-prompt-panel,.node.selected > .image-node-prompt-panel { opacity:1; visibility:visible; pointer-events:auto; transform:translate(-50%,0); }
 /* 框选结果以画布整体操作为主，多选期间不让任一节点的 hover/selected 规则弹出局部面板。 */
 .board.selection-multiple .node > .node-media-toolbar,
@@ -1109,7 +1109,7 @@ body.theme-dark .minimap-arrange-btn:hover { background:var(--soft-2); color:var
 .image-quick-choice-trigger span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .image-quick-choice-trigger svg { width:13px; height:13px; flex:0 0 auto; transition:transform .14s ease; }
 .image-quick-choice.open .image-quick-choice-trigger svg { transform:rotate(180deg); }
-.image-quick-choice-panel { position:absolute; left:0; top:calc(100% + 5px); z-index:80; display:flex; flex-direction:column; gap:2px; width:max-content; min-width:100%; max-width:min(280px,calc(100vw - 32px)); max-height:220px; overflow:auto; padding:5px; border:1px solid var(--line-2); border-radius:10px; background:var(--card-solid); box-shadow:0 14px 30px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translateY(-4px); transition:opacity .14s ease,transform .14s ease,visibility .14s ease; }
+.image-quick-choice-panel { position:absolute; left:0; top:calc(100% + 3px); z-index:80; display:flex; flex-direction:column; gap:2px; width:max-content; min-width:100%; max-width:min(280px,calc(100vw - 32px)); max-height:min(220px,calc(100vh - 88px)); overflow:auto; padding:5px; border:1px solid var(--line-2); border-radius:10px; background:var(--card-solid); box-shadow:0 14px 30px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translateY(-4px); transition:opacity .14s ease,transform .14s ease,visibility .14s ease; }
 .image-quick-choice.open .image-quick-choice-panel,
 .image-quick-choice:hover .image-quick-choice-panel,
 .image-quick-choice:focus-within .image-quick-choice-panel { opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0); }

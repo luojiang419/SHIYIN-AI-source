@@ -78,6 +78,9 @@ def test_image_quick_provider_and_model_use_hover_choice_menus():
     assert ".image-quick-choice-panel" in CSS
     assert ".image-quick-choice:hover .image-quick-choice-panel" in CSS
     assert ".image-quick-choice:focus-within .image-quick-choice-panel" in CSS
+    assert ".image-node-prompt-panel {" in CSS
+    assert "container-type:inline-size; overflow:visible;" in CSS
+    assert "max-height:min(220px,calc(100vh - 88px)); overflow:auto;" in CSS
 
 
 def test_media_controls_are_not_materialized_until_needed_for_every_classic_node():

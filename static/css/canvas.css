@@ -860,7 +860,8 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .port:hover::after { transform:scale(1.25); }
 .port.in { left:-29px; cursor:crosshair; }
 .lookbook-node .port.in { left:-29px; top:var(--canvas-port-top,50%); }
-.lookbook-node .port.in::before { content:attr(data-role-label); position:absolute; right:calc(100% + 7px); top:50%; transform:translateY(-50%); max-width:86px; padding:3px 7px; border:1px solid var(--line); border-radius:7px; background:var(--card-solid); color:var(--text); box-shadow:0 5px 14px rgba(0,0,0,.12); font-size:10px; font-weight:850; line-height:1.1; white-space:nowrap; pointer-events:none; }
+.lookbook-node .node-body { padding-left:74px; }
+.lookbook-node .port.in::before { content:attr(data-role-label); position:absolute; left:calc(100% + 7px); right:auto; top:50%; transform:translateY(-50%); max-width:86px; padding:3px 7px; border:1px solid var(--line); border-radius:7px; background:var(--card-solid); color:var(--text); box-shadow:0 5px 14px rgba(0,0,0,.12); font-size:10px; font-weight:850; line-height:1.1; white-space:nowrap; pointer-events:none; }
 .port.out { right:-15px; }
 .node > .port { top:50%; }
 .ltxDirector-node > .port,

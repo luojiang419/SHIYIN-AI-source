@@ -11,15 +11,19 @@ def test_camera_reference_manifest_contains_generated_horizontal_and_pitch_bucke
     manifest_path = ROOT / 'static/assets/camera-reference/manifest.json'
     data = json.loads(manifest_path.read_text(encoding='utf-8'))
     assert data['source']['license'] == 'Project-generated asset'
-    assert len(data['references']) == 9
-    assert {item['id'] for item in data['references']} >= {'front', 'back', 'low', 'elevated', 'high'}
+    assert len(data['references']) == 13
+    assert {item['id'] for item in data['references']} >= {'front', 'back', 'pitch-minus45', 'pitch-minus30', 'pitch-minus15', 'pitch-plus15', 'pitch-plus30', 'pitch-plus45', 'pitch-plus60'}
     for item in data['references']:
         assert item['url'].startswith('/static/assets/camera-reference/')
         assert (ROOT / item['url'].lstrip('/')).exists()
     pitch_bands = {item['id']: (item['elevationMin'], item['elevationMax']) for item in data['references'] if item.get('pitchBand')}
-    assert pitch_bands['low'] == (-45, -15)
-    assert pitch_bands['elevated'] == (16, 45)
-    assert pitch_bands['high'] == (46, 60)
+    assert pitch_bands['pitch-minus45'] == (-45, -38)
+    assert pitch_bands['pitch-minus30'] == (-37, -23)
+    assert pitch_bands['pitch-minus15'] == (-22, -8)
+    assert pitch_bands['pitch-plus15'] == (8, 22)
+    assert pitch_bands['pitch-plus30'] == (23, 37)
+    assert pitch_bands['pitch-plus45'] == (38, 52)
+    assert pitch_bands['pitch-plus60'] == (53, 60)
 
 
 def test_angle_panel_exposes_right_side_reference_preview_and_hides_depth_action():
@@ -33,9 +37,10 @@ def test_angle_panel_exposes_right_side_reference_preview_and_hides_depth_action
     assert '.angle-reference-preview' in css
     assert 'min="${ANGLE_ELEVATION_MIN}" max="${ANGLE_ELEVATION_MAX}"' in shared
     assert 'node.angleElevation = clamp' in shared
-    assert "if(elevation <= -15) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'low');" in shared
-    assert "if(elevation >= 46) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'high');" in shared
-    assert "if(elevation >= 16) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'elevated');" in shared
+    assert "const pitchCard = ANGLE_REFERENCE_CARDS.find(item => item.pitchBand !== 'eye'" in shared
+    assert "elevation >= item.elevationMin && elevation <= item.elevationMax" in shared
+    for marker in ('angle-pitch-minus45.png', 'angle-pitch-minus30.png', 'angle-pitch-minus15.png', 'angle-pitch-plus15.png', 'angle-pitch-plus30.png', 'angle-pitch-plus45.png', 'angle-pitch-plus60.png'):
+        assert marker in shared
 
 
 def test_angle_generation_uses_static_reference_as_image_2():

@@ -430,15 +430,19 @@
         [180,'背面 180°','back view'],[225,'左后 225°','back-left quarter view'],[270,'左侧 270°','left side view'],[315,'左前 315°','front-left quarter view']
     ];
     const ANGLE_REFERENCE_CARDS = [
-        {id:'front',label:'正面 / 平视',yawMin:-22.5,yawMax:22.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-front.png'},
-        {id:'front-left',label:'左前 45° / 平视',yawMin:-67.5,yawMax:-22.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-front-left.png'},
-        {id:'front-right',label:'右前 45° / 平视',yawMin:22.5,yawMax:67.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-front-right.png'},
-        {id:'side-right',label:'右侧 / 平视',yawMin:67.5,yawMax:157.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-side-right.png'},
-        {id:'back',label:'背面 / 平视',yawMin:157.5,yawMax:-157.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-back.png'},
-        {id:'side-left',label:'左侧 / 平视',yawMin:-157.5,yawMax:-67.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-side-left.png'},
-        {id:'low',label:'仰拍 / -45°',yawMin:-180,yawMax:180,elevationMin:-45,elevationMax:-15,url:'/static/assets/camera-reference/angle-pitch-low-minus45.png'},
-        {id:'elevated',label:'俯视 / +30°',yawMin:-180,yawMax:180,elevationMin:16,elevationMax:45,url:'/static/assets/camera-reference/angle-pitch-elevated-plus30.png'},
-        {id:'high',label:'高俯视 / +55°',yawMin:-180,yawMax:180,elevationMin:46,elevationMax:60,url:'/static/assets/camera-reference/angle-pitch-high-plus55.png'}
+        {id:'front',label:'正面 / 平视',yawMin:-22.5,yawMax:22.5,elevationMin:-7,elevationMax:7,url:'/static/assets/camera-reference/angle-eye-front.png',pitchBand:'eye'},
+        {id:'front-left',label:'左前 45° / 平视',yawMin:-67.5,yawMax:-22.5,elevationMin:-7,elevationMax:7,url:'/static/assets/camera-reference/angle-eye-front-left.png',pitchBand:'eye'},
+        {id:'front-right',label:'右前 45° / 平视',yawMin:22.5,yawMax:67.5,elevationMin:-7,elevationMax:7,url:'/static/assets/camera-reference/angle-eye-front-right.png',pitchBand:'eye'},
+        {id:'side-right',label:'右侧 / 平视',yawMin:67.5,yawMax:157.5,elevationMin:-7,elevationMax:7,url:'/static/assets/camera-reference/angle-eye-side-right.png',pitchBand:'eye'},
+        {id:'back',label:'背面 / 平视',yawMin:157.5,yawMax:-157.5,elevationMin:-7,elevationMax:7,url:'/static/assets/camera-reference/angle-eye-back.png',pitchBand:'eye'},
+        {id:'side-left',label:'左侧 / 平视',yawMin:-157.5,yawMax:-67.5,elevationMin:-7,elevationMax:7,url:'/static/assets/camera-reference/angle-eye-side-left.png',pitchBand:'eye'},
+        {id:'pitch-minus45',label:'仰拍 / -45°',yawMin:-180,yawMax:180,elevationMin:-45,elevationMax:-38,url:'/static/assets/camera-reference/angle-pitch-minus45.png',pitchBand:'low',representativeElevation:-45},
+        {id:'pitch-minus30',label:'仰拍 / -30°',yawMin:-180,yawMax:180,elevationMin:-37,elevationMax:-23,url:'/static/assets/camera-reference/angle-pitch-minus30.png',pitchBand:'low',representativeElevation:-30},
+        {id:'pitch-minus15',label:'低机位 / -15°',yawMin:-180,yawMax:180,elevationMin:-22,elevationMax:-8,url:'/static/assets/camera-reference/angle-pitch-minus15.png',pitchBand:'low',representativeElevation:-15},
+        {id:'pitch-plus15',label:'高机位 / +15°',yawMin:-180,yawMax:180,elevationMin:8,elevationMax:22,url:'/static/assets/camera-reference/angle-pitch-plus15.png',pitchBand:'elevated',representativeElevation:15},
+        {id:'pitch-plus30',label:'俯视 / +30°',yawMin:-180,yawMax:180,elevationMin:23,elevationMax:37,url:'/static/assets/camera-reference/angle-pitch-plus30.png',pitchBand:'elevated',representativeElevation:30},
+        {id:'pitch-plus45',label:'强俯视 / +45°',yawMin:-180,yawMax:180,elevationMin:38,elevationMax:52,url:'/static/assets/camera-reference/angle-pitch-plus45.png',pitchBand:'high',representativeElevation:45},
+        {id:'pitch-plus60',label:'高俯视 / +60°',yawMin:-180,yawMax:180,elevationMin:53,elevationMax:60,url:'/static/assets/camera-reference/angle-pitch-plus60.png',pitchBand:'high',representativeElevation:60}
     ];
     function normalizeAngle(node){
         node.angleAzimuth = ((Number.isFinite(Number(node.angleAzimuth)) ? Number(node.angleAzimuth) : 45) % 360 + 360) % 360;
@@ -467,10 +471,14 @@
     }
     function angleElevationText(value){
         const number = Number(value) || 0;
-        if(number <= -15) return ['低机位','low-angle shot'];
-        if(number <= 15) return ['平视','eye-level shot'];
-        if(number <= 45) return ['俯视','elevated shot'];
-        return ['高俯视','high-angle shot'];
+        if(number <= -38) return ['强仰拍','strong low-angle shot'];
+        if(number <= -23) return ['仰拍','low-angle shot'];
+        if(number <= -8) return ['低机位','slight low-angle shot'];
+        if(number <= 7) return ['平视','eye-level shot'];
+        if(number <= 22) return ['轻微俯视','slight elevated shot'];
+        if(number <= 37) return ['俯视','elevated shot'];
+        if(number <= 52) return ['强俯视','high-angle shot'];
+        return ['高俯视','steep high-angle shot'];
     }
     function angleControlSignature(node){
         return [Math.round(Number(node.angleYaw)||0),Math.round(Number(node.angleElevation)||0),node.angleDistance,node.angleLens,node.angleSubject,node.anglePreserve,node.angleNotes,node.angleGeometryMode,node.angleDepthUrl,node.angleDirectorCaptureUrl,node.editResolution,node.editQuality,node.editRatio,node.editModel].join('|');
@@ -510,9 +518,9 @@
     }
     function angleReferenceCard(node){
         const yaw = signedAngleAzimuth(node?.angleYaw), elevation = Number(node?.angleElevation) || 0;
-        if(elevation <= -15) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'low');
-        if(elevation >= 46) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'high');
-        if(elevation >= 16) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'elevated');
+        const pitchCard = ANGLE_REFERENCE_CARDS.find(item => item.pitchBand !== 'eye'
+            && elevation >= item.elevationMin && elevation <= item.elevationMax);
+        if(pitchCard) return pitchCard;
         if(yaw >= 157.5 || yaw < -157.5) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'back');
         return ANGLE_REFERENCE_CARDS.find(item => yaw >= item.yawMin && yaw < item.yawMax) || ANGLE_REFERENCE_CARDS[0];
     }
@@ -520,7 +528,7 @@
         if(!node) return null;
         normalizeAngle(node);
         const card = angleReferenceCard(node);
-        return card ? {url:card.url, name:`camera-reference-${card.id}.png`, kind:'image'} : null;
+        return card ? {url:card.url, name:card.url.split('/').pop() || `camera-reference-${card.id}.png`, kind:'image'} : null;
     }
     function buildAnglePrompt(node){
         normalizeAngle(node);

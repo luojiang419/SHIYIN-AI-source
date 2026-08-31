@@ -6,16 +6,20 @@
     "url": "",
     "license": "Project-generated asset"
   },
-  "note": "统一使用完整、穿不透明连体服的中性 3D 人偶；图片按水平角和俯仰滑块区间提供视觉几何参考，不作为精确 3D 相机标定数据。俯仰角采用低机位 -45°、俯视 +30°、高俯视 +55° 代表值。",
+  "note": "统一使用完整、穿不透明连体服的中性 3D 人偶；图片按水平角和俯仰滑块区间提供视觉几何参考，不作为精确 3D 相机标定数据。俯仰滑块使用 -45°、-30°、-15°、0°、+15°、+30°、+45°、+60° 八个代表角度。",
   "references": [
-    {"id":"front","label":"正面 / 平视","yawMin":-22.5,"yawMax":22.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-front.png","kind":"image","pitchBand":"eye"},
-    {"id":"front-left","label":"左前 45° / 平视","yawMin":-67.5,"yawMax":-22.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-front-left.png","kind":"image","pitchBand":"eye"},
-    {"id":"front-right","label":"右前 45° / 平视","yawMin":22.5,"yawMax":67.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-front-right.png","kind":"image","pitchBand":"eye"},
-    {"id":"side-right","label":"右侧 / 平视","yawMin":67.5,"yawMax":157.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-side-right.png","kind":"image","pitchBand":"eye"},
-    {"id":"back","label":"背面 / 平视","yawMin":157.5,"yawMax":-157.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-back.png","kind":"image","pitchBand":"eye"},
-    {"id":"side-left","label":"左侧 / 平视","yawMin":-157.5,"yawMax":-67.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-side-left.png","kind":"image","pitchBand":"eye"},
-    {"id":"low","label":"仰拍 / -45°","yawMin":-180,"yawMax":180,"elevationMin":-45,"elevationMax":-15,"url":"/static/assets/camera-reference/angle-pitch-low-minus45.png","kind":"image","pitchBand":"low","representativeElevation":-45},
-    {"id":"elevated","label":"俯视 / +30°","yawMin":-180,"yawMax":180,"elevationMin":16,"elevationMax":45,"url":"/static/assets/camera-reference/angle-pitch-elevated-plus30.png","kind":"image","pitchBand":"elevated","representativeElevation":30},
-    {"id":"high","label":"高俯视 / +55°","yawMin":-180,"yawMax":180,"elevationMin":46,"elevationMax":60,"url":"/static/assets/camera-reference/angle-pitch-high-plus55.png","kind":"image","pitchBand":"high","representativeElevation":55}
+    {"id":"front","label":"正面 / 平视","yawMin":-22.5,"yawMax":22.5,"elevationMin":-7,"elevationMax":7,"url":"/static/assets/camera-reference/angle-eye-front.png","kind":"image","pitchBand":"eye","representativeElevation":0},
+    {"id":"front-left","label":"左前 45° / 平视","yawMin":-67.5,"yawMax":-22.5,"elevationMin":-7,"elevationMax":7,"url":"/static/assets/camera-reference/angle-eye-front-left.png","kind":"image","pitchBand":"eye","representativeElevation":0},
+    {"id":"front-right","label":"右前 45° / 平视","yawMin":22.5,"yawMax":67.5,"elevationMin":-7,"elevationMax":7,"url":"/static/assets/camera-reference/angle-eye-front-right.png","kind":"image","pitchBand":"eye","representativeElevation":0},
+    {"id":"side-right","label":"右侧 / 平视","yawMin":67.5,"yawMax":157.5,"elevationMin":-7,"elevationMax":7,"url":"/static/assets/camera-reference/angle-eye-side-right.png","kind":"image","pitchBand":"eye","representativeElevation":0},
+    {"id":"back","label":"背面 / 平视","yawMin":157.5,"yawMax":-157.5,"elevationMin":-7,"elevationMax":7,"url":"/static/assets/camera-reference/angle-eye-back.png","kind":"image","pitchBand":"eye","representativeElevation":0},
+    {"id":"side-left","label":"左侧 / 平视","yawMin":-157.5,"yawMax":-67.5,"elevationMin":-7,"elevationMax":7,"url":"/static/assets/camera-reference/angle-eye-side-left.png","kind":"image","pitchBand":"eye","representativeElevation":0},
+    {"id":"pitch-minus45","label":"仰拍 / -45°","yawMin":-180,"yawMax":180,"elevationMin":-45,"elevationMax":-38,"url":"/static/assets/camera-reference/angle-pitch-minus45.png","kind":"image","pitchBand":"low","representativeElevation":-45},
+    {"id":"pitch-minus30","label":"仰拍 / -30°","yawMin":-180,"yawMax":180,"elevationMin":-37,"elevationMax":-23,"url":"/static/assets/camera-reference/angle-pitch-minus30.png","kind":"image","pitchBand":"low","representativeElevation":-30},
+    {"id":"pitch-minus15","label":"低机位 / -15°","yawMin":-180,"yawMax":180,"elevationMin":-22,"elevationMax":-8,"url":"/static/assets/camera-reference/angle-pitch-minus15.png","kind":"image","pitchBand":"low","representativeElevation":-15},
+    {"id":"pitch-plus15","label":"高机位 / +15°","yawMin":-180,"yawMax":180,"elevationMin":8,"elevationMax":22,"url":"/static/assets/camera-reference/angle-pitch-plus15.png","kind":"image","pitchBand":"elevated","representativeElevation":15},
+    {"id":"pitch-plus30","label":"俯视 / +30°","yawMin":-180,"yawMax":180,"elevationMin":23,"elevationMax":37,"url":"/static/assets/camera-reference/angle-pitch-plus30.png","kind":"image","pitchBand":"elevated","representativeElevation":30},
+    {"id":"pitch-plus45","label":"强俯视 / +45°","yawMin":-180,"yawMax":180,"elevationMin":38,"elevationMax":52,"url":"/static/assets/camera-reference/angle-pitch-plus45.png","kind":"image","pitchBand":"high","representativeElevation":45},
+    {"id":"pitch-plus60","label":"高俯视 / +60°","yawMin":-180,"yawMax":180,"elevationMin":53,"elevationMax":60,"url":"/static/assets/camera-reference/angle-pitch-plus60.png","kind":"image","pitchBand":"high","representativeElevation":60}
   ]
 }

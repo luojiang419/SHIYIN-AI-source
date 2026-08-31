@@ -1,7 +1,7 @@
 # AI助手连续视觉对话与参考资产复用
 
 状态：开发中  
-当前阶段：3/5  
+当前阶段：4/5  
 最后更新：2026-08-31
 
 ## 当前状态
@@ -12,12 +12,12 @@
 
 ## 下一步
 
-下一步首先完成自动引用准备和提交确认：
+下一步首先完成多图供应商兼容、批量操作和完整回归：
 
-1. 为参考图托盘增加来源、角色和锁定信息。
-2. 设计自动引用准备接口，先返回候选，不直接静默生成。
-3. 用对话资产摘要进行实体匹配，保留手动覆盖。
-4. 执行后端接口测试和完整相关回归，再接入图片生成。
+1. 检查各图片供应商的多图参考限制并补充降级提示。
+2. 增加批量下载/复用和对话分支等低风险操作。
+3. 完成完整测试与页面运行冒烟，确认首开和交互无异常。
+4. 更新任务文档、快照并完成最终 Git 检查。
 
 ## 当前 TODO
 
@@ -26,6 +26,8 @@
 - [x] 全屏预览滚轮缩放、平移、双击复位。
 - [x] 图片级删除与安全软删除语义。
 - [x] 对话视觉资产记录与稳定 asset_id。
+- [x] 参考图来源、角色、锁定信息和自动找图按钮。
+- [x] 自动引用准备接口和轻量实体匹配。
 - [ ] 多轮对话按实体/角色自动选择参考图。
 - [ ] 自动引用预览、确认和手动调整。
 - [ ] 多图批量下载、批量复用。
@@ -34,7 +36,7 @@
 ## 最近验证状态
 
 - 静态检查：`git diff --check` 通过；gpt-chat 内联 JS 语法通过。
-- 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_generated_image_browser_cache.py tests/test_focus_guard.py tests/test_performance_contracts.py -q`，24 passed。
+- 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_generated_image_browser_cache.py tests/test_focus_guard.py tests/test_performance_contracts.py -q`，27 passed。
 - 编译：`python -m py_compile main.py` 通过。
 - 运行测试：接口手动冒烟被项目现有账号鉴权拦截（401），未判定为功能通过；完整桌面运行冒烟尚未启动。
 - 最近 Git commit：`a0c5bc0 docs: close staged canvas performance fixes`
@@ -96,6 +98,7 @@
 - 完成对话图片资产基础记录和批量图片兼容读取。
 - 新增 `tests/test_chat_continuity.py`，覆盖新旧消息结构。
 - 完成图片级右键移除接口和前端持久化刷新，保留被删除资产记录并保护物理文件。
+- 完成 `/api/chat/prepare` 自动引用准备接口；根据对话资产摘要匹配人物、动物、背景等候选，并由前端“自动找图”按钮展示到参考图托盘。
 
 ## 当前关键修改
 
@@ -103,6 +106,7 @@
 - `main.py`：扩展 `AIReference` 元数据，新增对话图片资产记录和兼容读取函数，并在两条生图路径写入 `generated_assets`。
 - `tests/test_chat_continuity.py`：覆盖资产 ID、批量图片和旧消息兼容。
 - `main.py`：新增 `delete_chat_message_asset` 和 `/api/conversations/{conversation_id}/messages/{message_id}` 图片/消息软删除接口。
+- `main.py`：新增 `ChatReferencePrepareRequest`、`resolve_chat_reference_candidates` 和 `/api/chat/prepare`，保留普通生图不静默带入历史图的安全边界。
 
 ## 已知问题
 
@@ -115,6 +119,7 @@
 - 2026-08-31：建立任务文档，完成基线检查，准备从低风险前端交互开始。
 - 2026-08-31：完成前端图片操作与拖拽复用；完成后端视觉资产基础记录，22 项相关测试通过。
 - 2026-08-31：完成图片级软删除和右键移除，相关回归测试 24 项通过；接口手动冒烟因现有登录保护返回 401，未作为运行验证结论。
+- 2026-08-31：完成参考图托盘元数据、锁定和自动找图准备接口；相关回归测试 27 项通过。
 
 ## 接力信息
 

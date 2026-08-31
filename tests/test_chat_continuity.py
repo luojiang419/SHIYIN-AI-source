@@ -99,6 +99,41 @@ class ChatContinuityTests(unittest.TestCase):
         self.assertEqual(message["image_urls"], [])
         self.assertEqual(message["deleted_assets"][0]["url"], "/output/cowgirl.png")
 
+    def test_reference_candidates_match_multiple_visual_entities(self):
+        assets = [
+            {"asset_id": "horse-1", "url": "/output/horse.png", "name": "马", "prompt": "生成一批马"},
+            {"asset_id": "cowgirl-1", "url": "/output/cowgirl.png", "name": "女牛仔", "prompt": "生成女牛仔"},
+            {"asset_id": "ranch-1", "url": "/output/ranch.png", "name": "牧场", "prompt": "生成牧场背景"},
+        ]
+        result = main.resolve_chat_reference_candidates("让女牛仔骑在马背上", assets)
+        selected_ids = [item.get("asset_id") for item in result["selected"]]
+        self.assertIn("cowgirl-1", selected_ids)
+        self.assertIn("horse-1", selected_ids)
+        self.assertNotIn("ranch-1", selected_ids)
+        self.assertTrue(result["edit_intent"])
+
+    def test_plain_new_generation_does_not_silently_reuse_history(self):
+        assets = [{"asset_id": "ranch-1", "url": "/output/ranch.png", "name": "牧场", "prompt": "生成牧场背景"}]
+        result = main.resolve_chat_reference_candidates("生成牧场", assets)
+        self.assertFalse(result["edit_intent"])
+        self.assertEqual(result["auto_count"], 0)
+        self.assertEqual(result["selected"], [])
+
+    def test_reference_request_preserves_asset_metadata(self):
+        request = main.ChatRequest(
+            message="换背景",
+            reference_images=[{
+                "url": "/output/source.png",
+                "asset_id": "source-1",
+                "role": "subject",
+                "locked": True,
+            }],
+        )
+        ref = request.reference_images[0].model_dump()
+        self.assertEqual(ref["asset_id"], "source-1")
+        self.assertEqual(ref["role"], "subject")
+        self.assertTrue(ref["locked"])
+
 
 if __name__ == "__main__":
     unittest.main()

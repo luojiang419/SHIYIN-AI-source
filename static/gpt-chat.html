@@ -268,12 +268,21 @@
         .send-btn i,.send-btn svg { width:18px; height:18px; }
         .ref-strip { display:flex; align-items:center; gap:8px; overflow:auto; min-width:0; max-width:100%; min-height:0; }
         .ref-strip:empty { display:none; }
-        .ref-chip { position:relative; width:52px; height:52px; border-radius:12px; overflow:hidden; border:1px solid var(--chat-line); background:var(--chat-panel); flex:0 0 auto; }
+        .ref-chip { position:relative; width:62px; height:62px; border-radius:12px; overflow:hidden; border:1px solid var(--chat-line); background:var(--chat-panel); flex:0 0 auto; }
+        .ref-chip.locked { border-color:var(--chat-strong); box-shadow:0 0 0 1px color-mix(in srgb,var(--chat-strong) 32%,transparent); }
         .ref-chip img { width:100%; height:100%; object-fit:cover; }
+        .ref-chip-role { position:absolute; left:4px; bottom:4px; max-width:calc(100% - 8px); padding:2px 5px; border-radius:5px; color:#fffaf4; background:rgba(25,22,18,.72); font-size:9px; line-height:1.2; font-weight:850; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none; }
         .ref-chip.file { width:176px; padding:9px 28px 9px 10px; display:flex; align-items:center; gap:8px; color:var(--chat-text); }
         .ref-chip.file i,.ref-chip.file svg { width:16px; height:16px; color:var(--chat-muted); flex:0 0 auto; }
         .ref-chip.file .ref-file-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:850; }
         .ref-chip button { position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.92); color:#111827; font-size:12px; line-height:18px; }
+        .ref-chip button.ref-lock { right:24px; display:flex; align-items:center; justify-content:center; font-size:0; }
+        .ref-chip button.ref-lock i,.ref-chip button.ref-lock svg { width:11px; height:11px; }
+        .ref-hint { display:none; align-items:center; gap:6px; min-height:16px; color:var(--chat-muted); font-size:10px; font-weight:800; }
+        .ref-hint.visible { display:flex; }
+        .ref-hint i,.ref-hint svg { width:13px; height:13px; color:var(--chat-strong); }
+        .auto-ref-btn { width:auto; min-width:36px; padding:0 9px; gap:5px; font-size:10px; font-weight:850; }
+        .auto-ref-btn.busy { opacity:.56; pointer-events:none; }
         .image-preview-modal { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:24px; background:rgba(15,23,42,.62); backdrop-filter:blur(14px); z-index:10000; }
         .image-preview-modal.open { display:flex; animation:popIn .16s var(--ease); }
         .chat-preview-frame { width:min(1180px,94vw); height:min(820px,78vh); max-width:100%; border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,.32); background:var(--chat-panel); }
@@ -529,12 +538,16 @@
                     <div id="composerBody" class="composer-body">
                         <textarea id="messageInput" rows="4" placeholder="输入消息，Enter 发送..." data-i18n-placeholder="chat.inputPlaceholder" oninput="autoGrow(this)" onkeydown="handleKey(event)"></textarea>
                         <div id="refStrip" class="ref-strip"></div>
+                        <div id="refHint" class="ref-hint"><i data-lucide="info"></i><span></span></div>
                         <div class="composer-inside-foot">
                             <div class="left-tools">
                                 <div class="inline-controls">
                                     <input id="attachmentInput" class="file-input" type="file" multiple onchange="uploadFiles(this.files); this.value='';">
                                     <button type="button" class="upload-btn" onclick="document.getElementById('attachmentInput')?.click()" title="上传附件" aria-label="上传附件">
                                         <i data-lucide="paperclip"></i>
+                                    </button>
+                                    <button id="autoReferenceBtn" type="button" class="upload-btn auto-ref-btn" onclick="prepareChatReferences()" title="根据当前输入自动找图" aria-label="根据当前输入自动找图">
+                                        <i data-lucide="sparkles"></i><span>自动找图</span>
                                     </button>
                                     <div id="modelPicker" class="model-picker">
                                         <button id="modelPickerBtn" class="model-picker-button" onclick="event.stopPropagation();toggleModelPicker()" title="选择平台和模型">
@@ -1613,11 +1626,28 @@
             return node;
         }
 
+        function referenceRoleLabel(ref){
+            const labels = {subject:'主体', background:'背景', style:'风格', pose:'动作', source:'参考'};
+            return labels[String(ref?.role || '').toLowerCase()] || '参考';
+        }
+
+        function referenceSourceLabel(ref){
+            const source = String(ref?.source || '').toLowerCase();
+            if(source.includes('conversation')) return ref?.auto_selected ? '自动匹配' : '对话图片';
+            if(source.includes('upload')) return '上传';
+            return source.includes('drag') ? '拖入' : '手动';
+        }
+
         function renderRefChip(ref, i){
+            const locked = Boolean(ref?.locked);
+            const role = referenceRoleLabel(ref);
+            const source = referenceSourceLabel(ref);
+            const title = `${attachmentName(ref)} · ${role} · ${source}${locked ? ' · 已锁定' : ''}`;
+            const lock = `<button type="button" class="ref-lock" onclick="event.stopPropagation();toggleRefLock(${i})" title="${locked ? '解除锁定' : '锁定参考图'}" aria-label="${locked ? '解除锁定' : '锁定参考图'}"><i data-lucide="${locked ? 'lock' : 'unlock'}"></i></button>`;
             if(isImageRef(ref)){
-                return `<div class="ref-chip"><img src="${escapeHtml(ref.url)}" title="${escapeHtml(attachmentName(ref))}"><button onclick="removeRef(${i})">×</button></div>`;
+                return `<div class="ref-chip ${locked ? 'locked' : ''}" title="${escapeHtml(title)}"><img src="${escapeHtml(ref.url)}" title="${escapeHtml(attachmentName(ref))}"><span class="ref-chip-role">${escapeHtml(role)}</span>${lock}<button type="button" onclick="event.stopPropagation();removeRef(${i})" title="移除参考图">×</button></div>`;
             }
-            return `<div class="ref-chip file"><i data-lucide="file"></i><span class="ref-file-name" title="${escapeHtml(attachmentName(ref))}">${escapeHtml(attachmentName(ref))}</span><button onclick="removeRef(${i})">×</button></div>`;
+            return `<div class="ref-chip file ${locked ? 'locked' : ''}" title="${escapeHtml(title)}"><i data-lucide="file"></i><span class="ref-file-name" title="${escapeHtml(attachmentName(ref))}">${escapeHtml(attachmentName(ref))}</span>${lock}<button type="button" onclick="event.stopPropagation();removeRef(${i})" title="移除参考图">×</button></div>`;
         }
 
         async function uploadFiles(files){
@@ -1628,7 +1658,7 @@
             [...files].slice(0, available).forEach(file => form.append('files', file));
             try {
                 const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => { if(!r.ok) throw new Error((await r.json()).detail || '上传失败'); return r.json(); });
-                refs.push(...(data.files || []));
+                refs.push(...(data.files || []).map(ref => ({...ref, source:ref.source || 'upload'})));
                 renderRefs();
             } catch(e) {
                 alert(e.message || '上传失败');
@@ -1643,6 +1673,56 @@
         }
 
         function removeRef(i){ refs.splice(i,1); renderRefs(); }
+
+        function toggleRefLock(i){
+            if(!refs[i]) return;
+            refs[i] = {...refs[i], locked:!refs[i].locked};
+            renderRefs();
+        }
+
+        function setReferenceHint(text){
+            const hint = document.getElementById('refHint');
+            const span = hint?.querySelector('span');
+            if(!hint || !span) return;
+            span.textContent = text || '';
+            hint.classList.toggle('visible', Boolean(text));
+            if(text) lucide.createIcons();
+        }
+
+        async function prepareChatReferences(){
+            const input = document.getElementById('messageInput');
+            const message = input?.value.trim();
+            if(!message) { input?.focus(); return; }
+            const button = document.getElementById('autoReferenceBtn');
+            button?.classList.add('busy');
+            setReferenceHint('正在从当前对话中查找可能相关的图片…');
+            try {
+                const response = await fetch('/api/chat/prepare', {
+                    method:'POST',
+                    headers:headers(),
+                    body:JSON.stringify({
+                        conversation_id:currentConversation?.id || '',
+                        message,
+                        system_prompt:currentSystemPrompt(),
+                        model:provider === 'modelscope' ? (msModel || activeChatModel) : (activeChatModel || config.chat_model),
+                        ms_model:provider === 'modelscope' ? (msModel || activeChatModel) : '',
+                        provider,
+                        reference_images:refs,
+                    })
+                });
+                const data = await response.json();
+                if(!response.ok) throw new Error(data.detail || '自动找图失败');
+                const selected = Array.isArray(data.selected_references) ? data.selected_references : [];
+                refs = selected.map(ref => ({...ref, kind:ref.kind || 'image', locked:Boolean(ref.locked)}));
+                renderRefs();
+                const autoCount = Number(data.auto_count || 0);
+                setReferenceHint(autoCount ? `已自动匹配 ${autoCount} 张图片，可继续删除、锁定或补充参考图。` : (refs.length ? '已保留当前手动参考图，未匹配到新的历史图片。' : '没有匹配到历史参考图，仍可手动拖入图片。'));
+            } catch(error) {
+                setReferenceHint(error.message || '自动找图失败');
+            } finally {
+                button?.classList.remove('busy');
+            }
+        }
 
         window.addEventListener('paste', e => {
             const files = [...(e.clipboardData?.items || [])].filter(x => x.kind === 'file').map(x => x.getAsFile()).filter(Boolean);
@@ -1710,6 +1790,7 @@
             const pendingRefs = refs.slice();
             refs = [];
             renderRefs();
+            setReferenceHint('');
             input.value = '';
             autoGrow(input);
             if(!currentConversation){

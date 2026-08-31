@@ -3855,6 +3855,7 @@ class AIReference(BaseModel):
     message_id: str = ""
     image_index: int = 0
     confidence: float = 0.0
+    locked: bool = False
     # 影视节点传递的稳定资产映射字段。保留端口角色和 1-n 顺序，
     # 让可灵 CLI/其他视频适配器在一次请求中仍能还原真实输入关系。
     asset_index: int = 0
@@ -4261,6 +4262,17 @@ class ChatRequest(BaseModel):
     reference_images: List[AIReference] = []
     provider: str = "comfly"
     ms_model: str = ""
+
+
+class ChatReferencePrepareRequest(BaseModel):
+    conversation_id: str = ""
+    message: str = Field(min_length=1, max_length=LLM_MESSAGE_MAX_LENGTH)
+    system_prompt: str = ""
+    model: str = ""
+    provider: str = "comfly"
+    ms_model: str = ""
+    reference_images: List[AIReference] = []
+
 
 def chat_system_prompt(payload):
     prompt = str(getattr(payload, "system_prompt", "") or "").strip()
@@ -11831,6 +11843,115 @@ def conversation_chat_image_assets(conversation, limit=200):
             if len(assets) >= safe_limit:
                 return assets
     return assets
+
+
+CHAT_REFERENCE_ROLE_WORDS = {
+    "background": ("背景", "场景", "牧场", "街道", "室内", "户外", "天空", "夜景", "白底"),
+    "style": ("风格", "质感", "色调", "光影", "摄影", "插画", "电影感", "海报"),
+    "pose": ("姿势", "动作", "骑", "站", "坐", "奔跑", "手势"),
+}
+CHAT_REFERENCE_EDIT_PATTERNS = (
+    "修改", "改成", "换成", "替换", "调整", "编辑", "重绘", "保留", "这张", "那张", "上一张", "刚才",
+    "参考图", "改图", "背景", "让", "骑在", "穿上", "摆出",
+)
+CHAT_REFERENCE_CONTINUITY_PATTERNS = ("继续", "沿用", "保持", "基于", "同一", "使用刚才", "延续")
+CHAT_REFERENCE_TOKEN_STOPWORDS = {
+    "生", "成", "一", "张", "个", "的", "了", "在", "让", "请", "图", "片", "这", "那", "上", "下", "背", "景",
+}
+
+
+def chat_reference_tokens(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return set()
+    tokens = set(re.findall(r"[a-z0-9][a-z0-9_-]*", text))
+    chinese = "".join(re.findall(r"[\u4e00-\u9fff]", text))
+    for width in (1, 2, 3, 4):
+        tokens.update(chinese[index:index + width] for index in range(max(0, len(chinese) - width + 1)))
+    return {token for token in tokens if token and token not in CHAT_REFERENCE_TOKEN_STOPWORDS}
+
+
+def chat_reference_role_for_prompt(message, asset):
+    text = str(message or "").lower()
+    evidence = " ".join(str(asset.get(key) or "") for key in ("name", "prompt", "role", "label", "caption")).lower()
+    for role, words in CHAT_REFERENCE_ROLE_WORDS.items():
+        if any(word in text and word in evidence for word in words):
+            return role
+    if any(word in text for word in CHAT_REFERENCE_ROLE_WORDS["background"]):
+        return "background"
+    if any(word in text for word in CHAT_REFERENCE_ROLE_WORDS["pose"]):
+        return "pose"
+    return "subject"
+
+
+def resolve_chat_reference_candidates(message, assets, existing_refs=None, limit=4):
+    """按当前文本从本对话资产摘要中选出可审阅的参考图候选，不调用上游模型。"""
+    text = str(message or "").strip()
+    lower = text.lower()
+    manual = [dict(ref) for ref in (existing_refs or []) if isinstance(ref, dict) and ref.get("url")]
+    manual_urls = {str(ref.get("url") or "") for ref in manual}
+    edit_intent = any(pattern in lower for pattern in CHAT_REFERENCE_EDIT_PATTERNS)
+    continuity_intent = edit_intent or any(pattern in lower for pattern in CHAT_REFERENCE_CONTINUITY_PATTERNS)
+    token_set = chat_reference_tokens(text)
+    scored = []
+    asset_list = list(assets or [])
+    for recency, asset in enumerate(reversed(asset_list)):
+        if not isinstance(asset, dict) or not asset.get("url") or asset.get("url") in manual_urls:
+            continue
+        evidence = " ".join(str(asset.get(key) or "") for key in ("name", "prompt", "role", "label", "caption")).lower()
+        asset_tokens = chat_reference_tokens(evidence)
+        overlap = token_set.intersection(asset_tokens)
+        score = sum(1.0 if len(token) == 1 else 2.5 if len(token) == 2 else 3.5 for token in overlap)
+        if text and text.lower() in evidence:
+            score += 4.0
+        if edit_intent and overlap:
+            score += max(0.0, 1.0 - recency / max(1, len(asset_list)))
+        if score <= 0 or not continuity_intent:
+            continue
+        role = chat_reference_role_for_prompt(text, asset)
+        reason = "、".join(sorted(overlap, key=lambda item: (-len(item), item))[:4]) or "最近对话资产"
+        scored.append((score, recency, {
+            **asset,
+            "role": role,
+            "source": asset.get("source") or "conversation",
+            "confidence": round(min(0.99, 0.35 + score / 20.0), 2),
+            "match_reason": reason,
+            "auto_selected": True,
+        }))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    selected = []
+    selected_urls = set(manual_urls)
+    for _, _, candidate in scored:
+        url = str(candidate.get("url") or "")
+        if not url or url in selected_urls:
+            continue
+        selected.append(candidate)
+        selected_urls.add(url)
+        if len(selected) >= max(1, min(8, int(limit or 4))):
+            break
+
+    # 只有用户明确指向上一张图时才做最近图片兜底，普通生图不会静默带入历史图片。
+    if not selected and not manual and any(word in lower for word in ("上一张", "刚才", "这张", "那张")):
+        latest = list(reversed(asset_list))
+        if latest and isinstance(latest[0], dict) and latest[0].get("url"):
+            candidate = dict(latest[0])
+            candidate.update({
+                "role": chat_reference_role_for_prompt(text, candidate),
+                "source": candidate.get("source") or "conversation",
+                "confidence": 0.55,
+                "match_reason": "用户指向最近生成图",
+                "auto_selected": True,
+            })
+            selected = [candidate]
+    candidates = [item[2] for item in scored[:12]]
+    return {
+        "edit_intent": edit_intent,
+        "continuity_intent": continuity_intent,
+        "selected": [*manual, *selected],
+        "candidates": candidates,
+        "manual_count": len(manual),
+        "auto_count": len(selected),
+    }
 
 
 def delete_chat_message_asset(conversation, message_id, asset_id="", image_index=-1):
@@ -21497,6 +21618,34 @@ async def purge_canvas(canvas_id: str):
     return {"ok": True}
 
 # --- GPT 对话 ---
+
+@app.post("/api/chat/prepare")
+async def prepare_chat_references(payload: ChatReferencePrepareRequest, request: Request, x_user_id: str = Header(default="")):
+    """只准备对话意图和历史参考图候选，不触发图片生成或上游扣费。"""
+    user_id = safe_user_id(x_user_id, request)
+    if payload.conversation_id:
+        conversation = load_conversation(user_id, payload.conversation_id)
+    else:
+        conversation = {"id": "", "title": "新对话", "messages": []}
+    refs = [ref.model_dump() for ref in payload.reference_images if ref.url]
+    result = resolve_chat_reference_candidates(
+        payload.message,
+        conversation_chat_image_assets(conversation),
+        existing_refs=refs,
+        limit=4,
+    )
+    return {
+        "ok": True,
+        "conversation_id": conversation.get("id") or "",
+        "message": payload.message,
+        "edit_intent": result["edit_intent"],
+        "continuity_intent": result["continuity_intent"],
+        "selected_references": result["selected"],
+        "candidates": result["candidates"],
+        "manual_count": result["manual_count"],
+        "auto_count": result["auto_count"],
+    }
+
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):

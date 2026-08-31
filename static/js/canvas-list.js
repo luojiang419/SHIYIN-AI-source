@@ -499,6 +499,9 @@ function openCanvas(c){
     const enc = encodeURIComponent(c.id);
     const project = encodeURIComponent(c.project || currentProjectId || 'default');
     rememberProjectId(c.project || currentProjectId || 'default');
+    // 画布编辑器是当前页面最重的入口；点击后立即让宿主停止其它 iframe 预热，
+    // 避免列表导航与 ecommerce/works 等页面同时争用 WebView 主线程和连接池。
+    try { window.parent?.postMessage({type:'studio-preload-pause', reason:'canvas-navigation'}, '*'); } catch(e) {}
     window.location.href = `/static/canvas.html?id=${enc}&project=${project}&v=2026.08.14.canvas-neutral-no-blue.1&feature=shortcuts-runtime.2`;
 }
 

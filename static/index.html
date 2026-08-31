@@ -2651,7 +2651,14 @@
         const STUDIO_KEEP_PRELOADED_FRAMES = true;
         let studioFramePreloadStarted = false;
         let studioFramePreloadPromise = null;
+        let studioFramePreloadPaused = false;
         const studioFrameReadyState = Object.create(null);
+
+        function pauseStudioFramePreload(reason='navigation') {
+            studioFramePreloadPaused = true;
+            document.documentElement.dataset.studioPreload = 'paused';
+            window.dispatchEvent(new CustomEvent('studio-frame-preload-paused', {detail:{reason}}));
+        }
 
         function touchFrameUsage(id) {
             const frame = document.getElementById('frame-' + id);
@@ -2710,6 +2717,7 @@
             let cursor = 0;
             const worker = async () => {
                 while(cursor < queue.length) {
+                    if(studioFramePreloadPaused) break;
                     const id = queue[cursor++];
                     const frame = document.getElementById('frame-' + id);
                     if(!frame) continue;
@@ -2819,6 +2827,7 @@
 
         window.addEventListener('message', event => {
             if (event.origin && event.origin !== location.origin) return;
+            if(event.data?.type === 'studio-preload-pause') pauseStudioFramePreload(event.data.reason || 'navigation');
             if(event.data && event.data.type === 'studio-dirty-state') {
                 const pageId = String(event.data.pageId || '').replace(/^frame-/, '');
                 const frame = document.getElementById('frame-' + pageId);

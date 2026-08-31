@@ -54,18 +54,93 @@ function canvasMediaPreviewUrl(url, size=512){
     const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
 }
+// 过滤调用方传入的 loading/decoding，预览由显式视口队列统一调度。
+// 保留旧函数名是为了兼容扩展脚本，但不再把所有媒体标记为 eager。
 function canvasEagerMediaAttrs(attrs=''){
     return String(attrs || '')
         .replace(/\sloading\s*=\s*(['"])[^'"]*\1/ig, '')
         .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
 }
+const CLASSIC_MEDIA_QUEUE_MAX = 6;
+const CLASSIC_MEDIA_QUEUE_MARGIN = 720;
+let classicMediaQueueRaf = 0;
+let classicMediaQueueActive = 0;
+const classicMediaQueuePending = new Map();
+function canvasPreviewNeedsQueue(preview=''){
+    const value = String(preview || '');
+    return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
+        || /^https?:\/\//i.test(value);
+}
 function canvasPreviewImgHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
-    // 画布进入后立即发起全部预览请求；服务端通过 keyed Future + 专用线程池限流，
-    // 避免 lazy 在变换后的无限世界坐标中延迟或误判大量节点。
     const safeAttrs = canvasEagerMediaAttrs(attrs);
-    return `<img loading="eager" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    const immediate = !canvasPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
+    const srcAttr = immediate ? ` src="${escapeAttr(preview)}"` : '';
+    return `<img loading="lazy" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+}
+function classicPreviewNodeForImage(img){
+    const nodeEl = img?.closest?.('.node[data-id]');
+    if(!nodeEl) return null;
+    return canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
+}
+function classicPreviewCandidate(img){
+    const preview = img?.dataset?.previewSrc || '';
+    if(!img?.isConnected || !preview || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    const node = classicPreviewNodeForImage(img);
+    if(!node) return null;
+    const view = currentWorldViewRect();
+    const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
+    const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
+    const visible = rect.x < view.x + view.w && rect.x + rect.w > view.x && rect.y < view.y + view.h && rect.y + rect.h > view.y;
+    const near = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
+    if(!visible && !near && !selected.has(node.id)) return null;
+    const kind = img.dataset.previewKind === 'video' ? 1 : 0;
+    const priority = selected.has(node.id) ? -20 : (visible ? kind : 10 + kind);
+    return {img, priority, distance:Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))};
+}
+function startClassicPreviewImage(img){
+    if(!img?.isConnected || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded') return;
+    const preview = img.dataset.previewSrc || '';
+    if(!preview) return;
+    classicMediaQueuePending.delete(img);
+    classicMediaQueueActive += 1;
+    img.dataset.previewState = 'loading';
+    const startedAt = performance.now();
+    const finish = ok => {
+        classicMediaQueueActive = Math.max(0, classicMediaQueueActive - 1);
+        if(!img.isConnected) return;
+        img.dataset.previewState = ok ? 'loaded' : 'failed';
+        window.CanvasPerformance?.record?.('classic.media-preview', performance.now() - startedAt, {
+            kind:img.dataset.previewKind === 'video' ? 'video' : 'image', ok,
+            queued:classicMediaQueueActive
+        });
+        scheduleClassicMediaQueue();
+    };
+    img.addEventListener('load', () => finish(true), {once:true});
+    img.addEventListener('error', () => finish(false), {once:true});
+    img.src = preview;
+}
+function drainClassicPreviewQueue(){
+    classicMediaQueueRaf = 0;
+    if(!nodesEl || classicMediaQueueActive >= CLASSIC_MEDIA_QUEUE_MAX) return;
+    const candidates = [...nodesEl.querySelectorAll('img[data-preview-src]')]
+        .map(classicPreviewCandidate).filter(Boolean)
+        .sort((a, b) => a.priority - b.priority || a.distance - b.distance);
+    candidates.forEach(candidate => {
+        if(classicMediaQueueActive >= CLASSIC_MEDIA_QUEUE_MAX) return;
+        startClassicPreviewImage(candidate.img);
+    });
+}
+function scheduleClassicMediaQueue(){
+    if(classicMediaQueueRaf || !nodesEl) return;
+    classicMediaQueueRaf = requestAnimationFrame(drainClassicPreviewQueue);
+}
+function cancelClassicOffscreenPreviewTasks(){
+    classicMediaQueuePending.forEach((_, img) => {
+        if(!classicPreviewCandidate(img)) classicMediaQueuePending.delete(img);
+    });
+    scheduleClassicMediaQueue();
 }
 function loadCanvasOriginalImageDimensions(url){
     const src = String(url || '');
@@ -81,7 +156,9 @@ function canvasVideoPreviewHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
     const safeAttrs = canvasEagerMediaAttrs(attrs);
-    return `<img loading="eager" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    const immediate = !canvasPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
+    const srcAttr = immediate ? ` src="${escapeAttr(preview)}"` : '';
+    return `<img loading="lazy" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function canvasVideoFallbackHtml(url, attrs=''){
     const original = canvasOriginalMediaUrl(url);
@@ -179,7 +256,8 @@ function syncCanvasSelectedImageResolution(root=nodesEl, affectedNodeIds=null){
         const original = img.dataset.originalSrc || img.dataset.url || '';
         if(!selectedNode){
             delete img.dataset.selectedHighResTarget;
-            if(preview && img.getAttribute('src') !== preview) img.src = preview;
+            // 未进入视口的媒体保持 queued，避免选中状态切换把整张画布重新推入网络队列。
+            if(preview && img.dataset.previewState === 'loaded' && img.getAttribute('src') !== preview) img.src = preview;
             return;
         }
         const target = canvasDisplayMediaUrl(original);
@@ -189,7 +267,7 @@ function syncCanvasSelectedImageResolution(root=nodesEl, affectedNodeIds=null){
             if(img.getAttribute('src') !== target) img.src = target;
             return;
         }
-        if(preview && img.getAttribute('src') !== preview) img.src = preview;
+        if(preview && img.dataset.previewState === 'loaded' && img.getAttribute('src') !== preview) img.src = preview;
         selectedImages.push({img, target});
     });
     if(canvasSelectedHighResTimer) clearTimeout(canvasSelectedHighResTimer);
@@ -207,6 +285,7 @@ function syncCanvasSelectedImageResolution(root=nodesEl, affectedNodeIds=null){
             if(canvasSelectedHighResLoaded.has(target) && img.getAttribute('src') !== target) img.src = target;
         });
     }, CANVAS_SELECTED_HIGH_RES_DELAY);
+    scheduleClassicMediaQueue();
 }
 function applyLanguage(lang){
     if(lang && window.StudioI18n) StudioI18n.set(lang);
@@ -326,6 +405,7 @@ const imageNodeMenu = document.getElementById('imageNodeMenu');
 const connectionContextMenu = document.getElementById('connectionContextMenu');
 const selectionBox = document.getElementById('selectionBox');
 const selectionHub = document.getElementById('selectionHub');
+selectionHub?.addEventListener('mousedown', event => event.stopPropagation());
 const canvasSelectTool = document.getElementById('canvasSelectTool');
 const canvasPanTool = document.getElementById('canvasPanTool');
 const gateStatus = document.getElementById('gateStatus');
@@ -1934,6 +2014,7 @@ function applyViewport(){
     scheduleClassicSafeLod();
     scheduleMinimapViewportUpdate();
     scheduleSelectionHubPosition();
+    scheduleClassicMediaQueue();
 }
 function estimatedNodeRect(n){
     const cached = canvasNodeRectIndex.get(n.id);
@@ -8382,6 +8463,7 @@ function render(){
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
+    scheduleClassicMediaQueue();
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshOutputTimer();
     scheduleMinimapRender();
@@ -8447,6 +8529,7 @@ function patchCanvasNodeCreates(createdNodes=[], refreshIds=[]){
             refreshGeometryAfterLayout();
             scheduleSelectionHubPosition();
             scheduleMinimapRender();
+            scheduleClassicMediaQueue();
             if(window.lucide) lucide.createIcons();
         }
         return true;
@@ -8501,6 +8584,7 @@ function refreshNodes(ids=[]){
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
+    scheduleClassicMediaQueue();
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     refreshOutputTimer();
     perfEnd?.();
@@ -10332,24 +10416,14 @@ function renderNode(node){
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
     if(node.type === 'storyboardMerge') body.innerHTML = storyboardMergeBodyHtml(node);
-    if(node.type === 'image' && (!node.url || (mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)))){
-        const imagePromptPanel = document.createElement('div');
-        imagePromptPanel.className = 'image-node-prompt-panel';
-        imagePromptPanel.dataset.imageNodePromptPanel = '1';
-        imagePromptPanel.innerHTML = imageNodeQuickPromptHtml(node);
-        imagePromptPanel.addEventListener('mousedown', event => event.stopPropagation());
-        bindImageNodeQuickPrompt(node, imagePromptPanel);
-        el.appendChild(imagePromptPanel);
-    }
-    const mediaToolbar = classicMediaToolbarHtml(node);
-    if(mediaToolbar) el.insertAdjacentHTML('beforeend', mediaToolbar);
+    // 图片快捷提示词和媒体操作统一由 selectionHub 承载。
+    // 旧实现把完整表单/工具栏复制到每个图片节点，500 个节点会额外生成数千个控件并触发秒级布局长任务。
     const visualShell = document.createElement('div');
     visualShell.className = 'node-visual-shell';
     const nodeHead = el.querySelector(':scope > .node-head');
     if(nodeHead) visualShell.appendChild(nodeHead);
     visualShell.appendChild(body);
     el.appendChild(visualShell);
-    bindClassicMediaToolbar(el, node);
     if(node.type === 'storyboardMerge') bindStoryboardMergeNode(el, node);
     const storyboardMergeSequenceToggle = el.querySelector('[data-storyboard-merge-sequence-toggle]');
     storyboardMergeSequenceToggle?.addEventListener('click', event => {
@@ -19498,9 +19572,13 @@ function renderSelectionHub(options={}){
         ] : [])
     ];
     const imageNode = target.kind === 'node' && target.mediaKind === 'image' ? sourceNodeForSelectionTarget(target) : null;
-    if(imageNode) return;
-    selectionHub.innerHTML = `<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
+    const promptHtml = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';
+    selectionHub.innerHTML = `${promptHtml}<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
     selectionHub.classList.add('open');
+    if(imageNode){
+        selectionHub.classList.add('image-prompt-hub');
+        bindImageNodeQuickPrompt(imageNode, selectionHub);
+    }
     selectionHubAnchor = anchor;
     selectionHub.dataset.targetKind = target.kind;
     selectionHub.querySelectorAll('[data-media-action]').forEach(button => {
@@ -19629,7 +19707,9 @@ async function runImageNodeQuickGenerate(nodeId){
     node.running = true;
     node.runStatus = 'running';
     node.runError = '';
-    const button = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-image-node-prompt-panel] [data-image-quick-generate]`);
+    const button = selected.has(nodeId)
+        ? selectionHub?.querySelector?.('[data-image-quick-generate]')
+        : null;
     if(button){
         // 允许在已有任务进行时再次点击；每次点击都会创建独立 pending 任务。
         button.disabled = false;

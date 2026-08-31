@@ -9,8 +9,13 @@ const CACHE_NAME = `${CACHE_PREFIX}${WORKER_VERSION}`;
 const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}${WORKER_VERSION}`;
 const MAX_ENTRIES = 500;
 const MAX_BYTES = 512 * 1024 * 1024;
+const GENERATED_CACHE_RETENTION = 3;
+const MEDIA_PREVIEW_REFRESH_INTERVAL = 30 * 1000;
 const DB_NAME = 'shiyin-generated-image-cache';
 const DB_STORE = 'entries';
+const mediaPreviewRefreshes = new Map();
+const mediaPreviewRefreshAt = new Map();
+let cacheTrimTask = null;
 
 function isSameOrigin(request) {
     try { return new URL(request.url).origin === self.location.origin; } catch (error) { return false; }
@@ -60,8 +65,9 @@ function hasContentRevision(url) {
 function needsFreshNetwork(request) {
     try {
         const url = new URL(request.url);
-        // 预览接口和未携带内容修订号的媒体都可能复用同一 URL，刷新时必须优先取服务端最新结果。
-        return url.pathname.startsWith('/api/') || !hasContentRevision(url);
+        // 预览接口由 stale-while-revalidate 单独处理；文件名通常是内容寻址的，
+        // 没有版本 query 时也应优先复用缓存，避免每次重绘都触发网络和磁盘 I/O。
+        return url.pathname.startsWith('/api/');
     } catch (error) {
         return true;
     }
@@ -120,6 +126,12 @@ async function trimCache(cache) {
     }
 }
 
+function scheduleTrimCache(cache) {
+    if(cacheTrimTask) return cacheTrimTask;
+    cacheTrimTask = trimCache(cache).catch(() => {}).finally(() => { cacheTrimTask = null; });
+    return cacheTrimTask;
+}
+
 async function cacheResponse(request, response) {
     if (!response || !response.ok || !String(response.headers.get('content-type') || '').toLowerCase().startsWith('image/')) return;
     const cache = await caches.open(CACHE_NAME);
@@ -130,17 +142,33 @@ async function cacheResponse(request, response) {
         touchedAt: Date.now(),
     });
     // 不在每次命中时遍历 CacheStorage，只在写入后做有界清理。
-    await trimCache(cache);
+    await scheduleTrimCache(cache);
+}
+
+async function matchGeneratedImage(request) {
+    const names = [CACHE_NAME];
+    try {
+        const keys = await caches.keys();
+        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).forEach(key => names.push(key));
+    } catch (error) {}
+    for(const name of names){
+        try {
+            const response = await (await caches.open(name)).match(request);
+            if(response) return {response, cacheName:name};
+        } catch (error) {}
+    }
+    return null;
 }
 
 async function handleImageRequest(request) {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(request);
-    if (cached) {
-        const meta = await readMeta();
-        const entry = meta.find(item => item.url === request.url);
-        if (entry) await writeMeta({...entry, touchedAt: Date.now()});
-        return cached;
+    if (cached) return cached;
+    const legacy = await matchGeneratedImage(request);
+    if(legacy?.response){
+        // 升级后把命中的旧版本缩略图提升到当前 cache，避免冷启动时重复生成。
+        cache.put(request, legacy.response.clone()).catch(() => {});
+        return legacy.response;
     }
     try {
         const response = await fetch(request);
@@ -171,22 +199,43 @@ function isMediaPreviewRequest(request) {
 
 async function staleWhileRevalidateMediaPreview(request, event) {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request);
-    const refresh = fetch(new Request(request, {cache: 'no-store'}))
-        .then(response => cacheResponse(request, response).then(() => response));
+    const cached = await cache.match(request) || (await matchGeneratedImage(request))?.response;
+    const key = request.url;
+    const now = Date.now();
+    let refresh = mediaPreviewRefreshes.get(key);
+    if(!refresh && (!mediaPreviewRefreshAt.has(key) || now - mediaPreviewRefreshAt.get(key) >= MEDIA_PREVIEW_REFRESH_INTERVAL)){
+        mediaPreviewRefreshAt.set(key, now);
+        refresh = fetch(new Request(request, {cache: 'no-store'}))
+            .then(response => cacheResponse(request, response).then(() => response))
+            .finally(() => mediaPreviewRefreshes.delete(key));
+        mediaPreviewRefreshes.set(key, refresh);
+    }
     if (cached) {
-        // 首屏直接复用已有缩略图；刷新请求由 fetch event 托管，下一次进入即可得到最新结果。
-        event.waitUntil(refresh.catch(() => {}));
+        // 首屏直接复用已有缩略图；同一 URL 的后台刷新去重并节流，重复 render 不再制造洪峰。
+        if(refresh) event.waitUntil(refresh.catch(() => {}));
         return cached;
     }
-    try { return await refresh; }
+    try {
+        if(!refresh){
+            refresh = fetch(new Request(request, {cache: 'no-store'}))
+                .then(response => cacheResponse(request, response).then(() => response))
+                .finally(() => mediaPreviewRefreshes.delete(key));
+            mediaPreviewRefreshes.set(key, refresh);
+        }
+        return await refresh;
+    }
     catch (error) { return Response.error(); }
 }
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key)));
+    // generated-image cache 按内容 URL 复用，静态资源版本升级不应清空缩略图。
+    // 只保留最近几个版本，避免长期升级造成无限增长。
+    const generated = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
+    if(generated.length > GENERATED_CACHE_RETENTION - 1){
+        await Promise.all(generated.slice(0, generated.length - (GENERATED_CACHE_RETENTION - 1)).map(key => caches.delete(key)));
+    }
     await Promise.all(keys.filter(key => key.startsWith(STATIC_CACHE_PREFIX) && key !== STATIC_CACHE_NAME).map(key => caches.delete(key)));
     await self.clients.claim();
 })()));

@@ -152,6 +152,9 @@ let mentionInsertMode = 'token';
 let panState = null;
 let didPan = false;
 let smartNodeToolbarDismissed = false;
+let smartSelectionToolbarRefreshQueued = false;
+let smartSelectionToolbarRefreshSuppressed = false;
+const smartSelectionToolbarRefreshIds = new Set();
 let smartDropHighlightId = '';
 let expandedPromptSource = null;
 function openExpandedPromptEditor(source){
@@ -219,6 +222,20 @@ function dismissSmartNodeToolbar(){
 function restoreSmartNodeToolbar(){
     smartNodeToolbarDismissed = false;
     world?.classList.remove('smart-node-toolbar-dismissed');
+}
+function scheduleSmartSelectionToolbarRefresh(ids=[]){
+    if(smartSelectionToolbarRefreshSuppressed || !smartNodeDomIndex.size) return;
+    (ids || []).filter(Boolean).forEach(id => smartSelectionToolbarRefreshIds.add(id));
+    if(smartSelectionToolbarRefreshQueued || !smartSelectionToolbarRefreshIds.size) return;
+    smartSelectionToolbarRefreshQueued = true;
+    queueMicrotask(() => {
+        smartSelectionToolbarRefreshQueued = false;
+        if(smartSelectionToolbarRefreshSuppressed || !smartSelectionToolbarRefreshIds.size) return;
+        const idsToRefresh = [...smartSelectionToolbarRefreshIds];
+        smartSelectionToolbarRefreshIds.clear();
+        queueSmartRenderMutation({replaceIds:idsToRefresh});
+        render();
+    });
 }
 let portDragState = null;
 let saveTimer = null;
@@ -817,16 +834,28 @@ function smartMediaPreviewUrl(itemOrUrl, size=512){
     const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
     return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
 }
+// 旧函数名保留兼容扩展；媒体 loading 由视口队列决定，不再强制 eager。
 function smartEagerMediaAttrs(attrs=''){
     return String(attrs || '')
         .replace(/\sloading\s*=\s*(['"])[^'"]*\1/ig, '')
         .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
 }
+const SMART_MEDIA_QUEUE_MAX = 5;
+const SMART_MEDIA_QUEUE_MARGIN = 720;
+let smartMediaQueueRaf = 0;
+let smartMediaQueueActive = 0;
+function smartPreviewNeedsQueue(preview=''){
+    const value = String(preview || '');
+    return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
+        || /^https?:\/\//i.test(value);
+}
 function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
     const safeAttrs = smartEagerMediaAttrs(attrs);
-    return `<img loading="eager" decoding="async" src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    const immediate = !smartPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
+    const srcAttr = immediate ? ` src="${escapeHtml(preview)}"` : '';
+    return `<img loading="lazy" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function loadSmartOriginalImageDimensions(url){
     const src = displayMediaUrl({url:smartOriginalMediaUrl(url)});
@@ -842,7 +871,9 @@ function smartVideoPreviewHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
     const preview = smartMediaPreviewUrl(itemOrUrl, size);
     const safeAttrs = smartEagerMediaAttrs(attrs);
-    return `<img loading="eager" decoding="async" src="${escapeHtml(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    const immediate = !smartPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
+    const srcAttr = immediate ? ` src="${escapeHtml(preview)}"` : '';
+    return `<img loading="lazy" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function smartVideoFallbackHtml(url, attrs=''){
     const original = smartOriginalMediaUrl(url);
@@ -910,6 +941,69 @@ function bindSmartPreviewImageFallbacks(root=document){
         });
     });
 }
+function smartPreviewNodeForImage(img){
+    const nodeEl = img?.closest?.('.image-node[data-id]');
+    if(!nodeEl) return null;
+    return smartNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
+}
+function smartPreviewCandidate(img){
+    const preview = img?.dataset?.previewSrc || '';
+    if(!img?.isConnected || !preview || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    const node = smartPreviewNodeForImage(img);
+    if(!node) return null;
+    const scale = Math.max(0.05, viewport.scale || 1);
+    const view = {
+        x:-viewport.x / scale,
+        y:-viewport.y / scale,
+        w:shell.clientWidth / scale,
+        h:shell.clientHeight / scale
+    };
+    const margin = SMART_MEDIA_QUEUE_MARGIN / scale;
+    const rect = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
+    const visible = rect.x < view.x + view.w && rect.x + rect.width > view.x && rect.y < view.y + view.h && rect.y + rect.height > view.y;
+    const near = rect.x < view.x + view.w + margin && rect.x + rect.width > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.height > view.y - margin;
+    const selected = isNodeSelected(node.id);
+    if(!visible && !near && !selected) return null;
+    const kind = img.dataset.previewKind === 'video' ? 1 : 0;
+    const priority = selected ? -20 : (visible ? kind : 10 + kind);
+    return {img, priority, distance:Math.abs((rect.x + rect.width / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.height / 2) - (view.y + view.h / 2))};
+}
+function startSmartPreviewImage(img){
+    if(!img?.isConnected || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded') return;
+    const preview = img.dataset.previewSrc || '';
+    if(!preview) return;
+    smartMediaQueueActive += 1;
+    img.dataset.previewState = 'loading';
+    const startedAt = performance.now();
+    const finish = ok => {
+        smartMediaQueueActive = Math.max(0, smartMediaQueueActive - 1);
+        if(!img.isConnected) return;
+        img.dataset.previewState = ok ? 'loaded' : 'failed';
+        window.CanvasPerformance?.record?.('smart.media-preview', performance.now() - startedAt, {
+            kind:img.dataset.previewKind === 'video' ? 'video' : 'image', ok,
+            queued:smartMediaQueueActive
+        });
+        scheduleSmartMediaQueue();
+    };
+    img.addEventListener('load', () => finish(true), {once:true});
+    img.addEventListener('error', () => finish(false), {once:true});
+    img.src = preview;
+}
+function drainSmartPreviewQueue(){
+    smartMediaQueueRaf = 0;
+    if(!world || smartMediaQueueActive >= SMART_MEDIA_QUEUE_MAX) return;
+    const candidates = [...world.querySelectorAll('img[data-preview-src]')]
+        .map(smartPreviewCandidate).filter(Boolean)
+        .sort((a, b) => a.priority - b.priority || a.distance - b.distance);
+    candidates.forEach(candidate => {
+        if(smartMediaQueueActive >= SMART_MEDIA_QUEUE_MAX) return;
+        startSmartPreviewImage(candidate.img);
+    });
+}
+function scheduleSmartMediaQueue(){
+    if(smartMediaQueueRaf || !world) return;
+    smartMediaQueueRaf = requestAnimationFrame(drainSmartPreviewQueue);
+}
 const SMART_SELECTED_HIGH_RES_DELAY = 320;
 let smartSelectedHighResTimer = 0;
 let smartSelectedHighResSeq = 0;
@@ -951,7 +1045,7 @@ function syncSmartSelectedImageResolution(root=world, affectedNodeIds=null){
         const original = img.dataset.originalSrc || '';
         if(!selectedNode){
             delete img.dataset.selectedHighResTarget;
-            if(preview && img.getAttribute('src') !== preview) img.src = preview;
+            if(preview && img.dataset.previewState === 'loaded' && img.getAttribute('src') !== preview) img.src = preview;
             return;
         }
         const target = displayMediaUrl({url:smartOriginalMediaUrl(original)});
@@ -961,7 +1055,7 @@ function syncSmartSelectedImageResolution(root=world, affectedNodeIds=null){
             if(img.getAttribute('src') !== target) img.src = target;
             return;
         }
-        if(preview && img.getAttribute('src') !== preview) img.src = preview;
+        if(preview && img.dataset.previewState === 'loaded' && img.getAttribute('src') !== preview) img.src = preview;
         selectedImages.push({img, target});
     });
     if(smartSelectedHighResTimer) clearTimeout(smartSelectedHighResTimer);
@@ -979,6 +1073,7 @@ function syncSmartSelectedImageResolution(root=world, affectedNodeIds=null){
             if(smartSelectedHighResLoaded.has(target) && img.getAttribute('src') !== target) img.src = target;
         });
     }, SMART_SELECTED_HIGH_RES_DELAY);
+    scheduleSmartMediaQueue();
 }
 function cloneSmartSettings(source=settings){
     try {
@@ -1651,6 +1746,10 @@ function syncSelectionUi(){
     };
     syncSmartSelectedImageResolution(world, affectedNodeIds);
     scheduleSmartSafeLod();
+    if(previous && (previous.imageNodeId !== imageNodeId || previous.imageIndex !== Number(selectedImage.index)
+        || previous.ids.size !== nextIds.size || [...previous.ids].some(id => !nextIds.has(id)))){
+        scheduleSmartSelectionToolbarRefresh([...previous.ids, ...nextIds]);
+    }
 }
 function syncConnectionSelectionUi(){
     const svg = world.querySelector('svg.connection-layer');
@@ -3249,6 +3348,7 @@ function applyViewport(){
     shell.style.backgroundPosition = '0 0';
     scheduleSmartSafeLod();
     scheduleSmartMinimapViewportUpdate();
+    scheduleSmartMediaQueue();
 }
 function scheduleSmartSafeLod(){
     if(smartSafeLodRaf || !world) return;
@@ -9567,6 +9667,14 @@ function smartNodeToolbarImageIndex(node){
     }
     return 0;
 }
+function smartToolbarVisibleForNode(node){
+    // 工具栏只为当前单选节点生成；其余节点仅保留视觉内容，避免 500 个节点常驻数千个按钮/图标。
+    return Boolean(node && !smartNodeToolbarDismissed && selectedNodeIds().length === 1 && isNodeSelected(node.id));
+}
+function smartNodeToolbarHtmlForRender(node){
+    if(!smartToolbarVisibleForNode(node)) return '';
+    return `${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}`;
+}
 function smartNodeToolbarHtml(node){
     if(node?.specialType) return '';
     const isImageNode = node?.type === 'smart-image' || !node?.type;
@@ -9842,7 +9950,7 @@ function smartNodeHtml(node){
     return `<div class="image-node ${isFunctional ? 'functional-node' : ''} ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
         <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
         ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
-        ${smartNodeToolbarHtml(node)}${smartGroupToolbarHtml(node)}
+        ${smartNodeToolbarHtmlForRender(node)}
         ${runTimePillHtml(node)}
         <div class="node-body">${body}</div>
         ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
@@ -10061,7 +10169,10 @@ function render(){
             imageIndex:Number(selectedImage.index),
             connectionIds:new Set(selectedNodeIds())
         };
-    if(mutation) syncSelectionUi();
+    if(mutation){
+        smartSelectionToolbarRefreshSuppressed = true;
+        try { syncSelectionUi(); } finally { smartSelectionToolbarRefreshSuppressed = false; }
+    }
     updateComposer();
     scheduleSmartMinimapRender();
     if(mutation) freshNodeEls.forEach(root => {
@@ -10072,6 +10183,7 @@ function render(){
         scheduleSmartIdleIconRefresh(world);
         bindSmartPreviewImageFallbacks(world);
     }
+    scheduleSmartMediaQueue();
     syncSmartSelectedImageResolution(world, new Set(selectedNodeIds()));
     if(mutation) freshNodeEls.forEach(root => measureSmartNodeImages(nodeIndex, root));
     else measureSmartNodeImages(nodeIndex, world);
@@ -10099,7 +10211,7 @@ function render(){
         return `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
             <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
             ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
-            ${smartNodeToolbarHtml(node)}
+            ${smartNodeToolbarHtmlForRender(node)}
             ${runTimePillHtml(node)}
             <div class="node-body">${body}</div>
             <div class="node-hint">${isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')))}</div>

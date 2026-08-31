@@ -91,8 +91,9 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=lookbook-agent.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
-        self.assertIn("const hasOutputs=node.generatedOutputs.some(outputUrl)", self.lookbook)
-        self.assertIn("生成结果已发送到右侧输出节点", self.lookbook)
+        self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)
+        self.assertNotIn("生成结果将显示在右侧输出节点", self.lookbook)
+        self.assertNotIn("ecom-node-result-empty", self.lookbook)
         self.assertNotIn('ecom-node-result-grid">${outputs.map', self.lookbook)
         self.assertIn('data-lookbook-run aria-busy="${node.running?\'true\':\'false\'}"', self.lookbook)
 

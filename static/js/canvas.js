@@ -861,6 +861,7 @@ let managerSelectedWorkflowIds = new Set();
 let managerSelectedPromptIds = new Set();
 let activeCanvasWorkflowCategoryId = '';
 const activeCanvasTaskPolls = new Set();
+const activeEcommerceLookbookPolls = new Set();
 const activeCanvasVideoTaskPolls = new Set();
 let hoveredConnectionId = '';
 let lastMouseBoard = {x: 0, y: 0};
@@ -9909,6 +9910,79 @@ async function waitEcommerceTask(taskId, options={}){
         await sleep(1800);
     }
 }
+function activeEcommerceLookbookRun(node){
+    if(!node?.id) return false;
+    return outputNodesForSource(node.id).some(out => (out._pending || []).some(pending => pending.canvasTaskType === 'ecommerce-lookbook' && pending.run?.node?.id === node.id && !pending.failed));
+}
+function completeEcommerceLookbookTask(taskId, task){
+    const found = findPendingTask(taskId);
+    if(!found) return;
+    const {out,pending} = found;
+    const images = ecommerceTaskImages(task);
+    const node = nodes.find(item => item.id === pending.run?.node?.id && item.type === 'lookbook');
+    if(!images.length){
+        failEcommerceLookbookTask(pending.id,'Lookbook 任务没有返回图片',node,out);
+        return;
+    }
+    const meta = {runMs:nowMs() - Number(pending.startedAt || nowMs()), run:pending.run || {}};
+    meta.run.request = task?.request || task?.result?.request || {};
+    out._pending = (out._pending || []).filter(item => item.id !== pending.id);
+    appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
+    if(node){
+        const research = task.lookbook_research?.summary || task.result?.lookbook_research?.summary;
+        if(research) node.lookbookResearch = String(research).slice(0,12000);
+        const plan = task.lookbook_plan?.summary || task.options?.lookbook_plan || task.result?.lookbook_plan?.summary;
+        if(plan) node.lookbookPlan = String(plan).slice(0,12000);
+        const qualityGate = task.result?.lookbook_quality_gate;
+        if(qualityGate){ node.lookbookQualityScore = Number(qualityGate.score || 0); node.lookbookQualityPassed = Boolean(qualityGate.passed); node.lookbookQualityRetries = Array.isArray(qualityGate.retries) ? qualityGate.retries.length : 0; }
+        mergeGeneratedOutputs(node, images.map((item,index) => ({...((item && typeof item === 'object') ? item : {}), url:outputUrlValue(item), name:`lookbook-${Date.now()}-${index + 1}.png`, kind:'image'})), true);
+        node.runStatus = activeEcommerceLookbookRun(node) ? 'running' : 'done';
+        node.runError = '';
+        node.running = false;
+    }
+    addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs});
+    refreshRunNodes(node,out);
+    scheduleSave();
+    setStatus(`Lookbook 生成完成，共 ${images.length} 张`);
+}
+function failEcommerceLookbookTask(pendingId, message, node=null, out=null){
+    const found = pendingId ? findPendingTask(pendingId) : null;
+    const targetOut = found?.out || out;
+    const pending = found?.pending || (targetOut ? pendingById(targetOut,pendingId) : null);
+    const targetNode = node || nodes.find(item => item.id === pending?.run?.node?.id && item.type === 'lookbook');
+    const error = message || 'Lookbook 生成失败';
+    if(targetOut && pending) targetOut._pending = (targetOut._pending || []).filter(item => item.id !== pending.id);
+    if(targetNode){
+        targetNode.runStatus = activeEcommerceLookbookRun(targetNode) ? 'running' : 'failed';
+        targetNode.runError = error;
+        targetNode.running = false;
+        addGenerationLog({run:pending?.run || runSnapshot(targetNode,'Lookbook 平面广告',[]), outputs:[], runMs:pending ? nowMs() - Number(pending.startedAt || nowMs()) : 0, error});
+    }
+    refreshRunNodes(targetNode,targetOut);
+    scheduleSave();
+}
+async function pollEcommerceLookbookTask(taskId, options={}){
+    if(!taskId || activeEcommerceLookbookPolls.has(taskId)) return 'running';
+    activeEcommerceLookbookPolls.add(taskId);
+    try {
+        while(true){
+            const found = findPendingTask(taskId);
+            if(!found) return 'missing';
+            const cascadeTargetId = String(options?.cascadeTargetId || found.pending?.cascadeTargetId || '');
+            if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
+            const response = await cascadeFetch(`/api/ecommerce/tasks/${encodeURIComponent(taskId)}`,{}, {cascadeTargetId});
+            if(!response.ok) throw new Error(await responseErrorMessage(response,'Lookbook 任务查询失败'));
+            const task = await response.json();
+            if(task.status === 'succeeded'){ completeEcommerceLookbookTask(taskId,task); return 'succeeded'; }
+            if(['failed','interrupted'].includes(task.status)) throw new Error(task.error || 'Lookbook 任务执行失败');
+            await sleep(1800);
+        }
+    } catch(error){
+        const found = findPendingTask(taskId);
+        failEcommerceLookbookTask(found?.pending?.id || '',error.message || String(error),found?.pending ? nodes.find(item => item.id === found.pending.run?.node?.id) : null,found?.out || null);
+        return 'failed';
+    } finally { activeEcommerceLookbookPolls.delete(taskId); }
+}
 async function createAndWaitEcommerceTask(payload, options={}){
     const response = await cascadeFetch('/api/ecommerce/tasks',{
         method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),
@@ -10007,34 +10081,49 @@ function lookbookConnectedInputs(node){
 }
 async function runLookbookNode(nodeId, opts={}){
     const node = nodes.find(item => item.id === nodeId && item.type === 'lookbook');
-    if(!node || (node.running && !opts.cascade)) return;
+    if(!node) return;
     const inputs = lookbookConnectedInputs(node);
-    const out = outputForNode(node,520);
+    const out = outputForNode(node,520,true);
+    const pendingId = out ? uid('p') : '';
+    const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
+    const count = Math.max(1,Math.min(4,Number(node.count || 2)));
+    const run = runSnapshot(node, String(node.lookbookPrompt || '').trim() || 'Create a cohesive fashion Lookbook campaign.', inputs.map(item => ({...item, kind:'image'})));
+    run.nodeType = 'lookbook';
+    run.taskLabel = 'Lookbook 平面广告';
+    if(out){
+        out._pending = [...(out._pending || []), makePendingForRun(pendingId, run, node, {refs:inputs, cascadeTargetId:cascadeTargetIdFromOptions(opts)}, {
+            canvasTaskType:'ecommerce-lookbook', providerId:'', model:'', appendGenerated:true, lookbookCount:count,
+        })];
+    }
     node.running = true; node.runError = ''; if(!opts.cascade) node.runStatus = 'running';
     refreshRunNodes(node,out);
+    if(!opts.cascade) setTimeout(() => { if(nodes.includes(node)) { node.running = false; refreshRunNodes(node,out); } }, 2000);
+    const request = {
+        operation:'universal', mode:'standard', inputs,
+        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:count},
+        provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
+    };
     try {
-        const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
-        const {taskId,task} = await createAndWaitEcommerceTask({
-            operation:'universal', mode:'standard', inputs,
-            options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:Math.max(1,Math.min(4,Number(node.count || 2)))},
-            provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k',
-            quality:node.quality || 'high', count:Math.max(1,Math.min(4,Number(node.count || 2))), parent_task_id:'',
-        }, {cascadeTargetId:cascadeTargetIdFromOptions(opts)});
-        const images = ecommerceTaskImages(task);
-        if(!images.length) throw new Error('Lookbook 任务没有返回图片');
-        const research = task.lookbook_research?.summary || task.result?.lookbook_research?.summary;
-        if(research) node.lookbookResearch = String(research).slice(0,12000);
-        const plan = task.lookbook_plan?.summary || task.options?.lookbook_plan || task.result?.lookbook_plan?.summary;
-        if(plan) node.lookbookPlan = String(plan).slice(0,12000);
-        const qualityGate = task.result?.lookbook_quality_gate;
-        if(qualityGate){ node.lookbookQualityScore = Number(qualityGate.score || 0); node.lookbookQualityPassed = Boolean(qualityGate.passed); node.lookbookQualityRetries = Array.isArray(qualityGate.retries) ? qualityGate.retries.length : 0; }
-        node.ecomTaskId = taskId; node.generatedOutputs = images.map((item,index) => ({url:outputUrlValue(item),name:`lookbook-${index + 1}.png`,kind:'image'}));
-        node.runStatus = 'done'; node.runError = ''; syncConnectedOutputsFromGenerated(node,node.generatedOutputs); scheduleSave(); setStatus(`Lookbook 生成完成，共 ${images.length} 张`);
+        const cascadeTargetId = cascadeTargetIdFromOptions(opts);
+        const response = await cascadeFetch('/api/ecommerce/tasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)}, {cascadeTargetId});
+        if(!response.ok) throw new Error(await responseErrorMessage(response,'Lookbook 任务提交失败'));
+        const created = await response.json();
+        const taskId = created.id || created.task_id;
+        if(!taskId) throw new Error('Lookbook 任务没有返回任务 ID');
+        const pending = pendingById(out,pendingId);
+        if(pending){ pending.canvasTaskId = taskId; pending.providerId = created.provider_id || ''; }
+        node.ecomTaskId = taskId;
+        refreshRunNodes(node,out); scheduleSave(); await saveCanvas();
+        const task = await waitEcommerceTask(taskId,{cascadeTargetId});
+        completeEcommerceLookbookTask(taskId,task);
     } catch(error){
-        if(isCascadeAbortError(error)){ if(opts.cascade) throw error; return; }
-        node.runStatus = 'failed'; node.runError = error.message || String(error); if(opts.cascade) throw error; showErrorModal(node.runError,'Lookbook 生成失败');
-    } finally { node.running = false; refreshRunNodes(node,out); }
+        if(isCascadeAbortError(error)){ failEcommerceLookbookTask(pendingId,error.message || cascadeStopMessage(),node,out); if(opts.cascade) throw error; return; }
+        failEcommerceLookbookTask(pendingId,error.message || String(error),node,out);
+        if(opts.cascade) throw error;
+        showErrorModal(node.runError,'Lookbook 生成失败');
+    }
 }
+
 function bindClassicEcommerceNode(el,node){
     const api = window.CanvasEcommerceNodes;
     if(!api) return;
@@ -17634,6 +17723,7 @@ function resumeCanvasImageTasks(){
     nodes.filter(n => n.type === 'output').forEach(out => {
         (out._pending || []).forEach(p => {
             if((p.canvasTaskType === 'online-image' || p.canvasTaskType === 'multi-view-image') && p.canvasTaskId && !p.failed) pollCanvasImageTask(p.canvasTaskId, {cascadeTargetId:p.cascadeTargetId || ''});
+            if(p.canvasTaskType === 'ecommerce-lookbook' && p.canvasTaskId && !p.failed) pollEcommerceLookbookTask(p.canvasTaskId, {cascadeTargetId:p.cascadeTargetId || ''});
         });
     });
 }

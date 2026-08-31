@@ -69,11 +69,31 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.6", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.7", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
+        self.assertIn("feature=lookbook-output-node.1", self.html)
+        self.assertIn("feature=lookbook-multi-run.1", self.html)
         self.assertIn("feature=picker-dialog-top-layer.1", self.html)
+
+    def test_lookbook_results_are_rendered_in_output_node(self):
+        self.assertIn("const hasOutputs=node.generatedOutputs.some(outputUrl)", self.lookbook)
+        self.assertIn("生成结果已发送到右侧输出节点", self.lookbook)
+        self.assertNotIn('ecom-node-result-grid">${outputs.map', self.lookbook)
+        self.assertIn('data-lookbook-run aria-busy="${node.running?\'true\':\'false\'}"', self.lookbook)
+
+    def test_lookbook_runs_create_independent_pending_tasks(self):
+        start = self.canvas.index("async function runLookbookNode")
+        end = self.canvas.index("function bindClassicEcommerceNode", start)
+        body = self.canvas[start:end]
+        self.assertNotIn("node.running && !opts.cascade", body)
+        self.assertIn("outputForNode(node,520,true)", body)
+        self.assertIn("canvasTaskType:'ecommerce-lookbook'", body)
+        self.assertIn("out._pending = [...(out._pending || []),", body)
+        self.assertIn("setTimeout(() =>", body)
+        self.assertIn("completeEcommerceLookbookTask(taskId,task)", body)
+        self.assertIn("p.canvasTaskType === 'ecommerce-lookbook'", self.canvas)
 
 
 if __name__ == "__main__":

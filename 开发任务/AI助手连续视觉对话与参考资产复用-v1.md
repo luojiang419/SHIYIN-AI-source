@@ -41,8 +41,9 @@
 - 静态检查：`git diff --check` 通过；gpt-chat 内联 JS 语法通过。
 - 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_responses_protocol.py tests/test_responses_transport.py tests/test_chat_ui_contract.py -q`，36 passed；此前连续视觉回归 30 passed。
 - 编译：`python -m py_compile main.py` 通过。
+- 安装包：`dist/installer/SHIYIN-AI-Setup-1.0.376.exe` 构建及产物校验通过，SHA-256 `c9be71c1c5bfec987f0a7c1e300cfd1860cc0615706b0931c8d4385539fdff4c`；因桌面实例运行中跳过运行时冒烟。
 - 运行测试：接口手动冒烟被项目现有账号鉴权拦截（401），未判定为功能通过；完整桌面运行冒烟尚未启动。
-- 最近 Git commit：`5a237ef feat: 完善多角度节点3D参考图`（包含本轮 Responses 内容类型修复）。
+- 最近 Git commit：`2383d0a feat: 增强 AI 助手执行进度与消息管理`。
 
 ## 任务目标
 

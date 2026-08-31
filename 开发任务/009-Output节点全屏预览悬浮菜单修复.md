@@ -10,7 +10,7 @@ Output 图片点击/双击进入 `outputLightbox` 时，画布上的 `selectionH
 
 ## 下一步
 
-已完成全屏预览前清理、全屏期间渲染保护、专项测试和 Git 提交；发布时需带入新的静态资源查询串。
+已完成全屏预览前清理、全屏期间渲染保护、专项测试和 Git 提交；发布时需带入新的静态资源查询串。当前修复提交为 `85c091f`。
 
 ## 当前 TODO
 
@@ -25,7 +25,7 @@ Output 图片点击/双击进入 `outputLightbox` 时，画布上的 `selectionH
 - 单元测试：`tests/test_canvas_output_lightbox.py tests/test_lookbook_node_frontend.py tests/test_canvas_inline_generation_prompt.py` 共 19 passed
 - 编译：不适用（静态前端）
 - 运行测试：未执行桌面 WebView 视觉冒烟
-- 最近 Git commit：待提交
+- 最近 Git commit：`85c091f`
 
 ---
 

@@ -405,7 +405,6 @@ if(filmSubmenu) document.body.appendChild(filmSubmenu);
 const lookbookMenuHost = createMenu?.querySelector('[data-lookbook-menu-host]');
 const lookbookMenuTrigger = lookbookMenuHost?.querySelector('.menu-submenu-trigger');
 const lookbookSubmenu = lookbookMenuHost?.querySelector('.create-submenu');
-if(lookbookSubmenu) document.body.appendChild(lookbookSubmenu);
 const linkCreateMenu = document.getElementById('linkCreateMenu');
 const nodeInputMenu = document.getElementById('nodeInputMenu');
 const nodeOutputMenu = document.getElementById('nodeOutputMenu');

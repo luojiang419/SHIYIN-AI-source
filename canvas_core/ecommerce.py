@@ -21,6 +21,7 @@ ASPECT_RATIOS = ("source", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "9:16", "16
 RESOLUTIONS = ("auto", "1k", "2k", "4k")
 QUALITIES = ("auto", "low", "medium", "high")
 FREE_CREATION_PROMPT_POLICY = "free"
+LOOKBOOK_PROMPT_POLICY = "lookbook"
 
 SIZE_PRESETS: dict[str, dict[str, str]] = {
     "1:1": {"1k": "1024x1024", "2k": "2048x2048", "4k": "2880x2880"},
@@ -820,7 +821,7 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
             values,
             canonical_order=not (raw_prompt or user_supplement),
         )
-        if not normalized and prompt_policy != FREE_CREATION_PROMPT_POLICY:
+        if not normalized and prompt_policy not in {FREE_CREATION_PROMPT_POLICY, LOOKBOOK_PROMPT_POLICY}:
             raise ValueError("全能模式至少需要一张已上传的参考图")
         if raw_prompt:
             return normalized
@@ -1435,6 +1436,22 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         if not instruction:
             raise ValueError("自由创作必须填写提示词")
         return raw_instruction
+    if prompt_policy == LOOKBOOK_PROMPT_POLICY:
+        style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+        style_name = str(style.get("name") or "").strip()
+        style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
+        research = str(options.get("search_context") or "").strip()
+        user_line = instruction or "自由发挥一个具有商业传播力的时尚主题与版式"
+        parts = [
+            "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
+            f"USER CREATIVE BRIEF: {user_line}.",
+            f"SELECTED VISUAL STYLE SKILL{(' ' + style_name) if style_name else ''}: {style_prompt or 'high-end fashion editorial with clean art direction'}.",
+            "Use connected reference images as factual sources for product identity, material, color, logo, model identity and scene wherever visible; do not invent or distort branded details.",
+            "Create a finished standalone image suitable for a fashion lookbook cover or hero advertisement. Do not add watermarks, random text, UI elements, borders or unrelated products.",
+        ]
+        if research:
+            parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects or wording): " + research[:12000])
+        return " ".join(parts)
     reference_map = build_ordered_reference_map(normalized)
     if instruction and operation != "universal":
         return build_user_directed_ecommerce_prompt(instruction)

@@ -4101,6 +4101,7 @@ function addFilmNode(type, point){
     return addNode(node);
 }
 function addEcommerceNode(type, point){
+    if(type === 'lookbook') return addLookbookNode(point);
     const api = window.CanvasEcommerceNodes;
     if(!api?.isType?.(type)) return null;
     const p = point || defaultPoint(type === 'ecom-compose' ? 220 : 80, 0);
@@ -5605,6 +5606,7 @@ function createLinkedNode(type){
     }
 }
 function createNodeByType(type, point){
+    if(window.CanvasLookbookNode?.isType?.(type)) return addLookbookNode(point);
     if(window.CanvasLinkfoxVideo?.isType?.(type)) return addLinkfoxVideoNode(point);
     if(window.CanvasEcommerceNodes?.isType?.(type)) return addEcommerceNode(type, point);
     if(window.CanvasFilmNodes?.isType?.(type)) return addFilmNode(type, point);
@@ -5636,7 +5638,8 @@ function menuAdd(type){
     let created = null;
     beginCanvasMutationBatch();
     try {
-        if(window.CanvasLinkfoxVideo?.isType?.(type)) created = addLinkfoxVideoNode(point);
+        if(window.CanvasLookbookNode?.isType?.(type)) created = addLookbookNode(point);
+        else if(window.CanvasLinkfoxVideo?.isType?.(type)) created = addLinkfoxVideoNode(point);
         else if(window.CanvasEcommerceNodes?.isType?.(type)) created = addEcommerceNode(type, point);
         else if(window.CanvasFilmNodes?.isType?.(type)) created = addFilmNode(type, point);
         else if(type === 'image') created = addImageNode(point);
@@ -5761,6 +5764,13 @@ async function filesFromEntry(entry){
     }
     const nested = await Promise.all(children.map(filesFromEntry));
     return nested.flat();
+}
+function addLookbookNode(point){
+    const api = window.CanvasLookbookNode;
+    if(!api?.createNode) return null;
+    const node = api.createNode(point || defaultPoint(180,0));
+    node.id = uid('lookbook');
+    return addNode(node);
 }
 function uniqueDataTransferFiles(files){
     const seenObjects = new Set();
@@ -9838,6 +9848,40 @@ async function runEcommerceComposeNode(nodeId, opts={}){
         refreshRunNodes(node,out);
     }
 }
+function lookbookConnectedInputs(node){
+    const entries = connections.filter(connection => connection.to === node.id).map(connection => nodes.find(item => item.id === connection.from)).filter(Boolean);
+    const refs = [];
+    entries.forEach(source => mediaRefsFromNode(source).forEach((ref,index) => refs.push({
+        ...ref,
+        role:'prop', reference_type:'prop', reference_id:`${node.id}_reference_${refs.length + 1}`,
+        label:ref.name || `Lookbook 参考 ${refs.length + 1}`,
+    })));
+    return refs.filter(item => item.url).slice(0,14);
+}
+async function runLookbookNode(nodeId, opts={}){
+    const node = nodes.find(item => item.id === nodeId && item.type === 'lookbook');
+    if(!node || (node.running && !opts.cascade)) return;
+    const inputs = lookbookConnectedInputs(node);
+    const out = outputForNode(node,520);
+    node.running = true; node.runError = ''; if(!opts.cascade) node.runStatus = 'running';
+    refreshRunNodes(node,out);
+    try {
+        const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
+        const {taskId,task} = await createAndWaitEcommerceTask({
+            operation:'universal', mode:'standard', inputs,
+            options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, search_context:String(node.lookbookResearch || '')},
+            provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k',
+            quality:node.quality || 'high', count:Math.max(1,Math.min(4,Number(node.count || 2))), parent_task_id:'',
+        }, {cascadeTargetId:cascadeTargetIdFromOptions(opts)});
+        const images = ecommerceTaskImages(task);
+        if(!images.length) throw new Error('Lookbook 任务没有返回图片');
+        node.ecomTaskId = taskId; node.generatedOutputs = images.map((item,index) => ({url:outputUrlValue(item),name:`lookbook-${index + 1}.png`,kind:'image'}));
+        node.runStatus = 'done'; node.runError = ''; syncConnectedOutputsFromGenerated(node,node.generatedOutputs); scheduleSave(); setStatus(`Lookbook 生成完成，共 ${images.length} 张`);
+    } catch(error){
+        if(isCascadeAbortError(error)){ if(opts.cascade) throw error; return; }
+        node.runStatus = 'failed'; node.runError = error.message || String(error); if(opts.cascade) throw error; showErrorModal(node.runError,'Lookbook 生成失败');
+    } finally { node.running = false; refreshRunNodes(node,out); }
+}
 function bindClassicEcommerceNode(el,node){
     const api = window.CanvasEcommerceNodes;
     if(!api) return;
@@ -9845,6 +9889,7 @@ function bindClassicEcommerceNode(el,node){
         composeSummary:ecommerceComposeSummary,
         runScene:changed => runEcommerceSceneNode(changed.id),
         runCompose:changed => runEcommerceComposeNode(changed.id),
+        runLookbook:changed => runLookbookNode(changed.id),
         toast:message => setStatus(String(message || '').slice(0,160)),
         onChange:(_changed,meta={}) => {
             scheduleSave();
@@ -10201,6 +10246,7 @@ async function runFilmNode(nodeId, opts={}){
     }
 }
 function renderNode(node){
+    window.CanvasLookbookNode?.normalize?.(node);
     window.CanvasEcommerceNodes?.normalize?.(node);
     window.CanvasFilmNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
@@ -10216,6 +10262,7 @@ function renderNode(node){
         'panorama','multiView','dwpose','director3d','poseReplicate','angle','group','promptGroup'
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
+        && !window.CanvasLookbookNode?.isType?.(node.type)
         && !window.CanvasFilmNodes?.isType?.(node.type);
     const nodeTypeClass = node.type === 'batchGenerator'
         ? 'batchGenerator-node batch-generator-node generator-node'
@@ -10245,14 +10292,15 @@ function renderNode(node){
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
-    const title = ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
+    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
         : 0;
     const groupCountHtml = node.type === 'group' ? `<span class="group-image-count">${groupImageCount}张</span>` : '';
     // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','linkfox-video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','film-storyboard','film-video','storyboardMerge'].includes(node.type) && node.runStatus
+    const showStatus = ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','linkfox-video','topazVideo','rh','blenderDirector','ecom-compose','ecom-video','lookbook','film-storyboard','film-video','storyboardMerge'].includes(node.type) && node.runStatus
         && (node.runStatus !== 'failed' || node._cascadeFailed);
     const statusHtml = showStatus ? (() => {
         const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
@@ -10445,6 +10493,7 @@ function renderNode(node){
     }
     if(node.type === 'angle') body.innerHTML = window.CanvasSpecialNodes?.angleBodyHtml(node) || '<div class="muted-note">角度调整节点加载失败</div>';
     if(['ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(node.type)) body.innerHTML = window.CanvasEcommerceNodes?.bodyHtml?.(node) || '<div class="muted-note">电商节点加载失败</div>';
+    if(node.type === 'lookbook') body.innerHTML = window.CanvasLookbookNode?.bodyHtml?.(node) || '<div class="muted-note">Lookbook 节点加载失败</div>';
     if(node.type === 'comfy' || node.type === 'ltxDirector') {
         body.innerHTML = '<div class="muted-note">本地生成功能已移除，此历史节点仅保留用于识别旧画布。</div>';
     }
@@ -10486,15 +10535,17 @@ function renderNode(node){
         startNodeDrag(e, node);
     };
     const ecommercePorts = window.CanvasEcommerceNodes?.inputPorts?.(node.type) || [];
+    const lookbookPorts = window.CanvasLookbookNode?.inputPorts?.(node.type) || [];
     const filmPorts = window.CanvasFilmNodes?.inputPorts?.(node) || [];
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
+    const inputPorts = filmPorts.length ? filmPorts : (lookbookPorts.length ? lookbookPorts : ecommercePorts);
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
-    const canInput = rolePorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','angle','storyboardMerge'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
-    if(filmPorts.length || rolePorts.length > 1){
-        el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
-    } else if(ecommercePorts.length){
-        el.insertAdjacentHTML('beforeend', rolePorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${rolePorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
+    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
+    if(filmPorts.length || inputPorts.length > 1){
+        el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
+    } else if(ecommercePorts.length || lookbookPorts.length){
+        el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
@@ -10583,6 +10634,7 @@ function renderNode(node){
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
     if(['panorama','dwpose','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
     if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
@@ -10767,6 +10819,8 @@ function refreshOutputNodeContent(node){
     return true;
 }
 function defaultNodeSize(type){
+    const lookbookSize = window.CanvasLookbookNode?.size?.(type);
+    if(lookbookSize) return lookbookSize;
     const ecommerceSize = window.CanvasEcommerceNodes?.size?.(type);
     if(ecommerceSize) return ecommerceSize;
     const filmSize = window.CanvasFilmNodes?.size?.(type);
@@ -14631,9 +14685,9 @@ function updateComfyField(node, input, event){
     scheduleSave();
 }
 
-const CANVAS_GENERATOR_TYPES = ['generator','batchGenerator','video','topazVideo','rh','ecom-compose','ecom-video','film-storyboard','film-video','film-line-art'];
-const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector','director3d'],'batchGenerator','ecom-compose','film-storyboard','film-line-art','multiView'];
-const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector','director3d'],'batchGenerator','topazVideo','ecom-compose','ecom-video','film-storyboard','film-line-art','film-video','multiView'];
+const CANVAS_GENERATOR_TYPES = ['generator','batchGenerator','video','topazVideo','rh','ecom-compose','ecom-video','lookbook','film-storyboard','film-video','film-line-art'];
+const CANVAS_IMAGE_OUTPUT_TYPES = [...['generator','rh','blenderDirector','director3d'],'batchGenerator','ecom-compose','lookbook','film-storyboard','film-line-art','multiView'];
+const CANVAS_MEDIA_OUTPUT_TYPES = [...['generator','video','rh','blenderDirector','director3d'],'batchGenerator','topazVideo','ecom-compose','ecom-video','lookbook','film-storyboard','film-line-art','film-video','multiView'];
 CANVAS_GENERATOR_TYPES.push('linkfox-video');
 CANVAS_MEDIA_OUTPUT_TYPES.push('linkfox-video');
 function hasExplicitOutputConnection(nodeId){
@@ -16281,6 +16335,7 @@ function runCascadeNodeByType(node, opts={}){
     if(node.type === 'topazVideo') return runTopazVideoNode(node.id, runOpts);
     if(node.type === 'ecom-video') return runVideoNode(node.id, runOpts);
     if(node.type === 'ecom-compose') return runEcommerceComposeNode(node.id, runOpts);
+    if(node.type === 'lookbook') return runLookbookNode(node.id, runOpts);
     if(node.type === 'film-storyboard' || node.type === 'film-video' || node.type === 'film-line-art') return runFilmNode(node.id, runOpts);
     if(node.type === 'rh') return runRhNode(node.id, runOpts);
     return Promise.resolve();
@@ -16314,7 +16369,7 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
     return Promise.allSettled(workers);
 }
 function canvasRunTypes(){
-    return ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','rh','ecom-compose','ecom-video'];
+    return ['generator','batchGenerator','msgen','comfy','ltxDirector','llm','video','rh','ecom-compose','ecom-video','lookbook'];
 }
 function canvasWorkflowEdges(){
     const runTypes = canvasRunTypes();
@@ -16559,6 +16614,7 @@ async function runOneCascadePass(order, options={}){
             else if(node.type === 'linkfox-video') await runLinkfoxVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'topazVideo') await runTopazVideoNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'ecom-compose') await runEcommerceComposeNode(id, {cascade:true, cascadeTargetId:targetId});
+            else if(node.type === 'lookbook') await runLookbookNode(id, {cascade:true, cascadeTargetId:targetId});
             else if(node.type === 'rh') await runRhNode(id, {cascade:true, cascadeTargetId:targetId});
             if(targetId) ensureCascadeActive(targetId);
             node.runStatus = 'done';
@@ -20985,6 +21041,10 @@ function canConnect(fromId, toId, inputRole=''){
         const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','director3d','poseReplicate','angle','generator','rh'];
         return allowed.includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
+    if(to.type === 'lookbook'){
+        if(inputRole && inputRole !== 'lookbook-reference') return false;
+        return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
+    }
     if(to.type === 'ecom-video'){
         if(inputRole && inputRole !== 'video-input') return false;
         return ['ecom-compose','image','group','output','prompt','promptGroup','loop','llm','generator','rh','panorama','dwpose','angle'].includes(from.type)
@@ -20999,6 +21059,10 @@ function canConnect(fromId, toId, inputRole=''){
     if(from.type === 'ecom-compose'){
         if(to.type === 'output') return true;
         return ['ecom-video','video','generator','rh'].includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
+    }
+    if(from.type === 'lookbook'){
+        if(to.type === 'output') return true;
+        return ['video','generator','rh','ecom-video','lookbook'].includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(from.type === 'ecom-video') return to.type === 'output';
     const specialTypes = ['panorama','dwpose','angle'];

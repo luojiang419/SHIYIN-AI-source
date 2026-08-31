@@ -4273,6 +4273,15 @@ class ChatReferencePrepareRequest(BaseModel):
     ms_model: str = ""
     reference_images: List[AIReference] = []
 
+class LookbookSkillInstallRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=1000)
+
+class LookbookSkillCoverRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    aspect_ratio: str = "3:4"
+    resolution: str = "2k"
+    quality: str = "high"
+
 
 def chat_system_prompt(payload):
     prompt = str(getattr(payload, "system_prompt", "") or "").strip()
@@ -16169,7 +16178,7 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
     }
     if working.get("operation") != "universal":
         return working, None
-    if str(working["options"].get("prompt_policy") or "").strip().lower() == "free":
+    if str(working["options"].get("prompt_policy") or "").strip().lower() in {"free", "lookbook"}:
         return working, None
     supplied_items = working["options"].get("reference_analysis")
     if isinstance(supplied_items, dict) and supplied_items:
@@ -16289,7 +16298,7 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() == "free"
+    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() in {"free", "lookbook"}
     if free_creation and not normalized:
         inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True, options=options)
     else:
@@ -16369,6 +16378,39 @@ async def run_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     async with ECOMMERCE_TASK_SEMAPHORE:
         await execute_ecommerce_task(task_id, snapshot)
 
+async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Lookbook 生成前用同一电商视觉路由检索公开案例，只保留可迁移的方法摘要。"""
+    options = dict(snapshot.get("options") or {})
+    if snapshot.get("operation") != "universal" or str(options.get("prompt_policy") or "").strip().lower() != "lookbook":
+        return snapshot, None
+    if not bool(options.get("lookbook_search", True)) or str(options.get("search_context") or "").strip():
+        return snapshot, {"status": "provided" if str(options.get("search_context") or "").strip() else "disabled"}
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return snapshot, {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    query = str(options.get("instruction") or "时尚 Lookbook 平面广告").strip()[:4000]
+    style_prompt = str(style.get("prompt") or style.get("name") or "").strip()[:1000]
+    request = CanvasLLMRequest(
+        message=(
+            "请使用联网搜索，检索与以下 Lookbook 时尚平面广告创意和视觉风格相关的优秀公开案例。"
+            "只输出可迁移的方法总结：构图层级、镜头/景别、布光、材质呈现、色彩、版式和商业传播策略；"
+            "不要复制案例主体、品牌、人物、场景、原文或虚构来源。\n"
+            f"创意需求：{query}\n选定风格：{style_prompt or '高级时尚编辑'}"
+        ),
+        system_prompt="你是 Lookbook 视觉研究助手。联网后输出 500 字以内的方法摘要，内容要可直接供图片生成模型吸收。",
+        provider=route["provider_id"], model=route["model"], web_search=True, retry_524=1,
+    )
+    try:
+        result = await canvas_llm(request)
+        text = str(result.get("text") or "").strip()[:12000]
+        if not text:
+            return snapshot, {"status": "failed", "reason": "联网搜索未返回摘要"}
+        options["search_context"] = text
+        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, {"status": "succeeded", "summary": text}
+    except Exception as exc:
+        return snapshot, {"status": "failed", "reason": str(exc)[:240]}
+
 async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Dict[str, Any]:
     studio_reference = str((snapshot.get("options") or {}).get("studio_reference") or "").strip()
     if not studio_reference or snapshot.get("operation") == "background_change":
@@ -16407,6 +16449,9 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
 
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
+    snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
+    if lookbook_research is not None:
+        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})
     snapshot, garment_analysis = await enrich_ecommerce_snapshot_with_garment_analysis(snapshot)
     snapshot, universal_analysis = await enrich_ecommerce_snapshot_with_universal_analysis(snapshot)
     if garment_analysis is not None or universal_analysis is not None:
@@ -16632,7 +16677,7 @@ async def prepare_ecommerce_analysis(payload: EcommerceAnalyzeRequest) -> Dict[s
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() == "free"
+    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() in {"free", "lookbook"}
     if free_creation and not normalized:
         inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True, options=options)
     else:
@@ -16694,6 +16739,88 @@ async def get_ecommerce_capabilities():
         "route": public_ecommerce_route(vision_route) if vision_route else None,
     }
     return capabilities
+
+def _github_skill_fetch(url: str) -> List[Dict[str, Any]]:
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"github.com", "raw.githubusercontent.com"}:
+        raise ValueError("只支持 github.com 或 raw.githubusercontent.com 地址")
+    path = parsed.path.strip("/")
+    headers = {"User-Agent": "Shiyin-AI-Lookbook-Skill"}
+    def read_json(target: str):
+        request = urllib.request.Request(target, headers=headers)
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8", "replace"))
+    def read_text(target: str):
+        request = urllib.request.Request(target, headers=headers)
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.read().decode("utf-8", "replace")
+    targets: List[Tuple[str, str]] = []
+    if parsed.hostname == "raw.githubusercontent.com":
+        if not path.lower().endswith("skill.md"):
+            raise ValueError("raw GitHub 地址需要直接指向 SKILL.md")
+        targets.append((path.rsplit("/", 1)[-2] or "GitHub Skill", str(url)))
+    else:
+        parts = path.split("/")
+        if len(parts) < 2:
+            raise ValueError("GitHub 地址应为 owner/repository")
+        owner, repo = parts[0], parts[1]
+        branch = "main"
+        if len(parts) >= 4 and parts[2] == "tree":
+            branch = parts[3]
+        tree = read_json(f"https://api.github.com/repos/{urllib.parse.quote(owner)}/{urllib.parse.quote(repo)}/git/trees/{urllib.parse.quote(branch)}?recursive=1")
+        for item in tree.get("tree") or []:
+            candidate = str(item.get("path") or "")
+            if candidate.lower().endswith("skill.md"):
+                raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{urllib.parse.quote(candidate, safe='/')}"
+                targets.append((candidate.rsplit("/", 1)[-2] if "/" in candidate else repo, raw))
+        if not targets:
+            for candidate in ("SKILL.md", "skill.md", "README.md"):
+                try:
+                    raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{candidate}"
+                    read_text(raw); targets.append((repo, raw)); break
+                except Exception:
+                    continue
+    skills = []
+    for name, target in targets[:24]:
+        body = read_text(target)
+        title_match = re.search(r"^#\s+(.+)$", body, re.MULTILINE)
+        description_match = re.search(r"^(?:description|简介|描述)\s*:\s*(.+)$", body, re.IGNORECASE | re.MULTILINE)
+        title = (title_match.group(1).strip() if title_match else name).strip()[:100]
+        description = (description_match.group(1).strip() if description_match else re.sub(r"\s+", " ", body[:240])).strip()[:240]
+        prompt = re.sub(r"^```[\s\S]*?```$", "", body, flags=re.MULTILINE).strip()[:6000]
+        skill_id = "github-" + hashlib.sha1(target.encode("utf-8", "ignore")).hexdigest()[:12]
+        skills.append({"id":skill_id,"name":title,"description":description,"prompt":prompt,"cover":"","source":"github","source_url":target})
+    if not skills:
+        raise ValueError("地址中没有找到可安装的 SKILL.md")
+    return skills
+
+@app.post("/api/lookbook/skills/install")
+async def install_lookbook_skills(payload: LookbookSkillInstallRequest):
+    try:
+        skills = await asyncio.to_thread(_github_skill_fetch, payload.url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"GitHub Skill 解析失败：{str(exc)[:240]}") from exc
+    return {"skills": skills, "count": len(skills)}
+
+@app.post("/api/lookbook/skills/cover")
+async def generate_lookbook_skill_cover(payload: LookbookSkillCoverRequest):
+    route = configured_ecommerce_vision_route()
+    if not route:
+        raise HTTPException(status_code=400, detail="未配置可用的电商视觉图片模型")
+    try:
+        generation = resolve_ecommerce_generation_settings(1024, 1365, "standard", payload.aspect_ratio, payload.resolution, payload.quality, 1)
+        result = await execute_ai_image_batch(
+            prompt="Create one premium fashion lookbook cover image following this visual style skill. No watermark, no UI, no random text. " + payload.prompt,
+            provider_id=route["provider_id"], model=route["model"], size=generation["size"], quality=generation["quality"], references=[], count=1, prefix="lookbook_skill_cover_", allow_edit_endpoint_fallback=False, semantic_mask=False,
+        )
+        image = (result.get("image_items") or [{"url": (result.get("images") or [""])[0]}])[0]
+        if not image.get("url"):
+            raise HTTPException(status_code=502, detail="封面生成没有返回图片")
+        return {"image": image, "provider_id": route["provider_id"], "model": result.get("model") or route["model"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Skill 封面生成失败：{str(exc)[:240]}") from exc
 
 @app.post("/api/ecommerce/analyze")
 async def analyze_ecommerce_request(payload: EcommerceAnalyzeRequest):

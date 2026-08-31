@@ -12,11 +12,11 @@
 
 ## 下一步
 
-下一步首先完成最终兼容检查和完整回归：
+核心任务已完成；后续如继续优化，建议按以下顺序：
 
-1. 检查各图片供应商的多图参考限制和提示文案。
-2. 完成完整测试与页面静态运行检查，确认首开和交互无异常。
-3. 更新任务文档、快照并完成最终 Git 检查。
+1. 在登录态桌面环境完成页面运行冒烟。
+2. 增加批量下载 ZIP、对话分支和更强的视觉 embedding 检索。
+3. 根据实际使用反馈调整候选匹配阈值和确认界面。
 
 ## 当前 TODO
 
@@ -38,7 +38,7 @@
 - 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_generated_image_browser_cache.py tests/test_focus_guard.py tests/test_performance_contracts.py -q`，30 passed。
 - 编译：`python -m py_compile main.py` 通过。
 - 运行测试：接口手动冒烟被项目现有账号鉴权拦截（401），未判定为功能通过；完整桌面运行冒烟尚未启动。
-- 最近 Git commit：待提交本阶段自动引用确认改动。
+- 最近 Git commit：`d800f4c feat: add continuous visual chat references`。
 
 ## 任务目标
 

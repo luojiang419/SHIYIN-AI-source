@@ -402,6 +402,10 @@ const filmMenuHost = createMenu?.querySelector('[data-film-menu-host]');
 const filmMenuTrigger = filmMenuHost?.querySelector('.menu-submenu-trigger');
 const filmSubmenu = filmMenuHost?.querySelector('.create-submenu');
 if(filmSubmenu) document.body.appendChild(filmSubmenu);
+const lookbookMenuHost = createMenu?.querySelector('[data-lookbook-menu-host]');
+const lookbookMenuTrigger = lookbookMenuHost?.querySelector('.menu-submenu-trigger');
+const lookbookSubmenu = lookbookMenuHost?.querySelector('.create-submenu');
+if(lookbookSubmenu) document.body.appendChild(lookbookSubmenu);
 const linkCreateMenu = document.getElementById('linkCreateMenu');
 const nodeInputMenu = document.getElementById('nodeInputMenu');
 const nodeOutputMenu = document.getElementById('nodeOutputMenu');
@@ -5007,6 +5011,12 @@ function openCreateMenu(clientX, clientY){
         filmMenuTrigger?.setAttribute('aria-expanded','false');
         filmMenuHost.classList.toggle('submenu-flip', left + menuRect.width + 232 > window.innerWidth - viewportMargin);
     }
+    if(lookbookMenuHost){
+        lookbookMenuHost.classList.remove('submenu-open','submenu-flip');
+        lookbookSubmenu?.classList.remove('submenu-open');
+        lookbookMenuTrigger?.setAttribute('aria-expanded','false');
+        lookbookMenuHost.classList.toggle('submenu-flip', left + menuRect.width + 232 > window.innerWidth - viewportMargin);
+    }
     refreshIcons(createMenu);
 }
 function closeCreateMenu(){
@@ -5015,6 +5025,9 @@ function closeCreateMenu(){
     filmMenuHost?.classList.remove('submenu-open','submenu-flip');
     filmSubmenu?.classList.remove('submenu-open');
     filmMenuTrigger?.setAttribute('aria-expanded','false');
+    lookbookMenuHost?.classList.remove('submenu-open','submenu-flip');
+    lookbookSubmenu?.classList.remove('submenu-open');
+    lookbookMenuTrigger?.setAttribute('aria-expanded','false');
     closeLinkCreateMenu();
     closeImageNodeMenu();
     closeConnectionContextMenu();
@@ -5698,20 +5711,35 @@ function scheduleCanvasSubmenuClose(){
         filmMenuHost?.classList.remove('submenu-open','submenu-flip');
         filmSubmenu?.classList.remove('submenu-open');
         filmMenuTrigger?.setAttribute('aria-expanded','false');
+        lookbookMenuHost?.classList.remove('submenu-open','submenu-flip');
+        lookbookSubmenu?.classList.remove('submenu-open');
+        lookbookMenuTrigger?.setAttribute('aria-expanded','false');
     }, 140);
 }
 function closeInactiveCanvasSubmenus(event){
     if(!createMenu?.classList.contains('open')) return;
     const target = event.target;
     const inFilm = Boolean((filmMenuHost && filmMenuHost.contains(target)) || (filmSubmenu && filmSubmenu.contains(target)));
+    const inLookbook = Boolean((lookbookMenuHost && lookbookMenuHost.contains(target)) || (lookbookSubmenu && lookbookSubmenu.contains(target)));
     if(!inFilm){
-        scheduleCanvasSubmenuClose();
-        return;
+        if(!inLookbook){
+            scheduleCanvasSubmenuClose();
+            return;
+        }
     }
     if(canvasSubmenuCloseTimer){
         clearTimeout(canvasSubmenuCloseTimer);
         canvasSubmenuCloseTimer = 0;
     }
+}
+function positionLookbookSubmenu(){
+    if(!lookbookMenuHost || !lookbookSubmenu || !lookbookMenuTrigger) return;
+    const margin=10, gap=8, rect=lookbookMenuTrigger.getBoundingClientRect(), sub=lookbookSubmenu.getBoundingClientRect();
+    const width=sub.width || 216, height=sub.height || 80;
+    const flip=rect.right + gap + width > window.innerWidth - margin;
+    lookbookMenuHost.classList.toggle('submenu-flip',flip);
+    lookbookSubmenu.style.left=`${Math.max(margin,Math.min(window.innerWidth-width-margin,flip ? rect.left-width-gap : rect.right+gap))}px`;
+    lookbookSubmenu.style.top=`${Math.max(margin,Math.min(window.innerHeight-height-margin,rect.top-8))}px`;
 }
 document.addEventListener('pointerover', closeInactiveCanvasSubmenus, true);
 if(filmMenuTrigger){
@@ -5725,6 +5753,18 @@ if(filmMenuTrigger){
     filmMenuHost.addEventListener('pointerenter',() => setFilmSubmenuOpen(true));
     filmSubmenu?.addEventListener('mousedown',event => event.stopPropagation());
     filmSubmenu?.addEventListener('click',event => event.stopPropagation());
+}
+if(lookbookMenuTrigger){
+    const setLookbookSubmenuOpen = open => {
+        lookbookMenuHost.classList.toggle('submenu-open',open);
+        lookbookSubmenu?.classList.toggle('submenu-open',open);
+        lookbookMenuTrigger.setAttribute('aria-expanded',open ? 'true' : 'false');
+        if(open) requestAnimationFrame(positionLookbookSubmenu);
+    };
+    lookbookMenuTrigger.addEventListener('click',event => { event.preventDefault(); event.stopPropagation(); setLookbookSubmenuOpen(true); });
+    lookbookMenuHost.addEventListener('pointerenter',() => setLookbookSubmenuOpen(true));
+    lookbookSubmenu?.addEventListener('mousedown',event => event.stopPropagation());
+    lookbookSubmenu?.addEventListener('click',event => event.stopPropagation());
 }
 function mediaKindForUpload(file){
     const type = String(file?.type || '').toLowerCase();

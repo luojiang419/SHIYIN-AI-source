@@ -80,8 +80,13 @@
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">AI助手</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
-                <button class="menu-btn lookbook-menu-btn" onclick="menuAdd('lookbook')"><i data-lucide="book-open" class="w-4 h-4"></i><span>Lookbook 平面广告</span></button>
                 <button class="menu-btn linkfox-menu-btn" onclick="menuAdd('linkfox-video')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频生成</span></button>
+                <div class="menu-submenu-host" data-lookbook-menu-host>
+                    <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="book-open" class="w-4 h-4"></i><span>平面广告</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
+                    <div class="create-submenu" role="menu" aria-label="平面广告节点">
+                        <button class="menu-btn lookbook-menu-btn" type="button" onclick="menuAdd('lookbook')"><i data-lucide="book-open" class="w-4 h-4"></i><span>Lookbook 平面广告</span></button>
+                    </div>
+                </div>
                 <div class="menu-submenu-host" data-film-menu-host>
                     <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视制作</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
                     <div class="create-submenu" role="menu" aria-label="影视制作节点">

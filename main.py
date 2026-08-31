@@ -11832,6 +11832,69 @@ def conversation_chat_image_assets(conversation, limit=200):
                 return assets
     return assets
 
+
+def delete_chat_message_asset(conversation, message_id, asset_id="", image_index=-1):
+    """软删除对话消息或其中一张输出图，不直接删除物理文件。"""
+    target = next(
+        (item for item in conversation.get("messages") or []
+         if isinstance(item, dict) and str(item.get("id") or "") == str(message_id or "")),
+        None,
+    )
+    if not target:
+        raise KeyError("消息不存在")
+    clean_asset_id = str(asset_id or "").strip()
+    try:
+        requested_index = int(image_index)
+    except (TypeError, ValueError):
+        requested_index = -1
+    if not clean_asset_id and requested_index < 0:
+        target["deleted_at"] = now_ms()
+        target["deleted_reason"] = "user"
+        conversation["updated_at"] = now_ms()
+        return target
+
+    if target.get("role") != "assistant" or target.get("type") != "image":
+        raise ValueError("只有生成图片消息支持图片级删除")
+    raw_assets = target.get("generated_assets")
+    assets = [dict(item) for item in raw_assets if isinstance(item, dict)] if isinstance(raw_assets, list) else []
+    urls = target.get("image_urls") if isinstance(target.get("image_urls"), list) else []
+    first_url = str(target.get("image_url") or "").strip()
+    if first_url and first_url not in urls:
+        urls = [first_url, *urls]
+    urls = [str(url or "").strip() for url in urls if str(url or "").strip()]
+    target_index = -1
+    if clean_asset_id:
+        target_index = next((index for index, item in enumerate(assets) if str(item.get("asset_id") or "") == clean_asset_id), -1)
+    elif requested_index >= 0:
+        target_index = requested_index
+    if target_index < 0 and clean_asset_id and not assets:
+        target_index = next((index for index, url in enumerate(urls) if url == clean_asset_id), -1)
+    if target_index < 0 or target_index >= max(len(assets), len(urls)):
+        raise KeyError("图片资产不存在")
+
+    removed = {}
+    if target_index < len(assets):
+        removed = assets.pop(target_index)
+    if target_index < len(urls):
+        removed.setdefault("url", urls[target_index])
+        urls.pop(target_index)
+    elif removed.get("url"):
+        urls = [url for url in urls if url != removed["url"]]
+    target.setdefault("deleted_assets", []).append({
+        "asset_id": removed.get("asset_id") or clean_asset_id,
+        "url": removed.get("url") or "",
+        "image_index": target_index,
+        "deleted_at": now_ms(),
+    })
+    target["generated_assets"] = assets
+    target["image_urls"] = urls
+    target["image_url"] = urls[0] if urls else ""
+    if not urls:
+        target["deleted_at"] = now_ms()
+        target["deleted_reason"] = "all-images-removed"
+    conversation["updated_at"] = now_ms()
+    return target
+
 def image_size_from_reference(ref):
     path = output_file_from_url(ref)
     if not path:
@@ -20184,6 +20247,28 @@ async def create_conversation(payload: ConversationCreateRequest, request: Reque
 async def get_conversation(conversation_id: str, request: Request, x_user_id: str = Header(default="")):
     user_id = safe_user_id(x_user_id, request)
     return {"conversation": load_conversation(user_id, conversation_id)}
+
+
+@app.delete("/api/conversations/{conversation_id}/messages/{message_id}")
+async def delete_conversation_message(
+    conversation_id: str,
+    message_id: str,
+    request: Request,
+    asset_id: str = "",
+    image_index: int = -1,
+    x_user_id: str = Header(default=""),
+):
+    user_id = safe_user_id(x_user_id, request)
+    conversation = load_conversation(user_id, conversation_id)
+    try:
+        delete_chat_message_asset(conversation, message_id, asset_id=asset_id, image_index=image_index)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    save_conversation(user_id, conversation)
+    return {"ok": True, "conversation": conversation}
+
 
 @app.delete("/api/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, request: Request, x_user_id: str = Header(default="")):

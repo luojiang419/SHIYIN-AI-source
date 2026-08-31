@@ -62,6 +62,43 @@ class ChatContinuityTests(unittest.TestCase):
         self.assertEqual(refs[0]["url"], "/output/legacy.png")
         self.assertEqual(refs[0]["name"], "旧版图片")
 
+    def test_delete_one_image_keeps_message_and_other_assets(self):
+        conversation = {
+            "messages": [{
+                "id": "message-1",
+                "role": "assistant",
+                "type": "image",
+                "image_url": "/output/horse-1.png",
+                "image_urls": ["/output/horse-1.png", "/output/horse-2.png"],
+                "generated_assets": [
+                    {"asset_id": "horse-1", "url": "/output/horse-1.png"},
+                    {"asset_id": "horse-2", "url": "/output/horse-2.png"},
+                ],
+            }]
+        }
+        message = main.delete_chat_message_asset(conversation, "message-1", asset_id="horse-1")
+        self.assertEqual(message["image_url"], "/output/horse-2.png")
+        self.assertEqual(message["image_urls"], ["/output/horse-2.png"])
+        self.assertEqual([item["asset_id"] for item in message["generated_assets"]], ["horse-2"])
+        self.assertNotIn("deleted_at", message)
+
+    def test_delete_last_image_soft_deletes_message_without_removing_file(self):
+        conversation = {
+            "messages": [{
+                "id": "message-2",
+                "role": "assistant",
+                "type": "image",
+                "image_url": "/output/cowgirl.png",
+                "image_urls": ["/output/cowgirl.png"],
+                "generated_assets": [{"asset_id": "cowgirl-1", "url": "/output/cowgirl.png"}],
+            }]
+        }
+        message = main.delete_chat_message_asset(conversation, "message-2", asset_id="cowgirl-1")
+        self.assertTrue(message["deleted_at"])
+        self.assertEqual(message["image_url"], "")
+        self.assertEqual(message["image_urls"], [])
+        self.assertEqual(message["deleted_assets"][0]["url"], "/output/cowgirl.png")
+
 
 if __name__ == "__main__":
     unittest.main()

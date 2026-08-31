@@ -1,7 +1,7 @@
 # AI助手连续视觉对话与参考资产复用
 
 状态：开发中  
-当前阶段：2/5  
+当前阶段：3/5  
 最后更新：2026-08-31
 
 ## 当前状态
@@ -12,19 +12,19 @@
 
 ## 下一步
 
-下一步首先完成图片级管理和自动引用准备：
+下一步首先完成自动引用准备和提交确认：
 
-1. 增加图片级右键删除/回收站语义，保护仍被引用的图片。
-2. 为参考图托盘增加来源、角色和锁定信息。
-3. 设计自动引用准备接口，先返回候选，不直接静默生成。
-4. 执行后端接口测试和完整相关回归，再进入语义检索。
+1. 为参考图托盘增加来源、角色和锁定信息。
+2. 设计自动引用准备接口，先返回候选，不直接静默生成。
+3. 用对话资产摘要进行实体匹配，保留手动覆盖。
+4. 执行后端接口测试和完整相关回归，再接入图片生成。
 
 ## 当前 TODO
 
 - [x] 生成图片快捷操作栏：查看、复用、下载、编辑、右键快捷菜单。
 - [x] 生成图片内部拖拽到输入框参考图区域。
 - [x] 全屏预览滚轮缩放、平移、双击复位。
-- [ ] 图片级删除与回收站。
+- [x] 图片级删除与安全软删除语义。
 - [x] 对话视觉资产记录与稳定 asset_id。
 - [ ] 多轮对话按实体/角色自动选择参考图。
 - [ ] 自动引用预览、确认和手动调整。
@@ -34,9 +34,9 @@
 ## 最近验证状态
 
 - 静态检查：`git diff --check` 通过；gpt-chat 内联 JS 语法通过。
-- 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_generated_image_browser_cache.py tests/test_focus_guard.py tests/test_performance_contracts.py -q`，22 passed。
+- 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_generated_image_browser_cache.py tests/test_focus_guard.py tests/test_performance_contracts.py -q`，24 passed。
 - 编译：`python -m py_compile main.py` 通过。
-- 运行测试：尚未启动完整桌面运行冒烟。
+- 运行测试：接口手动冒烟被项目现有账号鉴权拦截（401），未判定为功能通过；完整桌面运行冒烟尚未启动。
 - 最近 Git commit：`a0c5bc0 docs: close staged canvas performance fixes`
 
 ## 任务目标
@@ -76,6 +76,8 @@
 
 增加图片级右键菜单、回收站、引用保护、批量操作、重试和对话分支。物理文件只在没有任何对话/作品引用时清理。
 
+图片级删除已先采用软删除：消息保留 `deleted_assets`，只从可见 `image_urls/generated_assets` 中移除，物理文件暂不清理。
+
 ## 验收标准
 
 1. 现有普通聊天、Agent、生图、编辑、文件上传和历史对话功能继续可用。
@@ -93,12 +95,14 @@
 - 完成 AI 助手生成图片快捷操作、内部拖拽复用和共享预览缩放平移。
 - 完成对话图片资产基础记录和批量图片兼容读取。
 - 新增 `tests/test_chat_continuity.py`，覆盖新旧消息结构。
+- 完成图片级右键移除接口和前端持久化刷新，保留被删除资产记录并保护物理文件。
 
 ## 当前关键修改
 
 - `static/gpt-chat.html`：生成图片操作栏、拖拽协议、下载入口、共享预览和右键快捷菜单。
 - `main.py`：扩展 `AIReference` 元数据，新增对话图片资产记录和兼容读取函数，并在两条生图路径写入 `generated_assets`。
 - `tests/test_chat_continuity.py`：覆盖资产 ID、批量图片和旧消息兼容。
+- `main.py`：新增 `delete_chat_message_asset` 和 `/api/conversations/{conversation_id}/messages/{message_id}` 图片/消息软删除接口。
 
 ## 已知问题
 
@@ -110,6 +114,7 @@
 
 - 2026-08-31：建立任务文档，完成基线检查，准备从低风险前端交互开始。
 - 2026-08-31：完成前端图片操作与拖拽复用；完成后端视觉资产基础记录，22 项相关测试通过。
+- 2026-08-31：完成图片级软删除和右键移除，相关回归测试 24 项通过；接口手动冒烟因现有登录保护返回 401，未作为运行验证结论。
 
 ## 接力信息
 

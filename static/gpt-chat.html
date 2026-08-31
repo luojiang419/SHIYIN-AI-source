@@ -1360,7 +1360,7 @@
                 lucide.createIcons();
                 return;
             }
-            messages.forEach(addMessageBubble);
+            messages.filter(item => !item?.deleted_at).forEach(addMessageBubble);
             scrollBottom();
         }
 
@@ -1368,6 +1368,7 @@
             const box = document.getElementById('messages');
             const row = document.createElement('div');
             row.className = `bubble-row ${msg.role === 'user' ? 'user' : 'assistant'}`;
+            row.dataset.messageId = msg.id || '';
             const bubble = document.createElement('div');
             bubble.className = `bubble ${msg.role === 'user' ? 'user' : 'assistant'}`;
             const imageUrls = Array.isArray(msg.image_urls) && msg.image_urls.length ? msg.image_urls : (msg.image_url ? [msg.image_url] : []);
@@ -1500,6 +1501,24 @@
             if(currentPreviewRef?.url) downloadChatImage(currentPreviewRef.url, attachmentName(currentPreviewRef));
         }
 
+        async function deleteChatImage(ref){
+            if(!ref?.message_id || !currentConversation?.id) return;
+            if(!confirm('从当前对话移除这张图片？原文件不会被立即删除。')) return;
+            const query = ref.asset_id
+                ? `asset_id=${encodeURIComponent(ref.asset_id)}`
+                : `image_index=${encodeURIComponent(String(ref.image_index ?? 0))}`;
+            try {
+                const response = await fetch(`/api/conversations/${encodeURIComponent(currentConversation.id)}/messages/${encodeURIComponent(ref.message_id)}?${query}`, {method:'DELETE', headers:{'X-User-ID':userId}});
+                const data = await response.json();
+                if(!response.ok) throw new Error(data.detail || '删除失败');
+                currentConversation = data.conversation;
+                renderMessages(currentConversation.messages || []);
+                await loadConversations();
+            } catch(error) {
+                alert(error.message || '删除失败');
+            }
+        }
+
         function imageFileName(url, fallback='chat-image'){
             const raw = String(url || '').split('?')[0].split('#')[0].split('/').pop() || '';
             let name = raw;
@@ -1541,7 +1560,8 @@
                 <button type="button" data-context-action="reuse"><i data-lucide="image-plus"></i><span>复用为参考图</span></button>
                 <button type="button" data-context-action="edit"><i data-lucide="wand-sparkles"></i><span>编辑这张图</span></button>
                 <button type="button" data-context-action="download"><i data-lucide="download"></i><span>下载图片</span></button>
-                <button type="button" data-context-action="copy"><i data-lucide="copy"></i><span>复制图片地址</span></button>`;
+                <button type="button" data-context-action="copy"><i data-lucide="copy"></i><span>复制图片地址</span></button>
+                <button type="button" data-context-action="delete"><i data-lucide="trash-2"></i><span>从对话移除</span></button>`;
             document.body.appendChild(menu);
             const left = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8));
             const top = Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8));
@@ -1553,6 +1573,10 @@
             menu.querySelector('[data-context-action="copy"]').onclick = async () => {
                 try { await navigator.clipboard?.writeText(ref.url); } catch(e) {}
                 closeImageContextMenu();
+            };
+            menu.querySelector('[data-context-action="delete"]').onclick = async () => {
+                closeImageContextMenu();
+                await deleteChatImage(ref);
             };
             lucide.createIcons();
         }

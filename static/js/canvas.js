@@ -20082,12 +20082,30 @@ function positionSelectionHub(anchor){
     const maxLeft = Math.max(margin, boardRect.width - hubRect.width - margin);
     const left = Math.max(margin, Math.min(maxLeft, anchorRect.left - boardRect.left + (anchorRect.width - hubRect.width) / 2));
     const gap = 16;
-    let top = anchorRect.top - boardRect.top - hubRect.height - 10 - 4;
-    if(top < margin){
-        top = Math.min(boardRect.height - hubRect.height - margin, anchorRect.bottom - boardRect.top + gap);
+    const anchorTop = anchorRect.top - boardRect.top;
+    const anchorBottom = anchorRect.bottom - boardRect.top;
+    const legacyPreferredTop = anchorRect.top - boardRect.top - hubRect.height - 10;
+    const availableAbove = Math.max(0, anchorTop - gap - margin);
+    const availableBelow = Math.max(0, boardRect.height - anchorBottom - gap - margin);
+    // 优先停在节点上方；空间不足时才放到节点下方，并把最大高度锁在画布内，
+    // 避免高大的编辑面板覆盖节点内容或把生成按钮挤出面板。
+    let top;
+    if(availableAbove >= Math.min(hubRect.height, 160) || availableAbove >= availableBelow){
+        if(availableAbove < hubRect.height){
+            selectionHub.style.maxHeight = `${Math.max(120, Math.floor(availableAbove))}px`;
+        } else {
+            selectionHub.style.maxHeight = 'calc(100% - 24px)';
+        }
+        top = availableAbove >= hubRect.height
+            ? legacyPreferredTop - 4
+            : Math.max(margin, anchorTop - Math.min(hubRect.height, availableAbove) - gap);
+    } else {
+        selectionHub.style.maxHeight = `${Math.max(120, Math.floor(availableBelow))}px`;
+        top = anchorBottom + gap;
     }
+    const maxTop = Math.max(margin, boardRect.height - selectionHub.getBoundingClientRect().height - margin);
     selectionHub.style.left = `${Math.round(left)}px`;
-    selectionHub.style.top = `${Math.round(Math.max(margin, top))}px`;
+    selectionHub.style.top = `${Math.round(Math.min(maxTop, Math.max(margin, top)))}px`;
 }
 function scheduleSelectionHubPosition(){
     if(selectionHubPositionQueued) return;

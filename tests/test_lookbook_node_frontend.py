@@ -1,0 +1,59 @@
+import re
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class LookbookNodeFrontendTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.lookbook = (ROOT / "static" / "js" / "canvas-lookbook-node.js").read_text(encoding="utf-8")
+        cls.canvas = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        cls.css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
+        cls.html = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+
+    def test_builtin_visual_skill_set_is_available_without_network(self):
+        self.assertIn("VISUAL_SKILLS_IMAGE_URL = 'https://github.com/smixs/visual-skills/tree/main/image'", self.lookbook)
+        for style_id in ("visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
+            self.assertIn(f"id:'{style_id}'", self.lookbook)
+        self.assertIn("skill:'image'", self.lookbook)
+        self.assertIn("CC BY 4.0", self.lookbook)
+
+    def test_style_picker_has_source_attribution_and_selectable_buttons(self):
+        self.assertIn('data-lookbook-choose', self.lookbook)
+        self.assertIn('data-lookbook-select', self.lookbook)
+        self.assertIn('event.preventDefault();event.stopPropagation();choose(', self.lookbook)
+        self.assertIn('smixs/visual-skills/image', self.lookbook)
+
+    def test_lookbook_actions_have_direct_and_delegated_click_fallbacks(self):
+        start = self.lookbook.index("function bind(root,node,options={}){")
+        end = self.lookbook.index("function mediaRefs", start)
+        body = self.lookbook[start:end]
+        self.assertIn("root.querySelector('[data-lookbook-choose]')?.addEventListener('click',handleAction)", body)
+        self.assertIn("root.addEventListener('click',handleAction,true)", body)
+        self.assertIn("event.preventDefault(); event.stopPropagation();", body)
+
+    def test_selection_hub_keeps_panel_inside_board_and_prefers_above_anchor(self):
+        self.assertIn("const availableAbove", self.canvas)
+        self.assertIn("selectionHub.style.maxHeight", self.canvas)
+        self.assertIn("anchorTop - Math.min(hubRect.height, availableAbove) - gap", self.canvas)
+        self.assertIn("z-index:1005", self.css)
+        self.assertIn("max-height:calc(100% - 24px)", self.css)
+
+    def test_image_quick_settings_cannot_push_generate_button_outside_panel(self):
+        self.assertIn("grid-template-columns:repeat(6,minmax(0,1fr))", self.css)
+        self.assertIn(".image-quick-model { min-width:0; grid-column:span 2; }", self.css)
+        self.assertIn(".image-quick-camera,.image-quick-generate { min-width:0; width:100%;", self.css)
+        self.assertIn("overflow-x:hidden", self.css)
+
+    def test_static_cache_keys_are_bumped_for_the_fix(self):
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.3", self.html)
+        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.1", self.html)
+        self.assertIn("feature=lookbook-picker.1", self.html)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,16 +1,17 @@
 # 平面广告 Lookbook 节点开发
 
-状态：已完成  
-当前阶段：8/8（生成后视觉质检与交付）
+状态：开发中
+当前阶段：9/9（选择器与画布快捷面板回归修复）
 最后更新：2026-08-31
 
 ## 当前状态
 
-已完成经典无限画布独立 `CanvasLookbookNode` 模块、视觉风格卡片弹窗、GitHub Skill 解析/安装接口、Skill 封面生成接口、节点参数与生成结果回写。后端复用电商视觉 API 路由，并在 Lookbook 任务开始前执行“联网案例研究 → 视觉创意总监策划 → 生图”的质量增强链路；未重新暴露已弃用的电商工作流节点组。生成后视觉模型会按 0-100 分检查输出，定位弱图并最多自动替换两张，再执行二次验收，质检分数和修复数量回写节点。人物与商品输入现在带有明确的组装约束：人物作为身份/身体基底，商品作为唯一 SKU 来源。Lookbook 已从一级创建菜单移入“平面广告”二级菜单。安装包 `SHIYIN-AI-Setup-1.0.378.exe` 正在重新构建，用于修复旧缓存脚本导致的风格按钮无响应和输入端口数量过期问题；运行冒烟因当前已有实例占用而跳过。
+已完成经典无限画布独立 `CanvasLookbookNode` 模块、视觉风格卡片弹窗、GitHub Skill 解析/安装接口、Skill 封面生成接口、节点参数与生成结果回写。后端复用电商视觉 API 路由，并在 Lookbook 任务开始前执行“联网案例研究 → 视觉创意总监策划 → 生图”的质量增强链路；未重新暴露已弃用的电商工作流节点组。生成后视觉模型会按 0-100 分检查输出，定位弱图并最多自动替换两张，再执行二次验收，质检分数和修复数量回写节点。人物与商品输入现在带有明确的组装约束：人物作为身份/身体基底，商品作为唯一 SKU 来源。Lookbook 已从一级创建菜单移入“平面广告”二级菜单。本轮补齐了旧 immutable cache 查询串、选择按钮事件兜底、内置 visual-skills/image 风格集，以及图片快捷面板定位/溢出修复。
 
 ## 下一步
 
-1. 当前功能与安装包交付完成；本次缓存与按钮修复已纳入 1.0.378。
+1. 提交本轮前端/CSS/内置 Skill 资源与回归测试。
+2. 重新构建安装包或在桌面实例执行一次 Lookbook 点击、选择、生成冒烟。
 
 ## 当前 TODO
 
@@ -24,14 +25,18 @@
 - [x] 增加 Logo/文字保护与质量检查约束
 - [x] 生成后视觉质检与弱图自动修复
 - [x] 局部验证、任务文档更新、Git 提交
+- [x] 修复旧静态缓存导致的选择器无响应
+- [x] 内置 `smixs/visual-skills/image` 衍生风格卡片并保留署名
+- [x] 修复图片快捷面板定位与生成按钮横向溢出
+- [x] 增加 Lookbook 前端契约回归测试
 
 ## 最近验证状态
 
-- 静态检查：`node --check`、`python -m py_compile` 已通过
-- 单元测试：电商与画布电商回归 `148 passed`
+- 静态检查：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js`、`python -m py_compile main.py canvas_core/ecommerce.py`、`git diff --check` 已通过
+- 单元测试：Lookbook/画布/电商/缓存专项 `156 passed`
 - 编译：未开始（前端为静态资源）
-- 运行测试：未开始
-- 最近 Git commit：`07d445c fix: move lookbook into flat ad submenu`
+- 运行测试：尚未在桌面实例执行；全量画布回归另有 10 个既有基线断言失败（旧版本字符串与已移除节点契约）
+- 最近 Git commit：待提交
 
 ---
 
@@ -55,6 +60,15 @@
 - 画幅、分辨率、质量、数量设置被提交，数量限制 1～4。
 - 任务失败在节点显示错误，成功结果显示缩略图并可向下游输出。
 - `python -m py_compile main.py canvas_core/ecommerce.py` 与前端语法检查通过。
+
+## 当前关键修改
+
+- `static/js/canvas-lookbook-node.js`：内置 10 张 visual-skills/image 衍生风格、上游来源署名、直接/委托点击监听双保险。
+- `static/js/canvas.js`：快捷面板优先定位到节点上方并按可用高度滚动，避免覆盖节点和按钮溢出。
+- `static/css/canvas.css`：快捷面板 z-index、画布内最大高度、六列/移动端两列 minmax 布局，生成按钮保持面板内。
+- `static/canvas.html`：升级 Lookbook/CSS/Canvas 查询串，避免 immutable cache 命中旧脚本。
+- `static/lookbook-skills/image/SKILL.md`：记录上游 visual-skills/image 映射原则与 CC BY 4.0 署名。
+- `tests/test_lookbook_node_frontend.py`：覆盖内置风格、按钮绑定、面板定位/布局和缓存查询串。
 
 ## 接力信息
 

@@ -3850,6 +3850,11 @@ class AIReference(BaseModel):
     url: str = ""
     name: str = ""
     role: str = ""
+    asset_id: str = ""
+    source: str = ""
+    message_id: str = ""
+    image_index: int = 0
+    confidence: float = 0.0
     # 影视节点传递的稳定资产映射字段。保留端口角色和 1-n 顺序，
     # 让可灵 CLI/其他视频适配器在一次请求中仍能还原真实输入关系。
     asset_index: int = 0
@@ -11709,15 +11714,123 @@ CN_NUMERAL_MAP = {
     "一": 1, "二": 2, "两": 2, "俩": 2, "三": 3, "四": 4,
 }
 
+def chat_generated_assets(
+    image_urls,
+    prompt,
+    message_id="",
+    created_at=0,
+    provider="",
+    model="",
+    references=None,
+):
+    """为对话生图结果建立稳定、可向后兼容的视觉资产记录。"""
+    timestamp = int(created_at or now_ms())
+    parent_refs = []
+    for ref in references or []:
+        if not isinstance(ref, dict) or not ref.get("url"):
+            continue
+        parent_refs.append({
+            key: ref.get(key)
+            for key in ("asset_id", "url", "name", "role", "source", "message_id", "image_index")
+            if ref.get(key) not in (None, "")
+        })
+    assets = []
+    for index, url in enumerate(image_urls or []):
+        clean_url = str(url or "").strip()
+        if not clean_url:
+            continue
+        parsed_name = os.path.basename(urllib.parse.urlparse(clean_url).path) or f"chat-image-{index + 1}.png"
+        assets.append({
+            "asset_id": f"chat_asset_{uuid.uuid4().hex}",
+            "url": clean_url,
+            "name": parsed_name,
+            "kind": "image",
+            "role": "output",
+            "source": "conversation",
+            "message_id": str(message_id or ""),
+            "image_index": index,
+            "prompt": str(prompt or "")[:LLM_MESSAGE_MAX_LENGTH],
+            "created_at": timestamp,
+            "provider": str(provider or ""),
+            "model": str(model or ""),
+            "parent_references": parent_refs,
+        })
+    return assets
+
+
 def latest_chat_image_refs(conversation, limit=1):
     refs = []
+    safe_limit = max(1, int(limit or 1))
     for item in reversed(conversation.get("messages") or []):
-        url = item.get("image_url") if isinstance(item, dict) else ""
-        if url:
-            refs.append({"url": url, "name": item.get("content") or "上一张图片", "role": "source"})
-        if len(refs) >= limit:
-            break
+        if not isinstance(item, dict) or item.get("role") != "assistant":
+            continue
+        assets = item.get("generated_assets")
+        if isinstance(assets, list) and assets:
+            candidates = assets
+        else:
+            urls = item.get("image_urls") if isinstance(item.get("image_urls"), list) else []
+            first_url = item.get("image_url")
+            candidates = ([first_url] if first_url else []) + [url for url in urls if url and url != first_url]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                url = str(candidate.get("url") or "").strip()
+                if not url:
+                    continue
+                ref = dict(candidate)
+                ref.setdefault("role", "source")
+            else:
+                url = str(candidate or "").strip()
+                if not url:
+                    continue
+                ref = {
+                    "url": url,
+                    "name": item.get("content") or "上一张图片",
+                    "role": "source",
+                    "source": "conversation",
+                    "message_id": item.get("id") or "",
+                }
+            refs.append(ref)
+            if len(refs) >= safe_limit:
+                return refs
     return refs
+
+
+def conversation_chat_image_assets(conversation, limit=200):
+    """返回当前对话中的图片资产摘要，供后续自动引用和前端历史选择使用。"""
+    assets = []
+    safe_limit = max(1, min(1000, int(limit or 200)))
+    for message in conversation.get("messages") or []:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        generated = message.get("generated_assets")
+        if isinstance(generated, list) and generated:
+            candidates = generated
+        else:
+            urls = message.get("image_urls") if isinstance(message.get("image_urls"), list) else []
+            first_url = message.get("image_url")
+            candidates = ([first_url] if first_url else []) + [url for url in urls if url and url != first_url]
+        for index, candidate in enumerate(candidates):
+            if isinstance(candidate, dict):
+                url = str(candidate.get("url") or "").strip()
+                asset = dict(candidate)
+            else:
+                url = str(candidate or "").strip()
+                asset = {}
+            if not url:
+                continue
+            asset.setdefault("url", url)
+            asset.setdefault("name", message.get("content") or f"对话图片-{index + 1}")
+            asset.setdefault("kind", "image")
+            asset.setdefault("role", "output")
+            asset.setdefault("source", "conversation")
+            asset.setdefault("message_id", message.get("id") or "")
+            asset.setdefault("image_index", index)
+            asset.setdefault("prompt", message.get("content") or "")
+            asset.setdefault("created_at", message.get("created_at") or 0)
+            assets.append(asset)
+            if len(assets) >= safe_limit:
+                return assets
+    return assets
 
 def image_size_from_reference(ref):
     path = output_file_from_url(ref)
@@ -21341,15 +21454,22 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
         except httpx.HTTPError as exc:
             log_net_error(f"对话生图 网络/TLS错误 model={model}", exc)
             raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
+        assistant_message_id = uuid.uuid4().hex
         assistant_message = {
-            "id": uuid.uuid4().hex,
+            "id": assistant_message_id,
             "role": "assistant",
             "type": "image",
             "content": payload.message,
             "image_url": local_url,
+            "image_urls": [local_url],
             "created_at": now_ms(),
             "model": model,
             "size": image_size,
+            "used_references": refs,
+            "generated_assets": chat_generated_assets(
+                [local_url], payload.message, assistant_message_id,
+                provider=provider["id"], model=model, references=refs,
+            ),
             "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
         }
     else:
@@ -21462,8 +21582,9 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
             log_net_error(f"对话生图 网络/TLS错误 model={model}", exc)
             raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
         local_url = local_urls[0] if local_urls else ""
+        assistant_message_id = uuid.uuid4().hex
         assistant_message = {
-            "id": uuid.uuid4().hex,
+            "id": assistant_message_id,
             "role": "assistant",
             "type": "image",
             "content": prompt,
@@ -21478,6 +21599,10 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
             "agent_action": action,
             "agent_reply": decision.get("reply") or "",
             "used_references": tool_refs,
+            "generated_assets": chat_generated_assets(
+                local_urls, prompt, assistant_message_id,
+                provider=image_provider["id"], model=model, references=tool_refs,
+            ),
             "raw_usage": raw_items[0].get("usage") if raw_items and isinstance(raw_items[0], dict) else None,
         }
     else:

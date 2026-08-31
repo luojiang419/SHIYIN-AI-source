@@ -1,12 +1,12 @@
 # 平面广告 Lookbook 节点开发
 
 状态：已完成
-当前阶段：10/10（多输入端口布局与 Web 冒烟）
+当前阶段：11/11（输入端口文本标签与 Web 冒烟）
 最后更新：2026-08-31
 
 ## 当前状态
 
-已完成经典无限画布独立 `CanvasLookbookNode` 模块、视觉风格卡片弹窗、GitHub Skill 解析/安装接口、Skill 封面生成接口、节点参数与生成结果回写。后端复用电商视觉 API 路由，并在 Lookbook 任务开始前执行“联网案例研究 → 视觉创意总监策划 → 生图”的质量增强链路；未重新暴露已弃用的电商工作流节点组。生成后视觉模型会按 0-100 分检查输出，定位弱图并最多自动替换两张，再执行二次验收，质检分数和修复数量回写节点。人物与商品输入现在带有明确的组装约束：人物作为身份/身体基底，商品作为唯一 SKU 来源。Lookbook 已从一级创建菜单移入“平面广告”二级菜单。本轮补齐了旧 immutable cache 查询串、选择按钮事件兜底、内置 visual-skills/image 风格集、图片快捷面板定位/溢出修复，以及 7 个 Lookbook 输入端口的独立垂直布局。
+已完成经典无限画布独立 `CanvasLookbookNode` 模块、视觉风格卡片弹窗、GitHub Skill 解析/安装接口、Skill 封面生成接口、节点参数与生成结果回写。后端复用电商视觉 API 路由，并在 Lookbook 任务开始前执行“联网案例研究 → 视觉创意总监策划 → 生图”的质量增强链路；未重新暴露已弃用的电商工作流节点组。生成后视觉模型会按 0-100 分检查输出，定位弱图并最多自动替换两张，再执行二次验收，质检分数和修复数量回写节点。人物与商品输入现在带有明确的组装约束：人物作为身份/身体基底，商品作为唯一 SKU 来源。Lookbook 已从一级创建菜单移入“平面广告”二级菜单。本轮补齐了旧 immutable cache 查询串、选择按钮事件兜底、内置 visual-skills/image 风格集、图片快捷面板定位/溢出修复、7 个 Lookbook 输入端口的独立垂直布局，以及端口对应文本标签。
 
 ## 下一步
 
@@ -30,13 +30,14 @@
 - [x] 增加 Lookbook 前端契约回归测试
 - [x] 修复 7 个输入端口重叠导致只能连接一个端口
 - [x] 启动隔离端口 Web 服务并完成登录、创建节点、弹窗选择和端口位置冒烟
+- [x] 为 7 个输入端口显示对应中文文本标签
 
 ## 最近验证状态
 
 - 静态检查：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js`、`python -m py_compile main.py canvas_core/ecommerce.py`、`git diff --check` 已通过
 - 单元测试：Lookbook/画布/电商/缓存专项 `156 passed`
 - 编译：未开始（前端为静态资源）
-- 运行测试：`http://127.0.0.1:3017` Web 冒烟通过（Lookbook 创建、10 张风格卡片、选择回写、7 个端口纵向分布）；未执行桌面实例级付费生成冒烟（当前环境无可复用实例/API Key）
+- 运行测试：`http://127.0.0.1:3017` Web 冒烟通过（Lookbook 创建、10 张风格卡片、选择回写、7 个端口纵向分布与文本标签）；未执行桌面实例级付费生成冒烟（当前环境无可复用实例/API Key）
 - 最近 Git commit：`8341b7f fix: separate lookbook input ports`
 
 ---
@@ -71,6 +72,7 @@
 - `static/lookbook-skills/image/SKILL.md`：记录上游 visual-skills/image 映射原则与 CC BY 4.0 署名。
 - `tests/test_lookbook_node_frontend.py`：覆盖内置风格、按钮绑定、面板定位/布局和缓存查询串。
 - `static/js/canvas.js` / `static/css/canvas.css`：给多角色输入端口写入 `--canvas-port-top` 并按节点高度分布，避免 7 个端口重叠。
+- `static/css/canvas.css`：使用 `data-role-label` 为每个输入端口渲染对应中文文本标签。
 
 ## 已知问题
 

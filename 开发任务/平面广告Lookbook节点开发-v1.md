@@ -18,7 +18,7 @@
 - [x] 视觉风格 Skill 卡片弹窗、封面自由设置
 - [x] 文本需求、画幅/分辨率/质量/生成数量
 - [x] 电商 API 复用、联网案例研究、生成结果回写
-- [x] 局部验证、任务文档更新、Git 提交（待本轮 commit）
+- [x] 局部验证、任务文档更新、Git 提交
 
 ## 最近验证状态
 
@@ -26,7 +26,7 @@
 - 单元测试：电商与画布电商回归 `148 passed`
 - 编译：未开始（前端为静态资源）
 - 运行测试：未开始
-- 最近 Git commit：工作区已有 `feat/storyboard-merge-node` 分支
+- 最近 Git commit：`75deb02 feat: add standalone lookbook canvas node`
 
 ---
 

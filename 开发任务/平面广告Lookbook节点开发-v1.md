@@ -1,6 +1,6 @@
 # 平面广告 Lookbook 节点开发
 
-状态：开发中
+状态：已完成
 当前阶段：9/9（选择器与画布快捷面板回归修复）
 最后更新：2026-08-31
 
@@ -10,8 +10,7 @@
 
 ## 下一步
 
-1. 提交本轮前端/CSS/内置 Skill 资源与回归测试。
-2. 重新构建安装包或在桌面实例执行一次 Lookbook 点击、选择、生成冒烟。
+1. 当前修复已提交并推送；如发布安装包，重新构建即可带入新静态资源查询串。
 
 ## 当前 TODO
 
@@ -35,8 +34,8 @@
 - 静态检查：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js`、`python -m py_compile main.py canvas_core/ecommerce.py`、`git diff --check` 已通过
 - 单元测试：Lookbook/画布/电商/缓存专项 `156 passed`
 - 编译：未开始（前端为静态资源）
-- 运行测试：尚未在桌面实例执行；全量画布回归另有 10 个既有基线断言失败（旧版本字符串与已移除节点契约）
-- 最近 Git commit：待提交
+- 运行测试：后端 GitHub Skill 解析实测通过；未执行桌面实例级付费生成冒烟（当前环境无可复用实例/API Key）
+- 最近 Git commit：`e2d018d fix: repair lookbook picker and image quick panel`
 
 ---
 
@@ -69,6 +68,11 @@
 - `static/canvas.html`：升级 Lookbook/CSS/Canvas 查询串，避免 immutable cache 命中旧脚本。
 - `static/lookbook-skills/image/SKILL.md`：记录上游 visual-skills/image 映射原则与 CC BY 4.0 署名。
 - `tests/test_lookbook_node_frontend.py`：覆盖内置风格、按钮绑定、面板定位/布局和缓存查询串。
+
+## 已知问题
+
+- 全量画布回归仍有 10 个既有基线断言失败，集中在旧版本资源字符串、已移除的影视线稿/灯光重塑节点契约；本轮专项 156 项全部通过，未发现与 Lookbook 或快捷编辑面板相关的回归。
+- 桌面实例级“点击选择风格 → 上传/安装 → 生成”冒烟需要运行中的本地实例与可用图片 API Key，本环境未执行该付费调用。
 
 ## 接力信息
 

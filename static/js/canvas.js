@@ -107,6 +107,10 @@ function startClassicPreviewImage(img){
     classicMediaQueueActive += 1;
     img.dataset.previewState = 'loading';
     const startedAt = performance.now();
+    if(canvas?.id && classicNavigationStartedAt && classicFirstPreviewCanvasId !== canvas.id){
+        classicFirstPreviewCanvasId = canvas.id;
+        window.CanvasPerformance?.record?.('classic.navigation-to-first-preview', performance.now() - classicNavigationStartedAt, {nodes:nodes.length});
+    }
     const finish = ok => {
         classicMediaQueueActive = Math.max(0, classicMediaQueueActive - 1);
         if(!img.isConnected) return;
@@ -552,6 +556,9 @@ const videoFrameCancel = document.getElementById('videoFrameCancel');
 let canvases = [];
 let deletedCanvases = [];
 let canvas = null;
+let classicNavigationStartedAt = 0;
+let classicFirstRenderCanvasId = '';
+let classicFirstPreviewCanvasId = '';
 let nodes = [];
 let connections = [];
 let canvasNodeIndex = new Map();
@@ -3040,6 +3047,26 @@ async function touchCanvasOpened(id){
         return null;
     }
 }
+function scheduleCanvasSecondaryStartup(openedCanvasId){
+    const run = () => {
+        if(!canvas || canvas.id !== openedCanvasId || document.hidden) return;
+        // 恢复任务、轮询、touch 和资源检查让出首屏关键帧与视口预览队列。
+        resumeCanvasImageTasks();
+        resumeCanvasVideoTasks();
+        resumeTopazVideoTasks();
+        startCanvasRemotePolling();
+        void touchCanvasOpened(openedCanvasId).then(touched => {
+            if(canvas?.id !== openedCanvasId || !touched?.updated_at) return;
+            canvas.updated_at = Number(touched.updated_at);
+            lastCanvasUpdatedAt = Math.max(lastCanvasUpdatedAt, canvas.updated_at);
+        });
+        void refreshMissingCanvasAssets(openedCanvasId).then(assetsChanged => {
+            if(assetsChanged && canvas?.id === openedCanvasId) render();
+        });
+    };
+    if('requestIdleCallback' in window) window.requestIdleCallback(run, {timeout:1500});
+    else window.setTimeout(run, 180);
+}
 function renderCanvasListInto(list){
     if(!list) return;
     refreshGateViewControls();
@@ -3377,6 +3404,9 @@ async function setCanvasTitle(id, title){
 }
 async function openCanvas(id){
     setStatus('Opening...');
+    classicNavigationStartedAt = performance.now();
+    classicFirstRenderCanvasId = '';
+    classicFirstPreviewCanvasId = '';
     try {
         const res = await fetch(`/api/canvases/${id}`);
         if(!res.ok) throw new Error(tr('canvas.openFailed'));
@@ -3401,20 +3431,9 @@ async function openCanvas(id){
         renderCanvasList();
         render();
         if(prunedRuntimeCollections || legacyMigration.changed) scheduleSave();
-        resumeCanvasImageTasks();
-        resumeCanvasVideoTasks();
-        resumeTopazVideoTasks();
-        startCanvasRemotePolling();
         setStatus('Ready');
         const openedCanvasId = canvas.id;
-        void touchCanvasOpened(openedCanvasId).then(touched => {
-            if(canvas?.id !== openedCanvasId || !touched?.updated_at) return;
-            canvas.updated_at = Number(touched.updated_at);
-            lastCanvasUpdatedAt = Math.max(lastCanvasUpdatedAt, canvas.updated_at);
-        });
-        void refreshMissingCanvasAssets(openedCanvasId).then(assetsChanged => {
-            if(assetsChanged && canvas?.id === openedCanvasId) render();
-        });
+        scheduleCanvasSecondaryStartup(openedCanvasId);
     } catch(e) {
         setStatus(tr('canvas.openFailed'));
         console.error(e);
@@ -8459,6 +8478,10 @@ function render(){
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
+    if(canvas?.id && classicNavigationStartedAt && classicFirstRenderCanvasId !== canvas.id){
+        classicFirstRenderCanvasId = canvas.id;
+        window.CanvasPerformance?.record?.('classic.navigation-to-first-render', performance.now() - classicNavigationStartedAt, {nodes:nodes.length, connections:connections.length});
+    }
     scheduleClassicIdleIconRefresh(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);

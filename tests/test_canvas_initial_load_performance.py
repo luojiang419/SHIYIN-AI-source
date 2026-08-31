@@ -15,11 +15,12 @@ def function_body(source: str, signature: str, next_marker: str) -> str:
 
 
 class CanvasInitialLoadPerformanceTests(unittest.TestCase):
-    def test_classic_canvas_renders_before_touch_and_asset_check_finish(self):
+    def test_classic_canvas_schedules_touch_and_asset_check_after_first_render(self):
         body = function_body(CANVAS_JS, "async function openCanvas(id)", "function applyRemoteCanvasData")
         render_at = body.index("render();")
-        self.assertLess(render_at, body.index("void touchCanvasOpened(openedCanvasId)"))
-        self.assertLess(render_at, body.index("void refreshMissingCanvasAssets(openedCanvasId)"))
+        self.assertLess(render_at, body.index("scheduleCanvasSecondaryStartup(openedCanvasId)"))
+        self.assertIn("function scheduleCanvasSecondaryStartup(openedCanvasId)", CANVAS_JS)
+        self.assertIn("requestIdleCallback", CANVAS_JS)
         self.assertNotIn("await touchCanvasOpened", body)
         self.assertNotIn("await refreshMissingCanvasAssets", body)
 

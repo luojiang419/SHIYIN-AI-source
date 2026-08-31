@@ -16265,7 +16265,7 @@ def validate_ecommerce_local_inputs(
             "kind": "image",
             "mime": ECOMMERCE_INPUT_FORMAT_MIMES[image_format],
         }
-        for key in ("reference_id", "reference_type", "label", "instruction", "detail_target_id"):
+        for key in ("reference_id", "reference_type", "label", "instruction", "detail_target_id", "lookbook_role"):
             if item.get(key):
                 normalized[key] = item.get(key)
         checked.append(normalized)

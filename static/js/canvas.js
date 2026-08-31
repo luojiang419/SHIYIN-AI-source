@@ -9849,12 +9849,15 @@ async function runEcommerceComposeNode(nodeId, opts={}){
     }
 }
 function lookbookConnectedInputs(node){
-    const entries = connections.filter(connection => connection.to === node.id).map(connection => nodes.find(item => item.id === connection.from)).filter(Boolean);
+    const entries = connections.filter(connection => connection.to === node.id).map(connection => ({connection,source:nodes.find(item => item.id === connection.from)})).filter(entry => entry.source);
+    const roleLabels = {'lookbook-person':'人物','lookbook-product':'商品','lookbook-scene':'场景','lookbook-material':'材质','lookbook-logo':'Logo'};
     const refs = [];
-    entries.forEach(source => mediaRefsFromNode(source).forEach((ref,index) => refs.push({
+    entries.forEach(entry => mediaRefsFromNode(entry.source).forEach((ref,index) => refs.push({
         ...ref,
         role:'prop', reference_type:'prop', reference_id:`${node.id}_reference_${refs.length + 1}`,
-        label:ref.name || `Lookbook 参考 ${refs.length + 1}`,
+        lookbook_role:roleLabels[entry.connection.inputRole] || '商品',
+        label:`${roleLabels[entry.connection.inputRole] || '商品'} · ${ref.name || `参考 ${refs.length + 1}`}`,
+        instruction:`Lookbook 专用输入：${roleLabels[entry.connection.inputRole] || '商品'}`,
     })));
     return refs.filter(item => item.url).slice(0,14);
 }
@@ -21046,7 +21049,8 @@ function canConnect(fromId, toId, inputRole=''){
         return allowed.includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'lookbook'){
-        if(inputRole && inputRole !== 'lookbook-reference') return false;
+        const lookbookRoles = new Set(['lookbook-person','lookbook-product','lookbook-scene','lookbook-material','lookbook-logo']);
+        if(inputRole && !lookbookRoles.has(inputRole)) return false;
         return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-video'){

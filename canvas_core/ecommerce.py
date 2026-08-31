@@ -591,6 +591,8 @@ def normalize_universal_inputs(inputs: Iterable[dict[str, Any]], canonical_order
             "kind": "image",
             "mime": str(value.get("mime") or "")[:120],
         }
+        if value.get("lookbook_role"):
+            item["lookbook_role"] = re.sub(r"[^a-zA-Z0-9_-]", "", str(value.get("lookbook_role") or ""))[:40]
         if value.get("detail_target_id"):
             item["detail_target_id"] = re.sub(
                 r"[^a-zA-Z0-9_-]", "", str(value.get("detail_target_id") or "")
@@ -1443,6 +1445,11 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         research = str(options.get("search_context") or "").strip()
         plan = str(options.get("lookbook_plan") or "").strip()
         count = max(1, min(4, int(options.get("lookbook_count") or 1)))
+        reference_lines = []
+        for index, item in enumerate(normalized, 1):
+            assigned = str(item.get("lookbook_role") or item.get("label") or "参考素材").strip()
+            name = str(item.get("name") or "").strip()
+            reference_lines.append(f"Image {index} is assigned to {assigned}{(' (' + name + ')') if name else ''}; use it only for that attribute family.")
         user_line = instruction or "自由发挥一个具有商业传播力的时尚主题与版式"
         parts = [
             "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
@@ -1452,6 +1459,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             "Create a finished standalone image suitable for a fashion lookbook cover or hero advertisement. Do not add watermarks, random text, UI elements, borders or unrelated products.",
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
         ]
+        if reference_lines:
+            parts.append("SEMANTIC INPUT MAP: " + " ".join(reference_lines))
         if research:
             parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects or wording): " + research[:12000])
         if plan:

@@ -76,6 +76,17 @@ class CanvasQuickActionPerformanceTests(unittest.TestCase):
             CANVAS_CSS,
         )
 
+    def test_smart_media_toolbar_is_materialized_only_for_single_selection(self):
+        smart_render = section(
+            "function smartNodeToolbarImageIndex",
+            "function queueSmartRenderMutation",
+            SMART_CANVAS_JS,
+        )
+        self.assertIn("function smartToolbarVisibleForNode(node)", smart_render)
+        self.assertIn("selectedNodeIds().length === 1", smart_render)
+        self.assertIn("function smartNodeToolbarHtmlForRender(node)", smart_render)
+        self.assertIn("scheduleSmartSelectionToolbarRefresh", SMART_CANVAS_JS)
+
     def test_incremental_node_icons_are_hydrated_before_dom_insertion(self):
         mutation_source = section(
             "function renderClassicMutation",

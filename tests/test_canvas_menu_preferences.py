@@ -55,6 +55,15 @@ def test_image_prompt_panel_is_shared_by_selection_hub():
     assert "function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)" in JS
 
 
+def test_media_controls_are_not_materialized_for_every_classic_node():
+    render_start = JS.index("function renderNode(node)")
+    render_end = JS.index("function bindOutputWrap", render_start)
+    render_source = JS[render_start:render_end]
+    assert "classicMediaToolbarHtml(node)" not in render_source
+    assert "imageNodePromptPanel" not in render_source
+    assert "selectionHub.innerHTML" not in render_source
+
+
 def test_canvas_preferences_preserve_an_explicit_empty_selection():
     assert "return filtered.slice(0, maxItems);" in JS
 

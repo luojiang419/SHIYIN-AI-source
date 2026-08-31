@@ -592,7 +592,7 @@ def normalize_universal_inputs(inputs: Iterable[dict[str, Any]], canonical_order
             "mime": str(value.get("mime") or "")[:120],
         }
         if value.get("lookbook_role"):
-            item["lookbook_role"] = re.sub(r"[^a-zA-Z0-9_-]", "", str(value.get("lookbook_role") or ""))[:40]
+            item["lookbook_role"] = re.sub(r"[\x00-\x1f]", "", str(value.get("lookbook_role") or "").strip())[:40]
         if value.get("detail_target_id"):
             item["detail_target_id"] = re.sub(
                 r"[^a-zA-Z0-9_-]", "", str(value.get("detail_target_id") or "")
@@ -1465,6 +1465,12 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         semantic_roles = {str(item.get("lookbook_role") or "").strip() for item in normalized}
         if "Logo" in semantic_roles:
             parts.append("LOGO AND BRAND TEXT LOCK: preserve the connected Logo reference exactly, including geometry, proportions, negative space, color, letterforms, spelling, orientation and placement. Never redraw, stylize, mirror, translate or invent brand marks.")
+        if "人物" in semantic_roles and "商品" in semantic_roles:
+            parts.append("PERSON-PRODUCT ASSEMBLY LOCK: use the connected 人物 image as the final person's identity, face, body, hair, anatomy and natural base composition. Use the connected 商品 image as the sole source of the exact SKU. Compose them as one intentional commercial relationship: wear the product when it is apparel or an accessory, hold or place it naturally when it is an object, and never show the person and product as unrelated cutouts. Preserve the product's silhouette, material, color, Logo and readable text; do not replace the person's identity with the product reference wearer.")
+        elif "人物" in semantic_roles:
+            parts.append("PERSON PRESERVATION LOCK: use the connected 人物 image as the final person's identity, body, hair, anatomy and natural expression. Do not replace the person with a newly invented model unless the user explicitly asks for it.")
+        elif "商品" in semantic_roles:
+            parts.append("PRODUCT HERO LOCK: use the connected 商品 image as the exact SKU source and make it the visual hero. Do not invent a person unless the user explicitly requests one.")
         if "姿态" in semantic_roles:
             parts.append("POSE AND CAMERA REFERENCE LOCK: use the connected pose image only for body action, gesture, camera viewpoint, crop and subject placement; do not copy its identity, clothing, products or background.")
         if "版式" in semantic_roles:

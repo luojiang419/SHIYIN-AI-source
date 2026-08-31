@@ -5366,6 +5366,10 @@ function openImageNodePreview(nodeId){
     openOutputLightbox(node.url, node);
 }
 function openOutputNodeMenu(nodeId, clientX, clientY){
+    if(outputLightbox?.classList.contains('open')){
+        closeImageNodeMenu();
+        return;
+    }
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.type !== 'output') return;
     closeCreateMenu();
@@ -18701,8 +18705,20 @@ function initOutputCompareEvents(){
     }, {passive:false});
     window.addEventListener('touchend', () => { outputCompareDrag = false; });
 }
+function hideSelectionHubForLightbox(){
+    selectionHub?.classList.remove('open','image-prompt-hub');
+    if(selectionHub){
+        selectionHub.innerHTML = '';
+        selectionHub.removeAttribute('data-target-kind');
+    }
+    selectionHubAnchor = null;
+    selectedOutputMedia = null;
+    nodesEl?.querySelectorAll('.output-img-wrap.quick-selected').forEach(element => element.classList.remove('quick-selected'));
+    closeImageNodeMenu();
+}
 function openOutputLightbox(url, out){
     if(!url) return;
+    hideSelectionHubForLightbox();
     resetOutputPreviewZoom();
     currentOutputLightboxOutId = out?.id || '';
     currentOutputLightboxUrl = url;
@@ -19854,6 +19870,10 @@ function renderSelectionHub(options={}){
     selectionHub.classList.remove('open','image-prompt-hub');
     selectionHubAnchor = null;
     nodesEl.querySelectorAll('.output-img-wrap.quick-selected').forEach(element => element.classList.remove('quick-selected'));
+    if(outputLightbox?.classList.contains('open')){
+        selectedOutputMedia = null;
+        return;
+    }
     if(!canvas || selected.size !== 1) return;
     const selectedId = [...selected][0];
     const node = nodes.find(item => item.id === selectedId);

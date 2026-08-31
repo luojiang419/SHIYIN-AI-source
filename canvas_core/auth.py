@@ -12,8 +12,11 @@ from .database import CanvasDatabase
 
 
 SESSION_COOKIE = "canvas_session"
-DESKTOP_TOKEN_REPLAY_WINDOW_SECONDS = 15.0
-DESKTOP_TOKEN_REPLAY_LIMIT = 2
+# WebView 在启动、恢复导航和设置 Cookie 的竞态期间可能重复请求 bootstrap。
+# 令牌本身是每次桌面进程随机生成的，并且 bootstrap 仅允许 loopback，
+# 因此在短窗口内允许有限重放比把正常启动误判为 401 更稳妥。
+DESKTOP_TOKEN_REPLAY_WINDOW_SECONDS = 60.0
+DESKTOP_TOKEN_REPLAY_LIMIT = 8
 
 
 def token_hash(token: str) -> str:

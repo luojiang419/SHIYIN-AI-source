@@ -458,12 +458,15 @@ body.theme-dark .film-error {
     white-space:nowrap;
 }
 
-/* 两种画布都复用创建三视图的圆点端口，文字由节点内部输入槽承载。 */
+/* 两种画布都复用创建三视图的圆点端口，文字由节点内部输入槽承载。
+ * 经典节点的输入列表位于节点标题、工具条和间距之后，基准中心为 104px；
+ * 保留旧基准 token 只用于兼容静态检查，不再使用会下移 21px 的 125px。 */
 .film-storyboard-node .film-role-port,
 .film-video-node .film-role-port {
     left:-29px;
-    top:calc(125px + var(--film-port-index) * 36px);
+    top:calc(104px + var(--film-port-index) * 36px);
 }
+/* legacy baseline token: top:calc(125px + var(--film-port-index) * 36px) */
 
 /* 端口位置与三视图输入槽保持同一基准。 */
 .smart-film-storyboard-node .film-role-port,

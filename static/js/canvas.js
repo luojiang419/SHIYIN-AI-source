@@ -9869,12 +9869,16 @@ async function runLookbookNode(nodeId, opts={}){
         const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
         const {taskId,task} = await createAndWaitEcommerceTask({
             operation:'universal', mode:'standard', inputs,
-            options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, search_context:String(node.lookbookResearch || '')},
+            options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:Math.max(1,Math.min(4,Number(node.count || 2)))},
             provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k',
             quality:node.quality || 'high', count:Math.max(1,Math.min(4,Number(node.count || 2))), parent_task_id:'',
         }, {cascadeTargetId:cascadeTargetIdFromOptions(opts)});
         const images = ecommerceTaskImages(task);
         if(!images.length) throw new Error('Lookbook 任务没有返回图片');
+        const research = task.lookbook_research?.summary || task.result?.lookbook_research?.summary;
+        if(research) node.lookbookResearch = String(research).slice(0,12000);
+        const plan = task.lookbook_plan?.summary || task.options?.lookbook_plan || task.result?.lookbook_plan?.summary;
+        if(plan) node.lookbookPlan = String(plan).slice(0,12000);
         node.ecomTaskId = taskId; node.generatedOutputs = images.map((item,index) => ({url:outputUrlValue(item),name:`lookbook-${index + 1}.png`,kind:'image'}));
         node.runStatus = 'done'; node.runError = ''; syncConnectedOutputsFromGenerated(node,node.generatedOutputs); scheduleSave(); setStatus(`Lookbook 生成完成，共 ${images.length} 张`);
     } catch(error){
@@ -10634,7 +10638,7 @@ function renderNode(node){
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
     if(['panorama','dwpose','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
-    if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
+    if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
     if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});

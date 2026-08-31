@@ -16411,6 +16411,43 @@ async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, An
     except Exception as exc:
         return snapshot, {"status": "failed", "reason": str(exc)[:240]}
 
+async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """在生图前让视觉模型把素材、风格和案例方法整理成可执行的广告 art direction。"""
+    options = dict(snapshot.get("options") or {})
+    if snapshot.get("operation") != "universal" or str(options.get("prompt_policy") or "").strip().lower() != "lookbook":
+        return snapshot, None
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return snapshot, {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
+    existing = str(options.get("lookbook_plan") or "").strip()
+    if existing:
+        return snapshot, {"status": "provided", "summary": existing}
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    brief = str(options.get("instruction") or "自由创作一组高级时尚 Lookbook 平面广告").strip()[:4000]
+    images = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
+    labels = [str(item.get("label") or item.get("name") or "参考素材")[:120] for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
+    request = CanvasLLMRequest(
+        message=(
+            "请为 Lookbook 平面广告生成一份可直接执行的 art direction 方案。"
+            "综合用户需求、选定视觉风格、联网案例方法和参考图片，输出 600 字以内的结构化方案，必须包含："
+            "主体与商品事实、系列叙事、主视觉构图、镜头/景别变化、场景与道具、布光、色彩、材质细节、版式留白、"
+            "品牌文字约束、负面约束和多张图片的一致性规则。不要虚构品牌事实，不要复制案例。\n"
+            f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
+            f"案例方法摘要：{str(options.get('search_context') or '')[:6000]}"
+        ),
+        system_prompt="你是资深时尚广告创意总监与视觉统筹。请给出具体、可执行、可交给图片模型的方案，不要泛泛而谈。",
+        provider=route["provider_id"], model=route["model"], images=images, image_labels=labels, web_search=False, retry_524=1,
+    )
+    try:
+        result = await canvas_llm(request)
+        text = str(result.get("text") or "").strip()[:12000]
+        if not text:
+            return snapshot, {"status": "failed", "reason": "视觉策划未返回方案"}
+        options["lookbook_plan"] = text
+        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, {"status": "succeeded", "summary": text}
+    except Exception as exc:
+        return snapshot, {"status": "failed", "reason": str(exc)[:240]}
+
 async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Dict[str, Any]:
     studio_reference = str((snapshot.get("options") or {}).get("studio_reference") or "").strip()
     if not studio_reference or snapshot.get("operation") == "background_change":
@@ -16452,6 +16489,9 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
     if lookbook_research is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})
+    snapshot, lookbook_plan = await enrich_lookbook_plan(snapshot)
+    if lookbook_plan is not None:
+        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_plan": lookbook_plan, "request": snapshot})
     snapshot, garment_analysis = await enrich_ecommerce_snapshot_with_garment_analysis(snapshot)
     snapshot, universal_analysis = await enrich_ecommerce_snapshot_with_universal_analysis(snapshot)
     if garment_analysis is not None or universal_analysis is not None:

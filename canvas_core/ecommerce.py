@@ -1441,6 +1441,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         style_name = str(style.get("name") or "").strip()
         style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
         research = str(options.get("search_context") or "").strip()
+        plan = str(options.get("lookbook_plan") or "").strip()
+        count = max(1, min(4, int(options.get("lookbook_count") or 1)))
         user_line = instruction or "自由发挥一个具有商业传播力的时尚主题与版式"
         parts = [
             "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
@@ -1448,9 +1450,12 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"SELECTED VISUAL STYLE SKILL{(' ' + style_name) if style_name else ''}: {style_prompt or 'high-end fashion editorial with clean art direction'}.",
             "Use connected reference images as factual sources for product identity, material, color, logo, model identity and scene wherever visible; do not invent or distort branded details.",
             "Create a finished standalone image suitable for a fashion lookbook cover or hero advertisement. Do not add watermarks, random text, UI elements, borders or unrelated products.",
+            f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
         ]
         if research:
             parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects or wording): " + research[:12000])
+        if plan:
+            parts.append("CREATIVE DIRECTOR PLAN (follow as the execution authority): " + plan[:12000])
         return " ".join(parts)
     reference_map = build_ordered_reference_map(normalized)
     if instruction and operation != "universal":

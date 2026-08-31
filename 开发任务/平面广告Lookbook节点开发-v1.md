@@ -38,7 +38,7 @@
 - 单元测试：Lookbook/画布/电商/缓存专项 `156 passed`
 - 编译：未开始（前端为静态资源）
 - 运行测试：`http://127.0.0.1:3017` Web 冒烟通过（Lookbook 创建、10 张风格卡片、选择回写、7 个端口纵向分布与文本标签）；未执行桌面实例级付费生成冒烟（当前环境无可复用实例/API Key）
-- 最近 Git commit：`8341b7f fix: separate lookbook input ports`
+- 最近 Git commit：`9635881 fix: label lookbook input ports`
 
 ---
 

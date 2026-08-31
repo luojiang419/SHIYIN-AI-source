@@ -11722,6 +11722,11 @@ AGENT_EDIT_KEYWORDS = [
     "修改", "改成", "换成", "调整", "优化", "编辑", "重绘", "上一张", "刚才",
     "这张", "那张", "参考图", "改图", "edit", "modify", "change", "revise",
 ]
+AGENT_COMPOSITE_EDIT_PATTERNS = (
+    r"让.+(?:骑|穿|站|坐|拿|抱|奔跑)",
+    r"保留.+(?:只|仅).+(?:换|改|替换)",
+    r"(?:将|把).+背景.+(?:换|改|替换)",
+)
 CN_NUMERAL_MAP = {
     "一": 1, "二": 2, "两": 2, "俩": 2, "三": 3, "四": 4,
 }
@@ -11850,6 +11855,11 @@ CHAT_REFERENCE_ROLE_WORDS = {
     "style": ("风格", "质感", "色调", "光影", "摄影", "插画", "电影感", "海报"),
     "pose": ("姿势", "动作", "骑", "站", "坐", "奔跑", "手势"),
 }
+
+
+def chat_composite_edit_intent(message):
+    text = str(message or "").strip().lower()
+    return any(re.search(pattern, text) for pattern in AGENT_COMPOSITE_EDIT_PATTERNS)
 CHAT_REFERENCE_EDIT_PATTERNS = (
     "修改", "改成", "换成", "替换", "调整", "编辑", "重绘", "保留", "这张", "那张", "上一张", "刚才",
     "参考图", "改图", "背景", "让", "骑在", "穿上", "摆出",
@@ -11877,9 +11887,9 @@ def chat_reference_role_for_prompt(message, asset):
     for role, words in CHAT_REFERENCE_ROLE_WORDS.items():
         if any(word in text and word in evidence for word in words):
             return role
-    if any(word in text for word in CHAT_REFERENCE_ROLE_WORDS["background"]):
+    if any(word in text and word in evidence for word in CHAT_REFERENCE_ROLE_WORDS["background"]):
         return "background"
-    if any(word in text for word in CHAT_REFERENCE_ROLE_WORDS["pose"]):
+    if any(word in evidence for word in CHAT_REFERENCE_ROLE_WORDS["pose"]):
         return "pose"
     return "subject"
 
@@ -11951,6 +11961,50 @@ def resolve_chat_reference_candidates(message, assets, existing_refs=None, limit
         "candidates": candidates,
         "manual_count": len(manual),
         "auto_count": len(selected),
+    }
+
+
+def chat_image_reference_capability(provider_id="", model=""):
+    """描述当前图片供应商对多参考图的已知能力，供发送前提示使用。"""
+    provider = get_api_provider(str(provider_id or "").strip() or "comfly")
+    if is_jimeng_provider(provider):
+        return {
+            "max_references": 1,
+            "supports_multiple": False,
+            "supports_roles": False,
+            "strategy": "first",
+            "message": "当前即梦图生图链路只提交第一张参考图，请把最重要的图片排在最前。",
+        }
+    if is_codex_provider(provider):
+        return {
+            "max_references": ONLINE_IMAGE_REFERENCE_MAX,
+            "supports_multiple": True,
+            "supports_roles": False,
+            "strategy": "all",
+            "message": "OpenAI Codex 会按顺序读取多张本地参考图，角色标签会转换为提示词上下文。",
+        }
+    if is_gemini_provider(provider) or is_volcengine_provider(provider) or is_grsai_provider(provider):
+        return {
+            "max_references": ONLINE_IMAGE_REFERENCE_MAX,
+            "supports_multiple": True,
+            "supports_roles": False,
+            "strategy": "all",
+            "message": "当前图片链路支持多张参考图，建议控制在 4 张以内以减少视觉冲突。",
+        }
+    if provider.get("image_request_mode") == "openai-json" or effective_image_request_mode(provider, model) == "openai-json":
+        return {
+            "max_references": ONLINE_IMAGE_REFERENCE_MAX,
+            "supports_multiple": True,
+            "supports_roles": False,
+            "strategy": "all",
+            "message": "当前 JSON 图片链路支持多张参考图，但角色标签主要依赖文字提示。",
+        }
+    return {
+        "max_references": ONLINE_IMAGE_REFERENCE_MAX,
+        "supports_multiple": True,
+        "supports_roles": False,
+        "strategy": "all",
+        "message": "当前图片链路按统一多参考图协议提交。",
     }
 
 
@@ -12078,9 +12132,10 @@ def heuristic_agent_decision(message, refs, has_previous_image):
     text = str(message or "").strip().lower()
     has_image_word = any(key.lower() in text for key in AGENT_IMAGE_KEYWORDS)
     has_edit_word = any(key.lower() in text for key in AGENT_EDIT_KEYWORDS)
-    if refs and (has_edit_word or has_image_word):
+    has_composite_edit = chat_composite_edit_intent(text)
+    if refs and (has_edit_word or has_image_word or has_composite_edit):
         return {"action": "edit_image", "prompt": message, "reply": ""}
-    if has_previous_image and has_edit_word:
+    if has_previous_image and (has_edit_word or has_composite_edit):
         return {"action": "edit_image", "prompt": message, "reply": ""}
     if has_image_word and not has_edit_word:
         return {"action": "generate_image", "prompt": message, "reply": ""}
@@ -21634,6 +21689,7 @@ async def prepare_chat_references(payload: ChatReferencePrepareRequest, request:
         existing_refs=refs,
         limit=4,
     )
+    capability = chat_image_reference_capability(payload.provider, payload.model)
     return {
         "ok": True,
         "conversation_id": conversation.get("id") or "",
@@ -21644,6 +21700,7 @@ async def prepare_chat_references(payload: ChatReferencePrepareRequest, request:
         "candidates": result["candidates"],
         "manual_count": result["manual_count"],
         "auto_count": result["auto_count"],
+        "reference_capability": capability,
     }
 
 
@@ -21786,8 +21843,37 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
     action = decision.get("action") or "chat"
     tool_refs = image_refs[:]
     inherited_size = ""
+    reference_resolution = {
+        "manual_count": len(tool_refs),
+        "auto_count": 0,
+        "selected": [dict(ref) for ref in tool_refs],
+        "source": "manual" if tool_refs else "none",
+    }
+    available_assets = conversation_chat_image_assets(conversation)
+    if action == "generate_image" and not tool_refs and available_assets and chat_composite_edit_intent(payload.message):
+        # 上游路由器偶尔会把“让人物骑马/保留主体换背景”判成普通生图，
+        # 仅在当前对话确实有历史视觉资产时收紧为编辑，避免无上下文时误改意图。
+        action = "edit_image"
+        decision["action"] = action
     if action == "edit_image" and not tool_refs:
-        tool_refs = latest_chat_image_refs(conversation, 1)
+        resolution = resolve_chat_reference_candidates(payload.message, available_assets, limit=4)
+        auto_refs = image_references(resolution.get("selected") or [])
+        if auto_refs:
+            tool_refs = auto_refs
+            reference_resolution = {
+                "manual_count": 0,
+                "auto_count": len(auto_refs),
+                "selected": auto_refs,
+                "source": "auto",
+            }
+        else:
+            tool_refs = latest_chat_image_refs(conversation, 1)
+            reference_resolution = {
+                "manual_count": 0,
+                "auto_count": 0,
+                "selected": tool_refs,
+                "source": "latest" if tool_refs else "none",
+            }
         inherited_size = image_size_from_reference(tool_refs[0]) if tool_refs else ""
     if action == "edit_image" and not tool_refs:
         action = "generate_image"
@@ -21833,6 +21919,7 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
             "agent_action": action,
             "agent_reply": decision.get("reply") or "",
             "used_references": tool_refs,
+            "reference_resolution": reference_resolution,
             "generated_assets": chat_generated_assets(
                 local_urls, prompt, assistant_message_id,
                 provider=image_provider["id"], model=model, references=tool_refs,
@@ -21846,7 +21933,11 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
     conversation["messages"].append(assistant_message)
     conversation["updated_at"] = now_ms()
     save_conversation(user_id, conversation)
-    return {"conversation": conversation, "message": assistant_message, "agent": {"action": action, "decision": decision}}
+    return {
+        "conversation": conversation,
+        "message": assistant_message,
+        "agent": {"action": action, "decision": decision, "reference_resolution": reference_resolution},
+    }
 
 @app.post("/api/chat/stream")
 async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):

@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import main
 
@@ -111,6 +112,9 @@ class ChatContinuityTests(unittest.TestCase):
         self.assertIn("horse-1", selected_ids)
         self.assertNotIn("ranch-1", selected_ids)
         self.assertTrue(result["edit_intent"])
+        roles = {item["asset_id"]: item["role"] for item in result["selected"]}
+        self.assertEqual(roles["cowgirl-1"], "subject")
+        self.assertEqual(roles["horse-1"], "subject")
 
     def test_plain_new_generation_does_not_silently_reuse_history(self):
         assets = [{"asset_id": "ranch-1", "url": "/output/ranch.png", "name": "牧场", "prompt": "生成牧场背景"}]
@@ -133,6 +137,77 @@ class ChatContinuityTests(unittest.TestCase):
         self.assertEqual(ref["asset_id"], "source-1")
         self.assertEqual(ref["role"], "subject")
         self.assertTrue(ref["locked"])
+
+    def test_jimeng_reference_capability_warns_about_single_reference(self):
+        with patch.object(main, "get_api_provider", return_value={"id": "jimeng", "protocol": "jimeng"}):
+            capability = main.chat_image_reference_capability("jimeng", "")
+        self.assertEqual(capability["max_references"], 1)
+        self.assertFalse(capability["supports_multiple"])
+        self.assertEqual(capability["strategy"], "first")
+
+    def test_agent_heuristic_routes_composite_edit_to_image_edit(self):
+        decision = main.heuristic_agent_decision("让女牛仔骑在马背上", [], has_previous_image=True)
+        self.assertEqual(decision["action"], "edit_image")
+
+
+class ChatAgentIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_agent_auto_selects_multiple_history_assets_for_composite_edit(self):
+        conversation = {
+            "id": "conversation-1",
+            "title": "连续创作",
+            "messages": [
+                {
+                    "id": "horse-message",
+                    "role": "assistant",
+                    "type": "image",
+                    "content": "生成一批马",
+                    "image_url": "/output/horse.png",
+                    "image_urls": ["/output/horse.png"],
+                    "generated_assets": [{"asset_id": "horse-1", "url": "/output/horse.png", "name": "马", "prompt": "生成一批马"}],
+                },
+                {
+                    "id": "cowgirl-message",
+                    "role": "assistant",
+                    "type": "image",
+                    "content": "生成女牛仔",
+                    "image_url": "/output/cowgirl.png",
+                    "image_urls": ["/output/cowgirl.png"],
+                    "generated_assets": [{"asset_id": "cowgirl-1", "url": "/output/cowgirl.png", "name": "女牛仔", "prompt": "生成女牛仔"}],
+                },
+            ],
+        }
+        payload = main.ChatRequest(
+            conversation_id="conversation-1",
+            message="让女牛仔骑在马背上",
+            provider="comfly",
+            model="gpt-4o-mini",
+            image_model="gpt-image-2",
+        )
+
+        async def fake_decide(*_args, **_kwargs):
+            return {"action": "edit_image", "prompt": payload.message, "reply": ""}
+
+        async def fake_generate(*_args, **_kwargs):
+            return {"type": "url", "value": "/output/result.png"}, {}
+
+        async def fake_save(*_args, **_kwargs):
+            return "/output/result.png"
+
+        with patch.object(main, "safe_user_id", return_value="test-user"), \
+             patch.object(main, "load_conversation", return_value=conversation), \
+             patch.object(main, "save_conversation"), \
+             patch.object(main, "decide_chat_agent_action", side_effect=fake_decide), \
+             patch.object(main, "pick_chat_image_provider", return_value={"id": "comfly", "image_models": ["gpt-image-2"]}), \
+             patch.object(main, "generate_ai_image", side_effect=fake_generate), \
+             patch.object(main, "save_ai_image_to_output", side_effect=fake_save):
+            result = await main.chat_agent(payload, None, x_user_id="test-user")
+
+        message = result["message"]
+        selected_ids = [item.get("asset_id") for item in message["used_references"]]
+        self.assertEqual(selected_ids, ["cowgirl-1", "horse-1"])
+        self.assertEqual(message["reference_resolution"]["source"], "auto")
+        self.assertEqual(message["reference_resolution"]["auto_count"], 2)
+        self.assertEqual(result["agent"]["action"], "edit_image")
 
 
 if __name__ == "__main__":

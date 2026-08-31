@@ -10,12 +10,11 @@ Lookbook 已升级为阶段化后台 agent：前端只提交本地电商任务�
 
 已确认可复用的稳定方案：视频自动解析使用本地后台任务、短连接轮询、Responses SSE；联网搜索和视觉请求分离；不使用代理不支持的 `background:true`；524 只重试同一完整请求。现有 Lookbook 任务本身已经是异步持久化任务，本轮将补齐其 agent 阶段和超时边界。
 
-当前阻塞：无。真实付费上游生成仍需用户环境提供 API Key。
+当前阻塞：无。真实 Lookbook 付费生成仍需用户环境提供 API Key；本轮安装包 smoke 已通过。
 
 ## 下一步
 
-1. 如发布安装包，重新构建并带入新的静态资源查询串。
-2. 使用可用 API Key 做一次真实“人物 + 时尚街景”任务验收，确认 SSE/web_search 配置和图片生成耗时。
+1. 使用可用 API Key 做一次真实“人物 + 时尚街景”任务验收，确认 SSE/web_search 配置和图片生成耗时。
 
 ## 当前 TODO
 
@@ -29,9 +28,10 @@ Lookbook 已升级为阶段化后台 agent：前端只提交本地电商任务�
 
 - 静态检查：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js`、`git diff --check` 通过
 - 单元测试：Lookbook/电商专项 `151 passed`
-- 编译：`python -m py_compile main.py canvas_core/ecommerce.py` 通过
-- 运行测试：新增超时终态、agent plan 和节点参数契约测试通过；真实付费生成需 API Key
-- 最近 Git commit：待本轮提交
+- 编译：`python -m py_compile main.py canvas_core/ecommerce.py` 通过；Tauri release、PyInstaller、Inno Setup 通过
+- 运行测试：新增超时终态、agent plan 和节点参数契约测试通过；打包版 desktop smoke health=ok，startup_ms=8134，进程树私有内存 216.79 MB；DWPose 真人 smoke 按构建脚本提示跳过
+- 安装包：`dist/installer/SHIYIN-AI-Setup-1.0.387.exe`，92,205,726 bytes，SHA-256 `8560ef051e1c877bd224082685c5288c04e3f1a10a539c3bf3a06151ee6b9294`，签名状态 `NotSigned`
+- 最近 Git commit：`347f9ad feat: make lookbook a durable agent node`
 
 ---
 
@@ -62,10 +62,10 @@ Lookbook 已升级为阶段化后台 agent：前端只提交本地电商任务�
 ## 开发阶段
 
 - [x] 阶段 1：现状分析与避坑对照
-- [ ] 阶段 2：后端 agent 阶段与超时
-- [ ] 阶段 3：前端设置透传与轮询状态
-- [ ] 阶段 4：专项测试与回归
-- [ ] 阶段 5：最终验收、Git 提交
+- [x] 阶段 2：后端 agent 阶段与超时
+- [x] 阶段 3：前端设置透传与轮询状态
+- [x] 阶段 4：专项测试与回归
+- [x] 阶段 5：最终验收、Git 提交
 
 ## 验收标准
 
@@ -79,6 +79,7 @@ Lookbook 已升级为阶段化后台 agent：前端只提交本地电商任务�
 ## 已完成内容
 
 - 已确认现有 Lookbook 使用 `/api/ecommerce/tasks`，任务创建后 `asyncio.create_task(run_ecommerce_task(...))`，前端 `pollEcommerceLookbookTask` 无超时且无阶段展示。
+- 已完成 `1.0.387` 安装包构建与产物校验，完整构建使用当前提交源码和新的 Lookbook 静态缓存版本。
 - 已确认视频自动解析的后台任务和 Responses SSE 方案可直接作为实现参考。
 - 已参考 LangGraph 的节点级持久化状态与可恢复执行、Temporal 的 durable execution 思路，并采用当前 SQLite/任务体系实现轻量状态图，避免引入新的服务依赖。
 

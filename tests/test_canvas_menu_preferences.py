@@ -61,6 +61,25 @@ def test_image_prompt_panel_is_lazy_materialized_on_the_image_node():
     assert "function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)" in JS
 
 
+def test_image_quick_provider_and_model_use_hover_choice_menus():
+    prompt_start = JS.index("function imageQuickChoiceMenuHtml(node)")
+    prompt_end = JS.index("function imageNodeQuickPromptHtml(node)", prompt_start)
+    choice_source = JS[prompt_start:prompt_end]
+    bind_start = JS.index("function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)")
+    bind_end = JS.index("async function runImageNodeQuickGenerate", bind_start)
+    bind_source = JS[bind_start:bind_end]
+    assert 'data-image-quick-choice="provider"' in choice_source
+    assert 'data-image-quick-choice="model"' in choice_source
+    assert "data-image-quick-provider-value" in choice_source
+    assert "data-image-quick-model-value" in choice_source
+    assert "pointerenter" in bind_source
+    assert "pointerleave" in bind_source
+    assert "closeChoices(null)" in bind_source
+    assert ".image-quick-choice-panel" in CSS
+    assert ".image-quick-choice:hover .image-quick-choice-panel" in CSS
+    assert ".image-quick-choice:focus-within .image-quick-choice-panel" in CSS
+
+
 def test_media_controls_are_not_materialized_until_needed_for_every_classic_node():
     render_start = JS.index("function renderNode(node)")
     render_end = JS.index("function bindOutputWrap", render_start)

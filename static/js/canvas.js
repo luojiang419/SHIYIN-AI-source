@@ -19869,6 +19869,36 @@ function imageNodeCameraPrompt(node){
     if(!camera.enabled) return '';
     return `Camera direction: ${camera.camera}, ${camera.lens}, ${camera.focalLength}mm lens, ${camera.aperture} aperture.`;
 }
+function imageQuickProviderLabel(providerId){
+    const provider = imageApiProviders().find(item => item.id === providerId);
+    return provider?.name || provider?.id || providerId || (tr('canvas.noApiProviders') || '暂无平台');
+}
+function imageQuickModelLabel(model){
+    return model || (tr('canvas.noImageModelsHint') || '暂无模型');
+}
+function imageQuickChoiceMenuHtml(node){
+    const providerId = resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
+    const models = allImageModels(providerId);
+    const selectedModel = node.model || models[0] || '';
+    const modelChoices = uniqueModels([selectedModel, ...models]).filter(Boolean);
+    const providers = imageApiProviders();
+    const providerItems = providers.length
+        ? providers.map(provider => `<button type="button" class="image-quick-choice-item ${provider.id === providerId ? 'active' : ''}" role="menuitem" data-image-quick-provider-value="${escapeAttr(provider.id)}"><span>${escapeHtml(provider.name || provider.id)}</span>${provider.id === providerId ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
+        : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noApiProviders') || '暂无 API 平台')}</button>`;
+    const modelItems = modelChoices.length
+        ? modelChoices.map(model => `<button type="button" class="image-quick-choice-item ${model === selectedModel ? 'active' : ''}" role="menuitem" data-image-quick-model-value="${escapeAttr(model)}"><span>${escapeHtml(model)}</span>${model === selectedModel ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
+        : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noImageModelsHint') || '暂无生图模型')}</button>`;
+    return `<div class="image-quick-choice image-quick-choice-provider" data-image-quick-choice="provider">
+            <input type="hidden" data-image-quick-provider value="${escapeAttr(providerId)}">
+            <button type="button" class="image-quick-select image-quick-choice-trigger" data-image-quick-choice-trigger="provider" aria-haspopup="menu" aria-expanded="false" title="图片生成平台"><span>${escapeHtml(imageQuickProviderLabel(providerId))}</span><i data-lucide="chevron-down"></i></button>
+            <div class="image-quick-choice-panel" data-image-quick-choice-panel="provider" role="menu">${providerItems}</div>
+        </div>
+        <div class="image-quick-choice image-quick-choice-model image-quick-model" data-image-quick-choice="model">
+            <input type="hidden" data-image-quick-model value="${escapeAttr(selectedModel)}">
+            <button type="button" class="image-quick-select image-quick-choice-trigger" data-image-quick-choice-trigger="model" aria-haspopup="menu" aria-expanded="false" title="图片生成模型"><span>${escapeHtml(imageQuickModelLabel(selectedModel))}</span><i data-lucide="chevron-down"></i></button>
+            <div class="image-quick-choice-panel" data-image-quick-choice-panel="model" role="menu">${modelItems}</div>
+        </div>`;
+}
 function imageNodeQuickPromptHtml(node){
     const camera = imageNodeCameraValue(node);
     const providerId = resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
@@ -19882,8 +19912,7 @@ function imageNodeQuickPromptHtml(node){
         <div class="image-quick-compose-head"><span>${node.url ? '编辑图片' : '生成图片'}</span><small>提示词、模型和摄影机设置</small></div>
         <textarea class="image-quick-prompt" data-image-quick-prompt rows="2" placeholder="描述要生成或修改的内容…">${escapeHtml(node.prompt || '')}</textarea>
         <div class="image-quick-settings">
-            <select class="image-quick-select image-quick-provider" data-image-quick-provider aria-label="图片生成平台">${providerOptions(providerId)}</select>
-            <select class="image-quick-select image-quick-model" data-image-quick-model aria-label="图片生成模型">${imageModelOptions(model, providerId)}</select>
+            ${imageQuickChoiceMenuHtml({...node, apiProvider:providerId, model})}
             <select class="image-quick-select" data-image-quick-ratio aria-label="输出画幅">${ratioOptions.map(([value,label]) => `<option value="${value}" ${value === ratio ? 'selected' : ''}>${label}</option>`).join('')}</select>
             <select class="image-quick-select" data-image-quick-resolution aria-label="输出分辨率">${resolutionOptions.map(value => `<option value="${value}" ${value === resolution ? 'selected' : ''}>${value === 'auto' ? '自动' : value.toUpperCase()}</option>`).join('')}</select>
             <button type="button" class="image-quick-camera ${camera.enabled ? 'active' : ''}" data-image-quick-camera title="摄影机设置"><i data-lucide="camera"></i><span>摄影机</span></button>
@@ -19907,8 +19936,82 @@ function bindImageNodeQuickPrompt(node, panelRoot=selectionHub){
     const resolution = root.querySelector('[data-image-quick-resolution]');
     const cameraButton = root.querySelector('[data-image-quick-camera]');
     const cameraPanel = root.querySelector('[data-image-quick-camera-panel]');
+    const choiceRoot = root.closest('[data-image-quick-compose]') || root;
+    const closeChoices = except => choiceRoot.querySelectorAll('[data-image-quick-choice]').forEach(menu => {
+        const open = menu === except;
+        menu.classList.toggle('open', open);
+        menu.querySelector('[data-image-quick-choice-trigger]')?.setAttribute('aria-expanded', String(open));
+    });
+    choiceRoot.querySelectorAll('[data-image-quick-choice]').forEach(menu => {
+        const trigger = menu.querySelector('[data-image-quick-choice-trigger]');
+        let closeTimer = 0;
+        const cancelClose = () => { if(closeTimer){ clearTimeout(closeTimer); closeTimer = 0; } };
+        const scheduleClose = () => {
+            cancelClose();
+            closeTimer = window.setTimeout(() => {
+                closeTimer = 0;
+                menu.classList.remove('open');
+                trigger?.setAttribute('aria-expanded', 'false');
+            }, 140);
+        };
+        trigger?.addEventListener('pointerenter', () => closeChoices(menu));
+        trigger?.addEventListener('focus', () => closeChoices(menu));
+        menu.addEventListener('pointerenter', cancelClose);
+        menu.addEventListener('pointerleave', scheduleClose);
+        trigger?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            closeChoices(menu.classList.contains('open') ? null : menu);
+        });
+    });
     const update = () => scheduleSave();
     prompt?.addEventListener('input', event => { event.stopPropagation(); node.prompt = prompt.value; update(); });
+    choiceRoot.querySelectorAll('[data-image-quick-provider-value]').forEach(button => button.addEventListener('click', event => {
+        event.stopPropagation();
+        const value = resolveImageProviderId(button.dataset.imageQuickProviderValue);
+        node.apiProvider = value;
+        const nextModel = allImageModels(node.apiProvider)[0] || '';
+        node.model = nextModel;
+        const providerInput = choiceRoot.querySelector('[data-image-quick-provider]');
+        const modelInput = choiceRoot.querySelector('[data-image-quick-model]');
+        if(providerInput) providerInput.value = value;
+        if(modelInput) modelInput.value = nextModel;
+        const providerMenu = choiceRoot.querySelector('[data-image-quick-choice="provider"]');
+        const modelMenu = choiceRoot.querySelector('[data-image-quick-choice="model"]');
+        if(providerMenu){
+            providerMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickProviderLabel(value);
+            providerMenu.querySelectorAll('[data-image-quick-provider-value]').forEach(item => item.classList.toggle('active', item.dataset.imageQuickProviderValue === value));
+        }
+        if(modelMenu){
+            modelMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickModelLabel(nextModel);
+            const panel = modelMenu.querySelector('[data-image-quick-choice-panel="model"]');
+            if(panel){
+                panel.innerHTML = allImageModels(value).length
+                    ? allImageModels(value).map(item => `<button type="button" class="image-quick-choice-item ${item === nextModel ? 'active' : ''}" role="menuitem" data-image-quick-model-value="${escapeAttr(item)}"><span>${escapeHtml(item)}</span>${item === nextModel ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
+                    : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noImageModelsHint') || '暂无生图模型')}</button>`;
+                refreshIcons(panel);
+                panel.querySelectorAll('[data-image-quick-model-value]').forEach(item => item.addEventListener('click', modelEvent => {
+                    modelEvent.stopPropagation();
+                    node.model = item.dataset.imageQuickModelValue || '';
+                    if(modelInput) modelInput.value = node.model;
+                    modelMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickModelLabel(node.model);
+                    panel.querySelectorAll('[data-image-quick-model-value]').forEach(option => option.classList.toggle('active', option === item));
+                    closeChoices(null); update();
+                }));
+            }
+        }
+        closeChoices(null); update();
+    }));
+    choiceRoot.querySelectorAll('[data-image-quick-model-value]').forEach(button => button.addEventListener('click', event => {
+        event.stopPropagation();
+        node.model = button.dataset.imageQuickModelValue || '';
+        const modelInput = choiceRoot.querySelector('[data-image-quick-model]');
+        if(modelInput) modelInput.value = node.model;
+        const modelMenu = choiceRoot.querySelector('[data-image-quick-choice="model"]');
+        modelMenu?.querySelector('.image-quick-choice-trigger span') && (modelMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickModelLabel(node.model));
+        choiceRoot.querySelectorAll('[data-image-quick-model-value]').forEach(item => item.classList.toggle('active', item === button));
+        closeChoices(null); update();
+    }));
+    /* 保留旧 select 的兼容路径，便于外部扩展脚本传入传统面板。 */
     provider?.addEventListener('change', event => {
         event.stopPropagation();
         node.apiProvider = resolveImageProviderId(provider.value);

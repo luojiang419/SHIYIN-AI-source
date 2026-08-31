@@ -20,7 +20,9 @@ Lookbook 节点已增加图片生成平台和图片模型二级菜单，使用�
 - 单元测试：Lookbook 专项 `17 passed`
 - JavaScript：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js` 通过
 - Diff：`git diff --check` 通过
-- 最近 Git commit：待本轮提交
+- 编译：Tauri release、PyInstaller、Inno Setup 和打包版 desktop smoke 通过
+- 安装包：`dist/installer/SHIYIN-AI-Setup-1.0.387.exe`，92,196,514 bytes，SHA-256 `e634f927d0383b6504c0047b94e3785d9f83eb10ecdec660a79f36d691f4a35e`，签名状态 `NotSigned`
+- 最近 Git commit：待本轮文档提交
 
 ## 技术方案
 

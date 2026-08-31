@@ -859,6 +859,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .port::after { content:""; position:absolute; left:15px; top:15px; width:14px; height:14px; border-radius:50%; border:2px solid #fff; background:#1a1a1a; box-shadow:0 0 0 1px #9b9288; transition:transform .14s var(--ease); }
 .port:hover::after { transform:scale(1.25); }
 .port.in { left:-29px; cursor:crosshair; }
+.lookbook-node .port.in { left:-29px; top:var(--canvas-port-top,50%); }
 .port.out { right:-15px; }
 .node > .port { top:50%; }
 .ltxDirector-node > .port,

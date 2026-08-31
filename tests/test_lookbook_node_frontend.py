@@ -42,6 +42,12 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("z-index:1005", self.css)
         self.assertIn("max-height:calc(100% - 24px)", self.css)
 
+    def test_lookbook_input_ports_have_distinct_roles_and_vertical_positions(self):
+        self.assertEqual(self.canvas.count("data-input-role=\"${escapeAttr(port.id || port.role)}\""), 2)
+        self.assertIn("--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%", self.canvas)
+        self.assertIn(".lookbook-node .port.in { left:-29px; top:var(--canvas-port-top,50%); }", self.css)
+        self.assertIn("aria-label=\"${escapeAttr(`输入端口：${port.label}`)}\"", self.canvas)
+
     def test_image_quick_settings_cannot_push_generate_button_outside_panel(self):
         self.assertIn("grid-template-columns:repeat(6,minmax(0,1fr))", self.css)
         self.assertIn(".image-quick-model { min-width:0; grid-column:span 2; }", self.css)
@@ -50,8 +56,8 @@ class LookbookNodeFrontendTests(unittest.TestCase):
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
         self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.3", self.html)
-        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.1", self.html)
+        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.2", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
 
 

@@ -5060,22 +5060,34 @@ def responses_input_from_messages(messages):
             continue
         content = message.get("content", "")
         parts = []
+        # Responses API 的消息内容类型按角色区分：user 使用 input_text，
+        # assistant 使用 output_text/refusal。把历史 assistant 回复继续发成
+        # input_text 会被上游校验拒绝（例如 input[1].content[0]）。
+        text_type = "output_text" if role == "assistant" else "input_text"
         if isinstance(content, str):
             if content:
-                parts.append({"type": "input_text", "text": content})
+                parts.append({"type": text_type, "text": content})
         elif isinstance(content, list):
             for item in content:
                 if isinstance(item, str) and item:
-                    parts.append({"type": "input_text", "text": item})
+                    parts.append({"type": text_type, "text": item})
                     continue
                 if not isinstance(item, dict):
                     continue
                 item_type = str(item.get("type") or "").strip().lower()
-                if item_type in {"text", "input_text"}:
+                if item_type in {"text", "input_text", "output_text"}:
                     text = str(item.get("text") or item.get("content") or "")
                     if text:
-                        parts.append({"type": "input_text", "text": text})
+                        parts.append({"type": text_type, "text": text})
+                elif item_type == "refusal" and role == "assistant":
+                    refusal = str(item.get("refusal") or item.get("text") or item.get("content") or "")
+                    if refusal:
+                        parts.append({"type": "refusal", "refusal": refusal})
                 elif item_type in {"image_url", "input_image"}:
+                    # assistant 消息不允许携带 input_image；历史视觉内容应通过
+                    # 后续 user 消息显式引用，避免生成非法的 Responses input。
+                    if role == "assistant":
+                        continue
                     image_url = item.get("image_url")
                     if isinstance(image_url, dict):
                         image_url = image_url.get("url")
@@ -5087,6 +5099,8 @@ def responses_input_from_messages(messages):
                             image_item["detail"] = detail
                         parts.append(image_item)
                 elif item_type == "video_url":
+                    if role == "assistant":
+                        continue
                     raise HTTPException(
                         status_code=400,
                         detail="Responses 视觉模型不接收原始视频，请先将视频提取为关键帧图片。",
@@ -5094,7 +5108,7 @@ def responses_input_from_messages(messages):
                 elif item_type:
                     text = str(item.get("text") or item.get("content") or "")
                     if text:
-                        parts.append({"type": "input_text", "text": text})
+                        parts.append({"type": text_type, "text": text})
         if parts:
             result.append({"role": role, "content": parts})
     return result
@@ -5873,7 +5887,7 @@ async def codex_prepare_local_media(ref_url):
     text = str(ref_url or "").strip()
     if not text:
         return "", []
-    if text.startswith(("/output/", "/assets/")):
+    if text.startswith(("/output/", "/assets/", "/static/assets/")):
         path = output_file_from_url(text)
         if path:
             return path, []
@@ -6616,7 +6630,7 @@ async def jimeng_prepare_local_media(ref_url, kind="image"):
     text = str(ref_url or "").strip()
     if not text:
         return "", []
-    if text.startswith("/output/") or text.startswith("/assets/"):
+    if text.startswith("/output/") or text.startswith("/assets/") or text.startswith("/static/assets/"):
         path = output_file_from_url(text)
         if path:
             return path, []
@@ -6896,6 +6910,7 @@ INTERNAL_MEDIA_PATH_PREFIXES = (
     "/assets/library/",
     "/assets/uploads/",
     "/output/",
+    "/static/assets/",
 )
 
 
@@ -6951,6 +6966,7 @@ def output_file_from_url(url):
         ("/assets/uploads/", LOCAL_UPLOAD_DIR),
         ("/assets/", ASSETS_DIR),
         ("/output/", OUTPUT_DIR),
+        ("/static/assets/", os.path.join(STATIC_DIR, "assets")),
     )
     prefix, root = next(((prefix, root) for prefix, root in mappings if clean.startswith(prefix)), ("", ""))
     if not prefix:
@@ -8830,7 +8846,7 @@ def attachment_text_blocks(refs, limit_each=MAX_ATTACHMENT_TEXT_CHARS):
 def media_reference_to_url(value, max_image_size=None):
     if not isinstance(value, str) or not value:
         return ""
-    if value.startswith("/output/") or value.startswith("/assets/"):
+    if value.startswith("/output/") or value.startswith("/assets/") or value.startswith("/static/assets/"):
         return reference_to_data_url({"url": value}, max_size=max_image_size)
     return value
 
@@ -9030,7 +9046,7 @@ def compress_data_url_image(value, max_size=1536, jpeg_quality=88):
 def modelscope_image_url(value, max_size=1536):
     if not value:
         return value
-    if isinstance(value, str) and (value.startswith("/output/") or value.startswith("/assets/")):
+    if isinstance(value, str) and (value.startswith("/output/") or value.startswith("/assets/") or value.startswith("/static/assets/")):
         return reference_to_data_url({"url": value}, max_size=max_size)
     return value
 

@@ -8831,9 +8831,12 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
     const previous = node?.outputUrl && node.outputUrl !== source.url
         ? {url:node.outputUrl, name:node.outputName || 'previous-angle.png', kind:'image'}
         : null;
-    const geometry = kind === 'angle' && node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl
-            ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image', natural_w:node.angleDirectorCaptureWidth || 0, natural_h:node.angleDirectorCaptureHeight || 0}
-            : null;
+    const geometry = kind === 'angle' && node.angleGeometryMode === 'director3d'
+        ? (window.CanvasSpecialNodes?.angleReferenceForNode?.(node)
+            || (node.angleDirectorCaptureUrl
+                ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image'}
+                : null))
+        : null;
     const payload = {
         prompt,
         operation:kind === 'angle' ? 'angle_change' : 'relight',

@@ -423,26 +423,29 @@
         </div>`;
     }
 
+    const ANGLE_ELEVATION_MIN = -45;
+    const ANGLE_ELEVATION_MAX = 60;
     const ANGLE_AZIMUTHS = [
         [0,'正面','front view'],[45,'右前 45°','front-right quarter view'],[90,'右侧 90°','right side view'],[135,'右后 135°','back-right quarter view'],
         [180,'背面 180°','back view'],[225,'左后 225°','back-left quarter view'],[270,'左侧 270°','left side view'],[315,'左前 315°','front-left quarter view']
     ];
     const ANGLE_REFERENCE_CARDS = [
-        {id:'front',label:'正面 / 平视',yawMin:-22.5,yawMax:22.5,elevationMin:-30,elevationMax:30,url:'/static/assets/camera-reference/fem-mannequin-front.png'},
-        {id:'front-left',label:'左前 45°',yawMin:-67.5,yawMax:-22.5,elevationMin:-30,elevationMax:30,url:'/static/assets/camera-reference/fem-mannequin-oblique.png'},
-        {id:'front-right',label:'右前 45°',yawMin:22.5,yawMax:67.5,elevationMin:-30,elevationMax:30,url:'/static/assets/camera-reference/fem-mannequin-oblique.png'},
-        {id:'side-right',label:'右侧 / 右后',yawMin:67.5,yawMax:157.5,elevationMin:-30,elevationMax:30,url:'/static/assets/camera-reference/fem-mannequin-action.jpg'},
-        {id:'back',label:'背面',yawMin:157.5,yawMax:-157.5,elevationMin:-30,elevationMax:30,url:'/static/assets/camera-reference/fem-mannequin-detail.png'},
-        {id:'side-left',label:'左后 / 左侧',yawMin:-157.5,yawMax:-67.5,elevationMin:-30,elevationMax:30,url:'/static/assets/camera-reference/fem-mannequin-action.jpg'},
-        {id:'high',label:'高机位',yawMin:-180,yawMax:180,elevationMin:30,elevationMax:60,url:'/static/assets/camera-reference/fem-mannequin-detail.png'},
-        {id:'low',label:'低机位',yawMin:-180,yawMax:180,elevationMin:-30,elevationMax:-30,url:'/static/assets/camera-reference/fem-mannequin-oblique.png'}
+        {id:'front',label:'正面 / 平视',yawMin:-22.5,yawMax:22.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-front.png'},
+        {id:'front-left',label:'左前 45° / 平视',yawMin:-67.5,yawMax:-22.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-front-left.png'},
+        {id:'front-right',label:'右前 45° / 平视',yawMin:22.5,yawMax:67.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-front-right.png'},
+        {id:'side-right',label:'右侧 / 平视',yawMin:67.5,yawMax:157.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-side-right.png'},
+        {id:'back',label:'背面 / 平视',yawMin:157.5,yawMax:-157.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-back.png'},
+        {id:'side-left',label:'左侧 / 平视',yawMin:-157.5,yawMax:-67.5,elevationMin:-14,elevationMax:15,url:'/static/assets/camera-reference/angle-eye-side-left.png'},
+        {id:'low',label:'仰拍 / -45°',yawMin:-180,yawMax:180,elevationMin:-45,elevationMax:-15,url:'/static/assets/camera-reference/angle-pitch-low-minus45.png'},
+        {id:'elevated',label:'俯视 / +30°',yawMin:-180,yawMax:180,elevationMin:16,elevationMax:45,url:'/static/assets/camera-reference/angle-pitch-elevated-plus30.png'},
+        {id:'high',label:'高俯视 / +55°',yawMin:-180,yawMax:180,elevationMin:46,elevationMax:60,url:'/static/assets/camera-reference/angle-pitch-high-plus55.png'}
     ];
     function normalizeAngle(node){
         node.angleAzimuth = ((Number.isFinite(Number(node.angleAzimuth)) ? Number(node.angleAzimuth) : 45) % 360 + 360) % 360;
         // NBP 语义模式使用有符号水平角：左侧为负，右侧为正；保留 angleAzimuth 兼容旧画布。
         node.angleYaw = clamp(Number.isFinite(Number(node.angleYaw)) ? Number(node.angleYaw) : signedAngleAzimuth(node.angleAzimuth), -180, 180);
         node.angleAzimuth = (node.angleYaw + 360) % 360;
-        node.angleElevation = clamp(Number.isFinite(Number(node.angleElevation)) ? node.angleElevation : 0, -30, 60);
+        node.angleElevation = clamp(Number.isFinite(Number(node.angleElevation)) ? node.angleElevation : 0, ANGLE_ELEVATION_MIN, ANGLE_ELEVATION_MAX);
         node.angleDistance = ['close','medium','wide'].includes(node.angleDistance) ? node.angleDistance : 'medium';
         node.angleLens = ['24','35','50','85'].includes(String(node.angleLens)) ? String(node.angleLens) : '50';
         node.angleSubject = ['person','product','scene'].includes(node.angleSubject) ? node.angleSubject : 'person';
@@ -507,10 +510,17 @@
     }
     function angleReferenceCard(node){
         const yaw = signedAngleAzimuth(node?.angleYaw), elevation = Number(node?.angleElevation) || 0;
-        if(elevation >= 30) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'high');
-        if(elevation <= -30) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'low');
+        if(elevation <= -15) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'low');
+        if(elevation >= 46) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'high');
+        if(elevation >= 16) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'elevated');
         if(yaw >= 157.5 || yaw < -157.5) return ANGLE_REFERENCE_CARDS.find(item => item.id === 'back');
         return ANGLE_REFERENCE_CARDS.find(item => yaw >= item.yawMin && yaw < item.yawMax) || ANGLE_REFERENCE_CARDS[0];
+    }
+    function angleReferenceForNode(node){
+        if(!node) return null;
+        normalizeAngle(node);
+        const card = angleReferenceCard(node);
+        return card ? {url:card.url, name:`camera-reference-${card.id}.png`, kind:'image'} : null;
     }
     function buildAnglePrompt(node){
         normalizeAngle(node);
@@ -532,9 +542,11 @@
                 : 'Keep the gaze neutral and away from the lens.';
         const view = yaw === 0 ? 'front view' : `${Math.abs(yaw)}-degree ${side} three-quarter view`;
         const elevationNumber = Math.round(Number(node.angleElevation) || 0);
-        const elevationLock = elevationNumber >= 30
-            ? `HIGH-CAMERA PITCH LOCK: the camera is ${elevationNumber} degrees above the subject and its optical axis points downward by ${elevationNumber} degrees. This is a steep elevated view, never an eye-level side view. The top crown of the hat, both shoulder tops, the inside of the collar, necklace layers and the top plane of the belt must be visible with strong foreshortening; if these top planes are not visible, the requested view is wrong.`
-            : '';
+        const elevationLock = elevationNumber <= -15
+            ? `LOW-CAMERA PITCH LOCK: the camera is ${Math.abs(elevationNumber)} degrees below the subject and its optical axis points upward by ${Math.abs(elevationNumber)} degrees. This is a true low-angle view, never an eye-level view. The underside of the chin, lower planes of the torso and upward convergence of the legs must be visible; if the camera does not clearly look up, the requested view is wrong.`
+            : elevationNumber >= 16
+                ? `ELEVATED-CAMERA PITCH LOCK: the camera is ${elevationNumber} degrees above the subject and its optical axis points downward by ${elevationNumber} degrees. This is an elevated view, never an eye-level view. The top of the head, shoulder tops and top planes of the torso must be visible with physically plausible foreshortening; if these top planes are not visible, the requested view is wrong.`
+                : '';
         const preserve = node.anglePreserve ? 'Keep identity, proportions, pose, clothing, materials, lighting and background consistent.' : 'Keep the design and world layout consistent while changing the viewpoint.';
         return [
             'CAMERA COORDINATE SYSTEM: Image 1 is the original reference; camera-right +X, left is camera-left and right is camera-right.',
@@ -587,7 +599,7 @@
             <div class="special-settings-grid edit-settings-grid">
                 <label><span>几何参考</span><select data-edit-field="angleGeometryMode"><option value="director3d" ${node.angleGeometryMode === 'director3d' ? 'selected' : ''}>3D参考图</option><option value="none" ${node.angleGeometryMode === 'none' ? 'selected' : ''}>无（仅语义）</option></select></label>
                 <label class="special-range wide"><span>水平角（左负右正）</span><input type="range" min="-180" max="180" step="1" value="${Math.round(node.angleYaw)}" data-edit-field="angleYaw"></label>
-                <label class="special-range wide"><span>俯仰角</span><input type="range" min="-30" max="60" step="1" value="${node.angleElevation}" data-edit-field="angleElevation"></label>
+                <label class="special-range wide"><span>俯仰角</span><input type="range" min="${ANGLE_ELEVATION_MIN}" max="${ANGLE_ELEVATION_MAX}" step="1" value="${node.angleElevation}" data-edit-field="angleElevation"></label>
                 <label><span>景别</span><select data-edit-field="angleDistance"><option value="close" ${node.angleDistance === 'close' ? 'selected' : ''}>近景</option><option value="medium" ${node.angleDistance === 'medium' ? 'selected' : ''}>中景</option><option value="wide" ${node.angleDistance === 'wide' ? 'selected' : ''}>远景</option></select></label>
                 <label><span>镜头</span><select data-edit-field="angleLens"><option value="24" ${node.angleLens === '24' ? 'selected' : ''}>24mm 广角</option><option value="35" ${node.angleLens === '35' ? 'selected' : ''}>35mm</option><option value="50" ${node.angleLens === '50' ? 'selected' : ''}>50mm 标准</option><option value="85" ${node.angleLens === '85' ? 'selected' : ''}>85mm 人像</option></select></label>
                 <label><span>对象</span><select data-edit-field="angleSubject"><option value="person" ${node.angleSubject === 'person' ? 'selected' : ''}>人物</option><option value="product" ${node.angleSubject === 'product' ? 'selected' : ''}>产品/物体</option><option value="scene" ${node.angleSubject === 'scene' ? 'selected' : ''}>场景空间</option></select></label>
@@ -1067,7 +1079,7 @@
         if(marker){
             const radians = Number(node.angleAzimuth || 0) * Math.PI / 180;
             const depth = Math.cos(radians);
-            const pitchPct = clamp(Number(node.angleElevation || 0), -30, 60) / 90 * 16;
+            const pitchPct = clamp(Number(node.angleElevation || 0), ANGLE_ELEVATION_MIN, ANGLE_ELEVATION_MAX) / 90 * 16;
             const markerX = 50 + Math.sin(radians) * 42;
             const markerY = 50 - Math.max(depth, 0) * 24 - pitchPct;
             marker.style.left = `${markerX}%`;
@@ -1151,12 +1163,13 @@
     }
     function syncDirectorReference(node, options){
         if(node.angleGeometryMode !== 'director3d') return null;
-        const card = angleReferenceCard(node);
-        node.angleDirectorCaptureUrl = card.url;
-        node.angleDirectorCaptureName = `camera-reference-${card.id}.png`;
+        const reference = angleReferenceForNode(node);
+        if(!reference) return null;
+        node.angleDirectorCaptureUrl = reference.url;
+        node.angleDirectorCaptureName = reference.name;
         node.angleDirectorCaptureWidth = 0;
         node.angleDirectorCaptureHeight = 0;
-        return {url:card.url,name:node.angleDirectorCaptureName,kind:'image'};
+        return reference;
     }
 
     function bindEditNode(root, node, options, prefix){
@@ -1195,7 +1208,7 @@
                     node.angleYaw = value;
                     node.angleAzimuth = (value + 360) % 360;
                 }
-                node[key] = value; source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
+                node[key] = value; if(prefix === 'angle') syncDirectorReference(node, options); source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
         });
         root.querySelectorAll('[data-relight-direction]').forEach(button => {
@@ -1209,7 +1222,7 @@
         root.querySelectorAll('[data-angle-preset]').forEach(button => {
             button.addEventListener('pointerdown', event => event.stopPropagation());
             button.addEventListener('click', event => {
-                event.preventDefault(); event.stopPropagation(); node.angleAzimuth = Number(button.dataset.anglePreset || 0); node.angleYaw = signedAngleAzimuth(node.angleAzimuth);
+                event.preventDefault(); event.stopPropagation(); node.angleAzimuth = Number(button.dataset.anglePreset || 0); node.angleYaw = signedAngleAzimuth(node.angleAzimuth); syncDirectorReference(node, options);
                 const slider = root.querySelector('[data-edit-field="angleYaw"]'); if(slider) slider.value = node.angleYaw;
                 source = editSource(node, options, prefix); persistEditSource(node, prefix, source); markEditChanged(root, node, options, prefix, source);
             });
@@ -1223,7 +1236,7 @@
                 if(!initial){
                     node.angleAzimuth = ((Number(node.angleAzimuth || 0) + deltaX * 0.85) % 360 + 360) % 360;
                     node.angleYaw = signedAngleAzimuth(node.angleAzimuth);
-                    node.angleElevation = clamp(Number(node.angleElevation || 0) - deltaY * 0.55, -30, 60);
+                    node.angleElevation = clamp(Number(node.angleElevation || 0) - deltaY * 0.55, ANGLE_ELEVATION_MIN, ANGLE_ELEVATION_MAX); syncDirectorReference(node, options);
                     orbit.dataset.lastX = String(event.clientX); orbit.dataset.lastY = String(event.clientY);
                 }
                 const slider = root.querySelector('[data-edit-field="angleYaw"]'); if(slider) slider.value = Math.round(node.angleYaw);
@@ -1377,7 +1390,7 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml,
+        panoramaBodyHtml, poseBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
         bindPanorama, bindPose, bindDirector3d, bindPoseReplicate, bindAngle,
         buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration

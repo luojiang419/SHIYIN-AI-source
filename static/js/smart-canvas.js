@@ -11055,9 +11055,12 @@ async function generateSmartSpecialEdit(node, prompt, source, kind){
     const previous = Array.isArray(node?.images)
         ? node.images.find(item => item?.url && item.url !== source.url)
         : null;
-    const geometry = kind === 'angle' && node.angleGeometryMode === 'director3d' && node.angleDirectorCaptureUrl
-            ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image', natural_w:node.angleDirectorCaptureWidth || 0, natural_h:node.angleDirectorCaptureHeight || 0}
-            : null;
+    const geometry = kind === 'angle' && node.angleGeometryMode === 'director3d'
+        ? (window.CanvasSpecialNodes?.angleReferenceForNode?.(node)
+            || (node.angleDirectorCaptureUrl
+                ? {url:node.angleDirectorCaptureUrl, name:node.angleDirectorCaptureName || 'director-3d.png', kind:'image'}
+                : null))
+        : null;
     const refs = [{...source, kind:'image'}, ...(geometry ? [{...geometry, kind:'image'}] : []), ...(previous ? [{...previous, kind:'image'}] : [])];
     const task = previous || geometry
         ? await runApiGeneration(prompt, refs, runSettings)

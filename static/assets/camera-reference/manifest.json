@@ -1,22 +1,21 @@
 {
   "schemaVersion": 1,
-  "title": "开放许可 3D 人偶机位参考",
+  "title": "标准 3D 人偶机位参考",
   "source": {
-    "name": "OpenGameArt · Fem Mannequin",
-    "url": "https://opengameart.org/content/fem-mannequin",
-    "license": "CC0"
+    "name": "SHIYIN AI 项目生成素材",
+    "url": "",
+    "license": "Project-generated asset"
   },
-  "note": "当前素材是公开预览图候选集，未经过统一姿势和镜头标定；用于机位方向提示，不作为精确 3D 几何数据。",
+  "note": "统一使用完整、穿不透明连体服的中性 3D 人偶；图片按水平角和俯仰滑块区间提供视觉几何参考，不作为精确 3D 相机标定数据。俯仰角采用低机位 -45°、俯视 +30°、高俯视 +55° 代表值。",
   "references": [
-    {"id":"front","label":"正面 / 平视","yawMin":-22.5,"yawMax":22.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-front.png","kind":"image"},
-    {"id":"front-left","label":"左前 45°","yawMin":-67.5,"yawMax":-22.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-oblique.png","kind":"image"},
-    {"id":"front-right","label":"右前 45°","yawMin":22.5,"yawMax":67.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-oblique.png","kind":"image"},
-    {"id":"side-right","label":"右侧 90°","yawMin":67.5,"yawMax":112.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
-    {"id":"rear-right","label":"右后 135°","yawMin":112.5,"yawMax":157.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
-    {"id":"back","label":"背面 180°","yawMin":157.5,"yawMax":-157.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-detail.png","kind":"image"},
-    {"id":"rear-left","label":"左后 225°","yawMin":-157.5,"yawMax":-112.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
-    {"id":"side-left","label":"左侧 270°","yawMin":-112.5,"yawMax":-67.5,"elevationMin":-30,"elevationMax":30,"url":"/static/assets/camera-reference/fem-mannequin-action.jpg","kind":"image"},
-    {"id":"high","label":"高机位","yawMin":-180,"yawMax":180,"elevationMin":30,"elevationMax":60,"url":"/static/assets/camera-reference/fem-mannequin-detail.png","kind":"image"},
-    {"id":"low","label":"低机位","yawMin":-180,"yawMax":180,"elevationMin":-30,"elevationMax":-30,"url":"/static/assets/camera-reference/fem-mannequin-oblique.png","kind":"image"}
+    {"id":"front","label":"正面 / 平视","yawMin":-22.5,"yawMax":22.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-front.png","kind":"image","pitchBand":"eye"},
+    {"id":"front-left","label":"左前 45° / 平视","yawMin":-67.5,"yawMax":-22.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-front-left.png","kind":"image","pitchBand":"eye"},
+    {"id":"front-right","label":"右前 45° / 平视","yawMin":22.5,"yawMax":67.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-front-right.png","kind":"image","pitchBand":"eye"},
+    {"id":"side-right","label":"右侧 / 平视","yawMin":67.5,"yawMax":157.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-side-right.png","kind":"image","pitchBand":"eye"},
+    {"id":"back","label":"背面 / 平视","yawMin":157.5,"yawMax":-157.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-back.png","kind":"image","pitchBand":"eye"},
+    {"id":"side-left","label":"左侧 / 平视","yawMin":-157.5,"yawMax":-67.5,"elevationMin":-14,"elevationMax":15,"url":"/static/assets/camera-reference/angle-eye-side-left.png","kind":"image","pitchBand":"eye"},
+    {"id":"low","label":"仰拍 / -45°","yawMin":-180,"yawMax":180,"elevationMin":-45,"elevationMax":-15,"url":"/static/assets/camera-reference/angle-pitch-low-minus45.png","kind":"image","pitchBand":"low","representativeElevation":-45},
+    {"id":"elevated","label":"俯视 / +30°","yawMin":-180,"yawMax":180,"elevationMin":16,"elevationMax":45,"url":"/static/assets/camera-reference/angle-pitch-elevated-plus30.png","kind":"image","pitchBand":"elevated","representativeElevation":30},
+    {"id":"high","label":"高俯视 / +55°","yawMin":-180,"yawMax":180,"elevationMin":46,"elevationMax":60,"url":"/static/assets/camera-reference/angle-pitch-high-plus55.png","kind":"image","pitchBand":"high","representativeElevation":55}
   ]
 }

@@ -1,7 +1,6 @@
 # Camera reference assets
 
-Source: OpenGameArt - Fem Mannequin
-URL: https://opengameart.org/content/fem-mannequin
-License: CC0
+Source: SHIYIN AI project generated assets
+License: Project-generated asset
 
-The preview images are used as temporary open reference cards. They are not a calibrated camera dataset; replace with a unified CC0 render set when available.
+These images are standard visual geometry references generated for the SHIYIN AI angle node. They use a consistent neutral, fully clothed 3D mannequin and representative horizontal/elevation views. They are not a precision calibrated camera dataset.

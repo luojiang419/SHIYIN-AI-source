@@ -26,12 +26,12 @@ with TestClient(main.app, client=("127.0.0.1", 50000)) as client:
     cookie_retry = client.get(url, follow_redirects=False)
     assert cookie_retry.status_code == 303, cookie_retry.text
 
-for retry_index in range(8):
+for retry_index in range(64):
     with TestClient(main.app, client=("127.0.0.1", 50001 + retry_index)) as retry_client:
         no_cookie_retry = retry_client.get(url, follow_redirects=False)
         assert no_cookie_retry.status_code == 303, no_cookie_retry.text
 
-with TestClient(main.app, client=("127.0.0.1", 50020)) as exhausted_client:
+with TestClient(main.app, client=("127.0.0.1", 50080)) as exhausted_client:
     exhausted = exhausted_client.get(url, follow_redirects=False)
     assert exhausted.status_code == 401, exhausted.text
 

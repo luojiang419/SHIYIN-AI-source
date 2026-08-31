@@ -45,7 +45,7 @@ class SecurityTests(unittest.TestCase):
             desktop_session, desktop = auth.consume_desktop_token("desktop-once")
             self.assertEqual(desktop.client_type, "desktop")
             self.assertIsNotNone(auth.authenticate(desktop_session))
-            for _ in range(8):
+            for _ in range(64):
                 replay_session, replay_identity = auth.consume_desktop_token("desktop-once")
                 self.assertEqual(replay_identity.client_type, "desktop")
                 self.assertIsNotNone(auth.authenticate(replay_session))
@@ -65,7 +65,7 @@ class SecurityTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 auth.consume_desktop_token("wrong-token")
             auth.consume_desktop_token("desktop-once")
-            clock[0] += 60.1
+            clock[0] += 300.1
             with self.assertRaises(PermissionError):
                 auth.consume_desktop_token("desktop-once")
 

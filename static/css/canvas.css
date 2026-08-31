@@ -860,6 +860,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .port:hover::after { transform:scale(1.25); }
 .port.in { left:-29px; cursor:crosshair; }
 .lookbook-node .port.in { left:-29px; top:var(--canvas-port-top,50%); }
+.lookbook-node .port.in { top:var(--lookbook-port-top,var(--canvas-port-top,50%)); }
 .lookbook-node .node-body { padding-left:74px; }
 .lookbook-node .port.in::before { content:attr(data-role-label); position:absolute; left:calc(100% + 7px); right:auto; top:50%; transform:translateY(-50%); max-width:86px; padding:3px 7px; border:1px solid var(--line); border-radius:7px; background:var(--card-solid); color:var(--text); box-shadow:0 5px 14px rgba(0,0,0,.12); font-size:10px; font-weight:850; line-height:1.1; white-space:nowrap; pointer-events:none; }
 .port.out { right:-15px; }
@@ -1812,7 +1813,7 @@ body.studio-theme-dark .comfy-random-btn.active,
 
 \n
 .lookbook-style-modal{position:fixed;inset:0;z-index:10020;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(18,16,14,.44);backdrop-filter:blur(8px)}
-.lookbook-style-modal.open{display:flex}
+.lookbook-style-modal.open{display:flex;pointer-events:auto}
 .lookbook-style-dialog{width:min(860px,calc(100vw - 36px));max-height:min(760px,calc(100vh - 48px));overflow:auto;border:1px solid var(--line);border-radius:20px;background:var(--card);color:var(--text);box-shadow:0 24px 70px rgba(0,0,0,.24);padding:20px}
 .lookbook-style-dialog>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.lookbook-style-dialog header small{font-size:9px;letter-spacing:.14em;color:var(--faint);font-weight:900}.lookbook-style-dialog h2{margin:4px 0 0;font-size:20px}.lookbook-style-attribution{margin:6px 0 0;color:var(--faint);font-size:10px;line-height:1.35}.lookbook-style-attribution a{color:var(--strong);font-weight:800;text-decoration:none}.lookbook-style-attribution a:hover{text-decoration:underline}.lookbook-modal-close{width:32px;height:32px;border:1px solid var(--line);border-radius:10px;background:var(--soft);color:var(--text);font-size:20px;cursor:pointer}
 .lookbook-github-install{display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--soft);margin-bottom:14px}.lookbook-github-install input{flex:1;min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--text);padding:9px 10px;font-size:12px}.lookbook-github-install button,.lookbook-card-actions button{border:1px solid var(--strong);border-radius:9px;background:var(--strong);color:var(--strong-text);padding:9px 12px;font-size:11px;font-weight:800;cursor:pointer}.lookbook-github-install span{font-size:10px;color:var(--faint);white-space:nowrap}

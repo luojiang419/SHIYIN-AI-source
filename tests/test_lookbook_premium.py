@@ -8,6 +8,37 @@ from canvas_core.ecommerce import build_prompt
 
 
 class LookbookPremiumResearchTests(unittest.TestCase):
+    def test_agent_plan_keeps_node_generation_settings_and_clamps_timeout(self):
+        snapshot = {
+            "operation": "universal",
+            "provider_id": "shiying",
+            "model": "gemini-3-pro-image-preview",
+            "aspect_ratio": "3:4",
+            "resolution": "2k",
+            "quality": "high",
+            "count": 4,
+            "size": "1536x2048",
+            "inputs": [{"url": "/assets/input/model.png"}],
+            "options": {"prompt_policy": "lookbook", "lookbook_timeout_minutes": 100, "lookbook_search": True, "lookbook_research_depth": "deep"},
+        }
+        plan = main.build_lookbook_agent_plan(snapshot)
+        self.assertEqual(plan["strategy"], "durable-state-machine")
+        self.assertEqual(plan["timeout_seconds"], 60 * 60)
+        self.assertEqual(plan["generation_settings"]["model"], "gemini-3-pro-image-preview")
+        self.assertEqual(plan["generation_settings"]["count"], 4)
+        self.assertEqual(main.lookbook_agent_timeout_seconds({"lookbook_timeout_minutes": 1}), 5 * 60)
+
+    def test_agent_marks_timeout_as_terminal_504_without_restarting_generation(self):
+        async def slow_execute(_task_id, _snapshot):
+            await asyncio.sleep(0.05)
+
+        snapshot = {"operation": "universal", "options": {"prompt_policy": "lookbook"}}
+        with patch.object(main, "lookbook_agent_timeout_seconds", return_value=0.01), patch.object(main, "execute_ecommerce_task", new=slow_execute), patch.object(main, "update_ecommerce_task") as update:
+            asyncio.run(main.run_ecommerce_task("lookbook-timeout", snapshot))
+        changes = [call.args[1] for call in update.call_args_list if len(call.args) > 1]
+        self.assertTrue(any(item.get("status") == "failed" and item.get("status_code") == 504 for item in changes))
+        self.assertTrue(any(item.get("agent_stage") == "timeout" for item in changes))
+
     def test_person_only_street_editorial_prompt_rejects_generic_studio_defaults(self):
         prompt = build_prompt(
             "universal",

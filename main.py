@@ -16391,9 +16391,107 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         "route_candidates": [public_ecommerce_route(route) for route in candidates],
     }
 
+LOOKBOOK_AGENT_DEFAULT_TIMEOUT_MINUTES = 30
+LOOKBOOK_AGENT_MIN_TIMEOUT_MINUTES = 5
+LOOKBOOK_AGENT_MAX_TIMEOUT_MINUTES = 60
+
+
+def lookbook_agent_timeout_seconds(options: Optional[Dict[str, Any]] = None) -> int:
+    options = options if isinstance(options, dict) else {}
+    try:
+        minutes = float(options.get("lookbook_timeout_minutes") or LOOKBOOK_AGENT_DEFAULT_TIMEOUT_MINUTES)
+    except (TypeError, ValueError):
+        minutes = LOOKBOOK_AGENT_DEFAULT_TIMEOUT_MINUTES
+    minutes = max(LOOKBOOK_AGENT_MIN_TIMEOUT_MINUTES, min(LOOKBOOK_AGENT_MAX_TIMEOUT_MINUTES, minutes))
+    return int(round(minutes * 60))
+
+
+def is_lookbook_snapshot(snapshot: Dict[str, Any]) -> bool:
+    options = snapshot.get("options") if isinstance(snapshot, dict) else {}
+    return bool(
+        snapshot.get("operation") == "universal"
+        and isinstance(options, dict)
+        and str(options.get("prompt_policy") or "").strip().lower() == "lookbook"
+    )
+
+
+def build_lookbook_agent_plan(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """生成可持久化的轻量状态图；阶段边界对应成熟 agent runtime 的 checkpoint。"""
+    options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
+    inputs = snapshot.get("inputs") if isinstance(snapshot.get("inputs"), list) else []
+    quality_gate = bool(options.get("lookbook_quality_gate", True))
+    web_search = bool(options.get("lookbook_search", True))
+    routes = snapshot.get("route_candidates") if isinstance(snapshot.get("route_candidates"), list) else []
+    primary_route = routes[0] if routes and isinstance(routes[0], dict) else {}
+    stages = [
+        {"id": "reference-analysis", "label": "人物与素材事实分析", "enabled": bool(inputs)},
+        {"id": "web-search", "label": "联网案例与色彩研究", "enabled": web_search},
+        {"id": "art-direction", "label": "创意总监方案", "enabled": True},
+        {"id": "generation", "label": "按节点参数生成", "enabled": True},
+        {"id": "quality-gate", "label": "视觉质检与弱图修复", "enabled": quality_gate},
+    ]
+    return {
+        "version": 1,
+        "strategy": "durable-state-machine",
+        "timeout_seconds": lookbook_agent_timeout_seconds(options),
+        "stages": stages,
+        "generation_settings": {
+            "provider_id": str(snapshot.get("provider_id") or primary_route.get("provider_id") or ""),
+            "model": str(snapshot.get("model") or primary_route.get("model") or ""),
+            "aspect_ratio": str(snapshot.get("aspect_ratio") or ""),
+            "resolution": str(snapshot.get("resolution") or ""),
+            "quality": str(snapshot.get("quality") or ""),
+            "count": int(snapshot.get("count") or 1),
+            "size": str(snapshot.get("size") or ""),
+            "research_depth": str(options.get("lookbook_research_depth") or "deep"),
+        },
+    }
+
+
+def update_lookbook_agent_stage(task_id: str, stage: str, message: str, percent: int) -> None:
+    """写入可被前端短轮询读取的 Lookbook agent 阶段，不改变任务提交协议。"""
+    now = time.time()
+    with ECOMMERCE_TASK_LOCK:
+        current = current_account_task(ECOMMERCE_TASKS, task_id)
+        trace = list(current.get("agent_trace") or []) if current else []
+    if trace and str(trace[-1].get("stage") or "") == str(stage or ""):
+        trace[-1] = {**trace[-1], "message": str(message or "")[:300], "percent": max(0, min(100, int(percent))), "updated_at": now}
+    else:
+        trace.append({
+            "stage": str(stage or "")[:60],
+            "message": str(message or "")[:300],
+            "percent": max(0, min(100, int(percent))),
+            "started_at": now,
+            "updated_at": now,
+        })
+    update_ecommerce_task(task_id, {
+        "agent_stage": str(stage or "")[:60],
+        "progress_status": str(message or "")[:300],
+        "progress_percent": max(0, min(100, int(percent))),
+        "agent_trace": trace[-20:],
+    })
+
+
 async def run_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     async with ECOMMERCE_TASK_SEMAPHORE:
-        await execute_ecommerce_task(task_id, snapshot)
+        if not is_lookbook_snapshot(snapshot):
+            await execute_ecommerce_task(task_id, snapshot)
+            return
+        timeout_seconds = lookbook_agent_timeout_seconds(snapshot.get("options") or {})
+        try:
+            await asyncio.wait_for(execute_ecommerce_task(task_id, snapshot), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            detail = f"Lookbook 智能体超时（超过 {timeout_seconds // 60} 分钟），已停止继续等待；请减少参考图或缩短研究内容后重试"
+            update_lookbook_agent_stage(task_id, "timeout", "Lookbook 智能体等待超时，任务已终止。", 100)
+            update_ecommerce_task(task_id, {
+                "status": "failed",
+                "stage": "timeout",
+                "agent_stage": "timeout",
+                "progress_status": "Lookbook 智能体等待超时，任务已终止。",
+                "progress_percent": 100,
+                "error": detail,
+                "status_code": 504,
+            })
 
 LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE = (
     "优先检索并交叉比较真实可访问的高质量来源：Vogue、Harper's Bazaar、Numéro、Dazed、i-D、"
@@ -16768,12 +16866,22 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
 
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
+    lookbook_agent = is_lookbook_snapshot(snapshot)
+    if lookbook_agent:
+        update_lookbook_agent_stage(task_id, "reference-analysis", "智能体正在解析人物面貌、体态、穿着和可见材质…", 8)
     snapshot, lookbook_reference_analysis = await enrich_lookbook_reference_analysis(snapshot)
     if lookbook_reference_analysis is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "lookbook_reference_analysis": lookbook_reference_analysis, "request": snapshot})
+    if lookbook_agent:
+        if bool((snapshot.get("options") or {}).get("lookbook_search", True)):
+            update_lookbook_agent_stage(task_id, "web-search", "智能体正在联网检索杂志与品牌时尚大片，并提取色彩方法…", 24)
+        else:
+            update_lookbook_agent_stage(task_id, "art-direction", "已跳过联网搜索，智能体正在整理高级视觉方案…", 32)
     snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
     if lookbook_research is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})
+    if lookbook_agent:
+        update_lookbook_agent_stage(task_id, "art-direction", "智能体正在把人物事实、案例色彩和选定风格合成为创意方案…", 42)
     snapshot, lookbook_plan = await enrich_lookbook_plan(snapshot)
     if lookbook_plan is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_plan": lookbook_plan, "request": snapshot})
@@ -16791,6 +16899,8 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
             "universal_analysis": universal_analysis,
             "request": snapshot,
         })
+    if lookbook_agent:
+        update_lookbook_agent_stage(task_id, "generation", "智能体正在使用节点设置的画幅、分辨率、质量和数量生成 Lookbook…", 58)
     routes = list(snapshot.get("route_candidates") or [])
     failures = []
     try:
@@ -16889,6 +16999,8 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     progress_callback=publish_ecommerce_partial,
                 )
                 batch = await apply_selected_studio_background(batch, snapshot, route)
+                if lookbook_agent:
+                    update_lookbook_agent_stage(task_id, "quality-gate", "智能体正在进行视觉质检，并检查是否退化为普通棚拍…", 88)
                 batch, lookbook_quality_gate = await improve_lookbook_batch(batch, snapshot, route)
                 raw = batch["raw"]
                 result = {
@@ -16947,8 +17059,14 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 save_to_history(result)
                 if GLOBAL_LOOP:
                     asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
+                if lookbook_agent:
+                    update_lookbook_agent_stage(task_id, "completed", "Lookbook 智能体已完成研究、创作与视觉质检。", 100)
                 update_ecommerce_task(task_id, {
                     "status": "succeeded",
+                    "stage": "completed",
+                    "agent_stage": "completed",
+                    "progress_status": "Lookbook 智能体已完成研究、创作与视觉质检。",
+                    "progress_percent": 100,
                     "result": result,
                     "partial_result": None,
                     "error": "",
@@ -16973,8 +17091,13 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 raise
     except Exception as exc:
         detail = str(getattr(exc, "detail", None) or exc)
+        if lookbook_agent:
+            update_lookbook_agent_stage(task_id, "failed", "Lookbook 智能体失败，已保留错误信息。", 100)
         update_ecommerce_task(task_id, {
             "status": "failed",
+            "stage": "failed",
+            "agent_stage": "failed" if lookbook_agent else "",
+            "progress_status": "Lookbook 智能体失败，已保留错误信息。" if lookbook_agent else "",
             "error": detail,
             "status_code": int(getattr(exc, "status_code", 500) or 500),
             "route_attempts": failures,
@@ -17174,6 +17297,22 @@ async def create_ecommerce_task(payload: EcommerceTaskRequest):
         **snapshot,
         "request": snapshot,
     }
+    if is_lookbook_snapshot(snapshot):
+        task.update({
+            "agent_kind": "lookbook",
+            "agent_stage": "queued",
+            "progress_status": "Lookbook 智能体任务已提交，等待执行…",
+            "progress_percent": 0,
+            "agent_started_at": now,
+            "agent_plan": build_lookbook_agent_plan(snapshot),
+            "agent_trace": [{
+                "stage": "queued",
+                "message": "Lookbook 智能体任务已提交，等待执行…",
+                "percent": 0,
+                "started_at": now,
+                "updated_at": now,
+            }],
+        })
     with ECOMMERCE_TASK_LOCK:
         ECOMMERCE_TASKS[task_id] = task
         write_ecommerce_task_locked(task)

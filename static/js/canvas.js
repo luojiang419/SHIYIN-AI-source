@@ -9933,6 +9933,7 @@ function completeEcommerceLookbookTask(taskId, task){
     out._pending = (out._pending || []).filter(item => item.id !== pending.id);
     appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
     if(node){
+        if(task.agent_stage) node.lookbookAgentStage = String(task.progress_status || task.agent_stage);
         const referenceAnalysis = task.lookbook_reference_analysis?.summary || task.options?.lookbook_reference_analysis;
         if(referenceAnalysis) node.lookbookReferenceAnalysis = String(referenceAnalysis).slice(0,12000);
         const research = task.lookbook_research?.summary || task.result?.lookbook_research?.summary;
@@ -9964,6 +9965,7 @@ function failEcommerceLookbookTask(pendingId, message, node=null, out=null){
     if(targetNode){
         targetNode.runStatus = activeEcommerceLookbookRun(targetNode) ? 'running' : 'failed';
         targetNode.runError = error;
+        targetNode.lookbookAgentStage = error;
         targetNode.running = false;
         addGenerationLog({run:pending?.run || runSnapshot(targetNode,'Lookbook 平面广告',[]), outputs:[], runMs:pending ? nowMs() - Number(pending.startedAt || nowMs()) : 0, error});
     }
@@ -9974,6 +9976,10 @@ async function pollEcommerceLookbookTask(taskId, options={}){
     if(!taskId || activeEcommerceLookbookPolls.has(taskId)) return 'running';
     activeEcommerceLookbookPolls.add(taskId);
     try {
+        const initialFound = findPendingTask(taskId);
+        const initialNode = initialFound?.pending?.run?.node?.id ? nodes.find(item => item.id === initialFound.pending.run.node.id && item.type === 'lookbook') : null;
+        const timeoutMinutes = Math.max(5, Math.min(60, Number(initialNode?.lookbookTimeoutMinutes || 30)));
+        const deadline = Date.now() + timeoutMinutes * 60 * 1000;
         while(true){
             const found = findPendingTask(taskId);
             if(!found) return 'missing';
@@ -9982,8 +9988,14 @@ async function pollEcommerceLookbookTask(taskId, options={}){
             const response = await cascadeFetch(`/api/ecommerce/tasks/${encodeURIComponent(taskId)}`,{}, {cascadeTargetId});
             if(!response.ok) throw new Error(await responseErrorMessage(response,'Lookbook 任务查询失败'));
             const task = await response.json();
+            const taskNode = nodes.find(item => item.id === found.pending.run?.node?.id && item.type === 'lookbook');
+            if(taskNode && task.progress_status){
+                taskNode.lookbookAgentStage = String(task.progress_status).slice(0,300);
+                refreshRunNodes(taskNode,found.out);
+            }
             if(task.status === 'succeeded'){ completeEcommerceLookbookTask(taskId,task); return 'succeeded'; }
             if(['failed','interrupted'].includes(task.status)) throw new Error(task.error || 'Lookbook 任务执行失败');
+            if(Date.now() >= deadline) throw new Error(`Lookbook 智能体等待超时（超过 ${timeoutMinutes} 分钟）`);
             await sleep(1800);
         }
     } catch(error){
@@ -10104,12 +10116,12 @@ async function runLookbookNode(nodeId, opts={}){
             canvasTaskType:'ecommerce-lookbook', providerId:'', model:'', appendGenerated:true, lookbookCount:count,
         })];
     }
-    node.running = true; node.runError = ''; node.lookbookResearchStatus = node.lookbookSearch !== false ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
+    node.running = true; node.runError = ''; node.lookbookAgentStage = '智能体任务已提交，准备启动…'; node.lookbookResearchStatus = node.lookbookSearch !== false ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
     refreshRunNodes(node,out);
     if(!opts.cascade) setTimeout(() => { if(nodes.includes(node)) { node.running = false; refreshRunNodes(node,out); } }, 2000);
     const request = {
         operation:'universal', mode:'standard', inputs,
-        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_research_depth:node.lookbookResearchDepth || 'deep', lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:count},
+        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_research_depth:node.lookbookResearchDepth || 'deep', lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:count, lookbook_timeout_minutes:Math.max(5,Math.min(60,Number(node.lookbookTimeoutMinutes || 30)))},
         provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
     };
     try {

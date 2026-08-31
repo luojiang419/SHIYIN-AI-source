@@ -27,6 +27,9 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("研究深度", self.lookbook)
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
         self.assertIn("lookbook_research_depth:node.lookbookResearchDepth || 'deep'", self.canvas)
+        self.assertIn("lookbook_timeout_minutes:Math.max(5,Math.min(60,Number(node.lookbookTimeoutMinutes || 30)))", self.canvas)
+        self.assertIn("Lookbook 智能体等待超时", self.canvas)
+        self.assertIn("taskNode.lookbookAgentStage = String(task.progress_status)", self.canvas)
         self.assertIn("node.lookbookResearchStatus = String(task.lookbook_research.status)", self.canvas)
 
     def test_title_provider_only_owns_lookbook_nodes(self):
@@ -77,7 +80,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.8", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.9", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -85,6 +88,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=lookbook-multi-run.1", self.html)
         self.assertIn("feature=picker-dialog-top-layer.1", self.html)
         self.assertIn("feature=premium-editorial-research.1", self.html)
+        self.assertIn("feature=lookbook-agent.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertIn("const hasOutputs=node.generatedOutputs.some(outputUrl)", self.lookbook)

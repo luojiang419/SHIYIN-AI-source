@@ -1,4 +1,5 @@
-# SHIYIN AI v1.0.384
+# SHIYIN AI v1.0.385
+- 修复升级后 `/static/*.html` 内嵌旧资源查询串与 Service Worker 静态缓存混用，确保 AI 助手模型选择、Lookbook 风格弹窗和画布节点始终加载同一版本资源。
 - 修复 127.0.0.1 与 0.0.0.0 端口并存时桌面版误连源码后端，避免黑屏和数据目录串用。
 - 修复安装包 sidecar 未同步桌面 bootstrap 修复导致启动黑屏的问题。
 - 修复升级后 WebView2 恢复旧 bootstrap 页面导致桌面窗口显示启动令牌错误的问题；每个版本使用独立 WebView2 配置目录。

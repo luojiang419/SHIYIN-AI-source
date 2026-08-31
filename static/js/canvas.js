@@ -8540,6 +8540,26 @@ function scheduleClassicIdleIconRefresh(root=nodesEl){
     if('requestIdleCallback' in window) classicIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
     else classicIdleIconHandle = window.setTimeout(run, 0);
 }
+// 完整重绘后，当前视口内的节点图标必须在本帧完成 hydration。
+// 视口外节点仍交给 idle 队列，避免大画布一次性扫描全部图标导致卡顿。
+function hydrateClassicVisibleIconRoots(root=nodesEl){
+    if(!root || !window.lucide) return;
+    const largeScene = nodes.length > 200;
+    const view = largeScene ? currentWorldViewRect() : null;
+    const margin = largeScene ? CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1) : 0;
+    const minX = view ? view.x - margin : 0;
+    const minY = view ? view.y - margin : 0;
+    const maxX = view ? view.x + view.w + margin : 0;
+    const maxY = view ? view.y + view.h + margin : 0;
+    root.querySelectorAll('.node[data-id]').forEach(nodeEl => {
+        if(!largeScene){ refreshIcons(nodeEl); return; }
+        const node = canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id);
+        if(!node) return;
+        const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
+        const visible = rect.x < maxX && rect.x + rect.w > minX && rect.y < maxY && rect.y + rect.h > minY;
+        if(visible || selected.has(node.id)) refreshIcons(nodeEl);
+    });
+}
 function measureCanvasOriginalImageNodesNow(root=nodesEl){
     root.querySelectorAll?.('.image-node img[data-original-src]').forEach(imgEl => {
         if(imgEl.dataset.previewKind === 'video') return;
@@ -8633,6 +8653,7 @@ function render(){
         window.CanvasPerformance?.record?.('classic.navigation-to-first-render', performance.now() - classicNavigationStartedAt, {nodes:nodes.length, connections:connections.length});
     }
     scheduleClassicIdleIconRefresh(nodesEl);
+    hydrateClassicVisibleIconRoots(nodesEl);
     bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);

@@ -817,6 +817,27 @@ function scheduleSmartIdleIconRefresh(root=world){
     if('requestIdleCallback' in window) smartIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
     else smartIdleIconHandle = window.setTimeout(run, 0);
 }
+// 首帧先同步当前视口图标，视口外节点继续由 idle 队列按需处理。
+function hydrateSmartVisibleIconRoots(root=world){
+    if(!root || !window.lucide) return;
+    const largeScene = nodes.length > 200;
+    const scale = Math.max(0.05, viewport.scale || 1);
+    const viewX = -viewport.x / scale;
+    const viewY = -viewport.y / scale;
+    const margin = largeScene ? SMART_SAFE_LOD_MARGIN / scale : 0;
+    const maxX = viewX + shell.clientWidth / scale + margin;
+    const maxY = viewY + shell.clientHeight / scale + margin;
+    const minX = viewX - margin;
+    const minY = viewY - margin;
+    root.querySelectorAll('.image-node[data-id]').forEach(nodeEl => {
+        if(!largeScene){ refreshIcons(nodeEl); return; }
+        const node = smartNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id);
+        if(!node) return;
+        const rect = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
+        const visible = rect.x < maxX && rect.x + rect.width > minX && rect.y < maxY && rect.y + rect.height > minY;
+        if(visible || isNodeSelected(node.id)) refreshIcons(nodeEl);
+    });
+}
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 const escapeAttr = escapeHtml;
@@ -10192,6 +10213,7 @@ function render(){
         bindSmartPreviewImageFallbacks(root);
     });
     else {
+        hydrateSmartVisibleIconRoots(world);
         scheduleSmartIdleIconRefresh(world);
         bindSmartPreviewImageFallbacks(world);
     }

@@ -102,6 +102,28 @@ class CanvasQuickActionPerformanceTests(unittest.TestCase):
         self.assertLess(created_icons, created_insert)
         self.assertNotIn("scheduleClassicIdleIconRefresh(root)", hydrate_source)
 
+    def test_full_render_hydrates_visible_icons_before_idle_queue(self):
+        classic_render = section(
+            "function render(){",
+            "function registerClassicCanvasPerfFixture",
+            CANVAS_JS,
+        )
+        smart_render = section(
+            "function render(){",
+            "function registerSmartCanvasPerfFixture",
+            SMART_CANVAS_JS,
+        )
+        self.assertIn("function hydrateClassicVisibleIconRoots", CANVAS_JS)
+        self.assertLess(
+            classic_render.index("hydrateClassicVisibleIconRoots(nodesEl)"),
+            classic_render.index("scheduleClassicMediaQueue()"),
+        )
+        self.assertIn("function hydrateSmartVisibleIconRoots", SMART_CANVAS_JS)
+        self.assertLess(
+            smart_render.index("hydrateSmartVisibleIconRoots(world)"),
+            smart_render.index("scheduleSmartMediaQueue()"),
+        )
+
     def test_new_connection_patch_uses_estimated_ports_before_layout_settles(self):
         patch_source = section(
             "function patchClassicMutationConnections",

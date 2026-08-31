@@ -16395,8 +16395,145 @@ async def run_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     async with ECOMMERCE_TASK_SEMAPHORE:
         await execute_ecommerce_task(task_id, snapshot)
 
+LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE = (
+    "优先检索并交叉比较真实可访问的高质量来源：Vogue、Harper's Bazaar、Numéro、Dazed、i-D、"
+    "032c、The Face、W Magazine、AnOther、Purple 等杂志的时装大片/街拍专题，以及 Prada、Miu Miu、"
+    "Saint Laurent、Loewe、Bottega Veneta、Maison Margiela、Jacquemus、Diesel、Nike 等品牌的公开 campaign；"
+    "也可参考知名时尚摄影师、造型师和摄影专题。来源只是研究证据，不能把品牌 Logo、具体模特、文案、"
+    "单一拍摄地点或可识别的广告画面复制进本次创作。"
+)
+
+
+def _lookbook_json_payload(value: Any) -> Dict[str, Any]:
+    """从视觉研究模型的 JSON 或带 Markdown 的 JSON 中提取对象。"""
+    raw = str(value or "").strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```$", "", raw).strip()
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if not match:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+        except Exception:
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def normalize_lookbook_visual_research(value: Any) -> Dict[str, Any]:
+    """把联网研究收敛为可直接注入生图的视觉系统，兼容旧版纯文本摘要。"""
+    parsed = _lookbook_json_payload(value)
+    if not parsed:
+        return {
+            "summary": str(value or "").strip()[:12000],
+            "sources": [],
+            "visual_system": {},
+        }
+
+    def text_field(container: Any, key: str, limit: int = 1000) -> str:
+        if not isinstance(container, dict):
+            return ""
+        return re.sub(r"[\x00-\x1f]", " ", str(container.get(key) or "").strip())[:limit]
+
+    def text_list(value_: Any, limit: int = 8, item_limit: int = 500) -> List[str]:
+        if isinstance(value_, str):
+            value_ = [value_]
+        if not isinstance(value_, list):
+            return []
+        return [
+            re.sub(r"[\x00-\x1f]", " ", str(item).strip())[:item_limit]
+            for item in value_[:limit]
+            if str(item or "").strip()
+        ]
+
+    visual = parsed.get("visual_system") if isinstance(parsed.get("visual_system"), dict) else {}
+    palette = visual.get("palette") if isinstance(visual.get("palette"), dict) else {}
+    sources = []
+    for item in parsed.get("sources") or []:
+        if not isinstance(item, dict):
+            continue
+        source = {
+            "publication_or_brand": text_field(item, "publication_or_brand", 160),
+            "case_or_campaign": text_field(item, "case_or_campaign", 240),
+            "url": text_field(item, "url", 500),
+            "why_relevant": text_field(item, "why_relevant", 500),
+        }
+        if source["publication_or_brand"] or source["case_or_campaign"]:
+            sources.append(source)
+    visual_system = {
+        "palette": {
+            "dominant": text_field(palette, "dominant", 260),
+            "secondary": text_field(palette, "secondary", 260),
+            "accent": text_field(palette, "accent", 260),
+            "ratios": text_field(palette, "ratios", 220),
+            "contrast": text_field(palette, "contrast", 260),
+            "light_color": text_field(palette, "light_color", 260),
+        },
+        "color_grade": text_field(visual, "color_grade", 700),
+        "styling": text_field(visual, "styling", 800),
+        "lighting": text_field(visual, "lighting", 800),
+        "materials": text_field(visual, "materials", 800),
+        "camera_and_composition": text_field(visual, "camera_and_composition", 900),
+        "environment_and_motion": text_field(visual, "environment_and_motion", 900),
+        "typography_and_negative_space": text_field(visual, "typography_and_negative_space", 700),
+        "finish": text_field(visual, "finish", 700),
+        "anti_generic_rules": text_list(visual.get("anti_generic_rules"), 10, 400),
+    }
+    summary = text_field(parsed, "summary", 1800) or str(value or "").strip()[:1800]
+    methods = text_list(parsed.get("transferable_methods"), 10, 600)
+    do_not_copy = text_list(parsed.get("do_not_copy"), 10, 400)
+    return {
+        "summary": summary,
+        "sources": sources[:8],
+        "visual_system": visual_system,
+        "transferable_methods": methods,
+        "do_not_copy": do_not_copy,
+    }
+
+
+async def enrich_lookbook_reference_analysis(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """先分析人物/商品的可见事实，再把事实交给后续案例检索，避免搜索阶段脱离素材。"""
+    options = dict(snapshot.get("options") or {})
+    if snapshot.get("operation") != "universal" or str(options.get("prompt_policy") or "").strip().lower() != "lookbook":
+        return snapshot, None
+    if str(options.get("lookbook_reference_analysis") or "").strip():
+        return snapshot, {"status": "provided", "summary": str(options["lookbook_reference_analysis"])[:8000]}
+    route = configured_ecommerce_vision_route()
+    images = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
+    if not route or not images:
+        return snapshot, {"status": "skipped", "reason": "没有可分析的参考图或视觉模型"}
+    labels = [
+        f"{str(item.get('lookbook_role') or item.get('label') or '参考素材').strip()}：{str(item.get('name') or '')[:100]}"
+        for item in (snapshot.get("inputs") or [])
+        if str(item.get("url") or "").strip()
+    ][:12]
+    request = CanvasLLMRequest(
+        message=(
+            "请先分析本次 Lookbook 参考图，只记录图片中确实可见的事实，供后续时尚案例研究和造型创作使用。"
+            "重点拆解人物身份连续性、面部特征、发型、肤色与表情、体态和穿着层次（廓形、面料、颜色、鞋包配饰）、"
+            "现有造型气质、可延展的动作和环境线索；不要美化、臆测品牌，不要替人物换衣，不要把不存在的商品写进去。"
+            "输出 JSON，不要 Markdown："
+            '{"identity":"","face":"","hair":"","body_and_pose":"","wardrobe":"","silhouette_and_material":"",'
+            '"visible_palette":"","current_mood":"","street_editorial_opportunities":[""],"preserve_facts":[""]}'
+        ),
+        system_prompt="你是严谨的时尚造型与人物参考分析师。只依据所见事实，输出严格 JSON。",
+        provider=route["provider_id"], model=route["model"], images=images, image_labels=labels, web_search=False, retry_524=1,
+    )
+    try:
+        result = await canvas_llm(request)
+        text = str(result.get("text") or "").strip()[:12000]
+        if not text:
+            return snapshot, {"status": "failed", "reason": "参考图分析未返回内容"}
+        options["lookbook_reference_analysis"] = text
+        return {**snapshot, "options": options}, {"status": "succeeded", "summary": text}
+    except Exception as exc:
+        return snapshot, {"status": "failed", "reason": str(exc)[:240]}
+
+
 async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
-    """Lookbook 生成前用同一电商视觉路由检索公开案例，只保留可迁移的方法摘要。"""
+    """Lookbook 生成前检索高质量编辑案例，并提取结构化色彩/摄影/造型方法。"""
     options = dict(snapshot.get("options") or {})
     if snapshot.get("operation") != "universal" or str(options.get("prompt_policy") or "").strip().lower() != "lookbook":
         return snapshot, None
@@ -16407,24 +16544,44 @@ async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, An
         return snapshot, {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     query = str(options.get("instruction") or "时尚 Lookbook 平面广告").strip()[:4000]
-    style_prompt = str(style.get("prompt") or style.get("name") or "").strip()[:1000]
+    style_prompt = str(style.get("prompt") or style.get("name") or "").strip()[:1400]
+    reference_analysis = str(options.get("lookbook_reference_analysis") or "").strip()[:7000]
+    research_depth = str(options.get("lookbook_research_depth") or "deep").strip().lower()
+    depth_hint = "进行至少 4 组交叉检索，优先返回有明确来源的案例" if research_depth == "deep" else "进行 2-3 组针对性检索"
     request = CanvasLLMRequest(
         message=(
-            "请使用联网搜索，检索与以下 Lookbook 时尚平面广告创意和视觉风格相关的优秀公开案例。"
-            "只输出可迁移的方法总结：构图层级、镜头/景别、布光、材质呈现、色彩、版式和商业传播策略；"
-            "不要复制案例主体、品牌、人物、场景、原文或虚构来源。\n"
-            f"创意需求：{query}\n选定风格：{style_prompt or '高级时尚编辑'}"
+            f"请使用联网搜索，{depth_hint}，检索与以下 Lookbook 时尚大片创意、人物造型和视觉风格相关的优秀公开案例。"
+            f"{LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE}"
+            "把搜索结果转化成可执行的视觉系统，尤其要给出具体颜色/色相、明度和饱和度关系、色彩比例、光色与肤色处理，"
+            "以及造型层次、面料表现、城市环境、动作生命力、镜头构图、版式留白和后期/印刷质感。"
+            "输出严格 JSON，不要 Markdown，结构必须是："
+            '{"sources":[{"publication_or_brand":"","case_or_campaign":"","url":"","why_relevant":""}],'
+            '"visual_system":{"palette":{"dominant":"","secondary":"","accent":"","ratios":"","contrast":"","light_color":""},'
+            '"color_grade":"","styling":"","lighting":"","materials":"","camera_and_composition":"",'
+            '"environment_and_motion":"","typography_and_negative_space":"","finish":"","anti_generic_rules":[""]},'
+            '"transferable_methods":[""],"do_not_copy":[""],"summary":""}.\n'
+            f"创意需求：{query}\n选定风格：{style_prompt or '高级时尚编辑'}\n"
+            f"参考图事实分析（必须围绕这些人物/服装事实研究）：{reference_analysis or '尚未提供，按用户需求研究'}"
         ),
-        system_prompt="你是 Lookbook 视觉研究助手。联网后输出 500 字以内的方法摘要，内容要可直接供图片生成模型吸收。",
+        system_prompt="你是顶级时尚杂志视觉研究主编与色彩总监。必须实际使用联网搜索；只输出严格 JSON；来源不确定就省略，不得编造。",
         provider=route["provider_id"], model=route["model"], web_search=True, retry_524=1,
     )
     try:
         result = await canvas_llm(request)
-        text = str(result.get("text") or "").strip()[:12000]
+        text = str(result.get("text") or "").strip()[:16000]
         if not text:
             return snapshot, {"status": "failed", "reason": "联网搜索未返回摘要"}
-        options["search_context"] = text
-        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, {"status": "succeeded", "summary": text}
+        research = normalize_lookbook_visual_research(text)
+        compact_context = "\n".join(
+            [
+                str(research.get("summary") or "").strip(),
+                *[f"可迁移方法：{item}" for item in research.get("transferable_methods") or []],
+                *[f"禁止复制：{item}" for item in research.get("do_not_copy") or []],
+            ]
+        ).strip()
+        options["search_context"] = (compact_context or text)[:7000]
+        options["lookbook_visual_system"] = research.get("visual_system") or {}
+        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, {"status": "succeeded", "summary": research.get("summary") or text, "visual_system": research.get("visual_system") or {}, "sources": research.get("sources") or []}
     except Exception as exc:
         return snapshot, {"status": "failed", "reason": str(exc)[:240]}
 
@@ -16446,13 +16603,16 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
     request = CanvasLLMRequest(
         message=(
             "请为 Lookbook 平面广告生成一份可直接执行的 art direction 方案。"
-            "综合用户需求、选定视觉风格、联网案例方法和参考图片，输出 600 字以内的结构化方案，必须包含："
-            "主体与商品事实、系列叙事、主视觉构图、镜头/景别变化、场景与道具、布光、色彩、材质细节、版式留白、"
-            "品牌文字约束、负面约束和多张图片的一致性规则。不要虚构品牌事实，不要复制案例。\n"
+            "综合用户需求、选定视觉风格、参考图事实、联网案例方法和色彩系统，输出 900 字以内的结构化方案，必须包含："
+            "人物面貌与现有穿着事实、系列叙事、主视觉构图、镜头/景别变化、真实城市环境与动作生命力、场景与道具、"
+            "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
+            "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
+            "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
             f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
-            f"案例方法摘要：{str(options.get('search_context') or '')[:6000]}"
+            f"参考图事实分析：{str(options.get('lookbook_reference_analysis') or '')[:7000]}\n"
+            f"案例方法与色彩系统：{str(options.get('search_context') or '')[:8000]}"
         ),
-        system_prompt="你是资深时尚广告创意总监与视觉统筹。请给出具体、可执行、可交给图片模型的方案，不要泛泛而谈。",
+        system_prompt="你是资深时尚广告创意总监、造型总监与色彩总监。请给出具体、可执行、可交给图片模型的方案；拒绝泛泛的‘高级、质感、大片’形容词。",
         provider=route["provider_id"], model=route["model"], images=images, image_labels=labels, web_search=False, retry_524=1,
     )
     try:
@@ -16514,6 +16674,8 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         message=(
             "请作为时尚广告终审，逐张检查 Lookbook 输出，并与原始参考和创意方案比较。"
             "检查人物身份与人体、商品结构和颜色、材质纹理、Logo/文字拼写、姿态、场景、版式留白、光影透视、商业完成度和系列一致性。"
+            "对街景/时尚编辑风格额外检查：是否有具体城市环境、前后景层次、自然动作或态度、明确色彩关系和有动机的镜头感；"
+            "白底棚拍、空洞渐变背景、静止证件照式站姿或普通商品目录构图应判为弱图并给出替换指令。"
             "输出严格 JSON，不要 Markdown："
             '{"passed":true,"score":0,"weak_indices":[0],"issues":["问题"],"corrections":{"0":"具体修复指令"},"summary":"总结"}。'
             "score 为 0-100；达到 82 且没有明显瑕疵才 passed=true；weak_indices 必须是从 0 开始的输出编号。\n"
@@ -16606,6 +16768,9 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
 
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
+    snapshot, lookbook_reference_analysis = await enrich_lookbook_reference_analysis(snapshot)
+    if lookbook_reference_analysis is not None:
+        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "lookbook_reference_analysis": lookbook_reference_analysis, "request": snapshot})
     snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
     if lookbook_research is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})

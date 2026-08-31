@@ -16,10 +16,18 @@ class LookbookNodeFrontendTests(unittest.TestCase):
 
     def test_builtin_visual_skill_set_is_available_without_network(self):
         self.assertIn("VISUAL_SKILLS_IMAGE_URL = 'https://github.com/smixs/visual-skills/tree/main/image'", self.lookbook)
-        for style_id in ("visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
+        for style_id in ("fashion-street-editorial", "visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
             self.assertIn(f"id:'{style_id}'", self.lookbook)
         self.assertIn("skill:'image'", self.lookbook)
         self.assertIn("CC BY 4.0", self.lookbook)
+
+    def test_premium_editorial_research_controls_are_submitted(self):
+        self.assertIn("name:'时尚街景'", self.lookbook)
+        self.assertIn("lookbookResearchDepth", self.lookbook)
+        self.assertIn("研究深度", self.lookbook)
+        self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
+        self.assertIn("lookbook_research_depth:node.lookbookResearchDepth || 'deep'", self.canvas)
+        self.assertIn("node.lookbookResearchStatus = String(task.lookbook_research.status)", self.canvas)
 
     def test_title_provider_only_owns_lookbook_nodes(self):
         self.assertIn("title:type=>type===TYPE ? 'Lookbook 平面广告' : ''", self.lookbook)
@@ -69,13 +77,14 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.7", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.8", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)
         self.assertIn("feature=picker-dialog-top-layer.1", self.html)
+        self.assertIn("feature=premium-editorial-research.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertIn("const hasOutputs=node.generatedOutputs.some(outputUrl)", self.lookbook)

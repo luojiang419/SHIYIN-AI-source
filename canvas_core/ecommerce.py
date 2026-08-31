@@ -1444,6 +1444,12 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
         research = str(options.get("search_context") or "").strip()
         plan = str(options.get("lookbook_plan") or "").strip()
+        reference_analysis = str(options.get("lookbook_reference_analysis") or "").strip()
+        visual_system = options.get("lookbook_visual_system")
+        if isinstance(visual_system, dict):
+            visual_system_text = json.dumps(visual_system, ensure_ascii=False, separators=(",", ":"))[:12000]
+        else:
+            visual_system_text = str(visual_system or "").strip()[:12000]
         count = max(1, min(4, int(options.get("lookbook_count") or 1)))
         reference_lines = []
         for index, item in enumerate(normalized, 1):
@@ -1455,6 +1461,9 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
             f"USER CREATIVE BRIEF: {user_line}.",
             f"SELECTED VISUAL STYLE SKILL{(' ' + style_name) if style_name else ''}: {style_prompt or 'high-end fashion editorial with clean art direction'}.",
+            "EDITORIAL QUALITY DIRECTIVE: build a distinct fashion image with a point of view, lived-in atmosphere and deliberate art direction. Avoid generic catalog staging, default white seamless backdrops, empty gray studios, passport-like posing, centered product cutouts, stock-photo smiles, random luxury props and unmotivated gradient backgrounds.",
+            "COLOR DIRECTION: use a finite, intentional palette with a dominant field, supporting color and one controlled accent. Preserve the reference subject's true skin tone and garment identity while grading the environment, shadows, highlights and wardrobe relationships as one coherent fashion image; no muddy gray wash, candy-color overload or random color shifts between frames.",
+            "FASHION PHOTOGRAPHY FINISH: favor a real editorial situation with depth, foreground/background layering, directional or available light, subtle motion in fabric/hair and believable contact with the environment. Use restrained filmic grain, halation, print texture or flash character only when supported by the selected style and research; never use generic 8k/best-quality filler as a substitute for decisions.",
             "Use connected reference images as factual sources for product identity, material, color, logo, model identity and scene wherever visible; do not invent or distort branded details.",
             "Create a finished standalone image suitable for a fashion lookbook cover or hero advertisement. Do not add watermarks, random text, UI elements, borders or unrelated products.",
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
@@ -1468,17 +1477,22 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         if "人物" in semantic_roles and "商品" in semantic_roles:
             parts.append("PERSON-PRODUCT ASSEMBLY LOCK: use the connected 人物 image as the final person's identity, face, body, hair, anatomy and natural base composition. Use the connected 商品 image as the sole source of the exact SKU. Compose them as one intentional commercial relationship: wear the product when it is apparel or an accessory, hold or place it naturally when it is an object, and never show the person and product as unrelated cutouts. Preserve the product's silhouette, material, color, Logo and readable text; do not replace the person's identity with the product reference wearer.")
         elif "人物" in semantic_roles:
-            parts.append("PERSON PRESERVATION LOCK: use the connected 人物 image as the final person's identity, body, hair, anatomy and natural expression. Do not replace the person with a newly invented model unless the user explicitly asks for it.")
+            parts.append("PERSON-ONLY EDITORIAL LOCK: first preserve and accurately reinterpret the connected 人物 image's face, identity, skin tone, hair, body proportions, expression and existing clothing layers, silhouette, colors, footwear and accessories. The wardrobe reference is the styling foundation; do not replace it with generic fashion or a newly invented model unless the user explicitly asks. Build a lived-in fashion editorial around this person: choose an intentional urban location, time of day, weather/light condition, walking or interacting gesture, foreground depth and a responsive camera moment. For street fashion, show movement, attitude and environmental context rather than a blank studio pose.")
         elif "商品" in semantic_roles:
             parts.append("PRODUCT HERO LOCK: use the connected 商品 image as the exact SKU source and make it the visual hero. Do not invent a person unless the user explicitly requests one.")
         if "姿态" in semantic_roles:
             parts.append("POSE AND CAMERA REFERENCE LOCK: use the connected pose image only for body action, gesture, camera viewpoint, crop and subject placement; do not copy its identity, clothing, products or background.")
         if "版式" in semantic_roles:
             parts.append("LAYOUT REFERENCE LOCK: use the connected layout image only for composition hierarchy, negative space, balance, crop and text-safe regions; do not copy its brand, subject or literal text.")
+        if reference_analysis:
+            parts.append("REFERENCE FACT ANALYSIS (facts first; preserve identity and existing wardrobe unless the user explicitly overrides): " + reference_analysis[:10000])
+        if visual_system_text:
+            parts.append("RESEARCHED EDITORIAL VISUAL SYSTEM (execute these decisions, do not mention the research or copy any named campaign): " + visual_system_text)
         if research:
-            parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects or wording): " + research[:12000])
+            parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects, brands, logos, locations or wording): " + research[:14000])
         if plan:
-            parts.append("CREATIVE DIRECTOR PLAN (follow as the execution authority): " + plan[:12000])
+            parts.append("CREATIVE DIRECTOR PLAN (follow as the execution authority; it overrides generic defaults): " + plan[:14000])
+        parts.append("ANTI-ORDINARY CHECK: before finalizing, verify that the image has a specific place, time/light, palette relationship, styling intention, physical gesture and editorial camera choice. If any are missing, redesign the frame; do not fall back to white-background studio photography.")
         return " ".join(parts)
     reference_map = build_ordered_reference_map(normalized)
     if instruction and operation != "universal":

@@ -9933,8 +9933,13 @@ function completeEcommerceLookbookTask(taskId, task){
     out._pending = (out._pending || []).filter(item => item.id !== pending.id);
     appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
     if(node){
+        const referenceAnalysis = task.lookbook_reference_analysis?.summary || task.options?.lookbook_reference_analysis;
+        if(referenceAnalysis) node.lookbookReferenceAnalysis = String(referenceAnalysis).slice(0,12000);
         const research = task.lookbook_research?.summary || task.result?.lookbook_research?.summary;
         if(research) node.lookbookResearch = String(research).slice(0,12000);
+        const researchVisualSystem = task.lookbook_research?.visual_system || task.options?.lookbook_visual_system;
+        if(researchVisualSystem) node.lookbookVisualSystem = researchVisualSystem;
+        if(task.lookbook_research?.status) node.lookbookResearchStatus = String(task.lookbook_research.status);
         const plan = task.lookbook_plan?.summary || task.options?.lookbook_plan || task.result?.lookbook_plan?.summary;
         if(plan) node.lookbookPlan = String(plan).slice(0,12000);
         const qualityGate = task.result?.lookbook_quality_gate;
@@ -10099,12 +10104,12 @@ async function runLookbookNode(nodeId, opts={}){
             canvasTaskType:'ecommerce-lookbook', providerId:'', model:'', appendGenerated:true, lookbookCount:count,
         })];
     }
-    node.running = true; node.runError = ''; if(!opts.cascade) node.runStatus = 'running';
+    node.running = true; node.runError = ''; node.lookbookResearchStatus = node.lookbookSearch !== false ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
     refreshRunNodes(node,out);
     if(!opts.cascade) setTimeout(() => { if(nodes.includes(node)) { node.running = false; refreshRunNodes(node,out); } }, 2000);
     const request = {
         operation:'universal', mode:'standard', inputs,
-        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:count},
+        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_research_depth:node.lookbookResearchDepth || 'deep', lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:count},
         provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
     };
     try {

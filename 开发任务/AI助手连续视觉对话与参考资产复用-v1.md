@@ -1,12 +1,12 @@
 # AI助手连续视觉对话与参考资产复用
 
-状态：核心功能完成，待持续优化
+状态：核心功能完成，Responses 视觉编辑链路修复完成，待持续优化
 当前阶段：5/5
 最后更新：2026-08-31
 
 ## 当前状态
 
-已完成当前项目结构、AI 助手前后端调用链和已有图片预览/拖拽能力的基线检查。当前分支为 `feat/storyboard-merge-node`，工作区在开发前保持干净。
+已完成当前项目结构、AI 助手前后端调用链和已有图片预览/拖拽能力的基线检查。当前分支为 `feat/storyboard-merge-node`。本轮修复了 Responses 原生协议下历史 `assistant` 消息错误使用 `input_text` 导致图片编辑请求被上游拒绝的问题。
 
 现有 AI 助手已经支持对话持久化、附件上传/粘贴/文件拖拽、Agent 意图路由、图片生成和上一张图片编辑；本轮已补充生成图片卡片操作、内部生成图拖拽、共享预览缩放平移，以及后端批量图片资产基础记录。
 
@@ -31,14 +31,15 @@
 - [x] 自动引用预览、确认和手动调整。
 - [x] 多图批量复用。
 - [x] 兼容不同图片供应商的多图参考能力提示。
+- [x] Responses 历史 assistant 消息使用合法的 `output_text` 内容类型。
 
 ## 最近验证状态
 
 - 静态检查：`git diff --check` 通过；gpt-chat 内联 JS 语法通过。
-- 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_generated_image_browser_cache.py tests/test_focus_guard.py tests/test_performance_contracts.py -q`，30 passed。
+- 单元测试：Responses 协议回归测试 `python -m pytest tests/test_responses_protocol.py tests/test_responses_transport.py -q`，21 passed；此前连续视觉回归 30 passed。
 - 编译：`python -m py_compile main.py` 通过。
 - 运行测试：接口手动冒烟被项目现有账号鉴权拦截（401），未判定为功能通过；完整桌面运行冒烟尚未启动。
-- 最近 Git commit：`d800f4c feat: add continuous visual chat references`。
+- 最近 Git commit：`5a237ef feat: 完善多角度节点3D参考图`（包含本轮 Responses 内容类型修复）。
 
 ## 任务目标
 
@@ -112,6 +113,8 @@
 - `main.py`：新增 `ChatReferencePrepareRequest`、`resolve_chat_reference_candidates` 和 `/api/chat/prepare`，保留普通生图不静默带入历史图的安全边界。
 - `main.py`：Agent 在复合编辑意图下自动选择多张历史资产，并记录 `reference_resolution`；补充供应商多参考图能力提示。
 - `static/gpt-chat.html`：Agent 自动引用预检和二次确认，普通发送路径保持兼容。
+- `main.py`：按 `user`/`assistant` 角色生成 Responses 内容类型，历史 assistant 文本改为 `output_text`，并跳过 assistant 中不被 Responses 接受的视觉/视频片段。
+- `tests/test_responses_protocol.py`：更新 Responses 历史 assistant 消息协议断言，防止 `input_text` 回归。
 
 ## 已知问题
 
@@ -128,6 +131,7 @@
 - 2026-08-31：完成参考图托盘元数据、锁定和自动找图准备接口；相关回归测试 27 项通过。
 - 2026-08-31：完成 Agent 复合编辑自动多图引用、供应商能力提示和批量全部复用；相关回归测试 30 项通过。
 - 2026-08-31：完成自动引用发送前预检与二次确认；预检失败回退旧链路，相关回归测试 30 项通过。
+- 2026-08-31：修复图片编辑请求触发的 Responses `input_text` 校验错误；Responses 协议测试 21 项通过。
 
 ## 接力信息
 

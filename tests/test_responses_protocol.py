@@ -177,7 +177,7 @@ class ResponsesProtocolTests(unittest.TestCase):
         self.assertEqual(body["instructions"], "system rule")
         self.assertEqual(
             body["input"][0],
-            {"role": "assistant", "content": [{"type": "input_text", "text": "previous answer"}]},
+            {"role": "assistant", "content": [{"type": "output_text", "text": "previous answer"}]},
         )
         self.assertEqual(body["input"][1]["content"][0], {"type": "input_text", "text": "describe"})
         self.assertEqual(

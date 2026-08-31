@@ -672,10 +672,10 @@ pub fn run() {
             let url: tauri::Url = format!("http://127.0.0.1:{}/api/auth/bootstrap", config.port).parse().map_err(|e| boxed_error(format!("URL 错误：{e}")))?;
             let placement_path = data_root.join("config").join("window.json");
             let placement = fs::read_to_string(placement_path).ok().and_then(|raw| serde_json::from_str::<WindowPlacement>(&raw).ok()).unwrap_or_default();
-            // HTML 使用 no-cache，静态资源 URL 在打包阶段写入版本号，因此 WebView 配置可跨版本复用。
-            // 这会避免每次升级都重新创建浏览器配置，并在首屏完成后回收旧的纯版本号缓存目录。
+            // 按版本隔离 WebView 配置，避免 WebView2 会话恢复旧版本中包含一次性
+            // bootstrap token 的页面。静态资源 URL 仍带版本号，启动后可安全复用当前版本缓存。
             let webview_root = data_root.join("cache").join("webview2");
-            let webview_data_root = webview_root.join("shared");
+            let webview_data_root = webview_root.join(env!("CARGO_PKG_VERSION"));
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title(APP_DISPLAY_NAME)
                 .min_inner_size(960.0, 640.0)

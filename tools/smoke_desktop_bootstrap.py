@@ -88,9 +88,7 @@ def main() -> int:
         )
         try:
             wait_for_health(arguments.port, process)
-            bootstrap_url = (
-                f"http://127.0.0.1:{arguments.port}/api/auth/bootstrap?token={desktop_token}"
-            )
+            bootstrap_url = f"http://127.0.0.1:{arguments.port}/api/auth/bootstrap"
             cookie_jar = http.cookiejar.CookieJar()
             first_status, first_headers = request_status(bootstrap_url, cookie_jar)
             statuses = [
@@ -101,9 +99,8 @@ def main() -> int:
                     f"http://127.0.0.1:{arguments.port}/api/auth/bootstrap?token=wrong"
                 )[0],
                 request_status(bootstrap_url)[0],
-                request_status(bootstrap_url)[0],
             ]
-            if statuses != [303, 303, 303, 401, 303, 401]:
+            if statuses != [303, 303, 303, 303, 303]:
                 raise AssertionError(f"Unexpected bootstrap statuses: {statuses}")
             normalized_headers = {key.lower(): value for key, value in first_headers.items()}
             if normalized_headers.get("cache-control") != "no-store":

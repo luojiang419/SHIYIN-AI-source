@@ -56,5 +56,5 @@
         {role:'lookbook-pose',label:'姿态',title:'连接人物姿态、动作或镜头机位参考图'},
         {role:'lookbook-layout',label:'版式',title:'连接广告版式、留白或构图参考图'},
     ];
-    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:()=>INPUT_PORTS.map(item=>({...item})),title:()=> 'Lookbook 平面广告',size:()=>({w:430,h:0}),normalize,createNode,bodyHtml,bind,mediaRefs};
+    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:()=>INPUT_PORTS.map(item=>({...item})),title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:()=>({w:430,h:0}),normalize,createNode,bodyHtml,bind,mediaRefs};
 })();

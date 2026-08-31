@@ -21,6 +21,10 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("skill:'image'", self.lookbook)
         self.assertIn("CC BY 4.0", self.lookbook)
 
+    def test_title_provider_only_owns_lookbook_nodes(self):
+        self.assertIn("title:type=>type===TYPE ? 'Lookbook 平面广告' : ''", self.lookbook)
+        self.assertIn("const title = lookbookTitle || ecommerceTitle || filmTitle", self.canvas)
+
     def test_style_picker_has_source_attribution_and_selectable_buttons(self):
         self.assertIn('data-lookbook-choose', self.lookbook)
         self.assertIn('data-lookbook-select', self.lookbook)
@@ -47,6 +51,8 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%", self.canvas)
         self.assertIn(".lookbook-node .port.in { left:-29px; top:var(--canvas-port-top,50%); }", self.css)
         self.assertIn(".lookbook-node .port.in::before { content:attr(data-role-label);", self.css)
+        self.assertIn(".lookbook-node .node-body { padding-left:74px; }", self.css)
+        self.assertIn("left:calc(100% + 7px); right:auto", self.css)
         self.assertIn("white-space:nowrap", self.css)
         self.assertIn("aria-label=\"${escapeAttr(`输入端口：${port.label}`)}\"", self.canvas)
 
@@ -57,8 +63,8 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.3", self.html)
-        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.3", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.4", self.html)
+        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
 

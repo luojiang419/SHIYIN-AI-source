@@ -438,7 +438,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "1.0.380"
+APP_VERSION = "1.0.381"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -2889,14 +2889,17 @@ def desktop_bootstrap(request: Request, token: str = ""):
     if existing_identity and existing_identity.is_admin:
         return RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
 
-    try:
-        AUTH_MANAGER.consume_desktop_token(token)
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=401,
-            detail=str(exc),
-            headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS,
-        ) from exc
+    # 桌面模式只接受 loopback，启动页不再依赖 URL 中的一次性令牌，
+    # 避免 WebView 恢复导航时重复消费令牌。源代码/浏览器模式仍保留令牌校验。
+    if RUNTIME_OPTIONS.mode != "desktop":
+        try:
+            AUTH_MANAGER.consume_desktop_token(token)
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail=str(exc),
+                headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS,
+            ) from exc
     identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
     session_token = ACCOUNT_STORE.create_session(identity, ttl_seconds=12 * 60 * 60)
     response = RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)

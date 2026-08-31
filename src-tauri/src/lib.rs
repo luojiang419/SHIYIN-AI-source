@@ -667,7 +667,9 @@ pub fn run() {
                 return Err(boxed_error(error));
             }
             app.manage(DesktopState { backend: Mutex::new(Some(child)), quitting: AtomicBool::new(false), data_root: data_root.clone(), desktop_token: token.clone(), port: config.port, portable_root: root, update_busy: Arc::new(Mutex::new(false)) });
-            let url: tauri::Url = format!("http://127.0.0.1:{}/api/auth/bootstrap?token={token}", config.port).parse().map_err(|e| boxed_error(format!("URL 错误：{e}")))?;
+            // 桌面模式的 bootstrap 固定使用本机地址，不把一次性启动令牌放进 WebView URL。
+            // 这样 WebView 恢复导航或重复加载时不会因旧 URL 令牌失效而显示 401 JSON。
+            let url: tauri::Url = format!("http://127.0.0.1:{}/api/auth/bootstrap", config.port).parse().map_err(|e| boxed_error(format!("URL 错误：{e}")))?;
             let placement_path = data_root.join("config").join("window.json");
             let placement = fs::read_to_string(placement_path).ok().and_then(|raw| serde_json::from_str::<WindowPlacement>(&raw).ok()).unwrap_or_default();
             // HTML 使用 no-cache，静态资源 URL 在打包阶段写入版本号，因此 WebView 配置可跨版本复用。

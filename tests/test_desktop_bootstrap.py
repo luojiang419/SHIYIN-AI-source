@@ -15,7 +15,7 @@ class DesktopBootstrapTests(unittest.TestCase):
 from fastapi.testclient import TestClient
 import main
 
-url = "/api/auth/bootstrap?token=desktop-test-token"
+url = "/api/auth/bootstrap"
 with TestClient(main.app, client=("127.0.0.1", 50000)) as client:
     first = client.get(url, follow_redirects=False)
     assert first.status_code == 303, first.text
@@ -32,12 +32,12 @@ for retry_index in range(64):
         assert no_cookie_retry.status_code == 303, no_cookie_retry.text
 
 with TestClient(main.app, client=("127.0.0.1", 50080)) as exhausted_client:
-    exhausted = exhausted_client.get(url, follow_redirects=False)
-    assert exhausted.status_code == 401, exhausted.text
+    desktop_retry = exhausted_client.get(url, follow_redirects=False)
+    assert desktop_retry.status_code == 303, desktop_retry.text
 
 with TestClient(main.app, client=("127.0.0.1", 50002)) as wrong_client:
     wrong = wrong_client.get("/api/auth/bootstrap?token=wrong", follow_redirects=False)
-    assert wrong.status_code == 401, wrong.text
+    assert wrong.status_code == 303, wrong.text
     assert wrong.headers["cache-control"] == "no-store", wrong.headers
     assert wrong.headers["referrer-policy"] == "no-referrer", wrong.headers
 

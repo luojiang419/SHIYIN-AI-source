@@ -9850,7 +9850,7 @@ async function runEcommerceComposeNode(nodeId, opts={}){
 }
 function lookbookConnectedInputs(node){
     const entries = connections.filter(connection => connection.to === node.id).map(connection => ({connection,source:nodes.find(item => item.id === connection.from)})).filter(entry => entry.source);
-    const roleLabels = {'lookbook-person':'人物','lookbook-product':'商品','lookbook-scene':'场景','lookbook-material':'材质','lookbook-logo':'Logo'};
+    const roleLabels = {'lookbook-person':'人物','lookbook-product':'商品','lookbook-scene':'场景','lookbook-material':'材质','lookbook-logo':'Logo','lookbook-pose':'姿态','lookbook-layout':'版式'};
     const refs = [];
     entries.forEach(entry => mediaRefsFromNode(entry.source).forEach((ref,index) => refs.push({
         ...ref,
@@ -21049,7 +21049,7 @@ function canConnect(fromId, toId, inputRole=''){
         return allowed.includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'lookbook'){
-        const lookbookRoles = new Set(['lookbook-person','lookbook-product','lookbook-scene','lookbook-material','lookbook-logo']);
+        const lookbookRoles = new Set(['lookbook-person','lookbook-product','lookbook-scene','lookbook-material','lookbook-logo','lookbook-pose','lookbook-layout']);
         if(inputRole && !lookbookRoles.has(inputRole)) return false;
         return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }

@@ -1458,9 +1458,17 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             "Use connected reference images as factual sources for product identity, material, color, logo, model identity and scene wherever visible; do not invent or distort branded details.",
             "Create a finished standalone image suitable for a fashion lookbook cover or hero advertisement. Do not add watermarks, random text, UI elements, borders or unrelated products.",
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
+            "PRE-DELIVERY QUALITY GATE: inspect the planned render before finalizing for correct anatomy, clean product edges, exact Logo and text, faithful material texture, coherent contact shadows, believable perspective, intentional negative space and commercial advertising polish. Reject obvious defects and regenerate the weak frame when possible.",
         ]
         if reference_lines:
             parts.append("SEMANTIC INPUT MAP: " + " ".join(reference_lines))
+        semantic_roles = {str(item.get("lookbook_role") or "").strip() for item in normalized}
+        if "Logo" in semantic_roles:
+            parts.append("LOGO AND BRAND TEXT LOCK: preserve the connected Logo reference exactly, including geometry, proportions, negative space, color, letterforms, spelling, orientation and placement. Never redraw, stylize, mirror, translate or invent brand marks.")
+        if "姿态" in semantic_roles:
+            parts.append("POSE AND CAMERA REFERENCE LOCK: use the connected pose image only for body action, gesture, camera viewpoint, crop and subject placement; do not copy its identity, clothing, products or background.")
+        if "版式" in semantic_roles:
+            parts.append("LAYOUT REFERENCE LOCK: use the connected layout image only for composition hierarchy, negative space, balance, crop and text-safe regions; do not copy its brand, subject or literal text.")
         if research:
             parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects or wording): " + research[:12000])
         if plan:

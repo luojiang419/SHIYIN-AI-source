@@ -46,6 +46,8 @@
         {role:'lookbook-scene',label:'场景',title:'连接场景、空间或背景参考图'},
         {role:'lookbook-material',label:'材质',title:'连接面料、纹理、工艺或材质细节图'},
         {role:'lookbook-logo',label:'Logo',title:'连接 Logo、字标或品牌规范图'},
+        {role:'lookbook-pose',label:'姿态',title:'连接人物姿态、动作或镜头机位参考图'},
+        {role:'lookbook-layout',label:'版式',title:'连接广告版式、留白或构图参考图'},
     ];
     window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:()=>INPUT_PORTS.map(item=>({...item})),title:()=> 'Lookbook 平面广告',size:()=>({w:430,h:0}),normalize,createNode,bodyHtml,bind,mediaRefs};
 })();

@@ -436,6 +436,8 @@ STARTUP_MAINTENANCE_STATE = {
 }
 ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
+ACTIVE_CANVAS_LAST_SEEN = 0.0
+STARTUP_CANVAS_GRACE_SECONDS = 12.0
 APP_VERSION = "1.0.376"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
@@ -510,6 +512,10 @@ async def run_deferred_startup_maintenance():
     failed = False
     try:
         for name, operation in steps:
+            # 用户刚进入画布时让出启动维护的磁盘/SQLite 竞争窗口；超过短暂 grace 后再继续，
+            # 避免维护任务无限期阻塞服务，同时覆盖首屏进入的 p95。
+            while ACTIVE_CANVAS_ID and time.time() - ACTIVE_CANVAS_LAST_SEEN < STARTUP_CANVAS_GRACE_SECONDS:
+                await asyncio.sleep(0.5)
             STARTUP_MAINTENANCE_STATE["current"] = name
             started = time.perf_counter()
             try:
@@ -549,6 +555,8 @@ async def run_deferred_task_recovery():
     try:
         for label, operation in operations:
             try:
+                while ACTIVE_CANVAS_ID and time.time() - ACTIVE_CANVAS_LAST_SEEN < STARTUP_CANVAS_GRACE_SECONDS:
+                    await asyncio.sleep(0.5)
                 await asyncio.to_thread(operation)
                 if operation is load_canvas_video_tasks_from_disk:
                     resume_canvas_video_tasks()
@@ -20164,13 +20172,17 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
 
 @app.get("/api/canvases/{canvas_id}")
 async def get_canvas(canvas_id: str):
+    global ACTIVE_CANVAS_ID, ACTIVE_CANVAS_LAST_SEEN
+    ACTIVE_CANVAS_ID = canvas_id
+    ACTIVE_CANVAS_LAST_SEEN = time.time()
     return {"canvas": load_canvas(canvas_id)}
 
 @app.post("/api/canvases/{canvas_id}/touch")
 async def touch_canvas(canvas_id: str):
     canvas = load_canvas(canvas_id)
-    global ACTIVE_CANVAS_ID
+    global ACTIVE_CANVAS_ID, ACTIVE_CANVAS_LAST_SEEN
     ACTIVE_CANVAS_ID = canvas["id"]
+    ACTIVE_CANVAS_LAST_SEEN = time.time()
     ACTIVE_CANVAS_BY_ACCOUNT[current_account_id()] = canvas["id"]
     save_canvas(canvas, broadcast=False)
     return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}

@@ -2738,3 +2738,54 @@ body.studio-theme-dark .smart-group-member-grab {
     background:color-mix(in srgb,var(--studio-text) 10%,transparent) !important;
     border-bottom-color:var(--studio-border) !important;
 }
+
+/* AI 助手最终主题收口：覆盖 theme.css 中遗留的蓝灰输入与浮层规则。 */
+html body .chat-shell #messageInput,
+html body .chat-shell #systemPromptInput {
+    background:transparent !important;
+    border-color:transparent !important;
+    color:var(--chat-text) !important;
+}
+
+html body .chat-shell #messageInput::placeholder,
+html body .chat-shell #systemPromptInput::placeholder,
+html body .chat-shell textarea::placeholder,
+html body .chat-shell input::placeholder {
+    color:var(--chat-faint) !important;
+    opacity:1 !important;
+}
+
+html body .chat-shell .chat-rail,
+html body .chat-shell .history-popover,
+html body .chat-shell .system-prompt-popover,
+html body .chat-shell .model-picker-popover,
+html body .chat-shell .resolution-picker-popover,
+html body .chat-shell .composer {
+    background:color-mix(in srgb,var(--chat-panel) 96%,transparent) !important;
+    border-color:var(--chat-line) !important;
+    color:var(--chat-text) !important;
+    box-shadow:var(--studio-shadow-raised) !important;
+}
+
+html body .chat-shell .composer-body,
+html body .chat-shell .model-picker-button,
+html body .chat-shell .resolution-picker-button,
+html body .chat-shell .upload-btn,
+html body .chat-shell .thread-item,
+html body .chat-shell .action-btn,
+html body .chat-shell .system-prompt-textarea {
+    background:var(--chat-panel-2) !important;
+    border-color:var(--chat-line) !important;
+    color:var(--chat-text) !important;
+    box-shadow:none !important;
+}
+
+html body .chat-shell .model-picker-option.active,
+html body .chat-shell .model-picker-scope button.active,
+html body .chat-shell .resolution-picker-scope button.active,
+html body .chat-shell .send-btn,
+html body .chat-shell .system-prompt-actions .primary {
+    background:var(--chat-strong) !important;
+    border-color:var(--chat-strong) !important;
+    color:var(--chat-strong-text) !important;
+}

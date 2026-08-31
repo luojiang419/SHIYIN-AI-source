@@ -16448,6 +16448,109 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
     except Exception as exc:
         return snapshot, {"status": "failed", "reason": str(exc)[:240]}
 
+def parse_lookbook_quality_result(text: str, image_count: int) -> Dict[str, Any]:
+    value = str(text or "").strip()
+    value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s*```$", "", value)
+    try:
+        data = json.loads(value)
+    except Exception:
+        match = re.search(r"\{[\s\S]*\}", value)
+        data = json.loads(match.group(0)) if match else {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        score = max(0, min(100, int(round(float(data.get("score") or 0)))))
+    except (TypeError, ValueError):
+        score = 0
+    weak_indices = []
+    for item in data.get("weak_indices") or []:
+        try:
+            index = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= index < image_count and index not in weak_indices:
+            weak_indices.append(index)
+    corrections = data.get("corrections") if isinstance(data.get("corrections"), dict) else {}
+    normalized_corrections = {str(index): str(corrections.get(str(index)) or corrections.get(index) or "修复视觉瑕疵并严格遵守原始 Lookbook 方案")[:1200] for index in weak_indices}
+    passed = bool(data.get("passed")) and score >= 82 and not weak_indices
+    return {
+        "status": "succeeded",
+        "passed": passed,
+        "score": score,
+        "weak_indices": weak_indices,
+        "issues": data.get("issues") if isinstance(data.get("issues"), list) else [],
+        "corrections": normalized_corrections,
+        "summary": str(data.get("summary") or "")[:1000],
+    }
+
+async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) -> Dict[str, Any]:
+    if not images:
+        return {"status": "skipped", "reason": "没有生成结果"}
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
+    references = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
+    reference_labels = [f"原始参考：{str(item.get('lookbook_role') or item.get('label') or item.get('name') or '素材')}" for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
+    output_labels = [f"待验收 Lookbook 输出 {index}（weak_indices 使用这个从 0 开始的编号）" for index in range(len(images))]
+    request = CanvasLLMRequest(
+        message=(
+            "请作为时尚广告终审，逐张检查 Lookbook 输出，并与原始参考和创意方案比较。"
+            "检查人物身份与人体、商品结构和颜色、材质纹理、Logo/文字拼写、姿态、场景、版式留白、光影透视、商业完成度和系列一致性。"
+            "输出严格 JSON，不要 Markdown："
+            '{"passed":true,"score":0,"weak_indices":[0],"issues":["问题"],"corrections":{"0":"具体修复指令"},"summary":"总结"}。'
+            "score 为 0-100；达到 82 且没有明显瑕疵才 passed=true；weak_indices 必须是从 0 开始的输出编号。\n"
+            f"创意方案：{str((snapshot.get('options') or {}).get('lookbook_plan') or '')[:8000]}"
+        ),
+        system_prompt="你是严格的高级时尚广告视觉质检总监。只依据所见输出和参考素材判断，不要猜测，不要输出 JSON 以外内容。",
+        provider=route["provider_id"], model=route["model"], images=[*references, *images], image_labels=[*reference_labels, *output_labels], web_search=False, retry_524=1,
+    )
+    try:
+        result = await canvas_llm(request)
+        return parse_lookbook_quality_result(str(result.get("text") or ""), len(images))
+    except Exception as exc:
+        return {"status": "failed", "reason": str(exc)[:500]}
+
+async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
+    if str(options.get("prompt_policy") or "").strip().lower() != "lookbook" or not bool(options.get("lookbook_quality_gate", True)):
+        return batch, None
+    images = list(batch.get("images") or [])
+    image_items = list(batch.get("image_items") or [])
+    initial = await analyze_lookbook_outputs(snapshot, images)
+    max_retries = max(0, min(1, int(options.get("lookbook_max_retries") or 1)))
+    weak_indices = list(initial.get("weak_indices") or [])[:2] if initial.get("status") == "succeeded" else []
+    retry_details = []
+    if not initial.get("passed") and weak_indices and max_retries:
+        for index in weak_indices:
+            correction = str((initial.get("corrections") or {}).get(str(index)) or "修复该画面的全部明显质量问题")
+            refined = await execute_ai_image_batch(
+                prompt=(snapshot["prompt"] + f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style and series-continuity attributes."),
+                provider_id=route["provider_id"], model=route["model"], size=snapshot["size"], quality=snapshot["quality"], references=snapshot["inputs"], count=1, prefix="lookbook_repair_", allow_edit_endpoint_fallback=False, semantic_mask=True,
+            )
+            replacement = (refined.get("images") or [""])[0]
+            if replacement:
+                images[index] = replacement
+                replacement_item = (refined.get("image_items") or [{"url": replacement}])[0]
+                if index < len(image_items):
+                    image_items[index] = replacement_item
+                else:
+                    image_items.append(replacement_item)
+                retry_details.append({"index": index, "correction": correction, "replaced": True})
+    final = await analyze_lookbook_outputs(snapshot, images) if retry_details else initial
+    return {
+        **batch,
+        "images": images,
+        "image_items": image_items,
+    }, {
+        "status": "succeeded" if initial.get("status") == "succeeded" else initial.get("status", "failed"),
+        "initial": initial,
+        "retries": retry_details,
+        "final": final,
+        "passed": bool(final.get("passed")),
+        "score": int(final.get("score") or 0),
+    }
+
 async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict[str, Any], route: Dict[str, Any]) -> Dict[str, Any]:
     studio_reference = str((snapshot.get("options") or {}).get("studio_reference") or "").strip()
     if not studio_reference or snapshot.get("operation") == "background_change":
@@ -16604,6 +16707,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     progress_callback=publish_ecommerce_partial,
                 )
                 batch = await apply_selected_studio_background(batch, snapshot, route)
+                batch, lookbook_quality_gate = await improve_lookbook_batch(batch, snapshot, route)
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",
@@ -16631,6 +16735,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "candidate_count": len(batch["images"]),
                     "garment_analysis": garment_analysis,
                     "universal_analysis": universal_analysis,
+                    "lookbook_quality_gate": lookbook_quality_gate,
                     "upstream_task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
                     "request_id": raw.get("id") if isinstance(raw, dict) else None,
                     "generation_started_at": batch["generation_started_at"],

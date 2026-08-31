@@ -9872,7 +9872,7 @@ async function runLookbookNode(nodeId, opts={}){
         const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
         const {taskId,task} = await createAndWaitEcommerceTask({
             operation:'universal', mode:'standard', inputs,
-            options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:Math.max(1,Math.min(4,Number(node.count || 2)))},
+            options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:Math.max(1,Math.min(4,Number(node.count || 2)))},
             provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k',
             quality:node.quality || 'high', count:Math.max(1,Math.min(4,Number(node.count || 2))), parent_task_id:'',
         }, {cascadeTargetId:cascadeTargetIdFromOptions(opts)});
@@ -9882,6 +9882,8 @@ async function runLookbookNode(nodeId, opts={}){
         if(research) node.lookbookResearch = String(research).slice(0,12000);
         const plan = task.lookbook_plan?.summary || task.options?.lookbook_plan || task.result?.lookbook_plan?.summary;
         if(plan) node.lookbookPlan = String(plan).slice(0,12000);
+        const qualityGate = task.result?.lookbook_quality_gate;
+        if(qualityGate){ node.lookbookQualityScore = Number(qualityGate.score || 0); node.lookbookQualityPassed = Boolean(qualityGate.passed); node.lookbookQualityRetries = Array.isArray(qualityGate.retries) ? qualityGate.retries.length : 0; }
         node.ecomTaskId = taskId; node.generatedOutputs = images.map((item,index) => ({url:outputUrlValue(item),name:`lookbook-${index + 1}.png`,kind:'image'}));
         node.runStatus = 'done'; node.runError = ''; syncConnectedOutputsFromGenerated(node,node.generatedOutputs); scheduleSave(); setStatus(`Lookbook 生成完成，共 ${images.length} 张`);
     } catch(error){

@@ -52,7 +52,12 @@ def test_image_prompt_panel_is_lazy_materialized_on_the_image_node():
     assert "bindImageNodeQuickPrompt(node, imagePromptPanel);" in JS
     assert "nodesEl?.addEventListener('pointerover'" in JS
     assert ".selection-hub {" in CSS
-    assert "height:clamp(112px,18vh,160px)" in CSS
+    assert ".image-quick-prompt {" in CSS
+    assert "height:58px; min-height:58px; max-height:120px" in CSS
+    assert ".image-quick-select {" in CSS
+    assert "height:30px" in CSS
+    assert ".image-node-prompt-panel .image-quick-settings { grid-template-columns:repeat(2,minmax(0,1fr)) repeat(2,30px); }" in CSS
+    assert ".image-node-prompt-panel .image-quick-camera span,.image-node-prompt-panel .image-quick-generate span { display:none; }" in CSS
     assert "function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)" in JS
 
 

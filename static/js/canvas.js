@@ -19859,9 +19859,9 @@ function imageNodeQuickPromptHtml(node){
     const running = Boolean(node.running);
     return `<div class="image-quick-compose" data-image-quick-compose>
         <div class="image-quick-compose-head"><span>${node.url ? '编辑图片' : '生成图片'}</span><small>提示词、模型和摄影机设置</small></div>
-        <textarea class="image-quick-prompt" data-image-quick-prompt rows="3" placeholder="描述要生成或修改的内容…">${escapeHtml(node.prompt || '')}</textarea>
+        <textarea class="image-quick-prompt" data-image-quick-prompt rows="2" placeholder="描述要生成或修改的内容…">${escapeHtml(node.prompt || '')}</textarea>
         <div class="image-quick-settings">
-            <select class="image-quick-select" data-image-quick-provider aria-label="图片生成平台">${providerOptions(providerId)}</select>
+            <select class="image-quick-select image-quick-provider" data-image-quick-provider aria-label="图片生成平台">${providerOptions(providerId)}</select>
             <select class="image-quick-select image-quick-model" data-image-quick-model aria-label="图片生成模型">${imageModelOptions(model, providerId)}</select>
             <select class="image-quick-select" data-image-quick-ratio aria-label="输出画幅">${ratioOptions.map(([value,label]) => `<option value="${value}" ${value === ratio ? 'selected' : ''}>${label}</option>`).join('')}</select>
             <select class="image-quick-select" data-image-quick-resolution aria-label="输出分辨率">${resolutionOptions.map(value => `<option value="${value}" ${value === resolution ? 'selected' : ''}>${value === 'auto' ? '自动' : value.toUpperCase()}</option>`).join('')}</select>

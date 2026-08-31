@@ -111,7 +111,7 @@
         "chat.ready": { zh: "就绪", en: "READY" },
         "chat.generated": { zh: "生成完成", en: "Done" },
         "chat.generatingImage": { zh: "正在生成图片...", en: "Generating image..." },
-        "chat.agentWorking": { zh: "正在判断并调用合适的工具...", en: "Choosing the right tool..." },
+        "chat.agentWorking": { zh: "正在执行", en: "Executing" },
         "chat.requestFailed": { zh: "请求失败", en: "Request failed" },
         "chat.chatMode": { zh: "聊天", en: "Chat" },
         "chat.agentMode": { zh: "Agent", en: "Agent" },

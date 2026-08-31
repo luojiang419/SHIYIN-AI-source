@@ -1,21 +1,21 @@
 # AI助手连续视觉对话与参考资产复用
 
-状态：核心功能完成，Responses 视觉编辑链路修复完成，待持续优化
+状态：AI 助手交互增强完成，待桌面运行验收
 当前阶段：5/5
 最后更新：2026-08-31
 
 ## 当前状态
 
-已完成当前项目结构、AI 助手前后端调用链和已有图片预览/拖拽能力的基线检查。当前分支为 `feat/storyboard-merge-node`。本轮修复了 Responses 原生协议下历史 `assistant` 消息错误使用 `input_text` 导致图片编辑请求被上游拒绝的问题。
+已完成当前项目结构、AI 助手前后端调用链和已有图片预览/拖拽能力的基线检查。当前分支为 `feat/storyboard-merge-node`。本轮新增 Agent 执行进度气泡、所有消息右键软删除，并补充手动参考图场景的 Responses 协议回归覆盖。
 
 现有 AI 助手已经支持对话持久化、附件上传/粘贴/文件拖拽、Agent 意图路由、图片生成和上一张图片编辑；本轮已补充生成图片卡片操作、内部生成图拖拽、共享预览缩放平移，以及后端批量图片资产基础记录。
 
 ## 下一步
 
-核心任务已完成；后续如继续优化，建议按以下顺序：
+下一步首先执行：
 
-1. 在登录态桌面环境完成页面运行冒烟。
-2. 增加批量下载 ZIP、对话分支和更强的视觉 embedding 检索。
+1. 关闭现有桌面实例后执行打包版运行冒烟。
+2. 在登录态验证 Agent 进度更新、纯文本气泡删除和图片编辑请求。
 3. 根据实际使用反馈调整候选匹配阈值和确认界面。
 
 ## 当前 TODO
@@ -32,11 +32,14 @@
 - [x] 多图批量复用。
 - [x] 兼容不同图片供应商的多图参考能力提示。
 - [x] Responses 历史 assistant 消息使用合法的 `output_text` 内容类型。
+- [x] Agent 等待期间显示“正在执行”和分阶段执行进度。
+- [x] 纯文本、用户消息和助手消息支持右键删除，继续使用软删除接口。
+- [x] 手动参考图编辑请求补充 Responses assistant 内容类型回归测试。
 
 ## 最近验证状态
 
 - 静态检查：`git diff --check` 通过；gpt-chat 内联 JS 语法通过。
-- 单元测试：Responses 协议回归测试 `python -m pytest tests/test_responses_protocol.py tests/test_responses_transport.py -q`，21 passed；此前连续视觉回归 30 passed。
+- 单元测试：`python -m pytest tests/test_chat_continuity.py tests/test_responses_protocol.py tests/test_responses_transport.py tests/test_chat_ui_contract.py -q`，36 passed；此前连续视觉回归 30 passed。
 - 编译：`python -m py_compile main.py` 通过。
 - 运行测试：接口手动冒烟被项目现有账号鉴权拦截（401），未判定为功能通过；完整桌面运行冒烟尚未启动。
 - 最近 Git commit：`5a237ef feat: 完善多角度节点3D参考图`（包含本轮 Responses 内容类型修复）。
@@ -115,6 +118,10 @@
 - `static/gpt-chat.html`：Agent 自动引用预检和二次确认，普通发送路径保持兼容。
 - `main.py`：按 `user`/`assistant` 角色生成 Responses 内容类型，历史 assistant 文本改为 `output_text`，并跳过 assistant 中不被 Responses 接受的视觉/视频片段。
 - `tests/test_responses_protocol.py`：更新 Responses 历史 assistant 消息协议断言，防止 `input_text` 回归。
+- `static/gpt-chat.html`：Agent 气泡改为“正在执行”并轮换显示执行阶段；普通消息气泡和图片消息文本区增加右键删除入口。
+- `static/js/i18n/studio.js`：更新 `chat.agentWorking` 的中英文文案。
+- `tests/test_chat_continuity.py`：覆盖纯文本消息软删除。
+- `tests/test_chat_ui_contract.py`：覆盖 Agent 执行进度和消息右键删除前端契约。
 
 ## 已知问题
 
@@ -122,6 +129,7 @@
 - 当前自动引用采用轻量关键词/实体匹配，不是向量检索或视觉 embedding；同名或描述模糊时仍需用户检查。
 - 当前图片类型消息在普通聊天历史转换中不会自动作为视觉输入发送给模型，连续视觉引用由 Agent 资产选择链路显式提供。
 - 当前自动引用使用轻量预览托盘完成确认，尚未提供独立大弹层；这属于后续视觉优化而非发送链路阻塞。
+- Agent 气泡显示的是请求阶段进度，不展示模型隐藏推理内容；真实模型输出仍按现有接口返回结果处理。
 
 ## 开发日志
 

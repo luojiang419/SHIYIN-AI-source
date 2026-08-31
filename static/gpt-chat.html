@@ -1388,6 +1388,14 @@
             row.dataset.messageId = msg.id || '';
             const bubble = document.createElement('div');
             bubble.className = `bubble ${msg.role === 'user' ? 'user' : 'assistant'}`;
+            if(msg.id){
+                bubble.addEventListener('contextmenu', event => {
+                    if(event.target.closest('.generated-item')) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    showMessageContextMenu(event.clientX, event.clientY, msg);
+                });
+            }
             const imageUrls = Array.isArray(msg.image_urls) && msg.image_urls.length ? msg.image_urls : (msg.image_url ? [msg.image_url] : []);
             if(imageUrls.length) bubble.classList.add('image-bubble');
             const text = document.createElement('div');
@@ -1416,6 +1424,7 @@
                     item.addEventListener('dragstart', event => setChatImageDragData(event, ref));
                     item.addEventListener('contextmenu', event => {
                         event.preventDefault();
+                        event.stopPropagation();
                         showImageContextMenu(event.clientX, event.clientY, ref);
                     });
                     const img = document.createElement('img');
@@ -1548,6 +1557,21 @@
             }
         }
 
+        async function deleteChatMessage(msg){
+            if(!msg?.id || !currentConversation?.id) return;
+            if(!confirm('删除这条信息？')) return;
+            try {
+                const response = await fetch(`/api/conversations/${encodeURIComponent(currentConversation.id)}/messages/${encodeURIComponent(msg.id)}`, {method:'DELETE', headers:{'X-User-ID':userId}});
+                const data = await response.json();
+                if(!response.ok) throw new Error(data.detail || '删除失败');
+                currentConversation = data.conversation;
+                renderMessages(currentConversation.messages || []);
+                await loadConversations();
+            } catch(error) {
+                alert(error.message || '删除失败');
+            }
+        }
+
         function imageFileName(url, fallback='chat-image'){
             const raw = String(url || '').split('?')[0].split('#')[0].split('/').pop() || '';
             let name = raw;
@@ -1579,6 +1603,24 @@
         }
 
         function closeImageContextMenu(){ document.querySelector('.chat-context-menu')?.remove(); }
+
+        function showMessageContextMenu(x, y, msg){
+            closeImageContextMenu();
+            if(!msg?.id) return;
+            const menu = document.createElement('div');
+            menu.className = 'chat-context-menu';
+            menu.innerHTML = '<button type="button" data-context-action="delete-message"><i data-lucide="trash-2"></i><span>删除这条信息</span></button>';
+            document.body.appendChild(menu);
+            const left = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8));
+            const top = Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8));
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+            menu.querySelector('[data-context-action="delete-message"]').onclick = async () => {
+                closeImageContextMenu();
+                await deleteChatMessage(msg);
+            };
+            lucide.createIcons();
+        }
 
         function showImageContextMenu(x, y, ref){
             closeImageContextMenu();
@@ -1842,6 +1884,26 @@
             if(e.key === 'Escape') closeImagePreview();
         });
 
+        function startAgentProgressBubble(assistantBubble, hasReferences){
+            if(!assistantBubble?.text) return () => {};
+            const steps = hasReferences
+                ? ['正在读取本轮消息和参考图…', '正在判断图片编辑工具…', '正在准备图片编辑请求…', '正在等待上游返回结果…']
+                : ['正在读取本轮消息…', '正在判断调用方式…', '正在准备请求参数…', '正在等待上游返回结果…'];
+            const lines = ['正在执行'];
+            let index = 0;
+            const render = () => {
+                assistantBubble.text.textContent = lines.join('\n');
+                scrollBottom();
+            };
+            render();
+            const timer = setInterval(() => {
+                if(index >= steps.length) return;
+                lines.push(steps[index++]);
+                render();
+            }, 850);
+            return () => clearInterval(timer);
+        }
+
         async function sendMessage(){
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
@@ -1868,6 +1930,7 @@
             const pendingText = mode === 'image' ? tr('chat.generatingImage') : (mode === 'agent' ? tr('chat.agentWorking') : '');
             const assistantBubble = addMessageBubble({role:'assistant', content: pendingText});
             if(mode === 'chat' || mode === 'agent') assistantBubble.bubble.classList.add('streaming');
+            const stopAgentProgress = mode === 'agent' ? startAgentProgressBubble(assistantBubble, pendingRefs.length > 0) : null;
             scrollBottom();
             try {
                 if(mode === 'chat') {
@@ -1920,6 +1983,7 @@
             } catch(err) {
                 renderMessages([...(currentConversation.messages || []), {role:'assistant', content:err.message || tr('chat.requestFailed')}]);
             } finally {
+                stopAgentProgress?.();
                 btn.disabled = false;
                 scrollBottom();
             }

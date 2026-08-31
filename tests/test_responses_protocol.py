@@ -185,6 +185,26 @@ class ResponsesProtocolTests(unittest.TestCase):
             {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
         )
 
+    def test_manual_reference_history_keeps_assistant_output_type(self):
+        body = self.main.build_llm_request_body(
+            {"model": "gpt-5.6-sol", "protocol": "responses", "provider": {}},
+            [
+                {"role": "system", "content": "只返回编辑结果"},
+                {"role": "assistant", "content": "上一轮图片已生成"},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "把这张图改成夜景"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,EDIT"}},
+                    ],
+                },
+            ],
+        )
+
+        self.assertEqual(body["input"][0]["content"], [{"type": "output_text", "text": "上一轮图片已生成"}])
+        self.assertEqual(body["input"][1]["content"][0], {"type": "input_text", "text": "把这张图改成夜景"})
+        self.assertEqual(body["input"][1]["content"][1], {"type": "input_image", "image_url": "data:image/png;base64,EDIT"})
+
     def test_responses_rejects_raw_video_input(self):
         with self.assertRaises(self.main.HTTPException) as raised:
             self.main.build_llm_request_body(

@@ -100,6 +100,19 @@ class ChatContinuityTests(unittest.TestCase):
         self.assertEqual(message["image_urls"], [])
         self.assertEqual(message["deleted_assets"][0]["url"], "/output/cowgirl.png")
 
+    def test_delete_plain_text_message_soft_deletes_message(self):
+        conversation = {
+            "messages": [{
+                "id": "text-message",
+                "role": "user",
+                "content": "请把背景换成夜景",
+            }]
+        }
+        message = main.delete_chat_message_asset(conversation, "text-message")
+        self.assertTrue(message["deleted_at"])
+        self.assertEqual(message["deleted_reason"], "user")
+        self.assertEqual(message["content"], "请把背景换成夜景")
+
     def test_reference_candidates_match_multiple_visual_entities(self):
         assets = [
             {"asset_id": "horse-1", "url": "/output/horse.png", "name": "马", "prompt": "生成一批马"},

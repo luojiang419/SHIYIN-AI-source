@@ -5800,11 +5800,15 @@ function closeInactiveCanvasSubmenus(event){
     const target = event.target;
     const inFilm = Boolean((filmMenuHost && filmMenuHost.contains(target)) || (filmSubmenu && filmSubmenu.contains(target)));
     const inLookbook = Boolean((lookbookMenuHost && lookbookMenuHost.contains(target)) || (lookbookSubmenu && lookbookSubmenu.contains(target)));
-    if(!inFilm){
-        if(!inLookbook){
-            scheduleCanvasSubmenuClose();
-            return;
-        }
+    // 两个二级菜单已移到 body 进行 fixed 定位，不能依赖原来的 :hover
+    // 自动互斥；进入另一组时立即收起当前菜单，避免两个面板叠在一起。
+    if(inFilm && !inLookbook){
+        closeCanvasSubmenu(lookbookMenuHost, lookbookSubmenu, lookbookMenuTrigger);
+    } else if(inLookbook && !inFilm){
+        closeCanvasSubmenu(filmMenuHost, filmSubmenu, filmMenuTrigger);
+    } else if(!inFilm && !inLookbook){
+        scheduleCanvasSubmenuClose();
+        return;
     }
     if(canvasSubmenuCloseTimer){
         clearTimeout(canvasSubmenuCloseTimer);
@@ -10670,9 +10674,9 @@ function renderNode(node){
     const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
     const canOutput = window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
     if(filmPorts.length || inputPorts.length > 1){
-        el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;${node.type === 'lookbook' ? `--lookbook-port-top:${72 + index * 46}px;` : ''}" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length || lookbookPorts.length){
-        el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;${node.type === 'lookbook' ? `--lookbook-port-top:${72 + index * 46}px;` : ''}" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){

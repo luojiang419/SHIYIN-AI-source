@@ -1,12 +1,12 @@
 # 平面广告 Lookbook 节点开发
 
 状态：已完成
-当前阶段：14/14（Web 事件兼容与弹窗冒烟）
+当前阶段：15/15（菜单互斥、弹窗事件与端口间距收口）
 最后更新：2026-08-31
 
 ## 当前状态
 
-已完成经典无限画布独立 `CanvasLookbookNode` 模块、视觉风格卡片弹窗、GitHub Skill 解析/安装接口、Skill 封面生成接口、节点参数与生成结果回写。后端复用电商视觉 API 路由，并在 Lookbook 任务开始前执行“联网案例研究 → 视觉创意总监策划 → 生图”的质量增强链路；未重新暴露已弃用的电商工作流节点组。生成后视觉模型会按 0-100 分检查输出，定位弱图并最多自动替换两张，再执行二次验收，质检分数和修复数量回写节点。人物与商品输入现在带有明确的组装约束：人物作为身份/身体基底，商品作为唯一 SKU 来源。Lookbook 已从一级创建菜单移入“平面广告”二级菜单。本轮补齐了旧 immutable cache 查询串、选择按钮事件兜底、内置 visual-skills/image 风格集、图片快捷面板定位/溢出修复、7 个 Lookbook 输入端口的独立垂直布局、端口对应文本标签、节点内部标签栏、标题提供器按节点类型隔离，以及 pointerup/onclick/委托三层选择器事件兼容。
+已完成经典无限画布独立 `CanvasLookbookNode` 模块、视觉风格卡片弹窗、GitHub Skill 解析/安装接口、Skill 封面生成接口、节点参数与生成结果回写。后端复用电商视觉 API 路由，并在 Lookbook 任务开始前执行“联网案例研究 → 视觉创意总监策划 → 生图”的质量增强链路；未重新暴露已弃用的电商工作流节点组。生成后视觉模型会按 0-100 分检查输出，定位弱图并最多自动替换两张，再执行二次验收，质检分数和修复数量回写节点。人物与商品输入现在带有明确的组装约束：人物作为身份/身体基底，商品作为唯一 SKU 来源。Lookbook 已从一级创建菜单移入“平面广告”二级菜单。本轮补齐了旧 immutable cache 查询串、选择按钮事件兜底、内置 visual-skills/image 风格集、图片快捷面板定位/溢出修复、7 个 Lookbook 输入端口的独立垂直布局、端口对应文本标签、节点内部标签栏、标题提供器按节点类型隔离、pointerup/onclick/委托三层选择器事件兼容，以及影视制作/平面广告二级菜单互斥关闭、Lookbook `mousedown` 弹窗兜底和紧凑端口间距。
 
 ## 下一步
 
@@ -34,11 +34,14 @@
 - [x] 将端口文本标签放入节点内部并预留内容区宽度
 - [x] 修复 Lookbook 标题提供器覆盖所有节点的问题
 - [x] 兼容旧 Web 页面事件路径并强制弹窗可见状态
+- [x] 修复影视制作与平面广告二级菜单互相遮挡
+- [x] Lookbook 选择风格增加 `mousedown` 事件兜底
+- [x] 收紧 Lookbook 左侧输入端口垂直间距
 
 ## 最近验证状态
 
-- 静态检查：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js`、`python -m py_compile main.py canvas_core/ecommerce.py`、`git diff --check` 已通过
-- 单元测试：Lookbook/画布/电商/缓存专项 `160 passed`
+- 静态检查：`node --check static/js/canvas.js static/js/canvas-lookbook-node.js`、`git diff --check` 已通过
+- 单元测试：Lookbook/画布菜单/经典节点专项 `22 passed`
 - 编译：未开始（前端为静态资源）
 - 运行测试：`http://127.0.0.1:3017` Web 冒烟通过（Lookbook 创建、10 张风格卡片、选择回写、7 个端口纵向分布、内部文本标签、影视/图片/Lookbook 标题恢复）；未执行桌面实例级付费生成冒烟（当前环境无可复用实例/API Key）
 - 最近 Git commit：待提交
@@ -79,6 +82,9 @@
 - `static/css/canvas.css`：标签改为端口右侧的节点内标签，并为 Lookbook body 预留 74px 左侧标签栏。
 - `static/js/canvas-lookbook-node.js`：标题函数只对 `lookbook` 类型返回 Lookbook 标题，其他节点交给通用标题逻辑。
 - `static/js/canvas-lookbook-node.js`：选择按钮同时绑定 pointerup、onclick 与祖先委托，打开弹窗时显式设置 `display:flex`。
+- `static/js/canvas.js`：进入另一组二级菜单时立即关闭当前 fixed 子菜单；Lookbook 输入端口额外写入紧凑的 `--lookbook-port-top`。
+- `static/js/canvas-lookbook-node.js`：选择风格/生成按钮增加 `mousedown` 事件兜底，兼容桌面 WebView 的点击事件路径。
+- `static/css/canvas.css`：Lookbook 端口使用紧凑垂直间距，弹窗打开态显式启用指针事件。
 
 ## 已知问题
 

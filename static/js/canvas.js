@@ -10122,7 +10122,7 @@ async function runLookbookNode(nodeId, opts={}){
     const request = {
         operation:'universal', mode:'standard', inputs,
         options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_style:style, lookbook_search:node.lookbookSearch !== false, lookbook_research_depth:node.lookbookResearchDepth || 'deep', lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_quality_gate:node.lookbookQualityGate !== false, lookbook_max_retries:1, search_context:String(node.lookbookResearch || ''), lookbook_plan:String(node.lookbookPlan || ''), lookbook_count:count, lookbook_timeout_minutes:Math.max(5,Math.min(60,Number(node.lookbookTimeoutMinutes || 30)))},
-        provider_id:'', model:'', aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
+        provider_id:String(node.apiProvider || ''), model:String(node.model || ''), aspect_ratio:node.aspectRatio || '3:4', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
     };
     try {
         const cascadeTargetId = cascadeTargetIdFromOptions(opts);

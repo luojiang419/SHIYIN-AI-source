@@ -32,6 +32,18 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("taskNode.lookbookAgentStage = String(task.progress_status)", self.canvas)
         self.assertIn("node.lookbookResearchStatus = String(task.lookbook_research.status)", self.canvas)
 
+    def test_lookbook_uses_image_generation_secondary_choice_menus(self):
+        self.assertIn("data-lookbook-generation-settings", self.lookbook)
+        self.assertIn("data-lookbook-choice=\"provider\"", self.lookbook)
+        self.assertIn("data-lookbook-provider-value", self.lookbook)
+        self.assertIn("data-lookbook-choice=\"model\"", self.lookbook)
+        self.assertIn("data-lookbook-model-value", self.lookbook)
+        self.assertIn("function bindGenerationChoices", self.lookbook)
+        self.assertIn("node.apiProvider=resolveProvider", self.lookbook)
+        self.assertIn("provider_id:String(node.apiProvider || '')", self.canvas)
+        self.assertIn("model:String(node.model || '')", self.canvas)
+        self.assertIn(".lookbook-generation-settings .image-quick-choice-panel{z-index:120}", self.css)
+
     def test_title_provider_only_owns_lookbook_nodes(self):
         self.assertIn("title:type=>type===TYPE ? 'Lookbook 平面广告' : ''", self.lookbook)
         self.assertIn("const title = lookbookTitle || ecommerceTitle || filmTitle", self.canvas)
@@ -80,7 +92,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.10", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.11", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)

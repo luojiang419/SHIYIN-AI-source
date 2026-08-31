@@ -107,6 +107,19 @@ def main() -> int:
                 raise AssertionError("Packaged bootstrap Cache-Control header is missing")
             if normalized_headers.get("referrer-policy") != "no-referrer":
                 raise AssertionError("Packaged bootstrap Referrer-Policy header is missing")
+            authenticated_opener = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(cookie_jar)
+            )
+            with authenticated_opener.open(f"http://127.0.0.1:{arguments.port}/", timeout=5) as page:
+                page_html = page.read().decode("utf-8", errors="replace")
+            if "SHIYIN AI" not in page_html or "<html" not in page_html.lower():
+                raise AssertionError("Authenticated desktop homepage did not return HTML")
+            with authenticated_opener.open(
+                f"http://127.0.0.1:{arguments.port}/api/canvases", timeout=5
+            ) as canvases_response:
+                canvases_payload = json.loads(canvases_response.read().decode("utf-8"))
+            if not isinstance(canvases_payload.get("canvases"), list):
+                raise AssertionError("Authenticated canvas API did not return a canvas list")
             print(json.dumps({"statuses": statuses, "result": "pass"}, ensure_ascii=False))
         finally:
             process.terminate()

@@ -413,6 +413,30 @@ const connectionContextMenu = document.getElementById('connectionContextMenu');
 const selectionBox = document.getElementById('selectionBox');
 const selectionHub = document.getElementById('selectionHub');
 selectionHub?.addEventListener('mousedown', event => event.stopPropagation());
+nodesEl?.addEventListener('pointerover', event => {
+    const nodeEl = event.target?.closest?.('.image-node[data-id]');
+    if(!nodeEl || !nodesEl.contains(nodeEl) || (event.relatedTarget && nodeEl.contains(event.relatedTarget))) return;
+    const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'image');
+    if(node) materializeClassicImageNodeChrome(nodeEl, node);
+});
+nodesEl?.addEventListener('pointerout', event => {
+    const nodeEl = event.target?.closest?.('.image-node[data-id]');
+    if(!nodeEl || !nodesEl.contains(nodeEl) || (event.relatedTarget && nodeEl.contains(event.relatedTarget))) return;
+    const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'image');
+    if(node) scheduleClassicImageNodeChromeCleanup(nodeEl, node);
+});
+nodesEl?.addEventListener('focusin', event => {
+    const nodeEl = event.target?.closest?.('.image-node[data-id]');
+    if(!nodeEl || !nodesEl.contains(nodeEl)) return;
+    const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'image');
+    if(node) materializeClassicImageNodeChrome(nodeEl, node);
+});
+nodesEl?.addEventListener('focusout', event => {
+    const nodeEl = event.target?.closest?.('.image-node[data-id]');
+    if(!nodeEl || !nodesEl.contains(nodeEl) || (event.relatedTarget && nodeEl.contains(event.relatedTarget))) return;
+    const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'image');
+    if(node) scheduleClassicImageNodeChromeCleanup(nodeEl, node);
+});
 const canvasSelectTool = document.getElementById('canvasSelectTool');
 const canvasPanTool = document.getElementById('canvasPanTool');
 const gateStatus = document.getElementById('gateStatus');
@@ -5238,6 +5262,62 @@ function bindClassicMediaToolbar(el, node){
         event.stopPropagation();
         runClassicMediaToolbarAction(button.dataset.nodeId || node.id, button.dataset.mediaToolbarAction || 'more');
     }));
+}
+const classicImageChromeCleanupTimers = new WeakMap();
+function classicImageNodeSupportsPrompt(node){
+    if(!node || node.type !== 'image') return false;
+    return !node.url || (mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url));
+}
+function materializeClassicImageNodeChrome(el, node){
+    if(!el || !node || node.type !== 'image' || !el.isConnected) return;
+    const timer = classicImageChromeCleanupTimers.get(el);
+    if(timer){ clearTimeout(timer); classicImageChromeCleanupTimers.delete(el); }
+    if(classicImageNodeSupportsPrompt(node) && !el.querySelector('[data-image-node-prompt-panel]')){
+        const imagePromptPanel = document.createElement('div');
+        imagePromptPanel.className = 'image-node-prompt-panel';
+        imagePromptPanel.dataset.imageNodePromptPanel = '1';
+        imagePromptPanel.innerHTML = imageNodeQuickPromptHtml(node);
+        imagePromptPanel.addEventListener('mousedown', event => event.stopPropagation());
+        bindImageNodeQuickPrompt(node, imagePromptPanel);
+        el.appendChild(imagePromptPanel);
+        refreshIcons(imagePromptPanel);
+    }
+    if(!el.querySelector('[data-node-media-toolbar]')){
+        const mediaToolbar = classicMediaToolbarHtml(node);
+        if(mediaToolbar){
+            el.insertAdjacentHTML('beforeend', mediaToolbar);
+            bindClassicMediaToolbar(el, node);
+            refreshIcons(el.querySelector('[data-node-media-toolbar]'));
+        }
+    }
+    el.dataset.imageNodeChrome = '1';
+}
+function cleanupClassicImageNodeChrome(el, node){
+    if(!el || !node || node.type !== 'image' || selected.has(node.id) || el.matches(':hover') || el.contains(document.activeElement)) return;
+    el.querySelector('[data-image-node-prompt-panel]')?.remove();
+    el.querySelector('[data-node-media-toolbar]')?.remove();
+    delete el.dataset.imageNodeChrome;
+}
+function scheduleClassicImageNodeChromeCleanup(el, node){
+    if(!el || !node) return;
+    const previous = classicImageChromeCleanupTimers.get(el);
+    if(previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+        classicImageChromeCleanupTimers.delete(el);
+        cleanupClassicImageNodeChrome(el, node);
+    }, 140);
+    classicImageChromeCleanupTimers.set(el, timer);
+}
+function syncClassicImageNodeChromeForSelection(selectedIds){
+    const uniqueId = selectedIds?.size === 1 ? [...selectedIds][0] : '';
+    nodesEl.querySelectorAll('.image-node[data-image-node-chrome="1"]').forEach(el => {
+        const node = nodes.find(item => item.id === el.dataset.id && item.type === 'image');
+        if(node && node.id !== uniqueId) cleanupClassicImageNodeChrome(el, node);
+    });
+    if(!uniqueId) return;
+    const node = nodes.find(item => item.id === uniqueId && item.type === 'image');
+    const el = node ? nodesEl.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"]`) : null;
+    if(node && el) materializeClassicImageNodeChrome(el, node);
 }
 function openImageNodeMenu(nodeId, clientX, clientY){
     const node = nodes.find(n => n.id === nodeId);
@@ -10556,8 +10636,7 @@ function renderNode(node){
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
     if(node.type === 'storyboardMerge') body.innerHTML = storyboardMergeBodyHtml(node);
-    // 图片快捷提示词和媒体操作统一由 selectionHub 承载。
-    // 旧实现把完整表单/工具栏复制到每个图片节点，500 个节点会额外生成数千个控件并触发秒级布局长任务。
+    // 图片节点的完整面板和工具条按 hover/focus/单选懒创建，避免大画布首屏一次性生成数千个控件。
     const visualShell = document.createElement('div');
     visualShell.className = 'node-visual-shell';
     const nodeHead = el.querySelector(':scope > .node-head');
@@ -10686,6 +10765,7 @@ function renderNode(node){
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
     if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
+    if(node.type === 'image' && selected.size === 1 && selected.has(node.id)) materializeClassicImageNodeChrome(el, node);
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -19719,13 +19799,12 @@ function renderSelectionHub(options={}){
         ] : [])
     ];
     const imageNode = target.kind === 'node' && target.mediaKind === 'image' ? sourceNodeForSelectionTarget(target) : null;
-    const promptHtml = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';
-    selectionHub.innerHTML = `${promptHtml}<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
-    selectionHub.classList.add('open');
     if(imageNode){
-        selectionHub.classList.add('image-prompt-hub');
-        bindImageNodeQuickPrompt(imageNode, selectionHub);
+        materializeClassicImageNodeChrome(anchor, imageNode);
+        return;
     }
+    selectionHub.innerHTML = `<div class="image-quick-actions">${actions.map(action => `<button type="button" class="media-quick-btn" data-media-action="${action.id}" title="${escapeAttr(action.label)}"><i data-lucide="${action.icon}"></i><span>${escapeHtml(action.label)}</span></button>`).join('')}</div>`;
+    selectionHub.classList.add('open');
     selectionHubAnchor = anchor;
     selectionHub.dataset.targetKind = target.kind;
     selectionHub.querySelectorAll('[data-media-action]').forEach(button => {
@@ -19854,9 +19933,7 @@ async function runImageNodeQuickGenerate(nodeId){
     node.running = true;
     node.runStatus = 'running';
     node.runError = '';
-    const button = selected.has(nodeId)
-        ? selectionHub?.querySelector?.('[data-image-quick-generate]')
-        : null;
+    const button = nodesEl.querySelector(`.image-node[data-id="${CSS.escape(nodeId)}"] [data-image-node-prompt-panel] [data-image-quick-generate]`);
     if(button){
         // 允许在已有任务进行时再次点击；每次点击都会创建独立 pending 任务。
         button.disabled = false;
@@ -21913,6 +21990,7 @@ function refreshSelectionVisuals(options={}){
     }
     if(options?.syncResolution !== false) syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
     board?.classList.toggle('selection-multiple', Boolean(canvas && nextSelected.size > 1));
+    syncClassicImageNodeChromeForSelection(nextSelected);
     syncConnectionSelectionVisuals();
     classicSelectionFeedbackState = {ids:nextSelected};
     scheduleClassicSafeLod([...affectedNodeIds]);

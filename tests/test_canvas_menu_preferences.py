@@ -40,28 +40,30 @@ def test_generation_nodes_keep_prompt_and_settings_in_bottom_workspace():
     assert ".node-bottom-controls .generator-inline-prompt" in CSS
 
 
-def test_image_prompt_panel_is_shared_by_selection_hub():
+def test_image_prompt_panel_is_lazy_materialized_on_the_image_node():
     render_start = JS.index("function renderSelectionHub")
     render_end = JS.index("function selectOutputMedia", render_start)
     render_source = JS[render_start:render_end]
     assert "selectionHub.classList.remove('open','image-prompt-hub')" in render_source
-    assert "const promptHtml = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';" in render_source
-    assert "bindImageNodeQuickPrompt(imageNode, selectionHub);" in render_source
-    assert "if(imageNode) return;" not in render_source
-    assert "image-node-prompt-panel" not in JS
+    assert "materializeClassicImageNodeChrome(anchor, imageNode);" in render_source
+    assert "if(imageNode){" in render_source
+    assert "function materializeClassicImageNodeChrome(el, node)" in JS
+    assert "imagePromptPanel.className = 'image-node-prompt-panel';" in JS
+    assert "bindImageNodeQuickPrompt(node, imagePromptPanel);" in JS
+    assert "nodesEl?.addEventListener('pointerover'" in JS
     assert ".selection-hub {" in CSS
-    assert "width:min(650px,calc(100vw - 32px))" in CSS
     assert "height:clamp(112px,18vh,160px)" in CSS
     assert "function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)" in JS
 
 
-def test_media_controls_are_not_materialized_for_every_classic_node():
+def test_media_controls_are_not_materialized_until_needed_for_every_classic_node():
     render_start = JS.index("function renderNode(node)")
     render_end = JS.index("function bindOutputWrap", render_start)
     render_source = JS[render_start:render_end]
     assert "classicMediaToolbarHtml(node)" not in render_source
-    assert "imageNodePromptPanel" not in render_source
-    assert "selectionHub.innerHTML" not in render_source
+    assert "imageNodeQuickPromptHtml(node)" not in render_source
+    assert "materializeClassicImageNodeChrome(el, node)" in JS
+    assert "el.dataset.imageNodeChrome = '1';" in JS
 
 
 def test_canvas_preferences_preserve_an_explicit_empty_selection():

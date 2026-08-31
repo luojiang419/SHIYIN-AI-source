@@ -378,12 +378,12 @@ fn rotate_log(path: &Path, max_bytes: u64, backups: u8) {
 }
 
 fn ensure_port_available(port: u16, config_path: &Path) -> Result<(), String> {
-    match TcpListener::bind(("0.0.0.0", port)) {
-        Ok(listener) => {
-            drop(listener);
-            Ok(())
-        }
-        Err(_) => {
+    // Windows 允许 127.0.0.1 与 0.0.0.0 同时存在监听器；只检查通配地址
+    // 会让桌面 sidecar 与源码后端并存，随后 WebView 可能命中错误的数据目录。
+    let port_conflict = ["0.0.0.0", "127.0.0.1"].iter().any(|address| {
+        TcpListener::bind((*address, port)).is_err()
+    });
+    if port_conflict {
             let message = format!(
                 "端口 {port} 已被占用（{}）。\n\n请在以下文件修改端口后重新启动：\n{}",
                 port_owner(port),
@@ -397,7 +397,8 @@ fn ensure_port_available(port: u16, config_path: &Path) -> Result<(), String> {
                 .show();
             let _ = Command::new("notepad.exe").arg(config_path).spawn();
             Err(message)
-        }
+    } else {
+        Ok(())
     }
 }
 

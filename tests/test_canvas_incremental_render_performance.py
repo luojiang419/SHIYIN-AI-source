@@ -42,6 +42,7 @@ class CanvasIncrementalRenderPerformanceTests(unittest.TestCase):
         self.assertIn("removeClassicNodeDomIndex", section)
         self.assertIn("patchClassicMutationConnections", section)
         self.assertIn("syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds)", section)
+        self.assertIn("scheduleClassicMediaQueue();", section)
         self.assertIn("scheduleMinimapNodeUpdate([...affectedNodeIds])", section)
         for forbidden in (
             "rebuildCanvasDomIndexes()",
@@ -65,6 +66,7 @@ class CanvasIncrementalRenderPerformanceTests(unittest.TestCase):
         self.assertIn("indexSmartNodeDom", section)
         self.assertIn("removeSmartNodeDomIndex", section)
         self.assertIn("patchSmartMutationConnections", section)
+        self.assertIn("scheduleSmartMediaQueue();", section)
         self.assertIn("scheduleSmartMinimapNodeUpdate([...affectedNodeIds])", section)
         for forbidden in (
             "world.querySelectorAll('.image-node')",

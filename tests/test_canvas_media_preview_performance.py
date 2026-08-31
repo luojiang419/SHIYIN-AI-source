@@ -80,6 +80,27 @@ class CanvasMediaPreviewPerformanceTests(unittest.TestCase):
         self.assertIn("if(!selected.has(node.id)) return;", classic)
         self.assertIn("&& isNodeSelected(node.id)", smart)
 
+    def test_preview_queue_survives_incremental_dom_replacement(self):
+        sources = (
+            ((ROOT / "static/js/canvas.js").read_text(encoding="utf-8"),
+             "function startClassicPreviewImage", "scheduleClassicMediaQueue", "if(!img.isConnected) return;"),
+            ((ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8"),
+             "function startSmartPreviewImage", "scheduleSmartMediaQueue", "if(!img.isConnected) return;"),
+        )
+        for source, start_marker, queue_marker, detached_marker in sources:
+            start = source.index(start_marker)
+            finish = source.index("const finish = ok =>", start)
+            finish_end = source.index("};", finish)
+            finish_body = source[finish:finish_end]
+            self.assertLess(finish_body.index(queue_marker), finish_body.index(detached_marker))
+
+        classic_mutation = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
+        classic_mutation = classic_mutation[classic_mutation.index("function renderClassicMutation"):classic_mutation.index("function serializableCanvasNodes")]
+        smart_mutation = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
+        smart_mutation = smart_mutation[smart_mutation.index("function renderSmartMutation"):smart_mutation.index("function render(){", smart_mutation.index("function renderSmartMutation"))]
+        self.assertIn("scheduleClassicMediaQueue();", classic_mutation)
+        self.assertIn("scheduleSmartMediaQueue();", smart_mutation)
+
 
 if __name__ == "__main__":
     unittest.main()

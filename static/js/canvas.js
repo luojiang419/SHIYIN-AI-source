@@ -113,13 +113,13 @@ function startClassicPreviewImage(img){
     }
     const finish = ok => {
         classicMediaQueueActive = Math.max(0, classicMediaQueueActive - 1);
+        scheduleClassicMediaQueue();
         if(!img.isConnected) return;
         img.dataset.previewState = ok ? 'loaded' : 'failed';
         window.CanvasPerformance?.record?.('classic.media-preview', performance.now() - startedAt, {
             kind:img.dataset.previewKind === 'video' ? 'video' : 'image', ok,
             queued:classicMediaQueueActive
         });
-        scheduleClassicMediaQueue();
     };
     img.addEventListener('load', () => finish(true), {once:true});
     img.addEventListener('error', () => finish(false), {once:true});
@@ -2735,6 +2735,7 @@ function renderClassicMutation(mutation){
     refreshSelectionVisuals({affectedNodeIds, syncResolution:false, deferHubPosition:true});
     hydrateClassicMutationNodeRoots(patchedNodeRoots);
     syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
+    scheduleClassicMediaQueue();
     scheduleMinimapNodeUpdate([...affectedNodeIds]);
 }
 function serializableCanvasNodes(list=nodes){

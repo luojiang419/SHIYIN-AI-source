@@ -986,13 +986,13 @@ function startSmartPreviewImage(img){
     const startedAt = performance.now();
     const finish = ok => {
         smartMediaQueueActive = Math.max(0, smartMediaQueueActive - 1);
+        scheduleSmartMediaQueue();
         if(!img.isConnected) return;
         img.dataset.previewState = ok ? 'loaded' : 'failed';
         window.CanvasPerformance?.record?.('smart.media-preview', performance.now() - startedAt, {
             kind:img.dataset.previewKind === 'video' ? 'video' : 'image', ok,
             queued:smartMediaQueueActive
         });
-        scheduleSmartMediaQueue();
     };
     img.addEventListener('load', () => finish(true), {once:true});
     img.addEventListener('error', () => finish(false), {once:true});
@@ -10058,6 +10058,7 @@ function renderSmartMutation(mutation){
     syncSelectionUi();
     scheduleSmartComposerUpdate();
     scheduleSmartMinimapNodeUpdate([...affectedNodeIds]);
+    scheduleSmartMediaQueue();
     syncSmartSelectedImageResolution(world, affectedNodeIds);
     if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
     return true;

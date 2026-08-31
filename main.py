@@ -7190,6 +7190,8 @@ def media_preview_cache_paths(path: str, width: int):
 MEDIA_PREVIEW_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="media-preview")
 MEDIA_PREVIEW_INFLIGHT_LOCK = Lock()
 MEDIA_PREVIEW_INFLIGHT: Dict[str, Future] = {}
+MEDIA_PREVIEW_FAILURE_TTL_SECONDS = 20.0
+MEDIA_PREVIEW_FAILURES: Dict[str, tuple[float, str]] = {}
 
 def is_video_preview_file(path: str) -> bool:
     return os.path.splitext(str(path or "").split("?", 1)[0])[1].lower() in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"}
@@ -7256,6 +7258,12 @@ async def get_or_build_media_preview(path: str, width: int, webp_path: str, png_
     """返回预览文件路径，并合并相同预览键的并发生成任务。"""
     key = f"{os.path.abspath(path)}|{os.path.getmtime(path)}|{os.path.getsize(path)}|{width}"
     with MEDIA_PREVIEW_INFLIGHT_LOCK:
+        failure = MEDIA_PREVIEW_FAILURES.get(key)
+        if failure:
+            failed_at, message = failure
+            if time.monotonic() - failed_at < MEDIA_PREVIEW_FAILURE_TTL_SECONDS:
+                raise RuntimeError(message)
+            MEDIA_PREVIEW_FAILURES.pop(key, None)
         future = MEDIA_PREVIEW_INFLIGHT.get(key)
         if future is None:
             future = MEDIA_PREVIEW_EXECUTOR.submit(build_media_preview, path, width, webp_path, png_path)
@@ -7265,6 +7273,14 @@ async def get_or_build_media_preview(path: str, width: int, webp_path: str, png_
                 with MEDIA_PREVIEW_INFLIGHT_LOCK:
                     if MEDIA_PREVIEW_INFLIGHT.get(cache_key) is done:
                         MEDIA_PREVIEW_INFLIGHT.pop(cache_key, None)
+                    if done.cancelled():
+                        return
+                    try:
+                        done.result()
+                    except Exception as exc:
+                        MEDIA_PREVIEW_FAILURES[cache_key] = (time.monotonic(), str(exc)[:300])
+                    else:
+                        MEDIA_PREVIEW_FAILURES.pop(cache_key, None)
 
             future.add_done_callback(forget)
     # shield 防止某个浏览器请求取消时连带取消共享的底层生成任务。

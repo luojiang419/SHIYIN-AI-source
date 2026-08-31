@@ -35,8 +35,11 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         start = self.lookbook.index("function bind(root,node,options={}){")
         end = self.lookbook.index("function mediaRefs", start)
         body = self.lookbook[start:end]
-        self.assertIn("root.querySelector('[data-lookbook-choose]')?.addEventListener('click',handleAction)", body)
+        self.assertIn("const chooseButton=root.querySelector('[data-lookbook-choose]')", body)
+        self.assertIn("button.onclick=handleAction", body)
         self.assertIn("root.addEventListener('click',handleAction,true)", body)
+        self.assertIn("button.onpointerup=handleAction", body)
+        self.assertIn("modal.style.display='flex'", self.lookbook)
         self.assertIn("event.preventDefault(); event.stopPropagation();", body)
 
     def test_selection_hub_keeps_panel_inside_board_and_prefers_above_anchor(self):
@@ -63,7 +66,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.4", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.5", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)

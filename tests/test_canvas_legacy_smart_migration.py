@@ -74,7 +74,10 @@ def test_unified_editor_loads_legacy_migration_before_canvas_runtime():
 
 def test_media_service_worker_serves_cached_previews_before_background_refresh():
     worker = (ROOT / "static/media-cache-sw.js").read_text(encoding="utf-8")
-    assert "url.pathname.startsWith('/api/') || !hasContentRevision(url)" in worker
+    assert "return url.pathname.startsWith('/api/');" in worker
+    assert "MEDIA_PREVIEW_REFRESH_INTERVAL" in worker
+    assert "mediaPreviewRefreshes" in worker
+    assert "matchGeneratedImage" in worker
     assert "new Request(request, {cache: 'no-store'})" in worker
     assert "path === '/api/media-preview'" in worker
     assert "staleWhileRevalidateMediaPreview" in worker

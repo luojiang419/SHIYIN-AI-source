@@ -40,20 +40,17 @@ def test_generation_nodes_keep_prompt_and_settings_in_bottom_workspace():
     assert ".node-bottom-controls .generator-inline-prompt" in CSS
 
 
-def test_image_prompt_panel_follows_the_image_node_like_the_top_toolbar():
+def test_image_prompt_panel_is_shared_by_selection_hub():
     render_start = JS.index("function renderSelectionHub")
     render_end = JS.index("function selectOutputMedia", render_start)
     render_source = JS[render_start:render_end]
     assert "selectionHub.classList.remove('open','image-prompt-hub')" in render_source
-    assert "imagePromptPanel.className = 'image-node-prompt-panel';" in JS
-    assert "imagePromptPanel.dataset.imageNodePromptPanel = '1';" in JS
-    assert "bindImageNodeQuickPrompt(node, imagePromptPanel);" in JS
-    assert "if(imageNode) return;" in render_source
-    assert ".image-node-prompt-panel { position:absolute; left:50%; top:calc(100% + 10px);" in CSS
-    assert "width:min(622px,100%)" in CSS
-    assert ".node.selected > .image-node-prompt-panel" in CSS
-    assert "container-type:inline-size" in CSS
-    assert "width:min(622px,calc(100vw - 24px))" not in CSS
+    assert "const promptHtml = imageNode ? imageNodeQuickPromptHtml(imageNode) : '';" in render_source
+    assert "bindImageNodeQuickPrompt(imageNode, selectionHub);" in render_source
+    assert "if(imageNode) return;" not in render_source
+    assert "image-node-prompt-panel" not in JS
+    assert ".selection-hub {" in CSS
+    assert "width:min(650px,calc(100vw - 32px))" in CSS
     assert "height:clamp(112px,18vh,160px)" in CSS
     assert "function bindImageNodeQuickPrompt(node, panelRoot=selectionHub)" in JS
 
@@ -63,9 +60,9 @@ def test_canvas_preferences_preserve_an_explicit_empty_selection():
 
 
 def test_image_media_toolbar_exposes_grid_and_downstream_actions_with_two_row_cap():
-    for action in ("grid", "generator", "batchGenerator", "video", "panorama", "angle", "multi-view", "relight", "dwpose"):
+    for action in ("grid", "generator", "batchGenerator", "video", "panorama", "angle", "multi-view", "dwpose"):
         assert f"{{id:'{action}'" in JS
-    assert "['edit','grid','batchGenerator','video','panorama','angle','multi-view','relight','dwpose','download']" in JS
+    assert "['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','storyboardMerge','download']" in JS
     assert "else if(node.url) runMediaQuickAction(action" in JS
 
 

@@ -802,7 +802,16 @@ function scheduleSmartIdleIconRefresh(root=world){
         const roots = [...smartIdleIconRoots];
         smartIdleIconRoots.clear();
         roots.forEach(item => {
-            if(item?.isConnected !== false) refreshIcons(item);
+            if(item?.isConnected === false) return;
+            if(item === world && nodes.length > 200){
+                world.querySelectorAll('.image-node[data-id]').forEach(nodeEl => {
+                    const node = smartNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id);
+                    if(!node) return;
+                    if(nodeEl.dataset.lodState !== 'deferred' || isNodeSelected(node.id)) refreshIcons(nodeEl);
+                });
+                return;
+            }
+            refreshIcons(item);
         });
     };
     if('requestIdleCallback' in window) smartIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
@@ -3383,8 +3392,10 @@ function updateSmartSafeLod(){
         const outside = largeScene && !intersects && !keepIds.has(node.id);
         const nextState = outside ? 'deferred' : 'full';
         if(el.dataset.lodState !== nextState){
+            const previousState = el.dataset.lodState || '';
             el.classList.toggle('smart-lod-outside', outside);
             el.dataset.lodState = nextState;
+            if(previousState === 'deferred' && nextState === 'full') requestAnimationFrame(() => refreshIcons(el));
         }
     });
 }

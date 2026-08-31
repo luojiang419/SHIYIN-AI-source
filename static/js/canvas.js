@@ -2086,8 +2086,10 @@ function updateClassicSafeLod(affectedIds=null){
         const outside = largeScene && !intersects && !keepIds.has(node.id);
         const nextState = outside ? 'deferred' : 'full';
         if(el.dataset.lodState !== nextState){
+            const previousState = el.dataset.lodState || '';
             el.classList.toggle('canvas-lod-outside', outside);
             el.dataset.lodState = nextState;
+            if(previousState === 'deferred' && nextState === 'full') requestAnimationFrame(() => refreshIcons(el));
         }
     });
 }
@@ -8384,7 +8386,21 @@ function scheduleClassicIdleIconRefresh(root=nodesEl){
         const roots = [...classicIdleIconRoots];
         classicIdleIconRoots.clear();
         roots.forEach(item => {
-            if(item?.isConnected !== false) refreshIcons(item);
+            if(item?.isConnected === false) return;
+            if(item === nodesEl && nodes.length > 200){
+                const view = currentWorldViewRect();
+                const margin = CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
+                nodesEl.querySelectorAll('.node[data-id]').forEach(nodeEl => {
+                    const node = canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id);
+                    if(!node) return;
+                    const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
+                    const visible = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin
+                        && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
+                    if(visible || selected.has(node.id)) refreshIcons(nodeEl);
+                });
+                return;
+            }
+            refreshIcons(item);
         });
     };
     if('requestIdleCallback' in window) classicIdleIconHandle = window.requestIdleCallback(run, {timeout:900});

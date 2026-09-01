@@ -3,6 +3,8 @@
 日期：2026-09-01  
 研究对象：[抖音主页](https://www.douyin.com/user/MS4wLjABAAAAwyze10g7eP56j3sCTCZXKd7v2ZXcW9oO4_ar0lcHcSz7efaYNnI-5xKLdHIzNDAi?from_tab_name=main&relation=0&vid=7652692832885938786)
 
+补充完成的 28 条视频本体下载与逐条解析见：[杨沛林yppl 28 条视频逐条解析报告](./杨沛林yppl-28条视频逐条解析报告-20260901.md)。
+
 ## 一、证据边界：用户请求与附件内容分离
 
 - 用户请求：分析博主视频方法论、解析工具生成的高级图片、用本地参考图测试、修复当前 Lookbook 节点并输出报告。

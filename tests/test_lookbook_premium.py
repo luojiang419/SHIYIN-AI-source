@@ -126,6 +126,25 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("printed/photographed face or editorial poster", prompt)
         self.assertIn("never treat it as a second live person", prompt)
 
+    def test_light_family_switches_with_editorial_style(self):
+        inputs = [{"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"}]
+        daylight = build_prompt("universal", inputs, {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"id": "candid-lifestyle", "name": "生活化真实抓拍"},
+        })
+        night = build_prompt("universal", inputs, {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"id": "street-film", "name": "街头电影叙事"},
+        })
+        material = build_prompt("universal", inputs, {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"id": "material-closeup", "name": "材质细节特写"},
+        })
+        self.assertIn("NATURAL SUNLIGHT AND SOFT-FILM LOCK", daylight)
+        self.assertIn("LOW-KEY SPECTACLE LOCK", night)
+        self.assertNotIn("NATURAL SUNLIGHT AND SOFT-FILM LOCK", night)
+        self.assertIn("MATERIAL PORTRAIT LIGHT LOCK", material)
+
     def test_structured_research_is_normalized_for_generation(self):
         value = main.normalize_lookbook_visual_research(json.dumps({
             "sources": [{"publication_or_brand": "Vogue", "case_or_campaign": "Street editorial", "url": "https://example.com", "why_relevant": "色彩"}],

@@ -81,18 +81,18 @@ class CanvasMediaPreviewPerformanceTests(unittest.TestCase):
         self.assertIn("&& isNodeSelected(node.id)", smart)
 
     def test_preview_queue_survives_incremental_dom_replacement(self):
-        sources = (
-            ((ROOT / "static/js/canvas.js").read_text(encoding="utf-8"),
-             "function startClassicPreviewImage", "scheduleClassicMediaQueue", "if(!img.isConnected) return;"),
-            ((ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8"),
-             "function startSmartPreviewImage", "scheduleSmartMediaQueue", "if(!img.isConnected) return;"),
-        )
-        for source, start_marker, queue_marker, detached_marker in sources:
-            start = source.index(start_marker)
-            finish = source.index("const finish = ok =>", start)
-            finish_end = source.index("};", finish)
-            finish_body = source[finish:finish_end]
-            self.assertLess(finish_body.index(queue_marker), finish_body.index(detached_marker))
+        runtime = (ROOT / "static/js/canvas-media-queue.js").read_text(encoding="utf-8")
+        settle_start = runtime.index("function settle(task, outcome")
+        settle_end = runtime.index("function armTimeout", settle_start)
+        settle = runtime[settle_start:settle_end]
+        self.assertLess(settle.index("active.delete(task.img)"), settle.index("if(current && task.img.isConnected)"))
+        self.assertGreater(settle.index("if(!destroyed) schedule()"), settle.index("if(current && task.img.isConnected)"))
+        self.assertIn("task.img?.isConnected ? 'offscreen' : 'detached'", runtime)
+
+        classic = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("ensureClassicMediaQueue()?.start(img)", classic)
+        self.assertIn("ensureSmartMediaQueue()?.start(img)", smart)
 
         classic_mutation = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
         classic_mutation = classic_mutation[classic_mutation.index("function renderClassicMutation"):classic_mutation.index("function serializableCanvasNodes")]

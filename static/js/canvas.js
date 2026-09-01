@@ -62,10 +62,10 @@ function canvasEagerMediaAttrs(attrs=''){
         .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
 }
 const CLASSIC_MEDIA_QUEUE_MAX = 6;
+const CLASSIC_MEDIA_IMAGE_MAX = 6;
+const CLASSIC_MEDIA_VIDEO_MAX = 2;
 const CLASSIC_MEDIA_QUEUE_MARGIN = 720;
-let classicMediaQueueRaf = 0;
-let classicMediaQueueActive = 0;
-const classicMediaQueuePending = new Map();
+let classicMediaQueueController = null;
 function canvasPreviewNeedsQueue(preview=''){
     const value = String(preview || '');
     return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
@@ -84,9 +84,10 @@ function classicPreviewNodeForImage(img){
     if(!nodeEl) return null;
     return canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
 }
-function classicPreviewCandidate(img){
+function classicPreviewCandidate(img, allowLoading=false){
     const preview = img?.dataset?.previewSrc || '';
-    if(!img?.isConnected || !preview || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
     const node = classicPreviewNodeForImage(img);
     if(!node) return null;
     const view = currentWorldViewRect();
@@ -99,51 +100,46 @@ function classicPreviewCandidate(img){
     const priority = selected.has(node.id) ? -20 : (visible ? kind : 10 + kind);
     return {img, priority, distance:Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))};
 }
-function startClassicPreviewImage(img){
-    if(!img?.isConnected || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded') return;
-    const preview = img.dataset.previewSrc || '';
-    if(!preview) return;
-    classicMediaQueuePending.delete(img);
-    classicMediaQueueActive += 1;
-    img.dataset.previewState = 'loading';
-    const startedAt = performance.now();
+function ensureClassicMediaQueue(){
+    if(classicMediaQueueController) return classicMediaQueueController;
+    if(!window.CanvasMediaQueue?.createMediaQueue) return null;
+    classicMediaQueueController = window.CanvasMediaQueue.createMediaQueue({
+        name:'classic',
+        maxActive:CLASSIC_MEDIA_QUEUE_MAX,
+        maxImageActive:CLASSIC_MEDIA_IMAGE_MAX,
+        maxVideoActive:CLASSIC_MEDIA_VIDEO_MAX,
+        imageTimeoutMs:20000,
+        videoTimeoutMs:45000,
+        maxAttempts:2,
+        collectCandidates:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])].map(img => classicPreviewCandidate(img)).filter(Boolean),
+        isEligible:img => Boolean(classicPreviewCandidate(img, true)),
+        fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
+        replaceVideoFallback:img => replaceCanvasVideoPreviewWithFallback(img),
+        onStart:() => recordClassicFirstPreviewStart(),
+        onRecord:entry => window.CanvasPerformance?.record?.('classic.media-preview', entry.duration, {
+            kind:entry.kind,
+            ok:entry.outcome === 'loaded',
+            outcome:entry.outcome,
+            reason:entry.reason,
+            attempt:entry.attempt,
+            queued:entry.activeTotal
+        })
+    });
+    return classicMediaQueueController;
+}
+function recordClassicFirstPreviewStart(){
     if(canvas?.id && classicNavigationStartedAt && classicFirstPreviewCanvasId !== canvas.id){
         classicFirstPreviewCanvasId = canvas.id;
         window.CanvasPerformance?.record?.('classic.navigation-to-first-preview', performance.now() - classicNavigationStartedAt, {nodes:nodes.length});
     }
-    const finish = ok => {
-        classicMediaQueueActive = Math.max(0, classicMediaQueueActive - 1);
-        scheduleClassicMediaQueue();
-        if(!img.isConnected) return;
-        img.dataset.previewState = ok ? 'loaded' : 'failed';
-        window.CanvasPerformance?.record?.('classic.media-preview', performance.now() - startedAt, {
-            kind:img.dataset.previewKind === 'video' ? 'video' : 'image', ok,
-            queued:classicMediaQueueActive
-        });
-    };
-    img.addEventListener('load', () => finish(true), {once:true});
-    img.addEventListener('error', () => finish(false), {once:true});
-    img.src = preview;
 }
-function drainClassicPreviewQueue(){
-    classicMediaQueueRaf = 0;
-    if(!nodesEl || classicMediaQueueActive >= CLASSIC_MEDIA_QUEUE_MAX) return;
-    const candidates = [...nodesEl.querySelectorAll('img[data-preview-src]')]
-        .map(classicPreviewCandidate).filter(Boolean)
-        .sort((a, b) => a.priority - b.priority || a.distance - b.distance);
-    candidates.forEach(candidate => {
-        if(classicMediaQueueActive >= CLASSIC_MEDIA_QUEUE_MAX) return;
-        startClassicPreviewImage(candidate.img);
-    });
-}
+function startClassicPreviewImage(img){ return ensureClassicMediaQueue()?.start(img) || false; }
+function drainClassicPreviewQueue(){ return ensureClassicMediaQueue()?.drainNow(); }
 function scheduleClassicMediaQueue(){
-    if(classicMediaQueueRaf || !nodesEl) return;
-    classicMediaQueueRaf = requestAnimationFrame(drainClassicPreviewQueue);
+    ensureClassicMediaQueue()?.schedule();
 }
 function cancelClassicOffscreenPreviewTasks(){
-    classicMediaQueuePending.forEach((_, img) => {
-        if(!classicPreviewCandidate(img)) classicMediaQueuePending.delete(img);
-    });
+    ensureClassicMediaQueue()?.cancelIneligible();
     scheduleClassicMediaQueue();
 }
 function loadCanvasOriginalImageDimensions(url){
@@ -211,16 +207,26 @@ function bindCanvasPreviewImageFallbacks(root=document){
     root.querySelectorAll?.('img[data-preview-src][data-original-src]:not([data-preview-fallback-bound])').forEach(img => {
         img.dataset.previewFallbackBound = '1';
         img.addEventListener('error', () => {
+            if(img.dataset.previewTaskId) return;
             const original = img.dataset.originalSrc || img.dataset.url || '';
             if(img.dataset.previewKind === 'video'){
-                const video = document.createElement('template');
-                video.innerHTML = canvasVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
-                img.replaceWith(video.content.firstElementChild);
+                replaceCanvasVideoPreviewWithFallback(img);
                 return;
             }
             if(original && img.getAttribute('src') !== original) img.src = original;
         });
     });
+}
+function replaceCanvasVideoPreviewWithFallback(img){
+    if(!img?.isConnected) return false;
+    const original = img.dataset.originalSrc || img.dataset.url || '';
+    if(!original) return false;
+    const video = document.createElement('template');
+    video.innerHTML = canvasVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
+    const fallback = video.content.firstElementChild;
+    if(!fallback) return false;
+    img.replaceWith(fallback);
+    return true;
 }
 const CANVAS_SELECTED_HIGH_RES_DELAY = 320;
 let canvasSelectedHighResTimer = 0;

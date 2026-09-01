@@ -871,9 +871,10 @@ function smartEagerMediaAttrs(attrs=''){
         .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
 }
 const SMART_MEDIA_QUEUE_MAX = 5;
+const SMART_MEDIA_IMAGE_MAX = 5;
+const SMART_MEDIA_VIDEO_MAX = 2;
 const SMART_MEDIA_QUEUE_MARGIN = 720;
-let smartMediaQueueRaf = 0;
-let smartMediaQueueActive = 0;
+let smartMediaQueueController = null;
 function smartPreviewNeedsQueue(preview=''){
     const value = String(preview || '');
     return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
@@ -960,25 +961,36 @@ function bindSmartPreviewImageFallbacks(root=document){
     root.querySelectorAll?.('img[data-preview-src][data-original-src]:not([data-preview-fallback-bound])').forEach(img => {
         img.dataset.previewFallbackBound = '1';
         img.addEventListener('error', () => {
+            if(img.dataset.previewTaskId) return;
             const original = img.dataset.originalSrc || '';
             if(img.dataset.previewKind === 'video'){
-                const tpl = document.createElement('template');
-                tpl.innerHTML = smartVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
-                img.replaceWith(tpl.content.firstElementChild);
+                replaceSmartVideoPreviewWithFallback(img);
                 return;
             }
             if(original && img.getAttribute('src') !== original) img.src = original;
         });
     });
 }
+function replaceSmartVideoPreviewWithFallback(img){
+    if(!img?.isConnected) return false;
+    const original = img.dataset.originalSrc || '';
+    if(!original) return false;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = smartVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
+    const fallback = tpl.content.firstElementChild;
+    if(!fallback) return false;
+    img.replaceWith(fallback);
+    return true;
+}
 function smartPreviewNodeForImage(img){
     const nodeEl = img?.closest?.('.image-node[data-id]');
     if(!nodeEl) return null;
     return smartNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
 }
-function smartPreviewCandidate(img){
+function smartPreviewCandidate(img, allowLoading=false){
     const preview = img?.dataset?.previewSrc || '';
-    if(!img?.isConnected || !preview || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
     const node = smartPreviewNodeForImage(img);
     if(!node) return null;
     const scale = Math.max(0.05, viewport.scale || 1);
@@ -998,41 +1010,40 @@ function smartPreviewCandidate(img){
     const priority = selected ? -20 : (visible ? kind : 10 + kind);
     return {img, priority, distance:Math.abs((rect.x + rect.width / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.height / 2) - (view.y + view.h / 2))};
 }
-function startSmartPreviewImage(img){
-    if(!img?.isConnected || img.dataset.previewState === 'loading' || img.dataset.previewState === 'loaded') return;
-    const preview = img.dataset.previewSrc || '';
-    if(!preview) return;
-    smartMediaQueueActive += 1;
-    img.dataset.previewState = 'loading';
-    const startedAt = performance.now();
-    const finish = ok => {
-        smartMediaQueueActive = Math.max(0, smartMediaQueueActive - 1);
-        scheduleSmartMediaQueue();
-        if(!img.isConnected) return;
-        img.dataset.previewState = ok ? 'loaded' : 'failed';
-        window.CanvasPerformance?.record?.('smart.media-preview', performance.now() - startedAt, {
-            kind:img.dataset.previewKind === 'video' ? 'video' : 'image', ok,
-            queued:smartMediaQueueActive
-        });
-    };
-    img.addEventListener('load', () => finish(true), {once:true});
-    img.addEventListener('error', () => finish(false), {once:true});
-    img.src = preview;
-}
-function drainSmartPreviewQueue(){
-    smartMediaQueueRaf = 0;
-    if(!world || smartMediaQueueActive >= SMART_MEDIA_QUEUE_MAX) return;
-    const candidates = [...world.querySelectorAll('img[data-preview-src]')]
-        .map(smartPreviewCandidate).filter(Boolean)
-        .sort((a, b) => a.priority - b.priority || a.distance - b.distance);
-    candidates.forEach(candidate => {
-        if(smartMediaQueueActive >= SMART_MEDIA_QUEUE_MAX) return;
-        startSmartPreviewImage(candidate.img);
+function ensureSmartMediaQueue(){
+    if(smartMediaQueueController) return smartMediaQueueController;
+    if(!window.CanvasMediaQueue?.createMediaQueue) return null;
+    smartMediaQueueController = window.CanvasMediaQueue.createMediaQueue({
+        name:'smart',
+        maxActive:SMART_MEDIA_QUEUE_MAX,
+        maxImageActive:SMART_MEDIA_IMAGE_MAX,
+        maxVideoActive:SMART_MEDIA_VIDEO_MAX,
+        imageTimeoutMs:20000,
+        videoTimeoutMs:45000,
+        maxAttempts:2,
+        collectCandidates:() => [...(world?.querySelectorAll?.('img[data-preview-src]') || [])].map(img => smartPreviewCandidate(img)).filter(Boolean),
+        isEligible:img => Boolean(smartPreviewCandidate(img, true)),
+        fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || ''),
+        replaceVideoFallback:img => replaceSmartVideoPreviewWithFallback(img),
+        onRecord:entry => window.CanvasPerformance?.record?.('smart.media-preview', entry.duration, {
+            kind:entry.kind,
+            ok:entry.outcome === 'loaded',
+            outcome:entry.outcome,
+            reason:entry.reason,
+            attempt:entry.attempt,
+            queued:entry.activeTotal
+        })
     });
+    return smartMediaQueueController;
 }
+function startSmartPreviewImage(img){ return ensureSmartMediaQueue()?.start(img) || false; }
+function drainSmartPreviewQueue(){ return ensureSmartMediaQueue()?.drainNow(); }
 function scheduleSmartMediaQueue(){
-    if(smartMediaQueueRaf || !world) return;
-    smartMediaQueueRaf = requestAnimationFrame(drainSmartPreviewQueue);
+    ensureSmartMediaQueue()?.schedule();
+}
+function cancelSmartOffscreenPreviewTasks(){
+    ensureSmartMediaQueue()?.cancelIneligible();
+    scheduleSmartMediaQueue();
 }
 const SMART_SELECTED_HIGH_RES_DELAY = 320;
 let smartSelectedHighResTimer = 0;

@@ -65,4 +65,4 @@
 - Lookbook + 电商测试：170 passed
 - Python / JavaScript 静态检查：通过
 - 真实生图：4 个独立单帧请求成功
-- Git commit：待本次报告提交后更新
+- Git commit：`3901512 fix: preserve lookbook subject identity and publish validation report`

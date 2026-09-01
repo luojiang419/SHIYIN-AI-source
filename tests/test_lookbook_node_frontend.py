@@ -92,15 +92,16 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.08.31.lookbook.11", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.12", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260831.2", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)
         self.assertIn("feature=picker-dialog-top-layer.1", self.html)
         self.assertIn("feature=premium-editorial-research.1", self.html)
         self.assertIn("feature=lookbook-agent.1", self.html)
+        self.assertIn("feature=lookbook-auto-mode.1", self.html)
         self.assertIn("feature=remove-output-hint.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
@@ -119,8 +120,19 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("canvasTaskType:'ecommerce-lookbook'", body)
         self.assertIn("out._pending = [...(out._pending || []),", body)
         self.assertIn("setTimeout(() =>", body)
-        self.assertIn("completeEcommerceLookbookTask(taskId,task)", body)
+        self.assertIn("pollEcommerceLookbookTask(taskId,{cascadeTargetId})", body)
         self.assertIn("p.canvasTaskType === 'ecommerce-lookbook'", self.canvas)
+
+    def test_lookbook_submission_uses_stage_aware_polling(self):
+        start = self.canvas.index("async function runLookbookNode")
+        end = self.canvas.index("function bindClassicEcommerceNode", start)
+        body = self.canvas[start:end]
+        self.assertIn("const hasBrief = Boolean(String(node.lookbookPrompt || '').trim())", body)
+        self.assertIn("已读取人物与场景参考，准备快速生成生活化随拍系列", body)
+        self.assertIn("await pollEcommerceLookbookTask(taskId,{cascadeTargetId})", body)
+
+    def test_new_lookbook_defaults_to_four_coordinated_images(self):
+        self.assertIn("count:4,generatedOutputs", self.lookbook)
 
 
 if __name__ == "__main__":

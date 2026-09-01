@@ -16421,18 +16421,20 @@ def build_lookbook_agent_plan(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     inputs = snapshot.get("inputs") if isinstance(snapshot.get("inputs"), list) else []
     quality_gate = bool(options.get("lookbook_quality_gate", True))
     web_search = bool(options.get("lookbook_search", True))
+    auto_mode = not str(options.get("instruction") or "").strip()
     routes = snapshot.get("route_candidates") if isinstance(snapshot.get("route_candidates"), list) else []
     primary_route = routes[0] if routes and isinstance(routes[0], dict) else {}
     stages = [
-        {"id": "reference-analysis", "label": "人物与素材事实分析", "enabled": bool(inputs)},
-        {"id": "web-search", "label": "联网案例与色彩研究", "enabled": web_search},
-        {"id": "art-direction", "label": "创意总监方案", "enabled": True},
+        {"id": "reference-analysis", "label": "人物与素材事实分析", "enabled": bool(inputs) and not auto_mode},
+        {"id": "web-search", "label": "联网案例与色彩研究", "enabled": web_search and not auto_mode},
+        {"id": "art-direction", "label": "创意总监方案", "enabled": not auto_mode},
         {"id": "generation", "label": "按节点参数生成", "enabled": True},
         {"id": "quality-gate", "label": "视觉质检与弱图修复", "enabled": quality_gate},
     ]
     return {
         "version": 1,
         "strategy": "durable-state-machine",
+        "mode": "auto-reference" if auto_mode else "brief-research",
         "timeout_seconds": lookbook_agent_timeout_seconds(options),
         "stages": stages,
         "generation_settings": {
@@ -16867,24 +16869,41 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
     lookbook_agent = is_lookbook_snapshot(snapshot)
-    if lookbook_agent:
-        update_lookbook_agent_stage(task_id, "reference-analysis", "智能体正在解析人物面貌、体态、穿着和可见材质…", 8)
-    snapshot, lookbook_reference_analysis = await enrich_lookbook_reference_analysis(snapshot)
-    if lookbook_reference_analysis is not None:
-        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "lookbook_reference_analysis": lookbook_reference_analysis, "request": snapshot})
-    if lookbook_agent:
-        if bool((snapshot.get("options") or {}).get("lookbook_search", True)):
-            update_lookbook_agent_stage(task_id, "web-search", "智能体正在联网检索杂志与品牌时尚大片，并提取色彩方法…", 24)
-        else:
-            update_lookbook_agent_stage(task_id, "art-direction", "已跳过联网搜索，智能体正在整理高级视觉方案…", 32)
-    snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
-    if lookbook_research is not None:
-        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})
-    if lookbook_agent:
-        update_lookbook_agent_stage(task_id, "art-direction", "智能体正在把人物事实、案例色彩和选定风格合成为创意方案…", 42)
-    snapshot, lookbook_plan = await enrich_lookbook_plan(snapshot)
-    if lookbook_plan is not None:
-        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_plan": lookbook_plan, "request": snapshot})
+    lookbook_options = dict(snapshot.get("options") or {})
+    lookbook_brief = str(lookbook_options.get("instruction") or "").strip()
+    lookbook_auto_mode = bool(lookbook_agent and not lookbook_brief)
+    lookbook_reference_analysis = None
+    lookbook_research = None
+    lookbook_plan = None
+    if lookbook_auto_mode:
+        # 无需求时不启动三次昂贵的视觉/联网模型调用，直接用参考图和内置风格规则生成。
+        lookbook_options["lookbook_auto_mode"] = True
+        snapshot = {
+            **snapshot,
+            "options": lookbook_options,
+            "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], lookbook_options),
+        }
+        update_lookbook_agent_stage(task_id, "auto-compose", "已读取人物与场景参考，直接生成生活化随拍系列…", 42)
+        update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_mode": "auto", "request": snapshot})
+    else:
+        if lookbook_agent:
+            update_lookbook_agent_stage(task_id, "reference-analysis", "智能体正在解析人物面貌、体态、穿着和可见材质…", 8)
+        snapshot, lookbook_reference_analysis = await enrich_lookbook_reference_analysis(snapshot)
+        if lookbook_reference_analysis is not None:
+            update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "lookbook_reference_analysis": lookbook_reference_analysis, "request": snapshot})
+        if lookbook_agent:
+            if bool((snapshot.get("options") or {}).get("lookbook_search", True)):
+                update_lookbook_agent_stage(task_id, "web-search", "智能体正在联网检索杂志与品牌时尚大片，并提取色彩方法…", 24)
+            else:
+                update_lookbook_agent_stage(task_id, "art-direction", "已跳过联网搜索，智能体正在整理高级视觉方案…", 32)
+        snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
+        if lookbook_research is not None:
+            update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})
+        if lookbook_agent:
+            update_lookbook_agent_stage(task_id, "art-direction", "智能体正在把人物事实、案例色彩和选定风格合成为创意方案…", 42)
+        snapshot, lookbook_plan = await enrich_lookbook_plan(snapshot)
+        if lookbook_plan is not None:
+            update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_plan": lookbook_plan, "request": snapshot})
     snapshot, garment_analysis = await enrich_ecommerce_snapshot_with_garment_analysis(snapshot)
     snapshot, universal_analysis = await enrich_ecommerce_snapshot_with_universal_analysis(snapshot)
     if garment_analysis is not None or universal_analysis is not None:
@@ -17298,16 +17317,22 @@ async def create_ecommerce_task(payload: EcommerceTaskRequest):
         "request": snapshot,
     }
     if is_lookbook_snapshot(snapshot):
+        auto_mode = not str((snapshot.get("options") or {}).get("instruction") or "").strip()
+        queued_message = (
+            "已读取人物与场景参考，准备快速生成生活化随拍系列…"
+            if auto_mode
+            else "Lookbook 智能体任务已提交，准备启动联网研究…"
+        )
         task.update({
             "agent_kind": "lookbook",
             "agent_stage": "queued",
-            "progress_status": "Lookbook 智能体任务已提交，等待执行…",
+            "progress_status": queued_message,
             "progress_percent": 0,
             "agent_started_at": now,
             "agent_plan": build_lookbook_agent_plan(snapshot),
             "agent_trace": [{
                 "stage": "queued",
-                "message": "Lookbook 智能体任务已提交，等待执行…",
+                "message": queued_message,
                 "percent": 0,
                 "started_at": now,
                 "updated_at": now,

@@ -1451,12 +1451,13 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         else:
             visual_system_text = str(visual_system or "").strip()[:12000]
         count = max(1, min(4, int(options.get("lookbook_count") or 1)))
+        auto_mode = not instruction
         reference_lines = []
         for index, item in enumerate(normalized, 1):
             assigned = str(item.get("lookbook_role") or item.get("label") or "参考素材").strip()
             name = str(item.get("name") or "").strip()
             reference_lines.append(f"Image {index} is assigned to {assigned}{(' (' + name + ')') if name else ''}; use it only for that attribute family.")
-        user_line = instruction or "自由发挥一个具有商业传播力的时尚主题与版式"
+        user_line = instruction or "依据连接的参考图自由发挥，不额外添加用户未要求的主题"
         parts = [
             "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
             f"USER CREATIVE BRIEF: {user_line}.",
@@ -1469,12 +1470,26 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
             "PRE-DELIVERY QUALITY GATE: inspect the planned render before finalizing for correct anatomy, clean product edges, exact Logo and text, faithful material texture, coherent contact shadows, believable perspective, intentional negative space and commercial advertising polish. Reject obvious defects and regenerate the weak frame when possible.",
         ]
+        if auto_mode:
+            parts.append(
+                "AUTO LOOKBOOK MODE (no user brief): use the connected reference images and selected style as the creative source of truth. "
+                "Generate a coordinated series of candid lifestyle fashion snapshots, as if an observant photographer caught real unposed moments between locations: relaxed micro-expressions, natural weight shifts, walking, turning, leaning, adjusting clothing or interacting with the supplied scene. "
+                "Prefer authentic environmental light, subtle motion blur, foreground occlusion, imperfect but flattering framing, tactile film grain and lived-in details over polished studio posing. "
+                "Vary each image by distance, angle, crop and decisive moment while keeping identity, wardrobe, palette and location continuous; never make a contact sheet, split panel, duplicate collage or isolated catalog cutout."
+            )
         if reference_lines:
             parts.append("SEMANTIC INPUT MAP: " + " ".join(reference_lines))
         semantic_roles = {str(item.get("lookbook_role") or "").strip() for item in normalized}
         if "Logo" in semantic_roles:
             parts.append("LOGO AND BRAND TEXT LOCK: preserve the connected Logo reference exactly, including geometry, proportions, negative space, color, letterforms, spelling, orientation and placement. Never redraw, stylize, mirror, translate or invent brand marks.")
-        if "人物" in semantic_roles and "商品" in semantic_roles:
+        if "人物" in semantic_roles and "场景" in semantic_roles:
+            parts.append(
+                "PERSON-SCENE LIFESTYLE LOCK: use the connected 人物 image as the sole source of face, identity, skin tone, hair, body proportions, existing wardrobe and accessories. "
+                "Use the connected 场景 image as the geographic and architectural anchor, preserving its recognizable spatial cues while adapting viewpoint and time of day naturally. "
+                "Photograph the person inside that world rather than compositing two cutouts: establish believable scale, feet-to-ground contact, directional light, atmospheric depth and an incidental interaction with the environment. "
+                "The result must feel like premium street-style or travel-editorial reportage—spontaneous, intimate and quietly luxurious—not a white-background studio, rigid catalog pose or synthetic backdrop."
+            )
+        elif "人物" in semantic_roles and "商品" in semantic_roles:
             parts.append("PERSON-PRODUCT ASSEMBLY LOCK: use the connected 人物 image as the final person's identity, face, body, hair, anatomy and natural base composition. Use the connected 商品 image as the sole source of the exact SKU. Compose them as one intentional commercial relationship: wear the product when it is apparel or an accessory, hold or place it naturally when it is an object, and never show the person and product as unrelated cutouts. Preserve the product's silhouette, material, color, Logo and readable text; do not replace the person's identity with the product reference wearer.")
         elif "人物" in semantic_roles:
             parts.append("PERSON-ONLY EDITORIAL LOCK: first preserve and accurately reinterpret the connected 人物 image's face, identity, skin tone, hair, body proportions, expression and existing clothing layers, silhouette, colors, footwear and accessories. The wardrobe reference is the styling foundation; do not replace it with generic fashion or a newly invented model unless the user explicitly asks. Build a lived-in fashion editorial around this person: choose an intentional urban location, time of day, weather/light condition, walking or interacting gesture, foreground depth and a responsive camera moment. For street fashion, show movement, attitude and environmental context rather than a blank studio pose.")

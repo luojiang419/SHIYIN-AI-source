@@ -10116,7 +10116,8 @@ async function runLookbookNode(nodeId, opts={}){
             canvasTaskType:'ecommerce-lookbook', providerId:'', model:'', appendGenerated:true, lookbookCount:count,
         })];
     }
-    node.running = true; node.runError = ''; node.lookbookAgentStage = '智能体任务已提交，准备启动…'; node.lookbookResearchStatus = node.lookbookSearch !== false ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
+    const hasBrief = Boolean(String(node.lookbookPrompt || '').trim());
+    node.running = true; node.runError = ''; node.lookbookAgentStage = hasBrief ? '智能体任务已提交，准备启动联网研究…' : '已读取人物与场景参考，准备快速生成生活化随拍系列…'; node.lookbookResearchStatus = hasBrief && node.lookbookSearch !== false ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
     refreshRunNodes(node,out);
     if(!opts.cascade) setTimeout(() => { if(nodes.includes(node)) { node.running = false; refreshRunNodes(node,out); } }, 2000);
     const request = {
@@ -10135,8 +10136,8 @@ async function runLookbookNode(nodeId, opts={}){
         if(pending){ pending.canvasTaskId = taskId; pending.providerId = created.provider_id || ''; }
         node.ecomTaskId = taskId;
         refreshRunNodes(node,out); scheduleSave(); await saveCanvas();
-        const task = await waitEcommerceTask(taskId,{cascadeTargetId});
-        completeEcommerceLookbookTask(taskId,task);
+        // Lookbook 使用专用短轮询，持续把 agent 阶段写回节点；通用 waitEcommerceTask 不会刷新阶段文案。
+        await pollEcommerceLookbookTask(taskId,{cascadeTargetId});
     } catch(error){
         if(isCascadeAbortError(error)){ failEcommerceLookbookTask(pendingId,error.message || cascadeStopMessage(),node,out); if(opts.cascade) throw error; return; }
         failEcommerceLookbookTask(pendingId,error.message || String(error),node,out);

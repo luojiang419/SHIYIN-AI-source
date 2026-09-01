@@ -8,6 +8,32 @@ from canvas_core.ecommerce import build_prompt
 
 
 class LookbookPremiumResearchTests(unittest.TestCase):
+    def test_auto_mode_plan_disables_expensive_research_stages(self):
+        plan = main.build_lookbook_agent_plan({
+            "operation": "universal",
+            "inputs": [{"url": "/assets/input/person.png"}, {"url": "/assets/input/scene.png"}],
+            "options": {"prompt_policy": "lookbook", "lookbook_search": True, "instruction": ""},
+        })
+        self.assertEqual(plan["mode"], "auto-reference")
+        self.assertFalse(plan["stages"][0]["enabled"])
+        self.assertFalse(plan["stages"][1]["enabled"])
+        self.assertFalse(plan["stages"][2]["enabled"])
+        self.assertTrue(plan["stages"][3]["enabled"])
+
+    def test_auto_person_scene_prompt_is_candid_and_series_oriented(self):
+        prompt = build_prompt("universal", [
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/person.png"},
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.png"},
+        ], {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"name": "时尚街景", "prompt": "urban fashion editorial"},
+            "lookbook_count": 4,
+        })
+        self.assertIn("AUTO LOOKBOOK MODE", prompt)
+        self.assertIn("PERSON-SCENE LIFESTYLE LOCK", prompt)
+        self.assertIn("candid lifestyle fashion snapshots", prompt)
+        self.assertIn("never make a contact sheet", prompt)
+
     def test_agent_plan_keeps_node_generation_settings_and_clamps_timeout(self):
         snapshot = {
             "operation": "universal",

@@ -1008,7 +1008,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(providers[3]["model_protocols"]["gemini-3-pro-image-preview"], "gemini")
         self.assertEqual(providers[4]["chat_models"], ["qwen3.5-9b-vlm"])
         self.assertEqual(providers[4]["image_models"], [])
-        self.assertEqual(providers[5]["name"], "电商专用")
+        self.assertEqual(providers[5]["name"], "AI助手")
         self.assertEqual(providers[5]["chat_models"], ["qwen3.5-9b-vlm"])
         self.assertEqual(providers[6]["video_models"], ["MiniMax H3"])
 
@@ -1709,7 +1709,7 @@ class EcommerceBackendTests(unittest.TestCase):
         with (
             patch.object(self.main, "validate_ecommerce_local_inputs", return_value=(payload.model_dump()["inputs"], (900, 1200))),
             patch.object(self.main, "analyze_ecommerce_universal_references", new=AsyncMock(return_value=analysis)),
-            patch.object(self.main, "configured_ecommerce_vision_route", return_value={"provider_id": "ecommerce-vision", "provider_name": "电商专用", "model": "qwen3.5-9b-vlm"}),
+            patch.object(self.main, "configured_ecommerce_vision_route", return_value={"provider_id": "ecommerce-vision", "provider_name": "AI助手", "model": "qwen3.5-9b-vlm"}),
         ):
             result = asyncio.run(self.main.prepare_ecommerce_analysis(payload))
         self.assertEqual(result["user_selected_type"], "universal")
@@ -2077,7 +2077,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("saveProviders({render:false, auto:true})", self.api_javascript)
 
     def test_ecommerce_provider_uses_standard_protocol_controls(self):
-        """电商专用必须和普通 API 平台一样允许切换协议及单模型协议。"""
+        """AI助手平台必须和普通 API 平台一样允许切换协议及单模型协议。"""
         fixed_protocol = re.search(
             r"const FIXED_PROTOCOL_PROVIDER_IDS = new Set\(\[(.*?)\]\);",
             self.api_javascript,

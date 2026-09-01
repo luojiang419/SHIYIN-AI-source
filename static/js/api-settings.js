@@ -3288,7 +3288,7 @@ async function clearKeyOnly(){
     const ok = await saveProviders();
     if(ok) keyInput.value = '';
 }
-// 电商专用平台沿用标准 API 配置页，协议和单模型协议均可由用户选择。
+// AI助手平台沿用标准 API 配置页，协议和单模型协议均可由用户选择。
 // 只有真正依赖专用运行时的内置平台才保留固定协议。
 const FIXED_PROTOCOL_PROVIDER_IDS = new Set(['modelscope', 'volcengine', 'jimeng', 'runninghub', 'codex', 'local-vision', 'minimax-h3', 'kling-cli']);
 function providerSupportsModelProtocol(item){

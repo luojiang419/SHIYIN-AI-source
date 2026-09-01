@@ -80,7 +80,7 @@ class ApiProviderPriorityTests(unittest.TestCase):
     def test_ecommerce_vision_provider_is_preferred_for_ecommerce_analysis(self):
         providers = [
             {**self.provider("local-vision"), "chat_models": ["qwen-vl"]},
-            {**self.provider("ecommerce-vision"), "name": "电商专用", "chat_models": ["custom-caption-model"]},
+            {**self.provider("ecommerce-vision"), "name": "AI助手", "chat_models": ["custom-caption-model"]},
         ]
         with patch.object(self.main, "provider_env_key_value", return_value="configured-key"):
             route = self.main.configured_ecommerce_vision_route(providers)
@@ -91,13 +91,42 @@ class ApiProviderPriorityTests(unittest.TestCase):
         providers = self.main.default_api_providers()
         item = next((provider for provider in providers if provider["id"] == "ecommerce-vision"), None)
         self.assertIsNotNone(item)
-        self.assertEqual(item["name"], "电商专用")
+        self.assertEqual(item["name"], "AI助手")
         self.assertTrue(item["chat_models"])
+
+    def test_existing_ecommerce_provider_name_is_migrated_without_changing_configuration(self):
+        saved = {
+            "id": "ecommerce-vision",
+            "name": "电商专用",
+            "base_url": "https://api.example.com/v1",
+            "protocol": "responses",
+            "request_protocol": "responses",
+            "image_request_mode": "openai-json",
+            "enabled": False,
+            "primary": True,
+            "image_models": ["image-model"],
+            "chat_models": ["vision-chat-model"],
+            "video_models": ["video-model"],
+            "model_protocols": {"vision-chat-model": "responses"},
+        }
+
+        item = next(
+            provider
+            for provider in self.main.merge_default_api_providers([saved])
+            if provider["id"] == "ecommerce-vision"
+        )
+
+        self.assertEqual(item["name"], "AI助手")
+        for field in (
+            "base_url", "protocol", "request_protocol", "image_request_mode", "enabled", "primary",
+            "image_models", "chat_models", "video_models", "model_protocols",
+        ):
+            self.assertEqual(item[field], saved[field])
 
     def test_ecommerce_provider_keeps_standard_model_fields(self):
         item = self.main.normalize_provider({
             "id": "ecommerce-vision",
-            "name": "电商专用",
+            "name": "AI助手",
             "base_url": "https://api.example.com/v1",
             "protocol": "gemini",
             "image_models": ["image-model"],
@@ -113,7 +142,7 @@ class ApiProviderPriorityTests(unittest.TestCase):
         self.assertNotIn("ecommerce-vision", self.main.FIXED_PROTOCOL_PROVIDER_IDS)
         provider = self.main.normalize_provider({
             "id": "ecommerce-vision",
-            "name": "电商专用",
+            "name": "AI助手",
             "base_url": "https://api.example.com/v1",
             "protocol": "responses",
             "request_protocol": "responses",

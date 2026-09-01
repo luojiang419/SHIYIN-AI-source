@@ -1282,7 +1282,7 @@ def api_provider_templates():
         },
         {
             "id": "ecommerce-vision",
-            "name": "电商专用",
+            "name": "AI助手",
             "base_url": LOCAL_VISION_DEFAULT_BASE_URL,
             "protocol": "openai",
             "image_request_mode": "openai",
@@ -1484,9 +1484,10 @@ def merge_default_api_providers(providers):
         if not current:
             merged.append(ecommerce_vision_default)
         else:
-            current["name"] = str(current.get("name") or ecommerce_vision_default["name"])
+            # 内置平台使用稳定 ID 关联节点和设置；这里只迁移显示名称，保留其余用户配置。
+            current["name"] = ecommerce_vision_default["name"]
             current["base_url"] = str(current.get("base_url") or ecommerce_vision_default["base_url"])
-            # 电商专用平台现在沿用标准 API 配置页，保留用户维护的三类模型和协议。
+            # AI助手平台沿用标准 API 配置页，保留用户维护的三类模型和协议。
             current["protocol"] = str(current.get("protocol") or ecommerce_vision_default["protocol"])
             current["image_request_mode"] = str(current.get("image_request_mode") or ecommerce_vision_default["image_request_mode"])
             current["image_models"] = model_list_from_values(current.get("image_models") or [])
@@ -3916,7 +3917,7 @@ class EcommerceAnalyzeRequest(BaseModel):
 
     该请求只负责解析参考图并生成可审阅的组合方案，不会调用图片生成接口。
     provider_id/model 保留在请求模型中用于回显当前页面选择，但视觉分析始终走
-    已配置的“电商专用”平台，避免用户误选普通聊天平台导致规则漂移。
+    已配置的“AI助手”平台，避免用户误选普通聊天平台导致规则漂移。
     """
     operation: str
     mode: str = "standard"
@@ -5307,7 +5308,7 @@ async def request_llm_json(transport, messages, retry_524=2, on_text_delta=None)
                     raise HTTPException(
                         status_code=504,
                         detail=(
-                            "连接电商视觉上游失败，未收到有效响应。"
+                            "连接 AI助手视觉上游失败，未收到有效响应。"
                             f"已自动重试 {retry_limit} 次（{type(exc).__name__}），请检查网络或稍后重试。"
                         ),
                     ) from exc
@@ -16133,7 +16134,7 @@ def configured_ecommerce_vision_route(providers: Optional[List[Dict[str, Any]]] 
         provider_name = str(provider.get("name") or provider_id)
         for model_index, model in enumerate(provider.get("chat_models") or []):
             model_name = str(model or "").strip()
-            # “电商专用”平台的聊天模型就是给商品/模特/场景解析使用的，
+            # “AI助手”平台的聊天模型就是给商品/模特/场景解析使用的，
             # 即使模型名称没有包含 vision/vlm，也应允许它参与电商视觉路由。
             if provider_id != "ecommerce-vision" and not looks_like_vision_chat_model(model_name):
                 continue
@@ -16787,7 +16788,7 @@ async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, An
         return snapshot, {"status": "provided" if str(options.get("search_context") or "").strip() else "disabled"}
     route = configured_ecommerce_vision_route()
     if not route:
-        return snapshot, {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
+        return snapshot, {"status": "skipped", "reason": "未配置可用的 AI助手视觉模型"}
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     query = str(options.get("instruction") or "时尚 Lookbook 平面广告").strip()[:4000]
     style_prompt = str(style.get("prompt") or style.get("name") or "").strip()[:1400]
@@ -16838,7 +16839,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
         return snapshot, None
     route = configured_ecommerce_vision_route()
     if not route:
-        return snapshot, {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
+        return snapshot, {"status": "skipped", "reason": "未配置可用的 AI助手视觉模型"}
     existing = str(options.get("lookbook_plan") or "").strip()
     if existing:
         return snapshot, {"status": "provided", "summary": existing}
@@ -16933,7 +16934,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         return {"status": "skipped", "reason": "没有生成结果"}
     route = configured_ecommerce_vision_route()
     if not route:
-        return {"status": "skipped", "reason": "未配置可用的电商视觉模型"}
+        return {"status": "skipped", "reason": "未配置可用的 AI助手视觉模型"}
     references = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
     reference_labels = [f"原始参考：{str(item.get('lookbook_role') or item.get('label') or item.get('name') or '素材')}" for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
     output_labels = [f"待验收 Lookbook 输出 {index}（weak_indices 使用这个从 0 开始的编号）" for index in range(len(images))]
@@ -17435,7 +17436,7 @@ async def install_lookbook_skills(payload: LookbookSkillInstallRequest):
 async def generate_lookbook_skill_cover(payload: LookbookSkillCoverRequest):
     route = configured_ecommerce_vision_route()
     if not route:
-        raise HTTPException(status_code=400, detail="未配置可用的电商视觉图片模型")
+        raise HTTPException(status_code=400, detail="未配置可用的 AI助手视觉图片模型")
     try:
         generation = resolve_ecommerce_generation_settings(1024, 1365, "standard", payload.aspect_ratio, payload.resolution, payload.quality, 1)
         result = await execute_ai_image_batch(
@@ -20886,7 +20887,7 @@ async def canvas_llm(payload: CanvasLLMRequest, progress_callback=None):
         friendly = friendly_chat_error_detail(body, model, _llm_provider)
         if exc.response.status_code == 524:
             friendly = (
-                "电商视觉上游网关等待超时（524）。API Key 和模型已正确命中电商专用平台，"
+                "AI助手视觉上游网关等待超时（524）。API Key 和模型已正确命中 AI助手平台，"
                 "系统已自动重试仍未在网关时限内返回；请稍后重试，或减少一次解析的参考图数量。"
             )
         elif exc.response.status_code >= 500 and not body.strip():

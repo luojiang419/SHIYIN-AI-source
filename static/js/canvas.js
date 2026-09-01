@@ -1347,7 +1347,7 @@ function resolveChatProviderId(id){
     const providers = chatApiProviders();
     return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
 }
-// 视频节点的视觉解析优先使用“电商专用”平台（若已配置），避免空的
+// 视频节点的视觉解析优先使用“AI助手”平台（若已配置），避免空的
 // visionProvider 被普通聊天平台（例如本地 qwen VLM）抢先占用。
 function resolveVideoVisionProviderId(id){
     const providers = chatApiProviders();

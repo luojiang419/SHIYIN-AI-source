@@ -3996,7 +3996,7 @@ function resolveChatProviderId(providerId=''){
     if(providers.some(p => p.id === providerId)) return providerId;
     return providers[0]?.id || 'comfly';
 }
-// 视频节点的视觉解析优先使用已配置的“电商专用”平台；普通 AI 助手仍沿用
+// 视频节点的视觉解析优先使用已配置的“AI助手”平台；普通 AI 助手节点仍沿用
 // resolveChatProviderId 的原有优先级。
 function resolveVideoVisionProviderId(providerId=''){
     const providers = chatApiProviders();

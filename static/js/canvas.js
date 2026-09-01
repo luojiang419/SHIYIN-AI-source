@@ -65,7 +65,11 @@ const CLASSIC_MEDIA_QUEUE_MAX = 6;
 const CLASSIC_MEDIA_IMAGE_MAX = 6;
 const CLASSIC_MEDIA_VIDEO_MAX = 2;
 const CLASSIC_MEDIA_QUEUE_MARGIN = 720;
+const CLASSIC_MEDIA_RESIDENCY_MAX = 72;
+const CLASSIC_MEDIA_RESIDENCY_PIXELS = 32 * 1024 * 1024;
+const CLASSIC_MEDIA_RESIDENCY_GRACE_MS = 3000;
 let classicMediaQueueController = null;
+let classicMediaResidencyController = null;
 function canvasPreviewNeedsQueue(preview=''){
     const value = String(preview || '');
     return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
@@ -84,21 +88,37 @@ function classicPreviewNodeForImage(img){
     if(!nodeEl) return null;
     return canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
 }
-function classicPreviewCandidate(img, allowLoading=false){
-    const preview = img?.dataset?.previewSrc || '';
-    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
-    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
-    const node = classicPreviewNodeForImage(img);
+function classicMediaViewportEntry(element){
+    if(!element?.isConnected) return null;
+    const nodeEl = element.closest?.('.node[data-id]');
+    const node = nodeEl ? (canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id)) : null;
     if(!node) return null;
     const view = currentWorldViewRect();
     const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
     const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
     const visible = rect.x < view.x + view.w && rect.x + rect.w > view.x && rect.y < view.y + view.h && rect.y + rect.h > view.y;
     const near = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
-    if(!visible && !near && !selected.has(node.id)) return null;
+    const pinned = selected.has(node.id)
+        || Boolean(node.running || node.pending || node.jimengPending || ['queued', 'running'].includes(node.runStatus))
+        || Boolean(document.activeElement && nodeEl?.contains(document.activeElement));
+    return {
+        element,
+        node,
+        visible,
+        eligible:visible || near || pinned,
+        pinned,
+        distance:Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))
+    };
+}
+function classicPreviewCandidate(img, allowLoading=false){
+    const preview = img?.dataset?.previewSrc || '';
+    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
+    const entry = classicMediaViewportEntry(img);
+    if(!entry?.eligible) return null;
+    if(img.dataset.previewState === 'evicted' && img.dataset.mediaResidentReason === 'budget' && !entry.visible && !entry.pinned) return null;
     const kind = img.dataset.previewKind === 'video' ? 1 : 0;
-    const priority = selected.has(node.id) ? -20 : (visible ? kind : 10 + kind);
-    return {img, priority, distance:Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))};
+    return {img, priority:entry.pinned ? -20 : (entry.visible ? kind : 10 + kind), distance:entry.distance};
 }
 function ensureClassicMediaQueue(){
     if(classicMediaQueueController) return classicMediaQueueController;
@@ -116,16 +136,40 @@ function ensureClassicMediaQueue(){
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
         replaceVideoFallback:img => replaceCanvasVideoPreviewWithFallback(img),
         onStart:() => recordClassicFirstPreviewStart(),
-        onRecord:entry => window.CanvasPerformance?.record?.('classic.media-preview', entry.duration, {
-            kind:entry.kind,
-            ok:entry.outcome === 'loaded',
-            outcome:entry.outcome,
-            reason:entry.reason,
-            attempt:entry.attempt,
-            queued:entry.activeTotal
-        })
+        onRecord:entry => {
+            ensureClassicMediaResidency()?.schedule();
+            window.CanvasPerformance?.record?.('classic.media-preview', entry.duration, {
+                kind:entry.kind,
+                ok:entry.outcome === 'loaded',
+                outcome:entry.outcome,
+                reason:entry.reason,
+                attempt:entry.attempt,
+                queued:entry.activeTotal
+            });
+        }
     });
     return classicMediaQueueController;
+}
+function ensureClassicMediaResidency(){
+    if(classicMediaResidencyController) return classicMediaResidencyController;
+    if(!window.CanvasMediaQueue?.createMediaResidency) return null;
+    classicMediaResidencyController = window.CanvasMediaQueue.createMediaResidency({
+        name:'classic',
+        graceMs:CLASSIC_MEDIA_RESIDENCY_GRACE_MS,
+        maxResident:CLASSIC_MEDIA_RESIDENCY_MAX,
+        maxResidentPixels:CLASSIC_MEDIA_RESIDENCY_PIXELS,
+        collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
+            .map(classicMediaViewportEntry).filter(Boolean),
+        onChange:() => ensureClassicMediaQueue()?.schedule(),
+        onRecord:entry => window.CanvasPerformance?.record?.('classic.media-residency', 0, {
+            action:entry.action,
+            reason:entry.reason,
+            kind:entry.kind,
+            resident:entry.residentTotal,
+            pixels:entry.residentPixels
+        })
+    });
+    return classicMediaResidencyController;
 }
 function recordClassicFirstPreviewStart(){
     if(canvas?.id && classicNavigationStartedAt && classicFirstPreviewCanvasId !== canvas.id){
@@ -134,12 +178,17 @@ function recordClassicFirstPreviewStart(){
     }
 }
 function startClassicPreviewImage(img){ return ensureClassicMediaQueue()?.start(img) || false; }
-function drainClassicPreviewQueue(){ return ensureClassicMediaQueue()?.drainNow(); }
+function drainClassicPreviewQueue(){
+    ensureClassicMediaResidency()?.reconcileNow();
+    return ensureClassicMediaQueue()?.drainNow();
+}
 function scheduleClassicMediaQueue(){
+    ensureClassicMediaResidency()?.schedule();
     ensureClassicMediaQueue()?.schedule();
 }
 function cancelClassicOffscreenPreviewTasks(){
     ensureClassicMediaQueue()?.cancelIneligible();
+    ensureClassicMediaResidency()?.reconcileNow();
     scheduleClassicMediaQueue();
 }
 function loadCanvasOriginalImageDimensions(url){
@@ -4391,8 +4440,8 @@ function renderBlenderDirectorBody(node){
     const latestKind = mediaKindForOutputItem(latest);
     const preview = latestUrl
         ? latestKind === 'video'
-            ? `<div class="blender-preview" data-blender-preview="${escapeAttr(latestUrl)}">${canvasVideoPreviewHtml(latestUrl, 768, 'controls preload="metadata" playsinline')}</div>`
-            : `<div class="blender-preview" data-blender-preview="${escapeAttr(latestUrl)}">${canvasPreviewImgHtml(latestUrl, 768, 'draggable="false"')}</div>`
+            ? `<div class="blender-preview" data-blender-preview="${escapeAttr(latestUrl)}">${canvasVideoPreviewHtml(latestUrl, 512, 'controls preload="metadata" playsinline')}</div>`
+            : `<div class="blender-preview" data-blender-preview="${escapeAttr(latestUrl)}">${canvasPreviewImgHtml(latestUrl, 512, 'draggable="false"')}</div>`
         : '<div class="blender-empty"><i data-lucide="scan-3d"></i><span>渲染结果会回传到这里，并可连接下游图片/视频节点</span></div>';
     const disabled = node.running || node._blenderConnecting ? 'disabled' : '';
     const connectLabel = node._blenderConnecting ? '正在启动并连接…' : state.connected ? '刷新连接' : '启动 / 连接 Blender';
@@ -10609,10 +10658,10 @@ function renderNode(node){
             const missing = isMissingAssetUrl(node.url);
             const mediaKind = mediaKindForNode(node);
             const isEditableImage = mediaKind === 'image' && !missing;
-            body.innerHTML = `<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : canvasPreviewImgHtml(node.url, 768, 'draggable="false"')}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')}${missing ? ` · ${langIsEn() ? 'missing' : '文件缺失'}` : ''}</div>`;
+            body.innerHTML = `<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : canvasPreviewImgHtml(node.url, 512, 'draggable="false"')}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')}${missing ? ` · ${langIsEn() ? 'missing' : '文件缺失'}` : ''}</div>`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
-                    ? `<div class="media-card video-card">${canvasVideoPreviewHtml(node.url, 768, 'draggable="false" data-video-fallback-attrs="controls"')}<button class="canvas-video-play" type="button" title="播放"><i data-lucide="play"></i></button></div>`
+                    ? `<div class="media-card video-card">${canvasVideoPreviewHtml(node.url, 512, 'draggable="false" data-video-fallback-attrs="controls"')}<button class="canvas-video-play" type="button" title="播放"><i data-lucide="play"></i></button></div>`
                     : `<div class="media-card audio-card"><i data-lucide="file-audio" class="w-8 h-8"></i><div class="audio-title">${escapeHtml(node.name || 'Audio')}</div><div class="audio-sub">AUDIO</div><audio src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="metadata"></audio></div>`;
                 body.innerHTML = `<div class="image-preview-wrap">${mediaHtml}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || nodeTitleForMedia(node))}</div>`;
             }
@@ -17930,7 +17979,7 @@ function renderOutputMedia(item, useGridLayout=false){
         return `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${gridStyle}>${missingAssetHtml(url, true)}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'video'){
-        return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasVideoPreviewHtml(url, useGridLayout ? 512 : 768, 'alt="video output" data-video-fallback-attrs="controls data-output-video-fallback=&quot;1&quot;"')}${timePill}<button class="canvas-video-play output-video-play" type="button" title="播放"><i data-lucide="play"></i></button><div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+        return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasVideoPreviewHtml(url, 512, 'alt="video output" data-video-fallback-attrs="controls data-output-video-fallback=&quot;1&quot;"')}${timePill}<button class="canvas-video-play output-video-play" type="button" title="播放"><i data-lucide="play"></i></button><div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'audio'){
         return `<div class="output-img-wrap output-audio-wrap" data-output-url="${safe}"${gridStyle}><div class="output-audio-card"><i data-lucide="file-audio" class="w-7 h-7"></i><span>${escapeHtml(outputImageName(url))}</span><audio src="${safe}" data-url="${safe}" controls preload="metadata"></audio></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
@@ -17940,7 +17989,7 @@ function renderOutputMedia(item, useGridLayout=false){
         const label = kind === 'text' ? 'TEXT' : 'FILE';
         return `<div class="output-img-wrap output-file-wrap" data-output-url="${safe}"${gridStyle}><div class="output-file-card"><i data-lucide="${icon}" class="w-7 h-7"></i><span>${escapeHtml(meta.name || outputImageName(url))}</span><small>${label}</small></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
-    return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasPreviewImgHtml(url, useGridLayout ? 512 : 768, 'alt="generated output"')}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+    return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasPreviewImgHtml(url, 512, 'alt="generated output"')}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
 }
 function outputGridLayout(node){
     const images = node?.images || [];

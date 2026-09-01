@@ -79,6 +79,11 @@ class CanvasMediaPreviewPerformanceTests(unittest.TestCase):
         self.assertIn(".replace(/\\sloading\\s*=\\s*(['\"])[^'\"]*\\1/ig, '')", smart)
         self.assertIn("if(!selected.has(node.id)) return;", classic)
         self.assertIn("&& isNodeSelected(node.id)", smart)
+        self.assertNotIn("canvasPreviewImgHtml(node.url, 768", classic)
+        self.assertNotIn("canvasVideoPreviewHtml(node.url, 768", classic)
+        self.assertNotIn("useGridLayout ? 512 : 768", classic)
+        self.assertNotIn("smartPreviewImgHtml(img, 768", smart)
+        self.assertNotIn("smartVideoPreviewHtml(img, 768", smart)
 
     def test_preview_queue_survives_incremental_dom_replacement(self):
         runtime = (ROOT / "static/js/canvas-media-queue.js").read_text(encoding="utf-8")

@@ -874,7 +874,11 @@ const SMART_MEDIA_QUEUE_MAX = 5;
 const SMART_MEDIA_IMAGE_MAX = 5;
 const SMART_MEDIA_VIDEO_MAX = 2;
 const SMART_MEDIA_QUEUE_MARGIN = 720;
+const SMART_MEDIA_RESIDENCY_MAX = 72;
+const SMART_MEDIA_RESIDENCY_PIXELS = 32 * 1024 * 1024;
+const SMART_MEDIA_RESIDENCY_GRACE_MS = 3000;
 let smartMediaQueueController = null;
+let smartMediaResidencyController = null;
 function smartPreviewNeedsQueue(preview=''){
     const value = String(preview || '');
     return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
@@ -987,11 +991,10 @@ function smartPreviewNodeForImage(img){
     if(!nodeEl) return null;
     return smartNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
 }
-function smartPreviewCandidate(img, allowLoading=false){
-    const preview = img?.dataset?.previewSrc || '';
-    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
-    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
-    const node = smartPreviewNodeForImage(img);
+function smartMediaViewportEntry(element){
+    if(!element?.isConnected) return null;
+    const nodeEl = element.closest?.('.image-node[data-id]');
+    const node = nodeEl ? (smartNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id)) : null;
     if(!node) return null;
     const scale = Math.max(0.05, viewport.scale || 1);
     const view = {
@@ -1004,11 +1007,27 @@ function smartPreviewCandidate(img, allowLoading=false){
     const rect = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
     const visible = rect.x < view.x + view.w && rect.x + rect.width > view.x && rect.y < view.y + view.h && rect.y + rect.height > view.y;
     const near = rect.x < view.x + view.w + margin && rect.x + rect.width > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.height > view.y - margin;
-    const selected = isNodeSelected(node.id);
-    if(!visible && !near && !selected) return null;
+    const pinned = isNodeSelected(node.id)
+        || Boolean(node.running || node.pending || node.jimengPending || node.queued || ['queued', 'running'].includes(node.runStatus))
+        || Boolean(document.activeElement && nodeEl?.contains(document.activeElement));
+    return {
+        element,
+        node,
+        visible,
+        eligible:visible || near || pinned,
+        pinned,
+        distance:Math.abs((rect.x + rect.width / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.height / 2) - (view.y + view.h / 2))
+    };
+}
+function smartPreviewCandidate(img, allowLoading=false){
+    const preview = img?.dataset?.previewSrc || '';
+    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
+    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
+    const entry = smartMediaViewportEntry(img);
+    if(!entry?.eligible) return null;
+    if(img.dataset.previewState === 'evicted' && img.dataset.mediaResidentReason === 'budget' && !entry.visible && !entry.pinned) return null;
     const kind = img.dataset.previewKind === 'video' ? 1 : 0;
-    const priority = selected ? -20 : (visible ? kind : 10 + kind);
-    return {img, priority, distance:Math.abs((rect.x + rect.width / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.height / 2) - (view.y + view.h / 2))};
+    return {img, priority:entry.pinned ? -20 : (entry.visible ? kind : 10 + kind), distance:entry.distance};
 }
 function ensureSmartMediaQueue(){
     if(smartMediaQueueController) return smartMediaQueueController;
@@ -1025,24 +1044,53 @@ function ensureSmartMediaQueue(){
         isEligible:img => Boolean(smartPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || ''),
         replaceVideoFallback:img => replaceSmartVideoPreviewWithFallback(img),
-        onRecord:entry => window.CanvasPerformance?.record?.('smart.media-preview', entry.duration, {
-            kind:entry.kind,
-            ok:entry.outcome === 'loaded',
-            outcome:entry.outcome,
-            reason:entry.reason,
-            attempt:entry.attempt,
-            queued:entry.activeTotal
-        })
+        onRecord:entry => {
+            ensureSmartMediaResidency()?.schedule();
+            window.CanvasPerformance?.record?.('smart.media-preview', entry.duration, {
+                kind:entry.kind,
+                ok:entry.outcome === 'loaded',
+                outcome:entry.outcome,
+                reason:entry.reason,
+                attempt:entry.attempt,
+                queued:entry.activeTotal
+            });
+        }
     });
     return smartMediaQueueController;
 }
+function ensureSmartMediaResidency(){
+    if(smartMediaResidencyController) return smartMediaResidencyController;
+    if(!window.CanvasMediaQueue?.createMediaResidency) return null;
+    smartMediaResidencyController = window.CanvasMediaQueue.createMediaResidency({
+        name:'smart',
+        graceMs:SMART_MEDIA_RESIDENCY_GRACE_MS,
+        maxResident:SMART_MEDIA_RESIDENCY_MAX,
+        maxResidentPixels:SMART_MEDIA_RESIDENCY_PIXELS,
+        collectEntries:() => [...(world?.querySelectorAll?.('.image-node img[data-preview-src],.image-node video[data-url],.image-node audio[data-url]') || [])]
+            .map(smartMediaViewportEntry).filter(Boolean),
+        onChange:() => ensureSmartMediaQueue()?.schedule(),
+        onRecord:entry => window.CanvasPerformance?.record?.('smart.media-residency', 0, {
+            action:entry.action,
+            reason:entry.reason,
+            kind:entry.kind,
+            resident:entry.residentTotal,
+            pixels:entry.residentPixels
+        })
+    });
+    return smartMediaResidencyController;
+}
 function startSmartPreviewImage(img){ return ensureSmartMediaQueue()?.start(img) || false; }
-function drainSmartPreviewQueue(){ return ensureSmartMediaQueue()?.drainNow(); }
+function drainSmartPreviewQueue(){
+    ensureSmartMediaResidency()?.reconcileNow();
+    return ensureSmartMediaQueue()?.drainNow();
+}
 function scheduleSmartMediaQueue(){
+    ensureSmartMediaResidency()?.schedule();
     ensureSmartMediaQueue()?.schedule();
 }
 function cancelSmartOffscreenPreviewTasks(){
     ensureSmartMediaQueue()?.cancelIneligible();
+    ensureSmartMediaResidency()?.reconcileNow();
     scheduleSmartMediaQueue();
 }
 const SMART_SELECTED_HIGH_RES_DELAY = 320;
@@ -8651,8 +8699,8 @@ function updateImageResolutionBadgeElement(itemEl, img){
 function singleMediaHtml(img, w, h){
     if(isFileMediaItem(img) || isTextMediaItem(img)) return `<div class="node-img media-card media-file-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="${isTextMediaItem(img) ? 'file-text' : 'file'}"></i></div><div class="media-card-title">${escapeHtml(img.name || (isTextMediaItem(img) ? 'Text' : 'File'))}</div><div class="media-card-sub">${isTextMediaItem(img) ? 'TEXT' : 'FILE'}</div></div>`;
     if(isAudioMediaItem(img)) return `<div class="node-img media-card media-audio-card" style="width:${w}px;height:${h}px"><div class="media-card-icon"><i data-lucide="file-audio"></i></div><div class="media-card-title">${escapeHtml(img.name || 'Audio')}</div><div class="media-card-sub">AUDIO</div><audio src="${escapeAttr(img.url || '')}" data-url="${escapeAttr(img.url || '')}" controls preload="metadata"></audio></div>`;
-    if(isVideoMediaItem(img)) return `<div class="node-img media-card media-video-card" style="width:${w}px;height:${h}px">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img.url || '') : `${smartVideoPreviewHtml(img, 768, 'alt=""')}<button class="smart-video-play" type="button" title="播放"><i data-lucide="play"></i></button>`}</div>`;
-    return smartPreviewImgHtml(img, 768, `class="node-img" draggable="false" style="width:${w}px;height:${h}px"`);
+    if(isVideoMediaItem(img)) return `<div class="node-img media-card media-video-card" style="width:${w}px;height:${h}px">${isInlineVideoActive(img) ? smartVideoPlayerHtml(img.url || '') : `${smartVideoPreviewHtml(img, 512, 'alt=""')}<button class="smart-video-play" type="button" title="播放"><i data-lucide="play"></i></button>`}</div>`;
+    return smartPreviewImgHtml(img, 512, `class="node-img" draggable="false" style="width:${w}px;height:${h}px"`);
 }
 function smartNodeHasLiveMedia(node){
     return Boolean(!node?.pending && (node?.images || []).some(img => img?.url));

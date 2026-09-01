@@ -252,5 +252,247 @@
         return Object.freeze({start, schedule, drainNow, cancelIneligible, snapshot, destroy});
     }
 
-    return Object.freeze({createMediaQueue});
+    function createMediaResidency(options={}){
+        const name = String(options.name || 'canvas-media-residency');
+        const graceMs = Math.max(0, Number(options.graceMs ?? 3000));
+        const maxResident = Math.max(1, Number(options.maxResident || 72));
+        const maxResidentPixels = Math.max(1, Number(options.maxResidentPixels || 32 * 1024 * 1024));
+        const defaultPixels = Math.max(1, Number(options.defaultPixels || 512 * 512));
+        const now = typeof options.now === 'function' ? options.now : () => Date.now();
+        const setTimer = typeof options.setTimer === 'function' ? options.setTimer : (fn, delay) => setTimeout(fn, delay);
+        const clearTimer = typeof options.clearTimer === 'function' ? options.clearTimer : handle => clearTimeout(handle);
+        const scheduleFrame = typeof options.scheduleFrame === 'function'
+            ? options.scheduleFrame
+            : fn => typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : setTimeout(fn, 0);
+        const cancelFrame = typeof options.cancelFrame === 'function'
+            ? options.cancelFrame
+            : handle => typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(handle) : clearTimeout(handle);
+        const outsideSince = new WeakMap();
+        let frameHandle = 0;
+        let timerHandle = 0;
+        let destroyed = false;
+        let cumulativeEvictions = 0;
+        let lastSnapshot = {
+            name,
+            residentTotal:0,
+            residentPixels:0,
+            evictedTotal:0,
+            maxResident,
+            maxResidentPixels,
+            budgetExceeded:false,
+            cumulativeEvictions:0
+        };
+
+        function tagName(element){ return String(element?.tagName || '').toLowerCase(); }
+        function sourceOf(element){
+            try { return String(element?.getAttribute?.('src') || ''); }
+            catch(error) { return ''; }
+        }
+        function isEvicted(element){
+            return element?.dataset?.mediaResidentState === 'evicted'
+                || (tagName(element) === 'img' && element?.dataset?.previewState === 'evicted');
+        }
+        function isPlaying(element){
+            const tag = tagName(element);
+            return (tag === 'video' || tag === 'audio') && element?.paused === false;
+        }
+        function isPinned(entry){ return Boolean(entry.pinned || isPlaying(entry.element)); }
+        function pixelCost(entry){
+            const explicit = Number(entry.pixels || 0);
+            if(explicit > 0) return Math.round(explicit);
+            const element = entry.element;
+            const width = Number(element?.naturalWidth || element?.videoWidth || 0);
+            const height = Number(element?.naturalHeight || element?.videoHeight || 0);
+            if(width > 0 && height > 0) return Math.round(width * height);
+            return tagName(element) === 'audio' ? 1 : defaultPixels;
+        }
+        function normalizeEntries(){
+            let raw = [];
+            if(typeof options.collectEntries === 'function'){
+                try { raw = options.collectEntries() || []; }
+                catch(error) { raw = []; }
+            }
+            let list = [];
+            try { list = [...raw]; }
+            catch(error) {}
+            const seen = new Set();
+            return list.map(value => {
+                const entry = value?.element ? value : {element:value};
+                return {
+                    ...entry,
+                    element:entry.element,
+                    eligible:Boolean(entry.eligible),
+                    visible:Boolean(entry.visible),
+                    pinned:Boolean(entry.pinned),
+                    distance:Number(entry.distance || 0)
+                };
+            }).filter(entry => {
+                const element = entry.element;
+                if(!element?.isConnected || seen.has(element)) return false;
+                seen.add(element);
+                return ['img', 'video', 'audio'].includes(tagName(element));
+            });
+        }
+        function notify(entry, action, reason, pixels){
+            const payload = {name, action, reason, kind:tagName(entry.element), pixels, ...lastSnapshot};
+            if(typeof options.onRecord === 'function'){
+                try { options.onRecord(payload); }
+                catch(error) {}
+            }
+            if(typeof options.onChange === 'function'){
+                try { options.onChange(payload); }
+                catch(error) {}
+            }
+        }
+        function queueNotification(events, entry, action, reason, pixels){
+            if(events) events.push({entry, action, reason, pixels});
+            else notify(entry, action, reason, pixels);
+        }
+        function evict(entry, reason, events=null){
+            const element = entry.element;
+            const tag = tagName(element);
+            const source = sourceOf(element);
+            if(!source || isPinned(entry)) return false;
+            if(tag === 'img'){
+                if(!element.dataset?.previewSrc || element.dataset.previewState === 'loading' || element.dataset.previewTaskId) return false;
+                try { element.removeAttribute('src'); }
+                catch(error) { return false; }
+                element.dataset.previewState = 'evicted';
+                delete element.dataset.selectedHighResTarget;
+            } else {
+                element.dataset.mediaResidentSrc = source;
+                try { element.pause?.(); } catch(error) {}
+                try { element.removeAttribute('src'); }
+                catch(error) { return false; }
+                try { element.load?.(); } catch(error) {}
+                element.dataset.mediaResidentState = 'evicted';
+            }
+            element.dataset.mediaResidentReason = reason;
+            outsideSince.delete(element);
+            cumulativeEvictions += 1;
+            queueNotification(events, entry, 'evicted', reason, pixelCost(entry));
+            return true;
+        }
+        function restore(entry, events=null){
+            const element = entry.element;
+            const tag = tagName(element);
+            if(!isEvicted(element)) return false;
+            if(tag === 'img'){
+                element.dataset.previewState = 'queued';
+                delete element.dataset.previewAttempt;
+                delete element.dataset.previewRetryAt;
+                delete element.dataset.previewPhase;
+                delete element.dataset.previewTaskId;
+            } else {
+                const source = String(element.dataset?.mediaResidentSrc || element.dataset?.url || '');
+                if(!source) return false;
+                try { element.src = source; }
+                catch(error) { return false; }
+                try { element.load?.(); } catch(error) {}
+                delete element.dataset.mediaResidentSrc;
+                delete element.dataset.mediaResidentState;
+            }
+            const reason = element.dataset.mediaResidentReason || 'offscreen';
+            delete element.dataset.mediaResidentReason;
+            outsideSince.delete(element);
+            queueNotification(events, entry, 'restored', reason, pixelCost(entry));
+            return true;
+        }
+        function residentStats(entries){
+            let residentTotal = 0;
+            let residentPixels = 0;
+            let evictedTotal = 0;
+            entries.forEach(entry => {
+                if(isEvicted(entry.element)){
+                    evictedTotal += 1;
+                    return;
+                }
+                if(!sourceOf(entry.element)) return;
+                residentTotal += 1;
+                residentPixels += pixelCost(entry);
+            });
+            return {residentTotal, residentPixels, evictedTotal};
+        }
+        function updateSnapshot(entries){
+            const stats = residentStats(entries);
+            lastSnapshot = {
+                name,
+                ...stats,
+                maxResident,
+                maxResidentPixels,
+                budgetExceeded:stats.residentTotal > maxResident || stats.residentPixels > maxResidentPixels,
+                cumulativeEvictions
+            };
+            return lastSnapshot;
+        }
+        function scheduleDeadline(delay){
+            if(destroyed || timerHandle) return;
+            timerHandle = setTimer(() => {
+                timerHandle = 0;
+                schedule();
+            }, Math.max(1, delay));
+        }
+        function reconcileNow(){
+            if(destroyed) return lastSnapshot;
+            if(timerHandle) clearTimer(timerHandle);
+            timerHandle = 0;
+            const entries = normalizeEntries();
+            const timestamp = now();
+            const events = [];
+            let nextDelay = Number.POSITIVE_INFINITY;
+            entries.forEach(entry => {
+                const pinned = isPinned(entry);
+                if(isEvicted(entry.element)){
+                    const reason = entry.element.dataset?.mediaResidentReason || 'offscreen';
+                    if(pinned || entry.visible || (entry.eligible && reason !== 'budget')) restore(entry, events);
+                    return;
+                }
+                if(!sourceOf(entry.element)) return;
+                if(pinned || entry.eligible){
+                    outsideSince.delete(entry.element);
+                    return;
+                }
+                const since = outsideSince.get(entry.element) ?? timestamp;
+                outsideSince.set(entry.element, since);
+                const remaining = graceMs - (timestamp - since);
+                if(remaining <= 0) evict(entry, 'offscreen', events);
+                else nextDelay = Math.min(nextDelay, remaining);
+            });
+
+            let stats = residentStats(entries);
+            if(stats.residentTotal > maxResident || stats.residentPixels > maxResidentPixels){
+                const budgetCandidates = entries
+                    .filter(entry => sourceOf(entry.element) && !isEvicted(entry.element) && !entry.visible && !isPinned(entry))
+                    .sort((left, right) => Number(right.distance || 0) - Number(left.distance || 0));
+                for(const entry of budgetCandidates){
+                    if(stats.residentTotal <= maxResident && stats.residentPixels <= maxResidentPixels) break;
+                    if(evict(entry, 'budget', events)) stats = residentStats(entries);
+                }
+            }
+            const result = updateSnapshot(entries);
+            events.forEach(event => notify(event.entry, event.action, event.reason, event.pixels));
+            if(Number.isFinite(nextDelay)) scheduleDeadline(nextDelay);
+            return result;
+        }
+        function schedule(){
+            if(destroyed || frameHandle) return;
+            frameHandle = scheduleFrame(() => {
+                frameHandle = 0;
+                reconcileNow();
+            });
+        }
+        function snapshot(){ return {...lastSnapshot}; }
+        function destroy(){
+            if(destroyed) return;
+            destroyed = true;
+            if(frameHandle) cancelFrame(frameHandle);
+            if(timerHandle) clearTimer(timerHandle);
+            frameHandle = 0;
+            timerHandle = 0;
+        }
+
+        return Object.freeze({schedule, reconcileNow, snapshot, destroy});
+    }
+
+    return Object.freeze({createMediaQueue, createMediaResidency});
 });

@@ -124,7 +124,7 @@ class FakeImage {
         self.assertEqual(run_node(script), {"ok": True})
 
     def test_both_canvas_pages_load_runtime_before_canvas_code(self):
-        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.1"
+        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.2"
         self.assertIn(runtime_src, CANVAS_HTML)
         self.assertIn(runtime_src, SMART_HTML)
         self.assertLess(CANVAS_HTML.index(runtime_src), CANVAS_HTML.index("/static/js/canvas.js"))
@@ -189,6 +189,145 @@ console.log(JSON.stringify({ok:true}));
 """
         self.assertEqual(run_node(script), {"ok": True})
 
+    def test_residency_evicts_restores_and_respects_playback_and_budget(self):
+        script = r"""
+const assert = require('assert');
+const {createMediaResidency} = require('./static/js/canvas-media-queue.js');
+
+class FakeMedia {
+    constructor(tag='img', source='/api/media-preview?id=resident') {
+        this.tagName = tag.toUpperCase();
+        this.dataset = tag === 'img'
+            ? {previewSrc:source, previewState:'loaded'}
+            : {url:source};
+        this.isConnected = true;
+        this.paused = true;
+        this.naturalWidth = tag === 'img' ? 800 : 0;
+        this.naturalHeight = tag === 'img' ? 600 : 0;
+        this.videoWidth = tag === 'video' ? 1280 : 0;
+        this.videoHeight = tag === 'video' ? 720 : 0;
+        this.attrs = new Map([['src', source]]);
+        this.pauseCalls = 0;
+        this.loadCalls = 0;
+    }
+    set src(value) { this.attrs.set('src', value); }
+    get src() { return this.attrs.get('src') || ''; }
+    getAttribute(name) { return this.attrs.get(name) || null; }
+    removeAttribute(name) { this.attrs.delete(name); }
+    pause() { this.paused = true; this.pauseCalls += 1; }
+    load() { this.loadCalls += 1; }
+}
+
+(async () => {
+    let clock = 0;
+    const clockOptions = {
+        now:() => clock,
+        setTimer:() => 0,
+        clearTimer:() => {},
+    };
+    let visible = false;
+    const image = new FakeMedia('img');
+    const entries = () => [{element:image, eligible:visible, visible, pinned:false, distance:100}];
+    let changes = 0;
+    const residency = createMediaResidency({
+        name:'image-residency',
+        collectEntries:entries,
+        graceMs:10,
+        maxResident:10,
+        maxResidentPixels:10_000_000,
+        onChange:() => { changes += 1; },
+        ...clockOptions,
+    });
+    residency.reconcileNow();
+    clock = 11;
+    residency.reconcileNow();
+    assert.equal(image.getAttribute('src'), null);
+    assert.equal(image.dataset.previewState, 'evicted');
+    assert.equal(residency.snapshot().evictedTotal, 1);
+    visible = true;
+    residency.reconcileNow();
+    assert.equal(image.dataset.previewState, 'queued');
+    assert.ok(changes >= 2);
+
+    const pausedVideo = new FakeMedia('video', '/output/paused.mp4');
+    const playingVideo = new FakeMedia('video', '/output/playing.mp4');
+    playingVideo.paused = false;
+    let videoVisible = false;
+    const videoResidency = createMediaResidency({
+        collectEntries:() => [
+            {element:pausedVideo, eligible:videoVisible, visible:videoVisible},
+            {element:playingVideo, eligible:videoVisible, visible:videoVisible},
+        ],
+        graceMs:1,
+        maxResident:10,
+        maxResidentPixels:10_000_000,
+        ...clockOptions,
+    });
+    videoResidency.reconcileNow();
+    clock = 13;
+    videoResidency.reconcileNow();
+    assert.equal(pausedVideo.getAttribute('src'), null);
+    assert.equal(pausedVideo.dataset.mediaResidentState, 'evicted');
+    assert.equal(playingVideo.getAttribute('src'), '/output/playing.mp4');
+    videoVisible = true;
+    videoResidency.reconcileNow();
+    assert.equal(pausedVideo.getAttribute('src'), '/output/paused.mp4');
+    assert.equal(pausedVideo.dataset.mediaResidentState, undefined);
+    assert.ok(pausedVideo.loadCalls >= 2);
+    videoResidency.destroy();
+
+    const budgetMedia = [0, 1, 2].map(index => new FakeMedia('img', `/output/${index}.png`));
+    const budgetResidency = createMediaResidency({
+        collectEntries:() => budgetMedia.map((element, index) => ({
+            element,
+            eligible:false,
+            visible:false,
+            pinned:index === 0,
+            distance:index * 100,
+        })),
+        graceMs:60_000,
+        maxResident:2,
+        maxResidentPixels:10_000_000,
+    });
+    budgetResidency.reconcileNow();
+    assert.equal(budgetMedia[0].getAttribute('src'), '/output/0.png');
+    assert.equal(budgetMedia.filter(media => media.getAttribute('src')).length, 2);
+    assert.equal(budgetMedia[2].dataset.mediaResidentReason, 'budget');
+
+    const pixelBudgetMedia = [0, 1, 2].map(index => new FakeMedia('img', `/output/pixel-${index}.png`));
+    const pixelBudgetResidency = createMediaResidency({
+        collectEntries:() => pixelBudgetMedia.map((element, index) => ({
+            element,
+            eligible:false,
+            visible:false,
+            pinned:index === 0,
+            distance:index * 100,
+        })),
+        graceMs:60_000,
+        maxResident:10,
+        maxResidentPixels:900_000,
+    });
+    pixelBudgetResidency.reconcileNow();
+    assert.equal(pixelBudgetMedia[0].getAttribute('src'), '/output/pixel-0.png');
+    assert.equal(pixelBudgetMedia.filter(media => media.getAttribute('src')).length, 1);
+    assert.equal(pixelBudgetResidency.snapshot().budgetExceeded, false);
+
+    const brokenResidency = createMediaResidency({
+        collectEntries:() => { throw new Error('collectEntries'); },
+        onChange:() => { throw new Error('onChange'); },
+        onRecord:() => { throw new Error('onRecord'); },
+    });
+    assert.doesNotThrow(() => brokenResidency.reconcileNow());
+
+    residency.destroy();
+    budgetResidency.destroy();
+    pixelBudgetResidency.destroy();
+    brokenResidency.destroy();
+    console.log(JSON.stringify({ok:true}));
+})().catch(error => { console.error(error); process.exit(1); });
+"""
+        self.assertEqual(run_node(script), {"ok": True})
+
     def test_classic_and_smart_canvases_use_shared_queue_controller(self):
         for source, name in ((CANVAS_JS, "classic"), (SMART_JS, "smart")):
             self.assertIn("window.CanvasMediaQueue.createMediaQueue", source, name)
@@ -196,6 +335,12 @@ console.log(JSON.stringify({ok:true}));
             self.assertIn("maxVideoActive", source, name)
             self.assertNotIn("MediaQueueActive += 1", source, name)
         self.assertIn("onStart:() => recordClassicFirstPreviewStart()", CANVAS_JS)
+        self.assertIn("window.CanvasMediaQueue.createMediaResidency", CANVAS_JS)
+        self.assertIn("window.CanvasMediaQueue.createMediaResidency", SMART_JS)
+        self.assertIn("mediaResidentReason === 'budget'", CANVAS_JS)
+        self.assertIn("mediaResidentReason === 'budget'", SMART_JS)
+        self.assertIn("maxResidentPixels", CANVAS_JS)
+        self.assertIn("maxResidentPixels", SMART_JS)
 
 
 if __name__ == "__main__":

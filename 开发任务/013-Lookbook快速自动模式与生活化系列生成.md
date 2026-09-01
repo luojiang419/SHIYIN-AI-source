@@ -1,7 +1,7 @@
 # Lookbook 快速自动模式与生活化系列生成
 
 状态：已完成
-当前阶段：4/4
+当前阶段：5/5（新增参考图真实感 Skill）
 最后更新：2026-09-01
 
 ## 当前状态
@@ -10,7 +10,7 @@
 
 ## 下一步
 
-当前任务已完成。
+当前任务已完成。已将抖音公开视频中可核验的“多人物/多场景参考图 + 预设 + 零文字提示词 + 自然互动批量生成”抽象为本地 Lookbook Skill，并设为新节点默认风格；旧节点显式选择的风格保持不变。
 
 ## 当前 TODO
 
@@ -18,12 +18,13 @@
 - [x] 增加人物+场景生活化高级随拍 prompt
 - [x] 保留有需求时联网搜索与创意策划链路
 - [x] 完成测试、文档和 Git 提交
+- [x] 新增 `reference-first-naturalism` Skill 与多人物互动/场景融合提示词约束
 
 ## 最近验证状态
 
 - 静态检查：`node --check`、`python -m py_compile`、`git diff --check` 通过
-- 单元测试：`tests/test_lookbook_premium.py tests/test_lookbook_node_frontend.py`，20 passed
-- 最近 Git commit：待提交
+- 单元测试：`tests/test_lookbook_premium.py tests/test_lookbook_node_frontend.py`，23 passed
+- 最近 Git commit：待提交（本轮变更待提交）
 
 ## 任务目标
 
@@ -42,6 +43,9 @@
 - 默认 prompt 增加人物+场景生活化抓拍、真实环境互动、系列多组构图和高级胶片质感约束，禁止拼贴/接触表/棚拍退化。
 - 前端 Lookbook 提交改用阶段感知短轮询，并在提交前显示自动模式或联网研究模式，持续回写 agent 阶段文案。
 - 新增自动模式计划、人物场景 prompt 与前端轮询契约测试。
+- 新增 `static/lookbook-skills/reference-first-naturalism/SKILL.md`，记录来源边界、参考图所有权、多人物互动和反 AI 感检查。
+- 新增内置“参考图真实感”风格卡片；新建 Lookbook 节点默认启用该 Skill，并更新静态资源查询串。
+- 后端 `build_prompt` 增加 Skill 注入、多人物独立身份锁、互动关系锁和参考场景真实融合锁；视觉策划阶段同步接收 Skill 约束。
 
 ## 修改文件
 

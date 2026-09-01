@@ -34,6 +34,22 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("candid lifestyle fashion snapshots", prompt)
         self.assertIn("never make a contact sheet", prompt)
 
+    def test_reference_first_skill_preserves_distinct_people_and_scene_contact(self):
+        prompt = build_prompt("universal", [
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/person-a.png"},
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/person-b.png"},
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.png"},
+        ], {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"id": "reference-first-naturalism", "name": "参考图真实感", "prompt": "reference-first naturalism"},
+            "lookbook_count": 4,
+        })
+        self.assertIn("REFERENCE-FIRST NATURALISM SKILL", prompt)
+        self.assertIn("MULTI-PERSON INTERACTION LOCK", prompt)
+        self.assertIn("2 distinct supplied people", prompt)
+        self.assertIn("REFERENCE-SCENE INTEGRATION", prompt)
+        self.assertIn("do not invent a long generic prompt", prompt)
+
     def test_agent_plan_keeps_node_generation_settings_and_clamps_timeout(self):
         snapshot = {
             "operation": "universal",

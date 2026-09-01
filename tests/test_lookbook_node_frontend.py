@@ -21,6 +21,14 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("skill:'image'", self.lookbook)
         self.assertIn("CC BY 4.0", self.lookbook)
 
+    def test_reference_first_naturalism_skill_is_builtin_and_default(self):
+        self.assertIn("id:'reference-first-naturalism'", self.lookbook)
+        self.assertIn("参考图真实感", self.lookbook)
+        self.assertIn("DEFAULT_STYLE_ID = 'reference-first-naturalism'", self.lookbook)
+        skill = ROOT / "static" / "lookbook-skills" / "reference-first-naturalism" / "SKILL.md"
+        self.assertTrue(skill.exists())
+        self.assertIn("参考图真实感", skill.read_text(encoding="utf-8"))
+
     def test_premium_editorial_research_controls_are_submitted(self):
         self.assertIn("name:'时尚街景'", self.lookbook)
         self.assertIn("lookbookResearchDepth", self.lookbook)
@@ -92,7 +100,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.12", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.13", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -102,6 +110,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=premium-editorial-research.1", self.html)
         self.assertIn("feature=lookbook-agent.1", self.html)
         self.assertIn("feature=lookbook-auto-mode.1", self.html)
+        self.assertIn("feature=reference-first-naturalism.1", self.html)
         self.assertIn("feature=remove-output-hint.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):

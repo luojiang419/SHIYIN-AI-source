@@ -1440,6 +1440,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         return raw_instruction
     if prompt_policy == LOOKBOOK_PROMPT_POLICY:
         style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+        style_id = str(style.get("id") or "").strip().lower()
         style_name = str(style.get("name") or "").strip()
         style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
         research = str(options.get("search_context") or "").strip()
@@ -1457,6 +1458,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             assigned = str(item.get("lookbook_role") or item.get("label") or "参考素材").strip()
             name = str(item.get("name") or "").strip()
             reference_lines.append(f"Image {index} is assigned to {assigned}{(' (' + name + ')') if name else ''}; use it only for that attribute family.")
+        person_count = sum(1 for item in normalized if str(item.get("lookbook_role") or "").strip() == "人物")
+        scene_count = sum(1 for item in normalized if str(item.get("lookbook_role") or "").strip() == "场景")
         user_line = instruction or "依据连接的参考图自由发挥，不额外添加用户未要求的主题"
         parts = [
             "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
@@ -1470,6 +1473,23 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
             "PRE-DELIVERY QUALITY GATE: inspect the planned render before finalizing for correct anatomy, clean product edges, exact Logo and text, faithful material texture, coherent contact shadows, believable perspective, intentional negative space and commercial advertising polish. Reject obvious defects and regenerate the weak frame when possible.",
         ]
+        if style_id == "reference-first-naturalism":
+            parts.append(
+                "REFERENCE-FIRST NATURALISM SKILL: reference images are the primary creative input, not decorative inspiration. "
+                "When the user brief is empty, do not invent a long generic prompt or add stock adjectives; infer a concrete photographic situation from the supplied people, products and locations. "
+                "Keep each supplied person as a separate identity and place them in one physically coherent world. Use eye-lines, listening, touch, shared attention, walking, leaning, adjusting clothing or handling a supplied object to create a believable relationship. "
+                "Preserve natural skin, hair, fabric weave, small asymmetries and camera imperfections; reject plastic skin, mannequin limbs, frozen smiles, isolated cutouts, generic studio gradients and over-processed HDR."
+            )
+        if person_count >= 2:
+            parts.append(
+                f"MULTI-PERSON INTERACTION LOCK: {person_count} distinct supplied people must remain separate and recognizable. "
+                "Do not merge faces, swap clothing, duplicate limbs or make everyone pose frontally. Stage at least one observable relationship per frame (shared gaze, conversation, touch, passing an object, walking together or reacting to the same environment), with believable distance, occlusion, scale and contact shadows."
+            )
+        if person_count >= 1 and scene_count >= 1:
+            parts.append(
+                "REFERENCE-SCENE INTEGRATION: photograph the people inside the supplied location rather than pasting cutouts over a background. "
+                "Preserve recognizable architectural cues while adapting viewpoint; align horizon, perspective, ambient color, cast shadows and foot-to-ground contact so the result reads as one captured photograph."
+            )
         if auto_mode:
             parts.append(
                 "AUTO LOOKBOOK MODE (no user brief): use the connected reference images and selected style as the creative source of truth. "

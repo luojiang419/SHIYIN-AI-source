@@ -27,6 +27,7 @@
 - 视频：`1920x1080 / 24fps / 39.96s`，已抽取 10 帧观察
 - 当前 Git branch：`feat/storyboard-merge-node`
 - 单元测试：`tests/test_lookbook_premium.py`、`tests/test_lookbook_node_frontend.py`，32 passed
+- 回归测试：`tests/test_ecommerce.py`，136 passed
 - 静态检查：`python -m py_compile main.py canvas_core/ecommerce.py`、`node --check static/js/canvas-lookbook-node.js`、`git diff --check` 通过
 - 生图测试：`shiying / gemini-3-pro-image-preview`，第二轮 4 张成功；输出保存在 `data/media/generated/fw_lookbook_test_v2_*.jpg`
 - 视觉检查：4 张中 3 张为单幅完整画面，1 张仍出现拼格倾向；后端已接入 Lookbook quality gate 对拼格/场景漂移进行自动复核与定向重生

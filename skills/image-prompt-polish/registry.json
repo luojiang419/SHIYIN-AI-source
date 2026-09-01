@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "registry_version": "2026.09.01",
+  "default_profile": "nano-banana-gemini-image",
   "profiles": [
     {
       "id": "gpt-image",

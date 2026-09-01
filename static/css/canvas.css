@@ -274,6 +274,10 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 #nodes.canvas-large-scene > .node.canvas-lod-safe > .node-visual-shell { content-visibility:auto; contain-intrinsic-size:260px 180px; }
 #nodes.canvas-lod-active > .node.canvas-lod-safe.canvas-lod-outside > .node-visual-shell { content-visibility:auto; contain-intrinsic-size:260px 180px; }
 #nodes.canvas-lod-active > .node.canvas-lod-safe:not(.canvas-lod-outside) > .node-visual-shell { content-visibility:visible; contain:none; }
+/* 世界坐标变换期间，Chromium 可能把 content-visibility:auto 的视觉子树误判为不可见。
+ * 平移是高频交互，临时保持视觉壳可绘制，结束后仍由 LOD 重新评估静止态。 */
+body.canvas-board-pan #nodes.canvas-large-scene > .node.canvas-lod-safe > .node-visual-shell,
+body.canvas-board-pan #nodes.canvas-lod-active > .node.canvas-lod-safe > .node-visual-shell { content-visibility:visible !important; contain:none !important; }
 .node-visual-shell::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--canvas-node-fill); pointer-events:none; z-index:-1; overflow:hidden; }
 .node.sized { display:flex; flex-direction:column; }
 .node.sized > .node-visual-shell { flex:1; min-height:0; display:flex; flex-direction:column; }

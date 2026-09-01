@@ -22433,6 +22433,7 @@ minimap?.addEventListener('mousedown', e => {
     e.stopPropagation();
     window.CanvasPerformance?.beginInteraction?.('classic.minimap-drag', {nodes:nodes.length});
     minimapDrag = true;
+    document.body.classList.add('canvas-board-pan');
     centerViewportOnWorldPoint(minimapEventToWorld(e));
     window.onmousemove = e2 => {
         if(minimapDrag) centerViewportOnWorldPoint(minimapEventToWorld(e2));
@@ -22442,6 +22443,7 @@ minimap?.addEventListener('mousedown', e => {
         window.CanvasPerformance?.markPaintFrom?.('classic.minimap-drag', 'classic.minimap-drag', {nodes:nodes.length});
         window.onmousemove = null;
         window.onmouseup = null;
+        document.body.classList.remove('canvas-board-pan');
         scheduleViewportSave();
     };
 });

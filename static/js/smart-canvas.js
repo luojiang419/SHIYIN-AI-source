@@ -20013,6 +20013,7 @@ minimap?.addEventListener('mousedown', e => {
     e.stopPropagation();
     window.CanvasPerformance?.beginInteraction?.('smart.minimap-drag', {nodes:nodes.length});
     smartMinimapDrag = true;
+    shell.classList.add('panning');
     centerViewportOnWorldPoint(minimapEventToWorld(e));
 });
 smartArrangeBtn?.addEventListener('mousedown', e => e.stopPropagation());
@@ -20390,6 +20391,7 @@ window.onmouseup = e => {
     }
     if(smartMinimapDrag){
         smartMinimapDrag = false;
+        shell.classList.remove('panning');
     }
     if(dragState){
         const draggedNode = nodes.find(n => n.id === dragState.id);

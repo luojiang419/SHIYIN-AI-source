@@ -46,6 +46,10 @@ button { border:0; cursor:pointer; }
 .world.smart-lod-active > .image-node.smart-lod-safe.smart-lod-outside > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
 .world.smart-lod-active > .image-node.smart-lod-safe:not(.smart-lod-outside) > .node-body { content-visibility:visible; contain:none; }
 .world.smart-lod-active > .image-node:not(.smart-lod-safe) > .node-body { content-visibility:visible; contain:none; }
+/* 平移时世界坐标持续变化，禁用 LOD 的 paint containment，避免媒体子树被浏览器误判为空白。 */
+.shell.panning .world.smart-large-scene > .image-node:not(.smart-special-node) > .node-body,
+.shell.panning .world.smart-lod-active > .image-node.smart-lod-safe > .node-body,
+.shell.panning .world.smart-lod-active > .image-node:not(.smart-lod-safe) > .node-body { content-visibility:visible !important; contain:none !important; }
 body.smart-node-drag * { user-select:none !important; }
 body.smart-node-drag .image-node textarea,
 body.smart-node-drag .image-node input,

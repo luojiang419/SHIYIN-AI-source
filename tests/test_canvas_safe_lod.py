@@ -58,6 +58,16 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertRegex(selection_body, r"scheduleClassicSafeLod\(\[\.\.\.affectedNodeIds\]\);")
         self.assertIn("scheduleSmartSafeLod();", body(SMART, "function syncSelectionUi", "function syncConnectionSelectionUi"))
 
+    def test_pan_disables_lod_paint_containment_for_media_subtrees(self):
+        self.assertIn("body.canvas-board-pan #nodes.canvas-large-scene", CLASSIC_CSS)
+        self.assertIn("content-visibility:visible !important", CLASSIC_CSS)
+        self.assertIn("contain:none !important", CLASSIC_CSS)
+        self.assertIn(".shell.panning .world.smart-large-scene", SMART_CSS)
+        self.assertIn("content-visibility:visible !important", SMART_CSS)
+        self.assertIn("contain:none !important", SMART_CSS)
+        self.assertIn("document.body.classList.add('canvas-board-pan')", CLASSIC)
+        self.assertIn("shell.classList.add('panning')", SMART)
+
 
 if __name__ == "__main__":
     unittest.main()

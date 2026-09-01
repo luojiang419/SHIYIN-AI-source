@@ -22,7 +22,7 @@ Lookbook 节点的数量参数已经透传到后端，但按钮同时绑定了 `
 
 - 静态检查：`node --check static/js/canvas-lookbook-node.js`、`git diff --check` 通过
 - 单元测试：`tests/test_lookbook_node_frontend.py tests/test_lookbook_premium.py`，30 passed
-- Git commit：待提交
+- Git commit：`6d8ce95 fix: prevent duplicate lookbook generation clicks`（已推送 `origin/feat/storyboard-merge-node`）
 
 ## 任务目标
 

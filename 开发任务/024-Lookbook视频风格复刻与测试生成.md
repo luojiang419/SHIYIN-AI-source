@@ -31,6 +31,10 @@
 - 生图测试：`shiying / gemini-3-pro-image-preview`，第二轮 4 张成功；输出保存在 `data/media/generated/fw_lookbook_test_v2_*.jpg`
 - 视觉检查：4 张中 3 张为单幅完整画面，1 张仍出现拼格倾向；后端已接入 Lookbook quality gate 对拼格/场景漂移进行自动复核与定向重生
 
+## 已知问题
+
+- 本次直接调用本地 `qwen3.5-9b-vlm` 视觉终审时上游返回 HTTP 502，因此没有在测试轮次中实际执行自动修复；不影响 preset/prompt 注入和生图结果，视觉接口恢复后质量门会按同一规则工作。
+
 ---
 
 ## 任务目标

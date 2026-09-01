@@ -672,6 +672,7 @@ const CLASSIC_DRAG_DOM_INDEX_ENABLED = true;
 let classicSafeLodRaf = 0;
 let classicSafeLodFullRefreshPending = false;
 const classicSafeLodNodeIds = new Set();
+let classicLodVisibleIds = null;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
 let classicRenderMutation = null;
 let canvasMutationBatchDepth = 0;
@@ -2102,6 +2103,7 @@ function rebuildCanvasDomIndexes(){
         indexClassicNodeDom(el, node);
     });
     rebuildClassicMediaSpatialGrid();
+    classicLodVisibleIds = null;
 }
 function rebuildClassicMediaSpatialGrid(){
     if(!window.CanvasMediaQueue?.createSpatialGridIndex) return null;
@@ -2180,12 +2182,8 @@ function updateClassicSafeLod(affectedIds=null){
     if(resizeNode?.node?.id) keepIds.add(resizeNode.node.id);
     if(tempLink?.from && !String(tempLink.from).startsWith('selection:')) keepIds.add(tempLink.from);
     if(linkCreateState?.originId) keepIds.add(linkCreateState.originId);
-    const elements = affectedIds == null || largeSceneChanged
-        ? nodesEl.querySelectorAll('.node.canvas-lod-safe')
-        : [...new Set(affectedIds)]
-            .map(id => canvasNodeDomIndex.get(id))
-            .filter(el => el?.classList?.contains('canvas-lod-safe'));
-    elements.forEach(el => {
+    const applyElement = el => {
+        if(!el?.classList?.contains('canvas-lod-safe')) return;
         const node = canvasNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
         if(!node){ el.classList.remove('canvas-lod-outside'); return; }
         const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
@@ -2198,7 +2196,31 @@ function updateClassicSafeLod(affectedIds=null){
             el.dataset.lodState = nextState;
             if(previousState === 'deferred' && nextState === 'full') requestAnimationFrame(() => refreshIcons(el));
         }
+    };
+    if(!largeScene){
+        classicLodVisibleIds = null;
+        canvasNodeDomIndex.forEach(applyElement);
+        return;
+    }
+    if(affectedIds != null && !largeSceneChanged){
+        [...new Set(affectedIds)].map(id => canvasNodeDomIndex.get(id)).filter(Boolean).forEach(applyElement);
+        return;
+    }
+    if(classicLodVisibleIds == null){
+        canvasNodeDomIndex.forEach(applyElement);
+    }
+    const visibleIds = new Set((classicMediaSpatialGrid?.search({x:minX, y:minY, w:maxX - minX, h:maxY - minY}) || []).map(el => el?.dataset?.id).filter(Boolean));
+    keepIds.forEach(id => visibleIds.add(id));
+    visibleIds.forEach(id => {
+        const el = canvasNodeDomIndex.get(id);
+        if(el) applyElement(el);
     });
+    (classicLodVisibleIds || []).forEach(id => {
+        if(visibleIds.has(id)) return;
+        const el = canvasNodeDomIndex.get(id);
+        if(el) applyElement(el);
+    });
+    classicLodVisibleIds = visibleIds;
 }
 function currentWorldViewRect(){
     const rect = board.getBoundingClientRect();

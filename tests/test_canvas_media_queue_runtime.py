@@ -366,6 +366,8 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("function smartMediaElementsInWindow", SMART_JS)
         self.assertIn("classicMediaElementsInWindow().map", CANVAS_JS)
         self.assertIn("smartMediaElementsInWindow().map", SMART_JS)
+        self.assertNotIn("nodesEl.querySelectorAll('.node.canvas-lod-safe')", CANVAS_JS)
+        self.assertNotIn("world.querySelectorAll('.image-node.smart-lod-safe')", SMART_JS)
 
 
 if __name__ == "__main__":

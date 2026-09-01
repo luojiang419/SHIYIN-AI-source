@@ -110,6 +110,7 @@ const SMART_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
 // 拖动目标高亮只切换旧/新节点；关闭或索引缺失时回退原选择器扫描。
 const SMART_DROP_HIGHLIGHT_INCREMENTAL_ENABLED = true;
 let smartSafeLodRaf = 0;
+let smartLodVisibleIds = null;
 // 结构 mutation 只提交节点/连线本身；Composer 的动态参数重绘移到空闲期，
 // 避免 1000+ 节点场景在粘贴/创建的直接交互帧内触发布局与绘制级联。
 let smartComposerIdleHandle = 0;
@@ -3170,6 +3171,7 @@ function rebuildSmartCanvasDomIndexes(){
         indexSmartNodeDom(el, node);
     });
     rebuildSmartMediaSpatialGrid();
+    smartLodVisibleIds = null;
 }
 function rebuildSmartMediaSpatialGrid(){
     if(!window.CanvasMediaQueue?.createSpatialGridIndex) return null;
@@ -3489,7 +3491,8 @@ function updateSmartSafeLod(){
     if(portDragState?.fromId) keepIds.add(portDragState.fromId);
     if(portDragState?.hoverTargetId) keepIds.add(portDragState.hoverTargetId);
     if(loopInsertPreview?.nodeId) keepIds.add(loopInsertPreview.nodeId);
-    world.querySelectorAll('.image-node.smart-lod-safe').forEach(el => {
+    const applyElement = el => {
+        if(!el?.classList?.contains('smart-lod-safe')) return;
         const node = smartNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
         if(!node){ el.classList.remove('smart-lod-outside'); return; }
         const rect = smartNodeRectIndex.get(node.id) || cachedSmartNodeRect(node);
@@ -3502,7 +3505,25 @@ function updateSmartSafeLod(){
             el.dataset.lodState = nextState;
             if(previousState === 'deferred' && nextState === 'full') requestAnimationFrame(() => refreshIcons(el));
         }
+    };
+    if(!largeScene){
+        smartLodVisibleIds = null;
+        smartNodeDomIndex.forEach(applyElement);
+        return;
+    }
+    if(smartLodVisibleIds == null) smartNodeDomIndex.forEach(applyElement);
+    const visibleIds = new Set((smartMediaSpatialGrid?.search({x:minX, y:minY, w:maxX - minX, h:maxY - minY}) || []).map(el => el?.dataset?.id).filter(Boolean));
+    keepIds.forEach(id => visibleIds.add(id));
+    visibleIds.forEach(id => {
+        const el = smartNodeDomIndex.get(id);
+        if(el) applyElement(el);
     });
+    (smartLodVisibleIds || []).forEach(id => {
+        if(visibleIds.has(id)) return;
+        const el = smartNodeDomIndex.get(id);
+        if(el) applyElement(el);
+    });
+    smartLodVisibleIds = visibleIds;
 }
 function screenToWorld(event){
     const rect = shell.getBoundingClientRect();

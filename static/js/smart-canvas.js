@@ -1069,8 +1069,21 @@ function ensureSmartMediaResidency(){
         graceMs:SMART_MEDIA_RESIDENCY_GRACE_MS,
         maxResident:SMART_MEDIA_RESIDENCY_MAX,
         maxResidentPixels:SMART_MEDIA_RESIDENCY_PIXELS,
-        collectEntries:() => [...(world?.querySelectorAll?.('.image-node img[data-preview-src],.image-node video[data-url],.image-node audio[data-url]') || [])]
+        collectEntries:() => [...(world?.querySelectorAll?.('.image-node img[data-preview-src],.image-node video[data-url],.image-node audio[data-url],.image-node [data-media-resident-placeholder="1"]') || [])]
             .map(smartMediaViewportEntry).filter(Boolean),
+        detachImage:(img) => {
+            const placeholder = document.createElement('span');
+            placeholder.className = 'smart-media-resident-placeholder';
+            placeholder.setAttribute('aria-hidden', 'true');
+            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(148,163,184,.12),rgba(148,163,184,.04));';
+            img.replaceWith(placeholder);
+            return placeholder;
+        },
+        restoreImage:(placeholder, img) => {
+            if(!placeholder?.isConnected) return false;
+            placeholder.replaceWith(img);
+            return true;
+        },
         onChange:() => ensureSmartMediaQueue()?.schedule(),
         onRecord:entry => window.CanvasPerformance?.record?.('smart.media-residency', 0, {
             action:entry.action,

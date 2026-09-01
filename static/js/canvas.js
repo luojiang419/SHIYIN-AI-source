@@ -158,8 +158,21 @@ function ensureClassicMediaResidency(){
         graceMs:CLASSIC_MEDIA_RESIDENCY_GRACE_MS,
         maxResident:CLASSIC_MEDIA_RESIDENCY_MAX,
         maxResidentPixels:CLASSIC_MEDIA_RESIDENCY_PIXELS,
-        collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
+        collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url],[data-media-resident-placeholder="1"]') || [])]
             .map(classicMediaViewportEntry).filter(Boolean),
+        detachImage:(img) => {
+            const placeholder = document.createElement('span');
+            placeholder.className = 'canvas-media-resident-placeholder';
+            placeholder.setAttribute('aria-hidden', 'true');
+            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(148,163,184,.12),rgba(148,163,184,.04));';
+            img.replaceWith(placeholder);
+            return placeholder;
+        },
+        restoreImage:(placeholder, img) => {
+            if(!placeholder?.isConnected) return false;
+            placeholder.replaceWith(img);
+            return true;
+        },
         onChange:() => ensureClassicMediaQueue()?.schedule(),
         onRecord:entry => window.CanvasPerformance?.record?.('classic.media-residency', 0, {
             action:entry.action,

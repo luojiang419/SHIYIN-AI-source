@@ -124,7 +124,7 @@ class FakeImage {
         self.assertEqual(run_node(script), {"ok": True})
 
     def test_both_canvas_pages_load_runtime_before_canvas_code(self):
-        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.2"
+        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.3"
         self.assertIn(runtime_src, CANVAS_HTML)
         self.assertIn(runtime_src, SMART_HTML)
         self.assertLess(CANVAS_HTML.index(runtime_src), CANVAS_HTML.index("/static/js/canvas.js"))
@@ -311,6 +311,44 @@ class FakeMedia {
     assert.equal(pixelBudgetMedia[0].getAttribute('src'), '/output/pixel-0.png');
     assert.equal(pixelBudgetMedia.filter(media => media.getAttribute('src')).length, 1);
     assert.equal(pixelBudgetResidency.snapshot().budgetExceeded, false);
+
+    const placeholderImage = new FakeMedia('img', '/output/placeholder.png');
+    let currentPlaceholder = placeholderImage;
+    let placeholderVisible = false;
+    const placeholderResidency = createMediaResidency({
+        collectEntries:() => [{element:currentPlaceholder, eligible:placeholderVisible, visible:placeholderVisible}],
+        graceMs:1,
+        maxResident:10,
+        maxResidentPixels:10_000_000,
+        now:() => clock,
+        setTimer:() => 0,
+        clearTimer:() => {},
+        detachImage:(img) => {
+            const placeholder = new FakeMedia('span', '');
+            placeholder.dataset = {mediaResidentPlaceholder:'1'};
+            img.isConnected = false;
+            placeholder.isConnected = true;
+            currentPlaceholder = placeholder;
+            return placeholder;
+        },
+        restoreImage:(placeholder, img) => {
+            placeholder.isConnected = false;
+            img.isConnected = true;
+            currentPlaceholder = img;
+            return true;
+        },
+    });
+    clock = 20;
+    placeholderResidency.reconcileNow();
+    clock = 22;
+    placeholderResidency.reconcileNow();
+    assert.equal(currentPlaceholder.dataset.mediaResidentPlaceholder, '1');
+    assert.equal(currentPlaceholder.dataset.mediaResidentState, 'evicted');
+    placeholderVisible = true;
+    placeholderResidency.reconcileNow();
+    assert.equal(currentPlaceholder, placeholderImage);
+    assert.equal(placeholderImage.dataset.previewState, 'queued');
+    placeholderResidency.destroy();
 
     const brokenResidency = createMediaResidency({
         collectEntries:() => { throw new Error('collectEntries'); },

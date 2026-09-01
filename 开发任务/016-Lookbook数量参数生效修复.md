@@ -22,7 +22,7 @@ Lookbook 生成入口仍残留旧代码 `Number(node.count || 2)`。当节点数
 - Lookbook 专项测试：25 passed
 - JavaScript/Python 静态检查：通过
 - `git diff --check`：通过
-- Git commit：待提交（本轮变更）
+- Git commit：`e883a24 fix: honor lookbook image count setting`（已推送 `origin/feat/storyboard-merge-node`）
 
 ## 验收标准
 

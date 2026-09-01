@@ -30,7 +30,7 @@
 - 回归测试：`tests/test_ecommerce.py`，136 passed
 - 静态检查：`python -m py_compile main.py canvas_core/ecommerce.py`、`node --check static/js/canvas-lookbook-node.js`、`git diff --check` 通过
 - 生图测试：`shiying / gemini-3-pro-image-preview`，第二轮 4 张成功；输出保存在 `data/media/generated/fw_lookbook_test_v2_*.jpg`
-- 视觉检查：4 张中 3 张为单幅完整画面，1 张仍出现拼格倾向；后端已接入 Lookbook quality gate 对拼格/场景漂移进行自动复核与定向重生
+- 视觉检查：第二轮中 3 张为单幅完整画面，1 张出现拼格倾向；随后以单张强约束补生 `fw_lookbook_test_v3_dcdb2d4791.jpg`，现有 4 张可用样本均为单幅画面；后端已接入 Lookbook quality gate 对拼格/场景漂移进行自动复核与定向重生
 
 ## 已知问题
 
@@ -70,6 +70,7 @@
 
 - 第一轮 `fw_lookbook_test_*.jpg` 暴露模型将四个系列节拍拼成一张四格图，并擅自替换场景，作为失败样本保留。
 - 第二轮 `fw_lookbook_test_v2_*.jpg`：绿色报刊亭、海报/杂志架、水果陈列和人物灰色针织开衫/白色内搭/牛仔裤/黑色包鞋均基本保持；走动、低头微笑、手部触碰等动作成立，奶油高光、绿色环境和胶片质感可见。
+- 补生 `fw_lookbook_test_v3_dcdb2d4791.jpg`：单幅倾斜构图，人物靠在报刊亭前低头微笑并触碰包带，场景与色彩关系更接近参考片。
 
 ## 接力信息
 

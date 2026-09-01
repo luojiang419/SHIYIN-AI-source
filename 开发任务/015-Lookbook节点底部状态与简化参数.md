@@ -26,6 +26,7 @@ Lookbook 节点当前把智能体状态放在生成参数之前，并显示研�
 - `node --check static/js/canvas-lookbook-node.js static/js/canvas.js`：通过
 - `python -m py_compile main.py canvas_core/ecommerce.py`：通过
 - `git diff --check`：通过
+- Git commit：`fa7bb0d fix: simplify lookbook node controls and status`（已推送 `origin/feat/storyboard-merge-node`）
 
 ## 验收标准
 

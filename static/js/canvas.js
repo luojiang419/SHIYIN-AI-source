@@ -5601,6 +5601,17 @@ async function saveCanvasItemsToDirectory(title, items){
         alert(tr('canvas.outputDownloadEmpty'));
         return false;
     }
+    if(window.ShiyinQuickSave){
+        const quickResult = await window.ShiyinQuickSave.saveAll(list.map(item => ({
+            url:item.url,
+            name:item.name || outputImageName(item.url)
+        })));
+        if(quickResult.handled){
+            const saved = Number(quickResult.count || 0);
+            setStatus(langIsEn() ? `Silently saved ${saved} file${saved === 1 ? '' : 's'}` : `已静默保存 ${saved} 个文件`);
+            return saved > 0;
+        }
+    }
     if(typeof window.showDirectoryPicker !== 'function'){
         const desktopResult = await requestDesktopCanvasDownload(list.map(item => ({
             url:item.url,

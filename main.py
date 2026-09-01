@@ -78,6 +78,7 @@ from canvas_core.database import RevisionConflict
 from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
 from canvas_core.generated_output import export_generated_files
+from canvas_core.quick_save import safe_download_name, save_stream
 from canvas_core.image_upload import normalize_image_orientation
 from canvas_core.canvas_placeholder_migration import migrate_orphan_output_pending_once
 from canvas_core.grid_crop import detect_grid
@@ -2722,6 +2723,8 @@ class PreferencesUpdateRequest(BaseModel):
 class AppSettingsUpdateRequest(BaseModel):
     close_behavior: Optional[str] = None
     generated_output_dir: Optional[str] = None
+    quick_save_mode: Optional[str] = None
+    quick_save_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
     shortcut_bindings: Optional[Dict[str, str]] = None
 
@@ -3004,6 +3007,8 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "generated_output_dir": custom_directory,
         "generated_output_effective_dir": effective_directory,
         "generated_output_uses_default": not bool(custom_directory),
+        "quick_save_mode": str(config.get("quick_save_mode") or "manual"),
+        "quick_save_dir": str(config.get("quick_save_dir") or "").strip(),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
         "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
         "runtime_mode": RUNTIME_OPTIONS.mode,
@@ -3022,6 +3027,16 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             fd, probe = tempfile.mkstemp(prefix=".shiyin-write-test-", dir=str(directory))
             os.close(fd)
             os.remove(probe)
+        if payload.quick_save_dir is not None:
+            requested_quick_save = str(payload.quick_save_dir or "").strip()
+            if requested_quick_save:
+                quick_save_directory = Path(requested_quick_save).expanduser()
+                if not quick_save_directory.is_absolute():
+                    raise ValueError("快捷保存目录必须是绝对路径")
+                quick_save_directory.mkdir(parents=True, exist_ok=True)
+                fd, probe = tempfile.mkstemp(prefix=".shiyin-write-test-", dir=str(quick_save_directory))
+                os.close(fd)
+                os.remove(probe)
         if payload.topaz_video_install_dir is not None:
             requested_topaz = str(payload.topaz_video_install_dir or "").strip()
             if requested_topaz:
@@ -3037,12 +3052,157 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             APP_PATHS.data_root,
             close_behavior=payload.close_behavior,
             generated_output_dir=payload.generated_output_dir,
+            quick_save_mode=payload.quick_save_mode,
+            quick_save_dir=payload.quick_save_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
             shortcut_bindings=payload.shortcut_bindings,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return app_settings_response(config)
+
+
+@app.get("/api/app-settings/quick-save")
+def get_quick_save_settings():
+    config = read_app_config(APP_PATHS.data_root)
+    return {
+        "mode": str(config.get("quick_save_mode") or "manual"),
+        "directory": str(config.get("quick_save_dir") or "").strip(),
+    }
+
+
+def quick_save_configured_directory() -> Path:
+    config = read_app_config(APP_PATHS.data_root)
+    if str(config.get("quick_save_mode") or "manual") != "silent":
+        raise HTTPException(status_code=409, detail="当前未启用静默保存")
+    directory = str(config.get("quick_save_dir") or "").strip()
+    if not directory:
+        raise HTTPException(status_code=409, detail="尚未选择快捷保存目录")
+    path = Path(directory).expanduser()
+    if not path.is_absolute():
+        raise HTTPException(status_code=409, detail="快捷保存目录无效，请重新选择")
+    return path
+
+
+def quick_save_source(url: str, requested_name: str) -> Tuple[str, str]:
+    source = str(url or "").strip()
+    name = str(requested_name or "").strip()
+    parsed = urllib.parse.urlsplit(source)
+    if parsed.path == "/api/download-output":
+        params = urllib.parse.parse_qs(parsed.query)
+        nested = str((params.get("url") or [""])[0]).strip()
+        if nested:
+            source = nested
+        if not name:
+            name = str((params.get("name") or [""])[0]).strip()
+    return source, name
+
+
+@app.post("/api/app-settings/quick-save")
+async def quick_save_download(
+    request: Request,
+    url: str = Form(""),
+    name: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+):
+    directory = quick_save_configured_directory()
+    source, requested_name = quick_save_source(url, name)
+    fallback = filename_from_media_url(source, "download.bin") if source else "download.bin"
+    filename = safe_download_name(requested_name or (file.filename if file else "") or fallback, fallback)
+
+    try:
+        if file is not None:
+            def write_upload(target):
+                while True:
+                    chunk = file.file.read(256 * 1024)
+                    if not chunk:
+                        break
+                    target.write(chunk)
+
+            destination = await asyncio.to_thread(save_stream, directory, filename, write_upload)
+        else:
+            if not source:
+                raise ValueError("缺少要保存的文件")
+            if source.startswith(("blob:", "data:")):
+                raise ValueError("浏览器临时文件必须作为文件内容上传")
+            local_path = output_file_from_url(source)
+            if not local_path:
+                local_path = local_media_file_by_basename(filename_from_media_url(source, ""))
+            if local_path and os.path.isfile(local_path):
+                def write_local(target):
+                    with open(local_path, "rb") as source_file:
+                        shutil.copyfileobj(source_file, target, length=256 * 1024)
+
+                destination = await asyncio.to_thread(save_stream, directory, filename, write_local)
+            else:
+                parsed = urllib.parse.urlsplit(source)
+                if parsed.path == "/api/app-settings/quick-save":
+                    raise ValueError("快捷保存地址不能指向自身")
+                if parsed.scheme in ("http", "https"):
+                    remote_url = source
+                elif source.startswith("/"):
+                    remote_url = urllib.parse.urljoin(str(request.base_url), source.lstrip("/"))
+                else:
+                    raise ValueError("无效的下载地址")
+
+                def write_remote(target):
+                    headers = {"User-Agent": "SHIYIN-AI/1.0"}
+                    if urllib.parse.urlsplit(remote_url).netloc == request.url.netloc:
+                        cookie = request.headers.get("cookie")
+                        if cookie:
+                            headers["Cookie"] = cookie
+                    with requests.get(remote_url, stream=True, timeout=(10, 120), headers=headers) as response:
+                        response.raise_for_status()
+                        for chunk in response.iter_content(chunk_size=256 * 1024):
+                            if chunk:
+                                target.write(chunk)
+
+                destination = await asyncio.to_thread(save_stream, directory, filename, write_remote)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"下载文件失败：{exc}") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if file is not None:
+            await file.close()
+    return {"saved": True, "name": destination.name, "path": str(destination)}
+
+
+@app.post("/api/app-settings/select-quick-save-directory")
+async def select_quick_save_directory():
+    if os.name != "nt":
+        raise HTTPException(status_code=501, detail="当前系统不支持原生目录选择")
+    config = read_app_config(APP_PATHS.data_root)
+    initial = str(config.get("quick_save_dir") or (Path.home() / "Downloads"))
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
+        "$dialog.Description='选择 SHIYIN AI 快捷保存目录';"
+        "$dialog.ShowNewFolderButton=$true;"
+        "if(Test-Path -LiteralPath $args[0]){$dialog.SelectedPath=$args[0]};"
+        "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
+    )
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        raise HTTPException(status_code=501, detail="未找到 Windows PowerShell，无法打开目录选择器")
+    try:
+        process = await asyncio.to_thread(
+            subprocess.run,
+            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, initial],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=408, detail="目录选择超时") from exc
+    if process.returncode != 0:
+        raise HTTPException(status_code=500, detail=(process.stderr or "无法打开目录选择器").strip()[:300])
+    selected = process.stdout.strip().splitlines()[-1].strip() if process.stdout.strip() else ""
+    return {"selected": bool(selected), "path": selected}
 
 
 @app.post("/api/app-settings/select-generated-output-directory")

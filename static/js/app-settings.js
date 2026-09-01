@@ -8,6 +8,12 @@
     const closeBehaviorNote = document.getElementById('closeBehaviorNote');
     const chooseOutput = document.getElementById('chooseGeneratedOutput');
     const resetOutput = document.getElementById('resetGeneratedOutput');
+    const quickSaveOptions = document.getElementById('quickSaveOptions');
+    const quickSaveStatus = document.getElementById('quickSaveStatus');
+    const quickSaveDirectoryControl = document.getElementById('quickSaveDirectoryControl');
+    const quickSaveDirectory = document.getElementById('quickSaveDir');
+    const chooseQuickSaveDirectory = document.getElementById('chooseQuickSaveDirectory');
+    const quickSaveHint = document.getElementById('quickSaveHint');
     const updatePolicy = document.getElementById('updatePolicy');
     const updateNetworkMode = document.getElementById('updateNetworkMode');
     const updateManualProxy = document.getElementById('updateManualProxy');
@@ -42,6 +48,9 @@
     const shortcutList = document.getElementById('shortcutList');
     let currentBehavior = 'ask_on_close';
     let currentOutputDirectory = '';
+    let currentQuickSaveMode = 'manual';
+    let currentQuickSaveDirectory = '';
+    let quickSaveStatusTimer = null;
     let statusTimer = null;
     let updateRequestSequence = 0;
     let lastOrphanPreview = [];
@@ -64,6 +73,14 @@
         if(!updateSaveStatus) return;
         updateSaveStatus.textContent = message;
         updateSaveStatus.classList.toggle('error', isError);
+    }
+
+    function showQuickSaveStatus(message, isError=false){
+        if(!quickSaveStatus) return;
+        clearTimeout(quickSaveStatusTimer);
+        quickSaveStatus.textContent = message;
+        quickSaveStatus.classList.toggle('error', isError);
+        if(message && !isError) quickSaveStatusTimer = setTimeout(() => { quickSaveStatus.textContent = ''; }, 2600);
     }
 
     function showStorageStatus(message, isError=false){
@@ -374,6 +391,39 @@
         resetOutput.disabled = !currentOutputDirectory;
     }
 
+    function selectQuickSaveMode(mode){
+        quickSaveOptions?.querySelectorAll('input[name="quickSaveMode"]').forEach(input => {
+            input.checked = input.value === mode;
+        });
+        if(quickSaveDirectoryControl) quickSaveDirectoryControl.hidden = mode !== 'silent';
+        if(quickSaveHint) quickSaveHint.textContent = mode === 'silent'
+            ? (currentQuickSaveDirectory ? '点击下载后会直接保存到此目录，同名文件会自动编号。' : '请先选择目录，选择完成后静默保存立即生效。')
+            : '手动保存会继续显示系统保存窗口。';
+    }
+
+    function broadcastQuickSaveSettings(){
+        const detail = {mode:currentQuickSaveMode, directory:currentQuickSaveDirectory};
+        try {
+            const channel = new BroadcastChannel('shiyin-quick-save-settings');
+            channel.postMessage(detail);
+            channel.close();
+        } catch(error) {}
+        try { window.parent?.postMessage({type:'quick-save-settings:changed', ...detail}, location.origin); } catch(error) {}
+    }
+
+    function applyQuickSaveSettings(data){
+        currentQuickSaveMode = data?.quick_save_mode === 'silent' ? 'silent' : 'manual';
+        currentQuickSaveDirectory = String(data?.quick_save_dir || '');
+        if(quickSaveDirectory) quickSaveDirectory.value = currentQuickSaveDirectory;
+        selectQuickSaveMode(currentQuickSaveMode);
+        broadcastQuickSaveSettings();
+    }
+
+    function setQuickSaveBusy(busy){
+        if(quickSaveOptions) quickSaveOptions.disabled = busy;
+        if(chooseQuickSaveDirectory) chooseQuickSaveDirectory.disabled = busy;
+    }
+
     async function requestSettings(url, init={}){
         const response = await fetch(url, init);
         const data = await response.json().catch(() => ({}));
@@ -504,6 +554,7 @@
             selectBehavior(currentBehavior);
             updateCloseBehaviorNote();
             applyOutputSettings(data);
+            applyQuickSaveSettings(data);
             applyTopazSettings(data);
             applyShortcutSettings(data);
         } catch(error) {
@@ -511,6 +562,7 @@
         } finally {
             options.disabled = false;
             setOutputBusy(false);
+            setQuickSaveBusy(false);
         }
     }
 
@@ -567,6 +619,44 @@
         }
     }
 
+    async function saveQuickSaveMode(mode){
+        if(mode === 'silent' && !currentQuickSaveDirectory){
+            selectQuickSaveMode('silent');
+            showQuickSaveStatus('请先选择保存目录', true);
+            return;
+        }
+        setQuickSaveBusy(true);
+        try {
+            const data = await saveSettings({quick_save_mode:mode});
+            applyQuickSaveSettings(data);
+            showQuickSaveStatus('已保存');
+        } catch(error) {
+            selectQuickSaveMode(currentQuickSaveMode);
+            showQuickSaveStatus(`保存失败：${error.message}`, true);
+        } finally {
+            setQuickSaveBusy(false);
+        }
+    }
+
+    async function chooseQuickSaveFolder(){
+        setQuickSaveBusy(true);
+        try {
+            const selection = await requestSettings('/api/app-settings/select-quick-save-directory', {method:'POST'});
+            if(!selection.selected || !selection.path){
+                selectQuickSaveMode(currentQuickSaveMode);
+                return;
+            }
+            const data = await saveSettings({quick_save_mode:'silent', quick_save_dir:selection.path});
+            applyQuickSaveSettings(data);
+            showQuickSaveStatus('静默保存已启用');
+        } catch(error) {
+            selectQuickSaveMode(currentQuickSaveMode);
+            showQuickSaveStatus(`保存失败：${error.message}`, true);
+        } finally {
+            setQuickSaveBusy(false);
+        }
+    }
+
     async function chooseTopazDirectory(){
         setTopazBusy(true);
         try {
@@ -612,6 +702,13 @@
     cleanupOrphanMedia?.addEventListener('click', cleanupOrphans);
     chooseOutput.addEventListener('click', chooseOutputDirectory);
     resetOutput.addEventListener('click', resetOutputDirectory);
+    quickSaveOptions?.addEventListener('change', event => {
+        const input = event.target.closest('input[name="quickSaveMode"]');
+        if(!input) return;
+        if(input.value !== currentQuickSaveMode) saveQuickSaveMode(input.value);
+        else selectQuickSaveMode(currentQuickSaveMode);
+    });
+    chooseQuickSaveDirectory?.addEventListener('click', chooseQuickSaveFolder);
     chooseTopazInstall?.addEventListener('click', chooseTopazDirectory);
     resetTopazInstall?.addEventListener('click', resetTopazDirectory);
     checkTopazInstall?.addEventListener('click', checkTopazCapabilities);

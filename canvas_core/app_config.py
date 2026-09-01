@@ -10,6 +10,9 @@ from typing import Any
 DEFAULT_CLOSE_BEHAVIOR = "ask_on_close"
 CLOSE_BEHAVIORS = frozenset({DEFAULT_CLOSE_BEHAVIOR, "minimize_to_tray", "exit"})
 DEFAULT_GENERATED_OUTPUT_DIR = ""
+DEFAULT_QUICK_SAVE_MODE = "manual"
+QUICK_SAVE_MODES = frozenset({DEFAULT_QUICK_SAVE_MODE, "silent"})
+DEFAULT_QUICK_SAVE_DIR = ""
 DEFAULT_TOPAZ_VIDEO_INSTALL_DIR = ""
 DEFAULT_SHORTCUT_BINDINGS: dict[str, str] = {}
 _CONFIG_LOCK = RLock()
@@ -47,6 +50,8 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
             return {
                 "close_behavior": DEFAULT_CLOSE_BEHAVIOR,
                 "generated_output_dir": DEFAULT_GENERATED_OUTPUT_DIR,
+                "quick_save_mode": DEFAULT_QUICK_SAVE_MODE,
+                "quick_save_dir": DEFAULT_QUICK_SAVE_DIR,
                 "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
                 "shortcut_bindings": DEFAULT_SHORTCUT_BINDINGS.copy(),
             }
@@ -59,6 +64,11 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         behavior = str(value.get("close_behavior") or DEFAULT_CLOSE_BEHAVIOR)
         value["close_behavior"] = behavior if behavior in CLOSE_BEHAVIORS else DEFAULT_CLOSE_BEHAVIOR
         value["generated_output_dir"] = str(value.get("generated_output_dir") or "").strip()
+        quick_save_mode = str(value.get("quick_save_mode") or DEFAULT_QUICK_SAVE_MODE).strip()
+        value["quick_save_mode"] = quick_save_mode if quick_save_mode in QUICK_SAVE_MODES else DEFAULT_QUICK_SAVE_MODE
+        value["quick_save_dir"] = str(value.get("quick_save_dir") or "").strip()
+        if value["quick_save_mode"] == "silent" and not value["quick_save_dir"]:
+            value["quick_save_mode"] = DEFAULT_QUICK_SAVE_MODE
         value["topaz_video_install_dir"] = str(value.get("topaz_video_install_dir") or "").strip()
         value["shortcut_bindings"] = _normalize_shortcut_bindings(value.get("shortcut_bindings"))
         return value
@@ -69,10 +79,12 @@ def update_app_settings(
     *,
     close_behavior: str | None = None,
     generated_output_dir: str | None = None,
+    quick_save_mode: str | None = None,
+    quick_save_dir: str | None = None,
     topaz_video_install_dir: str | None = None,
     shortcut_bindings: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
+    if close_behavior is None and generated_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -87,6 +99,18 @@ def update_app_settings(
             if directory and not Path(directory).expanduser().is_absolute():
                 raise ValueError("生成图片保存目录必须是绝对路径")
             value["generated_output_dir"] = directory
+        if quick_save_mode is not None:
+            mode = str(quick_save_mode or "").strip()
+            if mode not in QUICK_SAVE_MODES:
+                raise ValueError("快捷保存模式必须是 manual 或 silent")
+            value["quick_save_mode"] = mode
+        if quick_save_dir is not None:
+            directory = str(quick_save_dir or "").strip()
+            if directory and not Path(directory).expanduser().is_absolute():
+                raise ValueError("快捷保存目录必须是绝对路径")
+            value["quick_save_dir"] = directory
+        if value["quick_save_mode"] == "silent" and not value["quick_save_dir"]:
+            raise ValueError("启用静默保存前必须选择快捷保存目录")
         if topaz_video_install_dir is not None:
             directory = str(topaz_video_install_dir or "").strip()
             if directory and not Path(directory).expanduser().is_absolute():

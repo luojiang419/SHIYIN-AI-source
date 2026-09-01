@@ -507,6 +507,12 @@
     async function downloadAll(){
         const name=`SHIYIN-全部作品-${workDatePart({created_at:Date.now()/1000})}.zip`;
         const url=`/api/works/download-all?name=${encodeURIComponent(name)}`;
+        if(window.ShiyinQuickSave){
+            try {
+                const result=await window.ShiyinQuickSave.save({url,name});
+                if(result.handled){ toast(t('desktop.download.finished')); return; }
+            } catch(error){ toast(error.message || t('desktop.download.failed')); return; }
+        }
         if(window.showSaveFilePicker){
             try {
                 const handle=await window.showSaveFilePicker({suggestedName:name,types:[{description:'ZIP',accept:{'application/zip':['.zip']}}]});

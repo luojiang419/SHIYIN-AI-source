@@ -14,6 +14,8 @@ class AppConfigTests(unittest.TestCase):
             settings = read_app_config(Path(tmp))
             self.assertEqual(settings["close_behavior"], "ask_on_close")
             self.assertEqual(settings["generated_output_dir"], "")
+            self.assertEqual(settings["quick_save_mode"], "manual")
+            self.assertEqual(settings["quick_save_dir"], "")
             self.assertEqual(settings["topaz_video_install_dir"], "")
             self.assertEqual(settings["shortcut_bindings"], {})
 
@@ -70,6 +72,33 @@ class AppConfigTests(unittest.TestCase):
             self.assertEqual(saved["shortcut_bindings"]["canvas.undo"], "Alt+Z")
             self.assertEqual(saved["shortcut_bindings"]["canvas.toggleAssets"], "")
             self.assertEqual(read_app_config(Path(tmp))["shortcut_bindings"], saved["shortcut_bindings"])
+
+    def test_quick_save_requires_absolute_directory_before_silent_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "必须选择"):
+                update_app_settings(data_root, quick_save_mode="silent")
+            with self.assertRaisesRegex(ValueError, "绝对路径"):
+                update_app_settings(data_root, quick_save_dir="relative/downloads")
+
+            destination = data_root / "快捷保存"
+            saved = update_app_settings(
+                data_root,
+                quick_save_mode="silent",
+                quick_save_dir=str(destination),
+            )
+            self.assertEqual(saved["quick_save_mode"], "silent")
+            self.assertEqual(saved["quick_save_dir"], str(destination))
+            manual = update_app_settings(data_root, quick_save_mode="manual")
+            self.assertEqual(manual["quick_save_mode"], "manual")
+            self.assertEqual(manual["quick_save_dir"], str(destination))
+
+    def test_corrupt_silent_mode_without_directory_falls_back_to_manual(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config" / "app.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text('{"quick_save_mode":"silent","quick_save_dir":""}', encoding="utf-8")
+            self.assertEqual(read_app_config(Path(tmp))["quick_save_mode"], "manual")
 
     def test_shortcut_bindings_reject_invalid_action_ids(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>软件设置</title>
+    <script defer src="/static/js/quick-save.js?v=2026.09.02.1"></script>
     <script>
         (function(){
             try {
@@ -21,7 +22,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.08.21.shortcuts.1">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.02.quick-save.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -78,6 +79,34 @@
                 <p id="generatedOutputHint"></p>
             </div>
             <p class="app-settings-note" data-i18n="appSettings.generatedOutputNaming">生成成功后自动保存副本，文件名格式为 SHIYIN-000001-YYYYMMDD。</p>
+        </section>
+
+        <section class="app-settings-card" aria-labelledby="quickSaveTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>DOWNLOAD</span>
+                    <h2 id="quickSaveTitle">快捷保存</h2>
+                </div>
+                <strong id="quickSaveStatus" role="status"></strong>
+            </div>
+            <fieldset id="quickSaveOptions" class="app-settings-segmented" disabled>
+                <label>
+                    <input type="radio" name="quickSaveMode" value="manual">
+                    <span>手动保存</span>
+                </label>
+                <label>
+                    <input type="radio" name="quickSaveMode" value="silent">
+                    <span>静默保存</span>
+                </label>
+            </fieldset>
+            <div id="quickSaveDirectoryControl" class="app-settings-output-control" hidden>
+                <label for="quickSaveDir">静默保存目录</label>
+                <div class="app-settings-output-row quick-save-directory-row">
+                    <input id="quickSaveDir" type="text" readonly placeholder="请选择下载文件保存目录">
+                    <button id="chooseQuickSaveDirectory" type="button">选择文件夹</button>
+                </div>
+            </div>
+            <p id="quickSaveHint" class="app-settings-note">手动保存会继续显示系统保存窗口。</p>
         </section>
 
         <section class="app-settings-card app-settings-shortcuts-card" aria-labelledby="shortcutSettingsTitle">
@@ -198,6 +227,6 @@
         </section>
     </main>
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
-    <script src="/static/js/app-settings.js?v=2026.08.23.shortcuts-runtime.2"></script>
+    <script src="/static/js/app-settings.js?v=2026.09.02.quick-save.1"></script>
 </body>
 </html>

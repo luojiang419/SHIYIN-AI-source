@@ -23,6 +23,7 @@ button, input, select { font:inherit; }
 .app-settings-option i { width:9px; height:9px; border-top:2px solid var(--as-muted); border-right:2px solid var(--as-muted); transform:rotate(45deg); }
 .app-settings-note { margin:16px 2px 0; color:var(--as-muted); font-size:10px; }
 .app-settings-output-control { display:grid; gap:9px; margin-top:18px; }
+.app-settings-output-control[hidden] { display:none !important; }
 .app-settings-output-control > label { color:var(--as-soft); font-size:11px; font-weight:750; }
 .app-settings-output-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:9px; }
 .app-settings-output-row input { min-width:0; height:44px; padding:0 13px; border:1px solid var(--as-line); border-radius:12px; outline:0; background:var(--as-control); color:var(--as-text); font-size:11px; }
@@ -30,6 +31,16 @@ button, input, select { font:inherit; }
 .app-settings-output-row button.secondary { border-color:var(--as-line); background:var(--as-control); color:var(--as-text); }
 .app-settings-output-row button:disabled { cursor:wait; opacity:.55; }
 #generatedOutputHint { min-height:16px; margin:0; color:var(--as-muted); font-size:10px; }
+.app-settings-segmented { width:min(360px,100%); display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:18px 0 0; padding:4px; border:1px solid var(--as-line); border-radius:12px; background:var(--as-control); }
+.app-settings-segmented label { min-width:0; cursor:pointer; }
+.app-settings-segmented input { position:absolute; opacity:0; pointer-events:none; }
+.app-settings-segmented span { min-height:36px; display:flex; align-items:center; justify-content:center; padding:0 14px; border-radius:8px; color:var(--as-muted); font-size:11px; font-weight:800; }
+.app-settings-segmented input:checked + span { background:var(--as-panel); box-shadow:0 1px 4px rgba(30,36,28,.1); color:var(--as-text); }
+.app-settings-segmented:disabled { cursor:wait; opacity:.58; }
+.quick-save-directory-row { grid-template-columns:minmax(0,1fr) auto; }
+#quickSaveStatus { min-height:20px; color:var(--as-success); font-size:11px; }
+#quickSaveStatus.error { color:var(--as-danger); }
+#quickSaveHint { min-height:16px; }
 .topaz-directory-row { grid-template-columns:minmax(0,1fr) auto auto auto; }
 .app-settings-topaz-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:16px; }
 .app-settings-topaz-grid > div { min-width:0; display:grid; gap:6px; padding:12px; border:1px solid var(--as-line); border-radius:12px; background:var(--as-control); }
@@ -90,4 +101,4 @@ button, input, select { font:inherit; }
 #shortcutSaveStatus.error { color:var(--as-danger); }
 fieldset:disabled .app-settings-option { cursor:wait; opacity:.58; transform:none; }
 html.studio-theme-dark { color-scheme:dark; --as-bg:#1a1a1a; --as-panel:#1e1e1e; --as-text:#f0eee9; --as-soft:#d2d0cb; --as-muted:#a7a6a2; --as-line:rgba(255,255,255,.08); --as-control:#292928; --as-accent:#3a3a39; --as-success:#72d6a0; --as-danger:#ff8d86; }
-@media (max-width:640px) { .app-settings-page { width:calc(100% - 24px); padding:28px 0 50px; } .app-settings-card { padding:16px; border-radius:18px; } .app-settings-option { grid-template-columns:20px minmax(0,1fr); padding:14px; } .app-settings-option i { display:none; } .app-settings-output-row,.topaz-directory-row { grid-template-columns:1fr 1fr; } .app-settings-output-row input,.topaz-directory-row input { grid-column:1 / -1; } .app-settings-storage-grid,.app-settings-topaz-grid { grid-template-columns:1fr; } .app-settings-shortcut-toolbar { grid-template-columns:1fr; } .app-settings-shortcut-toolbar > button { justify-self:stretch; } .app-settings-shortcut-summary { flex-direction:column; gap:5px; } .app-settings-shortcut-list { max-height:none; } .app-settings-shortcut-row { grid-template-columns:minmax(0,1fr) 34px 34px; } .app-settings-shortcut-copy { grid-column:1 / -1; } .app-settings-shortcut-binding { grid-column:1; grid-row:2; } .app-settings-shortcut-icon-btn { grid-row:2; } }
+@media (max-width:640px) { .app-settings-page { width:calc(100% - 24px); padding:28px 0 50px; } .app-settings-card { padding:16px; border-radius:18px; } .app-settings-option { grid-template-columns:20px minmax(0,1fr); padding:14px; } .app-settings-option i { display:none; } .app-settings-output-row,.topaz-directory-row { grid-template-columns:1fr 1fr; } .app-settings-output-row input,.topaz-directory-row input { grid-column:1 / -1; } .quick-save-directory-row { grid-template-columns:1fr; } .quick-save-directory-row input { grid-column:1; } .app-settings-storage-grid,.app-settings-topaz-grid { grid-template-columns:1fr; } .app-settings-shortcut-toolbar { grid-template-columns:1fr; } .app-settings-shortcut-toolbar > button { justify-self:stretch; } .app-settings-shortcut-summary { flex-direction:column; gap:5px; } .app-settings-shortcut-list { max-height:none; } .app-settings-shortcut-row { grid-template-columns:minmax(0,1fr) 34px 34px; } .app-settings-shortcut-copy { grid-column:1 / -1; } .app-settings-shortcut-binding { grid-column:1; grid-row:2; } .app-settings-shortcut-icon-btn { grid-row:2; } }

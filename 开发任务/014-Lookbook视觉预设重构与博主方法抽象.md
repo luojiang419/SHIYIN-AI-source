@@ -27,7 +27,7 @@
 - `node --check static/js/canvas-lookbook-node.js`：通过
 - `python -m py_compile main.py canvas_core/ecommerce.py`：通过
 - `git diff --check`：通过
-- Git commit：待提交（本轮变更）
+- Git commit：`696b73f feat: replace lookbook presets with creator method taxonomy`（已推送 `origin/feat/storyboard-merge-node`）
 
 ## 验收标准
 

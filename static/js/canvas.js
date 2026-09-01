@@ -131,7 +131,7 @@ function ensureClassicMediaQueue(){
         imageTimeoutMs:20000,
         videoTimeoutMs:45000,
         maxAttempts:2,
-        collectCandidates:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])].map(img => classicPreviewCandidate(img)).filter(Boolean),
+        collectCandidates:() => classicMediaElementsInWindow().map(img => classicPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(classicPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
         replaceVideoFallback:img => replaceCanvasVideoPreviewWithFallback(img),
@@ -648,6 +648,8 @@ const canvasNodeDomIndex = new Map();
 const canvasPortDomIndex = new Map();
 const canvasNodeRectIndex = new Map();
 const canvasPortGeometryIndex = new Map();
+let classicMediaSpatialGrid = null;
+let classicMediaSpatialGridEpoch = -1;
 let canvasGeometryEpoch = 0;
 let videoClipEditor = null;
 let videoClipHandleDrag = '';
@@ -2002,6 +2004,7 @@ function canvasPortIndexKey(nodeId, kind, inputRole=''){
     return `${nodeId}:${kind}:${inputRole || ''}`;
 }
 function invalidateCanvasGeometry(ids=[]){
+    classicMediaSpatialGridEpoch = -1;
     const list = (ids || []).filter(Boolean);
     if(!list.length){
         canvasGeometryEpoch += 1;
@@ -2098,6 +2101,27 @@ function rebuildCanvasDomIndexes(){
         const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
         indexClassicNodeDom(el, node);
     });
+    rebuildClassicMediaSpatialGrid();
+}
+function rebuildClassicMediaSpatialGrid(){
+    if(!window.CanvasMediaQueue?.createSpatialGridIndex) return null;
+    classicMediaSpatialGrid = classicMediaSpatialGrid || window.CanvasMediaQueue.createSpatialGridIndex({cellSize:640});
+    classicMediaSpatialGrid.clear();
+    canvasNodeDomIndex.forEach((el, id) => {
+        const rect = canvasNodeRectIndex.get(id) || estimatedNodeRect(canvasNodeIndex.get(id) || nodes.find(item => item.id === id));
+        if(rect) classicMediaSpatialGrid.upsert(id, rect, el);
+    });
+    classicMediaSpatialGridEpoch = canvasGeometryEpoch;
+    return classicMediaSpatialGrid;
+}
+function classicMediaElementsInWindow(){
+    const view = currentWorldViewRect();
+    const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
+    const query = {x:view.x - margin, y:view.y - margin, w:view.w + margin * 2, h:view.h + margin * 2};
+    const grid = classicMediaSpatialGridEpoch === canvasGeometryEpoch ? classicMediaSpatialGrid : rebuildClassicMediaSpatialGrid();
+    const roots = grid?.search(query) || [];
+    if(!roots.length) return [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])];
+    return roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]);
 }
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;

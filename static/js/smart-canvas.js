@@ -88,6 +88,8 @@ const smartNodeDomIndex = new Map();
 const smartPortDomIndex = new Map();
 const smartNodeRectIndex = new Map();
 const smartPortGeometryIndex = new Map();
+let smartMediaSpatialGrid = null;
+let smartMediaSpatialGridEpoch = -1;
 const smartGroupOwnerIndex = new Map();
 let smartGeometryEpoch = 0;
 let selectedId = '';
@@ -1040,7 +1042,7 @@ function ensureSmartMediaQueue(){
         imageTimeoutMs:20000,
         videoTimeoutMs:45000,
         maxAttempts:2,
-        collectCandidates:() => [...(world?.querySelectorAll?.('img[data-preview-src]') || [])].map(img => smartPreviewCandidate(img)).filter(Boolean),
+        collectCandidates:() => smartMediaElementsInWindow().map(img => smartPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(smartPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || ''),
         replaceVideoFallback:img => replaceSmartVideoPreviewWithFallback(img),
@@ -3098,6 +3100,7 @@ function smartPortIndexKey(nodeId, kind, role=''){
     return `${nodeId}:${kind}:${role || ''}`;
 }
 function invalidateSmartGeometry(ids=[]){
+    smartMediaSpatialGridEpoch = -1;
     const list = (ids || []).filter(Boolean);
     if(!list.length){
         smartGeometryEpoch += 1;
@@ -3166,6 +3169,28 @@ function rebuildSmartCanvasDomIndexes(){
         const node = smartNodeIndex.get(id) || nodes.find(item => item.id === id);
         indexSmartNodeDom(el, node);
     });
+    rebuildSmartMediaSpatialGrid();
+}
+function rebuildSmartMediaSpatialGrid(){
+    if(!window.CanvasMediaQueue?.createSpatialGridIndex) return null;
+    smartMediaSpatialGrid = smartMediaSpatialGrid || window.CanvasMediaQueue.createSpatialGridIndex({cellSize:640});
+    smartMediaSpatialGrid.clear();
+    smartNodeDomIndex.forEach((el, id) => {
+        const rect = smartNodeRectIndex.get(id) || cachedSmartNodeRect(smartNodeIndex.get(id) || nodes.find(item => item.id === id));
+        if(rect) smartMediaSpatialGrid.upsert(id, rect, el);
+    });
+    smartMediaSpatialGridEpoch = smartGeometryEpoch;
+    return smartMediaSpatialGrid;
+}
+function smartMediaElementsInWindow(){
+    const scale = Math.max(0.05, viewport.scale || 1);
+    const view = {x:-viewport.x / scale, y:-viewport.y / scale, w:shell.clientWidth / scale, h:shell.clientHeight / scale};
+    const margin = SMART_MEDIA_QUEUE_MARGIN / scale;
+    const query = {x:view.x - margin, y:view.y - margin, w:view.w + margin * 2, h:view.h + margin * 2};
+    const grid = smartMediaSpatialGridEpoch === smartGeometryEpoch ? smartMediaSpatialGrid : rebuildSmartMediaSpatialGrid();
+    const roots = grid?.search(query) || [];
+    if(!roots.length) return [...(world?.querySelectorAll?.('img[data-preview-src]') || [])];
+    return roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]);
 }
 function cachedSmartNodeRect(node){
     if(!node) return {x:0, y:0, width:0, height:0};

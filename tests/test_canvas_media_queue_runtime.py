@@ -328,6 +328,26 @@ class FakeMedia {
 """
         self.assertEqual(run_node(script), {"ok": True})
 
+    def test_spatial_grid_indexes_and_queries_rectangles(self):
+        script = r"""
+const assert = require('assert');
+const {createSpatialGridIndex} = require('./static/js/canvas-media-queue.js');
+const index = createSpatialGridIndex({cellSize:100});
+index.upsert('near', {x:10,y:10,w:40,h:40}, {id:'near'});
+index.upsert('edge', {x:95,y:95,w:30,h:30}, {id:'edge'});
+index.upsert('far', {x:600,y:600,w:40,h:40}, {id:'far'});
+assert.equal(index.size(), 3);
+assert.deepEqual(index.search({x:0,y:0,w:150,h:150}).map(value => value.id).sort(), ['edge','near']);
+index.upsert('near', {x:500,y:500,w:20,h:20}, {id:'moved'});
+assert.deepEqual(index.search({x:0,y:0,w:150,h:150}).map(value => value.id), ['edge']);
+assert.equal(index.remove('edge'), true);
+assert.equal(index.size(), 2);
+index.clear();
+assert.equal(index.size(), 0);
+console.log(JSON.stringify({ok:true}));
+"""
+        self.assertEqual(run_node(script), {"ok": True})
+
     def test_classic_and_smart_canvases_use_shared_queue_controller(self):
         for source, name in ((CANVAS_JS, "classic"), (SMART_JS, "smart")):
             self.assertIn("window.CanvasMediaQueue.createMediaQueue", source, name)
@@ -341,6 +361,11 @@ class FakeMedia {
         self.assertIn("mediaResidentReason === 'budget'", SMART_JS)
         self.assertIn("maxResidentPixels", CANVAS_JS)
         self.assertIn("maxResidentPixels", SMART_JS)
+        self.assertIn("createSpatialGridIndex", RUNTIME.read_text(encoding="utf-8"))
+        self.assertIn("function classicMediaElementsInWindow", CANVAS_JS)
+        self.assertIn("function smartMediaElementsInWindow", SMART_JS)
+        self.assertIn("classicMediaElementsInWindow().map", CANVAS_JS)
+        self.assertIn("smartMediaElementsInWindow().map", SMART_JS)
 
 
 if __name__ == "__main__":

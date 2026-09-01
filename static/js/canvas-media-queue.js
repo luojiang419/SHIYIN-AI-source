@@ -494,5 +494,57 @@
         return Object.freeze({schedule, reconcileNow, snapshot, destroy});
     }
 
-    return Object.freeze({createMediaQueue, createMediaResidency});
+    function createSpatialGridIndex(options={}){
+        const cellSize = Math.max(32, Number(options.cellSize || 640));
+        const cells = new Map();
+        const entries = new Map();
+        const key = (x, y) => `${x}:${y}`;
+        const cellsFor = rect => {
+            const minX = Math.floor(Number(rect?.x || 0) / cellSize);
+            const minY = Math.floor(Number(rect?.y || 0) / cellSize);
+            const maxX = Math.floor((Number(rect?.x || 0) + Math.max(1, Number(rect?.w ?? rect?.width ?? 1)) - 1) / cellSize);
+            const maxY = Math.floor((Number(rect?.y || 0) + Math.max(1, Number(rect?.h ?? rect?.height ?? 1)) - 1) / cellSize);
+            const result = [];
+            for(let x=minX; x<=maxX; x++) for(let y=minY; y<=maxY; y++) result.push(key(x,y));
+            return result;
+        };
+        function remove(id){
+            const old = entries.get(id);
+            if(!old) return false;
+            old.keys.forEach(cell => cells.get(cell)?.delete(id));
+            entries.delete(id);
+            return true;
+        }
+        function upsert(id, rect, value=id){
+            if(id == null || !rect) return false;
+            remove(id);
+            const record = {id, rect:{...rect}, value, keys:cellsFor(rect)};
+            entries.set(id, record);
+            record.keys.forEach(cell => {
+                if(!cells.has(cell)) cells.set(cell, new Set());
+                cells.get(cell).add(id);
+            });
+            return true;
+        }
+        function clear(){ cells.clear(); entries.clear(); }
+        function search(rect){
+            const ids = new Set();
+            cellsFor(rect).forEach(cell => cells.get(cell)?.forEach(id => ids.add(id)));
+            const minX = Number(rect?.x || 0), minY = Number(rect?.y || 0);
+            const maxX = minX + Math.max(0, Number(rect?.w ?? rect?.width ?? 0));
+            const maxY = minY + Math.max(0, Number(rect?.h ?? rect?.height ?? 0));
+            return [...ids].map(id => entries.get(id)).filter(record => {
+                if(!record) return false;
+                const value = record.rect;
+                const x = Number(value.x || 0), y = Number(value.y || 0);
+                const w = Math.max(0, Number(value.w ?? value.width ?? 0));
+                const h = Math.max(0, Number(value.h ?? value.height ?? 0));
+                return x < maxX && x + w > minX && y < maxY && y + h > minY;
+            }).map(record => record.value);
+        }
+        function size(){ return entries.size; }
+        return Object.freeze({upsert, remove, clear, search, size});
+    }
+
+    return Object.freeze({createMediaQueue, createMediaResidency, createSpatialGridIndex});
 });

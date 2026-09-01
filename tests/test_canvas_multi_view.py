@@ -6,6 +6,7 @@ SMART_JS = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
 SMART_HTML = (ROOT / "static/smart-canvas.html").read_text(encoding="utf-8")
 CANVAS_JS = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
 CANVAS_HTML = (ROOT / "static/canvas.html").read_text(encoding="utf-8")
+LOOKBOOK_JS = (ROOT / "static/js/canvas-lookbook-node.js").read_text(encoding="utf-8")
 SPECIAL_CSS = (ROOT / "static/css/canvas-special-nodes.css").read_text(encoding="utf-8")
 MULTI_VIEW_CSS = (ROOT / "static/css/canvas-multi-view-overrides.css").read_text(encoding="utf-8")
 
@@ -160,6 +161,11 @@ def test_multi_view_uses_single_column_rows_for_port_alignment():
     assert ".multi-view-input-list,.classic-multi-view-input-list{display:flex;flex-direction:column" in MULTI_VIEW_CSS
     assert ".smart-special-node.smart-multi-view-node .multi-view-port{top:var(--multi-view-port-top" in MULTI_VIEW_CSS
     assert ".multiView-node .classic-multi-view-port{top:var(--multi-view-port-top" in MULTI_VIEW_CSS
+
+
+def test_lookbook_input_ports_are_scoped_to_lookbook_nodes():
+    assert "inputPorts:type=>type===TYPE ? INPUT_PORTS.map" in LOOKBOOK_JS
+    assert "size:type=>type===TYPE ? ({w:430,h:0}) : null" in LOOKBOOK_JS
 
 
 def test_multi_view_product_slots_are_split_by_garment_and_angle():

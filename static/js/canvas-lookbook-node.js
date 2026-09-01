@@ -114,5 +114,7 @@
         {role:'lookbook-pose',label:'姿态',title:'连接人物姿态、动作或镜头机位参考图'},
         {role:'lookbook-layout',label:'版式',title:'连接广告版式、留白或构图参考图'},
     ];
-    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:()=>INPUT_PORTS.map(item=>({...item})),title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:()=>({w:430,h:0}),normalize,createNode,bodyHtml,bind,mediaRefs,openPicker};
+    // 端口查询会在统一画布渲染所有节点时调用；非 Lookbook 节点必须返回空数组，
+    // 否则会抢先进入通用多端口分支，覆盖三视图等节点自己的角色端口。
+    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:type=>type===TYPE ? INPUT_PORTS.map(item=>({...item})) : [],title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:type=>type===TYPE ? ({w:430,h:0}) : null,normalize,createNode,bodyHtml,bind,mediaRefs,openPicker};
 })();

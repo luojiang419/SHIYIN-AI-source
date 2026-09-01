@@ -45,9 +45,20 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
         self.assertIn("return Response.error()", text)
         self.assertIn("clear-generated-image-cache", text)
         self.assertIn("invalidate-generated-image-cache", text)
+        self.assertIn("activate-media-cache-worker", text)
         self.assertIn("needsFreshNetwork", text)
         self.assertIn("cache: 'no-store'", text)
         self.assertIn("content-type", text)
+        cache_response = text[text.index("async function cacheResponse"):text.index("async function matchGeneratedImage")]
+        self.assertIn("scheduleTrimCache(cache);", cache_response)
+        self.assertNotIn("await scheduleTrimCache(cache)", cache_response)
+
+    def test_cache_client_explicitly_activates_waiting_worker(self):
+        text = (ROOT / "static" / "js" / "media-cache-client.js").read_text(encoding="utf-8")
+        self.assertIn("activate(registration.waiting)", text)
+        self.assertIn("if(worker.state === 'installed') activate(worker)", text)
+        self.assertIn("registration.addEventListener('updatefound'", text)
+        self.assertIn("worker.state === 'installed'", text)
 
     def test_service_worker_caches_versioned_static_assets_for_second_open(self):
         text = (ROOT / "static" / "media-cache-sw.js").read_text(encoding="utf-8")

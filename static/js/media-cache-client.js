@@ -3,9 +3,9 @@
     const CACHE_VERSION = (() => {
         try {
             return new URL(document.currentScript?.src || location.href, location.href).searchParams.get('v')
-                || '2026.08.30.static-assets-cache.1';
+                || '2026.09.02.media-cache-nonblocking-trim.3';
         } catch (error) {
-            return '2026.08.30.static-assets-cache.1';
+            return '2026.09.02.media-cache-nonblocking-trim.3';
         }
     })();
     const workerUrl = `/media-cache-sw.js?v=${CACHE_VERSION}`;
@@ -14,7 +14,17 @@
     function register(){
         if(registrationPromise) return registrationPromise;
         if(!('serviceWorker' in navigator) || location.protocol === 'file:') return Promise.resolve(null);
-        registrationPromise = navigator.serviceWorker.register(workerUrl, {scope:'/'}).catch(() => null);
+        registrationPromise = navigator.serviceWorker.register(workerUrl, {scope:'/'}).then(registration => {
+            const activate = worker => worker?.postMessage({type:'activate-media-cache-worker'});
+            activate(registration.waiting);
+            registration.addEventListener('updatefound', () => {
+                const worker = registration.installing;
+                worker?.addEventListener('statechange', () => {
+                    if(worker.state === 'installed') activate(worker);
+                });
+            });
+            return registration;
+        }).catch(() => null);
         return registrationPromise;
     }
 

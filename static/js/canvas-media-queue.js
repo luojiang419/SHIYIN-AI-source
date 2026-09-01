@@ -64,6 +64,21 @@
             try { img?.removeAttribute?.('src'); }
             catch(error) {}
         }
+        function restorePriorSource(task, keepEvicted){
+            if(!task.priorSource) return false;
+            try { task.img.src = task.priorSource; }
+            catch(error) { return false; }
+            if(keepEvicted){
+                task.img.dataset.mediaResidentState = 'evicted';
+                if(task.priorResidentSrc) task.img.dataset.mediaResidentSrc = task.priorResidentSrc;
+                if(task.priorResidentReason) task.img.dataset.mediaResidentReason = task.priorResidentReason;
+            } else {
+                delete task.img.dataset.mediaResidentState;
+                delete task.img.dataset.mediaResidentSrc;
+                delete task.img.dataset.mediaResidentReason;
+            }
+            return true;
+        }
         function cleanupTask(task){
             if(task.timer) clearTimer(task.timer);
             task.timer = 0;
@@ -125,24 +140,27 @@
             if(current && task.img.isConnected){
                 if(outcome === 'loaded'){
                     task.img.dataset.previewState = 'loaded';
+                    delete task.img.dataset.mediaResidentState;
+                    delete task.img.dataset.mediaResidentSrc;
+                    delete task.img.dataset.mediaResidentReason;
                     delete task.img.dataset.previewAttempt;
                     delete task.img.dataset.previewRetryAt;
                     delete task.img.dataset.previewPhase;
                 } else if(outcome === 'canceled'){
-                    removeSource(task.img);
+                    if(!restorePriorSource(task, true)) removeSource(task.img);
                     task.img.dataset.previewState = 'queued';
                     delete task.img.dataset.previewAttempt;
                     delete task.img.dataset.previewRetryAt;
                     delete task.img.dataset.previewPhase;
                 } else if((outcome === 'timeout' || outcome === 'failed') && task.attempt < maxAttempts && eligible(task.img)){
-                    removeSource(task.img);
+                    if(!restorePriorSource(task, true)) removeSource(task.img);
                     const delay = retryDelayMs * Math.pow(2, Math.max(0, task.attempt - 1));
                     task.img.dataset.previewState = 'queued';
                     task.img.dataset.previewRetryAt = String(now() + delay);
                     delete task.img.dataset.previewPhase;
                     scheduleRetry(task.img, delay);
                 } else {
-                    removeSource(task.img);
+                    if(!restorePriorSource(task, false)) removeSource(task.img);
                     task.img.dataset.previewState = 'failed';
                     delete task.img.dataset.previewRetryAt;
                     delete task.img.dataset.previewPhase;
@@ -187,6 +205,7 @@
             const kind = mediaKind(img);
             if(!hasCapacity(kind)) return false;
             const attempt = Math.max(0, Number(img.dataset.previewAttempt || 0)) + 1;
+            const wasEvicted = img.dataset.mediaResidentState === 'evicted';
             const task = {
                 id:`${name}-${++sequence}`,
                 img,
@@ -194,6 +213,9 @@
                 attempt,
                 phase:'preview',
                 startedAt:now(),
+                priorSource:wasEvicted ? String(img.getAttribute?.('src') || '') : '',
+                priorResidentSrc:wasEvicted ? String(img.dataset.mediaResidentSrc || '') : '',
+                priorResidentReason:wasEvicted ? String(img.dataset.mediaResidentReason || '') : '',
                 settled:false,
                 timer:0,
                 onLoad:null,
@@ -206,6 +228,11 @@
                 settle(task, 'failed', task.phase);
             };
             active.set(img, task);
+            if(wasEvicted){
+                delete img.dataset.mediaResidentState;
+                delete img.dataset.mediaResidentSrc;
+                delete img.dataset.mediaResidentReason;
+            }
             img.dataset.previewTaskId = task.id;
             img.dataset.previewAttempt = String(attempt);
             img.dataset.previewPhase = 'preview';

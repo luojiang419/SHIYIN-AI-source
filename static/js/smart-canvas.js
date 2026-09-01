@@ -880,8 +880,12 @@ const SMART_MEDIA_QUEUE_MARGIN = 720;
 const SMART_MEDIA_RESIDENCY_MAX = 72;
 const SMART_MEDIA_RESIDENCY_PIXELS = 32 * 1024 * 1024;
 const SMART_MEDIA_RESIDENCY_GRACE_MS = 3000;
+const SMART_MEDIA_RESIDENCY_IDLE_MS = 600;
+const SMART_MEDIA_RESTORE_IDLE_MS = 250;
 let smartMediaQueueController = null;
 let smartMediaResidencyController = null;
+let smartMediaResidencyTimer = 0;
+let smartMediaRestoreAfter = 0;
 function smartPreviewNeedsQueue(preview=''){
     const value = String(preview || '');
     return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
@@ -893,7 +897,7 @@ function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
     const safeAttrs = smartEagerMediaAttrs(attrs);
     const immediate = !smartPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
     const srcAttr = immediate ? ` src="${escapeHtml(preview)}"` : '';
-    return `<img loading="lazy" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    return `<img loading="eager" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function loadSmartOriginalImageDimensions(url){
     const src = displayMediaUrl({url:smartOriginalMediaUrl(url)});
@@ -911,7 +915,7 @@ function smartVideoPreviewHtml(itemOrUrl, size=512, attrs=''){
     const safeAttrs = smartEagerMediaAttrs(attrs);
     const immediate = !smartPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
     const srcAttr = immediate ? ` src="${escapeHtml(preview)}"` : '';
-    return `<img loading="lazy" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    return `<img loading="eager" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function smartVideoFallbackHtml(url, attrs=''){
     const original = smartOriginalMediaUrl(url);
@@ -1028,6 +1032,9 @@ function smartPreviewCandidate(img, allowLoading=false){
     if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
     const entry = smartMediaViewportEntry(img);
     if(!entry?.eligible) return null;
+    const currentSource = String(img.getAttribute?.('src') || '');
+    const hasVisibleFallback = Boolean(currentSource && currentSource !== preview);
+    if((img.dataset.previewState === 'evicted' || hasVisibleFallback) && !entry.pinned && performance.now() < smartMediaRestoreAfter) return null;
     if(img.dataset.previewState === 'evicted' && img.dataset.mediaResidentReason === 'budget' && !entry.visible && !entry.pinned) return null;
     const kind = img.dataset.previewKind === 'video' ? 1 : 0;
     return {img, priority:entry.pinned ? -20 : (entry.visible ? kind : 10 + kind), distance:entry.distance};
@@ -1043,13 +1050,13 @@ function ensureSmartMediaQueue(){
         imageTimeoutMs:20000,
         videoTimeoutMs:45000,
         maxAttempts:2,
-        hasPending:() => Boolean(world?.querySelector?.('img[data-preview-src][data-preview-state="queued"]')),
+        hasPending:() => Boolean(world?.querySelector?.('img[data-preview-src][data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"]')),
         collectCandidates:() => smartMediaElementsInWindow().map(img => smartPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(smartPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || ''),
         replaceVideoFallback:img => replaceSmartVideoPreviewWithFallback(img),
         onRecord:entry => {
-            ensureSmartMediaResidency()?.schedule();
+            scheduleSmartMediaResidency();
             window.CanvasPerformance?.record?.('smart.media-preview', entry.duration, {
                 kind:entry.kind,
                 ok:entry.outcome === 'loaded',
@@ -1087,11 +1094,20 @@ function ensureSmartMediaResidency(){
 }
 function startSmartPreviewImage(img){ return ensureSmartMediaQueue()?.start(img) || false; }
 function drainSmartPreviewQueue(){
+    if(smartMediaResidencyTimer) clearTimeout(smartMediaResidencyTimer);
+    smartMediaResidencyTimer = 0;
     ensureSmartMediaResidency()?.reconcileNow();
     return ensureSmartMediaQueue()?.drainNow();
 }
+function scheduleSmartMediaResidency(){
+    if(smartMediaResidencyTimer) clearTimeout(smartMediaResidencyTimer);
+    smartMediaResidencyTimer = setTimeout(() => {
+        smartMediaResidencyTimer = 0;
+        ensureSmartMediaResidency()?.reconcileNow();
+    }, SMART_MEDIA_RESIDENCY_IDLE_MS);
+}
 function scheduleSmartMediaQueue(){
-    ensureSmartMediaResidency()?.schedule();
+    scheduleSmartMediaResidency();
     ensureSmartMediaQueue()?.schedule();
 }
 function cancelSmartOffscreenPreviewTasks(){
@@ -3458,6 +3474,7 @@ function arrangeSelectedSmartNodes(){
 }
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    smartMediaRestoreAfter = performance.now() + SMART_MEDIA_RESTORE_IDLE_MS;
     // world 被 transform:scale 缩放后，其内部带 backdrop-filter 的卡片（参数设置/合成卡等）
     // 会被部分浏览器（Chrome/Edge 等 Blink 内核）当作独立合成层先按 1x 栅格化、再整体缩放，
     // 缩小时位图被降采样 → 组件发虚。缩放态下关闭这些 backdrop-filter（底色本身已接近不透明，

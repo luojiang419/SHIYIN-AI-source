@@ -272,6 +272,7 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node-visual-shell { position:relative; width:100%; min-height:inherit; box-sizing:border-box; border:1px solid var(--canvas-node-stroke); border-radius:inherit; background:var(--canvas-node-fill); box-shadow:0 16px 42px var(--shadow); overflow:visible; }
 /* transform 世界内禁止使用 content-visibility；Chromium/WebView2 会偶发跳过可视媒体子树。
  * 远区资源由媒体驻留控制器降级为低清预览，LOD 类只保留增量窗口与交互状态。 */
+#nodes.canvas-lod-active > .node.canvas-lod-safe.canvas-lod-outside { visibility:hidden; pointer-events:none; }
 .node-visual-shell::before { content:""; position:absolute; inset:0; border-radius:inherit; background:var(--canvas-node-fill); pointer-events:none; z-index:-1; overflow:hidden; }
 .node.sized { display:flex; flex-direction:column; }
 .node.sized > .node-visual-shell { flex:1; min-height:0; display:flex; flex-direction:column; }

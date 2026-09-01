@@ -62,16 +62,20 @@ class CanvasMediaPreviewPerformanceTests(unittest.TestCase):
             finally:
                 main.MEDIA_PREVIEW_FAILURES.clear()
 
-    def test_canvas_previews_are_lazy_and_drained_by_viewport_queue(self):
+    def test_canvas_previews_are_owned_and_drained_by_viewport_queue(self):
         classic = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
         smart = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
         self.assertIn("function canvasEagerMediaAttrs", classic)
-        self.assertIn('loading=\"lazy\" decoding=\"async\"', classic)
+        self.assertIn('loading=\"eager\" decoding=\"async\"', classic)
+        classic_preview_helpers = classic[classic.index("function canvasPreviewImgHtml"):classic.index("const CANVAS_SELECTED_HIGH_RES_DELAY")]
+        self.assertNotIn('loading=\"lazy\"', classic_preview_helpers)
         self.assertIn("const CLASSIC_MEDIA_QUEUE_MAX", classic)
         self.assertIn("function scheduleClassicMediaQueue", classic)
         self.assertIn('data-preview-state=\"${immediate ? \'ready\' : \'queued\'}\"', classic)
         self.assertIn("function smartEagerMediaAttrs", smart)
-        self.assertIn('loading=\"lazy\" decoding=\"async\"', smart)
+        self.assertIn('loading=\"eager\" decoding=\"async\"', smart)
+        smart_preview_helpers = smart[smart.index("function smartPreviewImgHtml"):smart.index("const SMART_SELECTED_HIGH_RES_DELAY")]
+        self.assertNotIn('loading=\"lazy\"', smart_preview_helpers)
         self.assertIn("const SMART_MEDIA_QUEUE_MAX", smart)
         self.assertIn("function scheduleSmartMediaQueue", smart)
         self.assertIn('data-preview-state=\"${immediate ? \'ready\' : \'queued\'}\"', smart)

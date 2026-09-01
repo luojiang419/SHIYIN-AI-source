@@ -27,6 +27,7 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertIn("'group','promptGroup'", CLASSIC)
         self.assertNotRegex(CLASSIC_CSS, r"content-visibility\s*:")
         self.assertNotIn("contain-intrinsic-size", CLASSIC_CSS)
+        self.assertIn(".node.canvas-lod-safe.canvas-lod-outside { visibility:hidden; pointer-events:none; }", CLASSIC_CSS)
 
     def test_smart_lod_excludes_special_prompt_loop_and_groups(self):
         self.assertIn("const SMART_SAFE_LOD_ENABLED = true", SMART)
@@ -42,6 +43,7 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertIn("!isSpecial", render)
         self.assertNotRegex(SMART_CSS, r"content-visibility\s*:")
         self.assertNotIn("contain-intrinsic-size", SMART_CSS)
+        self.assertIn(".image-node.smart-lod-safe.smart-lod-outside { visibility:hidden; pointer-events:none; }", SMART_CSS)
 
     def test_viewport_and_selection_schedule_lod_without_deleting_dom(self):
         classic_apply = body(CLASSIC, "function applyViewport", "function scheduleClassicSafeLod")

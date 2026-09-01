@@ -127,9 +127,8 @@ async function trimCache(cache) {
 }
 
 function scheduleTrimCache(cache) {
-    if(cacheTrimTask) return cacheTrimTask;
+    if(cacheTrimTask) return;
     cacheTrimTask = trimCache(cache).catch(() => {}).finally(() => { cacheTrimTask = null; });
-    return cacheTrimTask;
 }
 
 async function cacheResponse(request, response) {
@@ -141,8 +140,8 @@ async function cacheResponse(request, response) {
         bytes: Number(response.headers.get('content-length') || 0),
         touchedAt: Date.now(),
     });
-    // 不在每次命中时遍历 CacheStorage，只在写入后做有界清理。
-    await scheduleTrimCache(cache);
+    // 裁剪不能阻塞当前图片响应；大缓存清理留在后台串行执行。
+    scheduleTrimCache(cache);
 }
 
 async function matchGeneratedImage(request) {
@@ -257,6 +256,9 @@ self.addEventListener('fetch', event => {
 });
 
 self.addEventListener('message', event => {
+    if (event.data?.type === 'activate-media-cache-worker') {
+        event.waitUntil(self.skipWaiting());
+    }
     if (event.data?.type === 'clear-generated-image-cache') {
         event.waitUntil((async () => {
             await caches.delete(CACHE_NAME);

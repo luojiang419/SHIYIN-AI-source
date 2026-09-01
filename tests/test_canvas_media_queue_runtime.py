@@ -116,6 +116,32 @@ class FakeImage {
     assert.equal(offscreen.dataset.previewState, 'queued');
     assert.equal(offscreen.getAttribute('src'), null);
 
+    let evictedEligible = true;
+    const evicted = new FakeImage();
+    evicted.src = '/api/media-preview?w=96&id=evicted';
+    evicted.dataset.previewState = 'evicted';
+    evicted.dataset.mediaResidentState = 'evicted';
+    evicted.dataset.mediaResidentSrc = '/api/media-preview?w=512&id=evicted';
+    evicted.dataset.mediaResidentReason = 'budget';
+    const evictedQueue = createMediaQueue({
+        name:'evicted',
+        collectCandidates:() => [],
+        isEligible:() => evictedEligible,
+        imageTimeoutMs:1000,
+    });
+    assert.equal(evictedQueue.start(evicted), true);
+    assert.equal(evicted.dataset.mediaResidentState, undefined);
+    evictedEligible = false;
+    evictedQueue.cancelIneligible();
+    assert.equal(evicted.src, '/api/media-preview?w=96&id=evicted');
+    assert.equal(evicted.dataset.previewState, 'queued');
+    assert.equal(evicted.dataset.mediaResidentState, 'evicted');
+    evictedEligible = true;
+    assert.equal(evictedQueue.start(evicted), true);
+    evicted.emit('load');
+    assert.equal(evicted.dataset.previewState, 'loaded');
+    assert.equal(evicted.dataset.mediaResidentState, undefined);
+
     const videos = [new FakeImage('video'), new FakeImage('video'), new FakeImage('video')];
     const splitQueue = createMediaQueue({
         name:'split',
@@ -136,13 +162,14 @@ class FakeImage {
     transientQueue.destroy();
     timeoutQueue.destroy();
     cancelQueue.destroy();
+    evictedQueue.destroy();
     console.log(JSON.stringify({ok:true}));
 })().catch(error => { console.error(error); process.exit(1); });
 """
         self.assertEqual(run_node(script), {"ok": True})
 
     def test_both_canvas_pages_load_runtime_before_canvas_code(self):
-        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.4"
+        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.02.media-queue-runtime.5"
         self.assertIn(runtime_src, CANVAS_HTML)
         self.assertIn(runtime_src, SMART_HTML)
         self.assertLess(CANVAS_HTML.index(runtime_src), CANVAS_HTML.index("/static/js/canvas.js"))
@@ -457,6 +484,26 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("maxResidentPixels", SMART_JS)
         self.assertIn("imageLowResSource:img", CANVAS_JS)
         self.assertIn("imageLowResSource:img", SMART_JS)
+        self.assertIn('loading="eager" decoding="async"', CANVAS_JS)
+        self.assertIn('loading="eager" decoding="async"', SMART_JS)
+        self.assertIn("const CLASSIC_MEDIA_RESIDENCY_IDLE_MS = 600", CANVAS_JS)
+        self.assertIn("const SMART_MEDIA_RESIDENCY_IDLE_MS = 600", SMART_JS)
+        self.assertIn("const CLASSIC_MEDIA_RESTORE_IDLE_MS = 250", CANVAS_JS)
+        self.assertIn("const SMART_MEDIA_RESTORE_IDLE_MS = 250", SMART_JS)
+        self.assertIn("performance.now() < classicMediaRestoreAfter", CANVAS_JS)
+        self.assertIn("performance.now() < smartMediaRestoreAfter", SMART_JS)
+        self.assertIn("const hasVisibleFallback = Boolean(currentSource && currentSource !== preview)", CANVAS_JS)
+        self.assertIn("const hasVisibleFallback = Boolean(currentSource && currentSource !== preview)", SMART_JS)
+        self.assertIn('data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"', CANVAS_JS)
+        self.assertIn('data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"', SMART_JS)
+        self.assertIn("function scheduleClassicMediaResidency", CANVAS_JS)
+        self.assertIn("function scheduleSmartMediaResidency", SMART_JS)
+        self.assertIn("onRecord:entry => {\n            scheduleClassicMediaResidency();", CANVAS_JS)
+        self.assertIn("onRecord:entry => {\n            scheduleSmartMediaResidency();", SMART_JS)
+        classic_schedule = CANVAS_JS[CANVAS_JS.index("function scheduleClassicMediaQueue"):CANVAS_JS.index("function cancelClassicOffscreenPreviewTasks")]
+        smart_schedule = SMART_JS[SMART_JS.index("function scheduleSmartMediaQueue"):SMART_JS.index("function cancelSmartOffscreenPreviewTasks")]
+        self.assertNotIn("ensureClassicMediaResidency()?.schedule()", classic_schedule)
+        self.assertNotIn("ensureSmartMediaResidency()?.schedule()", smart_schedule)
         self.assertNotIn("data-media-resident-placeholder", CANVAS_JS)
         self.assertNotIn("data-media-resident-placeholder", SMART_JS)
         self.assertNotIn("detachImage", RUNTIME.read_text(encoding="utf-8"))

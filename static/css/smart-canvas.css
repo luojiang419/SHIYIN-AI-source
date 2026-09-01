@@ -42,6 +42,7 @@ button { border:0; cursor:pointer; }
 .image-node { position:absolute; width:260px; min-height:178px; border-radius:16px; background:transparent; border:0; box-shadow:none; overflow:visible; user-select:none; cursor:move; }
 /* transform 世界内禁止使用 content-visibility；Chromium/WebView2 会偶发跳过可视媒体子树。
  * 远区资源由媒体驻留控制器降级为低清预览，LOD 类只保留增量窗口与交互状态。 */
+.world.smart-lod-active > .image-node.smart-lod-safe.smart-lod-outside { visibility:hidden; pointer-events:none; }
 body.smart-node-drag * { user-select:none !important; }
 body.smart-node-drag .image-node textarea,
 body.smart-node-drag .image-node input,

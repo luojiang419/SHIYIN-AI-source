@@ -1043,6 +1043,7 @@ function ensureSmartMediaQueue(){
         imageTimeoutMs:20000,
         videoTimeoutMs:45000,
         maxAttempts:2,
+        hasPending:() => Boolean(world?.querySelector?.('img[data-preview-src][data-preview-state="queued"]')),
         collectCandidates:() => smartMediaElementsInWindow().map(img => smartPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(smartPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || ''),
@@ -1069,13 +1070,14 @@ function ensureSmartMediaResidency(){
         graceMs:SMART_MEDIA_RESIDENCY_GRACE_MS,
         maxResident:SMART_MEDIA_RESIDENCY_MAX,
         maxResidentPixels:SMART_MEDIA_RESIDENCY_PIXELS,
+        isViewportReady:() => Boolean(shell?.clientWidth > 1 && shell?.clientHeight > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0),
         collectEntries:() => [...(world?.querySelectorAll?.('.image-node img[data-preview-src],.image-node video[data-url],.image-node audio[data-url],.image-node [data-media-resident-placeholder="1"]') || [])]
             .map(smartMediaViewportEntry).filter(Boolean),
         detachImage:(img) => {
             const placeholder = document.createElement('span');
             placeholder.className = 'smart-media-resident-placeholder';
             placeholder.setAttribute('aria-hidden', 'true');
-            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(148,163,184,.12),rgba(148,163,184,.04));';
+            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(160,160,160,.12),rgba(160,160,160,.04));';
             img.replaceWith(placeholder);
             return placeholder;
         },

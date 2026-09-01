@@ -70,6 +70,23 @@ class FakeImage {
     assert.equal(fallbackQueue.snapshot().activeTotal, 0);
     assert.equal(fallback.dataset.previewState, 'loaded');
 
+    const transient = new FakeImage();
+    const transientQueue = createMediaQueue({
+        name:'transient',
+        collectCandidates:() => [],
+        isEligible:() => true,
+        imageTimeoutMs:1000,
+        retryDelayMs:1,
+        maxAttempts:2,
+    });
+    assert.equal(transientQueue.start(transient), true);
+    transient.emit('error');
+    assert.equal(transient.dataset.previewState, 'queued');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(transientQueue.start(transient), true);
+    transient.emit('load');
+    assert.equal(transient.dataset.previewState, 'loaded');
+
     const hanging = new FakeImage();
     const timeoutQueue = createMediaQueue({
         name:'timeout',
@@ -116,6 +133,7 @@ class FakeImage {
     splitQueue.destroy();
 
     fallbackQueue.destroy();
+    transientQueue.destroy();
     timeoutQueue.destroy();
     cancelQueue.destroy();
     console.log(JSON.stringify({ok:true}));
@@ -159,11 +177,12 @@ const throws = label => () => { throw new Error(label); };
 const startAndRecord = new FakeImage();
 const callbackQueue = createMediaQueue({
     collectCandidates:throws('collectCandidates'),
-    isEligible:throws('isEligible'),
+    isEligible:() => true,
     fallbackSource:throws('fallbackSource'),
     onStart:throws('onStart'),
     onRecord:throws('onRecord'),
     imageTimeoutMs:1000,
+    maxAttempts:1,
 });
 assert.doesNotThrow(() => callbackQueue.drainNow());
 assert.equal(callbackQueue.start(startAndRecord), true);
@@ -177,6 +196,7 @@ const videoQueue = createMediaQueue({
     isEligible:() => true,
     replaceVideoFallback:throws('replaceVideoFallback'),
     videoTimeoutMs:1000,
+    maxAttempts:1,
 });
 assert.equal(videoQueue.start(video), true);
 assert.doesNotThrow(() => video.emit('error'));
@@ -350,6 +370,27 @@ class FakeMedia {
     assert.equal(placeholderImage.dataset.previewState, 'queued');
     placeholderResidency.destroy();
 
+    let viewportReady = false;
+    const guardedMedia = new FakeMedia('img', '/output/guarded.png');
+    const guardedResidency = createMediaResidency({
+        collectEntries:() => [{element:guardedMedia, eligible:false, visible:false}],
+        graceMs:1,
+        maxResident:1,
+        maxResidentPixels:10_000_000,
+        isViewportReady:() => viewportReady,
+        ...clockOptions,
+    });
+    clock = 100;
+    guardedResidency.reconcileNow();
+    assert.equal(guardedMedia.getAttribute('src'), '/output/guarded.png');
+    viewportReady = true;
+    clock = 104;
+    guardedResidency.reconcileNow();
+    clock = 106;
+    guardedResidency.reconcileNow();
+    assert.equal(guardedMedia.getAttribute('src'), null);
+    guardedResidency.destroy();
+
     const brokenResidency = createMediaResidency({
         collectEntries:() => { throw new Error('collectEntries'); },
         onChange:() => { throw new Error('onChange'); },
@@ -404,6 +445,10 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("function smartMediaElementsInWindow", SMART_JS)
         self.assertIn("classicMediaElementsInWindow().map", CANVAS_JS)
         self.assertIn("smartMediaElementsInWindow().map", SMART_JS)
+        self.assertIn("hasPending:() =>", CANVAS_JS)
+        self.assertIn("hasPending:() =>", SMART_JS)
+        self.assertIn("isViewportReady:() =>", CANVAS_JS)
+        self.assertIn("isViewportReady:() =>", SMART_JS)
         self.assertNotIn("nodesEl.querySelectorAll('.node.canvas-lod-safe')", CANVAS_JS)
         self.assertNotIn("world.querySelectorAll('.image-node.smart-lod-safe')", SMART_JS)
 

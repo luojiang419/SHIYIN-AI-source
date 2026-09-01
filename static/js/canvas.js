@@ -131,6 +131,7 @@ function ensureClassicMediaQueue(){
         imageTimeoutMs:20000,
         videoTimeoutMs:45000,
         maxAttempts:2,
+        hasPending:() => Boolean(nodesEl?.querySelector?.('img[data-preview-src][data-preview-state="queued"]')),
         collectCandidates:() => classicMediaElementsInWindow().map(img => classicPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(classicPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
@@ -158,13 +159,17 @@ function ensureClassicMediaResidency(){
         graceMs:CLASSIC_MEDIA_RESIDENCY_GRACE_MS,
         maxResident:CLASSIC_MEDIA_RESIDENCY_MAX,
         maxResidentPixels:CLASSIC_MEDIA_RESIDENCY_PIXELS,
+        isViewportReady:() => {
+            const rect = board?.getBoundingClientRect?.();
+            return Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
+        },
         collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url],[data-media-resident-placeholder="1"]') || [])]
             .map(classicMediaViewportEntry).filter(Boolean),
         detachImage:(img) => {
             const placeholder = document.createElement('span');
             placeholder.className = 'canvas-media-resident-placeholder';
             placeholder.setAttribute('aria-hidden', 'true');
-            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(148,163,184,.12),rgba(148,163,184,.04));';
+            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(160,160,160,.12),rgba(160,160,160,.04));';
             img.replaceWith(placeholder);
             return placeholder;
         },

@@ -10,8 +10,9 @@
         const maxVideoActive = Math.max(1, Number(options.maxVideoActive || Math.min(2, maxActive)));
         const imageTimeoutMs = Math.max(1, Number(options.imageTimeoutMs || 20000));
         const videoTimeoutMs = Math.max(1, Number(options.videoTimeoutMs || 45000));
-        const maxAttempts = Math.max(1, Number(options.maxAttempts || 2));
+        const maxAttempts = Math.max(1, Number(options.maxAttempts ?? 2));
         const retryDelayMs = Math.max(0, Number(options.retryDelayMs || 1200));
+        const pendingRetryMs = Math.max(100, Number(options.pendingRetryMs || 500));
         const now = typeof options.now === 'function' ? options.now : () => Date.now();
         const setTimer = typeof options.setTimer === 'function' ? options.setTimer : (fn, delay) => setTimeout(fn, delay);
         const clearTimer = typeof options.clearTimer === 'function' ? options.clearTimer : handle => clearTimeout(handle);
@@ -23,6 +24,7 @@
             : handle => typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(handle) : clearTimeout(handle);
         const active = new Map();
         let frameHandle = 0;
+        let pendingRetryHandle = 0;
         let sequence = 0;
         let destroyed = false;
 
@@ -101,6 +103,18 @@
                 schedule();
             }, delay);
         }
+        function hasPendingCandidates(){
+            if(typeof options.hasPending !== 'function') return false;
+            try { return Boolean(options.hasPending()); }
+            catch(error) { return false; }
+        }
+        function armPendingRetry(){
+            if(destroyed || pendingRetryHandle || !hasPendingCandidates()) return;
+            pendingRetryHandle = setTimer(() => {
+                pendingRetryHandle = 0;
+                if(!destroyed) schedule();
+            }, pendingRetryMs);
+        }
         function settle(task, outcome, reason=''){
             if(task.settled) return false;
             task.settled = true;
@@ -120,7 +134,7 @@
                     delete task.img.dataset.previewAttempt;
                     delete task.img.dataset.previewRetryAt;
                     delete task.img.dataset.previewPhase;
-                } else if(outcome === 'timeout' && task.attempt < maxAttempts && eligible(task.img)){
+                } else if((outcome === 'timeout' || outcome === 'failed') && task.attempt < maxAttempts && eligible(task.img)){
                     removeSource(task.img);
                     const delay = retryDelayMs * Math.pow(2, Math.max(0, task.attempt - 1));
                     task.img.dataset.previewState = 'queued';
@@ -232,6 +246,8 @@
                 .filter(candidate => candidate?.img && eligible(candidate.img))
                 .sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0) || Number(left.distance || 0) - Number(right.distance || 0))
                 .forEach(candidate => { start(candidate.img); });
+            // 布局或空间索引可能在当前帧尚未稳定，不能因这一帧没有候选就永久停止排空。
+            if(hasPendingCandidates()) armPendingRetry();
             return snapshot();
         }
         function schedule(){
@@ -245,7 +261,9 @@
             if(destroyed) return;
             destroyed = true;
             if(frameHandle) cancelFrame(frameHandle);
+            if(pendingRetryHandle) clearTimer(pendingRetryHandle);
             frameHandle = 0;
+            pendingRetryHandle = 0;
             [...active.values()].forEach(task => cancelTask(task, 'destroyed'));
             active.clear();
         }
@@ -470,10 +488,16 @@
             if(timerHandle) clearTimer(timerHandle);
             timerHandle = 0;
             const entries = normalizeEntries();
+            let viewportReady = true;
+            if(typeof options.isViewportReady === 'function'){
+                try { viewportReady = Boolean(options.isViewportReady()); }
+                catch(error) { viewportReady = false; }
+            }
             const timestamp = now();
             const events = [];
             let nextDelay = Number.POSITIVE_INFINITY;
             entries.forEach(entry => {
+                if(!viewportReady) return;
                 const pinned = isPinned(entry);
                 if(isEvicted(entry.element)){
                     const reason = entry.element.dataset?.mediaResidentReason || 'offscreen';
@@ -493,7 +517,7 @@
             });
 
             let stats = residentStats(entries);
-            if(stats.residentTotal > maxResident || stats.residentPixels > maxResidentPixels){
+            if(viewportReady && (stats.residentTotal > maxResident || stats.residentPixels > maxResidentPixels)){
                 const budgetCandidates = entries
                     .filter(entry => sourceOf(entry.element) && !isEvicted(entry.element) && !entry.visible && !isPinned(entry))
                     .sort((left, right) => Number(right.distance || 0) - Number(left.distance || 0));
@@ -505,6 +529,7 @@
             const result = updateSnapshot(entries);
             events.forEach(event => notify(event.entry, event.action, event.reason, event.pixels));
             if(Number.isFinite(nextDelay)) scheduleDeadline(nextDelay);
+            if(!viewportReady) scheduleDeadline(500);
             return result;
         }
         function schedule(){

@@ -94,10 +94,9 @@
         const choiceRoot=root.querySelector('[data-lookbook-generation-settings]'); if(!choiceRoot) return;
         const closeChoices=except=>choiceRoot.querySelectorAll('[data-lookbook-choice]').forEach(menu=>{const open=menu===except; menu.classList.toggle('open',open); menu.querySelector('[data-lookbook-choice-trigger]')?.setAttribute('aria-expanded',String(open));});
         choiceRoot.querySelectorAll('[data-lookbook-choice]').forEach(menu=>{
-            const trigger=menu.querySelector('[data-lookbook-choice-trigger]'); let closeTimer=0;
-            const cancelClose=()=>{if(closeTimer){clearTimeout(closeTimer);closeTimer=0;}};
-            const scheduleClose=()=>{cancelClose();closeTimer=window.setTimeout(()=>{closeTimer=0;closeChoices(null);},140);};
-            trigger?.addEventListener('pointerenter',()=>closeChoices(menu)); trigger?.addEventListener('focus',()=>closeChoices(menu)); menu.addEventListener('pointerenter',cancelClose); menu.addEventListener('pointerleave',scheduleClose);
+            const trigger=menu.querySelector('[data-lookbook-choice-trigger]');
+            // Lookbook 平台/模型菜单只由点击控制，避免鼠标移入节点时意外展开。
+            trigger?.addEventListener('focus',()=>closeChoices(null));
             trigger?.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();closeChoices(menu.classList.contains('open')?null:menu);});
         });
         const update=()=>options.onChange?.(node,{render:false});

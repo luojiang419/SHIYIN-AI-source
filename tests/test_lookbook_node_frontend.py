@@ -63,6 +63,17 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("model:String(node.model || '')", self.canvas)
         self.assertIn(".lookbook-generation-settings .image-quick-choice-panel{z-index:120}", self.css)
 
+    def test_lookbook_choice_menus_are_click_only(self):
+        start = self.lookbook.index("function bindGenerationChoices")
+        end = self.lookbook.index("function bind(root,node,options={})", start)
+        bindings = self.lookbook[start:end]
+        self.assertNotIn("pointerenter", bindings)
+        self.assertNotIn("pointerleave", bindings)
+        self.assertIn("trigger?.addEventListener('click'", bindings)
+        self.assertIn(".lookbook-generation-settings .image-quick-choice.open .image-quick-choice-panel", self.css)
+        self.assertIn(".lookbook-generation-settings .image-quick-choice:not(.open):hover .image-quick-choice-panel", self.css)
+        self.assertIn(".lookbook-generation-settings .image-quick-choice:not(.open):focus-within .image-quick-choice-panel", self.css)
+
     def test_title_provider_only_owns_lookbook_nodes(self):
         self.assertIn("title:type=>type===TYPE ? 'Lookbook 平面广告' : ''", self.lookbook)
         self.assertIn("const title = lookbookTitle || ecommerceTitle || filmTitle", self.canvas)
@@ -114,7 +125,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.21", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.22", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.3", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)

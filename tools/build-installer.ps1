@@ -103,10 +103,17 @@ Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $stageRoot 'SHIYIN AI
 Copy-Item -LiteralPath $backendSource -Destination (Join-Path $stageRoot 'app\backend\canvas-backend') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path $stageRoot 'app\web') -Recurse
 # 视频提示词 skill 由后端按 app_root/skills 读取，必须随安装包一起发布。
-New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills') | Out-Null
-Copy-Item -LiteralPath ($projectRoot + '\skills\video-prompt-polish') -Destination (Join-Path (Join-Path $stageRoot 'app\skills') 'video-prompt-polish') -Recurse -Force
+New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills\video-prompt-polish') | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $projectRoot 'skills\video-prompt-polish') -Force | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stageRoot 'app\skills\video-prompt-polish') -Recurse -Force
+}
 # 图片提示词 profile 同样由后端按 app_root/skills 读取，必须随安装包一起发布。
-Copy-Item -LiteralPath ($projectRoot + '\skills\image-prompt-polish') -Destination (Join-Path (Join-Path $stageRoot 'app\skills') 'image-prompt-polish') -Recurse -Force
+New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills\image-prompt-polish') | Out-Null
+$imageSkillSource = Join-Path $projectRoot 'skills\image-prompt-polish'
+$imageSkillDestination = Join-Path $stageRoot 'app\skills\image-prompt-polish'
+& robocopy $imageSkillSource $imageSkillDestination /E /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -gt 7) { throw "Image prompt skill copy failed: exit $LASTEXITCODE" }
+$global:LASTEXITCODE = 0
 $connectors = Join-Path $stageRoot 'app\connectors'
 New-Item -ItemType Directory -Force $connectors | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\chrome-local-asset-importer') -Destination (Join-Path $connectors 'chrome') -Recurse

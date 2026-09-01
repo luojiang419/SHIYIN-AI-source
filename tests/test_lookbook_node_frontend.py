@@ -105,7 +105,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.15", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.16", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)

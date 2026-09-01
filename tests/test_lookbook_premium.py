@@ -8,16 +8,16 @@ from canvas_core.ecommerce import build_prompt
 
 
 class LookbookPremiumResearchTests(unittest.TestCase):
-    def test_auto_mode_plan_disables_expensive_research_stages(self):
+    def test_auto_mode_plan_keeps_reference_grounding_and_art_direction(self):
         plan = main.build_lookbook_agent_plan({
             "operation": "universal",
             "inputs": [{"url": "/assets/input/person.png"}, {"url": "/assets/input/scene.png"}],
             "options": {"prompt_policy": "lookbook", "lookbook_search": True, "instruction": ""},
         })
         self.assertEqual(plan["mode"], "auto-reference")
-        self.assertFalse(plan["stages"][0]["enabled"])
-        self.assertFalse(plan["stages"][1]["enabled"])
-        self.assertFalse(plan["stages"][2]["enabled"])
+        self.assertTrue(plan["stages"][0]["enabled"])
+        self.assertTrue(plan["stages"][1]["enabled"])
+        self.assertTrue(plan["stages"][2]["enabled"])
         self.assertTrue(plan["stages"][3]["enabled"])
 
     def test_auto_person_scene_prompt_is_candid_and_series_oriented(self):
@@ -33,6 +33,12 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("PERSON-SCENE LIFESTYLE LOCK", prompt)
         self.assertIn("candid lifestyle fashion snapshots", prompt)
         self.assertIn("never make a contact sheet", prompt)
+        self.assertIn("WARDROBE IMMUTABILITY LOCK", prompt)
+        self.assertIn("SCENE TYPOGRAPHY AND PLANE-FIGURE LOCK", prompt)
+        self.assertIn("EDITORIAL CAMERA GRAMMAR", prompt)
+        self.assertIn("NATURAL SUNLIGHT AND SOFT-FILM LOCK", prompt)
+        self.assertIn("NARRATIVE COLOR SCRIPT", prompt)
+        self.assertIn("CAMERA BEHAVIOR", prompt)
 
     def test_reference_first_skill_preserves_distinct_people_and_scene_contact(self):
         prompt = build_prompt("universal", [
@@ -110,6 +116,15 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("深炭黑", prompt)
         self.assertIn("70/20/10", prompt)
         self.assertIn("ANTI-ORDINARY CHECK", prompt)
+
+    def test_person_scene_prompt_keeps_outfit_and_background_poster_as_graphic(self):
+        prompt = build_prompt("universal", [
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"},
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.jpeg"},
+        ], {"prompt_policy": "lookbook", "lookbook_count": 4})
+        self.assertIn("exact outfit is the styling source of truth", prompt)
+        self.assertIn("printed/photographed face or editorial poster", prompt)
+        self.assertIn("never treat it as a second live person", prompt)
 
     def test_structured_research_is_normalized_for_generation(self):
         value = main.normalize_lookbook_visual_research(json.dumps({

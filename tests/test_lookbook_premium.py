@@ -1,7 +1,10 @@
 import asyncio
 import json
+import tempfile
 import unittest
 from unittest.mock import patch
+
+from PIL import Image
 
 import main
 from canvas_core.ecommerce import build_prompt
@@ -212,7 +215,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "FW CAMERA GRAMMAR",
             "FW HUMAN VITALITY LOCK",
             "FW ANALOG FINISH",
-            "fine organic 16mm/35mm film grain",
+            "genuinely irregular coarse film grain",
             "FW SERIES COLOR SCRIPT",
         ):
             self.assertIn(marker, prompt)
@@ -225,6 +228,28 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         })
         self.assertIn("AUTO STYLE ROUTER", prompt)
         self.assertIn("2026 FW REFERENCE FILM LOCK", prompt)
+
+    def test_fw_prompt_requires_transparent_sun_and_irregular_coarse_grain(self):
+        prompt = build_prompt("universal", [{"role":"prop", "reference_type":"prop", "lookbook_role":"人物", "url":"/assets/input/model.png"}], {
+            "prompt_policy":"lookbook",
+            "lookbook_style":{"id":"fw-cream-cyan-film", "name":"2026 FW 奶油青蓝胶片抓拍"},
+        })
+        self.assertIn("FW NATURAL SUN TRANSPARENCY", prompt)
+        self.assertIn("genuinely irregular coarse film grain", prompt)
+        self.assertIn("ordinary, imperfect face", prompt)
+
+    def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = f"{temp_dir}/grain.jpg"
+            Image.new("RGB", (96, 64), (180, 170, 150)).save(path, "JPEG", quality=95)
+            with patch.object(main, "output_file_from_url", return_value=path):
+                self.assertTrue(main.apply_lookbook_organic_film_grain("/assets/output/grain.jpg"))
+            with Image.open(path) as image:
+                arr = np.asarray(image.convert("RGB"), dtype=np.int16)
+            self.assertGreater(float(arr.std()), 0.25)
+            self.assertGreater(int(arr.max()) - int(arr.min()), 2)
 
     def test_structured_research_is_normalized_for_generation(self):
         value = main.normalize_lookbook_visual_research(json.dumps({

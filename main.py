@@ -15597,6 +15597,72 @@ def harmonize_generated_image_style(source_url: str, target_url: str, strength: 
         return False
 
 
+def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
+    """给 FW Lookbook 输出叠加非周期、多尺度的有机胶片粗颗粒。
+
+    生图模型经常把 ``film grain`` 渲染成规则网格或均匀数字噪声；这里使用
+    不同尺度的随机场、亮度相关的颗粒强度和轻微 RGB 偏差，保持颗粒集中在
+    中间调/阴影而不过度污染高光与肤色。函数只处理本地输出图片，失败时保留原图。
+    """
+    path = output_file_from_url(url)
+    if not path:
+        return False
+    try:
+        import hashlib
+        import numpy as np
+
+        with Image.open(path) as image:
+            source = image.convert("RGB")
+            width, height = source.size
+            if width < 2 or height < 2:
+                return False
+            rgb = np.asarray(source, dtype=np.float32) / 255.0
+            seed = int.from_bytes(hashlib.sha256(str(path).encode("utf-8", "ignore")).digest()[:8], "big")
+            rng = np.random.default_rng(seed)
+
+            # 独立高频颗粒 + 低频结团颗粒；低频场经过双线性放大，不会形成周期网格。
+            fine = rng.normal(0.0, 1.0, (height, width)).astype(np.float32)
+            coarse_h = max(3, height // 18)
+            coarse_w = max(3, width // 18)
+            coarse = Image.fromarray(
+                np.clip((rng.normal(0.0, 1.0, (coarse_h, coarse_w)) * 38.0 + 128.0), 0, 255).astype(np.uint8),
+                "L",
+            ).resize((width, height), Image.Resampling.BICUBIC)
+            coarse = (np.asarray(coarse, dtype=np.float32) - 128.0) / 38.0
+            # 让颗粒呈现轻微结团和空隙，不使用棋盘/规则纹理。
+            clump = rng.random((height, width), dtype=np.float32)
+            clump = 0.62 + 0.48 * clump
+            luma = np.clip(rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 0.0, 1.0)
+            mid_shadow_bias = 0.32 + 0.68 * (1.0 - np.clip(luma * 1.12, 0.0, 1.0))
+            grain = (fine * 0.68 + coarse * 0.32) * clump * mid_shadow_bias * float(amount)
+            chroma = rng.normal(0.0, 0.12, (height, width)).astype(np.float32) * grain
+            rgb[..., 0] += grain + chroma * 0.22
+            rgb[..., 1] += grain
+            rgb[..., 2] += grain - chroma * 0.18
+            finished = Image.fromarray(np.clip(rgb * 255.0, 0, 255).astype(np.uint8), "RGB")
+            finished.save(path, "JPEG", quality=95, subsampling=0, optimize=True)
+        return True
+    except Exception as exc:
+        print(f"Lookbook 有机胶片颗粒跳过：{exc}")
+        return False
+
+
+def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """只对 FW 风格应用颗粒 finish，其他 Lookbook 风格保持原始输出。"""
+    options = snapshot.get("options") if isinstance(snapshot, dict) else {}
+    options = options if isinstance(options, dict) else {}
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    style_id = str(style.get("id") or "").strip().lower()
+    if style_id == "auto":
+        decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
+        style_id = str(decision.get("selected_style_id") or "").strip().lower()
+    if style_id != "fw-cream-cyan-film":
+        return batch
+    for url in list(batch.get("images") or []):
+        apply_lookbook_organic_film_grain(str(url), amount=0.095)
+    return batch
+
+
 async def build_online_image_result(payload: OnlineImageRequest):
     selection = resolve_image_generation_selection(payload.provider_id, payload.model)
     batch = await execute_ai_image_batch(
@@ -17079,6 +17145,9 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                 if lookbook_agent and bool((snapshot.get("options") or {}).get("lookbook_quality_gate", True)):
                     update_lookbook_agent_stage(task_id, "quality-check", "智能体正在检查单幅构图、人物情绪、场景忠实度与胶片细节…", 82)
                     batch, lookbook_quality = await improve_lookbook_batch(batch, snapshot, route)
+                if lookbook_agent:
+                    # FW 风格需要真实不规则颗粒；必须在质量门重生之后再处理，避免修复图丢失 finish。
+                    batch = apply_lookbook_film_finish(batch, snapshot)
                 batch = await apply_selected_studio_background(batch, snapshot, route)
                 raw = batch["raw"]
                 result = {

@@ -16513,6 +16513,7 @@ LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE = (
 
 LOOKBOOK_AUTO_STYLE_IDS = {
     "candid-lifestyle",
+    "fw-cream-cyan-film",
     "multi-person-interaction",
     "single-person-emotion",
     "sports-dynamic",
@@ -16752,7 +16753,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
     auto_router_instruction = (
         "当前选择的是自动风格。你必须先作为视觉风格总监解析所有参考图的内容元素、人物/商品/场景关系、光线、色彩、材质、动作潜力和用户需求，"
         "然后从以下既有风格 taxonomy 中选择一个最适合的风格 ID："
-        "candid-lifestyle、multi-person-interaction、single-person-emotion、sports-dynamic、casual-friends、street-film、"
+            "fw-cream-cyan-film、candid-lifestyle、multi-person-interaction、single-person-emotion、sports-dynamic、casual-friends、street-film、"
         "travel-dream、product-story、pet-fashion、material-closeup。"
         "不要选择 auto；必须说明选择理由，并让后续 art direction 服从该选择。输出严格 JSON，结构为："
         '{"selected_style_id":"","selected_style_name":"","rationale":"","confidence":0,"art_direction":""}。\n'
@@ -16767,7 +16768,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
             "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
             "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
-            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"auto", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
+            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"auto", "fw-cream-cyan-film", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
             + f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
             f"参考图事实分析：{str(options.get('lookbook_reference_analysis') or '')[:7000]}\n"
             f"案例方法与色彩系统：{str(options.get('search_context') or '')[:8000]}"
@@ -17074,6 +17075,10 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     semantic_mask=True,
                     progress_callback=publish_ecommerce_partial,
                 )
+                lookbook_quality = None
+                if lookbook_agent and bool((snapshot.get("options") or {}).get("lookbook_quality_gate", True)):
+                    update_lookbook_agent_stage(task_id, "quality-check", "智能体正在检查单幅构图、人物情绪、场景忠实度与胶片细节…", 82)
+                    batch, lookbook_quality = await improve_lookbook_batch(batch, snapshot, route)
                 batch = await apply_selected_studio_background(batch, snapshot, route)
                 raw = batch["raw"]
                 result = {
@@ -17102,6 +17107,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "candidate_count": len(batch["images"]),
                     "garment_analysis": garment_analysis,
                     "universal_analysis": universal_analysis,
+                    "lookbook_quality": lookbook_quality,
                     "upstream_task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
                     "request_id": raw.get("id") if isinstance(raw, dict) else None,
                     "generation_started_at": batch["generation_started_at"],

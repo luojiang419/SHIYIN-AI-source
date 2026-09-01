@@ -147,6 +147,8 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertEqual(decision["confidence"], 0.87)
         fallback = main.normalize_lookbook_auto_decision({"selected_style_id": "made-up-style"})
         self.assertEqual(fallback["selected_style_id"], "candid-lifestyle")
+        fw = main.normalize_lookbook_auto_decision({"selected_style_id": "fw-cream-cyan-film", "confidence": 0.94})
+        self.assertEqual(fw["selected_style_id"], "fw-cream-cyan-film")
 
     def test_auto_style_plan_persists_visual_model_decision(self):
         async def fake_canvas_llm(request):
@@ -193,6 +195,36 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("LOW-KEY SPECTACLE LOCK", night)
         self.assertNotIn("NATURAL SUNLIGHT AND SOFT-FILM LOCK", night)
         self.assertIn("MATERIAL PORTRAIT LIGHT LOCK", material)
+
+    def test_fw_reference_film_style_injects_color_camera_emotion_and_analog_locks(self):
+        prompt = build_prompt("universal", [
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"},
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.jpeg"},
+        ], {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"id": "fw-cream-cyan-film", "name": "2026 FW 奶油青蓝胶片抓拍"},
+            "lookbook_count": 4,
+        })
+        for marker in (
+            "2026 FW REFERENCE FILM LOCK",
+            "warm ivory, cream and pale lemon-yellow",
+            "faded turquoise/cyan",
+            "FW CAMERA GRAMMAR",
+            "FW HUMAN VITALITY LOCK",
+            "FW ANALOG FINISH",
+            "fine organic 16mm/35mm film grain",
+            "FW SERIES COLOR SCRIPT",
+        ):
+            self.assertIn(marker, prompt)
+
+    def test_auto_decision_can_route_to_fw_reference_film_lock(self):
+        prompt = build_prompt("universal", [{"role":"prop", "reference_type":"prop", "lookbook_role":"人物", "url":"/assets/input/model.png"}], {
+            "prompt_policy":"lookbook",
+            "lookbook_style":{"id":"auto", "name":"自动"},
+            "lookbook_auto_decision":{"selected_style_id":"fw-cream-cyan-film", "selected_style_name":"2026 FW 奶油青蓝胶片抓拍"},
+        })
+        self.assertIn("AUTO STYLE ROUTER", prompt)
+        self.assertIn("2026 FW REFERENCE FILM LOCK", prompt)
 
     def test_structured_research_is_normalized_for_generation(self):
         value = main.normalize_lookbook_visual_research(json.dumps({

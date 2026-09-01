@@ -15,7 +15,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         cls.html = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 
     def test_builtin_visual_skill_set_is_available_without_network(self):
-        for style_id in ("auto", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"):
+        for style_id in ("auto", "fw-cream-cyan-film", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"):
             self.assertIn(f"id:'{style_id}'", self.lookbook)
         for old_id in ("minimal-editorial", "street-luxe", "quiet-luxury", "neo-chinese", "beauty-gloss", "avant-garde", "visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
             self.assertNotIn(f"id:'{old_id}'", self.lookbook)
@@ -24,6 +24,8 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("id:'auto'", self.lookbook)
         self.assertIn("name:'自动'", self.lookbook)
         self.assertIn("id:'candid-lifestyle'", self.lookbook)
+        self.assertIn("id:'fw-cream-cyan-film'", self.lookbook)
+        self.assertIn("16mm/35mm film grain", self.lookbook)
         self.assertIn("生活化真实抓拍", self.lookbook)
         self.assertIn("DEFAULT_STYLE_ID = 'auto'", self.lookbook)
         skill = ROOT / "static" / "lookbook-skills" / "yangpeilin-methods" / "SKILL.md"
@@ -112,7 +114,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.18", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.19", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -127,6 +129,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=remove-output-hint.1", self.html)
         self.assertIn("feature=lookbook-auto-style.1", self.html)
         self.assertIn("feature=lookbook-single-dispatch.1", self.html)
+        self.assertIn("feature=fw-reference-film.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)

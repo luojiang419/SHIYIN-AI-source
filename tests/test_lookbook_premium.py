@@ -69,6 +69,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertEqual(plan["generation_settings"]["model"], "gemini-3-pro-image-preview")
         self.assertEqual(plan["generation_settings"]["count"], 4)
         self.assertEqual(main.lookbook_agent_timeout_seconds({"lookbook_timeout_minutes": 1}), 5 * 60)
+        self.assertNotIn("quality-gate", {stage["id"] for stage in plan["stages"]})
 
     def test_agent_marks_timeout_as_terminal_504_without_restarting_generation(self):
         async def slow_execute(_task_id, _snapshot):

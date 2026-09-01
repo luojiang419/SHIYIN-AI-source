@@ -16419,7 +16419,6 @@ def build_lookbook_agent_plan(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """生成可持久化的轻量状态图；阶段边界对应成熟 agent runtime 的 checkpoint。"""
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     inputs = snapshot.get("inputs") if isinstance(snapshot.get("inputs"), list) else []
-    quality_gate = bool(options.get("lookbook_quality_gate", True))
     web_search = bool(options.get("lookbook_search", True))
     auto_mode = not str(options.get("instruction") or "").strip()
     routes = snapshot.get("route_candidates") if isinstance(snapshot.get("route_candidates"), list) else []
@@ -16429,7 +16428,6 @@ def build_lookbook_agent_plan(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         {"id": "web-search", "label": "联网案例与色彩研究", "enabled": web_search and not auto_mode},
         {"id": "art-direction", "label": "创意总监方案", "enabled": not auto_mode},
         {"id": "generation", "label": "按节点参数生成", "enabled": True},
-        {"id": "quality-gate", "label": "视觉质检与弱图修复", "enabled": quality_gate},
     ]
     return {
         "version": 1,
@@ -17020,9 +17018,6 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     progress_callback=publish_ecommerce_partial,
                 )
                 batch = await apply_selected_studio_background(batch, snapshot, route)
-                if lookbook_agent:
-                    update_lookbook_agent_stage(task_id, "quality-gate", "智能体正在进行视觉质检，并检查是否退化为普通棚拍…", 88)
-                batch, lookbook_quality_gate = await improve_lookbook_batch(batch, snapshot, route)
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",
@@ -17050,7 +17045,6 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "candidate_count": len(batch["images"]),
                     "garment_analysis": garment_analysis,
                     "universal_analysis": universal_analysis,
-                    "lookbook_quality_gate": lookbook_quality_gate,
                     "upstream_task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
                     "request_id": raw.get("id") if isinstance(raw, dict) else None,
                     "generation_started_at": batch["generation_started_at"],

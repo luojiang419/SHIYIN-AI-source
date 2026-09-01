@@ -30,14 +30,20 @@ class LookbookNodeFrontendTests(unittest.TestCase):
 
     def test_premium_editorial_research_controls_are_submitted(self):
         self.assertIn("name:'街头电影叙事'", self.lookbook)
-        self.assertIn("lookbookResearchDepth", self.lookbook)
-        self.assertIn("研究深度", self.lookbook)
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
-        self.assertIn("lookbook_research_depth:node.lookbookResearchDepth || 'deep'", self.canvas)
-        self.assertIn("lookbook_timeout_minutes:Math.max(5,Math.min(60,Number(node.lookbookTimeoutMinutes || 30)))", self.canvas)
+        self.assertNotIn("研究深度", self.lookbook)
+        self.assertNotIn("lookbook_timeout_minutes:", self.canvas)
+        self.assertNotIn("lookbook_quality_gate:", self.canvas)
+        self.assertNotIn("data-lookbook-field=\"lookbookQualityGate\"", self.lookbook)
         self.assertIn("Lookbook 智能体等待超时", self.canvas)
         self.assertIn("taskNode.lookbookAgentStage = String(task.progress_status)", self.canvas)
         self.assertIn("node.lookbookResearchStatus = String(task.lookbook_research.status)", self.canvas)
+
+    def test_status_is_rendered_after_run_button_and_quality_gate_is_removed(self):
+        body = self.lookbook[self.lookbook.index("function bodyHtml"):self.lookbook.index("function bindGenerationChoices")]
+        self.assertLess(body.index("data-lookbook-run"), body.index("lookbook-research-status"))
+        self.assertNotIn("lookbookQualityScore", body)
+        self.assertNotIn("lookbookQualityGate", body)
 
     def test_lookbook_uses_image_generation_secondary_choice_menus(self):
         self.assertIn("data-lookbook-generation-settings", self.lookbook)
@@ -99,7 +105,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.14", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.15", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)

@@ -78,9 +78,12 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("const chooseButton=root.querySelector('[data-lookbook-choose]')", body)
         self.assertIn("button.onclick=handleAction", body)
         self.assertIn("root.addEventListener('click',handleAction,true)", body)
-        self.assertIn("button.onpointerup=handleAction", body)
         self.assertIn("modal.style.display='flex'", self.lookbook)
-        self.assertIn("document.addEventListener('pointerdown', activateAction, true)", self.lookbook)
+        self.assertNotIn("button.onmousedown=handleAction", body)
+        self.assertNotIn("button.onpointerup=handleAction", body)
+        self.assertNotIn("document.addEventListener('pointerdown', activateAction, true)", self.lookbook)
+        self.assertIn("if(event.type !== 'click') return;", body)
+        self.assertIn("if(event.type !== 'click') return;", self.lookbook[self.lookbook.index("function activateAction"):self.lookbook.index("function installActionDelegation")])
         self.assertIn("actionBindings.set(button,{node,options})", self.lookbook)
         self.assertIn("modal.showModal()", self.lookbook)
         self.assertIn("event.preventDefault(); event.stopPropagation();", body)
@@ -109,7 +112,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.17", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.18", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -123,6 +126,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=yangpeilin-methods.1", self.html)
         self.assertIn("feature=remove-output-hint.1", self.html)
         self.assertIn("feature=lookbook-auto-style.1", self.html)
+        self.assertIn("feature=lookbook-single-dispatch.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)

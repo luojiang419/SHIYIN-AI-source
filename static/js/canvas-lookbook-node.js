@@ -47,10 +47,12 @@
     const actionBindings = new WeakMap();
     let actionDelegationInstalled = false;
     function activateAction(event){
+        // 生成动作只接受 click。pointerdown/mousedown/pointerup 同时绑定会在
+        // 节点重绘或长按时重复提交同一个 Lookbook 任务。
+        if(event.type !== 'click') return;
         const button = event.target?.closest?.('[data-lookbook-choose],[data-lookbook-run]');
         const binding = button ? actionBindings.get(button) : null;
         if(!button || !binding) return;
-        if(event.type === 'pointerdown' && event.button !== 0) return;
         const now = Date.now();
         if(now - Number(button.dataset.lookbookLastActionAt || 0) < 250) return;
         button.dataset.lookbookLastActionAt = String(now);
@@ -62,7 +64,6 @@
     function installActionDelegation(){
         if(actionDelegationInstalled || !document?.addEventListener) return;
         actionDelegationInstalled = true;
-        document.addEventListener('pointerdown', activateAction, true);
         document.addEventListener('click', activateAction, true);
     }
     async function uploadCover(file){ const form = new FormData(); form.append('files',file); const response = await fetch('/api/ai/upload',{method:'POST',body:form}); const data = await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '封面上传失败'); return data.files?.[0]?.url || ''; }
@@ -103,7 +104,7 @@
         choiceRoot.querySelectorAll('[data-lookbook-provider-value]').forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();const resolveProvider=typeof window.resolveImageProviderId==='function'?window.resolveImageProviderId:value=>String(value||'');node.apiProvider=resolveProvider(button.dataset.lookbookProviderValue||'');const models=imageModels(node.apiProvider);node.model=models[0]||'';const providerMenu=choiceRoot.querySelector('[data-lookbook-choice="provider"]');providerMenu?.querySelector('.image-quick-choice-trigger span')&&(providerMenu.querySelector('.image-quick-choice-trigger span').textContent=choiceProviderLabel(node.apiProvider,imageProviders()));choiceRoot.querySelectorAll('[data-lookbook-provider-value]').forEach(item=>item.classList.toggle('active',item===button));const modelMenu=choiceRoot.querySelector('[data-lookbook-choice="model"]');if(modelMenu){modelMenu.querySelector('.image-quick-choice-trigger span').textContent=choiceModelLabel(node.model);const panel=modelMenu.querySelector('[data-lookbook-choice-panel="model"]');panel.innerHTML=models.length?models.map(model=>`<button type="button" class="image-quick-choice-item ${model===node.model?'active':''}" role="menuitem" data-lookbook-model-value="${esc(model)}"><span>${esc(model)}</span>${model===node.model?'<i data-lucide="check"></i>':''}</button>`).join(''):'<button type="button" class="image-quick-choice-item empty" disabled>暂无图片模型</button>';window.lucide?.createIcons?.();bindModels();}closeChoices(null);update();});
         bindModels();
     }
-    function bind(root,node,options={}){ normalize(node); installActionDelegation(); root.querySelectorAll('[data-lookbook-field]').forEach(control=>control.addEventListener(control.type==='checkbox'?'change':'input',event=>{const key=control.dataset.lookbookField; node[key]=key==='count'?clamp(control.value,1,4):control.type==='checkbox'?Boolean(control.checked):control.value; if(key==='lookbookPrompt'){node.lookbookPlan='';if(node.lookbookStyleId==='auto')node.lookbookAutoDecision={};} options.onChange?.(node,{render:false}); event.stopPropagation();})); bindGenerationChoices(root,node,options); const handleAction=event=>{const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-run]'); if(!button||!root.contains(button)) return; if(event.type==='mousedown' && event.button!==0) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else options.run?.(node);}; const chooseButton=root.querySelector('[data-lookbook-choose]'); const runButton=root.querySelector('[data-lookbook-run]'); [chooseButton,runButton].filter(Boolean).forEach(button=>{ actionBindings.set(button,{node,options}); button.onclick=handleAction; button.onmousedown=handleAction; button.onpointerup=handleAction; }); root.addEventListener('click',handleAction,true); }
+    function bind(root,node,options={}){ normalize(node); installActionDelegation(); root.querySelectorAll('[data-lookbook-field]').forEach(control=>control.addEventListener(control.type==='checkbox'?'change':'input',event=>{const key=control.dataset.lookbookField; node[key]=key==='count'?clamp(control.value,1,4):control.type==='checkbox'?Boolean(control.checked):control.value; if(key==='lookbookPrompt'){node.lookbookPlan='';if(node.lookbookStyleId==='auto')node.lookbookAutoDecision={};} options.onChange?.(node,{render:false}); event.stopPropagation();})); bindGenerationChoices(root,node,options); const handleAction=event=>{if(event.type !== 'click') return; const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-run]'); if(!button||!root.contains(button)) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else options.run?.(node);}; const chooseButton=root.querySelector('[data-lookbook-choose]'); const runButton=root.querySelector('[data-lookbook-run]'); [chooseButton,runButton].filter(Boolean).forEach(button=>{ actionBindings.set(button,{node,options}); button.onclick=handleAction; }); root.addEventListener('click',handleAction,true); }
     function mediaRefs(node){ return (node.generatedOutputs||[]).map((item,index)=>({url:outputUrl(item),name:`lookbook-${index+1}.png`,kind:'image'})).filter(item=>item.url); }
     const INPUT_PORTS=[
         {role:'lookbook-person',label:'人物',title:'连接人物、模特或人物身份参考图'},

@@ -15613,6 +15613,9 @@ def apply_lookbook_natural_sun_grade(url: str) -> bool:
             graded = np.power(np.clip(rgb, 0.0, 1.0), 0.84) * 1.035
             shadow_lift = (1.0 - luma) * 0.028
             graded = np.clip(graded + shadow_lift[..., None], 0.0, 1.0)
+            # 浅色建筑/白墙场景需要保留参考片的奶油高光滚降，避免白点顶到纯白。
+            shoulder = np.clip((graded - 0.78) / 0.22, 0.0, 1.0)
+            graded = np.where(graded > 0.78, 0.78 + (graded - 0.78) * (0.52 + 0.10 * (1.0 - shoulder)), graded)
             # 仅在高光区域补极弱暖色，不污染肤色和中性商品。
             highlight = np.clip((luma - 0.70) / 0.30, 0.0, 1.0)
             graded[..., 0] += highlight * 0.008

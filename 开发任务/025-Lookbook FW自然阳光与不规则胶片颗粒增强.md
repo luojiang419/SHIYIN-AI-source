@@ -43,6 +43,8 @@
 - 真实生图：`shiying / gemini-3-pro-image-preview` 生成 `fw_lookbook_test_v4_e7790dbd04.jpg`，视觉上已出现方向性午后阳光、透亮空气、青绿阴影和不规则粗颗粒；首次请求遇到一次 TLS EOF，重试成功。
 - Git：`b100c52 fix: strengthen FW sunlight and organic film grain`，已推送 `origin/feat/storyboard-merge-node`
 - 最新验收：4 个独立单帧请求成功，报告见 `输出/2026-FW-Lookbook-复刻验收报告.md`
+- 浅色场景复测：使用 `page-055_img-001.png` 作为场景，4 个独立单帧请求成功；白墙高光经 shoulder 压缩后 P99 为 `0.897–0.905`，树影、蓝天反射和粗颗粒均可见。
+- 最新报告：已追加浅色场景对照结果、指标范围和逐项结论。
 
 ## 接力信息
 

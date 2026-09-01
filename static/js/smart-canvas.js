@@ -1071,21 +1071,9 @@ function ensureSmartMediaResidency(){
         maxResident:SMART_MEDIA_RESIDENCY_MAX,
         maxResidentPixels:SMART_MEDIA_RESIDENCY_PIXELS,
         isViewportReady:() => Boolean(shell?.clientWidth > 1 && shell?.clientHeight > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0),
-        collectEntries:() => [...(world?.querySelectorAll?.('.image-node img[data-preview-src],.image-node video[data-url],.image-node audio[data-url],.image-node [data-media-resident-placeholder="1"]') || [])]
+        collectEntries:() => [...(world?.querySelectorAll?.('.image-node img[data-preview-src],.image-node video[data-url],.image-node audio[data-url]') || [])]
             .map(smartMediaViewportEntry).filter(Boolean),
-        detachImage:(img) => {
-            const placeholder = document.createElement('span');
-            placeholder.className = 'smart-media-resident-placeholder';
-            placeholder.setAttribute('aria-hidden', 'true');
-            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(160,160,160,.12),rgba(160,160,160,.04));';
-            img.replaceWith(placeholder);
-            return placeholder;
-        },
-        restoreImage:(placeholder, img) => {
-            if(!placeholder?.isConnected) return false;
-            placeholder.replaceWith(img);
-            return true;
-        },
+        imageLowResSource:img => smartMediaPreviewUrl(img.dataset?.originalSrc || img.dataset?.url || '', 96),
         onChange:() => ensureSmartMediaQueue()?.schedule(),
         onRecord:entry => window.CanvasPerformance?.record?.('smart.media-residency', 0, {
             action:entry.action,

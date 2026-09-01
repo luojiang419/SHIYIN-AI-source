@@ -52,10 +52,11 @@ class CanvasQuickActionPerformanceTests(unittest.TestCase):
         self.assertIn("updateClassicSafeLod(pendingIds)", lod_source)
         self.assertIn("function updateClassicSafeLod(affectedIds=null)", lod_source)
         self.assertIn("canvasNodeDomIndex.get(id)", lod_source)
-        self.assertIn("nodesEl.querySelectorAll('.node.canvas-lod-safe')", lod_source)
+        self.assertNotIn("nodesEl.querySelectorAll('.node.canvas-lod-safe')", lod_source)
+        self.assertIn("classicMediaSpatialGrid?.search", lod_source)
         self.assertIn("scheduleClassicSafeLod([...affectedNodeIds])", selection_source)
 
-    def test_large_scene_lod_contains_visual_shell_without_clipping_ports(self):
+    def test_large_scene_lod_keeps_visual_shell_without_paint_skipping(self):
         render_source = section(
             "function renderNode(",
             "function bindOutputWrap",
@@ -67,14 +68,7 @@ class CanvasQuickActionPerformanceTests(unittest.TestCase):
         self.assertLess(shell_create, shell_append)
         self.assertLess(shell_append, output_port)
         self.assertIn("visualShell.appendChild(body)", render_source)
-        self.assertIn(
-            "#nodes.canvas-large-scene > .node.canvas-lod-safe > .node-visual-shell",
-            CANVAS_CSS,
-        )
-        self.assertNotIn(
-            "#nodes.canvas-large-scene > .node.canvas-lod-safe { content-visibility:auto",
-            CANVAS_CSS,
-        )
+        self.assertNotRegex(CANVAS_CSS, r"content-visibility\s*:")
 
     def test_smart_media_toolbar_is_materialized_only_for_single_selection(self):
         smart_render = section(

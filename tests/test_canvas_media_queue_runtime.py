@@ -142,7 +142,7 @@ class FakeImage {
         self.assertEqual(run_node(script), {"ok": True})
 
     def test_both_canvas_pages_load_runtime_before_canvas_code(self):
-        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.3"
+        runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.01.media-queue-runtime.4"
         self.assertIn(runtime_src, CANVAS_HTML)
         self.assertIn(runtime_src, SMART_HTML)
         self.assertLess(CANVAS_HTML.index(runtime_src), CANVAS_HTML.index("/static/js/canvas.js"))
@@ -255,13 +255,14 @@ class FakeMedia {
         graceMs:10,
         maxResident:10,
         maxResidentPixels:10_000_000,
+        imageLowResSource:() => '/api/media-preview?w=96&url=image',
         onChange:() => { changes += 1; },
         ...clockOptions,
     });
     residency.reconcileNow();
     clock = 11;
     residency.reconcileNow();
-    assert.equal(image.getAttribute('src'), null);
+    assert.equal(image.getAttribute('src'), '/api/media-preview?w=96&url=image');
     assert.equal(image.dataset.previewState, 'evicted');
     assert.equal(residency.snapshot().evictedTotal, 1);
     visible = true;
@@ -308,11 +309,13 @@ class FakeMedia {
         graceMs:60_000,
         maxResident:2,
         maxResidentPixels:10_000_000,
+        imageLowResSource:img => `/api/media-preview?w=96&url=${encodeURIComponent(img.dataset.previewSrc)}`,
     });
     budgetResidency.reconcileNow();
     assert.equal(budgetMedia[0].getAttribute('src'), '/output/0.png');
-    assert.equal(budgetMedia.filter(media => media.getAttribute('src')).length, 2);
+    assert.equal(budgetMedia.filter(media => media.dataset.mediaResidentState !== 'evicted').length, 2);
     assert.equal(budgetMedia[2].dataset.mediaResidentReason, 'budget');
+    assert.ok(budgetMedia[2].getAttribute('src').includes('w=96'));
 
     const pixelBudgetMedia = [0, 1, 2].map(index => new FakeMedia('img', `/output/pixel-${index}.png`));
     const pixelBudgetResidency = createMediaResidency({
@@ -326,49 +329,60 @@ class FakeMedia {
         graceMs:60_000,
         maxResident:10,
         maxResidentPixels:900_000,
+        imageLowResSource:img => `/api/media-preview?w=96&url=${encodeURIComponent(img.dataset.previewSrc)}`,
     });
     pixelBudgetResidency.reconcileNow();
     assert.equal(pixelBudgetMedia[0].getAttribute('src'), '/output/pixel-0.png');
-    assert.equal(pixelBudgetMedia.filter(media => media.getAttribute('src')).length, 1);
+    assert.equal(pixelBudgetMedia.filter(media => media.dataset.mediaResidentState !== 'evicted').length, 1);
     assert.equal(pixelBudgetResidency.snapshot().budgetExceeded, false);
 
-    const placeholderImage = new FakeMedia('img', '/output/placeholder.png');
-    let currentPlaceholder = placeholderImage;
-    let placeholderVisible = false;
-    const placeholderResidency = createMediaResidency({
-        collectEntries:() => [{element:currentPlaceholder, eligible:placeholderVisible, visible:placeholderVisible}],
+    const degradedImage = new FakeMedia('img', '/output/degraded.png');
+    let degradedVisible = false;
+    const degradedResidency = createMediaResidency({
+        collectEntries:() => [{element:degradedImage, eligible:degradedVisible, visible:degradedVisible}],
         graceMs:1,
         maxResident:10,
         maxResidentPixels:10_000_000,
         now:() => clock,
         setTimer:() => 0,
         clearTimer:() => {},
-        detachImage:(img) => {
-            const placeholder = new FakeMedia('span', '');
-            placeholder.dataset = {mediaResidentPlaceholder:'1'};
-            img.isConnected = false;
-            placeholder.isConnected = true;
-            currentPlaceholder = placeholder;
-            return placeholder;
-        },
-        restoreImage:(placeholder, img) => {
-            placeholder.isConnected = false;
-            img.isConnected = true;
-            currentPlaceholder = img;
-            return true;
-        },
+        imageLowResSource:() => '/api/media-preview?w=96&url=degraded',
     });
     clock = 20;
-    placeholderResidency.reconcileNow();
+    degradedResidency.reconcileNow();
     clock = 22;
-    placeholderResidency.reconcileNow();
-    assert.equal(currentPlaceholder.dataset.mediaResidentPlaceholder, '1');
-    assert.equal(currentPlaceholder.dataset.mediaResidentState, 'evicted');
-    placeholderVisible = true;
-    placeholderResidency.reconcileNow();
-    assert.equal(currentPlaceholder, placeholderImage);
-    assert.equal(placeholderImage.dataset.previewState, 'queued');
-    placeholderResidency.destroy();
+    degradedResidency.reconcileNow();
+    assert.equal(degradedImage.tagName, 'IMG');
+    assert.equal(degradedImage.isConnected, true);
+    assert.equal(degradedImage.getAttribute('src'), '/api/media-preview?w=96&url=degraded');
+    assert.equal(degradedImage.dataset.mediaResidentState, 'evicted');
+    assert.equal(degradedImage.dataset.mediaResidentPlaceholder, undefined);
+    degradedVisible = true;
+    degradedResidency.reconcileNow();
+    assert.equal(degradedImage.dataset.previewState, 'queued');
+    assert.equal(degradedImage.dataset.mediaResidentState, undefined);
+    assert.equal(degradedImage.getAttribute('src'), '/api/media-preview?w=96&url=degraded');
+    degradedResidency.destroy();
+
+    const unreducibleImage = new FakeMedia('img', '/output/unreducible.png');
+    const unreducibleResidency = createMediaResidency({
+        collectEntries:() => [{element:unreducibleImage, eligible:false, visible:false}],
+        graceMs:1,
+        maxResident:10,
+        maxResidentPixels:10_000_000,
+        now:() => clock,
+        setTimer:() => 0,
+        clearTimer:() => {},
+        imageLowResSource:(_img, _entry, source) => source,
+    });
+    clock = 30;
+    unreducibleResidency.reconcileNow();
+    clock = 32;
+    unreducibleResidency.reconcileNow();
+    assert.equal(unreducibleImage.getAttribute('src'), '/output/unreducible.png');
+    assert.equal(unreducibleImage.dataset.mediaResidentState, undefined);
+    assert.equal(unreducibleResidency.snapshot().cumulativeEvictions, 0);
+    unreducibleResidency.destroy();
 
     let viewportReady = false;
     const guardedMedia = new FakeMedia('img', '/output/guarded.png');
@@ -377,6 +391,7 @@ class FakeMedia {
         graceMs:1,
         maxResident:1,
         maxResidentPixels:10_000_000,
+        imageLowResSource:() => '/api/media-preview?w=96&url=guarded',
         isViewportReady:() => viewportReady,
         ...clockOptions,
     });
@@ -388,7 +403,7 @@ class FakeMedia {
     guardedResidency.reconcileNow();
     clock = 106;
     guardedResidency.reconcileNow();
-    assert.equal(guardedMedia.getAttribute('src'), null);
+    assert.equal(guardedMedia.getAttribute('src'), '/api/media-preview?w=96&url=guarded');
     guardedResidency.destroy();
 
     const brokenResidency = createMediaResidency({
@@ -440,6 +455,11 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("mediaResidentReason === 'budget'", SMART_JS)
         self.assertIn("maxResidentPixels", CANVAS_JS)
         self.assertIn("maxResidentPixels", SMART_JS)
+        self.assertIn("imageLowResSource:img", CANVAS_JS)
+        self.assertIn("imageLowResSource:img", SMART_JS)
+        self.assertNotIn("data-media-resident-placeholder", CANVAS_JS)
+        self.assertNotIn("data-media-resident-placeholder", SMART_JS)
+        self.assertNotIn("detachImage", RUNTIME.read_text(encoding="utf-8"))
         self.assertIn("createSpatialGridIndex", RUNTIME.read_text(encoding="utf-8"))
         self.assertIn("function classicMediaElementsInWindow", CANVAS_JS)
         self.assertIn("function smartMediaElementsInWindow", SMART_JS)

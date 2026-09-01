@@ -1,4 +1,3 @@
-import re
 import unittest
 from pathlib import Path
 
@@ -26,8 +25,8 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertIn("tempLink?.from", lod)
         self.assertIn("resizeNode?.node?.id", lod)
         self.assertIn("'group','promptGroup'", CLASSIC)
-        self.assertRegex(CLASSIC_CSS, re.compile(r"canvas-lod-active[^}]*canvas-lod-outside[^}]*content-visibility\s*:\s*auto"))
-        self.assertIn("canvas-lod-safe:not(.canvas-lod-outside)", CLASSIC_CSS)
+        self.assertNotRegex(CLASSIC_CSS, r"content-visibility\s*:")
+        self.assertNotIn("contain-intrinsic-size", CLASSIC_CSS)
 
     def test_smart_lod_excludes_special_prompt_loop_and_groups(self):
         self.assertIn("const SMART_SAFE_LOD_ENABLED = true", SMART)
@@ -41,9 +40,8 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertIn("!isPrompt", render)
         self.assertIn("!isLoop", render)
         self.assertIn("!isSpecial", render)
-        self.assertRegex(SMART_CSS, re.compile(r"smart-lod-active[^}]*smart-lod-outside[^}]*content-visibility\s*:\s*auto"))
-        self.assertIn("smart-lod-safe:not(.smart-lod-outside)", SMART_CSS)
-        self.assertIn("smart-lod-active > .image-node:not(.smart-lod-safe) > .node-body", SMART_CSS)
+        self.assertNotRegex(SMART_CSS, r"content-visibility\s*:")
+        self.assertNotIn("contain-intrinsic-size", SMART_CSS)
 
     def test_viewport_and_selection_schedule_lod_without_deleting_dom(self):
         classic_apply = body(CLASSIC, "function applyViewport", "function scheduleClassicSafeLod")
@@ -58,13 +56,9 @@ class CanvasSafeLodTests(unittest.TestCase):
         self.assertRegex(selection_body, r"scheduleClassicSafeLod\(\[\.\.\.affectedNodeIds\]\);")
         self.assertIn("scheduleSmartSafeLod();", body(SMART, "function syncSelectionUi", "function syncConnectionSelectionUi"))
 
-    def test_pan_disables_lod_paint_containment_for_media_subtrees(self):
-        self.assertIn("body.canvas-board-pan #nodes.canvas-large-scene", CLASSIC_CSS)
-        self.assertIn("content-visibility:visible !important", CLASSIC_CSS)
-        self.assertIn("contain:none !important", CLASSIC_CSS)
-        self.assertIn(".shell.panning .world.smart-large-scene", SMART_CSS)
-        self.assertIn("content-visibility:visible !important", SMART_CSS)
-        self.assertIn("contain:none !important", SMART_CSS)
+    def test_transform_media_subtrees_never_use_paint_skipping(self):
+        self.assertNotRegex(CLASSIC_CSS, r"content-visibility\s*:")
+        self.assertNotRegex(SMART_CSS, r"content-visibility\s*:")
         self.assertIn("document.body.classList.add('canvas-board-pan')", CLASSIC)
         self.assertIn("shell.classList.add('panning')", SMART)
 

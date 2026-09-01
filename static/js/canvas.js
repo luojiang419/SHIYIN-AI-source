@@ -163,21 +163,9 @@ function ensureClassicMediaResidency(){
             const rect = board?.getBoundingClientRect?.();
             return Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
         },
-        collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url],[data-media-resident-placeholder="1"]') || [])]
+        collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
             .map(classicMediaViewportEntry).filter(Boolean),
-        detachImage:(img) => {
-            const placeholder = document.createElement('span');
-            placeholder.className = 'canvas-media-resident-placeholder';
-            placeholder.setAttribute('aria-hidden', 'true');
-            placeholder.style.cssText = 'display:block;width:100%;height:100%;min-height:24px;background:linear-gradient(135deg,rgba(160,160,160,.12),rgba(160,160,160,.04));';
-            img.replaceWith(placeholder);
-            return placeholder;
-        },
-        restoreImage:(placeholder, img) => {
-            if(!placeholder?.isConnected) return false;
-            placeholder.replaceWith(img);
-            return true;
-        },
+        imageLowResSource:img => canvasMediaPreviewUrl(img.dataset?.originalSrc || img.dataset?.url || '', 96),
         onChange:() => ensureClassicMediaQueue()?.schedule(),
         onRecord:entry => window.CanvasPerformance?.record?.('classic.media-residency', 0, {
             action:entry.action,

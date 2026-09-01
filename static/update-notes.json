@@ -1,7 +1,11 @@
 {
-  "version": "1.0.390",
-  "updated_at": "2026-08-29T00:00:00+08:00",
+  "version": "1.0.391",
+  "updated_at": "2026-09-01T23:50:00+08:00",
   "items": [
+    {
+      "type": "fix",
+      "text": "修复无限画布媒体节点无征兆变空且点击后空白转移：图片回收保留原图元素并降级为 96px 低清预览，不再生成空 DOM 占位；移除 transform 媒体子树的 content-visibility 绘制跳过，返回视口后自动恢复 512px 预览。"
+    },
     {
       "type": "fix",
       "text": "修复电商专用 API 平台协议下拉被错误禁用的问题；现可自由选择 OpenAI 直连、Responses、异步、Gemini 等协议，并维护图片/聊天/视频模型。"

@@ -192,18 +192,21 @@ class CanvasInteractionPerformanceTests(unittest.TestCase):
         self.assertIn("deferRender:true", append)
         self.assertEqual(append.count("render();"), 1)
 
-    def test_large_scene_uses_node_indexes_and_content_visibility_lod(self):
+    def test_large_scene_uses_node_indexes_without_paint_skipping(self):
         self.assertIn("canvasNodeIndex = new Map", CANVAS_JS)
         self.assertIn("canvas-large-scene", CANVAS_JS)
         self.assertIn("smartNodeIndex = new Map", SMART_CANVAS_JS)
         self.assertIn("smart-large-scene", SMART_CANVAS_JS)
+        classic_css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
+        smart_css = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
+        self.assertNotRegex(classic_css, r"content-visibility\s*:")
+        self.assertNotRegex(smart_css, r"content-visibility\s*:")
 
     def test_large_scene_lod_does_not_clip_overflow_ports(self):
         classic_css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         smart_css = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
-        self.assertRegex(classic_css, r"#nodes\.canvas-large-scene\s*>\s*\.node\.canvas-lod-safe\s*>\s*\.node-visual-shell\s*\{[^}]*content-visibility\s*:\s*auto")
-        self.assertNotRegex(classic_css, r"#nodes\.canvas-large-scene\s*>\s*\.node\.canvas-lod-safe\s*\{[^}]*content-visibility\s*:\s*auto")
-        self.assertRegex(smart_css, r"\.world\.smart-large-scene\s*>\s*\.image-node:not\(\.smart-special-node\)\s*>\s*\.node-body\s*\{[^}]*content-visibility\s*:\s*auto")
+        self.assertNotRegex(classic_css, r"content-visibility\s*:")
+        self.assertNotRegex(smart_css, r"content-visibility\s*:")
         self.assertIn("const canvasLodSafe", CANVAS_JS)
         self.assertIn("canvasLodSafe ? 'canvas-lod-safe'", CANVAS_JS)
         classic_node = classic_css.index(".node { position:absolute")

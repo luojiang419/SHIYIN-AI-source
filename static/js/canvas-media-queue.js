@@ -290,7 +290,6 @@
         let timerHandle = 0;
         let destroyed = false;
         let cumulativeEvictions = 0;
-        const detachedRecords = new WeakMap();
         let lastSnapshot = {
             name,
             residentTotal:0,
@@ -309,7 +308,6 @@
         }
         function isEvicted(element){
             return element?.dataset?.mediaResidentState === 'evicted'
-                || element?.dataset?.mediaResidentPlaceholder === '1'
                 || (tagName(element) === 'img' && element?.dataset?.previewState === 'evicted');
         }
         function isPlaying(element){
@@ -350,7 +348,7 @@
                 const element = entry.element;
                 if(!element?.isConnected || seen.has(element)) return false;
                 seen.add(element);
-                return ['img', 'video', 'audio'].includes(tagName(element)) || element?.dataset?.mediaResidentPlaceholder === '1';
+                return ['img', 'video', 'audio'].includes(tagName(element));
             });
         }
         function notify(entry, action, reason, pixels){
@@ -375,23 +373,21 @@
             if(!source || isPinned(entry)) return false;
             if(tag === 'img'){
                 if(!element.dataset?.previewSrc || element.dataset.previewState === 'loading' || element.dataset.previewTaskId) return false;
-                const original = element;
-                try { element.removeAttribute('src'); }
+                let lowResSource = '';
+                if(typeof options.imageLowResSource === 'function'){
+                    try { lowResSource = String(options.imageLowResSource(element, entry, source) || ''); }
+                    catch(error) {}
+                }
+                // 图片回收不能制造空节点。无法生成低清源时保留当前图像，宁可少回收也不牺牲正确性。
+                if(!lowResSource || lowResSource === source) return false;
+                element.dataset.mediaResidentSrc = source;
+                try {
+                    if(element.getAttribute?.('src') !== lowResSource) element.src = lowResSource;
+                }
                 catch(error) { return false; }
                 element.dataset.previewState = 'evicted';
+                element.dataset.mediaResidentState = 'evicted';
                 delete element.dataset.selectedHighResTarget;
-                if(typeof options.detachImage === 'function'){
-                    let placeholder = null;
-                    try { placeholder = options.detachImage(original, entry); }
-                    catch(error) {}
-                    if(placeholder?.isConnected){
-                        placeholder.dataset.mediaResidentPlaceholder = '1';
-                        placeholder.dataset.mediaResidentState = 'evicted';
-                        placeholder.dataset.mediaResidentSrc = source;
-                        placeholder.dataset.mediaResidentReason = reason;
-                        detachedRecords.set(placeholder, {original, placeholder, source, entry});
-                    }
-                }
             } else {
                 element.dataset.mediaResidentSrc = source;
                 try { element.pause?.(); } catch(error) {}
@@ -410,30 +406,14 @@
             const element = entry.element;
             const tag = tagName(element);
             if(!isEvicted(element)) return false;
-            if(element?.dataset?.mediaResidentPlaceholder === '1'){
-                const record = detachedRecords.get(element);
-                if(!record?.original) return false;
-                let restored = false;
-                try {
-                    restored = typeof options.restoreImage === 'function'
-                        ? Boolean(options.restoreImage(element, record.original, entry))
-                        : Boolean(element.replaceWith?.(record.original));
-                } catch(error) {}
-                if(!restored && !record.original.isConnected) return false;
-                record.original.dataset.previewState = 'queued';
-                delete record.original.dataset.mediaResidentReason;
-                detachedRecords.delete(element);
-                const reason = element.dataset.mediaResidentReason || 'offscreen';
-                outsideSince.delete(element);
-                queueNotification(events, entry, 'restored', reason, pixelCost(entry));
-                return true;
-            }
             if(tag === 'img'){
                 element.dataset.previewState = 'queued';
                 delete element.dataset.previewAttempt;
                 delete element.dataset.previewRetryAt;
                 delete element.dataset.previewPhase;
                 delete element.dataset.previewTaskId;
+                delete element.dataset.mediaResidentSrc;
+                delete element.dataset.mediaResidentState;
             } else {
                 const source = String(element.dataset?.mediaResidentSrc || element.dataset?.url || '');
                 if(!source) return false;

@@ -40,16 +40,8 @@ button { border:0; cursor:pointer; }
 .smart-log-toggle.active,.smart-shortcut-toggle.active { background:var(--strong); color:var(--strong-text); border-color:var(--strong); box-shadow:0 16px 38px var(--shadow); }
 .smart-log-toggle i,.smart-log-toggle svg,.smart-shortcut-toggle i,.smart-shortcut-toggle svg { width:16px; height:16px; }
 .image-node { position:absolute; width:260px; min-height:178px; border-radius:16px; background:transparent; border:0; box-shadow:none; overflow:visible; user-select:none; cursor:move; }
-/* LOD 只放在节点内部，节点外层必须保持可溢出以显示左右端口。 */
-.world.smart-large-scene > .image-node:not(.smart-special-node) > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
-/* JS 只给视口外普通节点加 deferred；节点外壳、端口、Prompt/Loop 和分组保持完整。 */
-.world.smart-lod-active > .image-node.smart-lod-safe.smart-lod-outside > .node-body { content-visibility:auto; contain-intrinsic-size:260px 180px; }
-.world.smart-lod-active > .image-node.smart-lod-safe:not(.smart-lod-outside) > .node-body { content-visibility:visible; contain:none; }
-.world.smart-lod-active > .image-node:not(.smart-lod-safe) > .node-body { content-visibility:visible; contain:none; }
-/* 平移时世界坐标持续变化，禁用 LOD 的 paint containment，避免媒体子树被浏览器误判为空白。 */
-.shell.panning .world.smart-large-scene > .image-node:not(.smart-special-node) > .node-body,
-.shell.panning .world.smart-lod-active > .image-node.smart-lod-safe > .node-body,
-.shell.panning .world.smart-lod-active > .image-node:not(.smart-lod-safe) > .node-body { content-visibility:visible !important; contain:none !important; }
+/* transform 世界内禁止使用 content-visibility；Chromium/WebView2 会偶发跳过可视媒体子树。
+ * 远区资源由媒体驻留控制器降级为低清预览，LOD 类只保留增量窗口与交互状态。 */
 body.smart-node-drag * { user-select:none !important; }
 body.smart-node-drag .image-node textarea,
 body.smart-node-drag .image-node input,

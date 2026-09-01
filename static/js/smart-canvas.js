@@ -19172,11 +19172,15 @@ async function optimizeSmartModelscopePrompt(prompt, refs, runSettings, modelId)
                 prompt_context:{node_type:'smart-image', engine:'modelscope', has_reference:refs.length > 0}
             })
         });
-        if(!response.ok) return prompt;
+        if(!response.ok){
+            let detail = '图片提示词自动优化失败，已停止提交原始提示词';
+            try { const data = await response.json(); detail = data.detail || detail; } catch(_) {}
+            throw new Error(detail);
+        }
         const data = await response.json();
         return String(data.prompt || prompt).trim() || prompt;
-    } catch(_) {
-        return prompt;
+    } catch(error) {
+        throw error;
     }
 }
 async function urlToBase64(url){

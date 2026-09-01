@@ -9,10 +9,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_image_prompt_profile_matches_known_families_and_falls_back():
-    assert main.image_prompt_profile("grsai", "gpt-image-2")["id"] == "gpt-image"
+    assert main.image_prompt_profile("grsai", "gpt-image-2")["id"] == "nano-banana-gemini-image"
     assert main.image_prompt_profile("shiying", "gemini-3-pro-image-preview")["id"] == "nano-banana-gemini-image"
-    assert main.image_prompt_profile("volcengine", "doubao-seedream-5")["id"] == "seedream"
-    assert main.image_prompt_profile("custom", "unknown-model")["id"] == "generic-image"
+    assert main.image_prompt_profile("volcengine", "doubao-seedream-5")["id"] == "nano-banana-gemini-image"
+    assert main.image_prompt_profile("custom", "unknown-model")["id"] == "nano-banana-gemini-image"
 
 
 def test_image_prompt_compiler_preserves_original_and_all_reference_order():
@@ -91,6 +91,67 @@ def test_optimizer_falls_back_without_assistant_route():
     assert result["metadata"]["error"] == "没有可用的 AI助手聊天/视觉模型"
 
 
+def test_canvas_prepare_stops_before_image_api_when_optimizer_is_unavailable():
+    payload = main.OnlineImageRequest(
+        prompt="背景更换为森林，氛围调整为傍晚下雨，需要完美匹配氛围",
+        provider_id="grsai",
+        model="nano-banana-pro",
+        auto_optimize_prompt=True,
+    )
+    with patch.object(main, "optimize_image_prompt", return_value={
+        "prompt": payload.prompt,
+        "original_prompt": payload.prompt,
+        "metadata": {"status": "fallback", "error": "没有可用的 AI助手聊天/视觉模型"},
+    }):
+        try:
+            asyncio.run(main.prepare_image_generation_prompt(payload, {"provider_id": "grsai", "model": "nano-banana-pro"}))
+        except main.HTTPException as exc:
+            assert exc.status_code == 424
+            assert "停止提交原始提示词" in exc.detail
+        else:
+            raise AssertionError("expected mandatory optimization failure")
+
+
+def test_build_image_result_passes_compiled_prompt_to_image_adapter():
+    captured = {}
+
+    async def fake_execute(**kwargs):
+        captured["prompt"] = kwargs["prompt"]
+        return {
+            "provider": {"id": "grsai", "name": "Grsai"},
+            "model": "nano-banana-pro",
+            "references": [],
+            "raw": {},
+            "images": ["/output/generated.png"],
+            "image_items": [{"url": "/output/generated.png"}],
+            "count": 1,
+            "generation_started_at": 1.0,
+            "generation_completed_at": 2.0,
+            "generation_elapsed_seconds": 1.0,
+        }
+
+    payload = main.OnlineImageRequest(
+        prompt="背景更换为森林，氛围调整为傍晚下雨，需要完美匹配氛围",
+        provider_id="grsai",
+        model="nano-banana-pro",
+        auto_optimize_prompt=True,
+    )
+    optimized = "用户原始要求：背景更换为森林\n场景与环境：傍晚雨林氛围"
+    with patch.object(main, "prepare_image_generation_prompt", return_value={
+        "prompt": optimized,
+        "original_prompt": payload.prompt,
+        "metadata": {"status": "optimized", "profile_id": "nano-banana-gemini-image"},
+    }), patch.object(main, "resolve_image_generation_selection", return_value={
+        "provider_id": "grsai", "model": "nano-banana-pro"
+    }), patch.object(main, "execute_ai_image_batch", side_effect=fake_execute), patch.object(main, "save_to_history"), patch.object(main, "GLOBAL_LOOP", None):
+        result = asyncio.run(main.build_online_image_result(payload))
+
+    assert captured["prompt"] == optimized
+    assert result["prompt"] == optimized
+    assert result["prompt_original"] == payload.prompt
+    assert result["prompt_optimization"]["status"] == "optimized"
+
+
 def test_image_request_snapshot_keeps_optimization_settings_without_secrets():
     payload = main.OnlineImageRequest(
         prompt="测试",
@@ -125,6 +186,7 @@ def test_modelscope_direct_generation_calls_shared_optimizer_endpoint():
     body = smart[run_start:run_end]
     assert "optimizeSmartModelscopePrompt(prompt, refs, runSettings, modelId)" in body
     assert "fetch('/api/image-prompt-optimize'" in body
+    assert "已停止提交原始提示词" in body
 
 
 def test_installer_and_browser_smoke_package_image_prompt_skill():

@@ -2530,6 +2530,7 @@ IMAGE_PROMPT_SKILL_DIR = os.path.join(BASE_DIR, "skills", "image-prompt-polish")
 IMAGE_PROMPT_SKILL_REGISTRY = os.path.join(IMAGE_PROMPT_SKILL_DIR, "registry.json")
 IMAGE_PROMPT_SKILL_FILE = os.path.join(IMAGE_PROMPT_SKILL_DIR, "SKILL.md")
 IMAGE_PROMPT_PROFILE_VERSION = "2026.09.01"
+IMAGE_PROMPT_FIXED_PROFILE_ID = "nano-banana-gemini-image"
 IMAGE_PROMPT_OPTIMIZER_REFERENCE_MAX = 12
 IMAGE_PROMPT_OPTIMIZER_MAX_CHARS = 24000
 IMAGE_PROMPT_SEARCH_PATTERN = re.compile(
@@ -16186,35 +16187,27 @@ def configured_ecommerce_vision_route(providers: Optional[List[Dict[str, Any]]] 
 
 
 def image_prompt_profile(provider_id: str = "", model: str = "") -> Dict[str, Any]:
-    """读取随应用发布的图片 prompt 兼容 profile，不访问网络或读取密钥。"""
+    """读取图片节点固定使用的 Nano Banana Pro prompt profile。"""
     fallback = {
-        "id": "generic-image",
-        "label": "Generic image compatibility profile",
+        "id": IMAGE_PROMPT_FIXED_PROFILE_ID,
+        "label": "Nano Banana Pro image profile",
         "prompt_style": "structured_natural_language",
         "reference_style": "explicit_reference_roles_and_preservation_locks",
         "negative_support": False,
-        "max_chars": 18000,
+        "max_chars": 24000,
         "source_status": "compatibility_profile",
-        "source_note": "Unknown image model; use concrete natural language and do not assume undocumented syntax.",
+        "source_note": "All SHIYIN-AI image nodes use the Nano Banana Pro natural-language compatibility profile.",
     }
     try:
         with open(IMAGE_PROMPT_SKILL_REGISTRY, "r", encoding="utf-8") as handle:
             registry = json.load(handle)
         profiles = registry.get("profiles") if isinstance(registry, dict) else []
-        target = f"{provider_id} {model}".strip()
-        selected = None
-        for profile in profiles or []:
-            if not isinstance(profile, dict) or profile.get("id") == "generic-image":
-                continue
-            patterns = profile.get("match") or []
-            if any(re.search(str(pattern), target, re.IGNORECASE) for pattern in patterns if str(pattern).strip()):
-                selected = profile
-                break
+        selected = next((
+            item for item in profiles or []
+            if isinstance(item, dict) and item.get("id") == IMAGE_PROMPT_FIXED_PROFILE_ID
+        ), None)
         if isinstance(selected, dict):
             return {**fallback, **selected, "registry_version": str(registry.get("registry_version") or IMAGE_PROMPT_PROFILE_VERSION)}
-        generic = next((item for item in profiles or [] if isinstance(item, dict) and item.get("id") == "generic-image"), None)
-        if isinstance(generic, dict):
-            return {**fallback, **generic, "registry_version": str(registry.get("registry_version") or IMAGE_PROMPT_PROFILE_VERSION)}
     except (OSError, ValueError, TypeError) as exc:
         print(f"[image-prompt] profile load failed: {type(exc).__name__}")
     return {**fallback, "registry_version": IMAGE_PROMPT_PROFILE_VERSION}
@@ -16396,7 +16389,7 @@ async def optimize_image_prompt(
         "未知信息必须放入 uncertainties，不能猜测不可读文字、品牌、身份或产品细节。"
         "如果用户要求品牌、lookbook、campaign 或顶级时尚视觉，优先输出编辑/广告语境和可迁移的构图、造型、光线与镜头方法，不生成普通电商白底图。"
         "搜索结果仅用于提取高层方法，不能复制具体作品、模特、文案或独特构图。"
-        f"\n当前目标图片模型：{model or '未知'}；当前本地 profile：{profile.get('id')}。"
+        f"\n当前图片节点统一使用 Nano Banana Pro 提示词规范；上游实际模型：{model or '未知'}；当前本地 profile：{profile.get('id')}。"
         f"\n本地图片提示词规范：{skill or profile.get('source_note') or ''}"
         "\n返回字段：intent_summary、subject、action、environment、composition、camera_lighting、style_context、text_requirements、negative_constraints、reference_map、uncertainties。"
     )
@@ -16456,6 +16449,9 @@ async def image_prompt_optimize(payload: ImagePromptOptimizeRequest):
         payload.optimizer_web_search,
         payload.prompt_context,
     )
+    if result.get("metadata", {}).get("status") != "optimized":
+        detail = result.get("metadata", {}).get("error") or "AI助手没有返回有效的 Nano Banana Pro 规范提示词"
+        raise HTTPException(status_code=424, detail=f"图片提示词自动优化失败，已停止提交原始提示词：{detail}")
     return {
         "prompt": result["prompt"],
         "original_prompt": result.get("original_prompt") or payload.prompt,
@@ -16474,7 +16470,7 @@ async def prepare_image_generation_prompt(payload: OnlineImageRequest, selection
             "original_prompt": prompt,
             "metadata": {"status": "disabled", "reference_count": len(references), "profile_id": "", "profile_version": ""},
         }
-    return await optimize_image_prompt(
+    result = await optimize_image_prompt(
         prompt,
         selection["provider_id"],
         selection["model"],
@@ -16484,6 +16480,10 @@ async def prepare_image_generation_prompt(payload: OnlineImageRequest, selection
         payload.optimizer_web_search,
         payload.prompt_context,
     )
+    if result.get("metadata", {}).get("status") != "optimized":
+        detail = result.get("metadata", {}).get("error") or "AI助手没有返回有效的 Nano Banana Pro 规范提示词"
+        raise HTTPException(status_code=424, detail=f"图片提示词自动优化失败，已停止提交原始提示词：{detail}")
+    return result
 
 def configured_building_vision_route(providers: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, str]]:
     return configured_ecommerce_vision_route(providers)

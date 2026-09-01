@@ -24,7 +24,7 @@
 
 - 静态检查：`node --check`、`python -m py_compile`、`git diff --check` 通过
 - 单元测试：`tests/test_lookbook_premium.py tests/test_lookbook_node_frontend.py`，23 passed
-- 最近 Git commit：`72a1d90 feat: add reference-first naturalism lookbook skill`（已推送 `origin/feat/storyboard-merge-node`）
+- 最近 Git commit：`bc63094 docs: record lookbook skill integration`；功能实现 commit：`72a1d90 feat: add reference-first naturalism lookbook skill`（均已推送 `origin/feat/storyboard-merge-node`）
 
 ## 任务目标
 

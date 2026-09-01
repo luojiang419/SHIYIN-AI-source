@@ -825,7 +825,9 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         )
         if not normalized and prompt_policy not in {FREE_CREATION_PROMPT_POLICY, LOOKBOOK_PROMPT_POLICY}:
             raise ValueError("全能模式至少需要一张已上传的参考图")
-        if raw_prompt:
+        # Lookbook 自己负责人物/商品/场景的语义编排，允许只连接场景或只连接人物；
+        # 不应被电商 universal 的“主体+商品”组合冲突拦截。
+        if raw_prompt or prompt_policy == LOOKBOOK_PROMPT_POLICY:
             return normalized
         plan = resolve_universal_reference_plan(normalized, options)
         if plan["conflicts"]:
@@ -1441,6 +1443,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
     if prompt_policy == LOOKBOOK_PROMPT_POLICY:
         style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
         style_id = str(style.get("id") or "").strip().lower()
+        auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
+        effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
         style_name = str(style.get("name") or "").strip()
         style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
         research = str(options.get("search_context") or "").strip()
@@ -1464,7 +1468,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         parts = [
             "LOOKBOOK FASHION CAMPAIGN RECIPE: create a cohesive premium fashion lookbook / flat advertising spread, with editorial art direction, intentional styling, a clear visual hierarchy, refined composition, believable commercial photography, and a polished campaign finish.",
             f"USER CREATIVE BRIEF: {user_line}.",
-            f"SELECTED VISUAL STYLE SKILL{(' ' + style_name) if style_name else ''}: {style_prompt or 'high-end fashion editorial with clean art direction'}.",
+            f"SELECTED VISUAL STYLE SKILL{(' ' + style_name) if style_name else ''}: {style_prompt or ('visual model autonomously selects the best style from the connected references and user brief' if style_id == 'auto' else 'high-end fashion editorial with clean art direction')}.",
             "EDITORIAL QUALITY DIRECTIVE: build a distinct fashion image with a point of view, lived-in atmosphere and deliberate art direction. Avoid generic catalog staging, default white seamless backdrops, empty gray studios, passport-like posing, centered product cutouts, stock-photo smiles, random luxury props and unmotivated gradient backgrounds.",
             "COLOR DIRECTION: use a finite, intentional palette with a dominant field, supporting color and one controlled accent. Preserve the reference subject's true skin tone and garment identity while grading the environment, shadows, highlights and wardrobe relationships as one coherent fashion image; no muddy gray wash, candy-color overload or random color shifts between frames.",
             "FASHION PHOTOGRAPHY FINISH: favor a real editorial situation with depth, foreground/background layering, directional or available light, subtle motion in fabric/hair and believable contact with the environment. Use restrained filmic grain, halation, print texture or flash character only when supported by the selected style and research; never use generic 8k/best-quality filler as a substitute for decisions.",
@@ -1478,12 +1482,23 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
             "PRE-DELIVERY QUALITY GATE: inspect the planned render before finalizing for correct anatomy, clean product edges, exact Logo and text, faithful material texture, coherent contact shadows, believable perspective, intentional negative space and commercial advertising polish. Reject obvious defects and regenerate the weak frame when possible.",
         ]
-        if style_id in {"", "candid-lifestyle", "single-person-emotion", "casual-friends", "travel-dream", "pet-fashion"}:
+        if style_id == "auto":
+            parts.append(
+                "AUTO STYLE ROUTER: the visual model owns the style decision. Use the connected reference facts and the user brief as the source of truth, then execute the selected style decision below. Do not average multiple styles or let generic fashion defaults override the decision."
+            )
+            if auto_decision:
+                parts.append(
+                    "AUTO STYLE DECISION: selected_style_id=" + str(auto_decision.get("selected_style_id") or "candid-lifestyle")
+                    + "; selected_style_name=" + str(auto_decision.get("selected_style_name") or "")
+                    + "; rationale=" + str(auto_decision.get("rationale") or "")
+                    + "; confidence=" + str(auto_decision.get("confidence") or 0)
+                )
+        if effective_style_id in {"", "candid-lifestyle", "single-person-emotion", "casual-friends", "travel-dream", "pet-fashion"}:
             parts.extend([
                 "NATURAL SUNLIGHT AND SOFT-FILM LOCK: build the light as a motivated daylight photograph, not a studio effect—warm sun filtered through leaves or thin cloud, broad sky/ground bounce opening the shadow side, a restrained edge glow on hair and fabric, and soft contact shadows that still describe form. Expose for highlight detail and use a gentle filmic S-curve: lifted blacks, open midtones, creamy highlight roll-off, low micro-contrast and protected neutral skin. Shape the grade as a daylight color-negative language: warm honey highlights, quiet olive/deep-green shadows, slightly desaturated supporting colors, and one small accent sampled from the supplied scene. Add fine organic grain with visible but delicate grain clumps, subtle analog halation only around bright edges, and a transparent airy atmosphere. Avoid crushed shadows, clipped highlights, HDR clarity, glossy commercial flash, teal-orange blockbuster grading and aggressive sharpening.",
                 "NARRATIVE COLOR SCRIPT: the series should move from sunlit place to human gesture to private pause to tactile proof. Keep the same daylight direction and palette across frames; vary only the light's incidence, foreground occlusion and exposure breathing. The viewer should feel that a photographer observed a real afternoon, not that four images were color-filtered independently.",
             ])
-        elif style_id in {"street-film", "sports-dynamic"}:
+        elif effective_style_id in {"street-film", "sports-dynamic"}:
             parts.append(
                 "LOW-KEY SPECTACLE LOCK: use only scene-motivated contrast such as streetlamp, fire, vehicle light, stadium light or blue-hour ambience. Keep readable shadow texture and accurate skin/product color while allowing deep blacks, controlled specular highlights, smoke/haze and one saturated accent. The contrast must express action and pressure; avoid arbitrary HDR, neon color soup and crushed unmotivated darkness."
             )

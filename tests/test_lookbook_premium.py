@@ -126,6 +126,55 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("printed/photographed face or editorial poster", prompt)
         self.assertIn("never treat it as a second live person", prompt)
 
+    def test_auto_style_prompt_delegates_selection_to_visual_model(self):
+        prompt = build_prompt("universal", [{"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"}], {
+            "prompt_policy": "lookbook",
+            "lookbook_style": {"id": "auto", "name": "自动", "prompt": "autonomous visual direction"},
+            "instruction": "为这组人物和场景选择最合适的风格",
+        })
+        self.assertIn("AUTO STYLE ROUTER", prompt)
+        self.assertIn("AUTO STYLE ROUTER", prompt)
+
+    def test_auto_style_decision_is_normalized_to_valid_taxonomy(self):
+        decision = main.normalize_lookbook_auto_decision({
+            "selected_style_id": "street-film",
+            "selected_style_name": "街头电影叙事",
+            "rationale": "城市层次和硬切动作",
+            "confidence": 0.87,
+            "art_direction": "沿街跟拍，冷暖混合光",
+        })
+        self.assertEqual(decision["selected_style_id"], "street-film")
+        self.assertEqual(decision["confidence"], 0.87)
+        fallback = main.normalize_lookbook_auto_decision({"selected_style_id": "made-up-style"})
+        self.assertEqual(fallback["selected_style_id"], "candid-lifestyle")
+
+    def test_auto_style_plan_persists_visual_model_decision(self):
+        async def fake_canvas_llm(request):
+            self.assertIn("自动风格", request.message)
+            self.assertIn("selected_style_id", request.message)
+            return {"text": json.dumps({
+                "selected_style_id": "travel-dream",
+                "selected_style_name": "旅行环境梦境",
+                "rationale": "参考图包含海岸与自然光线索",
+                "confidence": 0.91,
+                "art_direction": "沿海岸线侧向跟拍，保留风和衣摆",
+            }, ensure_ascii=False)}
+
+        snapshot = {
+            "operation": "universal",
+            "inputs": [{"url": "/assets/input/scene.png", "label": "场景", "lookbook_role": "场景", "role": "scene", "reference_type": "scene"}],
+            "options": {
+                "prompt_policy": "lookbook",
+                "instruction": "生成轻盈的旅行时装系列",
+                "lookbook_style": {"id": "auto", "name": "自动", "prompt": "autonomous visual direction"},
+            },
+        }
+        with patch.object(main, "configured_ecommerce_vision_route", return_value={"provider_id": "ecommerce-vision", "model": "gpt-5.6-sol"}), patch.object(main, "canvas_llm", new=fake_canvas_llm):
+            enriched, meta = asyncio.run(main.enrich_lookbook_plan(snapshot))
+        self.assertEqual(enriched["options"]["lookbook_auto_decision"]["selected_style_id"], "travel-dream")
+        self.assertIn("沿海岸线", enriched["options"]["lookbook_plan"])
+        self.assertEqual(meta["auto_decision"]["selected_style_id"], "travel-dream")
+
     def test_light_family_switches_with_editorial_style(self):
         inputs = [{"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"}]
         daylight = build_prompt("universal", inputs, {

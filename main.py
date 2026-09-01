@@ -16503,6 +16503,45 @@ LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE = (
     "单一拍摄地点或可识别的广告画面复制进本次创作。"
 )
 
+LOOKBOOK_AUTO_STYLE_IDS = {
+    "candid-lifestyle",
+    "multi-person-interaction",
+    "single-person-emotion",
+    "sports-dynamic",
+    "casual-friends",
+    "street-film",
+    "travel-dream",
+    "product-story",
+    "pet-fashion",
+    "material-closeup",
+}
+
+
+def normalize_lookbook_auto_decision(value: Any) -> Dict[str, Any]:
+    """规范化视觉模型的自动风格选型，防止模型输出非法 taxonomy。"""
+    parsed = _lookbook_json_payload(value) if not isinstance(value, dict) else value
+    selected_id = str(
+        parsed.get("selected_style_id")
+        or parsed.get("recommended_style_id")
+        or parsed.get("style_id")
+        or ""
+    ).strip().lower()
+    if selected_id not in LOOKBOOK_AUTO_STYLE_IDS:
+        selected_id = "candid-lifestyle"
+    def text(value_: Any, limit: int) -> str:
+        return re.sub(r"[\x00-\x1f]", " ", str(value_ or "").strip())[:limit]
+    try:
+        confidence = max(0.0, min(1.0, float(parsed.get("confidence") or 0)))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return {
+        "selected_style_id": selected_id,
+        "selected_style_name": text(parsed.get("selected_style_name") or parsed.get("recommended_style_name"), 120),
+        "rationale": text(parsed.get("rationale") or parsed.get("reason"), 1200),
+        "art_direction": text(parsed.get("art_direction") or parsed.get("execution_plan"), 10000),
+        "confidence": round(confidence, 4),
+    }
+
 
 def _lookbook_json_payload(value: Any) -> Dict[str, Any]:
     """从视觉研究模型的 JSON 或带 Markdown 的 JSON 中提取对象。"""
@@ -16698,18 +16737,29 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
         return snapshot, {"status": "provided", "summary": existing}
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     style_id = str(style.get("id") or "").strip().lower()
+    auto_style = style_id == "auto"
     brief = str(options.get("instruction") or "自由创作一组高级时尚 Lookbook 平面广告").strip()[:4000]
     images = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
     labels = [str(item.get("label") or item.get("name") or "参考素材")[:120] for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
+    auto_router_instruction = (
+        "当前选择的是自动风格。你必须先作为视觉风格总监解析所有参考图的内容元素、人物/商品/场景关系、光线、色彩、材质、动作潜力和用户需求，"
+        "然后从以下既有风格 taxonomy 中选择一个最适合的风格 ID："
+        "candid-lifestyle、multi-person-interaction、single-person-emotion、sports-dynamic、casual-friends、street-film、"
+        "travel-dream、product-story、pet-fashion、material-closeup。"
+        "不要选择 auto；必须说明选择理由，并让后续 art direction 服从该选择。输出严格 JSON，结构为："
+        '{"selected_style_id":"","selected_style_name":"","rationale":"","confidence":0,"art_direction":""}。\n'
+        if auto_style else ""
+    )
     request = CanvasLLMRequest(
         message=(
-            "请为 Lookbook 平面广告生成一份可直接执行的 art direction 方案。"
+            auto_router_instruction
+            + "请为 Lookbook 平面广告生成一份可直接执行的 art direction 方案。"
             "综合用户需求、选定视觉风格、参考图事实、联网案例方法和色彩系统，输出 900 字以内的结构化方案，必须包含："
             "人物面貌与现有穿着事实、系列叙事、主视觉构图、镜头/景别变化、真实城市环境与动作生命力、场景与道具、"
             "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
             "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
-            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
+            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"auto", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
             + f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
             f"参考图事实分析：{str(options.get('lookbook_reference_analysis') or '')[:7000]}\n"
             f"案例方法与色彩系统：{str(options.get('search_context') or '')[:8000]}"
@@ -16722,8 +16772,16 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
         text = str(result.get("text") or "").strip()[:12000]
         if not text:
             return snapshot, {"status": "failed", "reason": "视觉策划未返回方案"}
+        decision = None
+        if auto_style:
+            decision = normalize_lookbook_auto_decision(text)
+            options["lookbook_auto_decision"] = decision
+            text = decision.get("art_direction") or text
         options["lookbook_plan"] = text
-        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, {"status": "succeeded", "summary": text}
+        response_meta = {"status": "succeeded", "summary": text}
+        if decision:
+            response_meta["auto_decision"] = decision
+        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, response_meta
     except Exception as exc:
         return snapshot, {"status": "failed", "reason": str(exc)[:240]}
 

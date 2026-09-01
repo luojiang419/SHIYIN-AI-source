@@ -18951,7 +18951,7 @@ function comfyFieldKind(field){
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
-    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)};
+    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX), auto_optimize_prompt:runSettings.autoOptimizePrompt !== false, prompt_context:{node_type:'smart-image', operation:runSettings.operation || '', has_reference:imageRefsOnly(refs).length > 0}};
     if(runSettings.operation) payload.operation = runSettings.operation;
     if(runSettings.style_reference_url) payload.style_reference_url = runSettings.style_reference_url;
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
@@ -19130,7 +19130,9 @@ async function runModelscopeGeneration(prompt, refs, runSettings=settings){
     refs = imageRefsOnly(refs);
     const modelKey = runSettings.msgenModel || 'zimage';
     const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
+    const modelId = modelKey === 'custom' ? (runSettings.msCustomModel || modelscopeImageModels()[0]) : msModel.modelId;
     if(msModel.supportsImage && !refs.length) throw new Error(tr('smart.errMsNeedRefs'));
+    prompt = await optimizeSmartModelscopePrompt(prompt, refs, runSettings, modelId);
     const size = apiImageSize(runSettings.msRatio || 'square', runSettings.msResolution || '1k', runSettings.msCustomRatio || '', runSettings.msCustomSize || '');
     const parsed = parseSizeValue(size);
     const width = Number(parsed?.width) || 1024;
@@ -19155,6 +19157,27 @@ async function runModelscopeGeneration(prompt, refs, runSettings=settings){
     };
     const results = await Promise.all(Array.from({length:count}, submit));
     return results.filter(Boolean);
+}
+async function optimizeSmartModelscopePrompt(prompt, refs, runSettings, modelId){
+    if(runSettings.autoOptimizePrompt === false) return prompt;
+    try {
+        const response = await fetch('/api/image-prompt-optimize', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                prompt,
+                provider_id:'modelscope',
+                model:modelId || '',
+                reference_images:refs.slice(0, SMART_REFERENCE_IMAGE_MAX),
+                prompt_context:{node_type:'smart-image', engine:'modelscope', has_reference:refs.length > 0}
+            })
+        });
+        if(!response.ok) return prompt;
+        const data = await response.json();
+        return String(data.prompt || prompt).trim() || prompt;
+    } catch(_) {
+        return prompt;
+    }
 }
 async function urlToBase64(url){
     const res = await fetch(url);

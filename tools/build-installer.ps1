@@ -56,12 +56,14 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     $h3SkillPath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\SKILL.md'
     $h3BaseGuidePath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\references\base-en.txt'
     $h3RefGuidePath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\references\ref-en.txt'
-    foreach ($requiredSkillPath in @($h3SkillPath, $h3BaseGuidePath, $h3RefGuidePath)) {
+    $imagePromptSkillPath = Join-Path $Root 'app\skills\image-prompt-polish\SKILL.md'
+    $imagePromptRegistryPath = Join-Path $Root 'app\skills\image-prompt-polish\registry.json'
+    foreach ($requiredSkillPath in @($h3SkillPath, $h3BaseGuidePath, $h3RefGuidePath, $imagePromptSkillPath, $imagePromptRegistryPath)) {
         if (-not (Test-Path -LiteralPath $requiredSkillPath -PathType Leaf)) {
-            throw "Staged video prompt skill is missing: $requiredSkillPath"
+            throw "Staged prompt skill is missing: $requiredSkillPath"
         }
         if ((Get-Item -LiteralPath $requiredSkillPath).Length -le 0) {
-            throw "Staged video prompt skill is empty: $requiredSkillPath"
+            throw "Staged prompt skill is empty: $requiredSkillPath"
         }
     }
     if (-not $canvasHtml.Contains("canvas-topaz-node.js?v=$ExpectedVersion")) {
@@ -103,6 +105,8 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path
 # 视频提示词 skill 由后端按 app_root/skills 读取，必须随安装包一起发布。
 New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills') | Out-Null
 Copy-Item -LiteralPath ($projectRoot + '\skills\video-prompt-polish') -Destination (Join-Path (Join-Path $stageRoot 'app\skills') 'video-prompt-polish') -Recurse -Force
+# 图片提示词 profile 同样由后端按 app_root/skills 读取，必须随安装包一起发布。
+Copy-Item -LiteralPath ($projectRoot + '\skills\image-prompt-polish') -Destination (Join-Path (Join-Path $stageRoot 'app\skills') 'image-prompt-polish') -Recurse -Force
 $connectors = Join-Path $stageRoot 'app\connectors'
 New-Item -ItemType Directory -Force $connectors | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'tools\chrome-local-asset-importer') -Destination (Join-Path $connectors 'chrome') -Recurse

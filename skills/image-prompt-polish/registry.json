@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "registry_version": "2026.09.01",
+  "profiles": [
+    {
+      "id": "gpt-image",
+      "label": "GPT Image natural-language profile",
+      "match": ["gpt-image", "dall-e", "dalle"],
+      "prompt_style": "plain_natural_language",
+      "reference_style": "name_each_reference_and_state_its_role",
+      "negative_support": false,
+      "max_chars": 18000,
+      "source_status": "compatibility_profile",
+      "source_note": "Keep instructions as natural language; do not emit Stable Diffusion weights or undocumented control syntax. Verify provider-specific behavior at runtime."
+    },
+    {
+      "id": "nano-banana-gemini-image",
+      "label": "Nano Banana / Gemini Image profile",
+      "match": ["nano-banana", "gemini.*image", "imagen"],
+      "prompt_style": "structured_natural_language",
+      "reference_style": "explicit_reference_roles_and_preservation_locks",
+      "negative_support": false,
+      "max_chars": 24000,
+      "source_status": "compatibility_profile",
+      "source_note": "Describe subject, scene, composition, lighting, camera intent, text and edit constraints in natural language; preserve reference roles explicitly."
+    },
+    {
+      "id": "seedream",
+      "label": "Seedream profile",
+      "match": ["seedream", "doubao-seedream"],
+      "prompt_style": "structured_natural_language",
+      "reference_style": "explicit_reference_roles_and_preservation_locks",
+      "negative_support": false,
+      "max_chars": 18000,
+      "source_status": "compatibility_profile",
+      "source_note": "Use a concise subject-to-scene description and keep identity, product, text and composition locks close to the relevant instruction."
+    },
+    {
+      "id": "flux-qwen-image",
+      "label": "FLUX / Qwen Image profile",
+      "match": ["flux", "qwen.*image", "z-image", "klein"],
+      "prompt_style": "concise_natural_language",
+      "reference_style": "short_reference_role_map",
+      "negative_support": true,
+      "max_chars": 16000,
+      "source_status": "compatibility_profile",
+      "source_note": "Prefer concrete visual nouns and relationships over keyword piles; put exclusions in a final constraints sentence when the provider supports it."
+    },
+    {
+      "id": "generic-image",
+      "label": "Generic image compatibility profile",
+      "match": [],
+      "prompt_style": "structured_natural_language",
+      "reference_style": "explicit_reference_roles_and_preservation_locks",
+      "negative_support": false,
+      "max_chars": 18000,
+      "source_status": "compatibility_profile",
+      "source_note": "Fallback profile for an unknown provider or model. Never assume unsupported parameters or reference-image syntax."
+    }
+  ]
+}

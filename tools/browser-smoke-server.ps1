@@ -47,12 +47,17 @@ New-Item -ItemType Directory -Force $appRoot, $dataRoot, $logRoot | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "static") -Destination (Join-Path $appRoot "web") -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot "VERSION") -Destination (Join-Path $stageRoot "VERSION")
 $promptSkillSourcePath = [IO.Path]::GetFullPath((Join-Path -Path ([string]$projectRoot) -ChildPath "skills\video-prompt-polish"))
+$imagePromptSkillSourcePath = [IO.Path]::GetFullPath((Join-Path -Path ([string]$projectRoot) -ChildPath "skills\image-prompt-polish"))
 $promptSkillTargetRoot = Join-Path -Path ([string]$appRoot) -ChildPath "skills"
 if (-not (Test-Path -LiteralPath $promptSkillSourcePath -PathType Container)) {
     throw "Video prompt skill source is missing: $promptSkillSourcePath"
 }
 New-Item -ItemType Directory -Force $promptSkillTargetRoot | Out-Null
 Copy-Item -LiteralPath $promptSkillSourcePath -Destination $promptSkillTargetRoot -Recurse -Force
+if (-not (Test-Path -LiteralPath $imagePromptSkillSourcePath -PathType Container)) {
+    throw "Image prompt skill source is missing: $imagePromptSkillSourcePath"
+}
+Copy-Item -LiteralPath $imagePromptSkillSourcePath -Destination $promptSkillTargetRoot -Recurse -Force
 
 $token = "browser-smoke-token"
 $python = Join-Path $projectRoot "python\python.exe"

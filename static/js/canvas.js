@@ -15509,7 +15509,7 @@ async function runBatchGenerator(genId, opts={}){
         const requestSize = await batchGeneratorSizeForRef(gen, ref);
         const run = runSnapshot(gen, batchPrompt, [ref]);
         run.taskLabel = `${tr('canvas.batchProcess')} ${index + 1}/${refs.length}`;
-        const payload = {prompt:batchPrompt, provider_id:providerId, model, size:requestSize, reference_images:[ref]};
+        const payload = {prompt:batchPrompt, provider_id:providerId, model, size:requestSize, reference_images:[ref], auto_optimize_prompt:true, prompt_context:{node_type:'batchGenerator', batch_index:index, batch_total:refs.length}};
         if(quality) payload.quality = quality;
         const pendingId = uid('p');
         const pending = makePendingForRun(pendingId, run, gen, {refs:[ref], requestSize, cascadeTargetId}, {
@@ -15592,7 +15592,9 @@ async function runGeneratorLegacy(genId, opts={}){
             provider_id:resolveImageProviderId(gen.apiProvider || 'comfly'),
             model:resolveImageModel(gen.model),
             size:requestSize,
-            reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+            reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX),
+            auto_optimize_prompt:true,
+            prompt_context:{node_type:gen.type || 'generator', connected_prompt:true}
         };
         const quality = normalizedImageQuality(gen.quality);
         if(quality) payload.quality = quality;
@@ -17306,6 +17308,9 @@ function requestMetaFromResult(result={}){
         task_id: result.task_id || result.raw?.task_id || result.raw?.data?.task_id || (Array.isArray(result.raw?.data) ? result.raw.data[0]?.task_id : '') || '',
         request_id: result.request_id || result.id || result.raw?.id || '',
         provider_id: result.provider_id || result.params?.provider_id || '',
+        prompt_original: result.prompt_original || result.params?.prompt_original || '',
+        prompt_optimized: result.prompt || '',
+        prompt_optimization: result.prompt_optimization || result.params?.prompt_optimization || {},
         backend: result.backend || '',
         prompt_id: result.prompt_id || '',
         workflow_json: result.workflow_json || '',
@@ -20341,7 +20346,9 @@ async function runImageNodeQuickGenerate(nodeId){
             provider_id:resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId),
             model:resolveImageModel(node.model),
             size:apiImageSize(node.ratio || (refs.length ? 'source' : 'square'), node.resolution || defaultApiImageResolution(node.model), node.customRatio || '', node.customSize || ''),
-            reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+            reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX),
+            auto_optimize_prompt:true,
+            prompt_context:{node_type:'image', camera_control:Boolean(node.cameraControl?.enabled), has_reference:refs.length > 0}
         };
         const quality = normalizedImageQuality(node.quality);
         if(quality) payload.quality = quality;

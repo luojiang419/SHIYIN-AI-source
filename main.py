@@ -2526,6 +2526,16 @@ def static_html_response(filename: str):
     )
 
 STATIC_PROMPT_TEMPLATE_MD = os.path.join(STATIC_DIR, "system-prompts", "infinite-canvas-prompt-templates.md")
+IMAGE_PROMPT_SKILL_DIR = os.path.join(BASE_DIR, "skills", "image-prompt-polish")
+IMAGE_PROMPT_SKILL_REGISTRY = os.path.join(IMAGE_PROMPT_SKILL_DIR, "registry.json")
+IMAGE_PROMPT_SKILL_FILE = os.path.join(IMAGE_PROMPT_SKILL_DIR, "SKILL.md")
+IMAGE_PROMPT_PROFILE_VERSION = "2026.09.01"
+IMAGE_PROMPT_OPTIMIZER_REFERENCE_MAX = 12
+IMAGE_PROMPT_OPTIMIZER_MAX_CHARS = 24000
+IMAGE_PROMPT_SEARCH_PATTERN = re.compile(
+    r"品牌|奢侈|时尚|大片|lookbook|campaign|editorial|fashion|luxury|广告|视觉广告|风格参考|案例|trend",
+    re.IGNORECASE,
+)
 PROMPT_TEMPLATE_PATHS = [STATIC_PROMPT_TEMPLATE_MD]
 PROMPT_TEMPLATE_EN = {
     "多机位九宫格": {
@@ -3898,6 +3908,22 @@ class OnlineImageRequest(BaseModel):
     quality: str = "auto"
     n: int = 1
     reference_images: List[AIReference] = []
+    auto_optimize_prompt: bool = False
+    optimizer_provider_id: str = ""
+    optimizer_model: str = ""
+    optimizer_web_search: Optional[bool] = None
+    prompt_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ImagePromptOptimizeRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=ONLINE_IMAGE_PROMPT_MAX_LENGTH)
+    provider_id: str = ""
+    model: str = ""
+    reference_images: List[AIReference] = []
+    optimizer_provider_id: str = ""
+    optimizer_model: str = ""
+    optimizer_web_search: Optional[bool] = None
+    prompt_context: Dict[str, Any] = Field(default_factory=dict)
 
 class EcommerceTaskRequest(BaseModel):
     operation: str
@@ -15698,8 +15724,10 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
 
 async def build_online_image_result(payload: OnlineImageRequest):
     selection = resolve_image_generation_selection(payload.provider_id, payload.model)
+    prompt_result = await prepare_image_generation_prompt(payload, selection)
+    generation_prompt = prompt_result["prompt"] or str(payload.prompt or "").strip()
     batch = await execute_ai_image_batch(
-        prompt=payload.prompt,
+        prompt=generation_prompt,
         provider_id=selection["provider_id"],
         model=selection["model"],
         size=payload.size,
@@ -15722,7 +15750,9 @@ async def build_online_image_result(payload: OnlineImageRequest):
         for image_url in batch["images"]:
             style_calibrated = harmonize_generated_image_style(style_reference_url, image_url) or style_calibrated
     result = {
-        "prompt": payload.prompt,
+        "prompt": generation_prompt,
+        "prompt_original": prompt_result.get("original_prompt") or payload.prompt,
+        "prompt_optimization": prompt_result.get("metadata") or {},
         "images": batch["images"],
         "image_items": batch["image_items"],
         "timestamp": generation_completed_at,
@@ -15735,7 +15765,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "generation_started_at": generation_started_at,
         "generation_completed_at": generation_completed_at,
         "generation_elapsed_seconds": generation_elapsed_seconds,
-        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds},
+        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds, "prompt_original": prompt_result.get("original_prompt") or payload.prompt, "prompt_optimization": prompt_result.get("metadata") or {}},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
@@ -15763,6 +15793,11 @@ def online_image_request_snapshot(payload: OnlineImageRequest) -> Dict[str, Any]
         "quality": payload.quality,
         "n": max(1, min(8, int(payload.n or 1))),
         "reference_images": refs,
+        "auto_optimize_prompt": bool(payload.auto_optimize_prompt),
+        "optimizer_provider_id": str(payload.optimizer_provider_id or ""),
+        "optimizer_model": str(payload.optimizer_model or ""),
+        "optimizer_web_search": payload.optimizer_web_search,
+        "prompt_context": dict(payload.prompt_context or {}),
     }
 
 def write_online_image_tasks_locked(task: Optional[Dict[str, Any]] = None):
@@ -16148,6 +16183,307 @@ def configured_ecommerce_vision_route(providers: Optional[List[Dict[str, Any]]] 
             ))
     candidates.sort(key=lambda item: item[:4])
     return candidates[0][4] if candidates else None
+
+
+def image_prompt_profile(provider_id: str = "", model: str = "") -> Dict[str, Any]:
+    """读取随应用发布的图片 prompt 兼容 profile，不访问网络或读取密钥。"""
+    fallback = {
+        "id": "generic-image",
+        "label": "Generic image compatibility profile",
+        "prompt_style": "structured_natural_language",
+        "reference_style": "explicit_reference_roles_and_preservation_locks",
+        "negative_support": False,
+        "max_chars": 18000,
+        "source_status": "compatibility_profile",
+        "source_note": "Unknown image model; use concrete natural language and do not assume undocumented syntax.",
+    }
+    try:
+        with open(IMAGE_PROMPT_SKILL_REGISTRY, "r", encoding="utf-8") as handle:
+            registry = json.load(handle)
+        profiles = registry.get("profiles") if isinstance(registry, dict) else []
+        target = f"{provider_id} {model}".strip()
+        selected = None
+        for profile in profiles or []:
+            if not isinstance(profile, dict) or profile.get("id") == "generic-image":
+                continue
+            patterns = profile.get("match") or []
+            if any(re.search(str(pattern), target, re.IGNORECASE) for pattern in patterns if str(pattern).strip()):
+                selected = profile
+                break
+        if isinstance(selected, dict):
+            return {**fallback, **selected, "registry_version": str(registry.get("registry_version") or IMAGE_PROMPT_PROFILE_VERSION)}
+        generic = next((item for item in profiles or [] if isinstance(item, dict) and item.get("id") == "generic-image"), None)
+        if isinstance(generic, dict):
+            return {**fallback, **generic, "registry_version": str(registry.get("registry_version") or IMAGE_PROMPT_PROFILE_VERSION)}
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"[image-prompt] profile load failed: {type(exc).__name__}")
+    return {**fallback, "registry_version": IMAGE_PROMPT_PROFILE_VERSION}
+
+
+def image_prompt_skill_text() -> str:
+    try:
+        with open(IMAGE_PROMPT_SKILL_FILE, "r", encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError as exc:
+        print(f"[image-prompt] skill load failed: {type(exc).__name__}")
+        return ""
+
+
+def configured_image_prompt_optimizer_route(
+    provider_id: str = "",
+    model: str = "",
+    providers: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, str]]:
+    """选择用于图片提示词优化的 AI助手聊天/视觉模型。"""
+    available = providers if providers is not None else load_api_providers()
+    requested_provider = str(provider_id or os.getenv("IMAGE_PROMPT_OPTIMIZER_PROVIDER_ID", "ecommerce-vision")).strip().lower()
+    requested_model = str(model or os.getenv("IMAGE_PROMPT_OPTIMIZER_MODEL", "")).strip()
+    candidates = []
+    for provider_index, provider in enumerate(available or []):
+        if not isinstance(provider, dict) or not provider.get("enabled", True):
+            continue
+        current_id = str(provider.get("id") or "").strip().lower()
+        if not current_id or is_codex_provider(provider):
+            continue
+        readiness = chat_generation_readiness(provider)
+        if not readiness["ready"]:
+            continue
+        is_named_assistant = current_id in {"ecommerce-vision", "local-vision"} or "助手" in str(provider.get("name") or "")
+        for model_index, current_model in enumerate(provider.get("chat_models") or []):
+            current_model = str(current_model or "").strip()
+            if not current_model:
+                continue
+            if current_id != requested_provider and not (is_named_assistant or looks_like_vision_chat_model(current_model)):
+                continue
+            if requested_model and current_id == requested_provider and current_model != requested_model:
+                continue
+            candidates.append((
+                0 if current_id == requested_provider else 1,
+                0 if current_model == requested_model else 1,
+                0 if is_named_assistant else 1,
+                provider_index,
+                model_index,
+                {
+                    "provider_id": current_id,
+                    "provider_name": str(provider.get("name") or current_id),
+                    "model": current_model,
+                },
+            ))
+    candidates.sort(key=lambda item: item[:5])
+    return candidates[0][5] if candidates else None
+
+
+def image_prompt_should_search(prompt: str, requested: Optional[bool], transport: Dict[str, Any]) -> bool:
+    if requested is not None:
+        enabled = bool(requested)
+    else:
+        enabled = bool(IMAGE_PROMPT_SEARCH_PATTERN.search(str(prompt or "")))
+    return enabled and str(transport.get("protocol") or "").strip().lower() == "responses" and provider_supports_builtin_web_search(transport.get("provider"))
+
+
+def _image_prompt_field(value: Any, limit: int = 2400) -> str:
+    if isinstance(value, list):
+        value = "；".join(str(item).strip() for item in value if str(item).strip())
+    elif isinstance(value, dict):
+        value = "；".join(f"{key}：{item}" for key, item in value.items() if str(item).strip())
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    return text[:limit]
+
+
+def _parse_image_prompt_json(text: str) -> Dict[str, Any]:
+    candidate = str(text or "").strip()
+    if candidate.startswith("```"):
+        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE | re.DOTALL).strip()
+    try:
+        data = json.loads(candidate)
+    except (TypeError, ValueError):
+        match = re.search(r"\{[\s\S]*\}", candidate)
+        if not match:
+            raise ValueError("图片提示词优化器未返回 JSON")
+        data = json.loads(match.group(0))
+    if not isinstance(data, dict):
+        raise ValueError("图片提示词优化器返回的 JSON 不是对象")
+    if isinstance(data.get("analysis"), dict):
+        data = {**data["analysis"], **{key: value for key, value in data.items() if key != "analysis"}}
+    return data
+
+
+def compile_image_prompt(
+    original_prompt: str,
+    analysis: Dict[str, Any],
+    references: List[Dict[str, Any]],
+    profile: Dict[str, Any],
+) -> str:
+    """将视觉模型的结构化证据编译为目标图片模型的自然语言 prompt。"""
+    subject = _image_prompt_field(analysis.get("subject") or analysis.get("subjects"))
+    action = _image_prompt_field(analysis.get("action"))
+    subject_action = "；".join(value for value in (subject, action) if value)
+    sections = [
+        ("最终画面意图", analysis.get("intent_summary")),
+        ("主体与动作", subject_action),
+        ("场景与环境", analysis.get("environment") or analysis.get("scene")),
+        ("构图与镜头", analysis.get("composition") or analysis.get("camera")),
+        ("光线与色彩", analysis.get("camera_lighting") or analysis.get("lighting")),
+        ("风格与材质", analysis.get("style_context") or analysis.get("style") or analysis.get("materials")),
+        ("文字要求", analysis.get("text_requirements") or analysis.get("text")),
+        ("排除与保留约束", analysis.get("negative_constraints") or analysis.get("constraints")),
+    ]
+    lines = [f"用户原始要求：{_image_prompt_field(original_prompt, 5000)}"]
+    for label, value in sections:
+        text = _image_prompt_field(value)
+        if text:
+            lines.append(f"{label}：{text}")
+    if references:
+        lines.append("参考图关系：")
+        reference_map = analysis.get("reference_map") if isinstance(analysis.get("reference_map"), list) else []
+        for index, reference in enumerate(references[:IMAGE_PROMPT_OPTIMIZER_REFERENCE_MAX], 1):
+            mapped = reference_map[index - 1] if index <= len(reference_map) and isinstance(reference_map[index - 1], dict) else {}
+            role = _image_prompt_field(mapped.get("role") or mapped.get("purpose") or "视觉证据", 400)
+            name = _image_prompt_field(reference.get("name") or f"图片{index}", 120)
+            lines.append(f"参考图 {index}（{name}）：只用于{role}；保持其可见身份、形状、颜色、材质和文字事实，不把未确认内容当作事实。")
+    uncertainties = _image_prompt_field(analysis.get("uncertainties"), 1600)
+    if uncertainties:
+        lines.append(f"未确认信息：{uncertainties}；对这些信息不要擅自补写为确定事实。")
+    result = "\n".join(lines).strip()
+    limit = max(4000, min(IMAGE_PROMPT_OPTIMIZER_MAX_CHARS, int(profile.get("max_chars") or 18000)))
+    return result[:limit]
+
+
+async def optimize_image_prompt(
+    prompt: str,
+    provider_id: str,
+    model: str,
+    references: List[Dict[str, Any]],
+    optimizer_provider_id: str = "",
+    optimizer_model: str = "",
+    optimizer_web_search: Optional[bool] = None,
+    prompt_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    original_prompt = str(prompt or "").strip()
+    profile = image_prompt_profile(provider_id, model)
+    metadata = {
+        "status": "fallback",
+        "profile_id": profile.get("id") or "generic-image",
+        "profile_version": profile.get("registry_version") or IMAGE_PROMPT_PROFILE_VERSION,
+        "profile_source_status": profile.get("source_status") or "compatibility_profile",
+        "optimizer_provider_id": "",
+        "optimizer_model": "",
+        "web_search": False,
+        "reference_count": len(references or []),
+        "reference_analysis_count": 0,
+        "error": "",
+    }
+    route = configured_image_prompt_optimizer_route(optimizer_provider_id, optimizer_model)
+    if not route:
+        metadata["error"] = "没有可用的 AI助手聊天/视觉模型"
+        return {"prompt": original_prompt, "original_prompt": original_prompt, "metadata": metadata}
+
+
+    transport = resolve_chat_transport(route["provider_id"], route["model"], "")
+    should_search = image_prompt_should_search(original_prompt, optimizer_web_search, transport)
+    transport["web_search"] = should_search
+    metadata.update({
+        "optimizer_provider_id": route["provider_id"],
+        "optimizer_provider_name": route.get("provider_name") or route["provider_id"],
+        "optimizer_model": transport["model"],
+        "web_search": should_search,
+    })
+    skill = image_prompt_skill_text()
+    system = (
+        "你是 SHIYIN-AI 的图片提示词优化器。只返回 JSON，不要 Markdown、解释或思考过程。"
+        "理解用户原始需求后，在不改变硬约束的基础上做有依据的视觉维度扩展。"
+        "参考图是本次请求中的视觉证据，必须逐张分析，不得只看第一张。"
+        "未知信息必须放入 uncertainties，不能猜测不可读文字、品牌、身份或产品细节。"
+        "如果用户要求品牌、lookbook、campaign 或顶级时尚视觉，优先输出编辑/广告语境和可迁移的构图、造型、光线与镜头方法，不生成普通电商白底图。"
+        "搜索结果仅用于提取高层方法，不能复制具体作品、模特、文案或独特构图。"
+        f"\n当前目标图片模型：{model or '未知'}；当前本地 profile：{profile.get('id')}。"
+        f"\n本地图片提示词规范：{skill or profile.get('source_note') or ''}"
+        "\n返回字段：intent_summary、subject、action、environment、composition、camera_lighting、style_context、text_requirements、negative_constraints、reference_map、uncertainties。"
+    )
+    context = prompt_context if isinstance(prompt_context, dict) else {}
+    user_text = (
+        f"用户原始提示词：{original_prompt}\n"
+        f"节点上下文：{json.dumps(context, ensure_ascii=False)[:5000] if context else '无'}\n"
+        f"参考图数量：{len(references or [])}\n"
+        "请先综合理解原始提示词和所有参考图，再返回结构化 JSON。"
+    )
+    content = [{"type": "text", "text": user_text}]
+    usable_references = 0
+    for index, reference in enumerate((references or [])[:IMAGE_PROMPT_OPTIMIZER_REFERENCE_MAX], 1):
+        try:
+            data_url = reference_to_data_url(reference, max_size=1024)
+        except Exception:
+            data_url = ""
+        if not data_url:
+            continue
+        usable_references += 1
+        content.append({"type": "text", "text": f"这是参考图 {index}，名称：{reference.get('name') or f'图片{index}'}。"})
+        content.append({"type": "image_url", "image_url": {"url": data_url}})
+    metadata["reference_analysis_count"] = usable_references
+    if usable_references < len(references or []):
+        metadata["reference_warning"] = "部分参考图无法转换为视觉输入，已保留在最终生图请求中"
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": content}]
+    try:
+        raw = await request_llm_json(transport, messages, retry_524=1)
+        analysis = _parse_image_prompt_json(text_from_llm_response(raw, transport["protocol"]))
+        compiled = compile_image_prompt(original_prompt, analysis, references or [], profile)
+        if not compiled:
+            raise ValueError("图片提示词编译结果为空")
+        metadata["status"] = "optimized"
+        metadata["analysis_fields"] = sorted(str(key) for key in analysis.keys() if str(key))
+        return {"prompt": compiled, "original_prompt": original_prompt, "analysis": analysis, "metadata": metadata}
+    except Exception as exc:
+        metadata["error"] = type(exc).__name__
+        print(
+            f"[image-prompt] optimization fallback provider={route['provider_id']} model={transport['model']} "
+            f"refs={usable_references}/{len(references or [])} error={type(exc).__name__}",
+            flush=True,
+        )
+        return {"prompt": original_prompt, "original_prompt": original_prompt, "metadata": metadata}
+
+
+@app.post("/api/image-prompt-optimize")
+async def image_prompt_optimize(payload: ImagePromptOptimizeRequest):
+    """供绕过画布异步任务的图像引擎先编译提示词；不触发图片生成。"""
+    selection = resolve_image_generation_selection(payload.provider_id, payload.model)
+    result = await optimize_image_prompt(
+        payload.prompt,
+        selection["provider_id"],
+        selection["model"],
+        [ref.model_dump() for ref in payload.reference_images if ref.url],
+        payload.optimizer_provider_id,
+        payload.optimizer_model,
+        payload.optimizer_web_search,
+        payload.prompt_context,
+    )
+    return {
+        "prompt": result["prompt"],
+        "original_prompt": result.get("original_prompt") or payload.prompt,
+        "prompt_optimization": result.get("metadata") or {},
+        "provider_id": selection["provider_id"],
+        "model": selection["model"],
+    }
+
+
+async def prepare_image_generation_prompt(payload: OnlineImageRequest, selection: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = str(payload.prompt or "").strip()
+    references = [ref.model_dump() for ref in payload.reference_images if ref.url]
+    if not payload.auto_optimize_prompt:
+        return {
+            "prompt": prompt,
+            "original_prompt": prompt,
+            "metadata": {"status": "disabled", "reference_count": len(references), "profile_id": "", "profile_version": ""},
+        }
+    return await optimize_image_prompt(
+        prompt,
+        selection["provider_id"],
+        selection["model"],
+        references,
+        payload.optimizer_provider_id,
+        payload.optimizer_model,
+        payload.optimizer_web_search,
+        payload.prompt_context,
+    )
 
 def configured_building_vision_route(providers: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, str]]:
     return configured_ecommerce_vision_route(providers)

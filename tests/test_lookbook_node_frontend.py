@@ -14,26 +14,22 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         cls.css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         cls.html = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 
-    def test_builtin_visual_skill_set_is_available_without_network(self):
-        for style_id in ("auto", "fw-cream-cyan-film", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"):
-            self.assertIn(f"id:'{style_id}'", self.lookbook)
-        for old_id in ("minimal-editorial", "street-luxe", "quiet-luxury", "neo-chinese", "beauty-gloss", "avant-garde", "visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
-            self.assertNotIn(f"id:'{old_id}'", self.lookbook)
+    def test_only_validated_2026_fw_builtin_preset_is_available(self):
+        styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
+        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film"])
+        self.assertIn("name:'2026 FW 奶油青蓝胶片抓拍'", styles)
 
-    def test_yangpeilin_method_skill_is_documented_and_default_is_new(self):
-        self.assertIn("id:'auto'", self.lookbook)
-        self.assertIn("name:'自动'", self.lookbook)
-        self.assertIn("id:'candid-lifestyle'", self.lookbook)
+    def test_2026_fw_is_the_default_and_removed_builtin_styles_are_migrated(self):
         self.assertIn("id:'fw-cream-cyan-film'", self.lookbook)
         self.assertIn("16mm/35mm film grain", self.lookbook)
-        self.assertIn("生活化真实抓拍", self.lookbook)
-        self.assertIn("DEFAULT_STYLE_ID = 'auto'", self.lookbook)
-        skill = ROOT / "static" / "lookbook-skills" / "yangpeilin-methods" / "SKILL.md"
-        self.assertTrue(skill.exists())
-        self.assertIn("参考图驱动时尚视觉方法", skill.read_text(encoding="utf-8"))
+        self.assertIn("DEFAULT_STYLE_ID = 'fw-cream-cyan-film'", self.lookbook)
+        self.assertIn("const removedBuiltinStyle=", self.lookbook)
+        self.assertIn("node.lookbookStyleName=defaultStyle.name", self.lookbook)
+        self.assertIn("node.lookbookStylePrompt=defaultStyle.prompt", self.lookbook)
+        self.assertIn("node.lookbookPlan=''", self.lookbook)
+        self.assertIn("node.lookbookAutoDecision={}", self.lookbook)
 
     def test_premium_editorial_research_controls_are_submitted(self):
-        self.assertIn("name:'街头电影叙事'", self.lookbook)
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
         self.assertNotIn("研究深度", self.lookbook)
         self.assertNotIn("lookbook_timeout_minutes:", self.canvas)
@@ -125,9 +121,9 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.22", self.html)
-        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.3", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.23", self.html)
+        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.6", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)
@@ -135,15 +131,14 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=premium-editorial-research.1", self.html)
         self.assertIn("feature=lookbook-agent.1", self.html)
         self.assertIn("feature=lookbook-count.1", self.html)
-        self.assertIn("feature=lookbook-auto-mode.1", self.html)
         self.assertIn("feature=yangpeilin-methods.1", self.html)
         self.assertIn("feature=remove-output-hint.1", self.html)
-        self.assertIn("feature=lookbook-auto-style.1", self.html)
         self.assertIn("feature=lookbook-single-dispatch.1", self.html)
         self.assertIn("feature=fw-reference-film.1", self.html)
         self.assertIn("feature=fw-natural-sun-grain.1", self.html)
         self.assertIn("feature=fw-model-identity.1", self.html)
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
+        self.assertIn("feature=lookbook-validated-presets-only.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)

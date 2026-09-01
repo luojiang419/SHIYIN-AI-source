@@ -10108,10 +10108,11 @@ async function runEcommerceComposeNode(nodeId, opts={}){
 function lookbookConnectedInputs(node){
     const entries = connections.filter(connection => connection.to === node.id).map(connection => ({connection,source:nodes.find(item => item.id === connection.from)})).filter(entry => entry.source);
     const roleLabels = {'lookbook-person':'人物','lookbook-product':'商品','lookbook-scene':'场景','lookbook-material':'材质','lookbook-logo':'Logo','lookbook-pose':'姿态','lookbook-layout':'版式'};
+    const referenceTypes = {'lookbook-person':'subject','lookbook-product':'prop','lookbook-scene':'scene','lookbook-material':'detail','lookbook-logo':'style','lookbook-pose':'pose','lookbook-layout':'style'};
     const refs = [];
     entries.forEach(entry => mediaRefsFromNode(entry.source).forEach((ref,index) => refs.push({
         ...ref,
-        role:'prop', reference_type:'prop', reference_id:`${node.id}_reference_${refs.length + 1}`,
+        role:referenceTypes[entry.connection.inputRole] || 'prop', reference_type:referenceTypes[entry.connection.inputRole] || 'prop', reference_id:`${node.id}_reference_${refs.length + 1}`,
         lookbook_role:roleLabels[entry.connection.inputRole] || '商品',
         label:`${roleLabels[entry.connection.inputRole] || '商品'} · ${ref.name || `参考 ${refs.length + 1}`}`,
         instruction:`Lookbook 专用输入：${roleLabels[entry.connection.inputRole] || '商品'}`,

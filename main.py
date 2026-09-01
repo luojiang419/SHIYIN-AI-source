@@ -15597,6 +15597,34 @@ def harmonize_generated_image_style(source_url: str, target_url: str, strength: 
         return False
 
 
+def apply_lookbook_natural_sun_grade(url: str) -> bool:
+    """把 FW 输出从欠曝的数字对比度拉回参考片的通透高键日光。"""
+    path = output_file_from_url(url)
+    if not path:
+        return False
+    try:
+        import numpy as np
+
+        with Image.open(path) as image:
+            source = image.convert("RGB")
+            rgb = np.asarray(source, dtype=np.float32) / 255.0
+            # 柔和 gamma 提升中间调，保留真正黑位；再做极轻的阴影 lift，避免绿色场景压成一块黑。
+            luma = np.clip(rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 0.0, 1.0)
+            graded = np.power(np.clip(rgb, 0.0, 1.0), 0.84) * 1.035
+            shadow_lift = (1.0 - luma) * 0.028
+            graded = np.clip(graded + shadow_lift[..., None], 0.0, 1.0)
+            # 仅在高光区域补极弱暖色，不污染肤色和中性商品。
+            highlight = np.clip((luma - 0.70) / 0.30, 0.0, 1.0)
+            graded[..., 0] += highlight * 0.008
+            graded[..., 1] += highlight * 0.004
+            finished = Image.fromarray(np.clip(graded * 255.0, 0, 255).astype(np.uint8), "RGB")
+            finished.save(path, "JPEG", quality=95, subsampling=0, optimize=True)
+        return True
+    except Exception as exc:
+        print(f"Lookbook 自然阳光校准跳过：{exc}")
+        return False
+
+
 def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
     """给 FW Lookbook 输出叠加非周期、多尺度的有机胶片粗颗粒。
 
@@ -15659,6 +15687,7 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
     if style_id != "fw-cream-cyan-film":
         return batch
     for url in list(batch.get("images") or []):
+        apply_lookbook_natural_sun_grade(str(url))
         apply_lookbook_organic_film_grain(str(url), amount=0.095)
     return batch
 

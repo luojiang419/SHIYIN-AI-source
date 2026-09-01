@@ -235,8 +235,11 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "lookbook_style":{"id":"fw-cream-cyan-film", "name":"2026 FW 奶油青蓝胶片抓拍"},
         })
         self.assertIn("FW NATURAL SUN TRANSPARENCY", prompt)
+        self.assertIn("luminous high-key daylight photograph", prompt)
+        self.assertIn("Do not underexpose the whole frame", prompt)
         self.assertIn("genuinely irregular coarse film grain", prompt)
-        self.assertIn("ordinary, imperfect face", prompt)
+        self.assertIn("USER-SUPPLIED MODEL", prompt)
+        self.assertIn("Do not add freckles", prompt)
 
     def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):
         import numpy as np

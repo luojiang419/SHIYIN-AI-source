@@ -107,13 +107,14 @@ class LookbookNodeFrontendTests(unittest.TestCase):
     def test_static_cache_keys_are_bumped_for_the_fix(self):
         self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.15", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.1", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.2", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)
         self.assertIn("feature=picker-dialog-top-layer.1", self.html)
         self.assertIn("feature=premium-editorial-research.1", self.html)
         self.assertIn("feature=lookbook-agent.1", self.html)
+        self.assertIn("feature=lookbook-count.1", self.html)
         self.assertIn("feature=lookbook-auto-mode.1", self.html)
         self.assertIn("feature=yangpeilin-methods.1", self.html)
         self.assertIn("feature=remove-output-hint.1", self.html)
@@ -136,6 +137,15 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("setTimeout(() =>", body)
         self.assertIn("pollEcommerceLookbookTask(taskId,{cascadeTargetId})", body)
         self.assertIn("p.canvasTaskType === 'ecommerce-lookbook'", self.canvas)
+
+    def test_lookbook_generation_uses_node_count_instead_of_legacy_two_default(self):
+        start = self.canvas.index("async function runLookbookNode")
+        end = self.canvas.index("function bindClassicEcommerceNode", start)
+        body = self.canvas[start:end]
+        self.assertIn("window.CanvasLookbookNode?.normalize?.(node)", body)
+        self.assertIn("Number(node.count || 4)", body)
+        self.assertNotIn("Number(node.count || 2)", body)
+        self.assertIn("count, parent_task_id:''", body)
 
     def test_lookbook_submission_uses_stage_aware_polling(self):
         start = self.canvas.index("async function runLookbookNode")

@@ -10101,11 +10101,12 @@ function lookbookConnectedInputs(node){
 async function runLookbookNode(nodeId, opts={}){
     const node = nodes.find(item => item.id === nodeId && item.type === 'lookbook');
     if(!node) return;
+    window.CanvasLookbookNode?.normalize?.(node);
     const inputs = lookbookConnectedInputs(node);
     const out = outputForNode(node,520,true);
     const pendingId = out ? uid('p') : '';
     const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
-    const count = Math.max(1,Math.min(4,Number(node.count || 2)));
+    const count = Math.max(1,Math.min(4,Number(node.count || 4)));
     const run = runSnapshot(node, String(node.lookbookPrompt || '').trim() || 'Create a cohesive fashion Lookbook campaign.', inputs.map(item => ({...item, kind:'image'})));
     run.nodeType = 'lookbook';
     run.taskLabel = 'Lookbook 平面广告';

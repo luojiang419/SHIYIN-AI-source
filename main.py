@@ -16315,7 +16315,8 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    free_creation = operation == "universal" and str(options.get("prompt_policy") or "").strip().lower() in {"free", "lookbook"}
+    prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
+    free_creation = operation == "universal" and prompt_policy in {"free", "lookbook"}
     if free_creation and not normalized:
         inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, allow_empty=True, options=options)
     else:
@@ -16358,6 +16359,11 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
             and not str(options.get("instruction") or "").strip()
         )
         source_composition_locked = operation == "background_change" or automatic_subject_edit
+        # Lookbook 同时携带顶层 count 和 options.lookbook_count。以后者作为专用字段的
+        # 规范化来源，兼容旧版/缓存前端只正确写入 options 的情况，避免数量退回 1。
+        requested_count = payload.count
+        if prompt_policy == "lookbook" and "lookbook_count" in options:
+            requested_count = options.get("lookbook_count")
         generation = resolve_ecommerce_generation_settings(
             source_dimensions[0],
             source_dimensions[1],
@@ -16365,10 +16371,12 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
             "source" if source_composition_locked else payload.aspect_ratio,
             payload.resolution,
             payload.quality,
-            payload.count,
+            requested_count,
         )
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if prompt_policy == "lookbook":
+        options["lookbook_count"] = generation["count"]
     prompt = build_ecommerce_prompt(operation, inputs, options)
     return {
         "operation": operation,

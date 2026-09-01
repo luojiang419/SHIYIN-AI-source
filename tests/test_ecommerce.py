@@ -1314,6 +1314,31 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["count"], 3)
         self.assertEqual(snapshot["parameters"], {"aspect_ratio": "4:5", "resolution": "2k", "quality": "high", "count": 3})
 
+    def test_lookbook_count_option_is_authoritative_for_generation_snapshot(self):
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        for count in range(1, 5):
+            with self.subTest(count=count):
+                payload = self.main.EcommerceTaskRequest(
+                    operation="universal",
+                    mode="standard",
+                    inputs=[],
+                    options={"prompt_policy": "lookbook", "lookbook_count": count},
+                    provider_id="shiying",
+                    model="gemini-3-pro-image-preview",
+                    aspect_ratio="16:9",
+                    resolution="2k",
+                    quality="high",
+                    count=1,
+                )
+                with (
+                    patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
+                    patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([], (1024, 1024))),
+                ):
+                    snapshot = self.main.prepare_ecommerce_request(payload)
+                self.assertEqual(snapshot["count"], count)
+                self.assertEqual(snapshot["parameters"]["count"], count)
+                self.assertEqual(snapshot["options"]["lookbook_count"], count)
+
     def test_background_replacement_always_forces_source_ratio(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         base = {

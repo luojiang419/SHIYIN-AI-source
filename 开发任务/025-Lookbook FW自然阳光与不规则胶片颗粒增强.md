@@ -40,6 +40,7 @@
 - `node --check static/js/canvas-lookbook-node.js`：通过
 - Lookbook + 电商回归测试：170 passed
 - 真实生图：`shiying / gemini-3-pro-image-preview` 生成 `fw_lookbook_test_v4_e7790dbd04.jpg`，视觉上已出现方向性午后阳光、透亮空气、青绿阴影和不规则粗颗粒；首次请求遇到一次 TLS EOF，重试成功。
+- Git：`b100c52 fix: strengthen FW sunlight and organic film grain`，已推送 `origin/feat/storyboard-merge-node`
 
 ## 接力信息
 

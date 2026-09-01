@@ -2564,6 +2564,7 @@ function toggleZoomPreview(){
 }
 function refreshGeometry(){
     invalidateCanvasGeometry();
+    alignClassicMultiViewPorts();
     renderLinks();
     renderSelectionHub();
 }
@@ -9913,6 +9914,23 @@ async function waitEcommerceTask(taskId, options={}){
         if(['failed','interrupted'].includes(task.status)) throw new Error(task.error || '电商任务执行失败');
         await sleep(1800);
     }
+}
+function alignClassicMultiViewPorts(root=nodesEl){
+    if(!root?.querySelectorAll) return;
+    const nodeRoots = root.matches?.('.multiView-node') ? [root] : root.querySelectorAll('.multiView-node');
+    const scale = Math.max(0.01, Number(viewport?.scale) || 1);
+    nodeRoots.forEach(nodeEl => {
+        const nodeRect = nodeEl.getBoundingClientRect();
+        nodeEl.querySelectorAll('.classic-multi-view-slot[data-input-role]').forEach(row => {
+            const role = row.dataset.inputRole || '';
+            if(!role) return;
+            const port = nodeEl.querySelector(`.classic-multi-view-port[data-input-role="${CSS.escape(role)}"]`);
+            if(!port) return;
+            const rowRect = row.getBoundingClientRect();
+            const center = ((rowRect.top + rowRect.height / 2) - nodeRect.top) / scale;
+            port.style.setProperty('--multi-view-port-top', `${Math.round(center * 100) / 100}px`);
+        });
+    });
 }
 function activeEcommerceLookbookRun(node){
     if(!node?.id) return false;

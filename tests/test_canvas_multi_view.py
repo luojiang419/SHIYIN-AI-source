@@ -168,6 +168,14 @@ def test_lookbook_input_ports_are_scoped_to_lookbook_nodes():
     assert "size:type=>type===TYPE ? ({w:430,h:0}) : null" in LOOKBOOK_JS
 
 
+def test_multi_view_port_labels_are_not_duplicated_and_align_to_rows():
+    assert ".smart-special-node.smart-multi-view-node .multi-view-port::before" in MULTI_VIEW_CSS
+    assert "content:none!important;display:none!important" in MULTI_VIEW_CSS
+    assert "function alignClassicMultiViewPorts" in CANVAS_JS
+    assert "classic-multi-view-slot[data-input-role]" in CANVAS_JS
+    assert "--multi-view-port-top" in CANVAS_JS
+
+
 def test_multi_view_product_slots_are_split_by_garment_and_angle():
     assert "<span>12 个输入 · 5 张输出</span>" in SMART_JS
     assert "<span>12 个输入 · 5 张输出</span>" in CANVAS_JS

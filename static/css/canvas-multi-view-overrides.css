@@ -51,6 +51,10 @@
 .multiView-node .classic-multi-view-port{top:var(--multi-view-port-top,125px)}
 .multiView-node .classic-multi-view-port::before{left:35px;max-width:94px;padding:3px 6px;border:1px solid color-mix(in srgb,var(--line,#ddd) 80%,transparent);border-radius:6px;background:color-mix(in srgb,var(--card,#fff) 92%,transparent);box-shadow:0 4px 10px rgba(0,0,0,.1);color:var(--muted,#555);font-size:8px;line-height:1}
 
+/* 文本标签已经显示在节点内的矩形行中，端口不再重复绘制一份小标签。 */
+.smart-special-node.smart-multi-view-node .multi-view-port::before,
+.multiView-node .classic-multi-view-port::before{content:none!important;display:none!important}
+
 /* 多视图节点菜单固定为多排网格，窄屏时继续收缩而不遮挡节点 */
 .smart-node-floating-menu.smart-node-image-menu{grid-template-columns:repeat(4,minmax(86px,1fr));grid-auto-rows:32px;gap:5px;width:min(470px,calc(100vw - 48px));max-width:min(470px,calc(100vw - 48px));padding:5px}
 .smart-node-floating-menu.smart-node-image-menu button{height:30px;border:1px solid transparent;font-weight:700}

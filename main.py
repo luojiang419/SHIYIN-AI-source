@@ -16709,7 +16709,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
             "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
             "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
-            + ("本次启用‘参考图真实感’ Skill：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id == "reference-first-naturalism" else "")
+            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
             + f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
             f"参考图事实分析：{str(options.get('lookbook_reference_analysis') or '')[:7000]}\n"
             f"案例方法与色彩系统：{str(options.get('search_context') or '')[:8000]}"

@@ -15,22 +15,21 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         cls.html = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 
     def test_builtin_visual_skill_set_is_available_without_network(self):
-        self.assertIn("VISUAL_SKILLS_IMAGE_URL = 'https://github.com/smixs/visual-skills/tree/main/image'", self.lookbook)
-        for style_id in ("fashion-street-editorial", "visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
+        for style_id in ("candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"):
             self.assertIn(f"id:'{style_id}'", self.lookbook)
-        self.assertIn("skill:'image'", self.lookbook)
-        self.assertIn("CC BY 4.0", self.lookbook)
+        for old_id in ("minimal-editorial", "street-luxe", "quiet-luxury", "neo-chinese", "beauty-gloss", "avant-garde", "visual-ecommerce", "visual-fashion-editorial", "visual-poster", "visual-social"):
+            self.assertNotIn(f"id:'{old_id}'", self.lookbook)
 
-    def test_reference_first_naturalism_skill_is_builtin_and_default(self):
-        self.assertIn("id:'reference-first-naturalism'", self.lookbook)
-        self.assertIn("参考图真实感", self.lookbook)
-        self.assertIn("DEFAULT_STYLE_ID = 'reference-first-naturalism'", self.lookbook)
-        skill = ROOT / "static" / "lookbook-skills" / "reference-first-naturalism" / "SKILL.md"
+    def test_yangpeilin_method_skill_is_documented_and_default_is_new(self):
+        self.assertIn("id:'candid-lifestyle'", self.lookbook)
+        self.assertIn("生活化真实抓拍", self.lookbook)
+        self.assertIn("DEFAULT_STYLE_ID = 'candid-lifestyle'", self.lookbook)
+        skill = ROOT / "static" / "lookbook-skills" / "yangpeilin-methods" / "SKILL.md"
         self.assertTrue(skill.exists())
-        self.assertIn("参考图真实感", skill.read_text(encoding="utf-8"))
+        self.assertIn("参考图驱动时尚视觉方法", skill.read_text(encoding="utf-8"))
 
     def test_premium_editorial_research_controls_are_submitted(self):
-        self.assertIn("name:'时尚街景'", self.lookbook)
+        self.assertIn("name:'街头电影叙事'", self.lookbook)
         self.assertIn("lookbookResearchDepth", self.lookbook)
         self.assertIn("研究深度", self.lookbook)
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
@@ -60,7 +59,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn('data-lookbook-choose', self.lookbook)
         self.assertIn('data-lookbook-select', self.lookbook)
         self.assertIn('event.preventDefault();event.stopPropagation();choose(', self.lookbook)
-        self.assertIn('smixs/visual-skills/image', self.lookbook)
+        self.assertIn('参考图优先 · 动作/情绪先行 · 真实环境融合 · 系列化输出', self.lookbook)
 
     def test_lookbook_actions_have_direct_and_delegated_click_fallbacks(self):
         start = self.lookbook.index("function bind(root,node,options={}){")
@@ -100,7 +99,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.13", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.01.lookbook.14", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260831.4", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260901.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -110,7 +109,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=premium-editorial-research.1", self.html)
         self.assertIn("feature=lookbook-agent.1", self.html)
         self.assertIn("feature=lookbook-auto-mode.1", self.html)
-        self.assertIn("feature=reference-first-naturalism.1", self.html)
+        self.assertIn("feature=yangpeilin-methods.1", self.html)
         self.assertIn("feature=remove-output-hint.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):

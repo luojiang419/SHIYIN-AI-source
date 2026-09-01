@@ -41,14 +41,14 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.png"},
         ], {
             "prompt_policy": "lookbook",
-            "lookbook_style": {"id": "reference-first-naturalism", "name": "参考图真实感", "prompt": "reference-first naturalism"},
+            "lookbook_style": {"id": "multi-person-interaction", "name": "多人互动纪实", "prompt": "multi-person interaction"},
             "lookbook_count": 4,
         })
-        self.assertIn("REFERENCE-FIRST NATURALISM SKILL", prompt)
+        self.assertIn("MULTI-PERSON INTERACTION LOCK", prompt)
         self.assertIn("MULTI-PERSON INTERACTION LOCK", prompt)
         self.assertIn("2 distinct supplied people", prompt)
         self.assertIn("REFERENCE-SCENE INTEGRATION", prompt)
-        self.assertIn("do not invent a long generic prompt", prompt)
+        self.assertIn("AUTO LOOKBOOK MODE", prompt)
 
     def test_agent_plan_keeps_node_generation_settings_and_clamps_timeout(self):
         snapshot = {

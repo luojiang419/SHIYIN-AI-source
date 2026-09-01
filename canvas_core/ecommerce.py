@@ -1473,7 +1473,10 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             f"SERIES CONSISTENCY: this request produces {count} coordinated campaign image(s). Keep identity, SKU details, palette, styling language and world consistent while varying framing, shot scale or editorial moment only when useful.",
             "PRE-DELIVERY QUALITY GATE: inspect the planned render before finalizing for correct anatomy, clean product edges, exact Logo and text, faithful material texture, coherent contact shadows, believable perspective, intentional negative space and commercial advertising polish. Reject obvious defects and regenerate the weak frame when possible.",
         ]
-        if style_id == "reference-first-naturalism":
+        if style_id in {
+            "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic",
+            "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup",
+        }:
             parts.append(
                 "REFERENCE-FIRST NATURALISM SKILL: reference images are the primary creative input, not decorative inspiration. "
                 "When the user brief is empty, do not invent a long generic prompt or add stock adjectives; infer a concrete photographic situation from the supplied people, products and locations. "

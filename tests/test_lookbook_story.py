@@ -303,6 +303,7 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertTrue(all(call["count"] == 1 for call in calls))
         self.assertEqual(batch["images"], ["/assets/frame-1.png", "/assets/frame-2.png", "/assets/frame-3.png"])
         self.assertEqual([item["shot_index"] for item in batch["image_items"]], [1, 2, 3])
+        self.assertEqual(batch["provider"]["id"], "vision")
 
 
 if __name__ == "__main__":

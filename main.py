@@ -17720,8 +17720,13 @@ async def execute_lookbook_story_batch(
     if len(completed) != count:
         raise HTTPException(status_code=502, detail=f"故事分镜生成不完整：完成 {len(completed)}/{count} 张")
     ordered = [completed[index] for index in range(1, count + 1)]
+    provider = dict(route)
+    # ecommerce_route_candidates 使用 provider_id；任务结果和历史记录的公共协议使用 id。
+    # 故事模式必须在批次边界统一字段，否则图片已生成后会在结果收尾阶段触发 KeyError('id')。
+    provider.setdefault("id", provider.get("provider_id") or "")
+    provider.setdefault("name", provider.get("provider_name") or provider.get("id") or "")
     return {
-        "provider": route,
+        "provider": provider,
         "model": route["model"],
         "count": count,
         "references": refs,

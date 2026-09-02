@@ -293,6 +293,22 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("avoid beauty gestures", prompts[2])
         self.assertIn("finger pressure", prompts[3])
 
+    def test_scene_styled_wardrobe_uses_identity_only_and_allows_solo_shots(self):
+        prompt = build_prompt("universal", [
+            {"role": "subject", "reference_type": "subject", "lookbook_role": "人物", "url": "/assets/input/model_a.jpg"},
+            {"role": "subject", "reference_type": "subject", "lookbook_role": "人物", "url": "/assets/input/model_b.jpg"},
+        ], {
+            "prompt_policy": "lookbook",
+            "instruction": "两位人物在西部酒吧组成四张故事组，允许 solo 与互动镜头",
+            "lookbook_style": {"id": "levis-adaptive-campaign", "name": "李维斯广告·环境自适应纪实"},
+            "lookbook_wardrobe_mode": "scene_styled",
+            "lookbook_count": 4,
+        })
+        self.assertIn("WARDROBE SCENE STYLING LOCK", prompt)
+        self.assertIn("interview outfits are not to be copied", prompt)
+        self.assertIn("PERSON IDENTITY-ONLY EDITORIAL LOCK", prompt)
+        self.assertNotIn("The wardrobe reference is the styling foundation", prompt)
+
     def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):
         import numpy as np
 

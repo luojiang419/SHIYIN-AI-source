@@ -40,6 +40,16 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("node.lookbookResearchStatus = String(task.lookbook_research.status)", self.canvas)
         self.assertIn("lookbook_auto_decision", self.canvas)
         self.assertIn("node.lookbookAutoDecision = autoDecision", self.canvas)
+        self.assertIn("lookbook_context_signature:String(node.lookbookContextSignature || '')", self.canvas)
+        self.assertIn("lookbook_research_images:node.lookbookResearchImages || []", self.canvas)
+        self.assertIn("lookbook_research_shots:node.lookbookResearchShots || []", self.canvas)
+
+    def test_brief_and_style_changes_clear_derived_research_without_touching_presets(self):
+        self.assertIn("function resetDerivedResearch(node)", self.lookbook)
+        self.assertIn("if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node)", self.lookbook)
+        self.assertIn("resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id", self.lookbook)
+        styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
+        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film"])
 
     def test_status_is_rendered_after_run_button_and_quality_gate_is_removed(self):
         body = self.lookbook[self.lookbook.index("function bodyHtml"):self.lookbook.index("function bindGenerationChoices")]
@@ -121,9 +131,9 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.23", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.24", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.6", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.7", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)
@@ -139,6 +149,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=fw-model-identity.1", self.html)
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
         self.assertIn("feature=lookbook-validated-presets-only.1", self.html)
+        self.assertIn("feature=lookbook-research-evidence.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)

@@ -222,6 +222,65 @@ class ResponsesProtocolTests(unittest.TestCase):
         )
         self.assertEqual(body["tools"], [{"type": "web_search"}])
 
+    def test_responses_web_search_can_request_sources_and_image_results(self):
+        body = self.main.build_llm_request_body(
+            {
+                "model": "gpt-5.6-sol",
+                "protocol": "responses",
+                "provider": {},
+                "web_search": True,
+                "web_search_options": {
+                    "search_context_size": "high",
+                    "search_content_types": ["image", "text", "image"],
+                    "image_max_results": 6,
+                    "include_sources": True,
+                },
+            },
+            [{"role": "user", "content": "研究时尚广告案例"}],
+        )
+
+        self.assertEqual(body["tools"], [{
+            "type": "web_search",
+            "search_context_size": "high",
+            "search_content_types": ["image", "text"],
+            "image_settings": {"max_results": 6, "caption": True},
+        }])
+        self.assertEqual(body["include"], ["web_search_call.action.sources", "web_search_call.results"])
+
+    def test_responses_web_search_evidence_extracts_queries_sources_and_images(self):
+        evidence = self.main.responses_web_search_evidence({
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "action": {
+                        "type": "search",
+                        "queries": ["Vogue daylight editorial"],
+                        "sources": [{"url": "https://vogue.example/case", "title": "Vogue case"}],
+                    },
+                    "results": [{
+                        "type": "image_result",
+                        "image_url": "https://cdn.example/case.jpg",
+                        "thumbnail_url": "https://cdn.example/case-thumb.jpg",
+                        "source_website_url": "https://vogue.example/case",
+                        "caption": "Daylight fashion editorial",
+                    }],
+                },
+                {
+                    "type": "message",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "研究结果",
+                        "annotations": [{"type": "url_citation", "url": "https://vogue.example/case", "title": "Vogue case"}],
+                    }],
+                },
+            ],
+        })
+
+        self.assertTrue(evidence["used"])
+        self.assertEqual(evidence["queries"], ["Vogue daylight editorial"])
+        self.assertEqual(evidence["sources"][0]["type"], "citation")
+        self.assertEqual(evidence["images"][0]["image_url"], "https://cdn.example/case.jpg")
+
     def test_ecommerce_native_responses_allows_builtin_web_search_for_text_requests(self):
         self.assertTrue(self.main.provider_supports_builtin_web_search({
             "id": "ecommerce-vision",

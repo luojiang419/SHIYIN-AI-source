@@ -4522,6 +4522,10 @@ class CanvasLLMRequest(BaseModel):
     image_labels: List[str] = []  # 与 images 同序的影视资产映射标签
     videos: List[str] = []   # 可以是 /output/*.mp4、/assets/*.mp4 本地路径 或 http(s) URL 或 data URL
     web_search: bool = False  # Responses 协议下允许模型调用内置联网搜索
+    web_search_context_size: str = ""
+    web_search_content_types: List[str] = []
+    web_search_image_max_results: int = Field(default=0, ge=0, le=12)
+    web_search_include_sources: bool = False
     # 视频润色/自动解析始终使用完整版导演规则；Responses 请求通过 SSE 保持长任务连接，
     # retry_524 仅用于上游明确返回 524 时对同一请求重试。
     retry_524: int = Field(default=2, ge=0, le=2)
@@ -5657,7 +5661,35 @@ def build_llm_request_body(transport, messages, stream=False):
             body["instructions"] = merged_instructions
         if transport.get("web_search"):
             # GPT-5.6 Sol 等 Responses 模型可直接调用 OpenAI 内置联网搜索。
-            body["tools"] = [{"type": "web_search"}]
+            search_options = transport.get("web_search_options") if isinstance(transport.get("web_search_options"), dict) else {}
+            if not any(search_options.values()):
+                body["tools"] = [{"type": "web_search"}]
+            else:
+                search_tool = {"type": "web_search"}
+                context_size = str(search_options.get("search_context_size") or "").strip().lower()
+                if context_size in {"low", "medium", "high"}:
+                    search_tool["search_context_size"] = context_size
+                content_types = [
+                    str(item or "").strip().lower()
+                    for item in (search_options.get("search_content_types") or [])
+                    if str(item or "").strip().lower() in {"text", "image"}
+                ]
+                if content_types:
+                    search_tool["search_content_types"] = list(dict.fromkeys(content_types))
+                try:
+                    image_max_results = max(0, min(12, int(search_options.get("image_max_results") or 0)))
+                except (TypeError, ValueError):
+                    image_max_results = 0
+                if image_max_results and "image" in content_types:
+                    search_tool["image_settings"] = {"max_results": image_max_results, "caption": True}
+                body["tools"] = [search_tool]
+                include = []
+                if bool(search_options.get("include_sources")):
+                    include.append("web_search_call.action.sources")
+                if "image" in content_types:
+                    include.append("web_search_call.results")
+                if include:
+                    body["include"] = include
     else:
         body["messages"] = messages
     if stream:
@@ -5961,6 +5993,96 @@ def text_from_responses_response(data):
     if parts:
         return "\n".join(parts)
     return text_from_chat_response(data)
+
+
+def responses_web_search_evidence(data):
+    """提取 Responses web_search 的查询、完整来源、引用和图片候选。"""
+    data = unwrap_apimart_response(data) if isinstance(data, dict) else {}
+    queries: List[str] = []
+    sources: List[Dict[str, str]] = []
+    images: List[Dict[str, str]] = []
+    call_count = 0
+
+    def add_query(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                add_query(item)
+            return
+        text = re.sub(r"[\x00-\x1f]", " ", str(value or "").strip())[:1000]
+        if text and text not in queries:
+            queries.append(text)
+
+    def add_source(value: Any, *, citation: bool = False) -> None:
+        if isinstance(value, str):
+            value = {"url": value}
+        if not isinstance(value, dict):
+            return
+        url = str(value.get("url") or value.get("source_website_url") or "").strip()[:2000]
+        if not url.startswith(("http://", "https://")):
+            return
+        entry = {
+            "url": url,
+            "title": re.sub(r"[\x00-\x1f]", " ", str(value.get("title") or value.get("name") or "").strip())[:500],
+            "type": "citation" if citation else str(value.get("type") or "source")[:80],
+        }
+        existing = next((item for item in sources if item.get("url") == url), None)
+        if existing:
+            if entry["title"] and not existing.get("title"):
+                existing["title"] = entry["title"]
+            if citation:
+                existing["type"] = "citation"
+            return
+        sources.append(entry)
+
+    def add_image(value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        image_url = str(value.get("image_url") or "").strip()[:4000]
+        thumbnail_url = str(value.get("thumbnail_url") or "").strip()[:4000]
+        if not image_url.startswith(("http://", "https://")) and not thumbnail_url.startswith(("http://", "https://")):
+            return
+        source_url = str(value.get("source_website_url") or value.get("url") or "").strip()[:2000]
+        entry = {
+            "image_url": image_url,
+            "thumbnail_url": thumbnail_url,
+            "source_website_url": source_url,
+            "caption": re.sub(r"[\x00-\x1f]", " ", str(value.get("caption") or value.get("title") or "").strip())[:800],
+        }
+        key = image_url or thumbnail_url
+        if key and not any((item.get("image_url") or item.get("thumbnail_url")) == key for item in images):
+            images.append(entry)
+        if source_url:
+            add_source({"url": source_url, "title": entry["caption"], "type": "image_source"})
+
+    for item in data.get("output") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").strip().lower() == "web_search_call":
+            call_count += 1
+            action = item.get("action") if isinstance(item.get("action"), dict) else {}
+            add_query(action.get("query"))
+            add_query(action.get("queries"))
+            for source in [*(action.get("sources") or []), *(item.get("sources") or [])]:
+                add_source(source)
+            for result in [*(item.get("results") or []), *(action.get("results") or [])]:
+                if isinstance(result, dict) and str(result.get("type") or "").strip().lower() == "image_result":
+                    add_image(result)
+                else:
+                    add_source(result)
+        for content in item.get("content") or []:
+            if not isinstance(content, dict):
+                continue
+            for annotation in content.get("annotations") or []:
+                if isinstance(annotation, dict) and str(annotation.get("type") or "").strip().lower() == "url_citation":
+                    add_source(annotation, citation=True)
+
+    return {
+        "used": call_count > 0,
+        "call_count": call_count,
+        "queries": queries[:20],
+        "sources": sources[:80],
+        "images": images[:12],
+    }
 
 def text_from_llm_response(data, protocol="chat_completions"):
     if str(protocol or "").strip().lower() == "responses":
@@ -15964,6 +16086,7 @@ async def execute_ai_image_batch(
     allow_edit_endpoint_fallback: bool = True,
     semantic_mask: bool = False,
     progress_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    prompts: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     provider = get_api_provider(provider_id)
     default_model = (provider.get("image_models") or [IMAGE_MODEL])[0]
@@ -15981,8 +16104,11 @@ async def execute_ai_image_batch(
             await result
 
     async def generate_one(index: int):
+        current_prompt = prompt
+        if isinstance(prompts, list) and index < len(prompts) and str(prompts[index] or "").strip():
+            current_prompt = str(prompts[index]).strip()
         image_data, raw_item = await generate_ai_image(
-            prompt,
+            current_prompt,
             size,
             quality,
             resolved_model,
@@ -17434,6 +17560,63 @@ LOOKBOOK_AUTO_STYLE_IDS = {
     "material-closeup",
 }
 
+LOOKBOOK_DERIVED_OPTION_KEYS = {
+    "lookbook_reference_analysis",
+    "search_context",
+    "lookbook_visual_system",
+    "lookbook_research_sources",
+    "lookbook_research_images",
+    "lookbook_research_queries",
+    "lookbook_research_evidence_status",
+    "lookbook_research_direction",
+    "lookbook_research_shots",
+    "lookbook_plan",
+    "lookbook_auto_decision",
+}
+
+
+def lookbook_context_signature(snapshot: Dict[str, Any]) -> str:
+    """标识一次研究所依赖的用户输入；派生结果只能在签名一致时复用。"""
+    options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    inputs = []
+    for item in snapshot.get("inputs") or []:
+        if not isinstance(item, dict):
+            continue
+        inputs.append({
+            "url": str(item.get("url") or "").strip(),
+            "role": str(item.get("lookbook_role") or item.get("reference_type") or item.get("role") or "").strip(),
+            "name": str(item.get("name") or "").strip(),
+        })
+    payload = {
+        "instruction": str(options.get("instruction") or "").strip(),
+        "style": {
+            "id": str(style.get("id") or "").strip(),
+            "name": str(style.get("name") or "").strip(),
+            "prompt": str(style.get("prompt") or "").strip(),
+            "source": str(style.get("source") or "").strip(),
+        },
+        "inputs": inputs,
+        "aspect_ratio": str(snapshot.get("aspect_ratio") or "").strip(),
+        "count": int(snapshot.get("count") or options.get("lookbook_count") or 1),
+        "research_depth": str(options.get("lookbook_research_depth") or "deep").strip().lower(),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def invalidate_stale_lookbook_context(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    options = dict(snapshot.get("options") or {})
+    signature = lookbook_context_signature({**snapshot, "options": options})
+    previous = str(options.get("lookbook_context_signature") or "").strip()
+    has_derived = any(options.get(key) not in (None, "", {}, []) for key in LOOKBOOK_DERIVED_OPTION_KEYS)
+    invalidated = bool(has_derived and previous != signature)
+    if invalidated:
+        for key in LOOKBOOK_DERIVED_OPTION_KEYS:
+            options.pop(key, None)
+    options["lookbook_context_signature"] = signature
+    return {**snapshot, "options": options}, invalidated
+
 
 def normalize_lookbook_auto_decision(value: Any) -> Dict[str, Any]:
     """规范化视觉模型的自动风格选型，防止模型输出非法 taxonomy。"""
@@ -17507,6 +17690,7 @@ def normalize_lookbook_visual_research(value: Any) -> Dict[str, Any]:
 
     visual = parsed.get("visual_system") if isinstance(parsed.get("visual_system"), dict) else {}
     palette = visual.get("palette") if isinstance(visual.get("palette"), dict) else {}
+    primary = parsed.get("primary_direction") if isinstance(parsed.get("primary_direction"), dict) else {}
     sources = []
     for item in parsed.get("sources") or []:
         if not isinstance(item, dict):
@@ -17541,13 +17725,89 @@ def normalize_lookbook_visual_research(value: Any) -> Dict[str, Any]:
     summary = text_field(parsed, "summary", 1800) or str(value or "").strip()[:1800]
     methods = text_list(parsed.get("transferable_methods"), 10, 600)
     do_not_copy = text_list(parsed.get("do_not_copy"), 10, 400)
+    shot_recommendations = []
+    for item in parsed.get("shot_recommendations") or []:
+        if not isinstance(item, dict):
+            continue
+        shot_recommendations.append({
+            "role": text_field(item, "role", 120),
+            "camera": text_field(item, "camera", 500),
+            "action": text_field(item, "action", 500),
+            "lighting": text_field(item, "lighting", 500),
+            "composition": text_field(item, "composition", 500),
+            "material_focus": text_field(item, "material_focus", 400),
+        })
     return {
         "summary": summary,
         "sources": sources[:8],
+        "research_focus": text_list(parsed.get("research_focus"), 8, 400),
+        "primary_direction": {
+            "name": text_field(primary, "name", 200),
+            "reason": text_field(primary, "reason", 1000),
+            "source_basis": text_list(primary.get("source_basis"), 8, 400),
+            "avoid_mixing": text_list(primary.get("avoid_mixing"), 8, 400),
+        },
         "visual_system": visual_system,
+        "shot_recommendations": shot_recommendations[:4],
         "transferable_methods": methods,
         "do_not_copy": do_not_copy,
     }
+
+
+def lookbook_research_focus(snapshot: Dict[str, Any]) -> List[str]:
+    roles = {
+        str(item.get("lookbook_role") or item.get("reference_type") or item.get("role") or "").strip()
+        for item in (snapshot.get("inputs") or [])
+        if isinstance(item, dict)
+    }
+    focus = []
+    if "人物" in roles:
+        focus.append("围绕人物现有面貌、体态和服装，研究可执行的动作、视线、景别与情绪瞬间，不研究换脸换装")
+    if "商品" in roles:
+        focus.append("研究商品与人物或环境的叙事关系、SKU 结构可见度、材质光和英雄构图")
+    if "场景" in roles:
+        focus.append("研究如何在保留现有场景几何与标识的前提下使用机位、前景、自然光或闪光塑造层次")
+    else:
+        focus.append("研究与现有主体相容的具体地点类型、时间和光线，不使用空白棚拍或无意义渐变背景")
+    if "材质" in roles:
+        focus.append("研究面料或工艺的微距光线、触感和与主体接触方式")
+    if "版式" in roles:
+        focus.append("已有版式参考是构图权威；搜索只补充摄影方法，不重新设计版式")
+    else:
+        focus.append("研究适合当前画幅的主体位置、负空间和文字安全区")
+    if "姿态" in roles:
+        focus.append("已有姿态参考是动作权威；搜索只补充快门瞬间、机位和环境互动")
+    return focus[:6]
+
+
+LOOKBOOK_DEFAULT_SHOT_ROLES = (
+    "环境建立：交代地点、人物尺度、主光方向和系列色彩基调",
+    "动作经过：捕捉人物与商品或环境发生关系的决定性瞬间",
+    "情绪停顿：用视线、呼吸、手部和重心承载人物状态",
+    "材质收束：强调服装、商品或场景材质及真实接触关系",
+)
+
+
+def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
+    """把联网研究镜头卡绑定到独立请求，避免同一 prompt 重复抽四次。"""
+    options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
+    cards = [item for item in (options.get("lookbook_research_shots") or []) if isinstance(item, dict)]
+    if not cards:
+        return []
+    count = max(1, min(4, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
+    base_prompt = str(snapshot.get("prompt") or "").strip()
+    prompts = []
+    for index in range(count):
+        card = dict(cards[index]) if index < len(cards) else {}
+        card["role"] = str(card.get("role") or LOOKBOOK_DEFAULT_SHOT_ROLES[index % len(LOOKBOOK_DEFAULT_SHOT_ROLES)])
+        prompts.append(
+            base_prompt
+            + " CURRENT OUTPUT ASSIGNMENT: Generate only series frame "
+            + f"{index + 1}/{count}. Execute only this shot card: "
+            + json.dumps(card, ensure_ascii=False, separators=(",", ":"))
+            + ". Do not combine this with the other series frames; output one full-bleed photograph only, never a grid, contact sheet, collage or storyboard."
+        )
+    return prompts
 
 
 async def enrich_lookbook_reference_analysis(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
@@ -17605,40 +17865,94 @@ async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, An
     reference_analysis = str(options.get("lookbook_reference_analysis") or "").strip()[:7000]
     research_depth = str(options.get("lookbook_research_depth") or "deep").strip().lower()
     depth_hint = "进行至少 4 组交叉检索，优先返回有明确来源的案例" if research_depth == "deep" else "进行 2-3 组针对性检索"
+    research_focus = lookbook_research_focus(snapshot)
     request = CanvasLLMRequest(
         message=(
             f"请使用联网搜索，{depth_hint}，检索与以下 Lookbook 时尚大片创意、人物造型和视觉风格相关的优秀公开案例。"
             f"{LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE}"
+            "先按本次素材缺口分别搜索，再从检索结果中选择一个最适合执行的主案例方向；不要把多个品牌方向平均混合成泛化的时尚感。"
+            "必须打开并核对来源页；图片搜索结果用于判断实际画面的色彩、机位、动作、材质和留白，不得只根据品牌名猜测。"
             "把搜索结果转化成可执行的视觉系统，尤其要给出具体颜色/色相、明度和饱和度关系、色彩比例、光色与肤色处理，"
             "以及造型层次、面料表现、城市环境、动作生命力、镜头构图、版式留白和后期/印刷质感。"
             "输出严格 JSON，不要 Markdown，结构必须是："
             '{"sources":[{"publication_or_brand":"","case_or_campaign":"","url":"","why_relevant":""}],'
+            '"research_focus":[""],"primary_direction":{"name":"","reason":"","source_basis":[""],"avoid_mixing":[""]},'
             '"visual_system":{"palette":{"dominant":"","secondary":"","accent":"","ratios":"","contrast":"","light_color":""},'
             '"color_grade":"","styling":"","lighting":"","materials":"","camera_and_composition":"",'
             '"environment_and_motion":"","typography_and_negative_space":"","finish":"","anti_generic_rules":[""]},'
+            '"shot_recommendations":[{"role":"","camera":"","action":"","lighting":"","composition":"","material_focus":""}],'
             '"transferable_methods":[""],"do_not_copy":[""],"summary":""}.\n'
             f"创意需求：{query}\n选定风格：{style_prompt or '高级时尚编辑'}\n"
+            f"本次只需要补足的研究重点：{json.dumps(research_focus, ensure_ascii=False)}\n"
             f"参考图事实分析（必须围绕这些人物/服装事实研究）：{reference_analysis or '尚未提供，按用户需求研究'}"
         ),
         system_prompt="你是顶级时尚杂志视觉研究主编与色彩总监。必须实际使用联网搜索；只输出严格 JSON；来源不确定就省略，不得编造。",
-        provider=route["provider_id"], model=route["model"], web_search=True, retry_524=1,
+        provider=route["provider_id"], model=route["model"], web_search=True,
+        web_search_context_size="high", web_search_content_types=["image", "text"],
+        web_search_image_max_results=6, web_search_include_sources=True, retry_524=1,
     )
     try:
-        result = await canvas_llm(request)
+        search_mode = "image_and_text"
+        try:
+            result = await canvas_llm(request)
+        except HTTPException as exc:
+            if int(exc.status_code or 0) not in {400, 422}:
+                raise
+            fallback_request = request.model_copy(update={
+                "web_search_context_size": "",
+                "web_search_content_types": [],
+                "web_search_image_max_results": 0,
+                "web_search_include_sources": False,
+            })
+            result = await canvas_llm(fallback_request)
+            search_mode = "text_fallback"
         text = str(result.get("text") or "").strip()[:16000]
         if not text:
             return snapshot, {"status": "failed", "reason": "联网搜索未返回摘要"}
         research = normalize_lookbook_visual_research(text)
+        evidence = result.get("web_search") if isinstance(result.get("web_search"), dict) else {}
+        evidence_sources = [item for item in (evidence.get("sources") or []) if isinstance(item, dict)]
+        known_urls = {str(item.get("url") or "").strip() for item in research.get("sources") or []}
+        for source in evidence_sources:
+            url = str(source.get("url") or "").strip()
+            if not url or url in known_urls:
+                continue
+            research.setdefault("sources", []).append({
+                "publication_or_brand": str(source.get("title") or "")[:160],
+                "case_or_campaign": str(source.get("title") or "")[:240],
+                "url": url[:500],
+                "why_relevant": "Responses web_search 检索来源",
+            })
+            known_urls.add(url)
         compact_context = "\n".join(
             [
                 str(research.get("summary") or "").strip(),
+                f"主视觉方向：{json.dumps(research.get('primary_direction') or {}, ensure_ascii=False, separators=(',', ':'))}",
                 *[f"可迁移方法：{item}" for item in research.get("transferable_methods") or []],
                 *[f"禁止复制：{item}" for item in research.get("do_not_copy") or []],
             ]
         ).strip()
         options["search_context"] = (compact_context or text)[:7000]
         options["lookbook_visual_system"] = research.get("visual_system") or {}
-        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, {"status": "succeeded", "summary": research.get("summary") or text, "visual_system": research.get("visual_system") or {}, "sources": research.get("sources") or []}
+        options["lookbook_research_sources"] = (research.get("sources") or [])[:20]
+        options["lookbook_research_images"] = [item for item in (evidence.get("images") or []) if isinstance(item, dict)][:6]
+        options["lookbook_research_queries"] = [str(item)[:1000] for item in (evidence.get("queries") or [])][:20]
+        options["lookbook_research_evidence_status"] = "verified" if bool(evidence.get("used")) else "unverified"
+        options["lookbook_research_direction"] = research.get("primary_direction") or {}
+        options["lookbook_research_shots"] = research.get("shot_recommendations") or []
+        meta = {
+            "status": "succeeded",
+            "search_mode": search_mode,
+            "evidence_status": options["lookbook_research_evidence_status"],
+            "summary": research.get("summary") or text,
+            "primary_direction": research.get("primary_direction") or {},
+            "visual_system": research.get("visual_system") or {},
+            "shot_recommendations": research.get("shot_recommendations") or [],
+            "sources": options["lookbook_research_sources"],
+            "images": options["lookbook_research_images"],
+            "queries": options["lookbook_research_queries"],
+        }
+        return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, meta
     except Exception as exc:
         return snapshot, {"status": "failed", "reason": str(exc)[:240]}
 
@@ -17659,6 +17973,21 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
     brief = str(options.get("instruction") or "自由创作一组高级时尚 Lookbook 平面广告").strip()[:4000]
     images = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
     labels = [str(item.get("label") or item.get("name") or "参考素材")[:120] for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
+    user_image_count = len(images)
+    research_images = []
+    for item in options.get("lookbook_research_images") or []:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("thumbnail_url") or item.get("image_url") or "").strip()
+        if not url.startswith(("http://", "https://")) or url in images:
+            continue
+        images.append(url)
+        caption = str(item.get("caption") or "公开案例图片")[:240]
+        source_url = str(item.get("source_website_url") or "")[:500]
+        labels.append(f"联网案例方法证据（只能分析视觉方法，禁止复制主体/品牌/文字/地点）：{caption}；来源页：{source_url}"[:900])
+        research_images.append(item)
+        if len(research_images) >= 4:
+            break
     auto_router_instruction = (
         "当前选择的是自动风格。你必须先作为视觉风格总监解析所有参考图的内容元素、人物/商品/场景关系、光线、色彩、材质、动作潜力和用户需求，"
         "然后从以下既有风格 taxonomy 中选择一个最适合的风格 ID："
@@ -17677,16 +18006,29 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
             "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
             "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
+            + ("最后几张输入图是联网案例方法证据，只能用来观察色彩比例、光源、景别、动作、材质和留白；绝不能把其中人物、服装、Logo、文案、独特地点或商品当成本次生成素材。必须从案例中选一个主方向，不要平均混合多个品牌视觉。\n" if research_images else "")
             + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"auto", "fw-cream-cyan-film", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
             + f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
             f"参考图事实分析：{str(options.get('lookbook_reference_analysis') or '')[:7000]}\n"
-            f"案例方法与色彩系统：{str(options.get('search_context') or '')[:8000]}"
+            f"案例研究摘要：{str(options.get('search_context') or '')[:6000]}\n"
+            f"完整视觉系统：{json.dumps(options.get('lookbook_visual_system') or {}, ensure_ascii=False, separators=(',', ':'))[:9000]}\n"
+            f"主案例方向：{json.dumps(options.get('lookbook_research_direction') or {}, ensure_ascii=False, separators=(',', ':'))[:3000]}\n"
+            f"搜索建议镜头：{json.dumps(options.get('lookbook_research_shots') or [], ensure_ascii=False, separators=(',', ':'))[:6000]}\n"
+            f"实际搜索查询：{json.dumps(options.get('lookbook_research_queries') or [], ensure_ascii=False)[:3000]}\n"
+            "最终方案必须给每张输出分配唯一的编号镜头角色，依次写明景别、机位、主体位置、动作与视线、光线、前景/留白和材质重点；每张仍是一幅独立完整照片，禁止四宫格、拼贴或故事板。"
         ),
         system_prompt="你是资深时尚广告创意总监、造型总监与色彩总监。请给出具体、可执行、可交给图片模型的方案；拒绝泛泛的‘高级、质感、大片’形容词。",
         provider=route["provider_id"], model=route["model"], images=images, image_labels=labels, web_search=False, retry_524=1,
     )
     try:
-        result = await canvas_llm(request)
+        try:
+            result = await canvas_llm(request)
+        except Exception:
+            if not research_images:
+                raise
+            request = request.model_copy(update={"images": images[:user_image_count], "image_labels": labels[:user_image_count]})
+            result = await canvas_llm(request)
+            research_images = []
         text = str(result.get("text") or "").strip()[:12000]
         if not text:
             return snapshot, {"status": "failed", "reason": "视觉策划未返回方案"}
@@ -17696,7 +18038,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
             options["lookbook_auto_decision"] = decision
             text = decision.get("art_direction") or text
         options["lookbook_plan"] = text
-        response_meta = {"status": "succeeded", "summary": text}
+        response_meta = {"status": "succeeded", "summary": text, "research_images_used": len(research_images)}
         if decision:
             response_meta["auto_decision"] = decision
         return {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}, response_meta
@@ -17847,6 +18189,13 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
     lookbook_agent = is_lookbook_snapshot(snapshot)
+    if lookbook_agent:
+        snapshot, context_invalidated = invalidate_stale_lookbook_context(snapshot)
+        update_ecommerce_task(task_id, {
+            "options": snapshot.get("options") or {},
+            "request": snapshot,
+            "lookbook_context_invalidated": context_invalidated,
+        })
     lookbook_options = dict(snapshot.get("options") or {})
     lookbook_reference_analysis = None
     lookbook_research = None
@@ -17971,6 +18320,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                         "model": partial_result["model"],
                     })
 
+                generation_prompts = lookbook_generation_prompts(snapshot) if lookbook_agent else []
                 batch = await execute_ai_image_batch(
                     prompt=snapshot["prompt"],
                     provider_id=route["provider_id"],
@@ -17983,6 +18333,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     allow_edit_endpoint_fallback=False,
                     semantic_mask=True,
                     progress_callback=publish_ecommerce_partial,
+                    prompts=generation_prompts or None,
                 )
                 lookbook_quality = None
                 if lookbook_agent and bool((snapshot.get("options") or {}).get("lookbook_quality_gate", True)):
@@ -18020,6 +18371,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     "garment_analysis": garment_analysis,
                     "universal_analysis": universal_analysis,
                     "lookbook_quality": lookbook_quality,
+                    "lookbook_generation_prompts": generation_prompts,
                     "upstream_task_id": extract_task_id(raw) if isinstance(raw, dict) else None,
                     "request_id": raw.get("id") if isinstance(raw, dict) else None,
                     "generation_started_at": batch["generation_started_at"],
@@ -21629,6 +21981,12 @@ async def canvas_llm(payload: CanvasLLMRequest, progress_callback=None):
     _llm_transport["web_search"] = bool(payload.web_search) and provider_supports_builtin_web_search(
         _llm_transport.get("provider")
     )
+    _llm_transport["web_search_options"] = {
+        "search_context_size": payload.web_search_context_size,
+        "search_content_types": payload.web_search_content_types,
+        "image_max_results": payload.web_search_image_max_results,
+        "include_sources": payload.web_search_include_sources,
+    }
     model = _llm_transport["model"]
     _llm_provider = _llm_transport["provider"]
     _llm_protocol = _llm_transport["protocol"]
@@ -21718,12 +22076,16 @@ async def canvas_llm(payload: CanvasLLMRequest, progress_callback=None):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"解析回复内容失败：{exc}") from exc
     raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else {}
+    search_evidence = responses_web_search_evidence(raw_data) if _llm_protocol == "responses" else {
+        "used": False, "call_count": 0, "queries": [], "sources": [], "images": [],
+    }
     return {
         "text": text,
         "model": model,
         "raw_usage": raw_data.get("usage"),
         "used_images": min(len(image_inputs), 20) if image_inputs else 0,
         "used_videos": min(len(video_inputs), 3) if video_inputs else 0,
+        "web_search": search_evidence,
     }
 
 @app.post("/api/canvas-prompt-polish")

@@ -268,11 +268,86 @@ class LookbookPremiumResearchTests(unittest.TestCase):
                 "anti_generic_rules": ["拒绝白底棚拍"],
             },
             "transferable_methods": ["用城市反射制造层次"],
+            "primary_direction": {"name": "冷日光街头纪实", "reason": "匹配现有场景", "source_basis": ["Vogue case"], "avoid_mixing": ["棚拍闪光"]},
+            "shot_recommendations": [{"role": "环境建立", "camera": "35mm 眼平", "action": "沿街行走", "lighting": "侧逆光", "composition": "主体偏左", "material_focus": "皮革反光"}],
             "summary": "色彩明确",
         }, ensure_ascii=False))
         self.assertEqual(value["sources"][0]["publication_or_brand"], "Vogue")
         self.assertEqual(value["visual_system"]["palette"]["ratios"], "65/25/10")
         self.assertEqual(value["visual_system"]["anti_generic_rules"], ["拒绝白底棚拍"])
+        self.assertEqual(value["primary_direction"]["name"], "冷日光街头纪实")
+        self.assertEqual(value["shot_recommendations"][0]["camera"], "35mm 眼平")
+
+    def test_context_signature_invalidates_stale_research_when_brief_changes(self):
+        snapshot = {
+            "operation": "universal",
+            "aspect_ratio": "3:4",
+            "count": 4,
+            "inputs": [{"url": "/assets/input/model.png", "lookbook_role": "人物"}],
+            "options": {
+                "prompt_policy": "lookbook",
+                "instruction": "旧需求",
+                "lookbook_style": {"id": "fw-cream-cyan-film", "prompt": "fixed preset"},
+                "search_context": "旧案例摘要",
+                "lookbook_plan": "旧方案",
+                "lookbook_context_signature": "stale",
+            },
+        }
+
+        refreshed, invalidated = main.invalidate_stale_lookbook_context(snapshot)
+
+        self.assertTrue(invalidated)
+        self.assertNotIn("search_context", refreshed["options"])
+        self.assertNotIn("lookbook_plan", refreshed["options"])
+        self.assertEqual(len(refreshed["options"]["lookbook_context_signature"]), 64)
+
+    def test_researched_shot_cards_create_distinct_single_frame_prompts(self):
+        snapshot = {
+            "count": 2,
+            "prompt": "BASE LOOKBOOK PROMPT",
+            "options": {
+                "prompt_policy": "lookbook",
+                "lookbook_research_shots": [
+                    {"role": "环境建立", "camera": "35mm wide"},
+                    {"role": "动作经过", "camera": "50mm medium"},
+                ],
+            },
+        }
+
+        prompts = main.lookbook_generation_prompts(snapshot)
+
+        self.assertEqual(len(prompts), 2)
+        self.assertIn("series frame 1/2", prompts[0])
+        self.assertIn("35mm wide", prompts[0])
+        self.assertIn("series frame 2/2", prompts[1])
+        self.assertIn("50mm medium", prompts[1])
+        self.assertIn("one full-bleed photograph only", prompts[0])
+
+    def test_image_search_parameter_error_falls_back_to_plain_web_search(self):
+        calls = []
+
+        async def fake_canvas_llm(request):
+            calls.append(request)
+            if request.web_search_content_types:
+                raise main.HTTPException(status_code=400, detail="unsupported image search option")
+            return {
+                "text": json.dumps({"summary": "纯文本搜索仍可用", "visual_system": {"lighting": "侧光"}}, ensure_ascii=False),
+                "web_search": {"used": True, "queries": ["fashion campaign"], "sources": [], "images": []},
+            }
+
+        snapshot = {
+            "operation": "universal",
+            "inputs": [],
+            "options": {"prompt_policy": "lookbook", "instruction": "极简商品广告", "lookbook_search": True},
+        }
+        with patch.object(main, "configured_ecommerce_vision_route", return_value={"provider_id": "responses", "model": "gpt-5.6-sol"}), patch.object(main, "canvas_llm", new=fake_canvas_llm):
+            enriched, meta = asyncio.run(main.enrich_lookbook_search(snapshot))
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].web_search_content_types, ["image", "text"])
+        self.assertEqual(calls[1].web_search_content_types, [])
+        self.assertEqual(meta["search_mode"], "text_fallback")
+        self.assertEqual(enriched["options"]["lookbook_visual_system"]["lighting"], "侧光")
 
     def test_reference_facts_are_analyzed_before_web_case_search(self):
         calls = []
@@ -282,9 +357,16 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             if request.web_search:
                 return {"text": json.dumps({
                     "sources": [{"publication_or_brand": "Dazed", "case_or_campaign": "street fashion", "url": "https://example.com", "why_relevant": "动态构图"}],
+                    "primary_direction": {"name": "动态街头纪实", "reason": "适合现有外套"},
                     "visual_system": {"palette": {"dominant": "炭黑", "accent": "电光绿", "ratios": "70/20/10"}, "environment_and_motion": "行走与前景遮挡"},
+                    "shot_recommendations": [{"role": "动作经过", "camera": "低机位跟拍"}],
                     "summary": "具体的街拍方法",
-                }, ensure_ascii=False)}
+                }, ensure_ascii=False), "web_search": {
+                    "used": True,
+                    "queries": ["Dazed street fashion movement"],
+                    "sources": [{"url": "https://dazed.example/editorial", "title": "Dazed movement editorial"}],
+                    "images": [{"image_url": "https://cdn.example/dazed.jpg", "thumbnail_url": "https://cdn.example/dazed-thumb.jpg", "source_website_url": "https://dazed.example/editorial", "caption": "Low-angle walking frame"}],
+                }}
             return {"text": '{"face":"清晰面部轮廓","wardrobe":"现有黑色外套","preserve_facts":["保持衣着"]}'}
 
         snapshot = {
@@ -307,7 +389,11 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("清晰面部轮廓", calls[1].message)
         self.assertEqual(analysis_meta["status"], "succeeded")
         self.assertEqual(research_meta["status"], "succeeded")
+        self.assertEqual(research_meta["evidence_status"], "verified")
         self.assertEqual(researched["options"]["lookbook_visual_system"]["palette"]["ratios"], "70/20/10")
+        self.assertEqual(researched["options"]["lookbook_research_queries"], ["Dazed street fashion movement"])
+        self.assertEqual(researched["options"]["lookbook_research_images"][0]["caption"], "Low-angle walking frame")
+        self.assertEqual(researched["options"]["lookbook_research_shots"][0]["camera"], "低机位跟拍")
 
 
 if __name__ == "__main__":

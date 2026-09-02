@@ -1571,7 +1571,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             parts.append("REFERENCE FACT ANALYSIS (facts first; preserve identity and existing wardrobe unless the user explicitly overrides): " + reference_analysis[:10000])
         if visual_system_text:
             parts.append("RESEARCHED EDITORIAL VISUAL SYSTEM (execute these decisions, do not mention the research or copy any named campaign): " + visual_system_text)
-        if research:
+        if research and not plan:
             parts.append("CASE STUDY RESEARCH SUMMARY (absorb methods only, do not copy subjects, brands, logos, locations or wording): " + research[:14000])
         if plan:
             parts.append("CREATIVE DIRECTOR PLAN (follow as the execution authority; it overrides generic defaults): " + plan[:14000])

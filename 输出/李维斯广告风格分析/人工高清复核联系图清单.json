@@ -1,0 +1,1149 @@
+[
+  {
+    "video_id": "01",
+    "candidate_count": 23,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_01.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00004_00005s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00008_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_01_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00012_00013s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00014_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00019_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00021_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00025_00025s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_01_00028_00028s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_01_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_01_0006.jpg"
+    ]
+  },
+  {
+    "video_id": "02",
+    "candidate_count": 43,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_02.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00005_00016s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00009_00025s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00011_00028s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00015_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00019_00042s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00022_00046s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00027_00053s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_02_00031_00058s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_02_0005.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_02_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_02_0013.jpg"
+    ]
+  },
+  {
+    "video_id": "03",
+    "candidate_count": 23,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_03.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00004_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00008_00007s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00010_00009s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00014_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00018_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_03_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00022_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00026_00023s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_03_00029_00028s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_03_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_03_0006.jpg"
+    ]
+  },
+  {
+    "video_id": "04",
+    "candidate_count": 13,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_04.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00002_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00003_00006s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00004_00007s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00005_00009s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00007_00011s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00009_00014s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_04_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_04_00011_00017s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_04_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_04_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_04_0004.jpg"
+    ]
+  },
+  {
+    "video_id": "05",
+    "candidate_count": 15,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_05.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00002_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00004_00007s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00005_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00006_00010s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00007_00011s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_05_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00011_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00014_00017s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_05_00015_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_05_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_05_0004.jpg"
+    ]
+  },
+  {
+    "video_id": "06",
+    "candidate_count": 70,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_06.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00013_00009s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00023_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_06_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00039_00038s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00045_00046s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00053_00055s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00062_00064s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00076_00074s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_06_00087_00082s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_06_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_06_0018.jpg"
+    ]
+  },
+  {
+    "video_id": "07",
+    "candidate_count": 48,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_07.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00006_00016s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00010_00028s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00014_00040s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00018_00052s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00021_00065s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00027_00080s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_07_00031_00091s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_07_0006.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_07_0010.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_07_0015.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_07_0019.jpg"
+    ]
+  },
+  {
+    "video_id": "08",
+    "candidate_count": 63,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_08.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_08_00001_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_08_00007_00047s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_08_00011_00084s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_08_00017_00105s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_08_00022_00128s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_08_00028_00168s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_08_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_08_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_08_0018.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_08_0024.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_08_0029.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_08_0035.jpg"
+    ]
+  },
+  {
+    "video_id": "09",
+    "candidate_count": 34,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_09.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00001_00000s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00008_00005s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00012_00009s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00016_00014s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_09_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00024_00027s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00029_00033s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00033_00036s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00042_00040s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_09_00048_00044s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_09_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_09_0010.jpg"
+    ]
+  },
+  {
+    "video_id": "10",
+    "candidate_count": 22,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_10.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00001_00000s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_10_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00016_00007s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00020_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_10_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00032_00013s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00034_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_10_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00045_00018s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00047_00024s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_10_00049_00027s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_10_0006.jpg"
+    ]
+  },
+  {
+    "video_id": "11",
+    "candidate_count": 33,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_11.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00001_00000s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00009_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00014_00006s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00019_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00021_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00025_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_11_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00033_00026s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00039_00031s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_11_00041_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_11_0005.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_11_0008.jpg"
+    ]
+  },
+  {
+    "video_id": "12",
+    "candidate_count": 56,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_12.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00001_00000s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00010_00006s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00021_00013s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00030_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_12_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00053_00031s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_12_0006.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_12_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00079_00053s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_12_00090_00057s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_12_0010.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_12_0014.jpg"
+    ]
+  },
+  {
+    "video_id": "13",
+    "candidate_count": 108,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_13.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00014_00033s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00023_00047s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00038_00061s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00051_00074s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00060_00088s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00070_00104s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00080_00118s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_13_00093_00134s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_13_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_13_0021.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_13_0031.jpg"
+    ]
+  },
+  {
+    "video_id": "14",
+    "candidate_count": 11,
+    "selected_count": 11,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_14.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00002_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00003_00005s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00005_00007s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00007_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00009_00011s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_14_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00011_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_14_00013_00013s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_14_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_14_0003.jpg"
+    ]
+  },
+  {
+    "video_id": "15",
+    "candidate_count": 44,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_15.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00005_00006s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00009_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00012_00017s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_15_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00023_00029s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_15_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00034_00039s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_15_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_15_00044_00050s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_15_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_15_0011.jpg"
+    ]
+  },
+  {
+    "video_id": "16",
+    "candidate_count": 23,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_16.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00001_00000s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00006_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_16_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00012_00010s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00015_00014s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00018_00018s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_16_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00021_00023s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00025_00025s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_16_00027_00029s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_16_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_16_0006.jpg"
+    ]
+  },
+  {
+    "video_id": "17",
+    "candidate_count": 44,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_17.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00005_00010s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_17_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00014_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00019_00027s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00022_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00027_00040s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00030_00044s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_17_00035_00054s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_17_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_17_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_17_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "18",
+    "candidate_count": 62,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_18.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_18_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_18_00007_00018s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_18_00012_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_18_00018_00090s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_18_00022_00105s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_18_00028_00142s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_18_0006.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_18_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_18_0017.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_18_0023.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_18_0028.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_18_0034.jpg"
+    ]
+  },
+  {
+    "video_id": "19",
+    "candidate_count": 23,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_19.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00007_00005s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_19_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00012_00009s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00018_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00024_00014s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_19_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00033_00018s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_19_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00042_00023s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_19_00046_00026s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_19_0006.jpg"
+    ]
+  },
+  {
+    "video_id": "20",
+    "candidate_count": 38,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_20.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00004_00006s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00008_00014s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00010_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00014_00026s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00019_00031s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00022_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00026_00042s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_20_00029_00051s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_20_0005.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_20_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_20_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "21",
+    "candidate_count": 219,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_21.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_21_00001_00035s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_21_00033_00073s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_21_00053_00187s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_21_00071_00268s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_21_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_21_00109_00484s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_21_00137_00517s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_21_0029.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_21_0049.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_21_0068.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_21_0088.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_21_0108.jpg"
+    ]
+  },
+  {
+    "video_id": "22",
+    "candidate_count": 36,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_22.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00007_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_22_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00014_00025s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00018_00033s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00020_00037s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00023_00043s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00026_00050s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_22_00029_00057s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_22_0006.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_22_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_22_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "23",
+    "candidate_count": 49,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_23.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00009_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00014_00016s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00019_00022s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00024_00027s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_23_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00034_00039s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00044_00046s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00050_00050s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_23_00055_00055s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_23_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_23_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "24",
+    "candidate_count": 37,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_24.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00001_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00006_00016s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00016_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00020_00023s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00027_00029s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_24_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00034_00038s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00039_00048s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_24_00041_00051s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_24_0005.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_24_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_24_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "25",
+    "candidate_count": 76,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_25.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00008_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00014_00033s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_25_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00026_00065s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00032_00082s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00039_00102s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_25_00045_00115s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_25_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_25_0013.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_25_0020.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_25_0027.jpg"
+    ]
+  },
+  {
+    "video_id": "26",
+    "candidate_count": 109,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_26.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00001_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00010_00025s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_26_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00031_00060s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00042_00081s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00051_00101s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00061_00116s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00076_00128s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_26_00089_00143s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_26_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_26_0022.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_26_0032.jpg"
+    ]
+  },
+  {
+    "video_id": "27",
+    "candidate_count": 46,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_27.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00007_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00010_00013s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00016_00018s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00021_00025s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00026_00030s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00031_00036s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00035_00042s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_27_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_27_00055_00055s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_27_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_27_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "28",
+    "candidate_count": 39,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_28.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00001_00007s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00009_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00013_00020s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00017_00026s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00020_00033s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00025_00038s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_28_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00039_00048s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_28_00042_00051s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_28_0005.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_28_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_28_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "29",
+    "candidate_count": 29,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_29.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00001_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00004_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00006_00024s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00009_00032s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00011_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00017_00040s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00019_00044s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_29_00024_00050s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_29_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_29_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_29_0009.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_29_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "30",
+    "candidate_count": 65,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_30.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00007_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00012_00028s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00017_00047s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00022_00058s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00028_00069s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00033_00081s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_30_00039_00095s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_30_0005.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_30_0010.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_30_0016.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_30_0022.jpg"
+    ]
+  },
+  {
+    "video_id": "31",
+    "candidate_count": 62,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_31.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00007_00020s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00011_00026s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00017_00044s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00021_00066s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00027_00084s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00031_00095s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_31_00038_00120s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_31_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_31_0014.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_31_0019.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_31_0025.jpg"
+    ]
+  },
+  {
+    "video_id": "32",
+    "candidate_count": 66,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_32.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_32_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_32_00008_00019s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_32_00013_00034s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_32_00019_00051s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_32_00024_00067s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_32_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_32_00034_00094s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_32_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_32_0006.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_32_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_32_0018.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_32_0024.jpg"
+    ]
+  },
+  {
+    "video_id": "33",
+    "candidate_count": 47,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_33.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_33_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00015_00016s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00020_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00029_00028s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00034_00033s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00041_00037s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00048_00043s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00059_00047s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_33_00064_00054s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_33_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_33_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "34",
+    "candidate_count": 42,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_34.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00001_00000s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00008_00008s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00012_00013s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00018_00022s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00024_00026s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_34_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_34_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00044_00041s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00049_00051s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_34_00054_00057s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_34_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_34_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "35",
+    "candidate_count": 60,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_35.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00001_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00008_00015s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00015_00023s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00021_00035s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_35_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00047_00055s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00057_00063s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00066_00075s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00075_00080s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_35_00081_00086s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_35_0013.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_35_0018.jpg"
+    ]
+  },
+  {
+    "video_id": "36",
+    "candidate_count": 50,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_36.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00001_00001s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00007_00006s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00012_00012s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_36_0002.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_36_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00037_00030s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00047_00036s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00060_00038s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00074_00045s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00086_00049s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_36_00094_00055s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_36_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "37",
+    "candidate_count": 49,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_37.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00001_00004s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00009_00011s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00017_00017s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00021_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_37_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00039_00031s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00044_00035s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00052_00042s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_37_0006.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_37_00065_00052s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_37_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_37_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "38",
+    "candidate_count": 48,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_38.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00001_00002s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00005_00009s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_38_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00013_00021s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00018_00027s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00021_00031s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_38_0003.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00035_00043s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_38_0004.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_38_00043_00053s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_38_0008.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_38_0012.jpg"
+    ]
+  },
+  {
+    "video_id": "39",
+    "candidate_count": 206,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_39.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_39_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_39_00019_00102s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_39_00035_00175s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_39_00052_00236s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_39_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_39_00086_00389s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_39_00128_00455s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_39_0023.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_39_0042.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_39_0061.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_39_0079.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_39_0098.jpg"
+    ]
+  },
+  {
+    "video_id": "40",
+    "candidate_count": 544,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_40.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00001_00003s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00048_00152s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00095_00292s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_40_0015.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00199_00527s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00249_00726s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00298_00826s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_40_00350_00922s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_40_0068.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_40_0117.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_40_0167.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_40_0216.jpg"
+    ]
+  },
+  {
+    "video_id": "41",
+    "candidate_count": 49,
+    "selected_count": 12,
+    "source_dimensions": [
+      720,
+      406
+    ],
+    "sheet_dimensions": [
+      2920,
+      1414
+    ],
+    "file": "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\人工高清复核联系图\\video_41.jpg",
+    "source_files": [
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00001_00005s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00005_00018s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_41_0001.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00013_00032s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00017_00040s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00022_00046s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00026_00053s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00030_00061s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\镜头变化帧-去重\\video_41_00035_00070s.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_41_0007.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_41_0012.jpg",
+      "E:\\APP\\SHIYIN-AI\\输出\\李维斯广告风格分析\\全部采样帧-5s\\video_41_0016.jpg"
+    ]
+  }
+]

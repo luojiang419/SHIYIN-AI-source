@@ -288,10 +288,9 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertNotIn("50mm", prompts[1])
         self.assertNotIn("85mm", prompts[2])
         self.assertIn("one heel lifted", prompts[0])
-        self.assertIn("begins removing one scene-owned newspaper", prompts[1])
+        self.assertIn("performs one concrete scene-owned task", prompts[1])
         self.assertIn("off-frame sound", prompts[2])
-        self.assertIn("left hand visibly holds a folded", prompts[2])
-        self.assertIn("rather than touching hair, chest or face", prompts[2])
+        self.assertIn("avoid beauty gestures", prompts[2])
         self.assertIn("finger pressure", prompts[3])
 
     def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):

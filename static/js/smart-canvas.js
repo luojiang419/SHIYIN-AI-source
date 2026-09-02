@@ -18943,7 +18943,7 @@ function comfyFieldKind(field){
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
-    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX), auto_optimize_prompt:runSettings.autoOptimizePrompt !== false, prompt_context:{node_type:'smart-image', operation:runSettings.operation || '', has_reference:imageRefsOnly(refs).length > 0}};
+    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX), auto_optimize_prompt:true, prompt_context:{node_type:'smart-image', operation:runSettings.operation || '', has_reference:imageRefsOnly(refs).length > 0}};
     if(runSettings.operation) payload.operation = runSettings.operation;
     if(runSettings.style_reference_url) payload.style_reference_url = runSettings.style_reference_url;
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
@@ -19151,7 +19151,6 @@ async function runModelscopeGeneration(prompt, refs, runSettings=settings){
     return results.filter(Boolean);
 }
 async function optimizeSmartModelscopePrompt(prompt, refs, runSettings, modelId){
-    if(runSettings.autoOptimizePrompt === false) return prompt;
     try {
         const response = await fetch('/api/image-prompt-optimize', {
             method:'POST',

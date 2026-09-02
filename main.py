@@ -4069,7 +4069,8 @@ class OnlineImageRequest(BaseModel):
     quality: str = "auto"
     n: int = 1
     reference_images: List[AIReference] = []
-    auto_optimize_prompt: bool = False
+    # 图片节点默认必须先经过 AI 助手优化；仅保留显式 false 作为内部兼容开关。
+    auto_optimize_prompt: bool = True
     optimizer_provider_id: str = ""
     optimizer_model: str = ""
     optimizer_web_search: Optional[bool] = None

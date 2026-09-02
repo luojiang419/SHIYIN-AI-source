@@ -172,8 +172,20 @@ def test_image_request_snapshot_keeps_optimization_settings_without_secrets():
 def test_canvas_generators_enable_automatic_optimization():
     classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
     smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
-    assert classic.count("auto_optimize_prompt:true") >= 3
-    assert "auto_optimize_prompt:runSettings.autoOptimizePrompt !== false" in smart
+    assert classic.count("auto_optimize_prompt:true") >= 12
+    for node_type in (
+        "panorama",
+        "special-image-edit",
+        "pose-replicate",
+        "building-multi-view",
+        "multi-view",
+        "film-storyboard",
+        "film-line-art",
+        "storyboard-transform",
+    ):
+        assert f"node_type:'{node_type}'" in classic
+    assert "auto_optimize_prompt:true" in smart
+    assert "auto_optimize_prompt:runSettings.autoOptimizePrompt !== false" not in smart
     assert "prompt_context:{node_type:'smart-image'" in smart
     assert "prompt_optimized: result.prompt || ''" in classic
     assert "prompt_optimization: result.prompt_optimization" in classic
@@ -187,6 +199,12 @@ def test_modelscope_direct_generation_calls_shared_optimizer_endpoint():
     assert "optimizeSmartModelscopePrompt(prompt, refs, runSettings, modelId)" in body
     assert "fetch('/api/image-prompt-optimize'" in body
     assert "已停止提交原始提示词" in body
+    assert "autoOptimizePrompt === false" not in body
+
+
+def test_image_request_defaults_to_mandatory_optimization():
+    payload = main.OnlineImageRequest(prompt="测试默认优化", provider_id="grsai", model="nano-banana-pro")
+    assert payload.auto_optimize_prompt is True
 
 
 def test_installer_and_browser_smoke_package_image_prompt_skill():

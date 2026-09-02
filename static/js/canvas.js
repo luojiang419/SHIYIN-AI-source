@@ -9088,7 +9088,9 @@ async function generateClassicPanorama(node, prompt){
         model:resolveImageModel(model),
         size:apiImageSize('custom', '2k', '2:1', ''),
         quality:'high',
-        reference_images:[]
+        reference_images:[],
+        auto_optimize_prompt:true,
+        prompt_context:{node_type:'panorama'}
     };
     const task = await createCanvasImageTask(payload);
     const result = await waitCanvasImageTaskResult(task.task_id);
@@ -9128,7 +9130,9 @@ async function generateClassicSpecialEdit(node, prompt, source, kind){
         model:resolveImageModel(node.editModel || model),
         size:apiImageSize('custom', node.editResolution || '2k', `${ratioParts.width}:${ratioParts.height}`, ''),
         quality:node.editQuality || 'high',
-        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}].concat(geometry ? [geometry] : []).concat(previous ? [previous] : [])
+        reference_images:[{url:source.url, name:source.name || 'reference.png', kind:'image'}].concat(geometry ? [geometry] : []).concat(previous ? [previous] : []),
+        auto_optimize_prompt:true,
+        prompt_context:{node_type:'special-image-edit', operation:kind === 'angle' ? 'angle_change' : 'relight', has_reference:true}
     };
     const task = await createCanvasImageTask(payload);
     const result = await waitCanvasImageTaskResult(task.task_id);
@@ -9210,7 +9214,9 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         model:resolveImageModel(model),
         size:requestSize,
         quality:'high',
-        reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+        reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX),
+        auto_optimize_prompt:true,
+        prompt_context:{node_type:'pose-replicate', reference_count:refs.length}
     };
     const position = classicPoseReplicateOutputPosition(node);
     const pendingId = uid('p');
@@ -9536,7 +9542,9 @@ async function generateClassicBuildingView(node, inputRefs, view){
         provider_id:node.apiProvider,
         model:node.model,
         size:apiImageSize('custom', node.resolution || '2k', view === 'sketch' ? '16:9' : '4:3'),
-        reference_images:referencePlan
+        reference_images:referencePlan,
+        auto_optimize_prompt:true,
+        prompt_context:{node_type:'building-multi-view', view, reference_count:referencePlan.length}
     };
     const quality = normalizedImageQuality(node.quality || 'high');
     if(quality) payload.quality = quality;
@@ -9896,7 +9904,9 @@ async function runClassicMultiViewNode(nodeId){
             provider_id:providerId,
             model,
             size:apiImageSize('custom', resolution, ratio),
-            reference_images:viewRefs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+            reference_images:viewRefs.slice(0, CANVAS_REFERENCE_IMAGE_MAX),
+            auto_optimize_prompt:true,
+            prompt_context:{node_type:'multi-view', view, output_kind:outputKind, reference_count:viewRefs.length}
         };
         if(quality) payload.quality = quality;
         const task = await createCanvasImageTask(payload);
@@ -10455,7 +10465,7 @@ async function runFilmLineArtNode(node, opts={}){
         const requestSize=await storyboardTransformSize(ref,model,transformOptions.ratio,transformOptions.resolution);
         const run=runSnapshot(node,prompt,[ref]);
         run.taskLabel=`生成线稿分镜 ${index + 1}/${refs.length}`;
-        const payload={prompt,provider_id:providerId,model,size:requestSize,quality:transformOptions.quality,reference_images:[ref]};
+        const payload={prompt,provider_id:providerId,model,size:requestSize,quality:transformOptions.quality,reference_images:[ref],auto_optimize_prompt:true,prompt_context:{node_type:'film-line-art',reference_count:1}};
         const pendingId=uid('p');
         const pending=makePendingForRun(pendingId,run,node,{refs:[ref],requestSize,cascadeTargetId:cascadeTargetIdFromOptions(opts)},{
             canvasTaskType:'online-image',providerId,model,appendGenerated:true,
@@ -10621,7 +10631,7 @@ async function runFilmNode(nodeId, opts={}){
     try {
         if(node.type === 'film-storyboard'){
             const imageProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
-            const payload={prompt:built.prompt,provider_id:imageProvider,model:resolveImageModel(node.model || providerImageModels(imageProvider)[0]),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high'};
+            const payload={prompt:built.prompt,provider_id:imageProvider,model:resolveImageModel(node.model || providerImageModels(imageProvider)[0]),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high',auto_optimize_prompt:true,prompt_context:{node_type:'film-storyboard',reference_count:refs.length}};
             pendings.forEach(pending => { pending.previewSize=pendingPreviewSizeFromSizeString(payload.size); });
             const tasks=await Promise.all(pendings.map(() => createCanvasImageTask(payload)));
             tasks.forEach((task,index) => { pendings[index].canvasTaskId=task.task_id; if(index === 0) pending.canvasTaskId=task.task_id; });
@@ -15402,7 +15412,9 @@ async function runGenerator(genId, opts={}){
         provider_id:resolveImageProviderId(gen.apiProvider || 'comfly'),
         model:resolveImageModel(gen.model),
         size:await generatorSizeForRun(gen, refs),
-        reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
+        reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX),
+        auto_optimize_prompt:true,
+        prompt_context:{node_type:gen.type || 'generator', connected_prompt:Boolean(prompt), reference_count:refs.length}
     };
     const quality = normalizedImageQuality(gen.quality);
     if(quality) payload.quality = quality;
@@ -19543,7 +19555,9 @@ async function transformStoryboardFrame(frame, operation, providerId, model, ind
         model:resolveImageModel(model),
         size:await storyboardTransformSize(frame, model, ratio, resolution),
         quality,
-        reference_images:[{url:frame.url, name:frame.name || `frame-${index + 1}.png`, kind:'image'}]
+        reference_images:[{url:frame.url, name:frame.name || `frame-${index + 1}.png`, kind:'image'}],
+        auto_optimize_prompt:true,
+        prompt_context:{node_type:'storyboard-transform', operation, reference_count:1}
     };
     const task = await createCanvasImageTask(payload);
     const result = await waitCanvasImageTaskResult(task.task_id);

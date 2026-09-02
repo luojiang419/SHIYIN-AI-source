@@ -16323,7 +16323,7 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
             apply_lookbook_organic_film_grain(str(url), amount=0.095)
         else:
             # 李维斯风格必须保留场景自身的天气与光色，只补充轻量胶片质感。
-            apply_lookbook_organic_film_grain(str(url), amount=0.06)
+            apply_lookbook_organic_film_grain(str(url), amount=0.025)
     return batch
 
 
@@ -17792,11 +17792,49 @@ LOOKBOOK_DEFAULT_SHOT_ROLES = (
     "材质收束：强调服装、商品或场景材质及真实接触关系",
 )
 
+LEVIS_ADAPTIVE_SHOT_CARDS = (
+    {
+        "role": "环境建立",
+        "camera": "waist-height wide environmental frame with natural perspective and the location occupying most of the image",
+        "action": "the person crosses into the location mid-stride with one heel lifted and bag momentum trailing the body",
+        "gaze": "attention fixed on a destination or activity inside the scene, never on the camera",
+        "performance": "walking has a practical reason; shoulders, free arm and clothing respond to momentum",
+    },
+    {
+        "role": "动作经过",
+        "camera": "human-distance oblique medium frame captured during the action",
+        "action": "the person reaches for and begins removing one scene-owned newspaper, magazine or supplied object while the other hand keeps hold of the bag",
+        "gaze": "eyes follow the object being handled",
+        "performance": "fingers curl around an edge, torso rotates toward the rack and weight transfers onto the leading foot",
+    },
+    {
+        "role": "情绪停顿",
+        "camera": "intimate three-quarter portrait observed from beside the scene, with environmental context still readable",
+        "action": "the person pauses because an off-frame sound or nearby person has caught their attention; the left hand visibly holds a folded scene-owned newspaper low at the side and the right hand visibly holds the black bag",
+        "gaze": "eyes react toward the off-frame source; the face is between listening and deciding",
+        "performance": "capture a half-breath, asymmetric mouth tension and released shoulders; both hands remain clearly visible and occupied by the newspaper and bag rather than touching hair, chest or face",
+    },
+    {
+        "role": "材质收束",
+        "camera": "close tactile crop of denim, knit, hand, bag and the scene contact surface",
+        "action": "one hand slides a paper item from the rack while the other carries the bag, creating real fabric folds and contact pressure",
+        "gaze": "face may stay outside the crop",
+        "performance": "show functional grip, finger pressure, denim creases, stitching, hardware and physically correct contact shadows",
+    },
+)
+
 
 def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
     """把研究或默认镜头卡绑定到独立请求，避免同一 prompt 被渲染成拼图。"""
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     cards = [item for item in (options.get("lookbook_research_shots") or []) if isinstance(item, dict)]
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    style_id = str(style.get("id") or "").strip().lower()
+    if style_id == "auto":
+        decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
+        style_id = str(decision.get("selected_style_id") or "").strip().lower()
+    if not cards and style_id == "levis-adaptive-campaign":
+        cards = [dict(item) for item in LEVIS_ADAPTIVE_SHOT_CARDS]
     count = max(1, min(4, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
     base_prompt = str(snapshot.get("prompt") or "").strip()
     prompts = []

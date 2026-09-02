@@ -133,7 +133,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.25", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.26", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.7", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -152,7 +152,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
         self.assertIn("feature=lookbook-validated-presets-only.1", self.html)
         self.assertIn("feature=lookbook-research-evidence.1", self.html)
-        self.assertIn("feature=levis-adaptive-campaign.1", self.html)
+        self.assertIn("feature=levis-adaptive-campaign.2", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)

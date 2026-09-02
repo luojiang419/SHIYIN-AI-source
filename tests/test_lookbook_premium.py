@@ -276,7 +276,23 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         snapshot = {"options": {"lookbook_style": {"id": "levis-adaptive-campaign"}}}
         with patch.object(main, "apply_lookbook_organic_film_grain", return_value=True) as grain:
             self.assertIs(main.apply_lookbook_film_finish(batch, snapshot), batch)
-            grain.assert_called_once_with("/assets/generated/levis.jpg", amount=0.06)
+            grain.assert_called_once_with("/assets/generated/levis.jpg", amount=0.025)
+
+    def test_levis_default_shot_cards_use_external_objectives_instead_of_beauty_poses(self):
+        prompts = main.lookbook_generation_prompts({
+            "count": 4,
+            "prompt": "BASE",
+            "options": {"lookbook_style": {"id": "levis-adaptive-campaign"}},
+        })
+        self.assertNotIn("28mm", prompts[0])
+        self.assertNotIn("50mm", prompts[1])
+        self.assertNotIn("85mm", prompts[2])
+        self.assertIn("one heel lifted", prompts[0])
+        self.assertIn("begins removing one scene-owned newspaper", prompts[1])
+        self.assertIn("off-frame sound", prompts[2])
+        self.assertIn("left hand visibly holds a folded", prompts[2])
+        self.assertIn("rather than touching hair, chest or face", prompts[2])
+        self.assertIn("finger pressure", prompts[3])
 
     def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):
         import numpy as np

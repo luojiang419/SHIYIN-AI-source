@@ -111,19 +111,142 @@
         return {handled:true, ...result};
     }
 
-    async function saveAll(items){
-        await ready;
-        if(!isSilent()) return {handled:false, count:0};
-        const list = (Array.isArray(items) ? items : []).filter(item => item?.url || item?.blob instanceof Blob);
-        if(!list.length) return {handled:true, count:0};
-        showToast(`正在静默保存 ${list.length} 个文件`);
+    function downloadResourceUrl(item){
+        const url = String(item?.url || '');
+        const name = safeName(item?.name, url);
+        if(!url || url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('/api/download-output')) return url;
+        return `/api/download-output?url=${encodeURIComponent(url)}&name=${encodeURIComponent(name)}`;
+    }
+
+    function uniqueListName(name, used){
+        const initial = safeName(name);
+        const dot = initial.lastIndexOf('.');
+        const stem = dot > 0 ? initial.slice(0, dot) : initial;
+        const extension = dot > 0 ? initial.slice(dot) : '';
+        let candidate = initial;
+        let sequence = 2;
+        while(used.has(candidate.toLowerCase())) candidate = `${stem} (${sequence++})${extension}`;
+        used.add(candidate.toLowerCase());
+        return candidate;
+    }
+
+    async function uniqueDirectoryName(directory, name, used){
+        const initial = uniqueListName(name, used);
+        const dot = initial.lastIndexOf('.');
+        const stem = dot > 0 ? initial.slice(0, dot) : initial;
+        const extension = dot > 0 ? initial.slice(dot) : '';
+        let candidate = initial;
+        let sequence = 2;
+        while(true){
+            try {
+                await directory.getFileHandle(candidate);
+                candidate = `${stem} (${sequence++})${extension}`;
+            } catch(error) {
+                if(error?.name === 'NotFoundError'){
+                    used.add(candidate.toLowerCase());
+                    return candidate;
+                }
+                throw error;
+            }
+        }
+    }
+
+    async function saveAllWithDirectoryPicker(list){
+        let directory;
+        try {
+            directory = await window.showDirectoryPicker({mode:'readwrite'});
+        } catch(error) {
+            if(error?.name === 'AbortError') return {handled:true, cancelled:true, count:0, mode:'manual'};
+            throw error;
+        }
+        const used = new Set();
         let count = 0;
         for(const item of list){
-            await saveItem(item, {quiet:true});
+            const name = await uniqueDirectoryName(directory, item.name, used);
+            let content = item?.blob instanceof Blob ? item.blob : null;
+            if(!content){
+                const response = await fetch(downloadResourceUrl(item));
+                if(!response.ok) throw new Error(`下载 ${name} 失败（HTTP ${response.status}）`);
+                content = await response.blob();
+            }
+            const handle = await directory.getFileHandle(name, {create:true});
+            const writable = await handle.createWritable();
+            try {
+                await writable.write(content);
+                await writable.close();
+            } catch(error) {
+                try { await writable.abort(); } catch(abortError) {}
+                throw error;
+            }
             count += 1;
         }
-        showToast(`已静默保存 ${count} 个文件`);
-        return {handled:true, count, directory:state.directory};
+        return {handled:true, cancelled:false, count, mode:'manual'};
+    }
+
+    function requestDesktopBatchSave(list){
+        if(window.parent === window || !window.parent?.postMessage) return null;
+        const requestId = `quick-save-batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                window.removeEventListener('message', receive);
+                reject(new Error('桌面文件保存服务未响应，请重启软件后重试'));
+            }, 120000);
+            function receive(event){
+                if(event.origin && event.origin !== location.origin) return;
+                const data = event.data || {};
+                if(data.type !== 'desktop-canvas-download:response' || data.requestId !== requestId) return;
+                clearTimeout(timeout);
+                window.removeEventListener('message', receive);
+                if(data.error) reject(new Error(data.error));
+                else resolve({handled:true, mode:'manual', ...data});
+            }
+            window.addEventListener('message', receive);
+            window.parent.postMessage({
+                type:'desktop-canvas-download:save',
+                requestId,
+                items:list.map(item => ({url:downloadResourceUrl(item), name:item.name})),
+            }, location.origin);
+        });
+    }
+
+    function fallbackIndividualDownloads(list){
+        list.forEach((item, index) => {
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.href = downloadResourceUrl(item);
+                link.download = item.name;
+                link.dataset.quickSaveBypass = '1';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+            }, index * 120);
+        });
+        return {handled:true, cancelled:false, count:list.length, mode:'manual'};
+    }
+
+    async function saveAll(items){
+        if(!state.loaded) await ready;
+        const list = (Array.isArray(items) ? items : [])
+            .filter(item => item?.url || item?.blob instanceof Blob)
+            .map(item => ({...item, name:safeName(item?.name || filenameFromUrl(item?.url), item?.url)}));
+        if(!list.length) return {handled:true, count:0};
+        if(isSilent()){
+            showToast(`正在静默保存 ${list.length} 个文件`);
+            let count = 0;
+            for(const item of list){
+                await saveItem(item, {quiet:true});
+                count += 1;
+            }
+            showToast(`已静默保存 ${count} 个文件`);
+            return {handled:true, cancelled:false, count, directory:state.directory, mode:'silent'};
+        }
+        showToast(`请选择文件夹保存 ${list.length} 个文件`);
+        let result;
+        if(typeof window.showDirectoryPicker === 'function') result = await saveAllWithDirectoryPicker(list);
+        else result = await requestDesktopBatchSave(list);
+        if(!result) result = fallbackIndividualDownloads(list);
+        if(!result.cancelled) showToast(`已保存 ${result.count || 0} 个文件`);
+        return result;
     }
 
     function isDownloadLink(anchor){

@@ -36,6 +36,17 @@ def test_desktop_download_bridge_uses_native_folder_and_file_commands():
     assert "write_download_file" in updater
     assert "fn choose_download_directory" in tauri
     assert "fn write_download_file" in tauri
+    assert "while target.exists()" in tauri
+    assert 'format!("{stem} ({sequence}){extension}")' in tauri
+
+
+def test_all_canvas_media_batch_downloads_save_individual_files():
+    smart = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
+    assert "await saveCanvasItemsToDirectory" in CANVAS_JS
+    assert "canvas-group.zip" not in CANVAS_JS
+    assert "canvas-log-${log.id || Date.now()}.zip" not in CANVAS_JS
+    assert "async function saveDownloadImageItems" in smart
+    assert "zipDownloadImageItems" not in smart
 
 
 def test_canvas_asset_tab_loads_on_entry_and_tracks_canvas_realtime_changes():

@@ -505,27 +505,11 @@
         toast(t('desktop.download.finished'));
     }
     async function downloadAll(){
-        const name=`SHIYIN-全部作品-${workDatePart({created_at:Date.now()/1000})}.zip`;
-        const url=`/api/works/download-all?name=${encodeURIComponent(name)}`;
-        if(window.ShiyinQuickSave){
-            try {
-                const result=await window.ShiyinQuickSave.save({url,name});
-                if(result.handled){ toast(t('desktop.download.finished')); return; }
-            } catch(error){ toast(error.message || t('desktop.download.failed')); return; }
-        }
-        if(window.showSaveFilePicker){
-            try {
-                const handle=await window.showSaveFilePicker({suggestedName:name,types:[{description:'ZIP',accept:{'application/zip':['.zip']}}]});
-                const response=await fetch(url);
-                if(!response.ok) throw new Error(`HTTP ${response.status}`);
-                const writable=await handle.createWritable();
-                await writable.write(await response.blob());
-                await writable.close();
-                toast(t('desktop.download.finished'));
-                return;
-            } catch(error){ if(error?.name==='AbortError') return; toast(error.message || t('desktop.download.failed')); return; }
-        }
-        window.location.href=url;
+        try {
+            const payload=await fetchJson('/api/works/download-all');
+            const result=await window.ShiyinQuickSave.saveAll(payload.items || []);
+            if(!result.cancelled) toast(`${t('desktop.download.finished')} ${result.count || 0}`);
+        } catch(error){ toast(error.message || t('desktop.download.failed')); }
     }
     async function clearAllWorks(){
         if(!window.confirm(t('works.clearAllConfirm'))) return;

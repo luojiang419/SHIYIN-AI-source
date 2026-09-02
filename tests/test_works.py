@@ -91,10 +91,9 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertNotIn("data-rename-work", self.works_js)
         self.assertIn("data-reveal-work", self.works_js)
         self.assertIn("/api/works/${encodeURIComponent(work.id)}/reveal", self.works_js)
-        self.assertIn("/api/works/download-all?name=${encodeURIComponent(name)}", self.works_js)
+        self.assertIn("fetchJson('/api/works/download-all')", self.works_js)
+        self.assertIn("window.ShiyinQuickSave.saveAll(payload.items || [])", self.works_js)
         self.assertIn("fetchJson('/api/works',{method:'DELETE'})", self.works_js)
-        self.assertIn("window.showSaveFilePicker", self.works_js)
-        self.assertIn("suggestedName:name", self.works_js)
         self.assertIn("works-download-all", self.works_css)
         self.assertIn("works-danger-button", self.works_css)
 
@@ -506,7 +505,7 @@ class WorksBackendTests(unittest.TestCase):
                     "",
                 )
 
-    def test_download_all_works_creates_enterprise_named_zip(self):
+    def test_download_all_works_returns_individual_enterprise_named_files(self):
         with tempfile.TemporaryDirectory() as root:
             first = Path(root) / "first.png"
             second = Path(root) / "second.jpg"
@@ -517,17 +516,13 @@ class WorksBackendTests(unittest.TestCase):
                 {"id": "work-b", "url": "/output/second.jpg", "original_name": "second.jpg", "created_at": 20, "trashed": False},
                 {"id": "work-trash", "url": "/output/trash.png", "original_name": "trash.png", "created_at": 20, "trashed": True},
             ]
-            paths = {"/output/first.png": str(first), "/output/second.jpg": str(second)}
-            with (
-                patch.object(self.main, "all_generated_works", return_value=works),
-                patch.object(self.main, "output_file_from_url", side_effect=lambda url: paths.get(url, "")),
-            ):
+            with patch.object(self.main, "all_generated_works", return_value=works):
                 response = asyncio.run(self.main.download_all_generated_works())
-            with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
-                names = archive.namelist()
-                self.assertEqual(archive.read(names[0]), b"first")
-                self.assertEqual(archive.read(names[1]), b"second")
-            self.assertEqual(names, ["SHIYIN-000001-19700101.png", "SHIYIN-000002-19700101.jpg"])
+            self.assertEqual(response["count"], 2)
+            self.assertEqual(response["items"], [
+                {"url": "/output/first.png", "name": "SHIYIN-000001-19700101.png"},
+                {"url": "/output/second.jpg", "name": "SHIYIN-000002-19700101.jpg"},
+            ])
 
     def test_clear_all_works_deletes_history_metadata_and_local_output_files(self):
         with tempfile.TemporaryDirectory() as root:

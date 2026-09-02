@@ -8967,31 +8967,16 @@ function previewDownloadGroupItems(){
             return colDiff || a.__index - b.__index;
         });
 }
-// 把一组图片打包成 zip 下载（预览“下载全部”和分组小菜单“批量下载”共用）。
-async function zipDownloadImageItems(title, items){
+// 预览“下载全部”和分组“批量下载”统一选择一次目录并逐张保存原图。
+async function saveDownloadImageItems(title, items){
     const list = (items || []).filter(item => item?.url);
     if(!list.length) return;
     try {
-        const filename = safeExportFileName(`${title || 'image-group'}.zip`, 'image-group.zip');
-        const response = await fetch('/api/canvas-assets/download', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                filename,
-                urls:list.map(item => item.url).filter(Boolean),
-                items:list.map((item, index) => ({url:item.url, name:downloadNameForMediaItem(item, `image-${String(index + 1).padStart(2, '0')}`)}))
-            })
-        });
-        if(!response.ok) throw new Error((await response.text()) || '批量下载失败');
-        const blob = await response.blob();
-        const href = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1200);
+        const result = await window.ShiyinQuickSave.saveAll(list.map((item, index) => ({
+            url:item.url,
+            name:downloadNameForMediaItem(item, `image-${String(index + 1).padStart(2, '0')}`)
+        })));
+        if(!result.cancelled) toast(`已保存 ${result.count || 0} 张图片`);
     } catch(e) {
         toast((e.message || '批量下载失败').slice(0, 160));
     }
@@ -8999,11 +8984,11 @@ async function zipDownloadImageItems(title, items){
 async function downloadPreviewGroup(){
     const group = previewNavState.groupId ? nodes.find(n => n.id === previewNavState.groupId) : null;
     const owner = group || nodes.find(n => n.id === previewNavState.nodeId);
-    return zipDownloadImageItems(owner?.title, previewDownloadGroupItems());
+    return saveDownloadImageItems(owner?.title, previewDownloadGroupItems());
 }
 function downloadSmartGroupImages(group){
     if(!isSmartGroupNode(group)) return;
-    return zipDownloadImageItems(group?.title, smartGroupImageRefs(group).map(r => r.item));
+    return saveDownloadImageItems(group?.title, smartGroupImageRefs(group).map(r => r.item));
 }
 function smartRunPlatformLabel(run){
     const s = run?.settings || {};
@@ -9209,7 +9194,7 @@ function renderSmartCanvasLog(){
             const log = logs[Number(el.dataset.smartLogDownload)];
             const items = (log?.outputs || []).map(smartLogOutputItem).filter(output => output?.url);
             if(items.length === 1) downloadPreviewFile(items[0]);
-            else if(items.length > 1) await zipDownloadImageItems(`generation-log-${Number(el.dataset.smartLogDownload) + 1}`, items);
+            else if(items.length > 1) await saveDownloadImageItems(`generation-log-${Number(el.dataset.smartLogDownload) + 1}`, items);
         };
     });
     const bindLogCopy = (selector, key) => {
@@ -9968,7 +9953,7 @@ function runSmartGroupToolbarAction(nodeId, action){
         openImagePreview(nodeId, Math.max(0, first));
         return;
     }
-    if(action === 'download'){ zipDownloadImageItems(group.title, (group.images || []).map(imageForDisplay)); return; }
+    if(action === 'download'){ saveDownloadImageItems(group.title, (group.images || []).map(imageForDisplay)); return; }
     if(action === 'grid'){
         if(imageCount <= 1){ toast('分组至少需要 2 张图片才能宫格拼接'); return; }
         const first = (group.images || []).findIndex(img => img?.url);

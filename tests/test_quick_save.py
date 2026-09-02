@@ -118,12 +118,22 @@ def test_quick_save_frontend_is_loaded_on_download_surfaces_and_keeps_manual_fal
     assert ".app-settings-output-control[hidden] { display:none !important; }" in styles
 
 
-def test_canvas_and_works_explicit_picker_flows_check_quick_save_first():
+def test_batch_media_downloads_save_individual_files_without_zip_archives():
     canvas = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
+    smart = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")
+    assets = (ROOT / "static/js/asset-manager.js").read_text(encoding="utf-8")
     works = (ROOT / "static/js/works.js").read_text(encoding="utf-8")
-    canvas_quick = canvas.index("window.ShiyinQuickSave.saveAll")
-    canvas_picker = canvas.index("window.showDirectoryPicker", canvas_quick)
-    assert canvas_quick < canvas_picker
-    works_quick = works.index("window.ShiyinQuickSave.save({url,name})")
-    works_picker = works.index("window.showSaveFilePicker", works_quick)
-    assert works_quick < works_picker
+    quick_save = (ROOT / "static/js/quick-save.js").read_text(encoding="utf-8")
+
+    assert "window.showDirectoryPicker({mode:'readwrite'})" in quick_save
+    assert "requestDesktopBatchSave(list)" in quick_save
+    assert "getFileHandle(name, {create:true})" in quick_save
+    assert "window.ShiyinQuickSave.saveAll" in canvas
+    assert "saveDownloadImageItems" in smart
+    assert "window.ShiyinQuickSave.saveAll" in assets
+    assert "window.ShiyinQuickSave.saveAll(payload.items || [])" in works
+
+    media_sources = canvas + smart + assets + works
+    for archive_name in ("canvas-group.zip", "assets.zip", "local-assets.zip", "canvas-assets.zip"):
+        assert archive_name not in media_sources
+    assert "canvas-log-${log.id || Date.now()}.zip" not in canvas

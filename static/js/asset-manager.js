@@ -2585,22 +2585,13 @@ async function downloadCanvasAssetItems(ids){
         setStatus('已下载画布资产');
         return;
     }
-    setStatus(items.length === 1 ? '正在下载画布资产...' : `正在打包 ${items.length} 个画布资产...`);
-    const res = await fetch('/api/canvas-assets/download', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({filename:'canvas-assets.zip', items:items.map(item => ({url:item.url, name:item.name || 'canvas-asset'}))})
-    });
-    if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '下载画布资产失败');
-    const blob = await res.blob();
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = items.length === 1 ? (items[0].name || 'canvas-asset') : 'canvas-assets.zip';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1200);
-    setStatus(`已下载 ${items.length} 个画布资产`);
+    setStatus(`请选择文件夹保存 ${items.length} 个画布资产...`);
+    try {
+        const result = await window.ShiyinQuickSave.saveAll(items.map(item => ({url:item.url, name:assetDownloadName(item)})));
+        setStatus(result.cancelled ? '已取消保存' : `已保存 ${result.count || 0} 个画布资产`);
+    } catch(error) {
+        setStatus(error.message || '下载画布资产失败');
+    }
 }
 function assetDownloadName(item){
     let name = String(item?.name || 'asset');
@@ -2646,23 +2637,10 @@ async function downloadSelectedAssets(){
     const items = [...selectedAssetIds].map(id => findAssetItem(id)).filter(it => it?.url);
     if(!items.length){ setStatus('没有可下载的素材'); return; }
     if(items.length === 1){ downloadAssetItem(items[0].id); return; }
-    setStatus(`正在打包 ${items.length} 个素材...`);
+    setStatus(`请选择文件夹保存 ${items.length} 个素材...`);
     try {
-        const res = await fetch('/api/canvas-assets/download', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({filename:'assets.zip', items:items.map(it => ({url:it.url, name:assetDownloadName(it)}))})
-        });
-        if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '下载失败');
-        const blob = await res.blob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'assets.zip';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1200);
-        setStatus(`已下载 ${items.length} 个素材`);
+        const result = await window.ShiyinQuickSave.saveAll(items.map(it => ({url:it.url, name:assetDownloadName(it)})));
+        setStatus(result.cancelled ? '已取消保存' : `已保存 ${result.count || 0} 个素材`);
     } catch(err){
         setStatus(err.message || '下载失败');
     }
@@ -2678,23 +2656,10 @@ async function downloadSelectedLocalUploads(){
     const items = [...selectedLocalUploadIds].map(id => findLocalUpload(id)).filter(it => it?.url);
     if(!items.length){ setStatus('没有可下载的素材'); return; }
     if(items.length === 1){ downloadLocalUpload(items[0].id); return; }
-    setStatus(`正在打包 ${items.length} 个素材...`);
+    setStatus(`请选择文件夹保存 ${items.length} 个素材...`);
     try {
-        const res = await fetch('/api/canvas-assets/download', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({filename:'local-assets.zip', items:items.map(it => ({url:it.url, name:assetDownloadName(it)}))})
-        });
-        if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '下载失败');
-        const blob = await res.blob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'local-assets.zip';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1200);
-        setStatus(`已下载 ${items.length} 个素材`);
+        const result = await window.ShiyinQuickSave.saveAll(items.map(it => ({url:it.url, name:assetDownloadName(it)})));
+        setStatus(result.cancelled ? '已取消保存' : `已保存 ${result.count || 0} 个素材`);
     } catch(err){
         setStatus(err.message || '下载失败');
     }

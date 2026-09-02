@@ -5607,8 +5607,12 @@ async function saveCanvasItemsToDirectory(title, items){
             name:item.name || outputImageName(item.url)
         })));
         if(quickResult.handled){
+            if(quickResult.cancelled) return false;
             const saved = Number(quickResult.count || 0);
-            setStatus(langIsEn() ? `Silently saved ${saved} file${saved === 1 ? '' : 's'}` : `已静默保存 ${saved} 个文件`);
+            const silent = quickResult.mode === 'silent';
+            setStatus(langIsEn()
+                ? `${silent ? 'Silently saved' : 'Saved'} ${saved} file${saved === 1 ? '' : 's'}`
+                : `${silent ? '已静默保存' : '已保存'} ${saved} 个文件`);
             return saved > 0;
         }
     }
@@ -5773,27 +5777,11 @@ async function downloadGroupNodeImages(groupId){
         alert(tr('canvas.outputDownloadEmpty'));
         return;
     }
-    const filename = safeDownloadFileName(`${canvas?.title || 'canvas-group'}-${group.id}.zip`, 'canvas-group.zip');
     try {
-        const res = await fetch('/api/canvas-assets/download', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                filename,
-                urls:items.map(item => item.url).filter(Boolean),
-                items:items.map((item, index) => ({url:item.url, name:downloadNameForGroupImage(item, index)}))
-            })
-        });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
-        const blob = await res.blob();
-        const href = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1200);
+        await saveCanvasItemsToDirectory(
+            `${canvas?.title || 'canvas-group'}-${group.id}`,
+            items.map((item, index) => ({url:item.url, name:downloadNameForGroupImage(item, index)}))
+        );
     } catch(err) {
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }
@@ -17394,21 +17382,7 @@ async function downloadCanvasLogOutputs(log){
         await downloadUrl(items[0].url, items[0].name || outputDownloadName(items[0].url));
         return;
     }
-    const response = await fetch('/api/canvas-assets/download', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({filename:`canvas-log-${log.id || Date.now()}.zip`, items})
-    });
-    if(!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '下载生成结果失败');
-    const blob = await response.blob();
-    const href = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = href;
-    link.download = `canvas-log-${log.id || Date.now()}.zip`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(href), 1200);
+    await saveCanvasItemsToDirectory(`canvas-log-${log.id || Date.now()}`, items);
 }
 function renderCanvasLog(){
     const list = document.getElementById('logList') || (typeof logList !== 'undefined' ? logList : null);

@@ -24237,50 +24237,32 @@ async def reveal_canvas_asset(asset_id: str):
     return {"revealed": True, "path": path, "asset_id": target_id}
 
 
-def works_archive_response(works: List[Dict[str, Any]], filename: str = "") -> Response:
-    buffer = BytesIO()
+def works_download_items(works: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     used_names = set()
-    count = 0
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for sequence, work in enumerate(works[:1000], 1):
-            path = work_local_file_path(work)
-            content = None
-            if not path:
-                try:
-                    remote = fetch_remote_media_bytes(str(work.get("url") or ""))
-                except Exception:
-                    remote = None
-                if not remote:
-                    continue
-                content, _ = remote
-            base = sanitize_export_filename(work_download_name(work, sequence), f"SHIYIN-{sequence:06d}-{work_date_part(work)}.png")
-            name, ext = os.path.splitext(base)
-            archive_name = base
-            suffix = 2
-            while archive_name in used_names:
-                archive_name = f"{name}-{suffix}{ext}"
-                suffix += 1
-            used_names.add(archive_name)
-            if path:
-                archive.write(path, archive_name)
-            else:
-                archive.writestr(archive_name, content)
-            count += 1
-    if count <= 0:
+    items = []
+    for sequence, work in enumerate(works[:1000], 1):
+        url = str(work.get("url") or "").strip()
+        if not url:
+            continue
+        base = sanitize_export_filename(work_download_name(work, sequence), f"SHIYIN-{sequence:06d}-{work_date_part(work)}.png")
+        stem, extension = os.path.splitext(base)
+        filename = base
+        duplicate = 2
+        while filename.lower() in used_names:
+            filename = f"{stem} ({duplicate}){extension}"
+            duplicate += 1
+        used_names.add(filename.lower())
+        items.append({"url": url, "name": filename})
+    if not items:
         raise HTTPException(status_code=404, detail="没有可下载的作品文件")
-    buffer.seek(0)
-    date_part = datetime.datetime.now().strftime("%Y%m%d")
-    safe_filename = sanitize_export_filename(filename or f"SHIYIN-全部作品-{date_part}.zip", f"SHIYIN-全部作品-{date_part}.zip")
-    if not safe_filename.lower().endswith(".zip"):
-        safe_filename += ".zip"
-    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(safe_filename)}"}
-    return Response(buffer.getvalue(), media_type="application/zip", headers=headers)
+    return items
 
 
 @app.get("/api/works/download-all")
-async def download_all_generated_works(name: str = ""):
+async def download_all_generated_works():
     works = [item for item in all_generated_works() if not item.get("trashed") and str(item.get("url") or "").strip()]
-    return works_archive_response(works, name)
+    items = works_download_items(works)
+    return {"items": items, "count": len(items)}
 
 
 @app.delete("/api/works")

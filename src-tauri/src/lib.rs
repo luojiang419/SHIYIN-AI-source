@@ -191,7 +191,7 @@ fn native_download_handler(webview: tauri::Webview, event: DownloadEvent<'_>) ->
 #[tauri::command]
 fn choose_download_directory() -> Option<String> {
     FileDialog::new()
-        .set_title("选择画布文件保存文件夹")
+        .set_title("选择文件保存文件夹")
         .pick_folder()
         .map(|path| path.display().to_string())
 }
@@ -211,8 +211,24 @@ fn write_download_file(directory: String, filename: String, data: Vec<u8>) -> Re
     if directory_path.as_os_str().is_empty() || !directory_path.is_dir() {
         return Err("所选保存文件夹不存在".to_string());
     }
-    fs::write(directory_path.join(trimmed_name), data)
-        .map_err(|error| format!("写入文件失败：{error}"))
+    let source_name = Path::new(trimmed_name);
+    let stem = source_name
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("download");
+    let extension = source_name
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+    let mut target = directory_path.join(trimmed_name);
+    let mut sequence = 2;
+    while target.exists() {
+        target = directory_path.join(format!("{stem} ({sequence}){extension}"));
+        sequence += 1;
+    }
+    fs::write(target, data).map_err(|error| format!("写入文件失败：{error}"))
 }
 
 impl Default for AppConfig {

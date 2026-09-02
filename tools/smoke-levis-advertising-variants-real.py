@@ -35,7 +35,7 @@ SCENARIO = (
 SHOT_CARDS = (
     {"role": "环境建立", "camera": "腰平宽环境纪实视角", "action": "人物从报刊亭遮棚迈出，左手拿折叠报纸，步伐自然有方向", "gaze": "视线投向街角声音，不看镜头"},
     {"role": "动作经过", "camera": "人际距离斜侧中景", "action": "人物边走边回头确认朋友位置，报纸和包随步伐产生轻微惯性", "gaze": "眼睛跟随街角目标，肩髋与脚步形成反向平衡"},
-    {"role": "自信停顿", "camera": "带前景遮挡的三分之四近景", "action": "人物听清招呼后短暂停步，嘴角自然松开，准备回应", "gaze": "视线停在画外朋友，双手不做无目的摸脸或摸头发"},
+    {"role": "自信停顿", "camera": "带前景遮挡的三分之四移动近景", "action": "人物听清招呼后仍处于转身或迈步末端，一手压住报纸/包带，准备回应", "gaze": "视线追随画外朋友，肩膀和下巴保持运动方向，不直视镜头", "performance": "一只脚保留行进方向，重心完成转移；禁止静态美姿和无目的摸脸/头发"},
     {"role": "材质收束", "camera": "手部、袖口、报纸和杂志架的触觉特写", "action": "一只手压住报纸，另一只手整理牛仔袖口后重新握紧纸张", "gaze": "面部可不入画", "performance": "展示织纹、车线、折痕、手指压力和接触阴影"},
 )
 
@@ -79,6 +79,7 @@ def main() -> int:
     parser.add_argument("--provider", default="shiying")
     parser.add_argument("--model", default="gemini-3-pro-image-preview")
     parser.add_argument("--styles", default=",".join(STYLES), help="逗号分隔的风格 ID")
+    parser.add_argument("--shots", default="1,2,3,4", help="只生成指定镜头编号，默认 1,2,3,4")
     args = parser.parse_args()
     read_shiying_key(Path(args.api_key_file))
     os.environ.setdefault("CANVAS_DWPOSE_AUTO_DOWNLOAD", "0")
@@ -97,8 +98,11 @@ def main() -> int:
     unknown = [item for item in selected if item not in STYLES]
     if unknown:
         raise ValueError(f"未知风格 ID: {unknown}")
+    selected_shots = sorted({int(item.strip()) for item in str(args.shots).split(",") if item.strip().isdigit() and 1 <= int(item.strip()) <= 4})
+    if not selected_shots:
+        raise ValueError("--shots 至少需要一个 1-4 的镜头编号")
     report_path = output_dir / "色彩变体场景验证报告.json"
-    report = {"status": "running", "scenario": SCENARIO, "images_per_style": 4, "styles": []}
+    report = {"status": "running", "scenario": SCENARIO, "requested_shots": selected_shots, "images_per_style": len(selected_shots), "styles": []}
     with tempfile.TemporaryDirectory(prefix="levis-advertising-variants-") as data_dir:
         os.environ["CANVAS_DATA_DIR"] = data_dir
         import main as canvas_main
@@ -127,6 +131,8 @@ def main() -> int:
             prompts = canvas_main.lookbook_generation_prompts({"count": 4, "prompt": base, "options": options})
             style_report = {"id": style_id, "name": STYLES[style_id], "scenario": SCENARIO, "images": [], "failures": []}
             for index, shot in enumerate(prompts, 1):
+                if index not in selected_shots:
+                    continue
                 # 将简短卡片显式附在 prompt 末尾，避免四张图只共享抽象风格而没有叙事节拍。
                 shot_prompt = shot + " SCENE STORY SHOT CARD: " + json.dumps(SHOT_CARDS[index - 1], ensure_ascii=False, separators=(",", ":"))
                 try:
@@ -144,7 +150,7 @@ def main() -> int:
                     style_report["failures"].append({"shot_index": index, "error": str(exc)[:500]})
                 report["styles"] = [item for item in report["styles"] if item.get("id") != style_id] + [style_report]
                 report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    report["status"] = "ok" if all(len(item.get("images") or []) == 4 and not item.get("failures") for item in report["styles"]) else "partial"
+    report["status"] = "ok" if all(len(item.get("images") or []) == len(selected_shots) and not item.get("failures") for item in report["styles"]) else "partial"
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0
 

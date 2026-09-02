@@ -290,7 +290,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("one heel lifted", prompts[0])
         self.assertIn("performs one concrete scene-owned task", prompts[1])
         self.assertIn("off-frame sound", prompts[2])
-        self.assertIn("avoid beauty gestures", prompts[2])
+        self.assertIn("never a static beauty pose", prompts[2])
         self.assertIn("finger pressure", prompts[3])
 
     def test_levis_variants_are_valid_and_keep_scene_story_in_four_frames(self):

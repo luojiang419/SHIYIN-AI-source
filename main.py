@@ -17836,10 +17836,10 @@ LEVIS_ADAPTIVE_SHOT_CARDS = (
     },
     {
         "role": "情绪停顿",
-        "camera": "intimate three-quarter portrait observed from beside the scene, with environmental context still readable",
-        "action": "the person pauses because an off-frame sound, nearby person or scene event has caught their attention; keep the hands occupied only when the supplied object or environment gives them a reason",
-        "gaze": "eyes react toward the off-frame source; the face is between listening and deciding",
-        "performance": "capture a half-breath, asymmetric mouth tension and released shoulders; avoid beauty gestures such as touching hair, chest or face without a task reason",
+        "camera": "intimate three-quarter moving frame observed from beside the scene, with environmental context still readable",
+        "action": "the person is caught mid-turn or at the end of a step after an off-frame sound, nearby person or scene event catches their attention; keep one hand on the supplied object, bag or environment",
+        "gaze": "eyes track the off-frame source while the chin and torso remain slightly in motion; never stare into camera",
+        "performance": "one foot remains directional, shoulders open and weight transfers through the turn; capture a half-breath and asymmetric mouth change, never a static beauty pose or idle hair/chest/face touch",
     },
     {
         "role": "材质收束",

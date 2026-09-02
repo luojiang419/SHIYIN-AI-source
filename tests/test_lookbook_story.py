@@ -7,6 +7,8 @@ import main
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
     build_lookbook_shot_prompt,
+    enforce_lookbook_shot_scale_contract,
+    lookbook_shot_scale_contract,
     normalize_lookbook_shot_cards,
     normalize_ai_lookbook_settings,
     parse_explicit_lookbook_settings,
@@ -155,6 +157,26 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("CONTINUITY RULE", prompt)
         self.assertIn("人物·model.png", prompt)
 
+    def test_six_frame_story_uses_only_one_environmental_wide_and_forces_close_variation(self):
+        plan = lookbook_shot_scale_contract(6)
+        self.assertEqual(len(plan), 6)
+        self.assertIn("wide establishing", plan[0]["shot_size"])
+        self.assertNotIn("wide", plan[1]["shot_size"])
+        self.assertIn("waist-up", plan[3]["shot_size"])
+        self.assertIn("tight action close-up", plan[4]["shot_size"])
+        self.assertIn("medium hero", plan[5]["shot_size"])
+
+    def test_shot_scale_contract_overrides_ai_wide_repetition_and_reaches_final_prompt(self):
+        cards = [
+            {"index": index, "beat": "发展", "story_purpose": "推进", "continuity_in": "承接", "continuity_out": "继续", "camera": {"shot_size": "wide full body"}}
+            for index in range(1, 7)
+        ]
+        enforced = enforce_lookbook_shot_scale_contract(cards, 6)
+        self.assertIn("tight action close-up", enforced[4]["camera"]["shot_size"])
+        prompt = build_lookbook_shot_prompt("两个女牛仔跳舞", {}, enforced[4])
+        self.assertIn("MANDATORY SHOT-SCALE LOCK", prompt)
+        self.assertIn("never owns the original camera position", prompt)
+
     def test_layout_requires_explicit_user_intent_and_negation_stays_single_frame(self):
         self.assertFalse(parse_lookbook_layout_intent("生成四张连续故事大片")['explicit'])
         self.assertFalse(parse_lookbook_layout_intent("生成四张图片，不要拼图或九宫格")['explicit'])
@@ -171,6 +193,18 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("EDITORIAL-LAYOUT AUTHORIZATION", layout_prompt)
         self.assertIn("top-tier fashion magazine", layout_prompt)
         self.assertNotIn("SINGLE-FRAME HARD STOP", layout_prompt)
+
+    def test_scene_styled_story_forbids_reference_interview_clothes(self):
+        prompt = build_lookbook_shot_prompt(
+            "为两个女牛仔重新设计经典蓝色牛仔套装",
+            {"wardrobe": "classic blue tailored denim cowgirl suits"},
+            {"index": 1, "beat": "开场", "story_purpose": "进入舞池", "continuity_in": "开始", "continuity_out": "准备solo"},
+            ["人物1", "人物2", "场景"],
+            wardrobe_mode="scene_styled",
+        )
+        self.assertIn("IDENTITY-ONLY WARDROBE OVERRIDE", prompt)
+        self.assertIn("photographed clothing is interview/source clothing and is forbidden", prompt)
+        self.assertNotIn("preserve the wardrobe and accessories visible", prompt)
 
     def test_storyboard_ai_response_must_return_exact_count(self):
         cards = [
@@ -304,6 +338,12 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertEqual(batch["images"], ["/assets/frame-1.png", "/assets/frame-2.png", "/assets/frame-3.png"])
         self.assertEqual([item["shot_index"] for item in batch["image_items"]], [1, 2, 3])
         self.assertEqual(batch["provider"]["id"], "vision")
+
+    def test_scene_reference_zoom_tracks_mandatory_shot_scale(self):
+        self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "35mm environmental wide establishing shot"}}), 1.0)
+        self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "50mm medium-full action shot, knees-to-head"}}), 1.25)
+        self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "85mm tight action close-up, chest-up with hands entering frame"}}), 1.9)
+        self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "50mm low-angle medium hero two-shot, knees-up"}}), 1.5)
 
 
 if __name__ == "__main__":

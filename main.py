@@ -168,6 +168,8 @@ from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
     LOOKBOOK_STORY_MODE,
     build_lookbook_shot_prompt,
+    enforce_lookbook_shot_scale_contract,
+    lookbook_shot_scale_contract,
     normalize_lookbook_shot_cards,
     normalize_ai_lookbook_settings,
     parse_lookbook_layout_intent,
@@ -16353,7 +16355,9 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
             apply_lookbook_organic_film_grain(str(url), amount=0.018)
         elif style_id == "fw-cream-cyan-film":
             apply_lookbook_natural_sun_grade(str(url))
-            apply_lookbook_organic_film_grain(str(url), amount=0.095)
+            # 0.095 会在 2K 人像上形成覆盖皮肤与丹宁纹理的噪点幕；保留可见胶片结构，
+            # 但让颗粒退回质感层而不是成为主体。
+            apply_lookbook_organic_film_grain(str(url), amount=0.035)
         elif style_id == "levis-high-key-color":
             apply_lookbook_natural_sun_grade(str(url))
             apply_lookbook_organic_film_grain(str(url), amount=0.025)
@@ -17638,6 +17642,70 @@ LOOKBOOK_STORY_GENERATION_CONCURRENCY = 3
 LOOKBOOK_STORY_MAX_RETRIES = 2
 
 
+def lookbook_scene_zoom_for_card(card: Dict[str, Any]) -> float:
+    """把强制景别转换为场景参考裁切倍率，降低大全景参考对构图的吸附。"""
+    camera = card.get("camera") if isinstance(card.get("camera"), dict) else {}
+    shot_size = str(camera.get("shot_size") or "").strip().lower()
+    if "tight action close-up" in shot_size:
+        return 1.9
+    if "tactile detail close-up" in shot_size:
+        return 2.2
+    if "waist-up" in shot_size:
+        return 1.65
+    if "three-quarter" in shot_size:
+        return 1.45
+    if "medium-full" in shot_size:
+        return 1.25
+    if "medium hero" in shot_size:
+        return 1.5
+    return 1.0
+
+
+def lookbook_scene_reference_for_card(reference: Dict[str, Any], card: Dict[str, Any]) -> Dict[str, Any]:
+    """为非全景镜头生成确定性的放大场景参考；远程或无效素材安全回退。"""
+    role = str(reference.get("lookbook_role") or reference.get("reference_type") or reference.get("role") or "").strip().lower()
+    zoom = lookbook_scene_zoom_for_card(card)
+    if role not in {"场景", "scene"} or zoom <= 1.01:
+        return dict(reference)
+    source_url = str(reference.get("url") or "").strip()
+    source_path = output_file_from_url(source_url)
+    if not source_path:
+        return dict(reference)
+    try:
+        digest = hashlib.sha256(f"{source_url}|{zoom:.2f}".encode("utf-8")).hexdigest()[:12]
+        target_path = os.path.join(OUTPUT_OUTPUT_DIR, f"lookbook_scene_zoom_{digest}.jpg")
+        if not os.path.exists(target_path):
+            with Image.open(source_path) as image:
+                image = image.convert("RGB")
+                width, height = image.size
+                crop_width = max(1, int(round(width / zoom)))
+                crop_height = max(1, int(round(height / zoom)))
+                left = max(0, (width - crop_width) // 2)
+                top = max(0, int(round((height - crop_height) * 0.42)))
+                crop = image.crop((left, top, left + crop_width, top + crop_height))
+                crop = crop.resize((width, height), Image.Resampling.LANCZOS)
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                crop.save(target_path, "JPEG", quality=94, subsampling=0, optimize=True)
+        crop_url = media_url_from_path(target_path)
+        if not crop_url:
+            return dict(reference)
+        label = str(reference.get("label") or reference.get("name") or "场景")
+        return {
+            **reference,
+            "url": crop_url,
+            "name": f"scene-framing-{zoom:.2f}x.jpg",
+            "label": f"{label} · 当前镜头景别裁切 {zoom:.2f}x",
+            "lookbook_scene_zoom": zoom,
+        }
+    except Exception as exc:
+        print(f"[lookbook] scene framing fallback zoom={zoom:.2f} error={type(exc).__name__}", flush=True)
+        return dict(reference)
+
+
+def lookbook_references_for_card(references: List[Dict[str, Any]], card: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [lookbook_scene_reference_for_card(reference, card) for reference in references]
+
+
 async def execute_lookbook_story_batch(
     snapshot: Dict[str, Any],
     route: Dict[str, Any],
@@ -17647,6 +17715,7 @@ async def execute_lookbook_story_batch(
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     count = max(1, min(LOOKBOOK_MAX_COUNT, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
     cards = normalize_lookbook_shot_cards(options.get("lookbook_shot_cards"), count)
+    cards = enforce_lookbook_shot_scale_contract(cards, count)
     prompts = lookbook_generation_prompts(snapshot)
     refs = [dict(item) for item in snapshot.get("inputs") or [] if isinstance(item, dict) and item.get("url")]
     semaphore = asyncio.Semaphore(LOOKBOOK_STORY_GENERATION_CONCURRENCY)
@@ -17654,6 +17723,7 @@ async def execute_lookbook_story_batch(
 
     async def generate_card(card: Dict[str, Any]):
         index = int(card["index"])
+        card_refs = lookbook_references_for_card(refs, card)
         last_error = ""
         for attempt in range(LOOKBOOK_STORY_MAX_RETRIES + 1):
             try:
@@ -17664,7 +17734,7 @@ async def execute_lookbook_story_batch(
                         model=route["model"],
                         size=snapshot["size"],
                         quality=snapshot["quality"],
-                        references=refs,
+                        references=card_refs,
                         count=1,
                         prefix="ecommerce_",
                         allow_edit_endpoint_fallback=False,
@@ -18051,6 +18121,7 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
     if story_mode:
         count = max(1, min(LOOKBOOK_MAX_COUNT, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
         cards = normalize_lookbook_shot_cards(options.get("lookbook_shot_cards"), count)
+        cards = enforce_lookbook_shot_scale_contract(cards, count)
         brief = str(options.get("instruction") or "").strip()
         bible = options.get("lookbook_bible") or options.get("lookbook_plan") or {}
         labels = [
@@ -18058,7 +18129,8 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
             for index, item in enumerate(snapshot.get("inputs") or [], 1)
             if isinstance(item, dict) and str(item.get("url") or "").strip()
         ][:12]
-        return [build_lookbook_shot_prompt(brief, bible, card, labels) for card in cards]
+        wardrobe_mode = str(options.get("lookbook_wardrobe_mode") or "")
+        return [build_lookbook_shot_prompt(brief, bible, card, labels, wardrobe_mode=wardrobe_mode) for card in cards]
     cards = [item for item in (options.get("lookbook_research_shots") or []) if isinstance(item, dict)]
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     style_id = str(style.get("id") or "").strip().lower()
@@ -18484,7 +18556,9 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
     if existing_cards:
         try:
             cards = normalize_lookbook_shot_cards(existing_cards, count)
-            return snapshot, {"status": "provided", "count": len(cards), "shot_cards": cards}
+            cards = enforce_lookbook_shot_scale_contract(cards, count)
+            options["lookbook_shot_cards"] = cards
+            return {**snapshot, "options": options}, {"status": "provided", "count": len(cards), "shot_cards": cards}
         except ValueError:
             # 旧快照中的不完整卡片不能静默复用，重新规划一次。
             options.pop("lookbook_shot_cards", None)
@@ -18509,6 +18583,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             "请把下面的用户故事制作成一组连续的时装故事大片分镜。必须严格输出 JSON，不要 Markdown，不要解释过程。"
             f"必须输出恰好 {count} 个 shot_cards，index 从 1 连续到 {count}，不能少卡、重复卡或改数量。"
             "先建立 campaign_bible，再把故事拆成有因果的开场、发展、转折/揭示和收束；数量较少时也要保留状态变化。"
+            f"以下景别分配是后端强制契约，shot_cards 必须逐项复制对应的 shot_size 和 framing，不能全部规划为大全景或全身照：{json.dumps(lookbook_shot_scale_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
             "每张卡只承担一个清晰叙事功能，并明确上一张结束状态如何成为本张开始状态；不能只写‘换一个角度’。"
             + (
                 f"用户明确要求 {str(layout_intent.get('specification') or layout_intent.get('source') or '杂志排版')}，因此可以在每张输出中按该规格规划有主次的编辑排版；"
@@ -18553,6 +18628,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
         result = await canvas_llm(request)
         data = _parse_lookbook_json(str(result.get("text") or ""))
         cards = normalize_lookbook_shot_cards(data.get("shot_cards"), count)
+        cards = enforce_lookbook_shot_scale_contract(cards, count)
         bible = data.get("campaign_bible")
         if not isinstance(bible, (dict, list, str)) or not str(bible).strip():
             raise ValueError("AI 分镜缺少 campaign_bible")

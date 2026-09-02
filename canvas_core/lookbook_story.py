@@ -331,11 +331,69 @@ def normalize_lookbook_shot_cards(value: Any, count: int) -> List[Dict[str, Any]
     return cards
 
 
+def lookbook_shot_scale_contract(count: int) -> List[Dict[str, str]]:
+    """为连续组图分配强制景别，避免场景参考把所有镜头吸成同一大全景。"""
+    expected = max(1, min(LOOKBOOK_MAX_COUNT, int(count or 1)))
+    if expected == 1:
+        return [{
+            "shot_size": "50mm environmental medium shot, frame the primary subject from knees or waist upward",
+            "framing": "subject dominates the focal plane while enough environment remains to explain the event",
+        }]
+    opening = {
+        "shot_size": "35mm environmental wide establishing shot",
+        "framing": "the only wide master in the sequence; establish spatial geography and full-body blocking",
+    }
+    closing = {
+        "shot_size": "50mm low-angle medium hero two-shot, knees-up",
+        "framing": "resolve the relationship with both faces and body attitude readable; never widen back to a master shot",
+    }
+    interior = [
+        {
+            "shot_size": "50mm medium-full action shot, knees-to-head",
+            "framing": "one primary performer owns the frame; background figures remain secondary and defocused",
+        },
+        {
+            "shot_size": "65mm three-quarter medium portrait, thigh-up",
+            "framing": "prioritize the second performer, torso rotation, hands and gaze; do not show the whole room",
+        },
+        {
+            "shot_size": "50mm waist-up interactive two-shot",
+            "framing": "both faces, joined action and eye-lines fill the frame; crop below the hips",
+        },
+        {
+            "shot_size": "85mm tight action close-up, chest-up with hands entering frame",
+            "framing": "capture decisive gesture, expression, fabric motion and contact; background becomes strong bokeh",
+        },
+        {
+            "shot_size": "85mm tactile detail close-up",
+            "framing": "show hands, material, footwear contact or another story-bearing detail without an environmental master",
+        },
+    ]
+    return [opening, *[dict(interior[index % len(interior)]) for index in range(expected - 2)], closing]
+
+
+def enforce_lookbook_shot_scale_contract(cards: List[Dict[str, Any]], count: int) -> List[Dict[str, Any]]:
+    """把景别契约写回镜头卡；该锁优先于模型返回的泛化构图描述。"""
+    plan = lookbook_shot_scale_contract(count)
+    enforced: List[Dict[str, Any]] = []
+    for position, source in enumerate(cards):
+        card = dict(source)
+        lock = dict(plan[position])
+        camera = dict(card.get("camera") or {}) if isinstance(card.get("camera"), dict) else {}
+        camera["shot_size"] = lock["shot_size"]
+        camera["framing_lock"] = lock["framing"]
+        card["camera"] = camera
+        card["shot_scale_lock"] = lock
+        enforced.append(card)
+    return enforced
+
+
 def build_lookbook_shot_prompt(
     brief: str,
     bible: Any,
     card: Dict[str, Any],
     reference_labels: Optional[Iterable[str]] = None,
+    wardrobe_mode: str = "",
 ) -> str:
     """把全局视觉圣经和当前分镜卡编译成图片请求。"""
     index = int(card.get("index") or 1)
@@ -367,6 +425,14 @@ def build_lookbook_shot_prompt(
             raw_brief,
             flags=re.IGNORECASE,
         ).strip(" ，,。;；") or raw_brief
+    wardrobe_rule = (
+        "IDENTITY-ONLY WARDROBE OVERRIDE: person reference images own face, hair, skin tone and body proportions only. "
+        "Their photographed clothing is interview/source clothing and is forbidden in the final image. "
+        "Use the scene-specific wardrobe defined by the GLOBAL LOOKBOOK BIBLE and CURRENT SHOT CARD, and keep that redesigned wardrobe continuous across the series. "
+        if str(wardrobe_mode or "").strip().lower() == "scene_styled"
+        else
+        "WARDROBE REFERENCE LOCK: preserve the wardrobe and accessories visible in the supplied person references unless the user explicitly requests a change. "
+    )
     return (
         output_lock
         + f"This is story frame {index}; execute only its assigned narrative beat and never add unrelated series frames. "
@@ -374,9 +440,14 @@ def build_lookbook_shot_prompt(
         f"GLOBAL LOOKBOOK BIBLE: {bible_text}\n"
         "CURRENT SHOT CARD: "
         + _compact_card(card)
+        + "\nMANDATORY SHOT-SCALE LOCK: execute camera.shot_size and camera.framing_lock exactly. "
+        "This lock overrides any wider framing implied by the scene reference or composition prose. "
+        "The scene reference owns architecture, light direction and spatial continuity only; it never owns the original camera position, crop or subject scale. "
+        "Do not widen a medium or close shot merely to show the complete room or every spectator. "
         + "\nCONTINUITY RULE: preserve the incoming state, execute the current decisive action, and leave the outgoing state for the next frame. "
         + (f"REFERENCE LABELS: {references}\n" if references else "")
-        + "Preserve identity, wardrobe, product geometry, scene architecture and readable brand marks from the supplied references. "
+        + wardrobe_rule
+        + "Preserve identity, product geometry, scene architecture and readable brand marks from the supplied references. "
         "Create a consequential observed moment with character objective, tension or emotional change, not a posed ecommerce listing. "
         "Reject white-seamless catalog staging, centered SKU presentation, mannequin gestures, hands-on-hips posing, stock smiles and decorative props without story function. "
         "Use motivated camera/light choices and do not add unrelated people, products, text or watermarks."
@@ -403,6 +474,7 @@ def _compact_card(card: Dict[str, Any]) -> str:
             "continuity_in",
             "continuity_out",
             "reference_ids",
+            "shot_scale_lock",
         )
         if card.get(key) not in (None, "", [], {})
     }

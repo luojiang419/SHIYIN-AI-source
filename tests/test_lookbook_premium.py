@@ -243,6 +243,41 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("Do not add freckles", prompt)
         self.assertIn("no large connected blotches", prompt)
 
+    def test_levis_prompt_adapts_environment_weather_and_human_performance(self):
+        prompt = build_prompt("universal", [
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"},
+            {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.jpeg"},
+        ], {
+            "prompt_policy": "lookbook",
+            "instruction": "把人物放进这个真实街景，做四张连续广告图",
+            "lookbook_style": {"id": "levis-adaptive-campaign", "name": "李维斯广告·环境自适应纪实"},
+            "lookbook_count": 4,
+        })
+        for marker in (
+            "ADAPTIVE DENIM CAMPAIGN METHOD",
+            "interior or exterior",
+            "Clear sun uses directional hard-edged light",
+            "overcast uses broad cool skylight",
+            "rain or wet ground",
+            "blue hour",
+            "HUMAN PERFORMANCE AND GROOMING",
+            "SINGLE-FRAME AND ORIGINALITY LOCK",
+        ):
+            self.assertIn(marker, prompt)
+
+    def test_levis_style_is_valid_for_auto_selection_and_uses_light_grain_finish(self):
+        decision = main.normalize_lookbook_auto_decision({
+            "selected_style_id": "levis-adaptive-campaign",
+            "selected_style_name": "李维斯广告·环境自适应纪实",
+            "confidence": 0.91,
+        })
+        self.assertEqual(decision["selected_style_id"], "levis-adaptive-campaign")
+        batch = {"images": ["/assets/generated/levis.jpg"]}
+        snapshot = {"options": {"lookbook_style": {"id": "levis-adaptive-campaign"}}}
+        with patch.object(main, "apply_lookbook_organic_film_grain", return_value=True) as grain:
+            self.assertIs(main.apply_lookbook_film_finish(batch, snapshot), batch)
+            grain.assert_called_once_with("/assets/generated/levis.jpg", amount=0.06)
+
     def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):
         import numpy as np
 
@@ -322,6 +357,20 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("series frame 2/2", prompts[1])
         self.assertIn("50mm medium", prompts[1])
         self.assertIn("one full-bleed photograph only", prompts[0])
+
+    def test_default_shot_cards_are_used_when_research_is_disabled(self):
+        prompts = main.lookbook_generation_prompts({
+            "count": 4,
+            "prompt": "BASE LOOKBOOK PROMPT",
+            "options": {"prompt_policy": "lookbook", "lookbook_search": False},
+        })
+
+        self.assertEqual(len(prompts), 4)
+        self.assertIn("SINGLE-FRAME HARD STOP", prompts[0])
+        self.assertIn("环境建立", prompts[0])
+        self.assertIn("动作经过", prompts[1])
+        self.assertIn("情绪停顿", prompts[2])
+        self.assertIn("材质收束", prompts[3])
 
     def test_image_search_parameter_error_falls_back_to_plain_web_search(self):
         calls = []

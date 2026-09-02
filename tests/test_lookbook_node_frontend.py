@@ -14,10 +14,12 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         cls.css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         cls.html = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 
-    def test_only_validated_2026_fw_builtin_preset_is_available(self):
+    def test_validated_builtin_presets_are_available(self):
         styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
-        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film"])
+        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign"])
         self.assertIn("name:'2026 FW 奶油青蓝胶片抓拍'", styles)
+        self.assertIn("name:'李维斯广告·环境自适应纪实'", styles)
+        self.assertIn("LEVIS_ADAPTIVE_PROMPT", self.lookbook)
 
     def test_2026_fw_is_the_default_and_removed_builtin_styles_are_migrated(self):
         self.assertIn("id:'fw-cream-cyan-film'", self.lookbook)
@@ -49,7 +51,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node)", self.lookbook)
         self.assertIn("resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id", self.lookbook)
         styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
-        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film"])
+        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign"])
 
     def test_status_is_rendered_after_run_button_and_quality_gate_is_removed(self):
         body = self.lookbook[self.lookbook.index("function bodyHtml"):self.lookbook.index("function bindGenerationChoices")]
@@ -131,7 +133,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.24", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.25", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.7", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
@@ -150,6 +152,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
         self.assertIn("feature=lookbook-validated-presets-only.1", self.html)
         self.assertIn("feature=lookbook-research-evidence.1", self.html)
+        self.assertIn("feature=levis-adaptive-campaign.1", self.html)
 
     def test_lookbook_results_are_rendered_in_output_node(self):
         self.assertNotIn("生成结果已发送到右侧输出节点", self.lookbook)

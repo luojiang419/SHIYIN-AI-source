@@ -118,6 +118,13 @@ def test_quick_save_frontend_is_loaded_on_download_surfaces_and_keeps_manual_fal
     assert ".app-settings-output-control[hidden] { display:none !important; }" in styles
 
 
+def test_native_directory_pickers_guard_empty_initial_path():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert source.count("$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};") == 3
+    assert source.count("if($initialPath -and (Test-Path -LiteralPath $initialPath))") == 3
+    assert "Test-Path -LiteralPath $args[0]" not in source
+
+
 def test_batch_media_downloads_save_individual_files_without_zip_archives():
     canvas = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
     smart = (ROOT / "static/js/smart-canvas.js").read_text(encoding="utf-8")

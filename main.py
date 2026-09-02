@@ -3186,7 +3186,8 @@ async def select_quick_save_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 SHIYIN AI 快捷保存目录';"
         "$dialog.ShowNewFolderButton=$true;"
-        "if(Test-Path -LiteralPath $args[0]){$dialog.SelectedPath=$args[0]};"
+        "$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};"
+        "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
@@ -3223,7 +3224,8 @@ async def select_generated_output_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 SHIYIN AI 生成图片保存目录';"
         "$dialog.ShowNewFolderButton=$true;"
-        "if(Test-Path -LiteralPath $args[0]){$dialog.SelectedPath=$args[0]};"
+        "$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};"
+        "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
@@ -3260,7 +3262,8 @@ async def select_topaz_video_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 Topaz Video AI 安装目录';"
         "$dialog.ShowNewFolderButton=$false;"
-        "if(Test-Path -LiteralPath $args[0]){$dialog.SelectedPath=$args[0]};"
+        "$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};"
+        "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")

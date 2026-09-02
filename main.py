@@ -3186,22 +3186,25 @@ async def select_quick_save_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 SHIYIN AI 快捷保存目录';"
         "$dialog.ShowNewFolderButton=$true;"
-        "$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};"
+        "$initialPath=[string]$env:SHIYIN_FOLDER_INITIAL_PATH;"
         "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
     if not powershell:
         raise HTTPException(status_code=501, detail="未找到 Windows PowerShell，无法打开目录选择器")
+    powershell_env = os.environ.copy()
+    powershell_env["SHIYIN_FOLDER_INITIAL_PATH"] = initial
     try:
         process = await asyncio.to_thread(
             subprocess.run,
-            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, initial],
+            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=300,
+            env=powershell_env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:
@@ -3224,22 +3227,25 @@ async def select_generated_output_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 SHIYIN AI 生成图片保存目录';"
         "$dialog.ShowNewFolderButton=$true;"
-        "$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};"
+        "$initialPath=[string]$env:SHIYIN_FOLDER_INITIAL_PATH;"
         "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
     if not powershell:
         raise HTTPException(status_code=501, detail="未找到 Windows PowerShell，无法打开目录选择器")
+    powershell_env = os.environ.copy()
+    powershell_env["SHIYIN_FOLDER_INITIAL_PATH"] = initial
     try:
         process = await asyncio.to_thread(
             subprocess.run,
-            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, initial],
+            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=300,
+            env=powershell_env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:
@@ -3262,22 +3268,25 @@ async def select_topaz_video_directory():
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 Topaz Video AI 安装目录';"
         "$dialog.ShowNewFolderButton=$false;"
-        "$initialPath=if($args.Count -gt 0){[string]$args[0]}else{''};"
+        "$initialPath=[string]$env:SHIYIN_FOLDER_INITIAL_PATH;"
         "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
         "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
     )
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
     if not powershell:
         raise HTTPException(status_code=501, detail="未找到 Windows PowerShell，无法打开目录选择器")
+    powershell_env = os.environ.copy()
+    powershell_env["SHIYIN_FOLDER_INITIAL_PATH"] = initial
     try:
         process = await asyncio.to_thread(
             subprocess.run,
-            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script, initial],
+            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=300,
+            env=powershell_env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired as exc:

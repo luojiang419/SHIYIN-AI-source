@@ -215,7 +215,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "FW CAMERA GRAMMAR",
             "FW HUMAN VITALITY LOCK",
             "FW ANALOG FINISH",
-            "genuinely irregular coarse film grain",
+            "fine-to-medium 16mm/35mm film grain",
             "FW SERIES COLOR SCRIPT",
         ):
             self.assertIn(marker, prompt)
@@ -237,9 +237,10 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("FW NATURAL SUN TRANSPARENCY", prompt)
         self.assertIn("luminous high-key daylight photograph", prompt)
         self.assertIn("Do not underexpose the whole frame", prompt)
-        self.assertIn("genuinely irregular coarse film grain", prompt)
+        self.assertIn("fine-to-medium 16mm/35mm film grain structure", prompt)
         self.assertIn("USER-SUPPLIED MODEL", prompt)
         self.assertIn("Do not add freckles", prompt)
+        self.assertIn("no large connected blotches", prompt)
 
     def test_fw_organic_grain_is_non_uniform_and_changes_pixels(self):
         import numpy as np

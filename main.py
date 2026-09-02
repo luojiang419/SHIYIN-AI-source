@@ -15840,21 +15840,20 @@ def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
             seed = int.from_bytes(hashlib.sha256(str(path).encode("utf-8", "ignore")).digest()[:8], "big")
             rng = np.random.default_rng(seed)
 
-            # 独立高频颗粒 + 低频结团颗粒；低频场经过双线性放大，不会形成周期网格。
+            # 细颗粒占主导；仅保留极弱的中频密度起伏，避免低频噪声形成片状脏点。
             fine = rng.normal(0.0, 1.0, (height, width)).astype(np.float32)
-            coarse_h = max(3, height // 18)
-            coarse_w = max(3, width // 18)
+            coarse_h = max(8, height // 64)
+            coarse_w = max(8, width // 64)
             coarse = Image.fromarray(
-                np.clip((rng.normal(0.0, 1.0, (coarse_h, coarse_w)) * 38.0 + 128.0), 0, 255).astype(np.uint8),
+                np.clip((rng.normal(0.0, 1.0, (coarse_h, coarse_w)) * 42.0 + 128.0), 0, 255).astype(np.uint8),
                 "L",
             ).resize((width, height), Image.Resampling.BICUBIC)
-            coarse = (np.asarray(coarse, dtype=np.float32) - 128.0) / 38.0
-            # 让颗粒呈现轻微结团和空隙，不使用棋盘/规则纹理。
-            clump = rng.random((height, width), dtype=np.float32)
-            clump = 0.62 + 0.48 * clump
+            coarse = (np.asarray(coarse, dtype=np.float32) - 128.0) / 42.0
+            # 每像素随机密度只做很窄的变化，禁止连续大块亮/暗斑。
+            clump = 0.92 + 0.16 * rng.random((height, width), dtype=np.float32)
             luma = np.clip(rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 0.0, 1.0)
             mid_shadow_bias = 0.32 + 0.68 * (1.0 - np.clip(luma * 1.12, 0.0, 1.0))
-            grain = (fine * 0.68 + coarse * 0.32) * clump * mid_shadow_bias * float(amount)
+            grain = (fine * 0.90 + coarse * 0.10) * clump * mid_shadow_bias * float(amount)
             chroma = rng.normal(0.0, 0.12, (height, width)).astype(np.float32) * grain
             rgb[..., 0] += grain + chroma * 0.22
             rgb[..., 1] += grain

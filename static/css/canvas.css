@@ -1035,6 +1035,21 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .asset-manager-card-actions button:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
 .drop-overlay { position:absolute; inset:0; z-index:20; display:none; align-items:center; justify-content:center; color:#766f68; background:rgba(244,242,237,.72); backdrop-filter:blur(2px); font-weight:800; letter-spacing:.16em; pointer-events:none; }
 .drop-overlay.active { display:flex; }
+.drop-overlay.package-drop { color:var(--text); background:rgba(244,242,237,.84); letter-spacing:.04em; }
+.canvas-package-progress-backdrop { position:fixed; inset:0; z-index:10030; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(18,18,17,.48); backdrop-filter:blur(10px); }
+.canvas-package-progress { width:min(430px, calc(100vw - 40px)); padding:24px; border:1px solid var(--line-2); border-radius:16px; background:var(--card-solid); color:var(--text); box-shadow:0 28px 80px rgba(0,0,0,.3); }
+.canvas-package-progress-head { display:flex; align-items:center; gap:12px; min-width:0; }
+.canvas-package-progress-icon { width:40px; height:40px; flex:0 0 auto; display:grid; place-items:center; border-radius:10px; background:var(--soft); color:var(--strong); border:1px solid var(--line); }
+.canvas-package-progress-title { font-size:16px; line-height:1.25; font-weight:900; }
+.canvas-package-progress-file { max-width:310px; margin-top:4px; overflow:hidden; color:var(--muted); font-size:11px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+.canvas-package-progress-value { margin-top:24px; color:var(--text); font-size:30px; line-height:1; font-weight:900; font-variant-numeric:tabular-nums; text-align:center; }
+.canvas-package-progress-track { height:8px; margin-top:14px; overflow:hidden; border-radius:999px; background:var(--soft-2); }
+.canvas-package-progress-bar { display:block; width:0; height:100%; border-radius:inherit; background:var(--strong); transition:width .2s ease; }
+.canvas-package-progress-message { min-height:18px; margin-top:12px; color:var(--muted); font-size:12px; line-height:1.5; font-weight:700; text-align:center; }
+.canvas-package-progress-close { display:block; min-width:90px; height:34px; margin:16px auto 0; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:var(--soft); color:var(--text); cursor:pointer; font-size:12px; font-weight:800; }
+.canvas-package-progress-close:hover { background:var(--soft-2); border-color:var(--line-2); }
+.canvas-package-progress[data-state="success"] .canvas-package-progress-bar { background:#059669; }
+.canvas-package-progress[data-state="error"] .canvas-package-progress-bar { background:#dc2626; }
 .create-menu { position:absolute; z-index:40; display:none; width:190px; max-width:calc(100vw - 20px); padding:8px; border-radius:18px; background:var(--card-solid); border:1px solid #eceae6; box-shadow:0 20px 50px rgba(0,0,0,.14); }
 .create-menu.open { display:flex; flex-direction:column; gap:6px; }
 .create-menu.open.create-menu-two-column { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); width:min(386px, calc(100vw - 20px)); max-height:calc(100vh - 20px); overflow-y:auto; }

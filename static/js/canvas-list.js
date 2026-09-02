@@ -61,8 +61,11 @@ const newCanvasBtn = document.getElementById('newCanvasBtn');
 const boardRefreshBtn = document.getElementById('boardRefresh');
 const boardResetViewBtn = document.getElementById('boardResetView');
 const arrangeCanvasesBtn = document.getElementById('arrangeCanvasesBtn');
+const importCanvasPackageBtn = document.getElementById('importCanvasPackageBtn');
+const importCanvasPackageInput = document.getElementById('importCanvasPackageInput');
 const pasteCanvasBtn = document.getElementById('pasteCanvasBtn');
 const emptyCreateCanvasBtn = document.getElementById('emptyCreateCanvasBtn');
+const emptyImportCanvasPackageBtn = document.getElementById('emptyImportCanvasPackageBtn');
 const statusEl = document.getElementById('boardStatus');
 
 /* ===== State ===== */
@@ -570,6 +573,114 @@ async function createCanvasOnBoard(title, worldPt){
     } catch(e){ console.error(e); setStatus(L('创建失败','Create failed')); }
 }
 
+/* ===== Import complete canvas package ===== */
+let canvasPackageProgressEl = null;
+let canvasPackageImporting = false;
+
+function closeCanvasPackageProgress(){
+    if(canvasPackageImporting) return;
+    canvasPackageProgressEl?.remove();
+    canvasPackageProgressEl = null;
+}
+
+function updateCanvasPackageProgress(percent, message, state = 'busy'){
+    if(!canvasPackageProgressEl) return;
+    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    const bar = canvasPackageProgressEl.querySelector('.ws-package-progress-bar');
+    const valueEl = canvasPackageProgressEl.querySelector('.ws-package-progress-value');
+    const messageEl = canvasPackageProgressEl.querySelector('.ws-package-progress-message');
+    const closeBtn = canvasPackageProgressEl.querySelector('.ws-package-progress-close');
+    if(bar) bar.style.width = `${value}%`;
+    if(valueEl) valueEl.textContent = `${value}%`;
+    if(messageEl) messageEl.textContent = message || '';
+    canvasPackageProgressEl.dataset.state = state;
+    if(closeBtn) closeBtn.hidden = state === 'busy';
+}
+
+function openCanvasPackageProgress(file){
+    canvasPackageProgressEl?.remove();
+    const el = document.createElement('div');
+    el.className = 'ws-package-progress-backdrop';
+    el.innerHTML = `<div class="ws-package-progress" role="dialog" aria-modal="true" aria-labelledby="wsPackageProgressTitle">
+        <div class="ws-package-progress-head">
+            <div class="ws-package-progress-icon"><i data-lucide="package" class="w-5 h-5"></i></div>
+            <div><div id="wsPackageProgressTitle" class="ws-package-progress-title">${L('正在导入工程包','Importing project package')}</div><div class="ws-package-progress-file"></div></div>
+        </div>
+        <div class="ws-package-progress-value">0%</div>
+        <div class="ws-package-progress-track"><span class="ws-package-progress-bar"></span></div>
+        <div class="ws-package-progress-message">${L('正在准备上传...','Preparing upload...')}</div>
+        <button class="ws-package-progress-close" type="button" hidden>${L('关闭','Close')}</button>
+    </div>`;
+    el.querySelector('.ws-package-progress-file').textContent = file?.name || '';
+    el.addEventListener('click', event => { if(event.target === el && !canvasPackageImporting) closeCanvasPackageProgress(); });
+    el.querySelector('.ws-package-progress-close').onclick = closeCanvasPackageProgress;
+    document.body.appendChild(el);
+    canvasPackageProgressEl = el;
+    refreshIcons();
+}
+
+function packageImportError(xhr){
+    try {
+        const payload = JSON.parse(xhr.responseText || '{}');
+        return payload.detail || payload.message || '';
+    } catch(e) { return ''; }
+}
+
+function importCanvasPackage(file){
+    if(canvasPackageImporting || !file) return;
+    if(!/\.zip$/i.test(file.name || '') && file.type !== 'application/zip'){
+        setStatus(L('请选择 ZIP 工程包','Choose a ZIP project package'));
+        return;
+    }
+    canvasPackageImporting = true;
+    openCanvasPackageProgress(file);
+    updateCanvasPackageProgress(2, L('正在准备上传...','Preparing upload...'));
+    const form = new FormData();
+    form.append('file', file, file.name || 'canvas-project.zip');
+    form.append('project', currentProjectId || 'default');
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/canvas-packages/import');
+    xhr.timeout = 300000;
+    xhr.upload.onprogress = event => {
+        if(!event.lengthComputable) return;
+        updateCanvasPackageProgress(Math.min(90, Math.max(4, event.loaded / event.total * 90)), L('正在上传工程包...','Uploading project package...'));
+    };
+    xhr.upload.onload = () => updateCanvasPackageProgress(92, L('上传完成，正在解析并恢复资源...','Upload complete. Restoring canvas and assets...'));
+    xhr.onerror = () => finishCanvasPackageImport(null, L('网络连接失败','Network error'));
+    xhr.ontimeout = () => finishCanvasPackageImport(null, L('导入超时，请重试','Import timed out. Please try again'));
+    xhr.onload = () => {
+        if(xhr.status < 200 || xhr.status >= 300){
+            finishCanvasPackageImport(null, packageImportError(xhr) || L('工程包无法导入','Project package could not be imported'));
+            return;
+        }
+        updateCanvasPackageProgress(96, L('正在打开导入的画布...','Opening imported canvas...'));
+        let payload = null;
+        try { payload = JSON.parse(xhr.responseText || '{}'); } catch(e) {}
+        if(!payload?.canvas?.id){
+            finishCanvasPackageImport(null, L('服务器返回的数据无效','The server returned invalid data'));
+            return;
+        }
+        updateCanvasPackageProgress(100, L('导入完成，正在进入画布...','Import complete. Opening canvas...'), 'success');
+        canvasPackageImporting = false;
+        setTimeout(() => {
+            canvasPackageProgressEl?.remove();
+            canvasPackageProgressEl = null;
+            canvases = canvases.filter(item => item.id !== payload.canvas.id);
+            canvases.push(payload.canvas);
+            renderProjects();
+            renderBoard();
+            openCanvas(payload.canvas);
+        }, 260);
+    };
+    xhr.send(form);
+}
+
+function finishCanvasPackageImport(canvas, message){
+    canvasPackageImporting = false;
+    updateCanvasPackageProgress(0, message, 'error');
+    setStatus(message);
+}
+
 /* ===== Card context menu (rename / delete / move) ===== */
 function closeCardMenu(){ document.querySelector('.ws-card-pop')?.remove(); }
 function openCardMenu(canvasId, anchorBtn){
@@ -615,196 +726,23 @@ async function exportCanvas(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在导出...','Exporting...'));
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
-        if(!res.ok) throw new Error('export failed');
-        const data = await res.json();
-        const cv = data.canvas || data;
-        const base = String((c?.title) || cv.title || 'canvas').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'canvas';
-        const blob = new Blob([JSON.stringify(cv, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
+        const base = safeExportBase((c?.title) || 'canvas');
+        const filename = `${base}-工程包.zip`;
         const a = document.createElement('a');
-        a.href = url; a.download = base + '.json';
+        a.href = `/api/canvases/${encodeURIComponent(id)}/export-package?name=${encodeURIComponent(filename)}`;
+        a.download = filename;
         document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1500);
-        setStatus(L('已导出','Exported'));
+        setStatus(L('已开始导出工程包','Project package export started'));
     } catch(e){ console.error(e); setStatus(L('导出失败','Export failed')); }
 }
 
-/* ===== Export canvas with referenced resources ===== */
-const ZIP_ENCODER = new TextEncoder();
-let ZIP_CRC_TABLE = null;
-
+/* ===== Export canvas package (built by the backend) ===== */
 function safeExportBase(name, fallback = 'canvas'){
     return String(name || fallback).replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || fallback;
 }
 
-function collectCanvasResourceUrls(value, out = [], seen = new Set()){
-    if(value == null) return out;
-    if(typeof value === 'string'){
-        const text = value.trim();
-        if(isCanvasResourceUrl(text) && !seen.has(text)){
-            seen.add(text);
-            out.push(text);
-        }
-        return out;
-    }
-    if(Array.isArray(value)){
-        value.forEach(item => collectCanvasResourceUrls(item, out, seen));
-        return out;
-    }
-    if(typeof value === 'object'){
-        Object.values(value).forEach(item => collectCanvasResourceUrls(item, out, seen));
-    }
-    return out;
-}
-
-function isCanvasResourceUrl(url){
-    return url.startsWith('/assets/') || url.startsWith('/output/') || /^https?:\/\//i.test(url);
-}
-
-function exportResourceName(url, index, used){
-    let name = '';
-    try {
-        const parsed = new URL(url, location.origin);
-        name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
-    } catch(e) {
-        name = String(url || '').split(/[?#]/)[0].split('/').pop() || '';
-    }
-    name = safeExportBase(name || `resource-${String(index + 1).padStart(3, '0')}`, `resource-${index + 1}`);
-    if(!/\.[a-z0-9]{1,8}$/i.test(name)) name += '.bin';
-    let finalName = `resources/${name}`;
-    const dot = finalName.lastIndexOf('.');
-    const stem = dot > 0 ? finalName.slice(0, dot) : finalName;
-    const ext = dot > 0 ? finalName.slice(dot) : '';
-    let suffix = 2;
-    while(used.has(finalName)){
-        finalName = `${stem}-${suffix}${ext}`;
-        suffix++;
-    }
-    used.add(finalName);
-    return finalName;
-}
-
-async function fetchResourceBytes(url){
-    const res = await fetch(url);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    return new Uint8Array(await res.arrayBuffer());
-}
-
-function zipCrc32(bytes){
-    if(!ZIP_CRC_TABLE){
-        ZIP_CRC_TABLE = new Uint32Array(256);
-        for(let i = 0; i < 256; i++){
-            let c = i;
-            for(let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-            ZIP_CRC_TABLE[i] = c >>> 0;
-        }
-    }
-    let crc = 0xffffffff;
-    for(let i = 0; i < bytes.length; i++) crc = ZIP_CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
-    return (crc ^ 0xffffffff) >>> 0;
-}
-
-function zipDosTime(date = new Date()){
-    const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
-    const year = Math.max(1980, date.getFullYear());
-    const day = ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
-    return { time, day };
-}
-
-function zipHeader(signature, size){
-    const bytes = new Uint8Array(size);
-    const view = new DataView(bytes.buffer);
-    view.setUint32(0, signature, true);
-    return { bytes, view };
-}
-
-function createZipBlob(entries){
-    const now = zipDosTime();
-    const files = [];
-    const central = [];
-    let offset = 0;
-    entries.forEach(entry => {
-        const nameBytes = ZIP_ENCODER.encode(entry.name);
-        const data = entry.bytes instanceof Uint8Array ? entry.bytes : ZIP_ENCODER.encode(String(entry.bytes || ''));
-        const crc = zipCrc32(data);
-        const local = zipHeader(0x04034b50, 30 + nameBytes.length);
-        local.view.setUint16(4, 20, true);
-        local.view.setUint16(6, 0x0800, true);
-        local.view.setUint16(8, 0, true);
-        local.view.setUint16(10, now.time, true);
-        local.view.setUint16(12, now.day, true);
-        local.view.setUint32(14, crc, true);
-        local.view.setUint32(18, data.length, true);
-        local.view.setUint32(22, data.length, true);
-        local.view.setUint16(26, nameBytes.length, true);
-        local.bytes.set(nameBytes, 30);
-        files.push(local.bytes, data);
-
-        const cd = zipHeader(0x02014b50, 46 + nameBytes.length);
-        cd.view.setUint16(4, 20, true);
-        cd.view.setUint16(6, 20, true);
-        cd.view.setUint16(8, 0x0800, true);
-        cd.view.setUint16(10, 0, true);
-        cd.view.setUint16(12, now.time, true);
-        cd.view.setUint16(14, now.day, true);
-        cd.view.setUint32(16, crc, true);
-        cd.view.setUint32(20, data.length, true);
-        cd.view.setUint32(24, data.length, true);
-        cd.view.setUint16(28, nameBytes.length, true);
-        cd.view.setUint32(42, offset, true);
-        cd.bytes.set(nameBytes, 46);
-        central.push(cd.bytes);
-        offset += local.bytes.length + data.length;
-    });
-    const centralSize = central.reduce((sum, bytes) => sum + bytes.length, 0);
-    const end = zipHeader(0x06054b50, 22);
-    end.view.setUint16(8, entries.length, true);
-    end.view.setUint16(10, entries.length, true);
-    end.view.setUint32(12, centralSize, true);
-    end.view.setUint32(16, offset, true);
-    return new Blob([...files, ...central, end.bytes], { type:'application/zip' });
-}
-
 async function exportCanvasWithResources(id){
-    const c = canvases.find(x => x.id === id);
-    setStatus(L('正在收集资源...','Collecting assets...'));
-    try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
-        if(!res.ok) throw new Error('export failed');
-        const data = await res.json();
-        const cv = data.canvas || data;
-        const base = safeExportBase((c?.title) || cv.title || 'canvas');
-        const urls = collectCanvasResourceUrls(cv).slice(0, 1000);
-        const usedNames = new Set(['canvas.json', 'resources-manifest.json']);
-        const entries = [{ name:'canvas.json', bytes:ZIP_ENCODER.encode(JSON.stringify(cv, null, 2)) }];
-        const manifest = [];
-        let skipped = 0;
-        for(let i = 0; i < urls.length; i++){
-            const url = urls[i];
-            try {
-                const bytes = await fetchResourceBytes(url);
-                const name = exportResourceName(url, i, usedNames);
-                entries.push({ name, bytes });
-                manifest.push({ url, file:name, size:bytes.length });
-            } catch(e) {
-                skipped++;
-                manifest.push({ url, skipped:true, reason:String(e?.message || e || 'fetch failed').slice(0, 120) });
-            }
-        }
-        entries.push({ name:'resources-manifest.json', bytes:ZIP_ENCODER.encode(JSON.stringify({ canvas_id:id, resources:manifest }, null, 2)) });
-        const blob = createZipBlob(entries);
-        const href = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = href;
-        a.download = `${base}.zip`;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1500);
-        const included = Math.max(0, entries.length - 2);
-        setStatus(skipped
-            ? L(`已导出，跳过 ${skipped} 个资源`, `Exported, skipped ${skipped} assets`)
-            : L(`已导出 ${included} 个资源`, `Exported ${included} assets`));
-    } catch(e){ console.error(e); setStatus(L('导出失败','Export failed')); }
+    return exportCanvas(id);
 }
 
 /* ===== Cut / paste a canvas across projects ===== */
@@ -1012,6 +950,13 @@ board.addEventListener('dblclick', e => {
 });
 
 newCanvasBtn.addEventListener('click', () => openCreateCard(boardCenterWorld()));
+importCanvasPackageBtn?.addEventListener('click', () => importCanvasPackageInput?.click());
+emptyImportCanvasPackageBtn?.addEventListener('click', e => { e.stopPropagation(); importCanvasPackageInput?.click(); });
+importCanvasPackageInput?.addEventListener('change', event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if(file) importCanvasPackage(file);
+});
 arrangeCanvasesBtn?.addEventListener('click', arrangeCanvasesInProject);
 emptyCreateCanvasBtn?.addEventListener('mousedown', e => e.stopPropagation());
 emptyCreateCanvasBtn?.addEventListener('click', e => {

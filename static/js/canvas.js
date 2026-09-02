@@ -22719,6 +22719,14 @@ board.onwheel = e => {
 };
 board.addEventListener('dragover', e => {
     const perfEnd = window.CanvasPerformance?.start?.('classic.dragover');
+    if(canvasPackageFromTransfer(e.dataTransfer)){
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        dropOverlay.textContent = langIsEn() ? 'Drop project package to import' : '拖放工程包以导入';
+        dropOverlay.classList.add('active', 'package-drop');
+        perfEnd?.({route:'canvas-package'});
+        return;
+    }
     if(e.target.closest?.('.image-node')){
         dropOverlay.classList.remove('active');
         perfEnd?.({route:'image-node'});
@@ -22746,11 +22754,16 @@ board.addEventListener('dragover', e => {
     perfEnd?.({route:'board'});
 });
 board.addEventListener('dragleave', e => {
-    if(e.target === board || !board.contains(e.relatedTarget)) dropOverlay.classList.remove('active');
+    if(e.target === board || !board.contains(e.relatedTarget)) resetCanvasPackageDropOverlay();
 });
 board.addEventListener('drop', async e => {
     e.preventDefault();
-    dropOverlay.classList.remove('active');
+    const packageFile = canvasPackageFromTransfer(e.dataTransfer);
+    resetCanvasPackageDropOverlay();
+    if(packageFile){
+        importCanvasPackageFromDrop(packageFile);
+        return;
+    }
     if(e.target.closest?.('.image-node')) return;
     if(hasOutputMediaDrag(e.dataTransfer)) {
         createMediaCardFromOutput(outputMediaDragPayload(e.dataTransfer), screenToWorld(e.clientX, e.clientY));
@@ -22779,8 +22792,8 @@ board.addEventListener('drop', async e => {
         showErrorModal(err.message || (langIsEn() ? 'Image import failed' : '导入图片失败'), langIsEn() ? 'Image import failed' : '导入图片失败');
     }
 });
-window.addEventListener('dragend', () => dropOverlay.classList.remove('active'));
-window.addEventListener('drop', () => dropOverlay.classList.remove('active'));
+window.addEventListener('dragend', resetCanvasPackageDropOverlay);
+window.addEventListener('drop', resetCanvasPackageDropOverlay);
 function cancelClassicNodePasteFallback(){
     if(!classicNodePasteTimer) return;
     clearTimeout(classicNodePasteTimer);
@@ -23184,6 +23197,101 @@ function hasOutputMediaDrag(dataTransfer){
     const types = dataTransfer?.types;
     if(!types || typeof types.includes !== 'function') return false;
     return types.includes(CANVAS_OUTPUT_MEDIA_DRAG_TYPE) || types.includes('application/x-canvas-output-image');
+}
+
+/* ===== Complete project package drop ===== */
+let canvasPackageDropBusy = false;
+let canvasPackageDropProgressEl = null;
+function isCanvasPackageFile(file){
+    return Boolean(file && (/\.zip$/i.test(file.name || '') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed'));
+}
+function canvasPackageFromTransfer(dataTransfer){
+    return [...(dataTransfer?.files || [])].find(isCanvasPackageFile) || null;
+}
+function resetCanvasPackageDropOverlay(){
+    if(!dropOverlay) return;
+    dropOverlay.textContent = tr('canvas.dropImage');
+    dropOverlay.classList.remove('active', 'package-drop');
+}
+function updateCanvasPackageDropProgress(percent, message, state = 'busy'){
+    if(!canvasPackageDropProgressEl) return;
+    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    canvasPackageDropProgressEl.querySelector('.canvas-package-progress-value').textContent = `${value}%`;
+    canvasPackageDropProgressEl.querySelector('.canvas-package-progress-bar').style.width = `${value}%`;
+    canvasPackageDropProgressEl.querySelector('.canvas-package-progress-message').textContent = message || '';
+    canvasPackageDropProgressEl.dataset.state = state;
+    canvasPackageDropProgressEl.querySelector('.canvas-package-progress-close').hidden = state === 'busy';
+}
+function openCanvasPackageDropProgress(file){
+    canvasPackageDropProgressEl?.remove();
+    const el = document.createElement('div');
+    el.className = 'canvas-package-progress-backdrop';
+    el.innerHTML = `<div class="canvas-package-progress" role="dialog" aria-modal="true" aria-labelledby="canvasPackageProgressTitle">
+        <div class="canvas-package-progress-head"><div class="canvas-package-progress-icon"><i data-lucide="package-open" class="w-5 h-5"></i></div><div><div id="canvasPackageProgressTitle" class="canvas-package-progress-title">${langIsEn() ? 'Importing project package' : '正在导入工程包'}</div><div class="canvas-package-progress-file"></div></div></div>
+        <div class="canvas-package-progress-value">0%</div>
+        <div class="canvas-package-progress-track"><span class="canvas-package-progress-bar"></span></div>
+        <div class="canvas-package-progress-message">${langIsEn() ? 'Preparing upload...' : '正在准备上传...'}</div>
+        <button class="canvas-package-progress-close" type="button" hidden>${langIsEn() ? 'Close' : '关闭'}</button>
+    </div>`;
+    el.querySelector('.canvas-package-progress-file').textContent = file?.name || '';
+    const close = () => { if(!canvasPackageDropBusy){ el.remove(); canvasPackageDropProgressEl = null; } };
+    el.addEventListener('click', event => { if(event.target === el) close(); });
+    el.querySelector('.canvas-package-progress-close').onclick = close;
+    document.body.appendChild(el);
+    canvasPackageDropProgressEl = el;
+    refreshIcons();
+}
+function canvasPackageDropError(xhr){
+    try {
+        const payload = JSON.parse(xhr.responseText || '{}');
+        return payload.detail || payload.message || '';
+    } catch(e) { return ''; }
+}
+function importCanvasPackageFromDrop(file){
+    if(canvasPackageDropBusy || !isCanvasPackageFile(file)) return;
+    canvasPackageDropBusy = true;
+    openCanvasPackageDropProgress(file);
+    updateCanvasPackageDropProgress(2, langIsEn() ? 'Preparing upload...' : '正在准备上传...');
+    const form = new FormData();
+    form.append('file', file, file.name || 'canvas-project.zip');
+    form.append('project', canvas?.project || requestedCanvasListProject() || 'default');
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/canvas-packages/import');
+    xhr.timeout = 300000;
+    xhr.upload.onprogress = event => {
+        if(!event.lengthComputable) return;
+        updateCanvasPackageDropProgress(Math.min(90, Math.max(4, event.loaded / event.total * 90)), langIsEn() ? 'Uploading project package...' : '正在上传工程包...');
+    };
+    xhr.upload.onload = () => updateCanvasPackageDropProgress(92, langIsEn() ? 'Upload complete. Restoring canvas and assets...' : '上传完成，正在解析并恢复资源...');
+    xhr.onerror = () => finishCanvasPackageDropImport(null, langIsEn() ? 'Network error' : '网络连接失败');
+    xhr.ontimeout = () => finishCanvasPackageDropImport(null, langIsEn() ? 'Import timed out. Please try again' : '导入超时，请重试');
+    xhr.onload = () => {
+        if(xhr.status < 200 || xhr.status >= 300){
+            finishCanvasPackageDropImport(null, canvasPackageDropError(xhr) || (langIsEn() ? 'Project package could not be imported' : '工程包无法导入'));
+            return;
+        }
+        let payload = null;
+        try { payload = JSON.parse(xhr.responseText || '{}'); } catch(e) {}
+        if(!payload?.canvas?.id){
+            finishCanvasPackageDropImport(null, langIsEn() ? 'The server returned invalid data' : '服务器返回的数据无效');
+            return;
+        }
+        updateCanvasPackageDropProgress(96, langIsEn() ? 'Opening imported canvas...' : '正在打开导入的画布...');
+        updateCanvasPackageDropProgress(100, langIsEn() ? 'Import complete. Opening canvas...' : '导入完成，正在进入画布...', 'success');
+        canvasPackageDropBusy = false;
+        setTimeout(() => {
+            canvasPackageDropProgressEl?.remove();
+            canvasPackageDropProgressEl = null;
+            const query = `?id=${encodeURIComponent(payload.canvas.id)}&project=${encodeURIComponent(payload.canvas.project || '')}`;
+            window.location.href = `/static/canvas.html${query}`;
+        }, 260);
+    };
+    xhr.send(form);
+}
+function finishCanvasPackageDropImport(_canvas, message){
+    canvasPackageDropBusy = false;
+    updateCanvasPackageDropProgress(0, message, 'error');
+    setStatus('Ready');
 }
 function outputMediaDragPayload(dataTransfer){
     try {

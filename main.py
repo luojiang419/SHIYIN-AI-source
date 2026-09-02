@@ -1,4 +1,5 @@
 import json
+import copy
 import uuid
 import base64
 import hashlib
@@ -678,6 +679,11 @@ ONLINE_IMAGE_TASKS_FILE = ""
 GLOBAL_CONFIG_FILE = ""
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
+CANVAS_PACKAGE_MAX_UPLOAD_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
+CANVAS_PACKAGE_MAX_UNCOMPRESSED_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_UNCOMPRESSED_BYTES", str(2 * 1024 * 1024 * 1024)))
+CANVAS_PACKAGE_MAX_FILES = int(os.getenv("CANVAS_PACKAGE_MAX_FILES", "5000"))
+CANVAS_PACKAGE_MAX_RESOURCE_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_RESOURCE_BYTES", str(512 * 1024 * 1024)))
+CANVAS_PACKAGE_MAX_RESOURCES = int(os.getenv("CANVAS_PACKAGE_MAX_RESOURCES", "2000"))
 DWPOSE_INPUT_MAX_BYTES = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_BYTES", str(25 * 1024 * 1024)))
 DWPOSE_INPUT_MAX_PIXELS = int(os.getenv("CANVAS_DWPOSE_INPUT_MAX_PIXELS", str(100_000_000)))
 DWPOSE_INFERENCE_MAX_PIXELS = int(os.getenv("CANVAS_DWPOSE_INFERENCE_MAX_PIXELS", str(4_000_000)))
@@ -4995,6 +5001,293 @@ def canvas_record(data):
         "deleted_at": data.get("deleted_at", 0),
         "node_count": node_count,
     }
+
+
+class CanvasPackageError(ValueError):
+    """工程包格式或内容不符合导入/导出约束。"""
+
+
+CANVAS_PACKAGE_FORMAT = "shiyin-infinite-canvas-package"
+CANVAS_PACKAGE_VERSION = 1
+
+
+def _canvas_package_archive_name(value: Any) -> str:
+    """只允许工程包内部的相对 POSIX 路径，防止 ZIP Slip 和设备路径。"""
+    name = str(value or "").replace("\\", "/").strip()
+    if not name or name.startswith("/") or re.match(r"^[a-zA-Z]:", name):
+        raise CanvasPackageError("工程包包含无效路径")
+    parts = name.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise CanvasPackageError("工程包包含不安全路径")
+    return "/".join(parts)
+
+
+def _canvas_package_json(raw: bytes, label: str) -> Dict[str, Any]:
+    try:
+        value = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CanvasPackageError(f"{label} 无法解析") from exc
+    if not isinstance(value, dict):
+        raise CanvasPackageError(f"{label} 格式无效")
+    return value
+
+
+def _canvas_package_collect_urls(value: Any, found: Optional[List[str]] = None) -> List[str]:
+    if found is None:
+        found = []
+    if isinstance(value, str):
+        text = value.strip()
+        if text and output_file_from_url(text) and text not in found:
+            found.append(text)
+    elif isinstance(value, dict):
+        for child in value.values():
+            _canvas_package_collect_urls(child, found)
+    elif isinstance(value, list):
+        for child in value:
+            _canvas_package_collect_urls(child, found)
+    return found
+
+
+def _canvas_package_replace_urls(value: Any, mapping: Dict[str, str]) -> Any:
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    if isinstance(value, dict):
+        return {key: _canvas_package_replace_urls(child, mapping) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_canvas_package_replace_urls(child, mapping) for child in value]
+    return value
+
+
+def _canvas_package_unique_resource_path(base_name: str, used: set[str]) -> str:
+    safe = sanitize_export_filename(base_name, "resource.bin")
+    stem, extension = os.path.splitext(safe)
+    candidate = f"resources/{safe}"
+    suffix = 2
+    while candidate in used:
+        candidate = f"resources/{stem}-{suffix}{extension}"
+        suffix += 1
+    used.add(candidate)
+    return candidate
+
+
+def _canvas_package_path_under(root: str, path: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.realpath(root), os.path.realpath(path)]) == os.path.realpath(root)
+    except ValueError:
+        return False
+
+
+def build_canvas_package_archive(source: Dict[str, Any]) -> Tuple[bytes, Dict[str, Any]]:
+    if not isinstance(source, dict) or not isinstance(source.get("nodes"), list):
+        raise CanvasPackageError("画布数据无效")
+    canvas = copy.deepcopy(source)
+    resources: List[Dict[str, Any]] = []
+    used_names = {"manifest.json", "canvas.json"}
+    skipped: List[Dict[str, str]] = []
+    urls = _canvas_package_collect_urls(canvas)
+    if len(urls) > CANVAS_PACKAGE_MAX_RESOURCES:
+        raise CanvasPackageError("画布引用的资源数量超出限制")
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for url in urls:
+            path = output_file_from_url(url)
+            if not path or not os.path.isfile(path):
+                skipped.append({"url": url, "reason": "本地文件不存在"})
+                continue
+            real_path = os.path.realpath(path)
+            allowed_roots = [
+                os.path.realpath(os.fspath(OUTPUT_INPUT_DIR)),
+                os.path.realpath(os.fspath(OUTPUT_OUTPUT_DIR)),
+                os.path.realpath(os.fspath(ASSET_LIBRARY_DIR)),
+                os.path.realpath(os.fspath(LOCAL_UPLOAD_DIR)),
+                os.path.realpath(os.fspath(OUTPUT_DIR)),
+            ]
+            if not any(_canvas_package_path_under(root, real_path) for root in allowed_roots):
+                skipped.append({"url": url, "reason": "文件路径不在账号目录内"})
+                continue
+            size = os.path.getsize(path)
+            if size > CANVAS_PACKAGE_MAX_RESOURCE_BYTES:
+                skipped.append({"url": url, "reason": "文件超过资源大小限制"})
+                continue
+            archive_name = _canvas_package_unique_resource_path(os.path.basename(path), used_names)
+            archive.write(path, archive_name)
+            resources.append({
+                "url": url,
+                "archive": archive_name,
+                "name": os.path.basename(path),
+                "size": size,
+                "kind": media_kind_from_path(path),
+            })
+        manifest = {
+            "format": CANVAS_PACKAGE_FORMAT,
+            "version": CANVAS_PACKAGE_VERSION,
+            "exported_at": now_ms(),
+            "canvas": {
+                "title": str(canvas.get("title") or "未命名画布")[:80],
+                "icon": str(canvas.get("icon") or "layers")[:32],
+                "project": str(canvas.get("project") or DEFAULT_PROJECT_ID),
+            },
+            "resources": resources,
+            "skipped_resources": skipped,
+            "stats": {
+                "node_count": len(canvas.get("nodes") or []),
+                "connection_count": len(canvas.get("connections") or []),
+                "resource_count": len(resources),
+                "skipped_resource_count": len(skipped),
+            },
+        }
+        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        archive.writestr("canvas.json", json.dumps(canvas, ensure_ascii=False, indent=2))
+    archive_buffer.seek(0)
+    archive_bytes = archive_buffer.getvalue()
+    if len(archive_bytes) > CANVAS_PACKAGE_MAX_UPLOAD_BYTES:
+        raise CanvasPackageError("工程包超过导入大小限制")
+    return archive_bytes, manifest
+
+
+def _canvas_package_validate_zip(zf: zipfile.ZipFile) -> Dict[str, zipfile.ZipInfo]:
+    infos = zf.infolist()
+    if not infos or len(infos) > CANVAS_PACKAGE_MAX_FILES:
+        raise CanvasPackageError("工程包文件数量超出限制")
+    total_size = 0
+    result: Dict[str, zipfile.ZipInfo] = {}
+    for info in infos:
+        name = _canvas_package_archive_name(info.filename)
+        if name in result:
+            raise CanvasPackageError("工程包包含重复文件")
+        if info.is_dir() or ((info.external_attr >> 16) & 0o170000) == 0o120000:
+            raise CanvasPackageError("工程包不支持目录或符号链接")
+        declared_size = int(info.file_size or 0)
+        total_size += declared_size
+        if total_size > CANVAS_PACKAGE_MAX_UNCOMPRESSED_BYTES:
+            raise CanvasPackageError("工程包解压后超过大小限制")
+        result[name] = info
+    return result
+
+
+def _canvas_package_read_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, label: str, limit: int) -> bytes:
+    if int(info.file_size or 0) > limit:
+        raise CanvasPackageError(f"{label} 超过大小限制")
+    try:
+        with zf.open(info) as source:
+            raw = source.read(limit + 1)
+    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise CanvasPackageError(f"无法读取 {label}") from exc
+    if len(raw) > limit:
+        raise CanvasPackageError(f"{label} 超过大小限制")
+    return raw
+
+
+def _canvas_package_project_id(value: str) -> str:
+    requested = str(value or "").strip()
+    projects = ensure_default_project()
+    if requested and any(str(project.get("id")) == requested for project in projects):
+        return requested
+    return DEFAULT_PROJECT_ID
+
+
+def import_canvas_package_archive(package_path: str, project: str = "") -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    try:
+        with zipfile.ZipFile(package_path, "r") as archive:
+            entries = _canvas_package_validate_zip(archive)
+            canvas_info = entries.get("canvas.json")
+            if not canvas_info:
+                raise CanvasPackageError("工程包中缺少 canvas.json")
+            canvas = _canvas_package_json(
+                _canvas_package_read_entry(archive, canvas_info, "canvas.json", min(CANVAS_PACKAGE_MAX_UNCOMPRESSED_BYTES, 100 * 1024 * 1024)),
+                "canvas.json",
+            )
+            manifest_info = entries.get("manifest.json")
+            if manifest_info:
+                manifest = _canvas_package_json(
+                    _canvas_package_read_entry(archive, manifest_info, "manifest.json", 10 * 1024 * 1024),
+                    "manifest.json",
+                )
+                try:
+                    manifest_version = int(manifest.get("version") or 0)
+                except (TypeError, ValueError) as exc:
+                    raise CanvasPackageError("工程包版本无效") from exc
+                if manifest.get("format") != CANVAS_PACKAGE_FORMAT or manifest_version != CANVAS_PACKAGE_VERSION:
+                    raise CanvasPackageError("不支持的工程包版本")
+                resource_records = manifest.get("resources") or []
+            else:
+                legacy_info = entries.get("resources-manifest.json")
+                manifest = _canvas_package_json(
+                    _canvas_package_read_entry(archive, legacy_info, "resources-manifest.json", 10 * 1024 * 1024),
+                    "resources-manifest.json",
+                ) if legacy_info else {}
+                resource_records = manifest.get("resources") or []
+            if not isinstance(resource_records, list) or len(resource_records) > CANVAS_PACKAGE_MAX_RESOURCES:
+                raise CanvasPackageError("工程包资源清单无效")
+            if not isinstance(canvas.get("nodes"), list) or not isinstance(canvas.get("connections", []), list):
+                raise CanvasPackageError("canvas.json 缺少有效的节点或连线")
+            canvas["nodes"] = [node for node in canvas["nodes"] if isinstance(node, dict)]
+            canvas["connections"] = [link for link in canvas.get("connections", []) if isinstance(link, dict)]
+            import_dir = os.path.abspath(os.path.join(os.fspath(OUTPUT_INPUT_DIR), f"canvas_package_{uuid.uuid4().hex}"))
+            os.makedirs(import_dir, exist_ok=False)
+            mapping: Dict[str, str] = {}
+            imported_resources = 0
+            try:
+                for record in resource_records:
+                    if not isinstance(record, dict):
+                        raise CanvasPackageError("工程包资源清单包含无效项目")
+                    if record.get("skipped"):
+                        continue
+                    archive_name = _canvas_package_archive_name(record.get("archive") or record.get("file"))
+                    if not archive_name.startswith("resources/") or archive_name not in entries:
+                        raise CanvasPackageError("工程包资源引用无效")
+                    info = entries[archive_name]
+                    if int(info.file_size or 0) > CANVAS_PACKAGE_MAX_RESOURCE_BYTES:
+                        raise CanvasPackageError("工程包资源超过大小限制")
+                    base = sanitize_export_filename(record.get("name") or os.path.basename(archive_name), "resource.bin")
+                    target = os.path.abspath(os.path.join(import_dir, f"{uuid.uuid4().hex[:10]}_{base}"))
+                    if os.path.commonpath([import_dir, target]) != import_dir:
+                        raise CanvasPackageError("工程包资源路径无效")
+                    raw = _canvas_package_read_entry(archive, info, base, CANVAS_PACKAGE_MAX_RESOURCE_BYTES)
+                    with open(target, "wb") as output:
+                        output.write(raw)
+                    new_url = media_url_from_path(target)
+                    if not new_url:
+                        raise CanvasPackageError("无法登记导入资源")
+                    old_url = str(record.get("url") or "").strip()
+                    if old_url:
+                        mapping[old_url] = new_url
+                    mapping[archive_name] = new_url
+                    mapping[f"./{archive_name}"] = new_url
+                    mapping[os.path.basename(archive_name)] = new_url
+                    imported_resources += 1
+                imported = copy.deepcopy(canvas)
+                imported["id"] = uuid.uuid4().hex
+                manifest_canvas = manifest.get("canvas") if isinstance(manifest.get("canvas"), dict) else {}
+                imported["title"] = str(imported.get("title") or manifest_canvas.get("title") or "导入画布")[:80]
+                imported["icon"] = str(imported.get("icon") or manifest_canvas.get("icon") or "layers")[:32]
+                imported["kind"] = "classic"
+                imported["project"] = _canvas_package_project_id(project)
+                imported.pop("deleted_at", None)
+                imported["created_at"] = now_ms()
+                imported["updated_at"] = imported["created_at"]
+                imported["nodes"] = _canvas_package_replace_urls(imported["nodes"], mapping)
+                imported["connections"] = _canvas_package_replace_urls(imported["connections"], mapping)
+                if "viewport" not in imported or not isinstance(imported.get("viewport"), dict):
+                    imported["viewport"] = {"x": 0, "y": 0, "scale": 1}
+                with CANVAS_LOCK:
+                    DATABASE.save_canvas(imported)
+                meta = {
+                    "format": CANVAS_PACKAGE_FORMAT,
+                    "version": CANVAS_PACKAGE_VERSION,
+                    "resource_count": imported_resources,
+                    "node_count": len(imported["nodes"]),
+                    "connection_count": len(imported["connections"]),
+                }
+                publish_entity_changed("canvas", imported["id"], int(imported.get("revision") or 0), updated_at=int(imported.get("updated_at") or 0))
+                return imported, meta
+            except Exception:
+                shutil.rmtree(import_dir, ignore_errors=True)
+                raise
+    except CanvasPackageError:
+        raise
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise CanvasPackageError("无法读取工程包") from exc
 
 def cleanup_expired_canvas_trash():
     cutoff = now_ms() - CANVAS_TRASH_RETENTION_MS
@@ -21850,6 +22143,62 @@ async def get_canvas(canvas_id: str):
     ACTIVE_CANVAS_ID = canvas_id
     ACTIVE_CANVAS_LAST_SEEN = time.time()
     return {"canvas": load_canvas(canvas_id)}
+
+@app.get("/api/canvases/{canvas_id}/export-package")
+async def export_canvas_package(canvas_id: str, name: str = ""):
+    """下载完整无限画布工程包，继续走浏览器/桌面端的原生保存流程。"""
+    source = load_canvas(canvas_id)
+    try:
+        archive, _ = await asyncio.to_thread(build_canvas_package_archive, source)
+    except CanvasPackageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    filename = sanitize_export_filename(
+        name or f"{source.get('title') or 'infinite-canvas'}-工程包.zip",
+        "infinite-canvas-project.zip",
+    )
+    if not filename.lower().endswith(".zip"):
+        filename += ".zip"
+    encoded = urllib.parse.quote(filename)
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
+    return Response(archive, media_type="application/zip", headers=headers)
+
+@app.post("/api/canvas-packages/import")
+async def import_canvas_package(
+    file: UploadFile = File(...),
+    project: str = Form(""),
+):
+    """导入工程包并创建新画布，不覆盖当前画布。"""
+    temp_dir = os.fspath(DATA_LAYOUT.temp)
+    os.makedirs(temp_dir, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix="canvas-package-", suffix=".zip", dir=temp_dir)
+    os.close(fd)
+    total = 0
+    try:
+        with open(temp_path, "wb") as target:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > CANVAS_PACKAGE_MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="工程包过大，无法导入")
+                target.write(chunk)
+        if total <= 0:
+            raise HTTPException(status_code=400, detail="工程包为空")
+        try:
+            imported, meta = await asyncio.to_thread(
+                import_canvas_package_archive,
+                temp_path,
+                project,
+            )
+        except CanvasPackageError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"canvas": imported, "meta": meta}
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
 
 @app.post("/api/canvases/{canvas_id}/touch")
 async def touch_canvas(canvas_id: str):

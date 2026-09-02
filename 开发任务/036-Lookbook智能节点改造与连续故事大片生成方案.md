@@ -45,7 +45,7 @@
 - 编译：未执行桌面安装包构建
 - 运行测试：隔离 Web 冒烟通过；使用伪 API Key 时任务按预期返回上游 `502`，尚未调用真实付费图片 API
 - 全量测试：`1088 passed, 14 failed`；失败集中在已有影视线稿/特殊节点、旧静态资源/主题和快捷键基线契约，未命中本次 Lookbook 故事模式测试
-- 最近 Git commit：`4e2b969 feat: improve lookbook story incremental output`
+- 最近 Git commit：`3e16df0 feat: improve lookbook story incremental output`
 
 ---
 

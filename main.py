@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from threading import Lock, Thread
 import httpx
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.exceptions import RequestValidationError
@@ -15837,23 +15837,32 @@ def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
             if width < 2 or height < 2:
                 return False
             rgb = np.asarray(source, dtype=np.float32) / 255.0
+            # 先轻微压低大尺度色度云斑（保留全局主色与边缘），避免模型/旧 finish
+            # 已烘焙的黄蓝片状团块继续叠在新颗粒下面。
+            blurred = np.asarray(source.filter(ImageFilter.GaussianBlur(radius=5.5)), dtype=np.float32) / 255.0
+            luma_blurred = blurred @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+            chroma_blurred = blurred - luma_blurred[..., None]
+            chroma_center = chroma_blurred.mean(axis=(0, 1), keepdims=True)
+            rgb = np.clip(rgb - (chroma_blurred - chroma_center) * 0.14, 0.0, 1.0)
+            # 在低纹理区域抑制已烘焙的中频云斑；用局部梯度保护建筑边缘、头发和织物。
+            broad = np.asarray(source.filter(ImageFilter.GaussianBlur(radius=15.0)), dtype=np.float32) / 255.0
+            medium = blurred - broad
+            medium_luma = np.clip(blurred @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 0.0, 1.0)
+            grad_y, grad_x = np.gradient(medium_luma)
+            flat_mask = np.clip(1.0 - (np.abs(grad_x) + np.abs(grad_y)) * 22.0, 0.0, 1.0)
+            rgb = np.clip(rgb - medium * flat_mask[..., None] * 0.34, 0.0, 1.0)
+            # 对几乎没有结构的平坦区域做轻微局部曝光归一，进一步消除云状亮暗漂移。
+            flat_luma = blurred.mean(axis=2)
+            flat_center = float(np.median(flat_luma))
+            rgb = np.clip(rgb - (flat_luma - flat_center)[..., None] * flat_mask[..., None] * 0.12, 0.0, 1.0)
             seed = int.from_bytes(hashlib.sha256(str(path).encode("utf-8", "ignore")).digest()[:8], "big")
             rng = np.random.default_rng(seed)
 
-            # 细颗粒占主导；仅保留极弱的中频密度起伏，避免低频噪声形成片状脏点。
+            # 只使用独立高频颗粒；不生成任何低频场或结团密度图，避免形成片状脏点。
             fine = rng.normal(0.0, 1.0, (height, width)).astype(np.float32)
-            coarse_h = max(8, height // 64)
-            coarse_w = max(8, width // 64)
-            coarse = Image.fromarray(
-                np.clip((rng.normal(0.0, 1.0, (coarse_h, coarse_w)) * 42.0 + 128.0), 0, 255).astype(np.uint8),
-                "L",
-            ).resize((width, height), Image.Resampling.BICUBIC)
-            coarse = (np.asarray(coarse, dtype=np.float32) - 128.0) / 42.0
-            # 每像素随机密度只做很窄的变化，禁止连续大块亮/暗斑。
-            clump = 0.92 + 0.16 * rng.random((height, width), dtype=np.float32)
             luma = np.clip(rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 0.0, 1.0)
             mid_shadow_bias = 0.32 + 0.68 * (1.0 - np.clip(luma * 1.12, 0.0, 1.0))
-            grain = (fine * 0.90 + coarse * 0.10) * clump * mid_shadow_bias * float(amount)
+            grain = fine * mid_shadow_bias * float(amount)
             chroma = rng.normal(0.0, 0.12, (height, width)).astype(np.float32) * grain
             rgb[..., 0] += grain + chroma * 0.22
             rgb[..., 1] += grain

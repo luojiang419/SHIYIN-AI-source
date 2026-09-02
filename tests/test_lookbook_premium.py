@@ -2,6 +2,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+import inspect
 from unittest.mock import patch
 
 from PIL import Image
@@ -254,6 +255,9 @@ class LookbookPremiumResearchTests(unittest.TestCase):
                 arr = np.asarray(image.convert("RGB"), dtype=np.int16)
             self.assertGreater(float(arr.std()), 0.25)
             self.assertGreater(int(arr.max()) - int(arr.min()), 2)
+            source = inspect.getsource(main.apply_lookbook_organic_film_grain)
+            self.assertNotIn("coarse_h", source)
+            self.assertNotIn("clump", source)
 
     def test_structured_research_is_normalized_for_generation(self):
         value = main.normalize_lookbook_visual_research(json.dumps({

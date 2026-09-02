@@ -293,6 +293,40 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("avoid beauty gestures", prompts[2])
         self.assertIn("finger pressure", prompts[3])
 
+    def test_levis_variants_are_valid_and_keep_scene_story_in_four_frames(self):
+        common = {
+            "prompt_policy": "lookbook",
+            "instruction": "报刊亭门口的小情景：人物买完报纸，听见街角朋友招呼，边走边回头，最后整理牛仔袖口",
+            "lookbook_count": 4,
+        }
+        for style_id, markers in {
+            "standard-advertising": ("STANDARD ADVERTISING COLOR LOCK", "STANDARD ADVERTISING PERFORMANCE"),
+            "levis-high-key-color": ("HIGH-KEY BRIGHT-COLOR LOCK", "HIGH-KEY FREE CONFIDENCE PERFORMANCE"),
+            "levis-black-white": ("BLACK-AND-WHITE TONAL LOCK", "BLACK-AND-WHITE FREE CONFIDENCE PERFORMANCE"),
+        }.items():
+            prompt = build_prompt("universal", [
+                {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"},
+                {"role": "prop", "reference_type": "prop", "lookbook_role": "场景", "url": "/assets/input/scene.jpeg"},
+            ], {**common, "lookbook_style": {"id": style_id, "name": style_id}})
+            for marker in markers:
+                self.assertIn(marker, prompt)
+            prompts = main.lookbook_generation_prompts({"count": 4, "prompt": prompt, "options": {**common, "lookbook_style": {"id": style_id}}})
+            self.assertEqual(len(prompts), 4)
+            self.assertTrue(all("SINGLE-FRAME HARD STOP" in item for item in prompts))
+
+    def test_black_white_finish_removes_chroma_and_preserves_image(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = f"{temp_dir}/bw.jpg"
+            Image.new("RGB", (48, 32), (200, 80, 40)).save(path, "JPEG", quality=95)
+            with patch.object(main, "output_file_from_url", return_value=path), patch.object(main, "apply_lookbook_organic_film_grain", return_value=True):
+                main.apply_lookbook_film_finish({"images": ["/assets/generated/bw.jpg"]}, {"options": {"lookbook_style": {"id": "levis-black-white"}}})
+            with Image.open(path) as image:
+                arr = np.asarray(image.convert("RGB"), dtype=np.int16)
+            self.assertLess(int(np.abs(arr[..., 0] - arr[..., 1]).max()), 2)
+            self.assertLess(int(np.abs(arr[..., 1] - arr[..., 2]).max()), 2)
+
     def test_scene_styled_wardrobe_uses_identity_only_and_allows_solo_shots(self):
         prompt = build_prompt("universal", [
             {"role": "subject", "reference_type": "subject", "lookbook_role": "人物", "url": "/assets/input/model_a.jpg"},

@@ -1517,6 +1517,24 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                 "FW SINGLE-FRAME OUTPUT LOCK: each API output is exactly one full-bleed photograph in the requested aspect ratio. Never draw a contact sheet, four-panel grid, split screen, storyboard page, collage or multiple moments inside one canvas; the four beats above are separate outputs generated independently.",
                 "FW SCENE IMMUTABILITY LOCK: when a scene reference is supplied, keep that exact location, architecture, dominant paint colors, storefront/kiosk geometry and printed graphics as the set. Change only camera position, crop and natural time-of-day exposure; never relocate the person to a beach, cafe, generic street, studio or invented architecture.",
             ])
+        elif effective_style_id == "standard-advertising":
+            parts.extend([
+                "STANDARD ADVERTISING COLOR LOCK: use the validated neutral cinematic grade—balanced highlights and shadows, open midtones, pleasing warm-neutral hue, protected skin and denim color, gentle highlight roll-off and a small structured black point. Keep contrast intentional but never extreme; reject crushed blacks, clipped whites, teal-orange blockbuster color, muddy gray wash and generic low-contrast haze.",
+                "STANDARD ADVERTISING PERFORMANCE: the actor carries calm self-confidence and relaxed freedom through useful movement—walking with purpose, leaning into the space, turning toward a nearby person or handling a scene-owned object. Keep shoulders open, feet grounded, hands occupied by the task and gaze aimed at its objective; never use a stiff catalog stance or empty beauty gesture.",
+                "STANDARD ADVERTISING SERIES: keep one coherent small scene story, light direction and palette across four separate images: environmental establish, observed action, confident human pause and tactile garment/product proof. Each output is one full-bleed photograph, never a grid or collage.",
+            ])
+        elif effective_style_id == "levis-high-key-color":
+            parts.extend([
+                "HIGH-KEY BRIGHT-COLOR LOCK: expose as a luminous, optimistic advertisement with open whites, bright readable skin and denim, broad motivated daylight or soft scene key, a small structured black point and creamy highlight shoulder. Build color from the supplied scene with one bright dominant field, one supporting hue and one restrained accent; keep saturation clean and optimistic, never candy-like, neon or color-random.",
+                "HIGH-KEY FREE CONFIDENCE PERFORMANCE: direct effortless, self-possessed movement—long stride, open shoulders, wind catching the garment, stepping through a threshold, turning toward a friend or reaching for a real object. The body must be in motion or just completing motion; hands, gaze, weight shift and fabric response follow a clear objective. Reject hands-on-hips, mannequin stance, frozen smile and beauty posing.",
+                "HIGH-KEY SERIES CONSISTENCY: one concrete scene story and the same bright exposure/color script across four standalone frames: arrival, moving interaction, confident close beat and tactile denim contact. Never render a multi-panel layout.",
+            ])
+        elif effective_style_id == "levis-black-white":
+            parts.extend([
+                "BLACK-AND-WHITE TONAL LOCK: remove hue while preserving every texture and scene fact. Use rich neutral grayscale, luminous whites, separated midtones and deep but readable blacks; shape contrast from the actual key direction with restrained fill and soft highlight roll-off. Keep skin, denim weave, seams, hair and background structure legible. Reject flat gray, posterized clipping, fake scratches, colored accents and text cards.",
+                "BLACK-AND-WHITE FREE CONFIDENCE PERFORMANCE: show the actor relaxed, self-possessed and spontaneous inside a real task—walking, opening a door, exchanging an object, leaning into wind, listening, laughing mid-action or turning away with purpose. Eyes follow the objective, hands make functional contact, shoulders and hips counterbalance; never freeze into a fashion pose.",
+                "BLACK-AND-WHITE SERIES CONSISTENCY: keep one small scene story, grayscale response and camera grammar across four separate full-bleed frames: establish, action, human pause and tactile contact. Never render a grid, split screen or collage.",
+            ])
         elif effective_style_id == "levis-adaptive-campaign":
             parts.extend([
                 "ADAPTIVE DENIM CAMPAIGN METHOD: translate the supplied advertising references into an original documentary fashion campaign. Preserve the supplied scene geometry, materials, existing signs and recognizable colors, then classify the visible setting as interior or exterior and infer weather and time before choosing one motivated light branch. Clear sun uses directional hard-edged light, warm highlights and controlled shadow lift; overcast uses broad cool skylight and soft contrast; rain or wet ground uses gray ambient light, restrained specular reflections and damp fabric response; blue hour uses cool ambient exposure with practical lights warming the face; night uses motivated street, window or room practicals with readable shadow texture; interior window light combines daylight direction with the existing fixtures. Never apply one generic filter across all environments.",
@@ -1535,7 +1553,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
                 "MATERIAL PORTRAIT LIGHT LOCK: shape the image around the owning material—broad high-key light for skin, jewelry and eyewear; raking side light for leather, knit and hardware; controlled negative fill for form. Preserve micro-texture, reflective edges and product color with clean highlight roll-off, restrained grain and no plastic CGI gloss."
             )
         if style_id in {
-            "fw-cream-cyan-film", "levis-adaptive-campaign", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic",
+            "fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic",
             "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup",
         }:
             parts.append(

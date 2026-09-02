@@ -16306,8 +16306,24 @@ def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
         return False
 
 
+def apply_lookbook_monochrome_grade(url: str) -> bool:
+    """将黑白纪实预设的输出统一为保留纹理的中性灰度。"""
+    path = output_file_from_url(url)
+    if not path:
+        return False
+    try:
+        with Image.open(path) as image:
+            gray = ImageOps.grayscale(image.convert("RGB"))
+            gray = ImageOps.autocontrast(gray, cutoff=0.25)
+            gray.convert("RGB").save(path, "JPEG", quality=95, subsampling=0, optimize=True)
+        return True
+    except Exception as exc:
+        print(f"Lookbook 黑白校准跳过：{exc}")
+        return False
+
+
 def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
-    """只对 FW 风格应用颗粒 finish，其他 Lookbook 风格保持原始输出。"""
+    """对已验证的 Lookbook 风格应用轻量、可解释的后处理。"""
     options = snapshot.get("options") if isinstance(snapshot, dict) else {}
     options = options if isinstance(options, dict) else {}
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
@@ -16315,12 +16331,20 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
     if style_id == "auto":
         decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
         style_id = str(decision.get("selected_style_id") or "").strip().lower()
-    if style_id not in {"fw-cream-cyan-film", "levis-adaptive-campaign"}:
+    if style_id not in {"fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white"}:
         return batch
     for url in list(batch.get("images") or []):
-        if style_id == "fw-cream-cyan-film":
+        if style_id == "levis-black-white":
+            apply_lookbook_monochrome_grade(str(url))
+            apply_lookbook_organic_film_grain(str(url), amount=0.018)
+        elif style_id == "fw-cream-cyan-film":
             apply_lookbook_natural_sun_grade(str(url))
             apply_lookbook_organic_film_grain(str(url), amount=0.095)
+        elif style_id == "levis-high-key-color":
+            apply_lookbook_natural_sun_grade(str(url))
+            apply_lookbook_organic_film_grain(str(url), amount=0.025)
+        elif style_id == "standard-advertising":
+            apply_lookbook_organic_film_grain(str(url), amount=0.018)
         else:
             # 李维斯风格必须保留场景自身的天气与光色，只补充轻量胶片质感。
             apply_lookbook_organic_film_grain(str(url), amount=0.025)
@@ -17554,6 +17578,9 @@ LOOKBOOK_AUTO_STYLE_IDS = {
     "candid-lifestyle",
     "fw-cream-cyan-film",
     "levis-adaptive-campaign",
+    "standard-advertising",
+    "levis-high-key-color",
+    "levis-black-white",
     "multi-person-interaction",
     "single-person-emotion",
     "sports-dynamic",
@@ -17833,7 +17860,7 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
     if style_id == "auto":
         decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
         style_id = str(decision.get("selected_style_id") or "").strip().lower()
-    if not cards and style_id == "levis-adaptive-campaign":
+    if not cards and style_id in {"levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white"}:
         cards = [dict(item) for item in LEVIS_ADAPTIVE_SHOT_CARDS]
     count = max(1, min(4, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
     base_prompt = str(snapshot.get("prompt") or "").strip()
@@ -18034,7 +18061,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
     auto_router_instruction = (
         "当前选择的是自动风格。你必须先作为视觉风格总监解析所有参考图的内容元素、人物/商品/场景关系、光线、色彩、材质、动作潜力和用户需求，"
         "然后从以下既有风格 taxonomy 中选择一个最适合的风格 ID："
-            "fw-cream-cyan-film、levis-adaptive-campaign、candid-lifestyle、multi-person-interaction、single-person-emotion、sports-dynamic、casual-friends、street-film、"
+            "fw-cream-cyan-film、levis-adaptive-campaign、standard-advertising、levis-high-key-color、levis-black-white、candid-lifestyle、multi-person-interaction、single-person-emotion、sports-dynamic、casual-friends、street-film、"
         "travel-dream、product-story、pet-fashion、material-closeup。"
         "不要选择 auto；必须说明选择理由，并让后续 art direction 服从该选择。输出严格 JSON，结构为："
         '{"selected_style_id":"","selected_style_name":"","rationale":"","confidence":0,"art_direction":""}。\n'
@@ -18050,7 +18077,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
             "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
             + ("最后几张输入图是联网案例方法证据，只能用来观察色彩比例、光源、景别、动作、材质和留白；绝不能把其中人物、服装、Logo、文案、独特地点或商品当成本次生成素材。必须从案例中选一个主方向，不要平均混合多个品牌视觉。\n" if research_images else "")
-            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"auto", "fw-cream-cyan-film", "levis-adaptive-campaign", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
+            + ("本次启用参考图驱动视觉方法：参考图优先、零文字提示词、多人物保持独立身份并产生视线/触碰/共同注意等自然互动；把人物放进场景中而不是抠图叠加，保留皮肤、发丝、织物纹理和真实摄影小瑕疵。\n" if style_id in {"auto", "fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic", "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup"} else "")
             + f"用户需求：{brief}\n视觉风格：{str(style.get('name') or '')} {str(style.get('prompt') or '')}\n"
             f"参考图事实分析：{str(options.get('lookbook_reference_analysis') or '')[:7000]}\n"
             f"案例研究摘要：{str(options.get('search_context') or '')[:6000]}\n"

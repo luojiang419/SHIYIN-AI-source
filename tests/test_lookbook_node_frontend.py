@@ -13,6 +13,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         cls.canvas = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         cls.css = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         cls.html = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+        cls.story = (ROOT / "canvas_core" / "lookbook_story.py").read_text(encoding="utf-8")
 
     def test_validated_builtin_presets_are_available(self):
         styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
@@ -136,9 +137,9 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.27", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.30", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.7", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.9", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)
@@ -200,6 +201,31 @@ class LookbookNodeFrontendTests(unittest.TestCase):
 
     def test_new_lookbook_defaults_to_four_coordinated_images(self):
         self.assertIn("count:4,generatedOutputs", self.lookbook)
+
+    def test_story_mode_accepts_twenty_images_and_tracks_manual_settings(self):
+        self.assertIn("lookbookMode:'story-campaign'", self.lookbook)
+        self.assertIn("node.lookbookMode=String(node.lookbookMode||'story-campaign')", self.lookbook)
+        self.assertIn('max="20"', self.lookbook)
+        self.assertIn("clamp(control.value,1,20)", self.lookbook)
+        self.assertIn("lookbook_mode:String(node.lookbookMode || 'story-campaign')", self.canvas)
+        self.assertIn("lookbook_manual_overrides:node.lookbookManualOverrides || {}", self.canvas)
+
+    def test_storyboard_state_is_persisted_and_sent_with_the_next_run(self):
+        self.assertIn("lookbookShotCards=Array.isArray(node.lookbookShotCards)?node.lookbookShotCards:[]", self.lookbook)
+        self.assertIn("lookbook_bible:node.lookbookBible || {}", self.canvas)
+        self.assertIn("lookbook_shot_cards:node.lookbookShotCards || []", self.canvas)
+        self.assertIn("node.lookbookShotCards = task.lookbook_shot_cards", self.canvas)
+
+    def test_lookbook_output_creates_one_pending_slot_per_requested_image_and_consumes_partial_results(self):
+        self.assertIn("Array.from({length:count}, () => uid('p'))", self.canvas)
+        self.assertIn("lookbookSlotIndex:index + 1", self.canvas)
+        self.assertIn("syncEcommerceLookbookPartial(taskId, task)", self.canvas)
+        self.assertIn("partial_result", self.canvas)
+
+    def test_story_prompt_only_authorizes_layout_when_brief_explicitly_requests_it(self):
+        self.assertIn("parse_lookbook_layout_intent", self.story)
+        self.assertIn("EDITORIAL-LAYOUT AUTHORIZATION", self.story)
+        self.assertIn("SINGLE-FRAME HARD STOP", self.story)
 
 
 if __name__ == "__main__":

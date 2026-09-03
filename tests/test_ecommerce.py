@@ -660,6 +660,9 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertEqual(custom["resolution"], "4k")
         self.assertEqual(custom["quality"], "low")
         self.assertEqual(custom["count"], 3)
+        ultra_wide = resolve_generation_settings(1600, 900, "standard", "21:9", "2k", "high", 1)
+        self.assertEqual(ultra_wide["size"], "2016x864")
+        self.assertEqual(ultra_wide["aspect_ratio"], "21:9")
         with self.assertRaises(ValueError):
             resolve_generation_settings(1600, 900, "preview", "5:7")
 

@@ -8,6 +8,7 @@ CanvasLLM 链路负责。
 from __future__ import annotations
 
 import re
+import math
 from typing import Any, Dict, Iterable, List, Optional
 
 
@@ -19,11 +20,28 @@ LOOKBOOK_DEFAULTS = {
     "resolution": "2k",
     "quality": "high",
 }
-LOOKBOOK_ASPECT_RATIOS = {"1:1", "2:3", "3:4", "4:3", "4:5", "9:16", "16:9"}
+LOOKBOOK_ASPECT_RATIOS = {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"}
 LOOKBOOK_RESOLUTIONS = {"1k", "2k", "4k"}
 LOOKBOOK_QUALITIES = {"auto", "medium", "high"}
 LOOKBOOK_SINGLE_FRAME_MODE = "single-frame"
 LOOKBOOK_EDITORIAL_LAYOUT_MODE = "editorial-layout"
+LOOKBOOK_LAYOUT_MAX_AXIS = 5
+LOOKBOOK_LAYOUT_MAX_PANELS = 20
+LOOKBOOK_LAYOUT_PRESETS = {
+    "auto": (1, 1),
+    "single-frame": (1, 1),
+    "row-3": (1, 3),
+    "column-3": (3, 1),
+    "grid-2x2": (2, 2),
+    "grid-3x3": (3, 3),
+}
+LOOKBOOK_LAYOUT_GAPS = {
+    0: {"id": "none", "label": "无间距", "prompt": "zero internal gutters; adjacent panels touch directly"},
+    1: {"id": "thin", "label": "窄间距", "prompt": "very thin, even internal gutters"},
+    2: {"id": "standard", "label": "标准间距", "prompt": "moderate, consistent internal gutters"},
+    3: {"id": "wide", "label": "宽间距", "prompt": "wide, deliberate editorial gutters"},
+}
+LOOKBOOK_OUTPUT_ASPECT_RATIOS = ("9:16", "2:3", "3:4", "1:1", "4:5", "5:4", "4:3", "3:2", "16:9", "21:9")
 
 _CN_DIGITS = {
     "零": 0,
@@ -113,6 +131,115 @@ def parse_lookbook_layout_intent(text: str) -> Dict[str, Any]:
         "explicit": True,
         "source": source,
         "specification": source[:120],
+    }
+
+
+def normalize_lookbook_layout_selection(value: Any) -> Dict[str, Any]:
+    """校验节点保存的布局选择；auto 继续允许从用户文案识别版式。"""
+    raw = value if isinstance(value, dict) else {}
+    preset_id = str(raw.get("preset_id") or raw.get("presetId") or "auto").strip().lower()
+    if preset_id not in {*LOOKBOOK_LAYOUT_PRESETS, "custom"}:
+        preset_id = "custom"
+    preset = LOOKBOOK_LAYOUT_PRESETS.get(preset_id)
+    try:
+        rows = int(raw.get("rows") or (preset[0] if preset else 1))
+        columns = int(raw.get("columns") or raw.get("cols") or (preset[1] if preset else 1))
+        gap = int(raw.get("gap", 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Lookbook 布局行列或间距无效") from exc
+    if preset:
+        rows, columns = preset
+    if not 1 <= rows <= LOOKBOOK_LAYOUT_MAX_AXIS or not 1 <= columns <= LOOKBOOK_LAYOUT_MAX_AXIS:
+        raise ValueError(f"Lookbook 布局行列必须是 1 到 {LOOKBOOK_LAYOUT_MAX_AXIS}")
+    panel_count = rows * columns
+    if panel_count > LOOKBOOK_LAYOUT_MAX_PANELS:
+        raise ValueError(f"Lookbook 单张拼图最多包含 {LOOKBOOK_LAYOUT_MAX_PANELS} 个画面")
+    if gap not in LOOKBOOK_LAYOUT_GAPS:
+        raise ValueError("Lookbook 图片间距只能是 0 到 3")
+    return {
+        "preset_id": preset_id,
+        "rows": rows,
+        "columns": columns,
+        "panel_count": panel_count,
+        "gap": gap,
+        "gap_id": LOOKBOOK_LAYOUT_GAPS[gap]["id"],
+        "gap_label": LOOKBOOK_LAYOUT_GAPS[gap]["label"],
+    }
+
+
+def _ratio_value(value: str) -> float:
+    match = re.fullmatch(r"\s*(\d+)\s*:\s*(\d+)\s*", str(value or ""))
+    if not match or int(match.group(2)) <= 0:
+        return 1.0
+    return int(match.group(1)) / int(match.group(2))
+
+
+def lookbook_layout_output_aspect_ratio(cell_aspect_ratio: str, rows: int, columns: int) -> str:
+    """把子画面比例和行列转换为图片 API 支持的最近最终画幅。"""
+    target = _ratio_value(cell_aspect_ratio) * max(1, int(columns)) / max(1, int(rows))
+    return min(
+        LOOKBOOK_OUTPUT_ASPECT_RATIOS,
+        key=lambda ratio: abs(math.log(max(target, 0.0001) / _ratio_value(ratio))),
+    )
+
+
+def _layout_grid_from_text(intent: Dict[str, Any]) -> Optional[tuple[int, int]]:
+    source = str(intent.get("source") or intent.get("specification") or "")
+    match = re.search(r"(\d{1,2}|[一二三四五六七八九十]+)\s*(?:宫格|格)", source)
+    count = chinese_number(match.group(1)) if match else None
+    known = {2: (1, 2), 3: (1, 3), 4: (2, 2), 6: (2, 3), 9: (3, 3), 12: (3, 4), 16: (4, 4), 20: (4, 5)}
+    return known.get(count or 0)
+
+
+def resolve_lookbook_layout_intent(
+    text: str,
+    selection: Any = None,
+    cell_aspect_ratio: str = "16:9",
+) -> Dict[str, Any]:
+    """合并弹窗选择和自然语言版式，并补齐可执行的行列、间距和画幅。"""
+    selected = normalize_lookbook_layout_selection(selection)
+    preset_id = selected["preset_id"]
+    if preset_id == "auto":
+        intent = parse_lookbook_layout_intent(text)
+        if not intent["explicit"]:
+            return {**intent, "selection": selected, "cell_aspect_ratio": cell_aspect_ratio, "output_aspect_ratio": cell_aspect_ratio}
+        inferred = _layout_grid_from_text(intent)
+        if inferred:
+            rows, columns = inferred
+            selected = normalize_lookbook_layout_selection({"preset_id": "custom", "rows": rows, "columns": columns, "gap": selected["gap"]})
+        else:
+            return {**intent, "selection": selected, "cell_aspect_ratio": cell_aspect_ratio, "output_aspect_ratio": cell_aspect_ratio}
+    elif preset_id == "single-frame":
+        return {
+            "mode": LOOKBOOK_SINGLE_FRAME_MODE,
+            "explicit": False,
+            "forced": True,
+            "source": "layout-picker",
+            "specification": "独立成片",
+            "selection": selected,
+            "cell_aspect_ratio": cell_aspect_ratio,
+            "output_aspect_ratio": cell_aspect_ratio,
+        }
+    else:
+        intent = {
+            "mode": LOOKBOOK_EDITORIAL_LAYOUT_MODE,
+            "explicit": True,
+            "source": "layout-picker",
+            "specification": f"{selected['rows']}x{selected['columns']} layout",
+        }
+    rows, columns = selected["rows"], selected["columns"]
+    return {
+        **intent,
+        **selected,
+        "selection": selected,
+        "cell_aspect_ratio": cell_aspect_ratio,
+        "output_aspect_ratio": lookbook_layout_output_aspect_ratio(cell_aspect_ratio, rows, columns),
+        "reading_order": "left-to-right-top-to-bottom",
+        "gap_prompt": LOOKBOOK_LAYOUT_GAPS[selected["gap"]]["prompt"],
+        "specification": (
+            f"{rows} rows x {columns} columns, exactly {selected['panel_count']} panels, "
+            f"each panel targets {cell_aspect_ratio}, {selected['gap_label']}"
+        ),
     }
 
 
@@ -511,20 +638,25 @@ def enforce_lookbook_story_rhythm_contract(cards: List[Dict[str, Any]], count: i
     return enforced
 
 
-def build_lookbook_series_quality_lock(count: int) -> str:
+def build_lookbook_series_quality_lock(count: int, layout_authorized: bool = False) -> str:
     """给独立多图系列注入与联合排版同等级的制作质量门。
 
     这段约束不授权模型绘制宫格，而是把“九宫格一次联合构图”带来的
     统一 art direction 转译为每个独立请求都必须执行的硬性检查。
     """
     expected = max(1, min(LOOKBOOK_MAX_COUNT, int(count or 1)))
+    output_rule = (
+        "This quality contract supports the authorized multi-panel layout: return one combined full-bleed layout image and do not fall back to separate files or an unrelated template. "
+        if layout_authorized else
+        "This is a quality contract only: output exactly one standalone full-bleed photograph and never draw a grid, collage, contact sheet, split screen or multiple panels. "
+    )
     return (
         f"SERIES QUALITY ANCHOR ({expected} independent frames): treat this request as one frame from a single, top-tier fashion editorial campaign. "
         "The GLOBAL LOOKBOOK BIBLE is the shared production source of truth: keep the same person identity, denim/product geometry, wardrobe state, location geography, light direction, palette, lens language and photographic finish across every frame. "
         "Reach publication-grade quality in this single image—believable anatomy and hands, purposeful body mechanics, eyes locked to the external objective, event-triggered micro-expression, real weight/contact, tactile fabric construction, motivated depth and a decisive editorial composition. "
         "Use one clear action with a visible beginning or consequence; never substitute a generic model pose, stock smile, empty showroom, unrelated prop or decorative background. "
         "Before finalizing, self-check identity continuity, product fidelity, emotional cause, spatial continuity, shot-scale lock, lighting continuity and commercial finishing, then correct any weak item in this frame. "
-        "This is a quality contract only: output exactly one standalone full-bleed photograph and never draw a grid, collage, contact sheet, split screen or multiple panels. "
+        + output_rule
     )
 
 
@@ -534,10 +666,11 @@ def build_lookbook_shot_prompt(
     card: Dict[str, Any],
     reference_labels: Optional[Iterable[str]] = None,
     wardrobe_mode: str = "",
+    layout_intent: Optional[Dict[str, Any]] = None,
 ) -> str:
     """把全局视觉圣经和当前分镜卡编译成图片请求。"""
     index = int(card.get("index") or 1)
-    layout_intent = parse_lookbook_layout_intent(brief)
+    layout_intent = layout_intent if isinstance(layout_intent, dict) else parse_lookbook_layout_intent(brief)
     references = " ".join(str(item).strip() for item in (reference_labels or []) if str(item).strip())
     bible_text = str(bible or "")
     if isinstance(bible, (dict, list)):
@@ -546,11 +679,27 @@ def build_lookbook_shot_prompt(
         bible_text = json.dumps(bible, ensure_ascii=False, separators=(",", ":"))
     raw_brief = str(brief or "").strip()
     if layout_intent["explicit"]:
+        rows = int(layout_intent.get("rows") or 0)
+        columns = int(layout_intent.get("columns") or 0)
+        panel_count = int(layout_intent.get("panel_count") or 0)
+        cell_ratio = str(layout_intent.get("cell_aspect_ratio") or "").strip()
+        gap_prompt = str(layout_intent.get("gap_prompt") or "precise, coherent gutters").strip()
+        structured_layout = (
+            f"Divide the complete output into exactly {panel_count} panels arranged as {rows} rows x {columns} columns. "
+            f"Each individual panel targets a {cell_ratio} aspect ratio; preserve that landscape/portrait orientation without stretching subjects. "
+            "Read panels left to right, then top to bottom. "
+            f"Use {gap_prompt}. Internal separators must be straight, aligned and visually consistent. "
+            "The photographic panels must reach the outer edges of the final canvas: zero outer margin and zero surrounding background. "
+            "ABSOLUTELY FORBIDDEN: presentation board, poster mockup, picture frame, mat board, mounting card, outer border, gray background outside the panels, drop shadow, floating sheet, rounded container or nested collage. "
+            if rows and columns and panel_count and cell_ratio else ""
+        )
         output_lock = (
             "EXPLICIT EDITORIAL-LAYOUT AUTHORIZATION: the user explicitly requested an arranged multi-image composition. "
             f"Execute only the requested layout specification ({layout_intent['specification']}) and make it feel art-directed for a top-tier fashion magazine: "
-            "precise visual hierarchy, intentional rhythm and scale contrast, coherent gutters/crops, disciplined negative space, seamless color continuity and publication-grade finishing. "
+            + structured_layout
+            + "precise visual hierarchy, intentional rhythm and scale contrast, coherent gutters/crops, disciplined negative space, seamless color continuity and publication-grade finishing. "
             "Every panel must advance the same narrative beat; never create a random collage, generic template, contact-sheet dump, repeated near-duplicates or ecommerce catalog tiles. "
+            "Return exactly one combined image containing the complete panel layout, never separate image files for its panels. "
         )
         story_text = raw_brief
     else:
@@ -565,7 +714,10 @@ def build_lookbook_shot_prompt(
             raw_brief,
             flags=re.IGNORECASE,
         ).strip(" ，,。;；") or raw_brief
-    series_quality_lock = build_lookbook_series_quality_lock(int(card.get("series_count") or 1))
+    series_quality_lock = build_lookbook_series_quality_lock(
+        int(card.get("series_count") or 1),
+        layout_authorized=bool(layout_intent.get("explicit")),
+    )
     wardrobe_rule = (
         "IDENTITY-ONLY WARDROBE OVERRIDE: person reference images own face, hair, skin tone and body proportions only. "
         "Their photographed clothing is interview/source clothing and is forbidden in the final image. "

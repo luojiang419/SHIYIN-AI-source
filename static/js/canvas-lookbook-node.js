@@ -3,10 +3,44 @@
     const TYPE = 'lookbook';
     const DEFAULT_STYLE_ID = 'fw-cream-cyan-film';
     const DEFAULT_GRAIN_STRENGTH = 0.095;
+    const LAYOUT_PRESETS = [
+        {id:'auto',name:'自动识别',rows:1,columns:1},
+        {id:'single-frame',name:'独立成片',rows:1,columns:1},
+        {id:'row-3',name:'单排三张',rows:1,columns:3},
+        {id:'column-3',name:'单列三张',rows:3,columns:1},
+        {id:'grid-2x2',name:'四宫格',rows:2,columns:2},
+        {id:'grid-3x3',name:'九宫格',rows:3,columns:3},
+    ];
+    const LAYOUT_GAP_LABELS = ['无间距','窄间距','标准间距','宽间距'];
+    const LAYOUT_OUTPUT_RATIOS = ['9:16','2:3','3:4','1:1','4:5','5:4','4:3','3:2','16:9','21:9'];
     const normalizeGrainStrength = value => {
         const numeric = Number(value);
         return Number.isFinite(numeric) ? Math.max(0, Math.min(0.2, numeric)) : DEFAULT_GRAIN_STRENGTH;
     };
+    const ratioValue = value => { const match=String(value||'').match(/^(\d+)\s*:\s*(\d+)$/); return match&&Number(match[2])>0?Number(match[1])/Number(match[2]):1; };
+    function normalizeLayoutSelection(value){
+        const raw=value&&typeof value==='object'?value:{};
+        let presetId=String(raw.preset_id||raw.presetId||'auto').trim().toLowerCase();
+        const preset=LAYOUT_PRESETS.find(item=>item.id===presetId);
+        if(!preset&&presetId!=='custom')presetId='custom';
+        let rows=preset?preset.rows:clamp(raw.rows||1,1,5);
+        let columns=preset?preset.columns:clamp(raw.columns||raw.cols||1,1,5);
+        if(rows*columns>20)columns=Math.max(1,Math.floor(20/rows));
+        const gap=clamp(Number(raw.gap??1),0,3);
+        return {preset_id:presetId,rows,columns,panel_count:rows*columns,gap};
+    }
+    function layoutOutputAspectRatio(node){
+        const selection=normalizeLayoutSelection(node?.lookbookLayoutSelection);
+        if(['auto','single-frame'].includes(selection.preset_id))return String(node?.aspectRatio||'16:9');
+        const target=ratioValue(node?.aspectRatio||'16:9')*selection.columns/selection.rows;
+        return LAYOUT_OUTPUT_RATIOS.reduce((best,ratio)=>Math.abs(Math.log(target/ratioValue(ratio)))<Math.abs(Math.log(target/ratioValue(best)))?ratio:best,LAYOUT_OUTPUT_RATIOS[0]);
+    }
+    function layoutSummary(node){
+        const selection=normalizeLayoutSelection(node?.lookbookLayoutSelection);
+        if(selection.preset_id==='auto')return '按需求自动';
+        if(selection.preset_id==='single-frame')return '独立成片';
+        return `${selection.rows}×${selection.columns} · ${LAYOUT_GAP_LABELS[selection.gap]}`;
+    }
     const LEVIS_ADAPTIVE_PROMPT = 'Heritage denim adaptive fashion campaign visual system, translated into an original editorial treatment for the supplied person, garment, product and location: documentary fashion photography with lived-in human presence, tactile denim construction, honest skin and imperfect real-world detail. Read the supplied scene first and preserve its geometry, materials, signs and recognizable colors. Classify the visible environment as interior or exterior, then infer the actual weather and time from the scene; select one motivated light branch and keep its direction consistent: clear sun uses directional hard-edged light with controlled shadow lift and warm highlights, overcast uses broad cool skylight with soft contrast, rain or wet ground uses gray ambient light plus restrained specular reflections and damp fabric response, blue hour uses cool ambient exposure with practical lights warming the face, night uses motivated street, window or room practicals with readable shadow detail, and interior window light combines daylight direction with the existing fixtures instead of a generic studio wash. Grade each scene from its own colors using 60% environment and denim midtones, 25% skin and neutral clothing, and 15% controlled accent sampled from the supplied image; keep indigo, washed blue, charcoal, off-white and muted earth colors natural, with red or saturated color only when visible or explicitly requested. Preserve the supplied person identity, face shape, skin tone, pores, hairline, hair texture, body proportions, visible makeup and wardrobe exactly; styling may adapt only when explicitly requested. Use believable editorial grooming: tactile hair strands, clean but human skin, minimal corrective makeup, weather-appropriate hair movement and makeup behavior, never a new face or beauty filter. Photograph an observed moment with an eye-level or waist-level handheld camera, moving between a wide environmental view, a human-distance action view and an intimate emotion or material detail; vary horizon, distance, crop and foreground occlusion with purpose. Give every frame one external objective belonging to the scene—arriving, selecting or paying for a paper item, reacting to an off-frame person or sound, leaving or sheltering from weather. Eyes follow that objective, fingers form a functional grip, shoulders and hips counterbalance, weight transfers between feet and clothing responds to momentum. Emotion is an involuntary reaction inside the task; hands stay occupied by the object, bag or environment rather than touching hair, chest or face. Keep the set lived-in with only scene-owned furniture, street furniture, tools, plants, vehicles or practical lights; do not invent a showroom. Preserve denim weave, seam, stitch, rivet, abrasion, fold, drape, skin pores, flyaway hair, dust, rain beads and contact shadows. Finish with restrained organic film texture, natural motion softness, gentle highlight roll-off and subtle halation only on bright edges. One full-bleed photograph per output, never a grid or collage; across four separate outputs use environmental establish, observed action, emotional close view and tactile garment/product proof. Extract methods only: do not copy any source person, slogan, logo, exact location or distinctive composition.';
     const STANDARD_AD_PROMPT = 'Standard advertising visual system: translate the supplied person, garment, product and scene into a polished but believable premium advertisement. Preserve identity, wardrobe, product geometry and scene architecture exactly. Use neutral cinematic contrast with balanced highlights and shadows, open midtones, a protected true black point, creamy highlight roll-off and pleasing warm-neutral skin; no crushed blacks, clipped whites, teal-orange cast or muddy gray wash. Light from the actual scene with one coherent key direction and restrained bounce, keeping faces, denim and background readable. Photograph a confident, relaxed person in a useful moment—walking with purpose, leaning into the environment, exchanging an object or reacting to someone nearby—not a stiff catalog pose. Keep hands, gaze, weight shift and clothing movement physically motivated. Use clean editorial composition, subtle depth and restrained organic grain. Four separate outputs form an advertising sequence: establish the place, catch an action, hold a confident human beat, then prove material/contact. One full-bleed photograph per output, never a grid, collage or storyboard.';
     const LEVIS_HIGH_KEY_PROMPT = 'High-key bright-color denim advertising visual system: create a luminous, optimistic campaign from the supplied person, garment, product and scene. Preserve scene geometry and identity, then expose for open whites, bright skin and readable denim with broad daylight or the scene\'s motivated soft key; keep a small structured black point and gentle creamy highlight shoulder. Build a clear color script from the actual scene: one bright dominant field (ivory, sunlit blue, pale green, warm yellow or another visible hue), one supporting color and one restrained accent; colors are saturated and clean but never candy-like or neon. Use airy atmosphere, crisp but natural fabric detail, soft contact shadows and subtle organic grain. Direct confident, free, effortless movement—long stride, shoulders open, jacket or shirt catching wind, turning toward a friend, stepping over a threshold, reaching for a real object—so the actor feels self-possessed and unforced. Avoid hands-on-hips, mannequin stance, beauty gestures and sterile studio backgrounds. Four independent full-bleed images share one small scene story and the same high-key color/light script: environmental arrival, moving interaction, confident close beat, tactile denim detail; never a grid or collage.';
@@ -45,14 +79,16 @@
         const modelItems = selected.models.length ? selected.models.map(model => `<button type="button" class="image-quick-choice-item ${model===selected.model?'active':''}" role="menuitem" data-lookbook-model-value="${esc(model)}"><span>${esc(model)}</span>${model===selected.model?'<i data-lucide="check"></i>':''}</button>`).join('') : '<button type="button" class="image-quick-choice-item empty" disabled>暂无图片模型</button>';
         return `<div class="lookbook-generation-settings" data-lookbook-generation-settings><div class="image-quick-choice image-quick-choice-provider" data-lookbook-choice="provider"><input type="hidden" data-lookbook-provider value="${esc(selected.providerId)}"><button type="button" class="image-quick-select image-quick-choice-trigger" data-lookbook-choice-trigger="provider" aria-haspopup="menu" aria-expanded="false" title="图片生成平台"><span>${esc(choiceProviderLabel(selected.providerId,selected.providers))}</span><i data-lucide="chevron-down"></i></button><div class="image-quick-choice-panel" data-lookbook-choice-panel="provider" role="menu">${providerItems}</div></div><div class="image-quick-choice image-quick-choice-model image-quick-model" data-lookbook-choice="model"><input type="hidden" data-lookbook-model value="${esc(selected.model)}"><button type="button" class="image-quick-select image-quick-choice-trigger" data-lookbook-choice-trigger="model" aria-haspopup="menu" aria-expanded="false" title="图片生成模型"><span>${esc(choiceModelLabel(selected.model))}</span><i data-lucide="chevron-down"></i></button><div class="image-quick-choice-panel" data-lookbook-choice-panel="model" role="menu">${modelItems}</div></div></div>`;
     }
+    function generationSummary(node){ const selected=syncGenerationSelection(node); return `${choiceProviderLabel(selected.providerId,selected.providers)} · ${choiceModelLabel(selected.model)} · ${node.aspectRatio} · ${String(node.resolution).toUpperCase()} · ${String(node.quality).toUpperCase()} · ${node.count}张`; }
     let pickerNode = null, pickerOptions = null;
+    let layoutPickerNode = null, layoutPickerOptions = null, layoutDraft = null;
     const actionBindings = new WeakMap();
     let actionDelegationInstalled = false;
     function activateAction(event){
         // 生成动作只接受 click。pointerdown/mousedown/pointerup 同时绑定会在
         // 节点重绘或长按时重复提交同一个 Lookbook 任务。
         if(event.type !== 'click') return;
-        const button = event.target?.closest?.('[data-lookbook-choose],[data-lookbook-run]');
+        const button = event.target?.closest?.('[data-lookbook-choose],[data-lookbook-layout],[data-lookbook-run]');
         const binding = button ? actionBindings.get(button) : null;
         if(!button || !binding) return;
         const now = Date.now();
@@ -61,6 +97,7 @@
         event.preventDefault();
         event.stopPropagation();
         if(button.hasAttribute('data-lookbook-choose')) openPicker(binding.node,{onChange:binding.options.onChange});
+        else if(button.hasAttribute('data-lookbook-layout')) openLayoutPicker(binding.node,{onChange:binding.options.onChange});
         else binding.options.run?.(binding.node);
     }
     function installActionDelegation(){
@@ -89,6 +126,70 @@
         window.lucide?.createIcons?.();
     }
     function openPicker(node,options){ pickerNode=node; pickerOptions=options||{}; renderModal(); const modal=ensureModal(); modal.classList.add('open'); modal.style.display='flex'; modal.style.pointerEvents='auto'; modal.setAttribute('aria-hidden','false'); if(typeof modal.showModal === 'function' && !modal.open){ try{ modal.showModal(); }catch(_){ modal.setAttribute('open',''); } } else modal.setAttribute('open',''); }
+    function layoutCells(rows,columns){ return Array.from({length:Math.min(20,Math.max(1,rows*columns))},(_,index)=>`<span>${index+1}</span>`).join(''); }
+    function layoutThumbnail(rows,columns){ return `<span class="lookbook-layout-thumb" style="--layout-rows:${rows};--layout-columns:${columns}">${layoutCells(rows,columns)}</span>`; }
+    function ensureLayoutModal(){
+        let modal=document.getElementById('lookbookLayoutModal'); if(modal)return modal;
+        modal=document.createElement('dialog'); modal.id='lookbookLayoutModal'; modal.className='lookbook-layout-modal'; modal.setAttribute('aria-hidden','true');
+        modal.innerHTML='<div class="lookbook-layout-dialog" role="dialog" aria-modal="true"><header><div><small>LOOKBOOK LAYOUT</small><h2>拼图版式</h2><p>子画面比例继承节点生成参数</p></div><button type="button" class="lookbook-modal-close" data-lookbook-layout-close aria-label="关闭">×</button></header><div class="lookbook-layout-body"><div class="lookbook-layout-presets" data-lookbook-layout-presets></div><section class="lookbook-layout-editor"><div class="lookbook-layout-preview-wrap"><div class="lookbook-layout-preview-meta"><span>布局预览</span><strong data-lookbook-layout-ratio></strong></div><div class="lookbook-layout-preview-stage"><div class="lookbook-layout-preview" data-lookbook-layout-preview></div></div></div><div class="lookbook-layout-controls"><label><span>行</span><input type="number" min="1" max="5" step="1" data-lookbook-layout-rows></label><label><span>列</span><input type="number" min="1" max="5" step="1" data-lookbook-layout-columns></label><label class="lookbook-layout-gap"><span>图片间距 <output data-lookbook-layout-gap-label></output></span><input type="range" min="0" max="3" step="1" data-lookbook-layout-gap></label></div><p class="lookbook-layout-warning" data-lookbook-layout-warning></p></section></div><footer><button type="button" data-lookbook-layout-cancel>取消</button><button type="button" class="primary" data-lookbook-layout-apply>应用版式</button></footer></div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click',event=>{if(event.target===modal||event.target.closest('[data-lookbook-layout-close],[data-lookbook-layout-cancel]'))closeLayoutPicker();});
+        modal.addEventListener('cancel',event=>{event.preventDefault();closeLayoutPicker();});
+        modal.querySelector('[data-lookbook-layout-apply]').addEventListener('click',applyLayoutSelection);
+        modal.querySelectorAll('[data-lookbook-layout-rows],[data-lookbook-layout-columns],[data-lookbook-layout-gap]').forEach(control=>control.addEventListener('input',syncLayoutDraftFromControls));
+        return modal;
+    }
+    function closeLayoutPicker(){ const modal=document.getElementById('lookbookLayoutModal'); if(modal?.open&&typeof modal.close==='function')modal.close(); modal?.classList.remove('open'); if(modal)modal.style.display='none'; modal?.setAttribute('aria-hidden','true'); layoutPickerNode=null;layoutPickerOptions=null;layoutDraft=null; }
+    function renderLayoutEditor(){
+        const modal=ensureLayoutModal(); if(!layoutDraft)return;
+        const rows=Math.max(1,Math.min(5,Number(layoutDraft.rows)||1));
+        const columns=Math.max(1,Math.min(5,Number(layoutDraft.columns)||1));
+        const gap=Math.max(0,Math.min(3,Number(layoutDraft.gap)||0));
+        const panelCount=rows*columns;
+        const preview=modal.querySelector('[data-lookbook-layout-preview]');
+        preview.style.setProperty('--layout-rows',String(rows));
+        preview.style.setProperty('--layout-columns',String(columns));
+        preview.style.setProperty('--layout-gap',`${[0,3,7,12][gap]}px`);
+        preview.style.setProperty('--layout-cell-ratio',String(ratioValue(layoutPickerNode?.aspectRatio||'16:9')));
+        preview.innerHTML=layoutCells(rows,columns);
+        modal.querySelector('[data-lookbook-layout-rows]').value=String(rows);
+        modal.querySelector('[data-lookbook-layout-columns]').value=String(columns);
+        modal.querySelector('[data-lookbook-layout-gap]').value=String(gap);
+        modal.querySelector('[data-lookbook-layout-gap-label]').textContent=LAYOUT_GAP_LABELS[gap];
+        const cellRatio=String(layoutPickerNode?.aspectRatio||'16:9');
+        const outputRatio=layoutOutputAspectRatio({...layoutPickerNode,lookbookLayoutSelection:{preset_id:'custom',rows,columns,gap}});
+        modal.querySelector('[data-lookbook-layout-ratio]').textContent=`${rows}×${columns} · 子图 ${cellRatio} · 输出 ${outputRatio}`;
+        const warning=modal.querySelector('[data-lookbook-layout-warning]');
+        const invalid=panelCount>20;
+        warning.textContent=invalid?'单张拼图最多包含 20 个画面':(rows===columns?'':'非等行列布局会按图片 API 支持的最近画幅生成');
+        warning.classList.toggle('error',invalid);
+        modal.querySelector('[data-lookbook-layout-apply]').disabled=invalid;
+        modal.querySelectorAll('[data-lookbook-layout-preset]').forEach(button=>button.classList.toggle('active',button.dataset.lookbookLayoutPreset===layoutDraft.preset_id));
+        window.lucide?.createIcons?.();
+    }
+    function renderLayoutModal(){
+        const modal=ensureLayoutModal();
+        modal.querySelector('[data-lookbook-layout-presets]').innerHTML=LAYOUT_PRESETS.map(item=>`<button type="button" class="lookbook-layout-preset ${layoutDraft?.preset_id===item.id?'active':''}" data-lookbook-layout-preset="${item.id}">${layoutThumbnail(item.rows,item.columns)}<strong>${item.name}</strong><small>${item.id==='auto'?'按文案判断':item.id==='single-frame'?'不使用拼图':`${item.rows} 行 × ${item.columns} 列`}</small></button>`).join('');
+        modal.querySelectorAll('[data-lookbook-layout-preset]').forEach(button=>button.onclick=()=>{const preset=LAYOUT_PRESETS.find(item=>item.id===button.dataset.lookbookLayoutPreset);if(!preset)return;layoutDraft={preset_id:preset.id,rows:preset.rows,columns:preset.columns,gap:layoutDraft?.gap??1};renderLayoutEditor();});
+        renderLayoutEditor();
+    }
+    function syncLayoutDraftFromControls(){
+        const modal=ensureLayoutModal();
+        layoutDraft={preset_id:'custom',rows:Number(modal.querySelector('[data-lookbook-layout-rows]').value)||1,columns:Number(modal.querySelector('[data-lookbook-layout-columns]').value)||1,gap:Number(modal.querySelector('[data-lookbook-layout-gap]').value)||0};
+        renderLayoutEditor();
+    }
+    function applyLayoutSelection(){
+        if(!layoutPickerNode||!layoutDraft||Number(layoutDraft.rows)*Number(layoutDraft.columns)>20)return;
+        resetDerivedResearch(layoutPickerNode);
+        layoutPickerNode.lookbookLayoutSelection=normalizeLayoutSelection(layoutDraft);
+        layoutPickerOptions?.onChange?.(layoutPickerNode,{render:true});
+        closeLayoutPicker();
+    }
+    function openLayoutPicker(node,options){
+        layoutPickerNode=node;layoutPickerOptions=options||{};layoutDraft={...normalizeLayoutSelection(node.lookbookLayoutSelection)};renderLayoutModal();
+        const modal=ensureLayoutModal();modal.classList.add('open');modal.style.display='flex';modal.style.pointerEvents='auto';modal.setAttribute('aria-hidden','false');
+        if(typeof modal.showModal==='function'&&!modal.open){try{modal.showModal();}catch(_){modal.setAttribute('open','');}}else modal.setAttribute('open','');
+    }
     function normalize(node){
         if(!node||node.type!==TYPE)return node;
         const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0];
@@ -131,6 +232,8 @@
         node.lookbookStoryCasePatterns=Array.isArray(node.lookbookStoryCasePatterns)?node.lookbookStoryCasePatterns:[];
         node.lookbookNarrativeMethods=Array.isArray(node.lookbookNarrativeMethods)?node.lookbookNarrativeMethods:[];
         node.lookbookLayoutIntent=node.lookbookLayoutIntent&&typeof node.lookbookLayoutIntent==='object'?node.lookbookLayoutIntent:{};
+        node.lookbookLayoutSelection=normalizeLayoutSelection(node.lookbookLayoutSelection);
+        node.lookbookGenerationExpanded=node.lookbookGenerationExpanded===true;
         node.lookbookResearchEvidenceStatus=String(node.lookbookResearchEvidenceStatus||'');
         node.apiProvider=String(node.apiProvider||'');
         node.model=String(node.model||'');
@@ -144,8 +247,23 @@
         node.runError=String(node.runError||'');
         return node;
     }
-    function createNode(point={}){ const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0]; return normalize({id:'',type:TYPE,x:Number(point.x||0),y:Number(point.y||0),w:430,lookbookPrompt:'',lookbookMode:'story-campaign',lookbookManualOverrides:{},lookbookStyleId:DEFAULT_STYLE_ID,lookbookStyleName:defaultStyle.name,lookbookStylePrompt:defaultStyle.prompt,lookbookStyleCover:'',lookbookStyleSource:'builtin',lookbookSearch:false,lookbookResearchStatus:'idle',lookbookAgentStage:'',lookbookAutoDecision:{},lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookResearchEvidenceStatus:'',lookbookGrainStrength:DEFAULT_GRAIN_STRENGTH,aspectRatio:'16:9',resolution:'2k',quality:'high',count:4,generatedOutputs:[],inputs:[],running:false,runError:''}); }
-    function bodyHtml(node){ normalize(node); const researchStatus=node.lookbookAgentStage || (node.lookbookResearchStatus==='running'?'正在执行当前 Skill':'等待生成'); return `<div class="ecom-node-panel lookbook-node-panel"><div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div><label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="输入故事或广告需求，例如：生成20张16:9、4K的连续时装大片，从地铁站走到书店，最后停在橱窗前">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">AI 会自动识别数量、画幅、分辨率，并拆解为连续独立画面；默认每张独立成片，只有明确写出宫格/拼图/杂志排版才会授权排版</small></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，优先执行已选风格）</span></label>${generationChoicesHtml(node)}<div class="ecom-node-params"><select data-lookbook-field="aspectRatio">${['1:1','2:3','3:4','4:3','4:5','9:16','16:9'].map(value=>`<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select><select data-lookbook-field="resolution">${['1k','2k','4k'].map(value=>`<option value="${value}" ${node.resolution===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><select data-lookbook-field="quality">${['auto','medium','high'].map(value=>`<option value="${value}" ${node.quality===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><label class="ecom-count">数量<input type="number" min="1" max="20" value="${node.count}" data-lookbook-field="count"></label></div><label class="lookbook-grain-control"><span>颗粒强度 <output data-lookbook-grain-value>${node.lookbookGrainStrength.toFixed(3)}</output></span><input type="range" min="0" max="0.2" step="0.005" value="${node.lookbookGrainStrength}" data-lookbook-field="lookbookGrainStrength" aria-label="颗粒强度"></label><button class="ecom-node-run lookbook-run" type="button" data-lookbook-run aria-busy="${node.running?'true':'false'}"><i data-lucide="wand-sparkles"></i>${node.running?'生成中…':'生成 Lookbook'}</button>${node.runError?`<div class="ecom-node-status failed"><span></span>${esc(node.runError)}</div>`:''}<div class="lookbook-research-status"><i data-lucide="sparkles"></i>${researchStatus}</div></div>`; }
+    function createNode(point={}){ const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0]; return normalize({id:'',type:TYPE,x:Number(point.x||0),y:Number(point.y||0),w:430,lookbookPrompt:'',lookbookMode:'story-campaign',lookbookManualOverrides:{},lookbookStyleId:DEFAULT_STYLE_ID,lookbookStyleName:defaultStyle.name,lookbookStylePrompt:defaultStyle.prompt,lookbookStyleCover:'',lookbookStyleSource:'builtin',lookbookSearch:false,lookbookResearchStatus:'idle',lookbookAgentStage:'',lookbookAutoDecision:{},lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookLayoutSelection:{preset_id:'auto',rows:1,columns:1,gap:1},lookbookGenerationExpanded:false,lookbookResearchEvidenceStatus:'',lookbookGrainStrength:DEFAULT_GRAIN_STRENGTH,aspectRatio:'16:9',resolution:'2k',quality:'high',count:4,generatedOutputs:[],inputs:[],running:false,runError:''}); }
+    function bodyHtml(node){
+        normalize(node);
+        const researchStatus=node.lookbookAgentStage || (node.lookbookResearchStatus==='running'?'正在执行当前 Skill':'等待生成');
+        const ratios=['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9'];
+        return `<div class="ecom-node-panel lookbook-node-panel">
+            <div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div>
+            <label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="输入故事或广告需求，例如：生成20张16:9、4K的连续时装大片，从地铁站走到书店，最后停在橱窗前">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">AI 会自动识别数量、画幅、分辨率，并拆解为连续独立画面；默认每张独立成片，只有明确写出宫格/拼图/杂志排版才会授权排版</small></label>
+            <label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，优先执行已选风格）</span></label>
+            <button type="button" class="lookbook-layout-button" data-lookbook-layout><i data-lucide="layout-grid"></i><span><small>拼图版式</small><strong>${esc(layoutSummary(node))}</strong></span><em>子图 ${esc(node.aspectRatio)} · 输出 ${esc(layoutOutputAspectRatio(node))}</em><i data-lucide="chevron-right"></i></button>
+            <section class="lookbook-settings ${node.lookbookGenerationExpanded?'expanded':''}" data-lookbook-settings>
+                <button type="button" class="lookbook-settings-toggle" data-lookbook-settings-toggle aria-expanded="${node.lookbookGenerationExpanded?'true':'false'}"><i data-lucide="settings-2"></i><span><strong>生成参数</strong><small>${esc(generationSummary(node))}</small></span><i data-lucide="chevron-down"></i></button>
+                <div class="lookbook-settings-content" data-lookbook-settings-content ${node.lookbookGenerationExpanded?'':'hidden'}>${generationChoicesHtml(node)}<div class="ecom-node-params"><select data-lookbook-field="aspectRatio">${ratios.map(value=>`<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select><select data-lookbook-field="resolution">${['1k','2k','4k'].map(value=>`<option value="${value}" ${node.resolution===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><select data-lookbook-field="quality">${['auto','medium','high'].map(value=>`<option value="${value}" ${node.quality===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><label class="ecom-count">成品数量<input type="number" min="1" max="20" value="${node.count}" data-lookbook-field="count"></label></div><label class="lookbook-grain-control"><span>颗粒强度 <output data-lookbook-grain-value>${node.lookbookGrainStrength.toFixed(3)}</output></span><input type="range" min="0" max="0.2" step="0.005" value="${node.lookbookGrainStrength}" data-lookbook-field="lookbookGrainStrength" aria-label="颗粒强度"></label></div>
+            </section>
+            <button class="ecom-node-run lookbook-run" type="button" data-lookbook-run aria-busy="${node.running?'true':'false'}"><i data-lucide="wand-sparkles"></i>${node.running?'生成中…':'生成 Lookbook'}</button>${node.runError?`<div class="ecom-node-status failed"><span></span>${esc(node.runError)}</div>`:''}<div class="lookbook-research-status"><i data-lucide="sparkles"></i>${researchStatus}</div>
+        </div>`;
+    }
     function bindGenerationChoices(root,node,options={}){
         const choiceRoot=root.querySelector('[data-lookbook-generation-settings]'); if(!choiceRoot) return;
         const closeChoices=except=>choiceRoot.querySelectorAll('[data-lookbook-choice]').forEach(menu=>{const open=menu===except; menu.classList.toggle('open',open); menu.querySelector('[data-lookbook-choice-trigger]')?.setAttribute('aria-expanded',String(open));});
@@ -155,10 +273,16 @@
             trigger?.addEventListener('focus',()=>closeChoices(null));
             trigger?.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();closeChoices(menu.classList.contains('open')?null:menu);});
         });
-        const update=()=>options.onChange?.(node,{render:false});
+        const update=()=>{refreshInlineSummaries(root,node);options.onChange?.(node,{render:false});};
         const bindModels=()=>choiceRoot.querySelectorAll('[data-lookbook-model-value]').forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();node.model=button.dataset.lookbookModelValue||'';const modelInput=choiceRoot.querySelector('[data-lookbook-model]');if(modelInput)modelInput.value=node.model;const menu=choiceRoot.querySelector('[data-lookbook-choice="model"]');menu?.querySelector('.image-quick-choice-trigger span')&&(menu.querySelector('.image-quick-choice-trigger span').textContent=choiceModelLabel(node.model));choiceRoot.querySelectorAll('[data-lookbook-model-value]').forEach(item=>item.classList.toggle('active',item===button));closeChoices(null);update();});
         choiceRoot.querySelectorAll('[data-lookbook-provider-value]').forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();const resolveProvider=typeof window.resolveImageProviderId==='function'?window.resolveImageProviderId:value=>String(value||'');node.apiProvider=resolveProvider(button.dataset.lookbookProviderValue||'');const models=imageModels(node.apiProvider);node.model=models[0]||'';const providerMenu=choiceRoot.querySelector('[data-lookbook-choice="provider"]');providerMenu?.querySelector('.image-quick-choice-trigger span')&&(providerMenu.querySelector('.image-quick-choice-trigger span').textContent=choiceProviderLabel(node.apiProvider,imageProviders()));choiceRoot.querySelectorAll('[data-lookbook-provider-value]').forEach(item=>item.classList.toggle('active',item===button));const modelMenu=choiceRoot.querySelector('[data-lookbook-choice="model"]');if(modelMenu){modelMenu.querySelector('.image-quick-choice-trigger span').textContent=choiceModelLabel(node.model);const panel=modelMenu.querySelector('[data-lookbook-choice-panel="model"]');panel.innerHTML=models.length?models.map(model=>`<button type="button" class="image-quick-choice-item ${model===node.model?'active':''}" role="menuitem" data-lookbook-model-value="${esc(model)}"><span>${esc(model)}</span>${model===node.model?'<i data-lucide="check"></i>':''}</button>`).join(''):'<button type="button" class="image-quick-choice-item empty" disabled>暂无图片模型</button>';window.lucide?.createIcons?.();bindModels();}closeChoices(null);update();});
         bindModels();
+    }
+    function refreshInlineSummaries(root,node){
+        const settingsSummary=root.querySelector('[data-lookbook-settings-toggle] small');
+        if(settingsSummary)settingsSummary.textContent=generationSummary(node);
+        const layoutMeta=root.querySelector('[data-lookbook-layout] em');
+        if(layoutMeta)layoutMeta.textContent=`子图 ${node.aspectRatio} · 输出 ${layoutOutputAspectRatio(node)}`;
     }
     function bind(root,node,options={}){
         normalize(node);
@@ -202,16 +326,20 @@
                         resetDerivedResearch(node);
                     }
                     if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node);
+                    refreshInlineSummaries(root,node);
                     options.onChange?.(node,{render:false});
                 }
                 event.stopPropagation();
             });
         });
         bindGenerationChoices(root,node,options);
-        const handleAction=event=>{if(event.type !== 'click') return; const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-run]'); if(!button||!root.contains(button)) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else options.run?.(node);};
+        const settingsToggle=root.querySelector('[data-lookbook-settings-toggle]');
+        settingsToggle?.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();node.lookbookGenerationExpanded=!node.lookbookGenerationExpanded;const section=root.querySelector('[data-lookbook-settings]');const content=root.querySelector('[data-lookbook-settings-content]');section?.classList.toggle('expanded',node.lookbookGenerationExpanded);if(content)content.hidden=!node.lookbookGenerationExpanded;settingsToggle.setAttribute('aria-expanded',String(node.lookbookGenerationExpanded));options.onChange?.(node,{render:false});});
+        const handleAction=event=>{if(event.type !== 'click') return; const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-layout],[data-lookbook-run]'); if(!button||!root.contains(button)) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else if(button.hasAttribute('data-lookbook-layout')) openLayoutPicker(node,{onChange:options.onChange}); else options.run?.(node);};
         const chooseButton=root.querySelector('[data-lookbook-choose]');
+        const layoutButton=root.querySelector('[data-lookbook-layout]');
         const runButton=root.querySelector('[data-lookbook-run]');
-        [chooseButton,runButton].filter(Boolean).forEach(button=>{ actionBindings.set(button,{node,options}); button.onclick=handleAction; });
+        [chooseButton,layoutButton,runButton].filter(Boolean).forEach(button=>{ actionBindings.set(button,{node,options}); button.onclick=handleAction; });
         root.addEventListener('click',handleAction,true);
     }
     function mediaRefs(node){ return (node.generatedOutputs||[]).map((item,index)=>({url:outputUrl(item),name:`lookbook-${index+1}.png`,kind:'image'})).filter(item=>item.url); }
@@ -226,5 +354,5 @@
     ];
     // 端口查询会在统一画布渲染所有节点时调用；非 Lookbook 节点必须返回空数组，
     // 否则会抢先进入通用多端口分支，覆盖三视图等节点自己的角色端口。
-    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:type=>type===TYPE ? INPUT_PORTS.map(item=>({...item})) : [],title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:type=>type===TYPE ? ({w:430,h:0}) : null,normalize,createNode,bodyHtml,bind,mediaRefs,openPicker};
+    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:type=>type===TYPE ? INPUT_PORTS.map(item=>({...item})) : [],title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:type=>type===TYPE ? ({w:430,h:0}) : null,normalize,createNode,bodyHtml,bind,mediaRefs,openPicker,outputAspectRatio:layoutOutputAspectRatio};
 })();

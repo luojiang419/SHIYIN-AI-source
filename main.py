@@ -175,6 +175,7 @@ from canvas_core.lookbook_story import (
     normalize_lookbook_shot_cards,
     normalize_ai_lookbook_settings,
     parse_lookbook_layout_intent,
+    resolve_lookbook_layout_intent,
     resolve_lookbook_settings,
 )
 from canvas_core.building_multi_view import (
@@ -17463,7 +17464,11 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
                 str(options.get("instruction") or ""),
                 node_settings={
                     "count": payload.count or 4,
-                    "aspect_ratio": payload.aspect_ratio if payload.aspect_ratio in {"1:1", "2:3", "3:4", "4:3", "4:5", "9:16", "16:9"} else "16:9",
+                    "aspect_ratio": (
+                        str(options.get("lookbook_cell_aspect_ratio") or payload.aspect_ratio)
+                        if str(options.get("lookbook_cell_aspect_ratio") or payload.aspect_ratio) in {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"}
+                        else "16:9"
+                    ),
                     "resolution": payload.resolution if payload.resolution in {"1k", "2k", "4k"} else "2k",
                     "quality": payload.quality if payload.quality in {"auto", "medium", "high"} else "high",
                 },
@@ -17476,17 +17481,24 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         values = brief_settings["values"]
+        layout_intent = resolve_lookbook_layout_intent(
+            str(options.get("instruction") or ""),
+            options.get("lookbook_layout_selection"),
+            values["aspect_ratio"],
+        )
         options["lookbook_count"] = values["count"]
         # 联网研究是可选增强项；故事模式不再覆盖用户显式的关闭选择。
         options["lookbook_search"] = bool(options.get("lookbook_search", False))
-        options["lookbook_layout_intent"] = brief_settings["layout_intent"]
+        options["lookbook_cell_aspect_ratio"] = values["aspect_ratio"]
+        options["lookbook_layout_selection"] = layout_intent.get("selection") or {}
+        options["lookbook_layout_intent"] = layout_intent
         options["lookbook_brief_parse"] = {
             "raw": brief_settings["parsed"]["raw"],
             "explicit": brief_settings["parsed"]["explicit"],
             "values": brief_settings["parsed"]["values"],
             "sources": brief_settings["sources"],
             "warnings": brief_settings["warnings"],
-            "layout_intent": brief_settings["layout_intent"],
+            "layout_intent": layout_intent,
         }
     free_creation = operation == "universal" and prompt_policy in {"free", "lookbook"}
     if free_creation and not normalized:
@@ -17540,7 +17552,7 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         if story_mode and brief_settings:
             values = brief_settings["values"]
             requested_count = values["count"]
-            generation_aspect_ratio = values["aspect_ratio"]
+            generation_aspect_ratio = str((options.get("lookbook_layout_intent") or {}).get("output_aspect_ratio") or values["aspect_ratio"])
             generation_resolution = values["resolution"]
             generation_quality = values["quality"]
         if prompt_policy == "lookbook" and "lookbook_count" in options:
@@ -17970,7 +17982,8 @@ def lookbook_context_signature(snapshot: Dict[str, Any]) -> str:
             "source": str(style.get("source") or "").strip(),
         },
         "inputs": inputs,
-        "aspect_ratio": str(snapshot.get("aspect_ratio") or "").strip(),
+        "cell_aspect_ratio": str(options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "").strip(),
+        "layout_selection": options.get("lookbook_layout_selection") if isinstance(options.get("lookbook_layout_selection"), dict) else {},
         "count": int(snapshot.get("count") or options.get("lookbook_count") or 1),
         "research_depth": str(options.get("lookbook_research_depth") or "deep").strip().lower(),
     }
@@ -18222,7 +18235,16 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
         effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
         selected_style_name = str(auto_decision.get("selected_style_name") or style.get("name") or "").strip()
         selected_style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
-        layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
+        stored_layout_intent = options.get("lookbook_layout_intent")
+        layout_intent = (
+            stored_layout_intent
+            if isinstance(stored_layout_intent, dict) and "explicit" in stored_layout_intent else
+            resolve_lookbook_layout_intent(
+                brief,
+                options.get("lookbook_layout_selection"),
+                str(options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "16:9"),
+            )
+        )
         series_count_authority = (
             f"SERIES COUNT AUTHORITY: the current task settings and shot card are the only quantity authority. This assigned output contains the explicitly requested layout ({str(layout_intent.get('specification') or 'editorial layout')}); any fixed output count or single-frame wording inside the style preset is a legacy example and must be ignored. "
             if layout_intent.get("explicit") else
@@ -18252,7 +18274,14 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
             # 让每个独立请求知道自己属于同一组图，提示词可以执行统一质量门；
             # 该字段只影响约束文本，不会改变镜头卡的公开数据结构。
             card_for_prompt = {**card, "series_count": count}
-            prompts.append(build_lookbook_shot_prompt(brief, bible, card_for_prompt, labels, wardrobe_mode=wardrobe_mode))
+            prompts.append(build_lookbook_shot_prompt(
+                brief,
+                bible,
+                card_for_prompt,
+                labels,
+                wardrobe_mode=wardrobe_mode,
+                layout_intent=layout_intent,
+            ))
         return prompts
     cards = [item for item in (options.get("lookbook_research_shots") or []) if isinstance(item, dict)]
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
@@ -18585,7 +18614,7 @@ async def enrich_lookbook_brief_settings(snapshot: Dict[str, Any]) -> Tuple[Dict
                 "请理解下面这段任意形式的时装广告/故事创作需求，并自动决定最合适的 Lookbook 生成参数。"
                 "用户可能使用口语、隐喻或只描述交付效果，不一定写出‘生成几张、什么比例、什么分辨率’。"
                 "请根据故事复杂度、镜头节奏、发布场景、构图需求和细节要求合理选择："
-                "count（1 到 20 的整数）、aspect_ratio（1:1/2:3/3:4/4:3/4:5/9:16/16:9）、"
+                "count（1 到 20 的整数）、aspect_ratio（1:1/2:3/3:2/3:4/4:3/4:5/5:4/9:16/16:9）、"
                 "resolution（1k/2k/4k）、quality（auto/medium/high）。"
                 "例如完整的多段广告故事应比单张海报选择更多镜头；手机社媒倾向 9:16，电影感横向故事倾向 16:9，"
                 "但必须以用户语义为准，不要机械套用例子。只输出 JSON，不要 Markdown："
@@ -18612,7 +18641,7 @@ async def enrich_lookbook_brief_settings(snapshot: Dict[str, Any]) -> Tuple[Dict
 
     node_settings = {
         "count": snapshot.get("count") or 4,
-        "aspect_ratio": snapshot.get("aspect_ratio") or "16:9",
+        "aspect_ratio": options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "16:9",
         "resolution": snapshot.get("resolution") or "2k",
         "quality": snapshot.get("quality") or "high",
     }
@@ -18623,13 +18652,19 @@ async def enrich_lookbook_brief_settings(snapshot: Dict[str, Any]) -> Tuple[Dict
         ai_settings=ai_settings,
     )
     values = resolved["values"]
+    layout_intent = resolve_lookbook_layout_intent(
+        str(options.get("instruction") or ""),
+        options.get("lookbook_layout_selection"),
+        values["aspect_ratio"],
+    )
+    output_aspect_ratio = str(layout_intent.get("output_aspect_ratio") or values["aspect_ratio"])
     dimensions = snapshot.get("source_dimensions") if isinstance(snapshot.get("source_dimensions"), dict) else {}
     try:
         generation = resolve_ecommerce_generation_settings(
             int(dimensions.get("width") or 1024),
             int(dimensions.get("height") or 1024),
             snapshot.get("mode") or "standard",
-            values["aspect_ratio"],
+            output_aspect_ratio,
             values["resolution"],
             values["quality"],
             values["count"],
@@ -18639,6 +18674,9 @@ async def enrich_lookbook_brief_settings(snapshot: Dict[str, Any]) -> Tuple[Dict
         return snapshot, {"status": "failed", "reason": str(exc)[:300]}
     options["lookbook_ai_settings"] = ai_settings
     options["lookbook_count"] = generation["count"]
+    options["lookbook_cell_aspect_ratio"] = values["aspect_ratio"]
+    options["lookbook_layout_selection"] = layout_intent.get("selection") or {}
+    options["lookbook_layout_intent"] = layout_intent
     brief_parse = dict(options.get("lookbook_brief_parse") or {})
     brief_parse.update({
         "ai": ai_settings,
@@ -18646,6 +18684,7 @@ async def enrich_lookbook_brief_settings(snapshot: Dict[str, Any]) -> Tuple[Dict
         "resolved_values": values,
         "sources": resolved["sources"],
         "warnings": resolved["warnings"],
+        "layout_intent": layout_intent,
     })
     options["lookbook_brief_parse"] = brief_parse
     enriched = {

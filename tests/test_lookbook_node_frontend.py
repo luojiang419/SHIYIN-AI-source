@@ -42,6 +42,53 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("lookbook_grain_strength:Number(node.lookbookGrainStrength ?? 0.095)", self.canvas)
         self.assertIn("lookbook-grain-control", self.css)
 
+    def test_layout_picker_has_presets_custom_grid_gap_and_live_thumbnail(self):
+        self.assertIn("const LAYOUT_PRESETS = [", self.lookbook)
+        for preset in ("row-3", "column-3", "grid-2x2", "grid-3x3"):
+            self.assertIn(f"id:'{preset}'", self.lookbook)
+        self.assertIn('data-lookbook-layout-rows', self.lookbook)
+        self.assertIn('data-lookbook-layout-columns', self.lookbook)
+        self.assertIn('data-lookbook-layout-gap', self.lookbook)
+        self.assertIn("rows*columns>20", self.lookbook)
+        self.assertIn("--layout-rows", self.lookbook)
+        self.assertIn("--layout-columns", self.lookbook)
+        self.assertIn("--layout-gap", self.lookbook)
+        self.assertIn(".lookbook-layout-preview", self.css)
+        self.assertIn(".lookbook-layout-preset", self.css)
+
+    def test_generation_settings_are_collapsed_by_default_with_summary(self):
+        self.assertIn("lookbookGenerationExpanded:false", self.lookbook)
+        self.assertIn("node.lookbookGenerationExpanded=node.lookbookGenerationExpanded===true", self.lookbook)
+        self.assertIn('data-lookbook-settings-toggle', self.lookbook)
+        self.assertIn('data-lookbook-settings-content ${node.lookbookGenerationExpanded?\'\':\'hidden\'}', self.lookbook)
+        self.assertIn("generationSummary(node)", self.lookbook)
+        self.assertIn("node.lookbookGenerationExpanded=!node.lookbookGenerationExpanded", self.lookbook)
+
+    def test_layout_selection_and_cell_ratio_are_submitted_and_restored(self):
+        self.assertIn("lookbook_layout_selection:node.lookbookLayoutSelection || {}", self.canvas)
+        self.assertIn("lookbook_cell_aspect_ratio:String(node.aspectRatio || '16:9')", self.canvas)
+        self.assertIn("window.CanvasLookbookNode?.outputAspectRatio?.(node)", self.canvas)
+        self.assertIn("node.lookbookLayoutSelection = task.options?.lookbook_layout_selection", self.canvas)
+        self.assertIn("created.options?.lookbook_cell_aspect_ratio", self.canvas)
+
+    def test_layout_output_ratio_runtime_maps_row_and_column_without_changing_cell_ratio(self):
+        module_path = ROOT / "static" / "js" / "canvas-lookbook-node.js"
+        script = f"""
+global.window = {{}};
+global.document = {{addEventListener:()=>{{}}}};
+global.localStorage = {{getItem:()=>null,setItem:()=>{{}}}};
+require({json.dumps(str(module_path))});
+const node = window.CanvasLookbookNode.createNode({{}});
+node.aspectRatio = '16:9';
+node.lookbookLayoutSelection = {{preset_id:'row-3',gap:1}};
+window.CanvasLookbookNode.normalize(node);
+if(window.CanvasLookbookNode.outputAspectRatio(node)!=='21:9' || node.aspectRatio!=='16:9') process.exit(2);
+node.lookbookLayoutSelection = {{preset_id:'column-3',gap:2}};
+window.CanvasLookbookNode.normalize(node);
+if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLayoutSelection.gap!==2) process.exit(3);
+"""
+        subprocess.run(["node", "-e", script], cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8")
+
     def test_premium_editorial_research_controls_are_submitted(self):
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
         self.assertNotIn("研究深度", self.lookbook)
@@ -213,10 +260,12 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.34", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.35", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
-        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.1", self.html)
+        self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260903.2", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.2", self.html)
+        self.assertIn("feature=lookbook-layout-editor.1", self.html)
+        self.assertIn("feature=lookbook-settings-collapse.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)

@@ -11,10 +11,13 @@ from canvas_core.lookbook_story import (
     enforce_lookbook_shot_scale_contract,
     lookbook_story_rhythm_contract,
     lookbook_shot_scale_contract,
+    lookbook_layout_output_aspect_ratio,
+    normalize_lookbook_layout_selection,
     normalize_lookbook_shot_cards,
     normalize_ai_lookbook_settings,
     parse_explicit_lookbook_settings,
     parse_lookbook_layout_intent,
+    resolve_lookbook_layout_intent,
     resolve_lookbook_settings,
 )
 
@@ -118,6 +121,36 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertEqual(snapshot["options"]["lookbook_brief_parse"]["sources"]["count"], "brief")
         self.assertFalse(snapshot["options"]["lookbook_search"])
         self.assertEqual(snapshot["options"]["lookbook_layout_intent"]["mode"], "single-frame")
+
+    def test_story_task_keeps_cell_ratio_while_row_layout_uses_wide_api_canvas(self):
+        payload = main.EcommerceTaskRequest(
+            operation="universal",
+            mode="standard",
+            inputs=[],
+            options={
+                "prompt_policy": "lookbook",
+                "lookbook_mode": "story-campaign",
+                "instruction": "生成一组美术馆时装画面",
+                "lookbook_cell_aspect_ratio": "16:9",
+                "lookbook_layout_selection": {"preset_id": "row-3", "gap": 1},
+            },
+            provider_id="shiying",
+            model="gemini-3-pro-image-preview",
+            aspect_ratio="16:9",
+            resolution="2k",
+            quality="high",
+            count=1,
+        )
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        with (
+            patch.object(main, "configured_ecommerce_providers", return_value=[provider]),
+            patch.object(main, "validate_ecommerce_local_inputs", return_value=([], (1024, 1024))),
+        ):
+            snapshot = main.prepare_ecommerce_request(payload)
+        self.assertEqual(snapshot["aspect_ratio"], "21:9")
+        self.assertEqual(snapshot["options"]["lookbook_cell_aspect_ratio"], "16:9")
+        self.assertEqual(snapshot["options"]["lookbook_layout_intent"]["panel_count"], 3)
+        self.assertEqual(snapshot["options"]["lookbook_layout_intent"]["gap_id"], "thin")
 
     def test_shot_cards_require_exact_order_and_continuity(self):
         cards = [
@@ -225,6 +258,43 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertTrue(intent['explicit'])
         self.assertEqual(intent['mode'], 'editorial-layout')
 
+    def test_layout_picker_normalizes_rows_columns_gap_and_panel_limit(self):
+        row = normalize_lookbook_layout_selection({"preset_id": "row-3", "gap": 0})
+        self.assertEqual((row["rows"], row["columns"], row["panel_count"]), (1, 3, 3))
+        self.assertEqual(row["gap_id"], "none")
+        custom = normalize_lookbook_layout_selection({"preset_id": "custom", "rows": 4, "columns": 5, "gap": 3})
+        self.assertEqual(custom["panel_count"], 20)
+        self.assertEqual(custom["gap_label"], "宽间距")
+        with self.assertRaisesRegex(ValueError, "最多包含 20"):
+            normalize_lookbook_layout_selection({"preset_id": "custom", "rows": 5, "columns": 5, "gap": 1})
+
+    def test_layout_output_ratio_uses_cell_ratio_and_nearest_api_canvas(self):
+        self.assertEqual(lookbook_layout_output_aspect_ratio("16:9", 2, 2), "16:9")
+        self.assertEqual(lookbook_layout_output_aspect_ratio("16:9", 3, 3), "16:9")
+        self.assertEqual(lookbook_layout_output_aspect_ratio("16:9", 1, 3), "21:9")
+        self.assertEqual(lookbook_layout_output_aspect_ratio("16:9", 3, 1), "9:16")
+
+    def test_picker_layout_overrides_text_and_carries_gap_contract(self):
+        intent = resolve_lookbook_layout_intent(
+            "生成独立时装画面，不要九宫格",
+            {"preset_id": "grid-2x2", "gap": 2},
+            "16:9",
+        )
+        self.assertTrue(intent["explicit"])
+        self.assertEqual((intent["rows"], intent["columns"], intent["panel_count"]), (2, 2, 4))
+        self.assertEqual(intent["gap_id"], "standard")
+        self.assertEqual(intent["output_aspect_ratio"], "16:9")
+
+    def test_picker_single_frame_can_explicitly_disable_text_layout(self):
+        intent = resolve_lookbook_layout_intent(
+            "请生成九宫格",
+            {"preset_id": "single-frame", "gap": 1},
+            "16:9",
+        )
+        self.assertFalse(intent["explicit"])
+        self.assertTrue(intent["forced"])
+        self.assertEqual(intent["mode"], "single-frame")
+
     def test_shot_prompt_authorizes_only_requested_editorial_layout(self):
         layout_prompt = build_lookbook_shot_prompt(
             "请生成一张4宫格杂志排版拼图，展示一段城市故事",
@@ -234,6 +304,48 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("EDITORIAL-LAYOUT AUTHORIZATION", layout_prompt)
         self.assertIn("top-tier fashion magazine", layout_prompt)
         self.assertNotIn("SINGLE-FRAME HARD STOP", layout_prompt)
+
+    def test_structured_layout_prompt_has_exact_grid_gap_and_no_outer_frame(self):
+        intent = resolve_lookbook_layout_intent(
+            "城市故事",
+            {"preset_id": "grid-3x3", "gap": 0},
+            "16:9",
+        )
+        prompt = build_lookbook_shot_prompt(
+            "城市故事",
+            {"palette": "red and white"},
+            {"index": 1, "series_count": 1, "beat": "开场", "story_purpose": "进入美术馆", "continuity_in": "开始", "continuity_out": "继续"},
+            layout_intent=intent,
+        )
+        self.assertIn("exactly 9 panels arranged as 3 rows x 3 columns", prompt)
+        self.assertIn("Each individual panel targets a 16:9 aspect ratio", prompt)
+        self.assertIn("zero internal gutters", prompt)
+        self.assertIn("zero outer margin", prompt)
+        self.assertIn("presentation board", prompt)
+        self.assertNotIn("never draw a grid", prompt)
+
+    def test_legacy_empty_layout_intent_falls_back_without_prompt_failure(self):
+        cards = [{
+            "index": 1,
+            "beat": "开场",
+            "story_purpose": "建立人物",
+            "continuity_in": "开始",
+            "continuity_out": "继续",
+        }]
+        prompts = main.lookbook_generation_prompts({
+            "count": 1,
+            "aspect_ratio": "16:9",
+            "inputs": [],
+            "options": {
+                "prompt_policy": "lookbook",
+                "lookbook_mode": "story-campaign",
+                "instruction": "生成一张时装广告",
+                "lookbook_layout_intent": {},
+                "lookbook_shot_cards": cards,
+            },
+        })
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("SINGLE-FRAME HARD STOP", prompts[0])
 
     def test_scene_styled_story_forbids_reference_interview_clothes(self):
         prompt = build_lookbook_shot_prompt(

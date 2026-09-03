@@ -10205,7 +10205,8 @@ function completeEcommerceLookbookTask(taskId, task){
         if(task.agent_stage) node.lookbookAgentStage = String(task.progress_status || task.agent_stage);
         const taskRequest = task.request || task.result?.params || {};
         if(Number(taskRequest.count || task.count) > 0) node.count = Math.max(1, Math.min(20, Number(taskRequest.count || task.count)));
-        if(taskRequest.aspect_ratio) node.aspectRatio = String(taskRequest.aspect_ratio);
+        const cellAspectRatio = task.options?.lookbook_cell_aspect_ratio || taskRequest.options?.lookbook_cell_aspect_ratio;
+        if(cellAspectRatio || taskRequest.aspect_ratio) node.aspectRatio = String(cellAspectRatio || taskRequest.aspect_ratio);
         if(taskRequest.resolution) node.resolution = String(taskRequest.resolution);
         if(taskRequest.quality) node.quality = String(taskRequest.quality);
         const referenceAnalysis = task.lookbook_reference_analysis?.summary || task.options?.lookbook_reference_analysis;
@@ -10223,6 +10224,7 @@ function completeEcommerceLookbookTask(taskId, task){
         node.lookbookStoryCasePatterns = Array.isArray(task.options?.lookbook_story_case_patterns) ? task.options.lookbook_story_case_patterns : [];
         node.lookbookNarrativeMethods = Array.isArray(task.options?.lookbook_narrative_methods) ? task.options.lookbook_narrative_methods : [];
         node.lookbookLayoutIntent = task.options?.lookbook_layout_intent && typeof task.options.lookbook_layout_intent === 'object' ? task.options.lookbook_layout_intent : {};
+        node.lookbookLayoutSelection = task.options?.lookbook_layout_selection && typeof task.options.lookbook_layout_selection === 'object' ? task.options.lookbook_layout_selection : (node.lookbookLayoutSelection || {});
         node.lookbookResearchEvidenceStatus = String(task.options?.lookbook_research_evidence_status || '');
         if(task.lookbook_research?.status) node.lookbookResearchStatus = String(task.lookbook_research.status);
         const plan = task.lookbook_plan?.summary || task.options?.lookbook_plan || task.result?.lookbook_plan?.summary;
@@ -10420,8 +10422,8 @@ async function runLookbookNode(nodeId, opts={}){
     if(!opts.cascade) setTimeout(() => { if(nodes.includes(node)) { node.running = false; refreshRunNodes(node,out); } }, 2000);
     const request = {
         operation:'universal', mode:'standard', inputs,
-        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_mode:String(node.lookbookMode || 'story-campaign'), lookbook_manual_overrides:node.lookbookManualOverrides || {}, lookbook_style:style, lookbook_search:node.lookbookSearch === true, lookbook_context_signature:String(node.lookbookContextSignature || ''), lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_research_sources:node.lookbookResearchSources || [], lookbook_research_images:node.lookbookResearchImages || [], lookbook_research_queries:node.lookbookResearchQueries || [], lookbook_research_direction:node.lookbookResearchDirection || {}, lookbook_research_shots:node.lookbookResearchShots || [], lookbook_story_case_patterns:node.lookbookStoryCasePatterns || [], lookbook_narrative_methods:node.lookbookNarrativeMethods || [], lookbook_layout_intent:node.lookbookLayoutIntent || {}, lookbook_research_evidence_status:String(node.lookbookResearchEvidenceStatus || ''), lookbook_auto_decision:isAutoStyle ? {} : (node.lookbookAutoDecision || {}), search_context:String(node.lookbookResearch || ''), lookbook_plan:isAutoStyle ? '' : String(node.lookbookPlan || ''), lookbook_bible:node.lookbookBible || {}, lookbook_shot_cards:node.lookbookShotCards || [], lookbook_story_summary:String(node.lookbookStorySummary || ''), lookbook_count:count, lookbook_grain_strength:Number(node.lookbookGrainStrength ?? 0.095)},
-        provider_id:String(node.apiProvider || ''), model:String(node.model || ''), aspect_ratio:node.aspectRatio || '16:9', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
+        options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_mode:String(node.lookbookMode || 'story-campaign'), lookbook_manual_overrides:node.lookbookManualOverrides || {}, lookbook_style:style, lookbook_search:node.lookbookSearch === true, lookbook_context_signature:String(node.lookbookContextSignature || ''), lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_research_sources:node.lookbookResearchSources || [], lookbook_research_images:node.lookbookResearchImages || [], lookbook_research_queries:node.lookbookResearchQueries || [], lookbook_research_direction:node.lookbookResearchDirection || {}, lookbook_research_shots:node.lookbookResearchShots || [], lookbook_story_case_patterns:node.lookbookStoryCasePatterns || [], lookbook_narrative_methods:node.lookbookNarrativeMethods || [], lookbook_layout_selection:node.lookbookLayoutSelection || {}, lookbook_layout_intent:node.lookbookLayoutIntent || {}, lookbook_cell_aspect_ratio:String(node.aspectRatio || '16:9'), lookbook_research_evidence_status:String(node.lookbookResearchEvidenceStatus || ''), lookbook_auto_decision:isAutoStyle ? {} : (node.lookbookAutoDecision || {}), search_context:String(node.lookbookResearch || ''), lookbook_plan:isAutoStyle ? '' : String(node.lookbookPlan || ''), lookbook_bible:node.lookbookBible || {}, lookbook_shot_cards:node.lookbookShotCards || [], lookbook_story_summary:String(node.lookbookStorySummary || ''), lookbook_count:count, lookbook_grain_strength:Number(node.lookbookGrainStrength ?? 0.095)},
+        provider_id:String(node.apiProvider || ''), model:String(node.model || ''), aspect_ratio:window.CanvasLookbookNode?.outputAspectRatio?.(node) || node.aspectRatio || '16:9', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
     };
     try {
         const cascadeTargetId = cascadeTargetIdFromOptions(opts);
@@ -10431,7 +10433,9 @@ async function runLookbookNode(nodeId, opts={}){
         const taskId = created.id || created.task_id;
         if(!taskId) throw new Error('Lookbook 任务没有返回任务 ID');
         if(Number(created.count) > 0) node.count = Math.max(1, Math.min(20, Number(created.count)));
-        if(created.aspect_ratio) node.aspectRatio = String(created.aspect_ratio);
+        const createdCellAspectRatio = created.options?.lookbook_cell_aspect_ratio;
+        if(createdCellAspectRatio || created.aspect_ratio) node.aspectRatio = String(createdCellAspectRatio || created.aspect_ratio);
+        if(created.options?.lookbook_layout_selection && typeof created.options.lookbook_layout_selection === 'object') node.lookbookLayoutSelection = created.options.lookbook_layout_selection;
         if(created.resolution) node.resolution = String(created.resolution);
         if(created.quality) node.quality = String(created.quality);
         const pending = pendingById(out,pendingIds[0]);

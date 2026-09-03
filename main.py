@@ -17722,9 +17722,16 @@ async def execute_lookbook_story_batch(
     semaphore = asyncio.Semaphore(LOOKBOOK_STORY_GENERATION_CONCURRENCY)
     started_at = time.time()
 
-    async def generate_card(card: Dict[str, Any]):
+    async def generate_card(card: Dict[str, Any], continuity_refs: Optional[List[Dict[str, Any]]] = None):
         index = int(card["index"])
         card_refs = lookbook_references_for_card(refs, card)
+        if continuity_refs:
+            # 首帧只作为人物/服装/光线/色彩连续性锚点，不拥有后续镜头的
+            # 相机、构图或动作；shot prompt 中的强制景别契约仍然优先。
+            anchor_refs = [dict(item) for item in continuity_refs if isinstance(item, dict) and item.get("url")]
+            # 路由筛选按原始参考图上限进行；加入锚点时保留上限，避免某些
+            # provider 因 15 张参考图直接拒绝整个镜头。
+            card_refs = (card_refs[:13] + anchor_refs[:1]) if len(card_refs) >= 14 else (card_refs + anchor_refs)
         last_error = ""
         for attempt in range(LOOKBOOK_STORY_MAX_RETRIES + 1):
             try:
@@ -17763,29 +17770,50 @@ async def execute_lookbook_story_batch(
                     await asyncio.sleep(min(2.0 * (attempt + 1), 5.0))
         raise HTTPException(status_code=502, detail=f"第 {index} 个故事镜头生成失败（已重试 {LOOKBOOK_STORY_MAX_RETRIES} 次）：{last_error}")
 
-    tasks = [asyncio.create_task(generate_card(card)) for card in cards]
     completed: Dict[int, Dict[str, Any]] = {}
     failures: List[str] = []
-    for task in asyncio.as_completed(tasks):
-        try:
-            item = await task
-            completed[int(item["index"])] = item
-            if progress_callback:
-                progress = {
-                    "index": item["index"],
-                    "images": item["images"],
-                    "image_items": item["image_items"],
-                    "raw": item["raw"],
-                    "completed_count": len(completed),
-                    "total_count": count,
-                    "generation_started_at": started_at,
-                    "generation_completed_at": time.time(),
-                }
-                result = progress_callback(progress)
-                if asyncio.iscoroutine(result):
-                    await result
-        except Exception as exc:
-            failures.append(str(getattr(exc, "detail", None) or exc)[:300])
+    async def publish(item: Dict[str, Any]) -> None:
+        completed[int(item["index"])] = item
+        if progress_callback:
+            progress = {
+                "index": item["index"],
+                "images": item["images"],
+                "image_items": item["image_items"],
+                "raw": item["raw"],
+                "completed_count": len(completed),
+                "total_count": count,
+                "generation_started_at": started_at,
+                "generation_completed_at": time.time(),
+            }
+            result = progress_callback(progress)
+            if asyncio.iscoroutine(result):
+                await result
+
+    # 先完成首帧，再把它作为连续性锚点提供给其余镜头。这样独立请求
+    # 共享九宫格联合构图所具备的角色、服装、色彩和空间基准，同时不牺牲
+    # 每张输出的独立 full-bleed 契约。
+    continuity_anchor: List[Dict[str, Any]] = []
+    try:
+        first = await generate_card(cards[0])
+        await publish(first)
+        if count > 1 and first.get("images"):
+            continuity_anchor = [{
+                "url": first["images"][0],
+                "role": "continuity-anchor",
+                "reference_type": "style",
+                "label": "Lookbook 首帧连续性锚点（仅身份、服装、光线与色彩）",
+                "instruction": "只用于连续性，不复制首帧的相机、构图、动作或景别",
+            }]
+    except Exception as exc:
+        failures.append(str(getattr(exc, "detail", None) or exc)[:300])
+
+    if not failures and count > 1:
+        tasks = [asyncio.create_task(generate_card(card, continuity_anchor)) for card in cards[1:]]
+        for task in asyncio.as_completed(tasks):
+            try:
+                await publish(await task)
+            except Exception as exc:
+                failures.append(str(getattr(exc, "detail", None) or exc)[:300])
     if failures:
         raise HTTPException(status_code=502, detail="；".join(failures[:3]))
     if len(completed) != count:
@@ -18155,7 +18183,13 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
             if isinstance(item, dict) and str(item.get("url") or "").strip()
         ][:12]
         wardrobe_mode = str(options.get("lookbook_wardrobe_mode") or "")
-        return [build_lookbook_shot_prompt(brief, bible, card, labels, wardrobe_mode=wardrobe_mode) for card in cards]
+        prompts = []
+        for card in cards:
+            # 让每个独立请求知道自己属于同一组图，提示词可以执行统一质量门；
+            # 该字段只影响约束文本，不会改变镜头卡的公开数据结构。
+            card_for_prompt = {**card, "series_count": count}
+            prompts.append(build_lookbook_shot_prompt(brief, bible, card_for_prompt, labels, wardrobe_mode=wardrobe_mode))
+        return prompts
     cards = [item for item in (options.get("lookbook_research_shots") or []) if isinstance(item, dict)]
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     style_id = str(style.get("id") or "").strip().lower()
@@ -18779,14 +18813,17 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
     image_items = list(batch.get("image_items") or [])
     initial = await analyze_lookbook_outputs(snapshot, images)
     max_retries = max(0, min(1, int(options.get("lookbook_max_retries") or 1)))
-    weak_indices = list(initial.get("weak_indices") or [])[:2] if initial.get("status") == "succeeded" else []
+    # 九宫格是一次联合构图，独立系列则需要逐张守住同一制作标准。默认
+    # 修复最多 6 个弱镜头，避免某一张异常把整组质量拉低，同时控制重试成本。
+    repair_limit = max(2, min(len(images), int(options.get("lookbook_quality_repair_limit") or 6)))
+    weak_indices = list(initial.get("weak_indices") or [])[:repair_limit] if initial.get("status") == "succeeded" else []
     retry_details = []
     repair_prompts = lookbook_generation_prompts(snapshot) if isinstance(snapshot.get("options"), dict) and snapshot["options"].get("lookbook_shot_cards") else []
     if not initial.get("passed") and weak_indices and max_retries:
         for index in weak_indices:
             correction = str((initial.get("corrections") or {}).get(str(index)) or "修复该画面的全部明显质量问题")
             refined = await execute_ai_image_batch(
-                prompt=((repair_prompts[index] if index < len(repair_prompts) else snapshot["prompt"]) + f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style and series-continuity attributes."),
+                prompt=((repair_prompts[index] if index < len(repair_prompts) else snapshot["prompt"]) + f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style and series-continuity attributes. Apply the same publication-grade series quality anchor and shot-scale lock; output one full-bleed image only."),
                 provider_id=route["provider_id"], model=route["model"], size=snapshot["size"], quality=snapshot["quality"], references=snapshot["inputs"], count=1, prefix="lookbook_repair_", allow_edit_endpoint_fallback=False, semantic_mask=True,
             )
             replacement = (refined.get("images") or [""])[0]

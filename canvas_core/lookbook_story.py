@@ -245,7 +245,12 @@ def resolve_lookbook_settings(
     manual_overrides: Optional[Dict[str, Any]] = None,
     ai_settings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """按“手动控件 > 文本明确值 > AI 理解值 > 节点默认值”合并设置。"""
+    """合并 Lookbook 设置。
+
+    数量是故事交付的硬约束：只要用户在文本中明确写出数量，就优先于节点
+    当前数量（包括旧版保存下来的 ``lookbook_manual_overrides.count``）。其余
+    字段仍保持“手动控件 > 文本明确值 > AI 理解值 > 节点默认值”的兼容规则。
+    """
     parsed = parse_explicit_lookbook_settings(text)
     ai_values = normalize_ai_lookbook_settings(ai_settings)
     node = dict(LOOKBOOK_DEFAULTS)
@@ -255,7 +260,12 @@ def resolve_lookbook_settings(
     sources: Dict[str, str] = {}
     warnings = list(parsed["warnings"])
     for key, default in LOOKBOOK_DEFAULTS.items():
-        if key in manual and manual[key] not in (None, ""):
+        # 用户故事中的明确数量必须覆盖节点数量，避免节点曾经手动设为 1
+        # 后，新的“生成 9 张”需求仍只提交一张。手动数量只作为文本未给出
+        # 数量时的显式回退。
+        if key == "count" and key in parsed["values"]:
+            value, source = parsed["values"][key], "brief"
+        elif key in manual and manual[key] not in (None, ""):
             value, source = manual[key], "manual"
         elif key in parsed["values"]:
             value, source = parsed["values"][key], "brief"
@@ -406,6 +416,23 @@ def enforce_lookbook_shot_scale_contract(cards: List[Dict[str, Any]], count: int
     return enforced
 
 
+def build_lookbook_series_quality_lock(count: int) -> str:
+    """给独立多图系列注入与联合排版同等级的制作质量门。
+
+    这段约束不授权模型绘制宫格，而是把“九宫格一次联合构图”带来的
+    统一 art direction 转译为每个独立请求都必须执行的硬性检查。
+    """
+    expected = max(1, min(LOOKBOOK_MAX_COUNT, int(count or 1)))
+    return (
+        f"SERIES QUALITY ANCHOR ({expected} independent frames): treat this request as one frame from a single, top-tier fashion editorial campaign. "
+        "The GLOBAL LOOKBOOK BIBLE is the shared production source of truth: keep the same person identity, denim/product geometry, wardrobe state, location geography, light direction, palette, lens language and photographic finish across every frame. "
+        "Reach publication-grade quality in this single image—believable anatomy and hands, purposeful body mechanics, eyes locked to the external objective, event-triggered micro-expression, real weight/contact, tactile fabric construction, motivated depth and a decisive editorial composition. "
+        "Use one clear action with a visible beginning or consequence; never substitute a generic model pose, stock smile, empty showroom, unrelated prop or decorative background. "
+        "Before finalizing, self-check identity continuity, product fidelity, emotional cause, spatial continuity, shot-scale lock, lighting continuity and commercial finishing, then correct any weak item in this frame. "
+        "This is a quality contract only: output exactly one standalone full-bleed photograph and never draw a grid, collage, contact sheet, split screen or multiple panels. "
+    )
+
+
 def build_lookbook_shot_prompt(
     brief: str,
     bible: Any,
@@ -443,6 +470,7 @@ def build_lookbook_shot_prompt(
             raw_brief,
             flags=re.IGNORECASE,
         ).strip(" ，,。;；") or raw_brief
+    series_quality_lock = build_lookbook_series_quality_lock(int(card.get("series_count") or 1))
     wardrobe_rule = (
         "IDENTITY-ONLY WARDROBE OVERRIDE: person reference images own face, hair, skin tone and body proportions only. "
         "Their photographed clothing is interview/source clothing and is forbidden in the final image. "
@@ -463,6 +491,7 @@ def build_lookbook_shot_prompt(
         "The scene reference owns architecture, light direction and spatial continuity only; it never owns the original camera position, crop or subject scale. "
         "Do not widen a medium or close shot merely to show the complete room or every spectator. "
         + "\nCONTINUITY RULE: preserve the incoming state, execute the current decisive action, and leave the outgoing state for the next frame. "
+        + series_quality_lock
         + (f"REFERENCE LABELS: {references}\n" if references else "")
         + wardrobe_rule
         + "Preserve identity, product geometry, scene architecture and readable brand marks from the supplied references. "

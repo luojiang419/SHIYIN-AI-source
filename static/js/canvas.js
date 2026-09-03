@@ -10092,6 +10092,25 @@ function ecommerceLookbookPartialResult(task){
     if(task?.result?.partial && typeof task.result === 'object') return task.result;
     return null;
 }
+function resizeEcommerceLookbookPendingGroup(out, groupId, total, template=null){
+    if(!out || !groupId) return;
+    const expected = Math.max(1, Math.min(20, Number(total || 1)));
+    const current = (out._pending || []).filter(item => item.lookbookGroupId === groupId);
+    const source = template || current[0];
+    if(!source) return;
+    const keep = current.slice(0, expected).map((item, index) => ({
+        ...item,
+        lookbookSlotIndex:index + 1,
+        lookbookTotal:expected,
+        lookbookCompleted:false,
+    }));
+    for(let index=keep.length; index<expected; index++){
+        keep.push({...source, id:uid('p'), lookbookSlotIndex:index + 1, lookbookTotal:expected, lookbookCompleted:false});
+    }
+    const ids = new Set(current.map(item => item.id));
+    out._pending = (out._pending || []).filter(item => item.lookbookGroupId !== groupId || !ids.has(item.id));
+    out._pending.push(...keep);
+}
 function syncEcommerceLookbookPartial(taskId, task){
     const found = findPendingTask(taskId);
     const partial = ecommerceLookbookPartialResult(task) || task?.result;
@@ -10416,6 +10435,12 @@ async function runLookbookNode(nodeId, opts={}){
         if(created.resolution) node.resolution = String(created.resolution);
         if(created.quality) node.quality = String(created.quality);
         const pending = pendingById(out,pendingIds[0]);
+        // 服务端会先按文本解析最终数量；立即同步占位槽，避免节点默认 1/4
+        // 导致用户看到的输出数量与实际任务不一致。后续 partial_result 仍会
+        // 依据 shot_index 做幂等校正。
+        if(out && pending && Number(created.count) > 0){
+            resizeEcommerceLookbookPendingGroup(out, pendingGroupId, Number(created.count), pending);
+        }
         (out?._pending || []).filter(item => item.lookbookGroupId === pendingGroupId).forEach(item => {
             item.canvasTaskId = taskId;
             item.providerId = created.provider_id || '';

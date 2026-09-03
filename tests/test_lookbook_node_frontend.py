@@ -290,6 +290,15 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("lookbookSlotIndex:index + 1", self.canvas)
         self.assertIn("syncEcommerceLookbookPartial(taskId, task)", self.canvas)
         self.assertIn("partial_result", self.canvas)
+        self.assertIn("resizeEcommerceLookbookPendingGroup(out, pendingGroupId, Number(created.count), pending)", self.canvas)
+
+    def test_lookbook_partial_slots_are_resized_to_server_text_count(self):
+        start = self.canvas.index("function resizeEcommerceLookbookPendingGroup")
+        end = self.canvas.index("function syncEcommerceLookbookPartial", start)
+        body = self.canvas[start:end]
+        self.assertIn("Math.min(20, Number(total || 1))", body)
+        self.assertIn("lookbookSlotIndex:index + 1", body)
+        self.assertIn("out._pending.push(...keep)", body)
 
     def test_story_prompt_only_authorizes_layout_when_brief_explicitly_requests_it(self):
         self.assertIn("parse_lookbook_layout_intent", self.story)

@@ -47,7 +47,7 @@ class LookbookStoryContractTests(unittest.TestCase):
             "quality": "high",
         })
 
-    def test_manual_settings_override_brief_and_brief_overrides_node_default(self):
+    def test_brief_count_overrides_node_and_saved_manual_count(self):
         resolved = resolve_lookbook_settings(
             "生成20张16:9的故事分镜图",
             node_settings={"count": 4, "aspect_ratio": "1:1", "resolution": "2k", "quality": "high"},
@@ -60,8 +60,8 @@ class LookbookStoryContractTests(unittest.TestCase):
             node_settings={"count": 4},
             manual_overrides={"count": 6},
         )
-        self.assertEqual(manual["values"]["count"], 6)
-        self.assertEqual(manual["sources"]["count"], "manual")
+        self.assertEqual(manual["values"]["count"], 20)
+        self.assertEqual(manual["sources"]["count"], "brief")
 
     def test_ai_settings_fill_implicit_requirements_but_never_override_explicit_text(self):
         ai = normalize_ai_lookbook_settings({
@@ -163,6 +163,16 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("人物·model.png", prompt)
         self.assertIn("emotion_state", prompt)
         self.assertIn("惊讶后释然", prompt)
+
+    def test_independent_series_prompt_has_joint_editorial_quality_bar(self):
+        prompt = build_lookbook_shot_prompt(
+            "生成9张16:9时尚广告故事画面",
+            {"wardrobe": "蓝色牛仔裤", "scene": "明亮通透的地铁车厢"},
+            {"index": 4, "series_count": 9, "beat": "发展", "story_purpose": "人物寻找座位", "continuity_in": "刚进入车厢", "continuity_out": "手扶住车门"},
+        )
+        self.assertIn("SERIES QUALITY ANCHOR (9 independent frames)", prompt)
+        self.assertIn("publication-grade quality", prompt)
+        self.assertIn("never draw a grid", prompt)
 
     def test_six_frame_story_uses_only_one_environmental_wide_and_forces_close_variation(self):
         plan = lookbook_shot_scale_contract(6)
@@ -345,6 +355,35 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertEqual(batch["images"], ["/assets/frame-1.png", "/assets/frame-2.png", "/assets/frame-3.png"])
         self.assertEqual([item["shot_index"] for item in batch["image_items"]], [1, 2, 3])
         self.assertEqual(batch["provider"]["id"], "vision")
+
+    def test_story_generation_reuses_first_frame_as_continuity_anchor(self):
+        calls = []
+
+        async def fake_batch(**kwargs):
+            calls.append(kwargs)
+            frame = int(kwargs["prompt"].split("story frame ", 1)[1].split(";", 1)[0])
+            return {
+                "provider": {"id": "vision", "name": "Vision"},
+                "model": "vision-model",
+                "images": [f"/assets/frame-{frame}.png"],
+                "image_items": [{"url": f"/assets/frame-{frame}.png"}],
+                "raw": {},
+            }
+
+        cards = [
+            {"index": index, "beat": "发展", "story_purpose": "推进", "continuity_in": "承接", "continuity_out": "继续"}
+            for index in range(1, 4)
+        ]
+        snapshot = {
+            "count": 3, "size": "1920x1080", "quality": "high", "inputs": [],
+            "options": {"prompt_policy": "lookbook", "lookbook_mode": "story-campaign", "instruction": "连续故事", "lookbook_shot_cards": cards},
+        }
+        with patch.object(main, "lookbook_generation_prompts", side_effect=lambda value: [f"story frame {index};" for index in range(1, 4)]), patch.object(main, "execute_ai_image_batch", new=fake_batch):
+            asyncio.run(main.execute_lookbook_story_batch(snapshot, {"provider_id": "vision", "model": "vision-model"}))
+        self.assertEqual(len(calls), 3)
+        self.assertFalse(any(item.get("role") == "continuity-anchor" for item in calls[0]["references"]))
+        self.assertTrue(any(item.get("role") == "continuity-anchor" for item in calls[1]["references"]))
+        self.assertTrue(any(item.get("role") == "continuity-anchor" for item in calls[2]["references"]))
 
     def test_scene_reference_zoom_tracks_mandatory_shot_scale(self):
         self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "35mm environmental wide establishing shot"}}), 1.0)

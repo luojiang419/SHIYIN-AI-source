@@ -46,6 +46,14 @@ class FocusGuardTests(unittest.TestCase):
             self.assertIn("StudioFocusGuard?.capture?.()", source)
             self.assertIn("StudioFocusGuard?.restore?.(focusSnapshot)", source)
 
+    def test_lookbook_fields_have_node_scoped_focus_restore_selectors(self):
+        guard = (STATIC / "js" / "focus-guard.js").read_text(encoding="utf-8")
+        canvas_html = (STATIC / "canvas.html").read_text(encoding="utf-8")
+        self.assertIn("'data-lookbook-field'", guard)
+        self.assertIn("const parentId = el.closest?.('[data-id]')", guard)
+        self.assertIn('return parentId ? `[data-id="${cssEscape(parentId)}"] ${controlSelector}`', guard)
+        self.assertIn("focus-guard.js?v=2026.09.03.lookbook-focus.1", canvas_html)
+
 
 if __name__ == "__main__":
     unittest.main()

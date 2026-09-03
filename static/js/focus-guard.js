@@ -41,12 +41,15 @@
         if(el.id) return `#${cssEscape(el.id)}`;
         const tag = String(el.tagName || '').toLowerCase();
         const attrs = [];
-        ['name','data-option','data-reference-field','data-reference-key','data-rh-param','data-comfy-param','data-field','data-template-edit-text'].forEach(name => {
+        ['name','data-option','data-reference-field','data-reference-key','data-rh-param','data-comfy-param','data-field','data-template-edit-text','data-lookbook-field'].forEach(name => {
             const value = el.getAttribute?.(name);
             if(value != null && value !== '') attrs.push(`[${name}="${cssEscape(value)}"]`);
         });
-        if(attrs.length) return `${tag}${attrs.join('')}`;
         const parentId = el.closest?.('[data-id]')?.getAttribute?.('data-id') || '';
+        if(attrs.length) {
+            const controlSelector = `${tag}${attrs.join('')}`;
+            return parentId ? `[data-id="${cssEscape(parentId)}"] ${controlSelector}` : controlSelector;
+        }
         if(parentId && el.classList?.length) {
             return `[data-id="${cssEscape(parentId)}"] ${tag}.${[...el.classList].map(cssEscape).join('.')}`;
         }

@@ -16399,9 +16399,8 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
             apply_lookbook_organic_film_grain(str(url), amount=0.018)
         elif style_id == "fw-cream-cyan-film":
             apply_lookbook_fw_contrast_grade(str(url))
-            # 0.095 会在 2K 人像上形成覆盖皮肤与丹宁纹理的噪点幕；保留可见胶片结构，
-            # 但让颗粒退回质感层而不是成为主体。
-            apply_lookbook_organic_film_grain(str(url), amount=0.035)
+            # 恢复 FW 原始胶片颗粒强度；色彩与光比仍由独立 FW 曲线负责。
+            apply_lookbook_organic_film_grain(str(url), amount=0.095)
         elif style_id == "levis-high-key-color":
             apply_lookbook_natural_sun_grade(str(url))
             apply_lookbook_organic_film_grain(str(url), amount=0.025)

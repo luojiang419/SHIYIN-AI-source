@@ -283,6 +283,16 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             self.assertIs(main.apply_lookbook_film_finish(batch, snapshot), batch)
             grain.assert_called_once_with("/assets/generated/levis.jpg", amount=0.025)
 
+    def test_fw_finish_keeps_structured_contrast_and_restores_original_grain_amount(self):
+        batch = {"images": ["/assets/generated/fw.jpg"]}
+        snapshot = {"options": {"lookbook_style": {"id": "fw-cream-cyan-film"}}}
+        with patch.object(main, "apply_lookbook_fw_contrast_grade", return_value=True) as contrast, patch.object(
+            main, "apply_lookbook_organic_film_grain", return_value=True
+        ) as grain:
+            self.assertIs(main.apply_lookbook_film_finish(batch, snapshot), batch)
+            contrast.assert_called_once_with("/assets/generated/fw.jpg")
+            grain.assert_called_once_with("/assets/generated/fw.jpg", amount=0.095)
+
     def test_levis_default_shot_cards_use_external_objectives_instead_of_beauty_poses(self):
         prompts = main.lookbook_generation_prompts({
             "count": 4,

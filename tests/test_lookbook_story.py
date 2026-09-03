@@ -114,7 +114,7 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertEqual(snapshot["aspect_ratio"], "16:9")
         self.assertEqual(snapshot["resolution"], "4k")
         self.assertEqual(snapshot["options"]["lookbook_brief_parse"]["sources"]["count"], "brief")
-        self.assertTrue(snapshot["options"]["lookbook_search"])
+        self.assertFalse(snapshot["options"]["lookbook_search"])
         self.assertEqual(snapshot["options"]["lookbook_layout_intent"]["mode"], "single-frame")
 
     def test_shot_cards_require_exact_order_and_continuity(self):

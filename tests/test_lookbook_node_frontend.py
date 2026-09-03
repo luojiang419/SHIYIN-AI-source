@@ -83,6 +83,14 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertNotIn("pointerleave", bindings)
         self.assertIn("trigger?.addEventListener('click'", bindings)
         self.assertIn(".lookbook-generation-settings .image-quick-choice.open .image-quick-choice-panel", self.css)
+
+    def test_lookbook_web_research_is_optional_and_defaults_off(self):
+        self.assertIn("lookbookSearch:false", self.lookbook)
+        self.assertIn("node.lookbookSearch=node.lookbookSearch===true", self.lookbook)
+        self.assertIn('data-lookbook-field="lookbookSearch" ${node.lookbookSearch?\'checked\':\'\'}', self.lookbook)
+        self.assertIn("可选，优先执行已选风格", self.lookbook)
+        self.assertIn("lookbook_search:node.lookbookSearch === true", self.canvas)
+        self.assertNotIn("lookbook_search:storyMode ? true", self.canvas)
         self.assertIn(".lookbook-generation-settings .image-quick-choice:not(.open):hover .image-quick-choice-panel", self.css)
         self.assertIn(".lookbook-generation-settings .image-quick-choice:not(.open):focus-within .image-quick-choice-panel", self.css)
 

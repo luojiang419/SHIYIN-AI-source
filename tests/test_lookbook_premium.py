@@ -437,6 +437,28 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("情绪停顿", prompts[2])
         self.assertIn("材质收束", prompts[3])
 
+    def test_story_prompts_keep_selected_style_as_primary_lock(self):
+        cards = [{
+            "index": 1,
+            "beat": "开场",
+            "story_purpose": "建立空间",
+            "continuity_in": "故事开始",
+            "continuity_out": "人物继续前行",
+        }]
+        prompts = main.lookbook_generation_prompts({
+            "count": 1,
+            "options": {
+                "prompt_policy": "lookbook",
+                "lookbook_mode": "story-campaign",
+                "instruction": "一段城市行走故事",
+                "lookbook_style": {"id": "standard-advertising", "name": "标准广告", "prompt": "selected style token"},
+                "lookbook_bible": {"palette": "warm neutral"},
+                "lookbook_shot_cards": cards,
+            },
+        })
+        self.assertIn("PRIMARY SELECTED STYLE LOCK", prompts[0])
+        self.assertIn("selected style token", prompts[0])
+
     def test_image_search_parameter_error_falls_back_to_plain_web_search(self):
         calls = []
 
@@ -489,6 +511,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "options": {
                 "prompt_policy": "lookbook",
                 "instruction": "时尚街景",
+                "lookbook_search": True,
                 "lookbook_style": {"name": "时尚街景", "prompt": "urban fashion editorial"},
             },
         }

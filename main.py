@@ -17422,7 +17422,8 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         values = brief_settings["values"]
         options["lookbook_count"] = values["count"]
-        options["lookbook_search"] = True
+        # 联网研究是可选增强项；故事模式不再覆盖用户显式的关闭选择。
+        options["lookbook_search"] = bool(options.get("lookbook_search", False))
         options["lookbook_layout_intent"] = brief_settings["layout_intent"]
         options["lookbook_brief_parse"] = {
             "raw": brief_settings["parsed"]["raw"],
@@ -17553,7 +17554,7 @@ def build_lookbook_agent_plan(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """生成可持久化的轻量状态图；阶段边界对应成熟 agent runtime 的 checkpoint。"""
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     inputs = snapshot.get("inputs") if isinstance(snapshot.get("inputs"), list) else []
-    web_search = bool(options.get("lookbook_search", True))
+    web_search = bool(options.get("lookbook_search", False))
     auto_mode = not str(options.get("instruction") or "").strip()
     story_mode = str(options.get("lookbook_mode") or "").strip().lower() == LOOKBOOK_STORY_MODE
     routes = snapshot.get("route_candidates") if isinstance(snapshot.get("route_candidates"), list) else []
@@ -18124,6 +18125,22 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
         cards = enforce_lookbook_shot_scale_contract(cards, count)
         brief = str(options.get("instruction") or "").strip()
         bible = options.get("lookbook_bible") or options.get("lookbook_plan") or {}
+        style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+        style_id = str(style.get("id") or "").strip().lower()
+        auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
+        effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
+        selected_style_name = str(auto_decision.get("selected_style_name") or style.get("name") or "").strip()
+        selected_style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
+        selected_style_lock = (
+            f"PRIMARY SELECTED STYLE LOCK ({selected_style_name or effective_style_id or 'user-selected style'}): {selected_style_prompt or 'follow the selected style taxonomy and its established visual language'}. "
+            "This selected style is the primary creative authority for palette, lighting, camera grammar, performance and finish. Any optional research is supplementary method reference only and must never dilute, replace or average this style."
+        )
+        if isinstance(bible, dict):
+            bible = {**bible, "selected_style_lock": selected_style_lock}
+        elif isinstance(bible, list):
+            bible = [*bible, selected_style_lock]
+        else:
+            bible = f"{bible}\n{selected_style_lock}".strip()
         labels = [
             str(item.get("label") or item.get("name") or f"参考素材 {index}")
             for index, item in enumerate(snapshot.get("inputs") or [], 1)
@@ -18201,7 +18218,7 @@ async def enrich_lookbook_search(snapshot: Dict[str, Any]) -> Tuple[Dict[str, An
     options = dict(snapshot.get("options") or {})
     if snapshot.get("operation") != "universal" or str(options.get("prompt_policy") or "").strip().lower() != "lookbook":
         return snapshot, None
-    if not bool(options.get("lookbook_search", True)) or str(options.get("search_context") or "").strip():
+    if not bool(options.get("lookbook_search", False)) or str(options.get("search_context") or "").strip():
         return snapshot, {"status": "provided" if str(options.get("search_context") or "").strip() else "disabled"}
     route = configured_ecommerce_vision_route()
     if not route:
@@ -18367,7 +18384,8 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
         message=(
             auto_router_instruction
             + "请为 Lookbook 平面广告生成一份可直接执行的 art direction 方案。"
-            "综合用户需求、选定视觉风格、参考图事实、联网案例方法和色彩系统，输出 900 字以内的结构化方案，必须包含："
+            "综合用户需求、选定视觉风格、参考图事实、可选联网案例方法和色彩系统，输出 900 字以内的结构化方案，必须包含："
+            "选定视觉风格是第一优先级，必须原样落实其核心色彩、光线、镜头、动作和后期语言；联网案例只能补充可迁移的方法，不能替换、平均混合或稀释选定风格。"
             "人物面貌与现有穿着事实、系列叙事、主视觉构图、镜头/景别变化、真实城市环境与动作生命力、场景与道具、"
             "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
@@ -18578,6 +18596,16 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
         for item in (snapshot.get("inputs") or [])
         if isinstance(item, dict) and str(item.get("url") or "").strip()
     ][:12]
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    style_id = str(style.get("id") or "").strip().lower()
+    auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
+    effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
+    selected_style_name = str(auto_decision.get("selected_style_name") or style.get("name") or "").strip()
+    selected_style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
+    selected_style_lock = (
+        f"选定视觉风格是本次分镜的第一优先级（{selected_style_name or effective_style_id or '用户选定风格'}）：{selected_style_prompt or '严格遵循该风格 taxonomy 的核心视觉语言'}。"
+        "必须把它落实到每张卡的色彩、布光、镜头、动作和后期；联网方法仅在已启用且有结果时作为补充，不能覆盖、稀释或平均混合选定风格。"
+    )
     request = CanvasLLMRequest(
         message=(
             "请把下面的用户故事制作成一组连续的时装故事大片分镜。必须严格输出 JSON，不要 Markdown，不要解释过程。"
@@ -18593,7 +18621,8 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             )
             + "严禁把视觉故事降级为电商摆拍：不做白底棚拍、SKU 陈列、正反面展示、同姿势换角度或只展示服装而没有人物目标与事件变化。"
             "参考图只用于身份、服装、商品、场景、材质和版式事实；不能把联网案例中的主体、品牌、Logo、文案或地点带入。"
-            "输出结构必须是："
+            + selected_style_lock
+            + "输出结构必须是："
             '{"logline":"","campaign_bible":{"identity":"","wardrobe":"","products":"",'
             '"location":"","props":"","palette":"","lighting":"","camera_grammar":"",'
             '"continuity_locks":[""],"must_keep":[""],"must_avoid":[""]},'
@@ -18839,26 +18868,13 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     if lookbook_reference_analysis is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "lookbook_reference_analysis": lookbook_reference_analysis, "request": snapshot})
     if lookbook_agent:
-        if bool((snapshot.get("options") or {}).get("lookbook_search", True)):
+        if bool((snapshot.get("options") or {}).get("lookbook_search", False)):
             update_lookbook_agent_stage(task_id, "web-search", "智能体正在联网检索杂志与品牌时尚大片，并提取色彩方法…", 24)
         else:
             update_lookbook_agent_stage(task_id, "art-direction", "已跳过联网搜索，智能体正在整理高级视觉方案…", 32)
     snapshot, lookbook_research = await enrich_lookbook_search(snapshot)
     if lookbook_research is not None:
         update_ecommerce_task(task_id, {"options": snapshot.get("options") or {}, "prompt": snapshot.get("prompt") or "", "lookbook_research": lookbook_research, "request": snapshot})
-    if story_mode and lookbook_research and lookbook_research.get("status") in {"failed", "skipped", "disabled"}:
-        detail = lookbook_research.get("reason") or "视觉故事必须先完成联网案例研究，未提交图片生成。"
-        update_lookbook_agent_stage(task_id, "failed", "联网故事案例研究失败，未提交图片生成。", 100)
-        update_ecommerce_task(task_id, {
-            "status": "failed",
-            "stage": "failed",
-            "agent_stage": "failed",
-            "progress_status": "联网故事案例研究失败，未提交图片生成。",
-            "progress_percent": 100,
-            "error": detail,
-            "status_code": 422,
-        })
-        return
     if lookbook_agent:
         update_lookbook_agent_stage(task_id, "art-direction", "智能体正在把人物事实、案例色彩和选定风格合成为创意方案…", 42)
     snapshot, lookbook_plan = await enrich_lookbook_plan(snapshot)
@@ -19331,7 +19347,7 @@ async def create_ecommerce_task(payload: EcommerceTaskRequest):
             if story_mode
             else "已读取人物与场景参考，准备快速生成生活化随拍系列…"
             if auto_mode
-            else "Lookbook 智能体任务已提交，准备启动联网研究…"
+            else "Lookbook 智能体任务已提交，准备分析参考图与选定风格…"
         )
         task.update({
             "agent_kind": "lookbook",

@@ -30,6 +30,23 @@ class CanvasVideoClipEditorTests(unittest.TestCase):
         self.assertIn("视频抽帧", body)
         self.assertIn("icon:'images'", body)
 
+    def test_video_selection_menu_merges_preview_and_replace_without_hover_toolbar(self):
+        render = re.search(r"function renderSelectionHub\((?:options=\{\})?\)\{(?P<body>.*?)\n\}", self.javascript, re.DOTALL)
+        self.assertIsNotNone(render)
+        body = render.group("body")
+        video_actions_match = re.search(r"target\.mediaKind === 'video' \? \[(?P<actions>.*?)\n    \] : \[", body, re.DOTALL)
+        self.assertIsNotNone(video_actions_match)
+        video_actions = video_actions_match.group("actions")
+        self.assertIn("{id:'preview'", video_actions)
+        self.assertIn("{id:'replace'", video_actions)
+
+        toolbar_start = self.javascript.index("function classicMediaToolbarHtml(node)")
+        toolbar_end = self.javascript.index("function runClassicMediaToolbarAction", toolbar_start)
+        toolbar = self.javascript[toolbar_start:toolbar_end]
+        self.assertIn("mediaKindForNode(node) === 'video'", toolbar)
+        self.assertIn("if(action === 'replace' && sourceNode?.type === 'image')", self.javascript)
+        self.assertIn("el.querySelector('[data-node-media-toolbar]')?.remove();", self.javascript)
+
     def test_editor_contains_preview_timeline_io_and_resolution_controls(self):
         for element_id in (
             "videoClipModal",

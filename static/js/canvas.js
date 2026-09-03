@@ -5358,6 +5358,9 @@ function mediaToolbarItemsForNode(node){
     return selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
 }
 function classicMediaToolbarHtml(node){
+    // 视频节点的操作统一放在选中节点面板中。若继续生成 hover 快捷栏，
+    // 在截图/截取等功能页会与 selectionHub 形成两层重复悬浮菜单。
+    if(node?.type === 'image' && mediaKindForNode(node) === 'video') return '';
     const items = mediaToolbarItemsForNode(node);
     if(!items.length && !['image','video'].includes(node?.type)) return '';
     const more = {id:'more', label:'更多', icon:'ellipsis'};
@@ -5413,7 +5416,10 @@ function materializeClassicImageNodeChrome(el, node){
         el.appendChild(imagePromptPanel);
         refreshIcons(imagePromptPanel);
     }
-    if(!el.querySelector('[data-node-media-toolbar]')){
+    if(mediaKindForNode(node) === 'video'){
+        // 节点类型/媒体类型切换后清理旧 hover 菜单，避免残留第二层操作栏。
+        el.querySelector('[data-node-media-toolbar]')?.remove();
+    } else if(!el.querySelector('[data-node-media-toolbar]')){
         const mediaToolbar = classicMediaToolbarHtml(node);
         if(mediaToolbar){
             el.insertAdjacentHTML('beforeend', mediaToolbar);
@@ -20211,6 +20217,7 @@ function renderSelectionHub(options={}){
         {id:'trim-video', label:langIsEn() ? 'Trim video' : '视频截取', icon:'scissors'},
         {id:'screenshot-video', label:langIsEn() ? 'Screenshot' : '截图', icon:'camera'},
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
+        {id:'replace', label:langIsEn() ? 'Replace' : '替换', icon:'image-plus'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
     ] : [
         ...(target.url ? [] : [{id:'upload', label:langIsEn() ? 'Upload image' : '上传图片', icon:'upload'}, {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'}]),
@@ -20813,6 +20820,10 @@ function runMediaQuickAction(action, target){
     }
     if(action === 'screenshot-video'){
         openVideoScreenshotEditor(target.nodeId);
+        return;
+    }
+    if(action === 'replace' && sourceNode?.type === 'image'){
+        pickImageForNode(sourceNode.id);
         return;
     }
     if(action === 'preview'){

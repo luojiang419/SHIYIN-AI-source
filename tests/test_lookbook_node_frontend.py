@@ -304,6 +304,8 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("parse_lookbook_layout_intent", self.story)
         self.assertIn("EDITORIAL-LAYOUT AUTHORIZATION", self.story)
         self.assertIn("SINGLE-FRAME HARD STOP", self.story)
+        self.assertIn("feature=lookbook-text-count-priority.1", self.html)
+        self.assertIn("feature=lookbook-series-anchor.1", self.html)
 
 
 if __name__ == "__main__":

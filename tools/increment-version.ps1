@@ -41,6 +41,10 @@ if (Test-Path -LiteralPath $cargoLock) {
     Replace-Required $cargoLock '(?ms)(\[\[package\]\]\s+name\s*=\s*"canvas-desktop"\s+version\s*=\s*")[^"]+' "`${1}$next"
 }
 Replace-Required (Join-Path $projectRoot "main.py") '(?m)(^APP_VERSION\s*=\s*")[^"]+("\s*$)' "`${1}$next`${2}"
+$releaseNotes = Join-Path $projectRoot "release-notes\current.md"
+if (Test-Path -LiteralPath $releaseNotes) {
+    Replace-Required $releaseNotes '(?m)(^# SHIYIN AI v)\d+\.\d+\.\d+(\s*$)' "`${1}$next`${2}"
+}
 $updateNotes = Join-Path $projectRoot "static\update-notes.json"
 if (Test-Path -LiteralPath $updateNotes) {
     Replace-Required $updateNotes '(?m)(^\s*"version"\s*:\s*")[^"]+("\s*,)' "`${1}$next`${2}"

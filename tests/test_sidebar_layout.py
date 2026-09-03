@@ -13,4 +13,4 @@ def test_sidebar_settings_group_can_show_language_button():
 
 def test_sidebar_drops_unused_bottom_direction_badge():
     assert 'id="project-version-badge"' not in INDEX
-    assert '.project-version-badge::before' in INDEX  # legacy CSS remains harmless for older cached markup
+    assert '.project-version-badge::before' not in INDEX

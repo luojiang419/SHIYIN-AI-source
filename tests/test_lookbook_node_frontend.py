@@ -1,4 +1,6 @@
+import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -126,6 +128,59 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("modal.showModal()", self.lookbook)
         self.assertIn("event.preventDefault(); event.stopPropagation();", body)
 
+    def test_lookbook_prompt_defers_state_reset_and_save_during_ime_composition(self):
+        body = self.lookbook[self.lookbook.index("function bodyHtml"):self.lookbook.index("function mediaRefs")]
+        self.assertIn('data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false"', body)
+        self.assertIn('autocomplete="off" autocorrect="off" autocapitalize="off"', body)
+        self.assertIn("const composingControls=new WeakSet()", body)
+        self.assertIn("const pendingPromptControls=new WeakSet()", body)
+        self.assertIn("control.addEventListener('compositionstart'", body)
+        self.assertIn("control.addEventListener('compositionend'", body)
+        self.assertIn("event.isComposing", body)
+        self.assertIn("window.StudioFocusGuard?.isComposing?.()", body)
+        self.assertIn("if(composing){", body)
+        self.assertIn("pendingPromptControls.add(control);", body)
+        self.assertIn("if(key==='lookbookPrompt') commitPromptChange(control)", body)
+
+    def test_lookbook_prompt_composition_runtime_commits_once_after_composition_end(self):
+        module_path = ROOT / "static" / "js" / "canvas-lookbook-node.js"
+        script = f"""
+global.window = {{StudioFocusGuard:{{isComposing:()=>true}}}};
+global.document = {{addEventListener:()=>{{}}}};
+global.localStorage = {{getItem:()=>null,setItem:()=>{{}}}};
+require({json.dumps(str(module_path))});
+const listeners = {{}};
+const control = {{
+  type:'textarea',
+  dataset:{{lookbookField:'lookbookPrompt'}},
+  value:'新的中文需求',
+  addEventListener:(name, callback)=>{{listeners[name]=callback;}}
+}};
+const root = {{
+  querySelectorAll:selector=>selector==='[data-lookbook-field]'?[control]:[],
+  querySelector:()=>null,
+  addEventListener:()=>{{}},
+  contains:()=>true
+}};
+const node = window.CanvasLookbookNode.createNode({{}});
+node.lookbookPlan = '旧计划';
+let changes = 0;
+window.CanvasLookbookNode.bind(root,node,{{onChange:()=>{{changes+=1;}}}});
+listeners.compositionstart({{}});
+listeners.input({{isComposing:true,stopPropagation:()=>{{}}}});
+if(node.lookbookPrompt!=='新的中文需求' || node.lookbookPlan!=='旧计划' || changes!==0) process.exit(2);
+listeners.compositionend({{}});
+if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
+"""
+        subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
     def test_selection_hub_keeps_panel_inside_board_and_prefers_above_anchor(self):
         self.assertIn("const availableAbove", self.canvas)
         self.assertIn("selectionHub.style.maxHeight", self.canvas)
@@ -150,7 +205,8 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.31", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.32", self.html)
+        self.assertIn("feature=ime-composition.1", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)

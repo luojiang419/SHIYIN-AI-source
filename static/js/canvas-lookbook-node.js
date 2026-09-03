@@ -139,7 +139,7 @@
         return node;
     }
     function createNode(point={}){ const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0]; return normalize({id:'',type:TYPE,x:Number(point.x||0),y:Number(point.y||0),w:430,lookbookPrompt:'',lookbookMode:'story-campaign',lookbookManualOverrides:{},lookbookStyleId:DEFAULT_STYLE_ID,lookbookStyleName:defaultStyle.name,lookbookStylePrompt:defaultStyle.prompt,lookbookStyleCover:'',lookbookStyleSource:'builtin',lookbookSearch:false,lookbookResearchStatus:'idle',lookbookAgentStage:'',lookbookAutoDecision:{},lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookResearchEvidenceStatus:'',aspectRatio:'16:9',resolution:'2k',quality:'high',count:4,generatedOutputs:[],inputs:[],running:false,runError:''}); }
-    function bodyHtml(node){ normalize(node); const researchStatus=node.lookbookAgentStage || (node.lookbookResearchStatus==='running'?'正在执行当前 Skill':'等待生成'); return `<div class="ecom-node-panel lookbook-node-panel"><div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div><label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" placeholder="输入故事或广告需求，例如：生成20张16:9、4K的连续时装大片，从地铁站走到书店，最后停在橱窗前">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">AI 会自动识别数量、画幅、分辨率，并拆解为连续独立画面；默认每张独立成片，只有明确写出宫格/拼图/杂志排版才会授权排版</small></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，优先执行已选风格）</span></label>${generationChoicesHtml(node)}<div class="ecom-node-params"><select data-lookbook-field="aspectRatio">${['1:1','2:3','3:4','4:3','4:5','9:16','16:9'].map(value=>`<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select><select data-lookbook-field="resolution">${['1k','2k','4k'].map(value=>`<option value="${value}" ${node.resolution===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><select data-lookbook-field="quality">${['auto','medium','high'].map(value=>`<option value="${value}" ${node.quality===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><label class="ecom-count">数量<input type="number" min="1" max="20" value="${node.count}" data-lookbook-field="count"></label></div><button class="ecom-node-run lookbook-run" type="button" data-lookbook-run aria-busy="${node.running?'true':'false'}"><i data-lucide="wand-sparkles"></i>${node.running?'生成中…':'生成 Lookbook'}</button>${node.runError?`<div class="ecom-node-status failed"><span></span>${esc(node.runError)}</div>`:''}<div class="lookbook-research-status"><i data-lucide="sparkles"></i>${researchStatus}</div></div>`; }
+    function bodyHtml(node){ normalize(node); const researchStatus=node.lookbookAgentStage || (node.lookbookResearchStatus==='running'?'正在执行当前 Skill':'等待生成'); return `<div class="ecom-node-panel lookbook-node-panel"><div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div><label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="输入故事或广告需求，例如：生成20张16:9、4K的连续时装大片，从地铁站走到书店，最后停在橱窗前">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">AI 会自动识别数量、画幅、分辨率，并拆解为连续独立画面；默认每张独立成片，只有明确写出宫格/拼图/杂志排版才会授权排版</small></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，优先执行已选风格）</span></label>${generationChoicesHtml(node)}<div class="ecom-node-params"><select data-lookbook-field="aspectRatio">${['1:1','2:3','3:4','4:3','4:5','9:16','16:9'].map(value=>`<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select><select data-lookbook-field="resolution">${['1k','2k','4k'].map(value=>`<option value="${value}" ${node.resolution===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><select data-lookbook-field="quality">${['auto','medium','high'].map(value=>`<option value="${value}" ${node.quality===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><label class="ecom-count">数量<input type="number" min="1" max="20" value="${node.count}" data-lookbook-field="count"></label></div><button class="ecom-node-run lookbook-run" type="button" data-lookbook-run aria-busy="${node.running?'true':'false'}"><i data-lucide="wand-sparkles"></i>${node.running?'生成中…':'生成 Lookbook'}</button>${node.runError?`<div class="ecom-node-status failed"><span></span>${esc(node.runError)}</div>`:''}<div class="lookbook-research-status"><i data-lucide="sparkles"></i>${researchStatus}</div></div>`; }
     function bindGenerationChoices(root,node,options={}){
         const choiceRoot=root.querySelector('[data-lookbook-generation-settings]'); if(!choiceRoot) return;
         const closeChoices=except=>choiceRoot.querySelectorAll('[data-lookbook-choice]').forEach(menu=>{const open=menu===except; menu.classList.toggle('open',open); menu.querySelector('[data-lookbook-choice-trigger]')?.setAttribute('aria-expanded',String(open));});
@@ -154,7 +154,54 @@
         choiceRoot.querySelectorAll('[data-lookbook-provider-value]').forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();const resolveProvider=typeof window.resolveImageProviderId==='function'?window.resolveImageProviderId:value=>String(value||'');node.apiProvider=resolveProvider(button.dataset.lookbookProviderValue||'');const models=imageModels(node.apiProvider);node.model=models[0]||'';const providerMenu=choiceRoot.querySelector('[data-lookbook-choice="provider"]');providerMenu?.querySelector('.image-quick-choice-trigger span')&&(providerMenu.querySelector('.image-quick-choice-trigger span').textContent=choiceProviderLabel(node.apiProvider,imageProviders()));choiceRoot.querySelectorAll('[data-lookbook-provider-value]').forEach(item=>item.classList.toggle('active',item===button));const modelMenu=choiceRoot.querySelector('[data-lookbook-choice="model"]');if(modelMenu){modelMenu.querySelector('.image-quick-choice-trigger span').textContent=choiceModelLabel(node.model);const panel=modelMenu.querySelector('[data-lookbook-choice-panel="model"]');panel.innerHTML=models.length?models.map(model=>`<button type="button" class="image-quick-choice-item ${model===node.model?'active':''}" role="menuitem" data-lookbook-model-value="${esc(model)}"><span>${esc(model)}</span>${model===node.model?'<i data-lucide="check"></i>':''}</button>`).join(''):'<button type="button" class="image-quick-choice-item empty" disabled>暂无图片模型</button>';window.lucide?.createIcons?.();bindModels();}closeChoices(null);update();});
         bindModels();
     }
-    function bind(root,node,options={}){ normalize(node); installActionDelegation(); root.querySelectorAll('[data-lookbook-field]').forEach(control=>control.addEventListener(control.type==='checkbox'?'change':'input',event=>{const key=control.dataset.lookbookField; node[key]=key==='count'?clamp(control.value,1,20):control.type==='checkbox'?Boolean(control.checked):control.value; if(['count','aspectRatio','resolution','quality'].includes(key)){const optionKey=key==='aspectRatio'?'aspect_ratio':key; node.lookbookManualOverrides[optionKey]=node[key]; resetDerivedResearch(node);} if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node); options.onChange?.(node,{render:false}); event.stopPropagation();})); bindGenerationChoices(root,node,options); const handleAction=event=>{if(event.type !== 'click') return; const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-run]'); if(!button||!root.contains(button)) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else options.run?.(node);}; const chooseButton=root.querySelector('[data-lookbook-choose]'); const runButton=root.querySelector('[data-lookbook-run]'); [chooseButton,runButton].filter(Boolean).forEach(button=>{ actionBindings.set(button,{node,options}); button.onclick=handleAction; }); root.addEventListener('click',handleAction,true); }
+    function bind(root,node,options={}){
+        normalize(node);
+        installActionDelegation();
+        const composingControls=new WeakSet();
+        const pendingPromptControls=new WeakSet();
+        const commitPromptChange=control=>{
+            if(!pendingPromptControls.has(control)) return;
+            pendingPromptControls.delete(control);
+            resetDerivedResearch(node);
+            options.onChange?.(node,{render:false});
+        };
+        root.querySelectorAll('[data-lookbook-field]').forEach(control=>{
+            const key=control.dataset.lookbookField;
+            control.addEventListener('compositionstart',()=>composingControls.add(control));
+            control.addEventListener('compositionend',()=>{
+                composingControls.delete(control);
+                if(key==='lookbookPrompt') commitPromptChange(control);
+            });
+            control.addEventListener(control.type==='checkbox'?'change':'input',event=>{
+                node[key]=key==='count'
+                    ? clamp(control.value,1,20)
+                    : control.type==='checkbox' ? Boolean(control.checked) : control.value;
+                const composing=key==='lookbookPrompt' && (
+                    composingControls.has(control)
+                    || event.isComposing
+                    || window.StudioFocusGuard?.isComposing?.()
+                );
+                if(composing){
+                    pendingPromptControls.add(control);
+                } else {
+                    if(['count','aspectRatio','resolution','quality'].includes(key)){
+                        const optionKey=key==='aspectRatio'?'aspect_ratio':key;
+                        node.lookbookManualOverrides[optionKey]=node[key];
+                        resetDerivedResearch(node);
+                    }
+                    if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node);
+                    options.onChange?.(node,{render:false});
+                }
+                event.stopPropagation();
+            });
+        });
+        bindGenerationChoices(root,node,options);
+        const handleAction=event=>{if(event.type !== 'click') return; const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-run]'); if(!button||!root.contains(button)) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else options.run?.(node);};
+        const chooseButton=root.querySelector('[data-lookbook-choose]');
+        const runButton=root.querySelector('[data-lookbook-run]');
+        [chooseButton,runButton].filter(Boolean).forEach(button=>{ actionBindings.set(button,{node,options}); button.onclick=handleAction; });
+        root.addEventListener('click',handleAction,true);
+    }
     function mediaRefs(node){ return (node.generatedOutputs||[]).map((item,index)=>({url:outputUrl(item),name:`lookbook-${index+1}.png`,kind:'image'})).filter(item=>item.url); }
     const INPUT_PORTS=[
         {role:'lookbook-person',label:'人物',title:'连接人物、模特或人物身份参考图'},

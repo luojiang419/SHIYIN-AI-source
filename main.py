@@ -17818,6 +17818,12 @@ LOOKBOOK_EDITORIAL_SOURCE_GUIDANCE = (
     "单一拍摄地点或可识别的广告画面复制进本次创作。"
 )
 
+LOOKBOOK_LEVIS_PERFORMANCE_GUIDANCE = (
+    "LEVI'S 品牌表演方法：把牛仔服当作行动中的生活制服，而不是静态商品。人物必须带着明确目标进入画面，先由视线/注意力触发身体，再经历蓄势、主动作、接触或空间关系变化，最后留下半拍反应。"
+    "从故事选择具体情绪（期待/好奇、玩心松弛、连接、挑战专注、惊讶、释然、喜悦、安静骄傲或温柔沉静），用眼睑、视线、嘴角不对称、下颌放松、呼吸、肩颈张力、手部压力和重心变化表达，禁止贴上统一微笑。"
+    "每张图至少出现一个不对称且有受力依据的身体关系：一脚承重、一脚准备或回收，骨盆与肩线反向旋转，手部有任务或动作余势，衣物/头发有惯性，脚与地面有接触。严禁木偶站姿、锁膝、双肩齐平、双臂镜像、死鱼眼、无因果正面凝视、手扶腰、托脸、摸头和等待镜头的模特；静止只能是动作前后带余势的瞬间。"
+)
+
 LOOKBOOK_AUTO_STYLE_IDS = {
     "candid-lifestyle",
     "fw-cream-cyan-film",
@@ -18135,6 +18141,8 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
             f"PRIMARY SELECTED STYLE LOCK ({selected_style_name or effective_style_id or 'user-selected style'}): {selected_style_prompt or 'follow the selected style taxonomy and its established visual language'}. "
             "This selected style is the primary creative authority for palette, lighting, camera grammar, performance and finish. Any optional research is supplementary method reference only and must never dilute, replace or average this style."
         )
+        if effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}:
+            selected_style_lock += " " + LOOKBOOK_LEVIS_PERFORMANCE_GUIDANCE
         if isinstance(bible, dict):
             bible = {**bible, "selected_style_lock": selected_style_lock}
         elif isinstance(bible, list):
@@ -18350,6 +18358,7 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     style_id = str(style.get("id") or "").strip().lower()
     auto_style = style_id == "auto"
+    levis_style = style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}
     brief = str(options.get("instruction") or "自由创作一组高级时尚 Lookbook 平面广告").strip()[:4000]
     story_mode = str(options.get("lookbook_mode") or "").strip().lower() == LOOKBOOK_STORY_MODE
     layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
@@ -18386,7 +18395,8 @@ async def enrich_lookbook_plan(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any]
             + "请为 Lookbook 平面广告生成一份可直接执行的 art direction 方案。"
             "综合用户需求、选定视觉风格、参考图事实、可选联网案例方法和色彩系统，输出 900 字以内的结构化方案，必须包含："
             "选定视觉风格是第一优先级，必须原样落实其核心色彩、光线、镜头、动作和后期语言；联网案例只能补充可迁移的方法，不能替换、平均混合或稀释选定风格。"
-            "人物面貌与现有穿着事实、系列叙事、主视觉构图、镜头/景别变化、真实城市环境与动作生命力、场景与道具、"
+            + (LOOKBOOK_LEVIS_PERFORMANCE_GUIDANCE if levis_style else "")
+            + "人物面貌与现有穿着事实、系列叙事、主视觉构图、镜头/景别变化、真实城市环境与动作生命力、场景与道具、"
             "布光、具体色板与色彩比例、肤色处理、材质细节、版式留白、后期/印刷质感、品牌文字约束、反普通化负面约束和"
             "多张图片的一致性规则。只有人物输入时必须以该人物现有穿着为造型基底，不得无理由换装；除非用户明确要求，"
             "不得使用白底棚拍、无意义渐变背景或静止证件照式构图。不要虚构品牌事实，不要复制案例。\n"
@@ -18602,6 +18612,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
     effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
     selected_style_name = str(auto_decision.get("selected_style_name") or style.get("name") or "").strip()
     selected_style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
+    levis_style = effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}
     selected_style_lock = (
         f"选定视觉风格是本次分镜的第一优先级（{selected_style_name or effective_style_id or '用户选定风格'}）：{selected_style_prompt or '严格遵循该风格 taxonomy 的核心视觉语言'}。"
         "必须把它落实到每张卡的色彩、布光、镜头、动作和后期；联网方法仅在已启用且有结果时作为补充，不能覆盖、稀释或平均混合选定风格。"
@@ -18622,13 +18633,16 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             + "严禁把视觉故事降级为电商摆拍：不做白底棚拍、SKU 陈列、正反面展示、同姿势换角度或只展示服装而没有人物目标与事件变化。"
             "参考图只用于身份、服装、商品、场景、材质和版式事实；不能把联网案例中的主体、品牌、Logo、文案或地点带入。"
             + selected_style_lock
+            + (LOOKBOOK_LEVIS_PERFORMANCE_GUIDANCE if levis_style else "")
             + "输出结构必须是："
-            '{"logline":"","campaign_bible":{"identity":"","wardrobe":"","products":"",'
+            '{"logline":"","campaign_bible":{"brand_personality":"","emotion_arc":"",'
+            '"performance_rules":[""],"identity":"","wardrobe":"","products":"",'
             '"location":"","props":"","palette":"","lighting":"","camera_grammar":"",'
             '"continuity_locks":[""],"must_keep":[""],"must_avoid":[""]},'
             '"shot_cards":[{"index":1,"beat":"开场","story_purpose":"",'
-            '"time_position":"","location":"","subjects":[{"id":"","action":"",'
-            '"gaze":""}],"wardrobe_state":"","prop_state":"",'
+            '"time_position":"","location":"","emotion_state":"","objective":"",'
+            '"action_chain":"","micro_expression":"","weight_and_contact":"",'
+            '"subjects":[{"id":"","action":"","gaze":""}],"wardrobe_state":"","prop_state":"",'
             '"camera":{"shot_size":"","angle":"","movement":""},"composition":"",'
             '"lighting":"","continuity_in":"","continuity_out":"",'
             '"reference_ids":[""]}]}\n'
@@ -18716,6 +18730,11 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
     references = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     brief = str(options.get("instruction") or "")
+    style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
+    style_id = str(style.get("id") or "").strip().lower()
+    auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
+    effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
+    levis_style = effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}
     layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
     layout_check = (
         "用户明确授权排版时，检查是否严格遵守指定规格并达到顶级时尚杂志专题页质量：主次层级、节奏、比例、留白和统一色彩明确；随机模板拼图、重复近景、无叙事方格仍判弱。"
@@ -18729,6 +18748,12 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
             "请作为时尚广告终审，逐张检查 Lookbook 输出，并与原始参考和创意方案比较。"
             "检查人物身份与人体、商品结构和颜色、材质纹理、Logo/文字拼写、姿态、场景、版式留白、光影透视、商业完成度和系列一致性。"
             "检查是否真的在讲视觉故事：人物目标、事件因果、情绪变化、环境关系和品牌理念是否可见；电商目录式摆拍、SKU 陈列、白底棚拍、同姿势换角度和无剧情手势都应判弱。"
+            + (
+                "当前是 Levi's 品牌表演风格。逐张检查视线是否先于身体、重心是否真实转移、肩髋是否有反向关系、手部是否有任务、衣物/头发是否响应动作，以及表情是否由事件触发。"
+                "木偶式站姿、锁膝、双肩齐平、双臂镜像、死鱼眼、统一微笑、无因果正面凝视、手扶腰、托脸、摸头或人物明显在等待拍摄，一律列入 weak_indices。"
+                "修复指令必须写出人物目标、动作起点、重心/接触、视线、具体微表情和动作余势，不能只写‘更自然’或‘增加情绪’。"
+                if levis_style else ""
+            )
             + layout_check
             + "对街景/时尚编辑风格额外检查：是否有具体城市环境、前后景层次、自然动作或态度、明确色彩关系和有动机的镜头感；"
             "空洞渐变背景、静止证件照式站姿或普通商品目录构图应判为弱图并给出替换指令。"

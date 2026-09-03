@@ -104,6 +104,11 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn('event.preventDefault();event.stopPropagation();choose(', self.lookbook)
         self.assertIn('参考图优先 · 动作/情绪先行 · 真实环境融合 · 系列化输出', self.lookbook)
 
+    def test_levis_presets_include_brand_performance_and_anti_puppet_rules(self):
+        self.assertIn("const LEVIS_HUMAN_PERFORMANCE_PROMPT", self.lookbook)
+        self.assertIn("Puppet-posing hard ban", self.lookbook)
+        self.assertIn("LEVIS_HUMAN_PERFORMANCE_PROMPT},", self.lookbook)
+
     def test_lookbook_actions_have_direct_and_delegated_click_fallbacks(self):
         start = self.lookbook.index("function bind(root,node,options={}){")
         end = self.lookbook.index("function mediaRefs", start)
@@ -145,9 +150,9 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.02.lookbook.30", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.31", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
-        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260902.9", self.html)
+        self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.1", self.html)
         self.assertIn("feature=lookbook-picker.1", self.html)
         self.assertIn("feature=lookbook-output-node.1", self.html)
         self.assertIn("feature=lookbook-multi-run.1", self.html)

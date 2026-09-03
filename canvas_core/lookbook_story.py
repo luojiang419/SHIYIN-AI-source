@@ -326,6 +326,24 @@ def normalize_lookbook_shot_cards(value: Any, count: int) -> List[Dict[str, Any]
         card["story_purpose"] = str(card["story_purpose"]).strip()
         card["continuity_in"] = str(card["continuity_in"]).strip()
         card["continuity_out"] = str(card["continuity_out"]).strip()
+        subjects = card.get("subjects") if isinstance(card.get("subjects"), list) else []
+        primary_subject = subjects[0] if subjects and isinstance(subjects[0], dict) else {}
+        primary_action = str(primary_subject.get("action") or "").strip()
+        primary_gaze = str(primary_subject.get("gaze") or "").strip()
+        # 兼容旧快照，同时把表演字段显式带入逐镜头 prompt，避免模型退化成静态站姿。
+        card["emotion_state"] = str(card.get("emotion_state") or "由当前事件触发的具体情绪，禁止统一微笑").strip()[:500]
+        card["objective"] = str(card.get("objective") or card["story_purpose"]).strip()[:500]
+        card["action_chain"] = str(
+            card.get("action_chain")
+            or f"承接：{card['continuity_in']}；执行：{primary_action or card['story_purpose']}；收束：{card['continuity_out']}"
+        ).strip()[:900]
+        card["micro_expression"] = str(
+            card.get("micro_expression") or "视线先行，眼睑、嘴角、下颌或呼吸对事件产生一拍内的可见反应，避免无因果表情"
+        ).strip()[:600]
+        card["weight_and_contact"] = str(
+            card.get("weight_and_contact")
+            or f"至少一脚承重并产生真实接触，肩髋与动作方向形成自然不对称；{primary_gaze or '视线与动作目标保持一致'}，衣物/头发保留动作余势"
+        ).strip()[:700]
         card["reference_ids"] = [str(item) for item in card.get("reference_ids") or [] if str(item).strip()]
         cards.append(card)
     return cards
@@ -465,6 +483,11 @@ def _compact_card(card: Dict[str, Any]) -> str:
             "story_purpose",
             "time_position",
             "location",
+            "emotion_state",
+            "objective",
+            "action_chain",
+            "micro_expression",
+            "weight_and_contact",
             "subjects",
             "wardrobe_state",
             "prop_state",

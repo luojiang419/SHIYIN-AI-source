@@ -23,6 +23,15 @@ QUALITIES = ("auto", "low", "medium", "high")
 FREE_CREATION_PROMPT_POLICY = "free"
 LOOKBOOK_PROMPT_POLICY = "lookbook"
 
+LEVIS_BRAND_PERFORMANCE_DIRECTIVE = (
+    "LEVI'S BRAND PERSONALITY AND HUMAN PERFORMANCE LOCK: treat the brand as an unofficial uniform of progress—rugged individuality, authentic self-expression, optimism, inclusion, utility and a restless pioneering spirit—not as a static denim catalog. "
+    "Every frame must show a person living in the clothes while pursuing one concrete objective in the supplied world: moving toward something, making a choice, handling an object, meeting or responding to someone, taking a risk, recovering from a surprise, or claiming space with purpose. "
+    "Build a visible performance chain in each still: attention leads the body (eyes and head orient first), preparation changes breath and weight, one decisive action changes the spatial relationship, then a half-beat reaction leaves an emotional after-image. "
+    "Choose an emotion that belongs to the story rather than default happiness—curiosity/anticipation, playful ease, connection, defiant focus, surprise, relief, joy, quiet pride, tenderness or reflective calm—and show it through eyelids, gaze direction, mouth asymmetry, jaw release, breath, shoulder tone, hand tension and posture, never through a pasted smile. "
+    "Use asymmetrical, anatomically grounded body language: one leg bears weight while the other prepares or recovers, pelvis and shoulders counter-rotate, hands have a task or a believable relaxed consequence, fabric/hair follows inertia, and feet make contact with the ground. Vary movement across the series (stride, turn, reach, sit-to-rise, lean, dance-like release, exchange, pause after effort) while keeping one recognizable person and emotional progression. "
+    "PUPPET-POSING HARD BAN: never use a mannequin stance, locked knees, squared shoulders, mirrored arms, frozen hands, dead forward stare, generic closed-mouth smile, hands-on-hips, hand-to-face beauty gesture, idle hair touch, or a character who appears to wait for the camera. If a still moment is necessary, capture the instant before or after an action with residual momentum and a specific off-frame cause."
+)
+
 SIZE_PRESETS: dict[str, dict[str, str]] = {
     "1:1": {"1k": "1024x1024", "2k": "2048x2048", "4k": "2880x2880"},
     "2:3": {"1k": "1024x1536", "2k": "1360x2040", "4k": "2304x3456"},
@@ -1552,6 +1561,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             parts.append(
                 "MATERIAL PORTRAIT LIGHT LOCK: shape the image around the owning material—broad high-key light for skin, jewelry and eyewear; raking side light for leather, knit and hardware; controlled negative fill for form. Preserve micro-texture, reflective edges and product color with clean highlight roll-off, restrained grain and no plastic CGI gloss."
             )
+        if effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}:
+            parts.append(LEVIS_BRAND_PERFORMANCE_DIRECTIVE)
         if style_id in {
             "fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white", "candid-lifestyle", "multi-person-interaction", "single-person-emotion", "sports-dynamic",
             "casual-friends", "street-film", "travel-dream", "product-story", "pet-fashion", "material-closeup",

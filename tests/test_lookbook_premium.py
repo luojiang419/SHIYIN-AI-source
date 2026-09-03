@@ -261,6 +261,8 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "rain or wet ground",
             "blue hour",
             "HUMAN PERFORMANCE AND GROOMING",
+            "LEVI'S BRAND PERSONALITY AND HUMAN PERFORMANCE LOCK",
+            "PUPPET-POSING HARD BAN",
             "SINGLE-FRAME AND ORIGINALITY LOCK",
         ):
             self.assertIn(marker, prompt)
@@ -301,8 +303,8 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         }
         for style_id, markers in {
             "standard-advertising": ("STANDARD ADVERTISING COLOR LOCK", "STANDARD ADVERTISING PERFORMANCE"),
-            "levis-high-key-color": ("HIGH-KEY BRIGHT-COLOR LOCK", "HIGH-KEY FREE CONFIDENCE PERFORMANCE"),
-            "levis-black-white": ("BLACK-AND-WHITE TONAL LOCK", "BLACK-AND-WHITE FREE CONFIDENCE PERFORMANCE"),
+            "levis-high-key-color": ("HIGH-KEY BRIGHT-COLOR LOCK", "HIGH-KEY FREE CONFIDENCE PERFORMANCE", "PUPPET-POSING HARD BAN"),
+            "levis-black-white": ("BLACK-AND-WHITE TONAL LOCK", "BLACK-AND-WHITE FREE CONFIDENCE PERFORMANCE", "PUPPET-POSING HARD BAN"),
         }.items():
             prompt = build_prompt("universal", [
                 {"role": "prop", "reference_type": "prop", "lookbook_role": "人物", "url": "/assets/input/model.png"},

@@ -149,6 +149,11 @@ class LookbookStoryContractTests(unittest.TestCase):
                 "story_purpose": "听见朋友呼喊后回头",
                 "continuity_in": "右手仍持纸袋",
                 "continuity_out": "视线转向街角",
+                "emotion_state": "惊讶后释然",
+                "objective": "确认朋友位置",
+                "action_chain": "先听见声音，随后转身并收紧手指，最后停在半步余势中",
+                "micro_expression": "眼睑短暂抬起，嘴角一侧放松",
+                "weight_and_contact": "右脚承重，左脚尚未完全落地，纸袋产生牵引褶皱",
             },
             ["人物·model.png", "场景·street.png"],
         )
@@ -156,6 +161,8 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("story frame 3", prompt)
         self.assertIn("CONTINUITY RULE", prompt)
         self.assertIn("人物·model.png", prompt)
+        self.assertIn("emotion_state", prompt)
+        self.assertIn("惊讶后释然", prompt)
 
     def test_six_frame_story_uses_only_one_environmental_wide_and_forces_close_variation(self):
         plan = lookbook_shot_scale_contract(6)

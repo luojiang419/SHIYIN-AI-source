@@ -23,7 +23,7 @@
 
 - 静态检查：`python -m py_compile main.py canvas_core/ecommerce.py canvas_core/lookbook_story.py`、`node --check static/js/canvas.js`、`node --check static/js/canvas-lookbook-node.js`、`git diff --check` 通过
 - 单元测试：`pytest -q tests/test_lookbook_story.py tests/test_lookbook_node_frontend.py tests/test_lookbook_premium.py`，71 passed
-- 最近 Git commit：待提交；工作区其余用户改动未纳入本任务
+- 最近 Git commit：`a88f4e3 fix: make lookbook web research optional`（已推送 `origin/feat/storyboard-merge-node`）；工作区其余用户改动未纳入本任务
 
 ---
 

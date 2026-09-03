@@ -213,6 +213,9 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "2026 FW REFERENCE FILM LOCK",
             "warm ivory, cream and pale lemon-yellow",
             "faded turquoise/cyan",
+            "FW TONAL CONTRAST LOCK",
+            "structured S-curve",
+            "For 16:9 outputs",
             "FW CAMERA GRAMMAR",
             "FW HUMAN VITALITY LOCK",
             "FW ANALOG FINISH",
@@ -360,6 +363,25 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             source = inspect.getsource(main.apply_lookbook_organic_film_grain)
             self.assertNotIn("coarse_h", source)
             self.assertNotIn("clump", source)
+
+    def test_fw_contrast_grade_separates_tones_without_clipping_highlights(self):
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = f"{temp_dir}/contrast.jpg"
+            image = Image.new("RGB", (96, 64))
+            pixels = image.load()
+            for x in range(96):
+                value = int(70 + (x / 95) * 170)
+                for y in range(64):
+                    pixels[x, y] = (value, min(255, value + 4), min(255, value + 8))
+            image.save(path, "JPEG", quality=95)
+            with patch.object(main, "output_file_from_url", return_value=path):
+                self.assertTrue(main.apply_lookbook_fw_contrast_grade("/assets/output/contrast.jpg"))
+            with Image.open(path) as graded:
+                arr = np.asarray(graded.convert("RGB"), dtype=np.int16)
+            self.assertGreater(float(arr.std()), 48.0)
+            self.assertLessEqual(int(arr.max()), 253)
 
     def test_structured_research_is_normalized_for_generation(self):
         value = main.normalize_lookbook_visual_research(json.dumps({

@@ -205,7 +205,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.32", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.33", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.1", self.html)
@@ -222,6 +222,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("feature=fw-reference-film.1", self.html)
         self.assertIn("feature=fw-natural-sun-grain.1", self.html)
         self.assertIn("feature=fw-model-identity.1", self.html)
+        self.assertIn("feature=fw-structured-contrast.1", self.html)
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
         self.assertIn("feature=lookbook-validated-presets-only.1", self.html)
         self.assertIn("feature=lookbook-research-evidence.1", self.html)

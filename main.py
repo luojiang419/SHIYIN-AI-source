@@ -16266,6 +16266,48 @@ def apply_lookbook_natural_sun_grade(url: str) -> bool:
         return False
 
 
+def apply_lookbook_fw_contrast_grade(url: str) -> bool:
+    """为 FW2026 参考片建立一次高键但有结构的曝光曲线。
+
+    参考图的高键来自更亮的主光面，而不是把所有暗部抬到同一灰阶；因此
+    这里直接从模型原图建立温和的曝光 + S 曲线，避免通用自然阳光校准先
+    压扁高光后再拉对比。保留高光 shoulder、肤色和奶油白，同时让发丝、
+    深色内景、栏杆缝隙和硬件重新成为黑位锚点。该函数只由
+    ``fw-cream-cyan-film`` 调用，避免改变其他 Lookbook 风格。
+    """
+    path = output_file_from_url(url)
+    if not path:
+        return False
+    try:
+        import numpy as np
+
+        with Image.open(path) as image:
+            source = image.convert("RGB")
+            rgb = np.asarray(source, dtype=np.float32) / 255.0
+            # 轻微曝光补偿后直接建立对比，不使用会把白衣/天空压成灰的通用 shoulder。
+            exposed = np.power(np.clip(rgb, 0.0, 1.0), 0.94) * 1.015
+            luma = np.clip(exposed @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), 0.0, 1.0)
+            pivot = 0.46
+            # 中间调分离优先，暗部只保留极轻 lift；每通道处理可保留奶油/青蓝色相关系。
+            graded = pivot + (exposed - pivot) * 1.24
+            shadow = np.clip((0.32 - luma) / 0.32, 0.0, 1.0)
+            graded -= shadow[..., None] * 0.006
+            # 短高光肩部保留白衣和面部高光纹理，不让增加对比变成硬 clipping。
+            shoulder = np.clip((graded - 0.88) / 0.12, 0.0, 1.0)
+            graded = np.where(
+                graded > 0.88,
+                0.88 + (graded - 0.88) * (0.52 + 0.08 * (1.0 - shoulder)),
+                graded,
+            )
+            graded = np.clip(graded, 0.0, 0.985)
+            finished = Image.fromarray((graded * 255.0).astype(np.uint8), "RGB")
+            finished.save(path, "JPEG", quality=95, subsampling=0, optimize=True)
+        return True
+    except Exception as exc:
+        print(f"Lookbook FW 结构化对比校准跳过：{exc}")
+        return False
+
+
 def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
     """给 FW Lookbook 输出叠加非周期、多尺度的有机胶片粗颗粒。
 
@@ -16356,7 +16398,7 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
             apply_lookbook_monochrome_grade(str(url))
             apply_lookbook_organic_film_grain(str(url), amount=0.018)
         elif style_id == "fw-cream-cyan-film":
-            apply_lookbook_natural_sun_grade(str(url))
+            apply_lookbook_fw_contrast_grade(str(url))
             # 0.095 会在 2K 人像上形成覆盖皮肤与丹宁纹理的噪点幕；保留可见胶片结构，
             # 但让颗粒退回质感层而不是成为主体。
             apply_lookbook_organic_film_grain(str(url), amount=0.035)

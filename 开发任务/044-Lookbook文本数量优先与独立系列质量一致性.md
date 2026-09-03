@@ -25,7 +25,7 @@
 
 - 静态检查：`python -m py_compile main.py canvas_core/lookbook_story.py`、`node --check static/js/canvas.js`、`node --check static/js/canvas-lookbook-node.js`、`git diff --check` 通过
 - 单元测试：Lookbook/电商专项 `213 passed`
-- Git：保留用户现有未提交改动，不覆盖或清理；本任务提交待完成
+- Git：`f9d0a03 fix: prioritize lookbook brief count and improve series continuity`；已推送到 `origin/feat/storyboard-merge-node`
 
 ---
 

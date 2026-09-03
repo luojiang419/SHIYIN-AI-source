@@ -7,7 +7,9 @@ import main
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
     build_lookbook_shot_prompt,
+    enforce_lookbook_story_rhythm_contract,
     enforce_lookbook_shot_scale_contract,
+    lookbook_story_rhythm_contract,
     lookbook_shot_scale_contract,
     normalize_lookbook_shot_cards,
     normalize_ai_lookbook_settings,
@@ -163,6 +165,7 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("人物·model.png", prompt)
         self.assertIn("emotion_state", prompt)
         self.assertIn("惊讶后释然", prompt)
+        self.assertIn("RHYTHM LOCK", prompt)
 
     def test_independent_series_prompt_has_joint_editorial_quality_bar(self):
         prompt = build_lookbook_shot_prompt(
@@ -182,6 +185,27 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertIn("waist-up", plan[3]["shot_size"])
         self.assertIn("tight action close-up", plan[4]["shot_size"])
         self.assertIn("medium hero", plan[5]["shot_size"])
+
+    def test_story_rhythm_contract_scales_without_repeating_a_four_frame_template(self):
+        for count in range(1, 21):
+            rhythm = lookbook_story_rhythm_contract(count)
+            self.assertEqual(len(rhythm), count)
+            self.assertEqual([item["index"] for item in rhythm], list(range(1, count + 1)))
+            self.assertTrue(all(item["rhythm_role"] for item in rhythm))
+        self.assertEqual([item["rhythm_role"] for item in lookbook_story_rhythm_contract(3)], ["建立目标", "事件转折", "结果收束"])
+        nine = lookbook_story_rhythm_contract(9)
+        self.assertEqual([item["index"] for item in nine if item["anchor"]], [1, 4, 9])
+        self.assertEqual(nine[3]["rhythm_role"], "事件转折")
+        self.assertEqual(nine[-2]["rhythm_role"], "产品证明")
+
+    def test_story_rhythm_is_written_to_each_shot_card(self):
+        cards = [
+            {"index": index, "beat": "发展", "story_purpose": "推进", "continuity_in": "承接", "continuity_out": "继续"}
+            for index in range(1, 6)
+        ]
+        enforced = enforce_lookbook_story_rhythm_contract(cards, 5)
+        self.assertEqual(enforced[2]["rhythm_lock"]["rhythm_role"], "事件转折")
+        self.assertIn("transition_rule", enforced[2]["rhythm_lock"])
 
     def test_shot_scale_contract_overrides_ai_wide_repetition_and_reaches_final_prompt(self):
         cards = [

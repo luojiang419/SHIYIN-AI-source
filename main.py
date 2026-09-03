@@ -168,7 +168,9 @@ from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
     LOOKBOOK_STORY_MODE,
     build_lookbook_shot_prompt,
+    enforce_lookbook_story_rhythm_contract,
     enforce_lookbook_shot_scale_contract,
+    lookbook_story_rhythm_contract,
     lookbook_shot_scale_contract,
     normalize_lookbook_shot_cards,
     normalize_ai_lookbook_settings,
@@ -17717,6 +17719,7 @@ async def execute_lookbook_story_batch(
     count = max(1, min(LOOKBOOK_MAX_COUNT, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
     cards = normalize_lookbook_shot_cards(options.get("lookbook_shot_cards"), count)
     cards = enforce_lookbook_shot_scale_contract(cards, count)
+    cards = enforce_lookbook_story_rhythm_contract(cards, count)
     prompts = lookbook_generation_prompts(snapshot)
     refs = [dict(item) for item in snapshot.get("inputs") or [] if isinstance(item, dict) and item.get("url")]
     semaphore = asyncio.Semaphore(LOOKBOOK_STORY_GENERATION_CONCURRENCY)
@@ -18157,6 +18160,7 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
         count = max(1, min(LOOKBOOK_MAX_COUNT, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
         cards = normalize_lookbook_shot_cards(options.get("lookbook_shot_cards"), count)
         cards = enforce_lookbook_shot_scale_contract(cards, count)
+        cards = enforce_lookbook_story_rhythm_contract(cards, count)
         brief = str(options.get("instruction") or "").strip()
         bible = options.get("lookbook_bible") or options.get("lookbook_plan") or {}
         style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
@@ -18165,9 +18169,16 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
         effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
         selected_style_name = str(auto_decision.get("selected_style_name") or style.get("name") or "").strip()
         selected_style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
+        layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
+        series_count_authority = (
+            f"SERIES COUNT AUTHORITY: the current task settings and shot card are the only quantity authority. This assigned output contains the explicitly requested layout ({str(layout_intent.get('specification') or 'editorial layout')}); any fixed output count or single-frame wording inside the style preset is a legacy example and must be ignored. "
+            if layout_intent.get("explicit") else
+            f"SERIES COUNT AUTHORITY: this campaign contains exactly {count} independent full-bleed outputs. Any fixed wording such as 'four separate outputs' inside the style preset is a legacy example only and must not change the count, rhythm plan or current shot assignment. "
+        )
         selected_style_lock = (
             f"PRIMARY SELECTED STYLE LOCK ({selected_style_name or effective_style_id or 'user-selected style'}): {selected_style_prompt or 'follow the selected style taxonomy and its established visual language'}. "
-            "This selected style is the primary creative authority for palette, lighting, camera grammar, performance and finish. Any optional research is supplementary method reference only and must never dilute, replace or average this style."
+            "This selected style is the primary creative authority for palette, lighting, camera grammar, performance and finish. Any optional research is supplementary method reference only and must never dilute, replace or average this style. "
+            + series_count_authority
         )
         if effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}:
             selected_style_lock += " " + LOOKBOOK_LEVIS_PERFORMANCE_GUIDANCE
@@ -18619,6 +18630,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
         try:
             cards = normalize_lookbook_shot_cards(existing_cards, count)
             cards = enforce_lookbook_shot_scale_contract(cards, count)
+            cards = enforce_lookbook_story_rhythm_contract(cards, count)
             options["lookbook_shot_cards"] = cards
             return {**snapshot, "options": options}, {"status": "provided", "count": len(cards), "shot_cards": cards}
         except ValueError:
@@ -18650,6 +18662,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
     selected_style_lock = (
         f"选定视觉风格是本次分镜的第一优先级（{selected_style_name or effective_style_id or '用户选定风格'}）：{selected_style_prompt or '严格遵循该风格 taxonomy 的核心视觉语言'}。"
         "必须把它落实到每张卡的色彩、布光、镜头、动作和后期；联网方法仅在已启用且有结果时作为补充，不能覆盖、稀释或平均混合选定风格。"
+        f"数量唯一权威是当前任务的 {count} 张；风格文本中任何固定‘四张/Four separate outputs’都只是旧示例，不能改变数量、节奏或镜头职责。"
     )
     request = CanvasLLMRequest(
         message=(
@@ -18657,6 +18670,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             f"必须输出恰好 {count} 个 shot_cards，index 从 1 连续到 {count}，不能少卡、重复卡或改数量。"
             "先建立 campaign_bible，再把故事拆成有因果的开场、发展、转折/揭示和收束；数量较少时也要保留状态变化。"
             f"以下景别分配是后端强制契约，shot_cards 必须逐项复制对应的 shot_size 和 framing，不能全部规划为大全景或全身照：{json.dumps(lookbook_shot_scale_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
+            f"以下节奏分配也是后端强制契约；每张卡必须执行对应 rhythm_role、story_function、transition_rule 和 energy，不能把它们改成同姿势换角度：{json.dumps(lookbook_story_rhythm_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
             "每张卡只承担一个清晰叙事功能，并明确上一张结束状态如何成为本张开始状态；不能只写‘换一个角度’。"
             + (
                 f"用户明确要求 {str(layout_intent.get('specification') or layout_intent.get('source') or '杂志排版')}，因此可以在每张输出中按该规格规划有主次的编辑排版；"
@@ -18706,6 +18720,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
         data = _parse_lookbook_json(str(result.get("text") or ""))
         cards = normalize_lookbook_shot_cards(data.get("shot_cards"), count)
         cards = enforce_lookbook_shot_scale_contract(cards, count)
+        cards = enforce_lookbook_story_rhythm_contract(cards, count)
         bible = data.get("campaign_bible")
         if not isinstance(bible, (dict, list, str)) or not str(bible).strip():
             raise ValueError("AI 分镜缺少 campaign_bible")
@@ -18770,6 +18785,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
     effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
     levis_style = effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}
     layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
+    rhythm_contract = lookbook_story_rhythm_contract(len(images)) if len(images) > 1 else []
     layout_check = (
         "用户明确授权排版时，检查是否严格遵守指定规格并达到顶级时尚杂志专题页质量：主次层级、节奏、比例、留白和统一色彩明确；随机模板拼图、重复近景、无叙事方格仍判弱。"
         if layout_intent.get("explicit") else
@@ -18782,6 +18798,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
             "请作为时尚广告终审，逐张检查 Lookbook 输出，并与原始参考和创意方案比较。"
             "检查人物身份与人体、商品结构和颜色、材质纹理、Logo/文字拼写、姿态、场景、版式留白、光影透视、商业完成度和系列一致性。"
             "检查是否真的在讲视觉故事：人物目标、事件因果、情绪变化、环境关系和品牌理念是否可见；电商目录式摆拍、SKU 陈列、白底棚拍、同姿势换角度和无剧情手势都应判弱。"
+            "按输出顺序检查节奏契约：建立目标后必须启动并推进动作，在指定锚点发生真实转折，随后出现即时反应、恢复/兑现、产品证明和结果收束；相邻张不能只换角度，continuity_out 必须成为下一张可见的 continuity_in。"
             + (
                 "当前是 Levi's 品牌表演风格。逐张检查视线是否先于身体、重心是否真实转移、肩髋是否有反向关系、手部是否有任务、衣物/头发是否响应动作，以及表情是否由事件触发。"
                 "木偶式站姿、锁膝、双肩齐平、双臂镜像、死鱼眼、统一微笑、无因果正面凝视、手扶腰、托脸、摸头或人物明显在等待拍摄，一律列入 weak_indices。"
@@ -18794,6 +18811,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
             "输出严格 JSON，不要 Markdown："
             '{"passed":true,"score":0,"weak_indices":[0],"issues":["问题"],"corrections":{"0":"具体修复指令"},"summary":"总结"}。'
             "score 为 0-100；达到 82 且没有明显瑕疵才 passed=true；weak_indices 必须是从 0 开始的输出编号。\n"
+            f"本组确定性节奏契约：{json.dumps(rhythm_contract, ensure_ascii=False, separators=(',', ':'))[:8000]}\n"
             f"创意方案：{str((snapshot.get('options') or {}).get('lookbook_plan') or '')[:8000]}"
         ),
         system_prompt="你是严格的高级时尚广告视觉质检总监。只依据所见输出和参考素材判断，不要猜测，不要输出 JSON 以外内容。",

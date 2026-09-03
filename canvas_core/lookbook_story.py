@@ -400,6 +400,89 @@ def lookbook_shot_scale_contract(count: int) -> List[Dict[str, str]]:
     return [opening, *[dict(interior[index % len(interior)]) for index in range(expected - 2)], closing]
 
 
+def lookbook_story_rhythm_contract(count: int) -> List[Dict[str, Any]]:
+    """把九宫格的“建立—转折—收束”规律扩展到任意 1～20 张。
+
+    契约只规定每个位置承担的叙事功能和状态变化方向，不替用户编造具体
+    情节。小数量使用专门结构；6 张以上按归一化位置分配，并把约 40%
+    位置固定为事件转折锚点（9 张时恰好为第 4 张）。
+    """
+    expected = max(1, min(LOOKBOOK_MAX_COUNT, int(count or 1)))
+    small_roles = {
+        1: [("英雄收束", "在一个决定性瞬间同时交代人物目标、环境关系与产品价值", "进入动作高潮并停在仍有余势的完成状态")],
+        2: [
+            ("建立目标", "建立人物、环境、目标和初始状态", "明确下一张将发生的动作或事件"),
+            ("结果收束", "呈现目标完成后的结果、情绪变化和产品证明", "形成可结束但仍有余韵的终局状态"),
+        ],
+        3: [
+            ("建立目标", "建立人物、环境、目标和初始状态", "启动通向事件的动作"),
+            ("事件转折", "让环境事件或人物选择改变动作、重心或注意力", "留下清晰反应并指向结果"),
+            ("结果收束", "完成目标并让情绪与产品价值同时落地", "形成终局状态"),
+        ],
+        4: [
+            ("建立目标", "建立空间、人物目标与初始状态", "准备启动动作"),
+            ("行动启动", "以一个具体动作让故事开始移动", "把动作方向交给转折"),
+            ("事件转折", "由环境或人物选择制造可见变化", "保留动作后果和情绪反应"),
+            ("结果收束", "完成目标并以产品/人物关系收束", "形成终局状态"),
+        ],
+        5: [
+            ("建立目标", "建立空间、人物目标与初始状态", "准备启动动作"),
+            ("行动启动", "人物开始执行目标并产生第一处状态变化", "把运动方向交给事件"),
+            ("事件转折", "环境事件或人物选择打断原有节奏", "留下明确失衡、发现或决定"),
+            ("反应恢复", "人物回应转折并重新组织重心、目光和行动", "将恢复后的方向交给结尾"),
+            ("结果收束", "目标、情绪和产品价值在同一结果中落地", "形成终局状态"),
+        ],
+    }
+    if expected in small_roles:
+        roles = small_roles[expected]
+        return [
+            {
+                "index": index,
+                "anchor": index in {1, expected} or role == "事件转折",
+                "rhythm_role": role,
+                "story_function": function,
+                "transition_rule": transition,
+                "energy": "凝聚" if expected == 1 else "建立" if index == 1 else "收束" if index == expected else "转折" if role == "事件转折" else "推进",
+            }
+            for index, (role, function, transition) in enumerate(roles, 1)
+        ]
+
+    turning_index = max(3, min(expected - 2, int(round(expected * 0.4))))
+    contract: List[Dict[str, Any]] = []
+    for index in range(1, expected + 1):
+        if index == 1:
+            role, function, transition, energy = "建立目标", "建立空间地理、人物目标、产品初始状态和行动方向", "以视线或准备动作明确下一张的运动方向", "建立"
+        elif index == expected:
+            role, function, transition, energy = "结果收束", "完成目标，让人物情绪、环境结果和产品价值同时落地", "形成可结束且有余韵的终局状态", "收束"
+        elif index == turning_index:
+            role, function, transition, energy = "事件转折", "由环境事件、阻力、发现或人物选择改变原动作", "把失衡、接触、发现或决定的直接后果交给下一张", "峰值"
+        elif index == turning_index + 1:
+            role, function, transition, energy = "即时反应", "表现转折后一拍内的目光、微表情、重心和接触反应", "反应必须驱动人物重新选择行动", "回落"
+        elif index == expected - 1:
+            role, function, transition, energy = "产品证明", "让产品材质、结构或穿着性能自然参与完成目标", "产品接触或动作结果直接导向终局", "再聚焦"
+        elif index < turning_index:
+            role, function, transition, energy = (
+                ("行动启动", "以一个具体可见动作启动目标", "保持方向并增加下一张的动作幅度", "上升")
+                if index == 2 else
+                ("行动推进", "通过新的空间关系、接触或阻力推进同一目标", "保留动作余势并逼近事件转折", "上升")
+            )
+        else:
+            role, function, transition, energy = (
+                ("恢复掌控", "人物消化转折并重新组织目光、呼吸、重心和行动", "建立新的稳定方向", "恢复")
+                if index == turning_index + 2 else
+                ("行动兑现", "沿恢复后的选择继续推进，展示可见后果而非重复动作", "逐步压缩到产品证明和终局", "再上升")
+            )
+        contract.append({
+            "index": index,
+            "anchor": index in {1, turning_index, expected},
+            "rhythm_role": role,
+            "story_function": function,
+            "transition_rule": transition,
+            "energy": energy,
+        })
+    return contract
+
+
 def enforce_lookbook_shot_scale_contract(cards: List[Dict[str, Any]], count: int) -> List[Dict[str, Any]]:
     """把景别契约写回镜头卡；该锁优先于模型返回的泛化构图描述。"""
     plan = lookbook_shot_scale_contract(count)
@@ -412,6 +495,18 @@ def enforce_lookbook_shot_scale_contract(cards: List[Dict[str, Any]], count: int
         camera["framing_lock"] = lock["framing"]
         card["camera"] = camera
         card["shot_scale_lock"] = lock
+        enforced.append(card)
+    return enforced
+
+
+def enforce_lookbook_story_rhythm_contract(cards: List[Dict[str, Any]], count: int) -> List[Dict[str, Any]]:
+    """把确定性节奏角色写入镜头卡，防止 LLM 退化为同姿势换角度。"""
+    rhythm = lookbook_story_rhythm_contract(count)
+    enforced: List[Dict[str, Any]] = []
+    for position, source in enumerate(cards):
+        card = dict(source)
+        lock = dict(rhythm[position])
+        card["rhythm_lock"] = lock
         enforced.append(card)
     return enforced
 
@@ -491,6 +586,7 @@ def build_lookbook_shot_prompt(
         "The scene reference owns architecture, light direction and spatial continuity only; it never owns the original camera position, crop or subject scale. "
         "Do not widen a medium or close shot merely to show the complete room or every spectator. "
         + "\nCONTINUITY RULE: preserve the incoming state, execute the current decisive action, and leave the outgoing state for the next frame. "
+        + "RHYTHM LOCK: execute CURRENT SHOT CARD.rhythm_lock as the unique dramatic function of this frame. Do not repeat the previous frame's action, pose, gaze, composition or emotional state; make the outgoing state visibly prepare the next rhythm role. "
         + series_quality_lock
         + (f"REFERENCE LABELS: {references}\n" if references else "")
         + wardrobe_rule
@@ -527,6 +623,7 @@ def _compact_card(card: Dict[str, Any]) -> str:
             "continuity_out",
             "reference_ids",
             "shot_scale_lock",
+            "rhythm_lock",
         )
         if card.get(key) not in (None, "", [], {})
     }

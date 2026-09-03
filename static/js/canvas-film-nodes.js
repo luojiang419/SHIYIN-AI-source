@@ -26,6 +26,14 @@
         kling: {id:'kling', name:'可灵', prefix:'<<<image_', template:'<<<image_{index}>>>={role}', maxImages:12},
         minimax: {id:'minimax', name:'MiniMax H3', prefix:'Picture ', template:'<Picture {index}> is {role}', maxImages:9},
     };
+    const H3_DEFAULT_RESOLUTION = '0.2MP 16:9 - 608x352';
+    const H3_RESOLUTION_PRESETS = [
+        '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
+        '0.2MP 16:9 - 608x352','0.3MP 16:9 - 736x416','0.4MP 16:9 - 864x480','0.5MP 16:9 - 960x544','0.6MP 16:9 - 1056x608',
+        '0.2MP 4:3 - 512x384','0.3MP 4:3 - 640x480','0.4MP 4:3 - 768x576','Square 512x512',
+        '0.2MP 3:4 - 384x512','0.3MP 3:4 - 480x640','0.4MP 3:4 - 576x768',
+        '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
+    ];
     const LINE_ART_PROMPT = '这是导演审阅用的专业黑白线稿分镜转换任务。请把参考视频帧重绘为标准电影分镜线稿，不是照片滤镜，也不是简单边缘检测。必须保留景别、机位、透视、主体位置与大小、人物数量、人物距离与朝向、肢体动作、视线方向、必要道具和场景空间关系。人物统一替换为无身份、无外貌、无服装特征的中性分镜人偶：光滑空白椭圆头部、完全留白的脸、简洁几何体块和圆柱四肢，只用外轮廓、关节转折和少量结构线表达动作；禁止脸部、发型、肤色、服装、配饰和写实人体细节。背景只保留机位、景别、主体位置、前中后景、主要灯架、摄影机和遮挡关系所必需的长轮廓与几何形状，使用白底细黑线和少量排线，移除颜色、照片纹理、品牌、水印、字幕和无关杂物。禁止添加分镜编号、镜头参数、对白框、箭头、边框、表格或任何文字，只输出单张纯黑白分镜画面。';
 
     function esc(value){
@@ -67,10 +75,13 @@
             node.batchError = String(node.batchError || '');
             node.batchCompleted = Math.max(0, Number(node.batchCompleted) || 0);
         } else {
-            node.duration = clamp(node.duration || 5, 1, 60);
+            const h3 = modelRule(node.apiProvider, node.model).id === 'minimax';
+            node.duration = clamp(node.duration || 5, 1, h3 ? 15 : 60);
             node.aspectRatio = node.aspectRatio || '16:9';
-            // 空值会触发平台自身的不可控默认值，影视节点统一默认使用 1080P。
-            node.resolution = String(node.resolution || '1080p');
+            // H3 使用 MP/像素预设；其他影视模型保留原有 1080P 默认值。
+            node.resolution = String(node.resolution || (h3 ? H3_DEFAULT_RESOLUTION : '1080p'));
+            if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;
+            node.steps = clamp(node.steps || 12, 4, 30);
             node.apiProvider = String(node.apiProvider || '');
             node.model = String(node.model || '');
             node.enhancePrompt = node.enhancePrompt !== false;
@@ -236,6 +247,34 @@
         const stateHtml = connected ? '<span class="film-input-status-dot" aria-hidden="true"></span>已连接' : state;
         return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${connected ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${connected ? 'has-input' : ''}">${stateHtml}</b></div>`;
     }
+    function h3ResolutionOptions(selected){
+        const value = H3_RESOLUTION_PRESETS.includes(String(selected || '')) ? String(selected) : H3_DEFAULT_RESOLUTION;
+        return H3_RESOLUTION_PRESETS.map(item => `<option value="${esc(item)}" ${item === value ? 'selected' : ''}>${esc(item)}</option>`).join('');
+    }
+    function h3VideoSettingsHtml(node, providerOptions='', modelOptions=''){
+        return `<div class="film-video-settings film-video-settings-h3">
+            <div class="gen-settings-row"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select></div>
+            <div class="film-video-model-note"><strong>MiniMax H3 参数</strong><span>支持全能参考最多 9 图 + 3 视频；关键帧模式使用前两张图</span></div>
+            <div class="gen-settings-row">
+                <label class="field"><div class="setting-title">时长（1–15 秒）</div><input class="setting-input" data-film-field="duration" type="number" min="1" max="15" step="1" value="${Number(node.duration || 5)}"></label>
+                <label class="field"><div class="setting-title">画幅比例</div><select class="select-lite" data-film-field="aspectRatio">${['21:9','16:9','4:3','1:1','3:4','9:16'].map(value => `<option value="${value}" ${value === (node.aspectRatio || '16:9') ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+                <label class="field"><div class="setting-title">分辨率</div><select class="select-lite" data-film-field="resolution">${h3ResolutionOptions(node.resolution)}</select></label>
+            </div>
+            <div class="gen-settings-row">
+                <label class="field"><div class="setting-title">采样步数（4–30）</div><input class="setting-input" data-film-field="steps" type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}"></label>
+            </div>
+            <div class="gen-settings-row">
+                <button type="button" class="setting-check ${node.multimodal ? 'active' : ''}" data-film-toggle="multimodal"><span class="check-dot"></span>全能参考</button>
+                <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-film-toggle="useFrameRoles"><span class="check-dot"></span>首尾帧模式</button>
+            </div>
+        </div>`;
+    }
+    function genericVideoSettingsHtml(node, providerOptions, modelOptions){
+        return `<div class="film-video-settings">
+            <div class="gen-settings-row"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select></div>
+            <div class="gen-settings-row"><label class="field"><div class="setting-title">时长</div><input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label class="field"><div class="setting-title">画幅</div><select data-film-field="aspectRatio">${['16:9','9:16','1:1','4:3'].map(value => `<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select></label><label class="field"><div class="setting-title">分辨率</div><select data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P（推荐）</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label></div>
+        </div>`;
+    }
     function bodyHtml(node, options={}){
         normalize(node);
         const isLineArt = node.type === LINE_ART_TYPE;
@@ -247,6 +286,10 @@
         const modelOptions = ['film-storyboard',LINE_ART_TYPE].includes(node.type)
             ? (options.imageModelOptions || options.modelOptions)?.(node) || ''
             : options.modelOptions?.(node) || '';
+        const videoIsH3 = node.type === 'film-video' && modelRule(node.apiProvider, node.model).id === 'minimax';
+        const videoSettings = node.type === 'film-video'
+            ? (videoIsH3 ? h3VideoSettingsHtml(node, providerOptions, modelOptions) : genericVideoSettingsHtml(node, providerOptions, modelOptions))
+            : '';
         const lineArtAssets = isLineArt ? (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url) : [];
         const lineArtStatus = node.batchStatus === 'running'
             ? `正在并行提交 ${lineArtAssets.length} 张图片…`
@@ -262,7 +305,7 @@
                 ${isLineArt ? `<div class="film-line-art-batch-summary"><strong>${esc(lineArtStatus)}</strong><small>每张图片独立提交，批量并行生成</small></div>` : ''}
                 <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
                 ${promptHtml(node, options)}
-                ${node.type === 'film-video' ? `<div class="film-video-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>时长<input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='4:3'?'selected':''}>4:3</option></select></label><label>分辨率<select data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P（推荐）</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label></div>` : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
+                ${node.type === 'film-video' ? videoSettings : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
                 ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
             </div>
             <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
@@ -500,15 +543,43 @@
             const eventName=control.matches('input')?'input':'change';
             control.addEventListener(eventName,event=>{
                 const key=control.dataset.filmField;
+                const previousRule = modelRule(node.apiProvider, node.model);
                 node[key]=key==='duration'
-                    ? clamp(control.value,1,60)
+                    ? clamp(control.value,1,modelRule(node.apiProvider,node.model).id === 'minimax' ? 15 : 60)
+                    : key==='steps' ? clamp(control.value,4,30)
                     : key==='count' ? clamp(control.value,1,4) : control.value;
                 if(key==='apiProvider'){
                     const getDefault=['film-storyboard',LINE_ART_TYPE].includes(node.type) ? options.defaultImageModel : options.defaultModel;
                     node.model=getDefault?.(control.value,node) || '';
                 }
+                const nextRule = modelRule(node.apiProvider, node.model);
+                if(node.type === 'film-video' && nextRule.id === 'minimax'){
+                    node.duration=clamp(node.duration,1,15);
+                    node.steps=clamp(node.steps || 12,4,30);
+                    if(!H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution=H3_DEFAULT_RESOLUTION;
+                    if(previousRule.id !== 'minimax'){
+                        node.multimodal=true;
+                        node.useFrameRoles=false;
+                    }
+                } else if(node.type === 'film-video' && previousRule.id === 'minimax'){
+                    node.duration=clamp(node.duration,1,60);
+                    node.resolution='1080p';
+                    node.multimodal=false;
+                    node.useFrameRoles=false;
+                }
                 notify(options,node,key==='apiProvider' || key==='model');
                 event.stopPropagation();
+            });
+        });
+        root.querySelectorAll('[data-film-toggle]').forEach(button=>{
+            button.addEventListener('mousedown',event=>event.stopPropagation());
+            button.addEventListener('click',event=>{
+                event.preventDefault(); event.stopPropagation();
+                const field=button.dataset.filmToggle;
+                node[field]=!node[field];
+                if(field==='multimodal' && node.multimodal) node.useFrameRoles=false;
+                if(field==='useFrameRoles' && node.useFrameRoles) node.multimodal=false;
+                notify(options,node,true);
             });
         });
         root.querySelector('[data-film-action="add-actor"]')?.addEventListener('click',event=>{
@@ -529,5 +600,5 @@
         const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
     }
 
-    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,lineArtPrompt,bodyHtml,bind,parseScene,autoParseVideoPrompt};
+    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
 })();

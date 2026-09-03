@@ -244,6 +244,26 @@ def test_classic_film_video_defaults_to_kling_video_3_0_omni_and_resolves_real_m
     assert "result.get(\"model\") or payload.model" in MAIN
 
 
+def test_film_video_switches_to_minimax_h3_specific_settings_panel():
+    assert "const H3_RESOLUTION_PRESETS = [" in FILM
+    assert "function h3VideoSettingsHtml(node" in FILM
+    assert "film-video-settings-h3" in FILM
+    assert "采样步数（4–30）" in FILM
+    assert "data-film-field=\"steps\"" in FILM
+    assert "data-film-toggle=\"multimodal\"" in FILM
+    assert "data-film-toggle=\"useFrameRoles\"" in FILM
+    assert "videoIsH3 = node.type === 'film-video' && modelRule(node.apiProvider, node.model).id === 'minimax'" in FILM
+
+
+def test_film_video_h3_settings_are_normalized_and_submitted_on_both_canvases():
+    assert "if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;" in FILM
+    assert "key==='steps' ? clamp(control.value,4,30)" in FILM
+    assert "previousRule.id !== 'minimax'" in FILM
+    assert "steps:Math.max(4,Math.min(30,Number(node.steps || 12)))" in CLASSIC
+    assert "videoSteps:node.steps || settingsForNodeRun.videoSteps || 12" in SMART
+    assert "videoMultimodal:node.multimodal !== undefined" in SMART
+
+
 def test_classic_film_render_passes_image_model_sources_for_storyboard_node():
     compact_classic = " ".join(CLASSIC.split())
     assert "imageProviderOptions:filmNodeImageProviderOptions" in compact_classic

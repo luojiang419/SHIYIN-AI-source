@@ -2175,7 +2175,7 @@ async function runSmartFilmNode(node){
             if(!images.length) throw new Error('分镜合成没有返回图片');
             node.images=images; finalizePendingNode(output,images,meta,'image');
         } else {
-            const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || ''};
+            const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || '',videoSteps:node.steps || settingsForNodeRun.videoSteps || 12,videoMultimodal:node.multimodal !== undefined ? Boolean(node.multimodal) : Boolean(settingsForNodeRun.videoMultimodal),videoUseFrameRoles:node.useFrameRoles !== undefined ? Boolean(node.useFrameRoles) : Boolean(settingsForNodeRun.videoUseFrameRoles)};
             const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings);
             const images=(urls || []).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'video'}:{url:item,kind:'video'}).filter(item=>item.url);
             if(!images.length) throw new Error('视频生成没有返回结果');

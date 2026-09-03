@@ -10801,7 +10801,7 @@ async function runFilmNode(nodeId, opts={}){
         } else {
             const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
             if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
-            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),steps:12};
+            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
             const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));

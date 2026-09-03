@@ -34,6 +34,14 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("node.lookbookPlan=''", self.lookbook)
         self.assertIn("node.lookbookAutoDecision={}", self.lookbook)
 
+    def test_lookbook_grain_slider_defaults_to_fw_value_and_is_submitted(self):
+        self.assertIn("const DEFAULT_GRAIN_STRENGTH = 0.095", self.lookbook)
+        self.assertIn("lookbookGrainStrength:DEFAULT_GRAIN_STRENGTH", self.lookbook)
+        self.assertIn('data-lookbook-field="lookbookGrainStrength"', self.lookbook)
+        self.assertIn('min="0" max="0.2" step="0.005"', self.lookbook)
+        self.assertIn("lookbook_grain_strength:Number(node.lookbookGrainStrength ?? 0.095)", self.canvas)
+        self.assertIn("lookbook-grain-control", self.css)
+
     def test_premium_editorial_research_controls_are_submitted(self):
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
         self.assertNotIn("研究深度", self.lookbook)
@@ -205,7 +213,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.33", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.34", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260902.1", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.1", self.html)
@@ -223,6 +231,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("feature=fw-natural-sun-grain.1", self.html)
         self.assertIn("feature=fw-model-identity.1", self.html)
         self.assertIn("feature=fw-structured-contrast.1", self.html)
+        self.assertIn("feature=lookbook-grain-slider.1", self.html)
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
         self.assertIn("feature=lookbook-validated-presets-only.1", self.html)
         self.assertIn("feature=lookbook-research-evidence.1", self.html)

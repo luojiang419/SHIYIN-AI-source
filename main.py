@@ -16308,6 +16308,18 @@ def apply_lookbook_fw_contrast_grade(url: str) -> bool:
         return False
 
 
+def resolve_lookbook_grain_strength(options: Dict[str, Any], default: float = 0.095) -> float:
+    """读取节点颗粒滑块值，并将异常/越界输入收敛到安全范围。"""
+    raw = options.get("lookbook_grain_strength", default) if isinstance(options, dict) else default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(0.0, min(0.2, value))
+
+
 def apply_lookbook_organic_film_grain(url: str, amount: float = 0.095) -> bool:
     """给 FW Lookbook 输出叠加非周期、多尺度的有机胶片粗颗粒。
 
@@ -16400,7 +16412,7 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
         elif style_id == "fw-cream-cyan-film":
             apply_lookbook_fw_contrast_grade(str(url))
             # 恢复 FW 原始胶片颗粒强度；色彩与光比仍由独立 FW 曲线负责。
-            apply_lookbook_organic_film_grain(str(url), amount=0.095)
+            apply_lookbook_organic_film_grain(str(url), amount=resolve_lookbook_grain_strength(options))
         elif style_id == "levis-high-key-color":
             apply_lookbook_natural_sun_grade(str(url))
             apply_lookbook_organic_film_grain(str(url), amount=0.025)

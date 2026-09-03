@@ -310,9 +310,10 @@ body.smart-prompt-split-resize .prompt-node-llm select { pointer-events:none !im
 .loop-smart-run:disabled { opacity:.45; cursor:not-allowed; }
 .create-menu { position:fixed; z-index:75; display:none; width:500px; max-width:calc(100vw - 28px); padding:9px; border-radius:16px; background:var(--card); border:1px solid var(--line); box-shadow:0 22px 58px var(--shadow); }
 .create-menu.open { display:block; }
-.smart-arrange-menu-btn { width:100%; min-height:36px; display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:8px; border:1px solid var(--line); border-radius:11px; background:var(--soft); color:var(--text); font-size:11px; font-weight:850; cursor:pointer; }
-.smart-arrange-menu-btn:hover { border-color:var(--strong); background:var(--card); }
-.smart-arrange-menu-btn i,.smart-arrange-menu-btn svg { width:16px; height:16px; }
+.smart-arrange-menu-btn,.smart-download-selected-menu-btn { width:100%; min-height:36px; display:flex; align-items:center; justify-content:center; gap:7px; margin-bottom:8px; border:1px solid var(--line); border-radius:11px; background:var(--soft); color:var(--text); font-size:11px; font-weight:850; cursor:pointer; }
+.smart-arrange-menu-btn:hover,.smart-download-selected-menu-btn:hover { border-color:var(--strong); background:var(--card); }
+.smart-arrange-menu-btn i,.smart-arrange-menu-btn svg,.smart-download-selected-menu-btn i,.smart-download-selected-menu-btn svg { width:16px; height:16px; }
+.smart-arrange-menu-btn:disabled,.smart-download-selected-menu-btn:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
 .create-menu-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; }
 .create-card { min-height:96px; padding:10px 10px 9px; border-radius:13px; border:1px solid var(--line); background:var(--card); color:var(--text); display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; gap:8px; text-align:left; transition:transform .14s ease, border-color .14s ease, box-shadow .14s ease; }
 .create-card:hover { transform:translateY(-2px); border-color:var(--strong); box-shadow:0 10px 24px rgba(0,0,0,.1); }

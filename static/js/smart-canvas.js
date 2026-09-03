@@ -22,6 +22,7 @@ const minimap = document.getElementById('minimap');
 const minimapContent = document.getElementById('minimapContent');
 const smartArrangeBtn = document.getElementById('smartArrangeBtn');
 const smartArrangeMenuBtn = document.getElementById('smartArrangeMenuBtn');
+const smartDownloadSelectedMenuBtn = document.getElementById('smartDownloadSelectedMenuBtn');
 const imageEditModal = document.getElementById('imageEditModal');
 const smartLogModal = document.getElementById('smartLogModal');
 const smartLogList = document.getElementById('smartLogList');
@@ -8981,6 +8982,32 @@ async function saveDownloadImageItems(title, items){
         toast((e.message || '批量下载失败').slice(0, 160));
     }
 }
+function selectedSmartDownloadItems(){
+    const items = [];
+    const seen = new Set();
+    const add = item => {
+        const url = String(item?.url || '').trim();
+        if(!url || seen.has(url) || mediaKindForItem(item) !== 'image') return;
+        seen.add(url);
+        items.push(imageForDisplay({...item, url}));
+    };
+    selectedNodeIds().forEach(nodeId => {
+        const node = nodes.find(item => item.id === nodeId);
+        if(!node) return;
+        if(isSmartGroupNode(node)) smartGroupImageRefs(node).forEach(ref => add(ref.item));
+        else (node.images || []).forEach(add);
+    });
+    return items;
+}
+async function downloadSelectedSmartNodes(){
+    const items = selectedSmartDownloadItems();
+    closeCreateMenu();
+    if(!items.length){
+        toast('选中的节点没有可下载图片');
+        return false;
+    }
+    return saveDownloadImageItems('selected', items);
+}
 async function downloadPreviewGroup(){
     const group = previewNavState.groupId ? nodes.find(n => n.id === previewNavState.groupId) : null;
     const owner = group || nodes.find(n => n.id === previewNavState.nodeId);
@@ -15499,7 +15526,7 @@ async function applyImageGridSplit(){
         const order = String(i + 1).padStart(digits, '0');
         if(blob) blobs.push({blob, name:`${base}_${order}_r${rect.row + 1}_c${rect.col + 1}.png`});
     }
-    const files = await uploadImageBlobs(blobs);
+    const files = (await uploadImageBlobs(blobs)) || [];
     if(files.length){
         const layout = gridLayoutFromRects(rects);
         const outputImages = files.map((file, i) => ({
@@ -15511,6 +15538,7 @@ async function applyImageGridSplit(){
         const outputNode = createNode(point.x, point.y, outputImages);
         outputNode.title = 'Grid';
         closeImageEditor(); render(); scheduleSave();
+        toast(`已切分 ${outputImages.length} 张图片并返回画布`);
     }
 }
 function loadGridJoinImage(entry){
@@ -19986,7 +20014,12 @@ function openCreateMenu(event, options={}){
     if(!createMenu) return;
     createMenuPoint = screenToWorld(event);
     createMenuGroupId = options.groupId || '';
-    if(smartArrangeMenuBtn) smartArrangeMenuBtn.hidden = selectedNodeIds().length < 2;
+    const selectionCount = selectedNodeIds().length;
+    if(smartArrangeMenuBtn) smartArrangeMenuBtn.hidden = selectionCount < 2;
+    if(smartDownloadSelectedMenuBtn){
+        smartDownloadSelectedMenuBtn.hidden = selectionCount < 2;
+        smartDownloadSelectedMenuBtn.disabled = selectedSmartDownloadItems().length === 0;
+    }
     const w = 500;
     const h = 330;
     const left = Math.max(14, Math.min(window.innerWidth - w - 14, event.clientX + 8));
@@ -20164,6 +20197,12 @@ smartArrangeMenuBtn?.addEventListener('click', e => {
     e.stopPropagation();
     closeCreateMenu();
     arrangeSelectedSmartNodes();
+});
+smartDownloadSelectedMenuBtn?.addEventListener('mousedown', e => e.stopPropagation());
+smartDownloadSelectedMenuBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    downloadSelectedSmartNodes();
 });
 let portDragMoveRaf = 0;
 let portDragLatestEvent = null;

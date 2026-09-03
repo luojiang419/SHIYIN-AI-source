@@ -474,6 +474,7 @@ const linkControlsEl = document.getElementById('linkControls');
 const dropOverlay = document.getElementById('dropOverlay');
 const createMenu = document.getElementById('createMenu');
 const canvasArrangeMenuBtn = document.getElementById('canvasArrangeMenuBtn');
+const canvasDownloadSelectedMenuBtn = document.getElementById('canvasDownloadSelectedMenuBtn');
 const canvasArrangeMenuDivider = createMenu?.querySelector('.canvas-arrange-menu-divider');
 const filmMenuHost = createMenu?.querySelector('[data-film-menu-host]');
 const filmMenuTrigger = filmMenuHost?.querySelector('.menu-submenu-trigger');
@@ -5140,6 +5141,10 @@ function openCreateMenu(clientX, clientY){
     closeLinkCreateMenu();
     const canArrangeSelection = selected.size > 1;
     if(canvasArrangeMenuBtn) canvasArrangeMenuBtn.hidden = !canArrangeSelection;
+    if(canvasDownloadSelectedMenuBtn){
+        canvasDownloadSelectedMenuBtn.hidden = !canArrangeSelection;
+        canvasDownloadSelectedMenuBtn.disabled = selectedCanvasDownloadItems().length === 0;
+    }
     if(canvasArrangeMenuDivider) canvasArrangeMenuDivider.hidden = !canArrangeSelection;
     const viewportMargin = 10;
     createMenu.classList.remove('create-menu-two-column');
@@ -8524,7 +8529,7 @@ async function applyImageGridSplit(){
         if(blob) blobs.push({blob, name:`${base}_r${rect.row + 1}_c${rect.col + 1}.png`});
     }
     if(!blobs.length) return;
-    const files = await uploadImageBlobs(blobs);
+    const files = (await uploadImageBlobs(blobs)) || [];
     if(files.length){
         const out = imageEditorOutputNode(node);
         const urls = files.map(file => file.url).filter(Boolean);
@@ -8537,6 +8542,7 @@ async function applyImageGridSplit(){
         closeImageEditor();
         render();
         scheduleSave();
+        setStatus(`已切分 ${urls.length} 张图片并输出到 Output`);
     }
 }
 async function applyImageResize(){
@@ -9002,6 +9008,38 @@ function renderPendingOutput(pending, useGridLayout=false){
         ? `<span class="output-time-pill running">镜头 ${pending.lookbookSlotIndex}/${pending.lookbookTotal || '?'}</span>`
         : `<span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span>`;
     return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending, useGridLayout)}>${slot}<div class="output-spinner"></div>${canCancel ? `<button class="output-cancel-task" type="button" title="取消视频任务" aria-label="取消视频任务">×</button>` : `<button class="output-del" title="${tr('common.delete')}">×</button>`}</div>`;
+}
+function selectedCanvasDownloadItems(){
+    const items = [];
+    const seen = new Set();
+    const add = item => {
+        const url = String(item?.url || '').trim();
+        if(!url || seen.has(url)) return;
+        seen.add(url);
+        items.push({url, name:item.name || outputImageName(url)});
+    };
+    [...selected].forEach(nodeId => {
+        const node = nodes.find(item => item.id === nodeId);
+        if(!node) return;
+        if(node.type === 'group' || node.type === 'promptGroup') groupImageItems(node).forEach(add);
+        else if(node.type === 'output') outputDownloadableItems(node).forEach(add);
+        else if(node.type === 'image' && node.url && mediaKindForNode(node) === 'image' && !isMissingAssetUrl(node.url)) add({url:node.url, name:node.name || outputImageName(node.url)});
+    });
+    return items;
+}
+async function downloadSelectedCanvasNodes(){
+    const items = selectedCanvasDownloadItems();
+    closeCreateMenu();
+    if(!items.length){
+        alert(tr('canvas.outputDownloadEmpty'));
+        return false;
+    }
+    try {
+        return await saveCanvasItemsToDirectory(`${canvas?.title || 'canvas'}-selected`, items);
+    } catch(err) {
+        alert(err.message || tr('canvas.outputDownloadEmpty'));
+        return false;
+    }
 }
 function captureOutputScrolls(){
     const state = new Map();
@@ -22681,6 +22719,12 @@ canvasArrangeMenuBtn?.addEventListener('click', e => {
     e.stopPropagation();
     arrangeSelectedCanvasNodes();
     closeCreateMenu();
+});
+canvasDownloadSelectedMenuBtn?.addEventListener('mousedown', e => e.stopPropagation());
+canvasDownloadSelectedMenuBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    downloadSelectedCanvasNodes();
 });
 function isZoomPreviewIgnoredTarget(target){
     return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');

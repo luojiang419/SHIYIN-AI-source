@@ -24,7 +24,7 @@
 
 - 静态检查：`node --check static/js/canvas-film-nodes.js static/js/canvas.js static/js/smart-canvas.js` 通过
 - 单元测试：H3/视频/影视相关 63 passed；完整影视集合另有 1 项既有契约失败
-- 最近 Git commit：`d8a481c fix: sync film video node with minimax h3 settings`
+- 最近 Git commit：`b0b7ade fix: sync film video node with minimax h3 settings`
 
 ---
 

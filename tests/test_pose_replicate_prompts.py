@@ -84,8 +84,8 @@ def test_user_instruction_requires_normalized_ai_payload():
 def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_prompt():
     submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
     with patch.object(main, "normalize_pose_replicate_instruction", side_effect=AssertionError("AI must not run")), patch.object(
-        main, "create_canvas_image_task", submit
-    ):
+        main, "resolve_image_generation_selection", return_value={"provider_id": "shiying", "model": "gemini-3-pro-image-preview"}
+    ), patch.object(main, "create_canvas_image_task", submit):
         response = asyncio.run(main.create_pose_replicate_task(task_request()))
 
     image_payload = submit.await_args.args[0]
@@ -118,8 +118,8 @@ def test_user_instruction_endpoint_calls_assistant_once_and_preserves_hard_templ
     )
     submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
     with patch.object(main, "normalize_pose_replicate_instruction", normalize), patch.object(
-        main, "create_canvas_image_task", submit
-    ):
+        main, "resolve_image_generation_selection", return_value={"provider_id": "shiying", "model": "gemini-3-pro-image-preview"}
+    ), patch.object(main, "create_canvas_image_task", submit):
         response = asyncio.run(
             main.create_pose_replicate_task(
                 task_request(instruction="外套保持敞开，保留项链", model=True, scene=True)
@@ -207,3 +207,30 @@ def test_pose_replicate_size_contract_matches_canvas_defaults():
     assert main.pose_replicate_image_size("16:9", "2k") == "2048x1152"
     with pytest.raises(PoseReplicatePromptError):
         main.pose_replicate_image_size("2:1", "2k")
+
+
+def test_pose_replicate_rejects_provider_fallback_instead_of_silently_switching():
+    submit = AsyncMock(return_value={"task_id": "must-not-run"})
+    with patch.object(
+        main,
+        "resolve_image_generation_selection",
+        return_value={"provider_id": "other", "model": "fallback-model"},
+    ), patch.object(main, "create_canvas_image_task", submit):
+        with pytest.raises(main.HTTPException) as error:
+            asyncio.run(main.create_pose_replicate_task(task_request()))
+    assert error.value.status_code == 409
+    assert "当前不可用" in error.value.detail
+    submit.assert_not_awaited()
+
+
+def test_depth_task_stops_before_assistant_and_generation_when_component_is_not_ready():
+    normalize = AsyncMock()
+    submit = AsyncMock()
+    with patch.object(main.PERSON_DEPTH_COMPONENT_MANAGER, "public_status", return_value={"ready": False}), patch.object(
+        main, "normalize_pose_replicate_instruction", normalize
+    ), patch.object(main, "create_canvas_image_task", submit):
+        with pytest.raises(main.HTTPException) as error:
+            asyncio.run(main.create_pose_replicate_task(task_request(mode="depth", instruction="保留项链")))
+    assert error.value.status_code == 503
+    normalize.assert_not_awaited()
+    submit.assert_not_awaited()

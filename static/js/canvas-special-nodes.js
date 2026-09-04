@@ -20,8 +20,14 @@
         '5. Produce a photorealistic result with natural anatomy, correct limb connections and no extra fingers or limbs.'
     ].join('\n');
     const DWPOSE_MODEL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+    const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
     const panoramaStates = new WeakMap();
     const poseTasks = new Map();
+    const personDepthBindings = new Map();
+    let personDepthStatus = {state:'loading', ready:false, install_available:false, progress:0, message:'正在检查高精度人物深度组件'};
+    let personDepthStatusPromise = null;
+    let personDepthPollTimer = 0;
+    let personDepthUpdatedAt = 0;
 
     function esc(value){
         return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -206,48 +212,110 @@
             createDirectorOutputNode: options.createDirectorOutputNode,
         });
     }
-    function poseReplicateImageCard(item, role, emptyIcon, emptyText){
+    function poseReplicateImageCard(item, role, label, emptyIcon, emptyText, hint='请从对应端口连接图片'){
         const url = item?.url || '';
         return `<div class="pose-replicate-column">
-            <div class="pose-replicate-column-title">${role === 'pose-reference' ? '动作参考' : role === 'pose-skeleton' ? '姿势骨架' : '目标图'}</div>
+            <div class="pose-replicate-column-title">${esc(label)}</div>
             <div class="pose-replicate-input-card ${url ? 'has-image' : ''}" data-pose-replicate-slot="${role}">
-                ${url ? `<img src="${esc(url)}" alt="${esc(role)}" draggable="false">` : `<i data-lucide="${emptyIcon}"></i><strong>${esc(emptyText)}</strong><span>${role === 'pose-skeleton' ? '连接动作参考后自动生成' : '请从对应端口连接图片'}</span>`}
+                ${url ? `<img src="${esc(url)}" alt="${esc(label)}" draggable="false">` : `<i data-lucide="${emptyIcon}"></i><strong>${esc(emptyText)}</strong><span>${esc(hint)}</span>`}
             </div>
         </div>`;
     }
-    function poseReplicateBodyHtml(node){
+    function poseReplicateComponentHtml(status){
+        const state = String(status?.state || 'loading');
+        if(status?.ready) return '';
+        const progress = Math.max(0, Math.min(1, Number(status?.progress) || 0));
+        const percent = Math.round(progress * 100);
+        const downloaded = Number(status?.downloaded_bytes) || 0;
+        const total = Number(status?.total_bytes) || 0;
+        const source = String(status?.source_label || '');
+        const stage = state === 'verifying' ? '校验中' : state === 'installing' ? '安装中' : state === 'smoke' ? 'smoke 验证中' : state === 'downloading' ? '下载中' : state === 'checking' ? '检查中' : state === 'failed' ? '安装失败' : state === 'unavailable' ? '暂不可安装' : '等待下载';
+        const details = [total ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : '', source, stage].filter(Boolean).join(' · ');
+        const canInstall = Boolean(status?.install_available) && !PERSON_DEPTH_ACTIVE_STATES.has(state);
+        const action = state === 'failed' ? 'retry-person-depth' : 'install-person-depth';
+        return `<div class="pose-replicate-component ${state}" data-person-depth-state="${esc(state)}">
+            <div class="pose-replicate-component-head"><span>${esc(status?.message || '高精度人物深度组件尚未就绪')}</span><strong>${percent}%</strong></div>
+            <div class="pose-replicate-progress" role="progressbar" aria-label="高精度人物深度组件进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><i style="width:${percent}%"></i></div>
+            <div class="pose-replicate-component-detail"><span>${esc(details || '深度模式需要先安装高精度组件')}</span>${canInstall ? `<button type="button" data-special-action="${action}">${state === 'failed' ? '重试' : '下载'}</button>` : ''}</div>
+        </div>`;
+    }
+    function poseReplicateProviderOptions(providers, selected){
+        const items = Array.isArray(providers) ? providers : [];
+        const exists = items.some(item => item?.id === selected);
+        return `${!exists && selected ? `<option value="${esc(selected)}" selected>${esc(selected)}（未配置）</option>` : ''}${items.map(item => `<option value="${esc(item.id)}" ${item.id === selected ? 'selected' : ''}>${esc(item.name || item.id)}</option>`).join('')}`;
+    }
+    function poseReplicateModelOptions(providers, providerId, selected){
+        const provider = (providers || []).find(item => item?.id === providerId);
+        const models = Array.isArray(provider?.models) ? provider.models : [];
+        const exists = models.includes(selected);
+        return `${!exists && selected ? `<option value="${esc(selected)}" selected>${esc(selected)}（未配置）</option>` : ''}${models.map(value => `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(value)}</option>`).join('')}`;
+    }
+    function normalizePoseReplicateNode(node, options={}){
+        const providers = Array.isArray(options.providers) ? options.providers : [];
+        const modern = Number(node.poseReplicateSchemaVersion || 0) >= 2;
+        if(!modern){
+            node.poseReplicateMode = 'skeleton';
+            node.poseReplicateRatio = node.poseReplicateRatio || '1:1';
+            if(node.poseReplicatePrompt === DEFAULT_POSE_REPLICATE_PROMPT) node.poseReplicatePrompt = '';
+        }
+        node.poseReplicateMode = ['depth','skeleton'].includes(node.poseReplicateMode) ? node.poseReplicateMode : (modern ? 'depth' : 'skeleton');
+        node.poseReplicateRatio = ['1:1','16:9','9:16','4:3','3:4'].includes(node.poseReplicateRatio) ? node.poseReplicateRatio : (modern ? '16:9' : '1:1');
+        node.poseReplicateResolution = ['1k','2k','4k'].includes(node.poseReplicateResolution) ? node.poseReplicateResolution : '2k';
+        node.poseReplicateProvider = String(node.poseReplicateProvider || (modern ? 'shiying' : providers[0]?.id || ''));
+        const provider = providers.find(item => item?.id === node.poseReplicateProvider);
+        node.poseReplicateModel = String(node.poseReplicateModel || (modern ? 'gemini-3-pro-image-preview' : provider?.models?.[0] || ''));
+        node.poseReplicatePrompt = String(node.poseReplicatePrompt || '');
+        return node;
+    }
+    function poseReplicateBodyHtml(node, options={}){
+        normalizePoseReplicateNode(node, options);
         const action = node.poseReferenceUrl ? {url:node.poseReferenceUrl} : null;
-        const skeleton = node.poseSkeletonUrl ? {url:node.poseSkeletonUrl} : null;
         const target = node.targetImageUrl ? {url:node.targetImageUrl} : null;
-        const status = node.poseStatus || 'idle';
-        const ready = Boolean(action?.url && skeleton?.url && target?.url);
+        const modelSubject = node.modelSubjectUrl ? {url:node.modelSubjectUrl} : null;
+        const scene = node.sceneUrl ? {url:node.sceneUrl} : null;
+        const mode = node.poseReplicateMode;
+        const control = mode === 'depth'
+            ? (node.poseDepthUrl ? {url:node.poseDepthUrl} : null)
+            : (node.poseSkeletonUrl ? {url:node.poseSkeletonUrl} : null);
+        const status = mode === 'depth' ? (node.poseDepthStatus || 'idle') : (node.poseStatus || 'idle');
+        const providers = Array.isArray(options.providers) ? options.providers : [];
+        const provider = providers.find(item => item?.id === node.poseReplicateProvider);
+        const modelReady = Boolean(provider && Array.isArray(provider.models) && provider.models.includes(node.poseReplicateModel));
+        const componentReady = mode !== 'depth' || Boolean(personDepthStatus?.ready);
+        const ready = Boolean(action?.url && control?.url && target?.url && componentReady && modelReady);
         const activeRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0);
         const statusText = status === 'running'
-            ? (node.posePreparing || '正在自动提取动作骨架…')
+            ? (mode === 'depth' ? '正在生成高精度人物深度图…' : (node.posePreparing || '正在自动提取动作骨架…'))
             : status === 'failed'
-                ? (node.poseError || '动作骨架提取失败')
+                ? (mode === 'depth' ? (node.poseDepthError || '高精度人物深度图生成失败') : (node.poseError || '动作骨架提取失败'))
                 : ready
-                    ? '动作骨架和目标图已就绪，可连续点击并发抽卡'
-                    : action?.url && !skeleton?.url
-                        ? '动作参考已连接，等待骨架提取'
-                        : '请连接动作参考和目标图';
-        const ratios = ['1:1','16:9','9:16','4:3','3:4','3:2','2:3'];
+                    ? `${mode === 'depth' ? '深度图' : '骨架图'}和必需输入已就绪，可连续点击并发生成`
+                    : !modelReady
+                        ? '所选图片生成平台或模型尚未配置'
+                        : action?.url && !control?.url
+                            ? `动作参考已连接，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
+                            : '请连接动作参考和目标图';
+        const ratios = ['1:1','16:9','9:16','4:3','3:4'];
         const resolutions = ['1k','2k','4k'];
-        node.poseReplicateRatio = ratios.includes(node.poseReplicateRatio) ? node.poseReplicateRatio : '1:1';
-        node.poseReplicateResolution = resolutions.includes(node.poseReplicateResolution) ? node.poseReplicateResolution : '2k';
-        if(!node.poseReplicatePrompt) node.poseReplicatePrompt = DEFAULT_POSE_REPLICATE_PROMPT;
         return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
             <div class="pose-replicate-inputs">
-                ${poseReplicateImageCard(action, 'pose-reference', 'person-standing', '连接动作参考')}
-                ${poseReplicateImageCard(skeleton, 'pose-skeleton', status === 'running' ? 'loader-2' : 'scan-line', status === 'running' ? '骨架提取中' : status === 'failed' ? '提取失败' : '等待自动提取')}
-                ${poseReplicateImageCard(target, 'target-image', 'image', '连接目标图')}
+                ${poseReplicateImageCard(action, 'pose-reference', '动作参考', 'person-standing', '连接动作参考')}
+                ${poseReplicateImageCard(target, 'target-image', '目标图', 'shirt', '连接服装来源')}
+                ${poseReplicateImageCard(modelSubject, 'model-subject', '模特主体 · 可选', 'user-round', '连接模特主体')}
+                ${poseReplicateImageCard(scene, 'scene', '场景 · 可选', 'image', '连接场景')}
+            </div>
+            <div class="pose-replicate-control-panel">
+                ${poseReplicateImageCard(control, 'control-map', mode === 'depth' ? '内部控制图 · 深度' : '内部控制图 · 骨架', status === 'running' ? 'loader-2' : mode === 'depth' ? 'scan-line' : 'activity', status === 'running' ? '控制图提取中' : status === 'failed' ? '提取失败' : '连接动作参考后自动生成', '内部生成，不占用输入端口')}
+                ${mode === 'depth' ? poseReplicateComponentHtml(personDepthStatus) : ''}
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
-            <textarea class="special-prompt pose-replicate-prompt" data-pose-replicate-field="poseReplicatePrompt" rows="4" placeholder="复刻提示词">${esc(node.poseReplicatePrompt)}</textarea>
+            <textarea class="special-prompt pose-replicate-prompt" data-pose-replicate-field="poseReplicatePrompt" rows="3" placeholder="可选补充要求；留空使用固定模板，不调用 AI 助手">${esc(node.poseReplicatePrompt)}</textarea>
             <div class="pose-replicate-controls">
+                <label><span>模式</span><select data-pose-replicate-field="poseReplicateMode"><option value="depth" ${mode === 'depth' ? 'selected' : ''}>深度图</option><option value="skeleton" ${mode === 'skeleton' ? 'selected' : ''}>骨架图</option></select></label>
+                <label><span>平台</span><select data-pose-replicate-field="poseReplicateProvider">${poseReplicateProviderOptions(providers, node.poseReplicateProvider)}</select></label>
+                <label class="pose-replicate-model-control"><span>模型</span><select data-pose-replicate-field="poseReplicateModel">${poseReplicateModelOptions(providers, node.poseReplicateProvider, node.poseReplicateModel)}</select></label>
                 <label><span>画幅</span><select data-pose-replicate-field="poseReplicateRatio">${ratios.map(value => `<option value="${value}" ${node.poseReplicateRatio === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
                 <label><span>分辨率</span><select data-pose-replicate-field="poseReplicateResolution">${resolutions.map(value => `<option value="${value}" ${node.poseReplicateResolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select></label>
-                <span class="pose-replicate-model-hint"><i data-lucide="sparkles"></i>使用当前图片生成模型</span>
             </div>
             <div class="special-output-row pose-replicate-run-row">
                 <span>${activeRuns ? `${activeRuns} 个复刻任务正在并发生成` : '每次点击都会创建一个独立输出节点'}</span>
@@ -515,6 +583,90 @@
         const yaw = Number(value) || 0;
         if(Math.abs(yaw) < 0.5) return '正面';
         return yaw < 0 ? `左侧 ${Math.abs(Math.round(yaw))}°` : `右侧 ${Math.abs(Math.round(yaw))}°`;
+    }
+    function formatBytes(value){
+        const bytes = Math.max(0, Number(value) || 0);
+        if(bytes < 1024) return `${Math.round(bytes)}B`;
+        const units = ['KB','MB','GB','TB'];
+        let current = bytes / 1024, index = 0;
+        while(current >= 1024 && index < units.length - 1){ current /= 1024; index += 1; }
+        return `${current >= 100 ? Math.round(current) : current.toFixed(1)}${units[index]}`;
+    }
+    function notifyPersonDepthBindings(){
+        personDepthBindings.forEach(binding => {
+            try { notify(binding.options, binding.node, true); } catch(_) {}
+        });
+    }
+    function schedulePersonDepthPoll(){
+        clearTimeout(personDepthPollTimer);
+        personDepthPollTimer = 0;
+        if(!PERSON_DEPTH_ACTIVE_STATES.has(String(personDepthStatus?.state || ''))) return;
+        personDepthPollTimer = setTimeout(() => refreshPersonDepthStatus(true).catch(() => {}), 1500);
+    }
+    async function refreshPersonDepthStatus(force=false){
+        if(!force && personDepthUpdatedAt && Date.now() - personDepthUpdatedAt < 5000) return personDepthStatus;
+        if(personDepthStatusPromise && !force) return personDepthStatusPromise;
+        personDepthStatusPromise = fetch('/api/person-depth/component/status', {cache:'no-store'})
+            .then(async response => {
+                if(!response.ok) throw new Error(await responseError(response, '高精度人物深度组件状态读取失败'));
+                personDepthStatus = await response.json();
+                personDepthUpdatedAt = Date.now();
+                notifyPersonDepthBindings();
+                schedulePersonDepthPoll();
+                return personDepthStatus;
+            })
+            .catch(error => {
+                personDepthStatus = {state:'failed', ready:false, install_available:false, progress:0, message:error.message || '高精度人物深度组件状态读取失败'};
+                personDepthUpdatedAt = Date.now();
+                notifyPersonDepthBindings();
+                return personDepthStatus;
+            })
+            .finally(() => { personDepthStatusPromise = null; });
+        return personDepthStatusPromise;
+    }
+    function registerPersonDepthBinding(node, options){
+        personDepthBindings.set(`${options.canvasKey || 'canvas'}:${node.id}`, {node, options});
+        refreshPersonDepthStatus(false).catch(() => {});
+    }
+    async function installPersonDepthComponent(retry=false){
+        const endpoint = retry ? '/api/person-depth/component/retry' : '/api/person-depth/component/install';
+        const response = await fetch(endpoint, {method:'POST'});
+        if(!response.ok) throw new Error(await responseError(response, '高精度人物深度组件安装无法启动'));
+        const data = await response.json();
+        personDepthStatus = data.status || personDepthStatus;
+        personDepthUpdatedAt = Date.now();
+        notifyPersonDepthBindings();
+        schedulePersonDepthPoll();
+        return personDepthStatus;
+    }
+    function closePersonDepthDialog(){
+        document.querySelector('.person-depth-dialog-backdrop')?.remove();
+    }
+    function openPersonDepthDialog(options, retry=false){
+        closePersonDepthDialog();
+        const total = Number(personDepthStatus?.total_bytes) || 0;
+        const backdrop = document.createElement('div');
+        backdrop.className = 'person-depth-dialog-backdrop';
+        backdrop.innerHTML = `<div class="person-depth-dialog" role="dialog" aria-modal="true" aria-labelledby="personDepthDialogTitle">
+            <div class="person-depth-dialog-head"><div><strong id="personDepthDialogTitle">${retry ? '重试高精度人物深度组件' : '下载高精度人物深度组件'}</strong><span>${total ? `下载量 ${formatBytes(total)}` : '下载量与磁盘需求以正式组件清单为准'}</span></div><button type="button" data-person-depth-dialog-close aria-label="关闭"><i data-lucide="x"></i></button></div>
+            <p>该系统级组件用于一键复刻的高精度姿势、体积、遮挡和自然褶皱控制。组件独立保存在软件数据目录，升级后继续复用；下载完成后还会执行 SHA-256、原子安装和小图 smoke 验证。</p>
+            <div class="person-depth-dialog-actions"><button type="button" data-person-depth-dialog-close>稍后</button><button type="button" class="primary" data-person-depth-dialog-confirm>${retry ? '确认重试' : '确认下载'}</button></div>
+        </div>`;
+        backdrop.addEventListener('click', event => { if(event.target === backdrop) closePersonDepthDialog(); });
+        backdrop.querySelectorAll('[data-person-depth-dialog-close]').forEach(button => button.addEventListener('click', closePersonDepthDialog));
+        backdrop.querySelector('[data-person-depth-dialog-confirm]').addEventListener('click', async event => {
+            const button = event.currentTarget;
+            button.disabled = true; button.textContent = retry ? '正在重试…' : '正在启动…';
+            try {
+                await installPersonDepthComponent(retry);
+                closePersonDepthDialog();
+            } catch(error){
+                button.disabled = false; button.textContent = retry ? '确认重试' : '确认下载';
+                options.toast?.(error.message || '高精度人物深度组件安装无法启动');
+            }
+        });
+        document.body.appendChild(backdrop);
+        window.lucide?.createIcons?.({root:backdrop});
     }
     function angleReferenceCard(node){
         const yaw = signedAngleAzimuth(node?.angleYaw), elevation = Number(node?.angleElevation) || 0;
@@ -962,7 +1114,14 @@
         return options.getInputImage?.(node, role) || null;
     }
     function assignPoseReplicateInput(node, role, item){
-        const prefix = role === 'pose-reference' ? 'poseReference' : 'targetImage';
+        const prefixes = {
+            'pose-reference':'poseReference',
+            'target-image':'targetImage',
+            'model-subject':'modelSubject',
+            'scene':'scene'
+        };
+        const prefix = prefixes[role];
+        if(!prefix) return false;
         const previous = node[`${prefix}Signature`] || '';
         const next = sourceSignature(item);
         node[`${prefix}Signature`] = next;
@@ -972,7 +1131,7 @@
         node[`${prefix}Height`] = item?.natural_h || item?.height || 0;
         return previous !== next;
     }
-    function clearPoseReplicateSkeleton(node){
+    function clearPoseReplicateControls(node){
         node.poseSkeletonUrl = '';
         node.poseSkeletonName = '';
         node.poseSkeletonWidth = 0;
@@ -982,6 +1141,14 @@
         node.poseStatus = 'idle';
         node.poseError = '';
         node.posePreparing = '';
+        node.poseDepthUrl = '';
+        node.poseDepthName = '';
+        node.poseDepthWidth = 0;
+        node.poseDepthHeight = 0;
+        delete node.poseDepthSourceSignature;
+        delete node.poseDepthFailedSignature;
+        node.poseDepthStatus = 'idle';
+        node.poseDepthError = '';
     }
     function poseReplicatePoseOptions(options){
         return {
@@ -1002,40 +1169,116 @@
             }
         };
     }
+    function poseReplicateControlItem(node){
+        if(node.poseReplicateMode === 'depth'){
+            return node.poseDepthUrl ? {
+                url:node.poseDepthUrl,
+                name:node.poseDepthName || 'person-depth.png',
+                natural_w:node.poseDepthWidth || 0,
+                natural_h:node.poseDepthHeight || 0,
+                kind:'image'
+            } : null;
+        }
+        return node.poseSkeletonUrl ? {
+            url:node.poseSkeletonUrl,
+            name:node.poseSkeletonName || 'pose-skeleton.png',
+            natural_w:node.poseSkeletonWidth || 0,
+            natural_h:node.poseSkeletonHeight || 0,
+            kind:'image'
+        } : null;
+    }
+    async function runPersonDepth(node, options, force=false){
+        const source = poseReplicateInput(node, options, 'pose-reference');
+        const signature = `depth|${sourceSignature(source)}`;
+        if(!signature || signature === 'depth|') return;
+        if(!personDepthStatus?.ready){
+            registerPersonDepthBinding(node, options);
+            return;
+        }
+        if(!force && node.poseDepthSourceSignature === signature && node.poseDepthUrl) return poseReplicateControlItem(node);
+        const taskKey = `${options.canvasKey || 'canvas'}:${node.id}:person-depth`;
+        if(poseTasks.has(taskKey)) return poseTasks.get(taskKey);
+        const task = (async () => {
+            node.poseDepthStatus = 'running'; node.poseDepthError = ''; notify(options, node, true);
+            try {
+                const sourceUrl = options.resolveUrl?.(source.url) || source.url;
+                const imageResponse = await fetch(sourceUrl);
+                if(!imageResponse.ok) throw new Error('动作参考图片读取失败');
+                const form = new FormData();
+                form.append('file', await imageResponse.blob(), source.name || 'pose-reference.png');
+                form.append('bit_depth', '8');
+                const response = await fetch('/api/person-depth/estimate', {method:'POST', body:form});
+                if(!response.ok) throw new Error(await responseError(response, '高精度人物深度图生成失败'));
+                const width = Number(response.headers.get('X-Person-Depth-Width') || 0);
+                const height = Number(response.headers.get('X-Person-Depth-Height') || 0);
+                const file = await uploadBlob(await response.blob(), `person-depth-${Date.now()}.png`);
+                node.poseDepthUrl = file.url || '';
+                node.poseDepthName = file.name || 'person-depth.png';
+                node.poseDepthWidth = width || file.natural_w || file.width || source.natural_w || 0;
+                node.poseDepthHeight = height || file.natural_h || file.height || source.natural_h || 0;
+                node.poseDepthSourceSignature = signature;
+                delete node.poseDepthFailedSignature;
+                node.poseDepthStatus = 'done'; node.poseDepthError = '';
+                notify(options, node, true);
+                return poseReplicateControlItem(node);
+            } catch(error){
+                node.poseDepthStatus = 'failed'; node.poseDepthFailedSignature = signature;
+                node.poseDepthError = error.message || '高精度人物深度图生成失败';
+                notify(options, node, true); throw error;
+            } finally { poseTasks.delete(taskKey); }
+        })();
+        poseTasks.set(taskKey, task);
+        return task;
+    }
     function bindPoseReplicate(root, node, options={}){
         if(!root || !node) return;
+        if(node.poseReplicateMode === 'depth') registerPersonDepthBinding(node, options);
         const action = poseReplicateInput(node, options, 'pose-reference');
         const target = poseReplicateInput(node, options, 'target-image');
+        const modelSubject = poseReplicateInput(node, options, 'model-subject');
+        const scene = poseReplicateInput(node, options, 'scene');
         const actionChanged = assignPoseReplicateInput(node, 'pose-reference', action);
         const targetChanged = assignPoseReplicateInput(node, 'target-image', target);
-        if(actionChanged) clearPoseReplicateSkeleton(node);
-        if(actionChanged || targetChanged) notify(options, node, true);
+        const modelChanged = assignPoseReplicateInput(node, 'model-subject', modelSubject);
+        const sceneChanged = assignPoseReplicateInput(node, 'scene', scene);
+        if(actionChanged) clearPoseReplicateControls(node);
+        if(actionChanged || targetChanged || modelChanged || sceneChanged) notify(options, node, true);
 
         root.querySelectorAll('[data-pose-replicate-field]').forEach(control => {
             control.addEventListener('pointerdown', event => event.stopPropagation());
             control.addEventListener(control.matches('textarea') ? 'input' : 'change', event => {
                 event.stopPropagation();
-                node[control.dataset.poseReplicateField] = control.value;
-                notify(options, node, false);
+                const field = control.dataset.poseReplicateField;
+                node[field] = control.value;
+                if(field === 'poseReplicateMode') node.poseReplicateSchemaVersion = 2;
+                if(field === 'poseReplicateProvider'){
+                    node.poseReplicateModel = options.imageModels?.(control.value)?.[0] || '';
+                }
+                notify(options, node, field === 'poseReplicateProvider' || field === 'poseReplicateMode');
             });
+        });
+        root.querySelector('[data-special-action="install-person-depth"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            openPersonDepthDialog(options, false);
+        });
+        root.querySelector('[data-special-action="retry-person-depth"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            openPersonDepthDialog(options, true);
         });
         root.querySelector('[data-special-action="run-pose-replicate"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             const currentAction = poseReplicateInput(node, options, 'pose-reference');
             const currentTarget = poseReplicateInput(node, options, 'target-image');
-            const skeleton = node.poseSkeletonUrl ? {
-                url:node.poseSkeletonUrl,
-                name:node.poseSkeletonName || 'pose-skeleton.png',
-                natural_w:node.poseSkeletonWidth || 0,
-                natural_h:node.poseSkeletonHeight || 0,
-                kind:'image'
-            } : null;
-            if(!currentAction?.url || !currentTarget?.url || !skeleton?.url){ options.toast?.('请等待动作参考骨架提取完成，并确认目标图已连接'); return; }
+            const currentModel = poseReplicateInput(node, options, 'model-subject');
+            const currentScene = poseReplicateInput(node, options, 'scene');
+            const control = poseReplicateControlItem(node);
+            if(!currentAction?.url || !currentTarget?.url || !control?.url){ options.toast?.(`请等待${node.poseReplicateMode === 'depth' ? '深度图' : '骨架图'}提取完成，并确认目标图已连接`); return; }
+            if(node.poseReplicateMode === 'depth' && !personDepthStatus?.ready){ options.toast?.('高精度人物深度组件尚未就绪'); return; }
             if(!options.generatePoseReplicate){ options.toast?.('当前画布尚未配置一键复刻生成能力'); return; }
-            const prompt = String(node.poseReplicatePrompt || DEFAULT_POSE_REPLICATE_PROMPT).trim() || DEFAULT_POSE_REPLICATE_PROMPT;
+            const prompt = String(node.poseReplicatePrompt || '').trim();
             node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + 1;
             notify(options, node, true);
-            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, skeleton, target:currentTarget}, prompt))
+            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, control, target:currentTarget, modelSubject:currentModel, scene:currentScene, mode:node.poseReplicateMode}, prompt))
                 .catch(error => options.toast?.(error?.message || '一键复刻任务创建失败'))
                 .finally(() => {
                     node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) - 1;
@@ -1044,11 +1287,16 @@
         });
 
         if(action?.url){
-            const poseOptions = poseReplicatePoseOptions(options);
-            const currentSignature = sourceSignature(action);
-            if(node.poseStatus !== 'failed' || node.poseFailedSignature !== currentSignature) runPose(node, poseOptions, false).catch(() => {});
-        } else if(node.poseSkeletonUrl || node.poseStatus !== 'idle'){
-            clearPoseReplicateSkeleton(node);
+            if(node.poseReplicateMode === 'depth'){
+                const depthSignature = `depth|${sourceSignature(action)}`;
+                if(personDepthStatus?.ready && (node.poseDepthStatus !== 'failed' || node.poseDepthFailedSignature !== depthSignature)) runPersonDepth(node, options, false).catch(() => {});
+            } else {
+                const poseOptions = poseReplicatePoseOptions(options);
+                const currentSignature = sourceSignature(action);
+                if(node.poseStatus !== 'failed' || node.poseFailedSignature !== currentSignature) runPose(node, poseOptions, false).catch(() => {});
+            }
+        } else if(node.poseSkeletonUrl || node.poseDepthUrl || node.poseStatus !== 'idle' || node.poseDepthStatus !== 'idle'){
+            clearPoseReplicateControls(node);
             notify(options, node, true);
         }
     }

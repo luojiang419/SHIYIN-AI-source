@@ -4353,8 +4353,11 @@ function addDirector3dNode(point){
 function addPoseReplicateNode(point){
     const p = point || defaultPoint(120, 40);
     return addNode({
-        id:uid('replicate'), type:'poseReplicate', x:p.x, y:p.y, w:560, h:520,
-        poseReplicateStatus:'idle', poseStatus:'idle', poseReplicateRuns:[]
+        id:uid('replicate'), type:'poseReplicate', x:p.x, y:p.y, w:720, h:680,
+        poseReplicateSchemaVersion:2, poseReplicateMode:'depth',
+        poseReplicateProvider:'shiying', poseReplicateModel:'gemini-3-pro-image-preview',
+        poseReplicateRatio:'16:9', poseReplicateResolution:'2k', poseReplicatePrompt:'',
+        poseReplicateStatus:'idle', poseStatus:'idle', poseDepthStatus:'idle', poseReplicateRuns:[]
     });
 }
 function addAngleNode(point){
@@ -9291,27 +9294,28 @@ function classicPoseReplicateOutputPosition(sourceNode){
     };
 }
 async function generateClassicPoseReplicate(node, inputs, prompt){
-    const providerId = imageApiProviders()[0]?.id || '';
-    const model = allImageModels(providerId)[0] || '';
-    if(!providerId || !model) throw new Error('请先在 API 设置中配置图片生成模型');
-    const refs = [inputs.skeleton, inputs.action, inputs.target].filter(item => item?.url).map((item, index) => ({
-        ...item,
-        name:item.name || ['pose-skeleton.png','action-reference.png','target-image.png'][index],
-        kind:'image'
-    }));
-    if(refs.length !== 3) throw new Error('动作骨架、动作参考或目标图缺失');
-    const ratio = node.poseReplicateRatio || '1:1';
+    const providerId = String(node.poseReplicateProvider || '');
+    const model = String(node.poseReplicateModel || '');
+    const provider = imageApiProviders().find(item => item.id === providerId);
+    if(!provider || !allImageModels(providerId).includes(model)) throw new Error('所选图片生成平台或模型尚未配置');
+    const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
+    if(!inputs.action?.url || !inputs.control?.url || !inputs.target?.url) throw new Error('动作参考、内部控制图或目标图缺失');
+    const ratio = node.poseReplicateRatio || '16:9';
     const resolution = node.poseReplicateResolution || '2k';
     const requestSize = apiImageSize('custom', resolution, ratio, '');
     const payload = {
-        prompt,
-        provider_id:resolveImageProviderId(providerId),
-        model:resolveImageModel(model),
-        size:requestSize,
-        quality:'high',
-        reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX),
-        auto_optimize_prompt:true,
-        prompt_context:{node_type:'pose-replicate', reference_count:refs.length}
+        mode:inputs.mode || node.poseReplicateMode || 'skeleton',
+        inputs:{
+            pose_reference:inputs.action,
+            control_map:inputs.control,
+            target_image:inputs.target,
+            model_subject:inputs.modelSubject || null,
+            scene:inputs.scene || null
+        },
+        user_instruction:prompt || '',
+        generation:{provider_id:providerId, model, resolution, aspect_ratio:ratio, quality:'high', count:1},
+        prompt_policy:{template_id:'pose-replicate.v2.1', locale:'zh-CN'},
+        control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
     };
     const position = classicPoseReplicateOutputPosition(node);
     const pendingId = uid('p');
@@ -9322,7 +9326,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         id:uid('out'), type:'output', x:position.x, y:position.y, images:[],
         poseReplicateSourceId:node.id,
         _pending:[makePendingForRun(pendingId, run, node, {refs, requestSize}, {
-            canvasTaskType:'online-image', providerId:payload.provider_id, model:payload.model
+            canvasTaskType:'online-image', providerId, model
         })]
     };
     pushUndo();
@@ -9332,7 +9336,11 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
     selected.clear(); selected.add(output.id);
     render(); scheduleSave();
     try {
-        const task = await createCanvasImageTask(payload);
+        const response = await cascadeFetch('/api/canvas/pose-replicate-tasks', {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+        });
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '一键复刻任务创建失败'));
+        const task = await response.json();
         const pending = pendingById(output, pendingId);
         if(!pending) throw new Error('复刻输出节点已被删除');
         pending.canvasTaskId = task.task_id;
@@ -10067,6 +10075,7 @@ function bindClassicSpecialNode(el, node){
         generateImageEdit:generateClassicSpecialEdit,
         createEditPendingOutputNode:createClassicSpecialPendingOutputNode,
         generatePoseReplicate:generateClassicPoseReplicate,
+        imageModels:providerId => allImageModels(providerId),
         createOutputNode:createClassicPoseOutputNode,
         createEditOutputNode:createClassicSpecialOutputNode,
         toast:message => setStatus(String(message || '').slice(0, 120)),
@@ -11190,7 +11199,7 @@ function renderNode(node){
     if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
     if(node.type === 'director3d') body.innerHTML = window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="muted-note">3D导演台加载失败</div>';
-    if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="muted-note">一键复刻节点加载失败</div>';
+    if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageApiProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:allImageModels(provider.id)}))}) || '<div class="muted-note">一键复刻节点加载失败</div>';
     if(node.type === 'angle'){
         const prefix = node.type;
         const connectedSource = classicSpecialInputImage(node);
@@ -11258,7 +11267,7 @@ function renderNode(node){
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
-        el.insertAdjacentHTML('beforeend', `<div class="port in pose-role-port" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="port in pose-role-port" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>`);
+        el.insertAdjacentHTML('beforeend', [['pose-reference','动作参考'],['target-image','目标图'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};--pose-port-top:${20 + index * 20}%" title="连接${label}"></div>`).join(''));
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -11553,7 +11562,7 @@ function defaultNodeSize(type){
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
-    if(type === 'poseReplicate') return {w:560, h:520};
+    if(type === 'poseReplicate') return {w:720, h:680};
     if(type === 'angle') return {w:460, h:660};
     if(type === 'storyboardMerge') return {w:460, h:0};
     return {w:260, h:0};
@@ -22270,7 +22279,7 @@ function canConnect(fromId, toId, inputRole=''){
     if(from.type === 'ecom-video') return to.type === 'output';
     const specialTypes = ['panorama','dwpose','angle'];
     if(to.type === 'poseReplicate'){
-        if(!['pose-reference','target-image'].includes(inputRole)) return false;
+        if(!['pose-reference','target-image','model-subject','scene'].includes(inputRole)) return false;
         return ['image','group','output','panorama','dwpose','angle'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';

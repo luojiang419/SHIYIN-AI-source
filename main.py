@@ -619,6 +619,7 @@ async def shutdown_startup_maintenance():
             await recovery_task
         except asyncio.CancelledError:
             pass
+    await asyncio.to_thread(PERSON_DEPTH_WORKER.close)
     task = STARTUP_MAINTENANCE_TASK
     STARTUP_MAINTENANCE_TASK = None
     if task and not task.done():
@@ -20147,6 +20148,9 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         auto_optimize_prompt=False,
         prompt_context=prompt_context,
     )
+    selection = resolve_image_generation_selection(image_payload.provider_id, image_payload.model)
+    if selection["provider_id"] != image_payload.provider_id or selection["model"] != image_payload.model:
+        raise HTTPException(status_code=409, detail="一键复刻所选图片生成平台或模型当前不可用")
     task_response = await create_canvas_image_task(image_payload)
     task_id = str(task_response.get("task_id") or "")
     with CANVAS_TASK_LOCK:

@@ -2229,8 +2229,11 @@ function createPoseReplicateNode(point){
     pushUndo();
     const node = {
         id:uid('replicate'), type:'smart-image', specialType:'pose-replicate',
-        x:(point?.x || 0) - 280, y:(point?.y || 0) - 260, w:560, h:520,
-        title:'一键复刻', images:[], poseReplicateStatus:'idle', poseStatus:'idle',
+        x:(point?.x || 0) - 360, y:(point?.y || 0) - 340, w:720, h:680,
+        title:'一键复刻', images:[], poseReplicateSchemaVersion:2, poseReplicateMode:'depth',
+        poseReplicateProvider:'shiying', poseReplicateModel:'gemini-3-pro-image-preview',
+        poseReplicateRatio:'16:9', poseReplicateResolution:'2k', poseReplicatePrompt:'',
+        poseReplicateStatus:'idle', poseStatus:'idle', poseDepthStatus:'idle',
         poseReplicateRuns:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
     return commitSmartNodeCreate(node);
@@ -3022,7 +3025,7 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
     if(node?.specialType === 'director3d') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(380, Math.round(Number(node.h) || 420)), thumb:96, single:true};
-    if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(480, Math.round(Number(node.w) || 560)), height:Math.max(420, Math.round(Number(node.h) || 520)), thumb:96, single:true};
+    if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(640, Math.round(Number(node.w) || 720)), height:Math.max(600, Math.round(Number(node.h) || 680)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
     if(node?.specialType === 'batch-generator') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 440)), height:Math.max(470, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'multi-view') {
@@ -9721,7 +9724,7 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
     if(node.specialType === 'director3d') return window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="smart-group-empty">3D导演台加载失败</div>';
-    if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
+    if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:providerImageModels(provider.id)}))}) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
     if(node.specialType === 'angle'){
         const source = smartSpecialInputImage(node);
         if(source?.url){
@@ -10125,7 +10128,7 @@ function smartNodeHtml(node){
         ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
         <div class="node-hint">${hint}</div>
         ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? '<div class="node-port port-in" data-port="in" data-input-role="pose-reference" data-role-label="动作参考" title="连接动作参考图"></div><div class="node-port port-in" data-port="in" data-input-role="target-image" data-role-label="目标图" title="连接目标图"></div>' : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','动作参考'],['target-image','目标图'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};--pose-port-top:${20 + index * 20}%" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
         <div class="node-port port-out" data-port="out" title="output"></div>
     </div>`;
 }
@@ -12009,21 +12012,21 @@ async function generateSmartMultiView(node){
 }
 async function generateSmartPoseReplicate(node, inputs, prompt){
     const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
-    const ratio = node.poseReplicateRatio || '1:1';
+    const providerId = String(node.poseReplicateProvider || '');
+    const model = String(node.poseReplicateModel || '');
+    const provider = imageProviders().find(item => item.id === providerId);
+    if(!provider || !providerImageModels(providerId).includes(model)) throw new Error('所选图片生成平台或模型尚未配置');
+    const ratio = node.poseReplicateRatio || '16:9';
     const [ratioWidth, ratioHeight] = ratio.split(':').map(value => Math.max(1, Number(value) || 1));
     const runSettings = {
-        ...base,
+        ...base, provider_id:providerId, model,
         engine:'api', apiKind:'image', ratio:'custom', resolution:node.poseReplicateResolution || '2k',
         customRatio:ratio, customRatioWidth:ratioWidth, customRatioHeight:ratioHeight,
         customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1
     };
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
-    const refs = [inputs.skeleton, inputs.action, inputs.target].filter(item => item?.url).map((item, index) => ({
-        ...item,
-        name:item.name || ['pose-skeleton.png','action-reference.png','target-image.png'][index],
-        kind:'image'
-    }));
-    if(refs.length !== 3) throw new Error('动作骨架、动作参考或目标图缺失');
+    const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
+    if(!inputs.action?.url || !inputs.control?.url || !inputs.target?.url) throw new Error('动作参考、内部控制图或目标图缺失');
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
     meta.settings = settingsForStorage(runSettings);
     const runLog = {
@@ -12038,11 +12041,22 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
     output.runSettings = settingsForStorage(runSettings);
     render(); scheduleSave();
     try {
-        const submitted = await runApiGeneration(prompt, refs, runSettings);
-        const taskIds = Array.isArray(submitted?.taskIds) ? submitted.taskIds : [];
+        const payload = {
+            mode:inputs.mode || node.poseReplicateMode || 'skeleton',
+            inputs:{pose_reference:inputs.action, control_map:inputs.control, target_image:inputs.target, model_subject:inputs.modelSubject || null, scene:inputs.scene || null},
+            user_instruction:prompt || '',
+            generation:{provider_id:providerId, model, resolution:node.poseReplicateResolution || '2k', aspect_ratio:ratio, quality:runSettings.quality || 'high', count:1},
+            prompt_policy:{template_id:'pose-replicate.v2.1', locale:'zh-CN'},
+            control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
+        };
+        const submitted = await fetch('/api/canvas/pose-replicate-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async response => {
+            if(!response.ok) throw new Error(await responseErrorMessage(response, '一键复刻任务创建失败'));
+            return response.json();
+        });
+        const taskIds = [submitted?.task_id].filter(Boolean);
         if(!taskIds.length) throw new Error('一键复刻任务创建失败');
         initializeSmartGenerationSlots(output, taskIds.map(taskId => ({
-            taskId, kind:'image', providerId:submitted.providerId, model:submitted.model
+            taskId, kind:'image', providerId:submitted.provider_id || providerId, model:submitted.model || model
         })));
         output.pending = taskIds.length;
         output.running = false;
@@ -12313,6 +12327,7 @@ function bindSmartSpecialNode(el, node){
         generateImageEdit:generateSmartSpecialEdit,
         createEditPendingOutputNode:createSmartSpecialPendingOutputNode,
         generatePoseReplicate:generateSmartPoseReplicate,
+        imageModels:providerId => providerImageModels(providerId),
         createOutputNode:createSmartPoseOutputNode,
         createEditOutputNode:createSmartSpecialOutputNode,
         toast:message => toast(String(message || '').slice(0, 120)),
@@ -12701,7 +12716,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             e.stopPropagation();
             if(nodeForControls?.specialType){
                 if(nodeForControls.specialType === 'pose-replicate'){
-                    toast('一键复刻仅接受端口连线，请连接动作参考和目标图');
+                    toast('一键复刻仅接受端口连线，请连接动作参考、目标图、模特主体或场景');
                     return;
                 }
                 const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));
@@ -16610,7 +16625,7 @@ function connectInputNode(fromId, toId, inputRole=''){
         } else if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.specialType === 'pose-replicate'){
-        if(!['pose-reference','target-image'].includes(inputRole)) return false;
+        if(!['pose-reference','target-image','model-subject','scene'].includes(inputRole)) return false;
         if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.specialType === 'multi-view'){

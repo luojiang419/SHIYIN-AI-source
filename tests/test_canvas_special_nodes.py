@@ -25,7 +25,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("/static/js/canvas-special-nodes.js", page)
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
-            self.assertIn("pose-replicate.2", page)
+            self.assertIn("pose-replicate.3", page)
             self.assertNotIn("灯光重塑", page)
         self.assertIn("location.replace(target)", self.smart_html)
 
@@ -138,18 +138,21 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             for marker in markers:
                 self.assertIn(marker, source)
 
-    def test_pose_replicate_node_is_available_on_both_canvases_with_two_role_ports(self):
+    def test_pose_replicate_node_is_available_on_both_canvases_with_four_role_ports(self):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
-            self.assertIn("/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.30.static-angle-reference.1", page)
+            self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.3", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.04.pose-replicate-depth.1", page)
+            self.assertIn("feature=pose-replicate-v2.1", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
             "type:'poseReplicate'",
-            "data-input-role=\"pose-reference\"",
-            "data-input-role=\"target-image\"",
-            "poseReplicateBodyHtml(node)",
+            "['pose-reference','动作参考']",
+            "['target-image','目标图']",
+            "['model-subject','模特主体']",
+            "['scene','场景']",
+            "poseReplicateBodyHtml(node, {providers:",
         ):
             self.assertIn(marker, self.classic)
         self.assertIn("if(from.type === 'poseReplicate') return to.type === 'output'", self.classic)
@@ -158,9 +161,11 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for marker in (
             "function createPoseReplicateNode(point)",
             "specialType:'pose-replicate'",
-            "data-input-role=\"pose-reference\"",
-            "data-input-role=\"target-image\"",
-            "poseReplicateBodyHtml(node)",
+            "['pose-reference','动作参考']",
+            "['target-image','目标图']",
+            "['model-subject','模特主体']",
+            "['scene','场景']",
+            "poseReplicateBodyHtml(node, {providers:",
         ):
             self.assertIn(marker, self.smart)
 
@@ -185,8 +190,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn(marker, self.smart)
 
         for marker in (
-            "data-input-role=\"pose-reference\"",
-            "data-input-role=\"target-image\"",
+            ".port.in[data-input-role]",
+            ".node-port.port-in[data-input-role]",
             ".poseReplicate-node",
             ".pose-replicate-node",
             ".smart-pose-replicate-node",
@@ -432,7 +437,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
 
     def test_pose_replicate_uses_connected_inputs_only_and_has_no_upload_surface(self):
         body = re.search(
-            r"function poseReplicateBodyHtml\(node\).*?\n\s*\}",
+            r"function poseReplicateBodyHtml\(node, options=\{\}\).*?(?=\n\s*const RELIGHT_DIRECTIONS)",
             self.shared,
             re.S,
         )
@@ -440,7 +445,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         body_source = body.group(0)
         self.assertIn("动作参考", body_source)
         self.assertIn("目标图", body_source)
-        self.assertIn("姿势骨架", self.shared)
+        self.assertIn("模特主体", body_source)
+        self.assertIn("场景", body_source)
+        self.assertIn("内部控制图", body_source)
         self.assertIn("poseReplicatePrompt", body_source)
         self.assertNotIn('type="file"', body_source)
         self.assertNotIn("upload", body_source.lower())
@@ -454,12 +461,12 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(classic_run)
         classic_source = classic_run.group(0)
-        self.assertIn("const refs = [inputs.skeleton, inputs.action, inputs.target]", classic_source)
+        self.assertIn("const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene]", classic_source)
         self.assertIn("type:'output'", classic_source)
         self.assertIn("canvasTaskType:'online-image'", classic_source)
         self.assertIn("nodes.push(output)", classic_source)
-        self.assertIn("createCanvasImageTask(payload)", classic_source)
-        self.assertLess(classic_source.index("nodes.push(output)"), classic_source.index("createCanvasImageTask(payload)"))
+        self.assertIn("'/api/canvas/pose-replicate-tasks'", classic_source)
+        self.assertLess(classic_source.index("nodes.push(output)"), classic_source.index("'/api/canvas/pose-replicate-tasks'"))
         self.assertIn("pollCanvasImageTask(task.task_id)", classic_source)
 
         smart_run = re.search(
@@ -469,10 +476,10 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(smart_run)
         smart_source = smart_run.group(0)
-        self.assertIn("const refs = [inputs.skeleton, inputs.action, inputs.target]", smart_source)
+        self.assertIn("const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene]", smart_source)
         self.assertIn("createPendingOutputFromSource(node, 1", smart_source)
-        self.assertIn("runApiGeneration(prompt, refs, runSettings)", smart_source)
-        self.assertLess(smart_source.index("createPendingOutputFromSource(node, 1"), smart_source.index("runApiGeneration(prompt, refs, runSettings)"))
+        self.assertIn("'/api/canvas/pose-replicate-tasks'", smart_source)
+        self.assertLess(smart_source.index("createPendingOutputFromSource(node, 1"), smart_source.index("'/api/canvas/pose-replicate-tasks'"))
         self.assertIn("initializeSmartGenerationSlots", smart_source)
         self.assertIn("resumeSmartPendingNode(output", smart_source)
 
@@ -495,6 +502,53 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertNotIn("poseReplicateActiveRuns", run_button.group("attrs"))
         self.assertIn("delete copy.poseReplicateActiveRuns", self.classic)
         self.assertIn("delete node.poseReplicateActiveRuns", self.smart)
+
+    def test_pose_replicate_depth_mode_and_component_progress_are_shared(self):
+        for marker in (
+            "PERSON_DEPTH_ACTIVE_STATES",
+            "'/api/person-depth/component/status'",
+            "'/api/person-depth/component/install'",
+            "'/api/person-depth/estimate'",
+            "poseDepthSourceSignature",
+            "poseDepthUrl",
+            "data-person-depth-state",
+            "role=\"progressbar\"",
+            "downloaded_bytes",
+            "source_label",
+            "openPersonDepthDialog(options, false)",
+            "data-person-depth-dialog-confirm",
+            "SHA-256、原子安装和小图 smoke 验证",
+        ):
+            self.assertIn(marker, self.shared)
+
+    def test_pose_replicate_new_defaults_and_legacy_mode_are_explicit(self):
+        for source in (self.classic, self.smart):
+            for marker in (
+                "poseReplicateSchemaVersion:2",
+                "poseReplicateMode:'depth'",
+                "poseReplicateProvider:'shiying'",
+                "poseReplicateModel:'gemini-3-pro-image-preview'",
+                "poseReplicateRatio:'16:9'",
+                "poseReplicateResolution:'2k'",
+            ):
+                self.assertIn(marker, source)
+        self.assertIn("if(!modern)", self.shared)
+        self.assertIn("node.poseReplicateMode = 'skeleton'", self.shared)
+        self.assertIn("if(field === 'poseReplicateMode') node.poseReplicateSchemaVersion = 2", self.shared)
+
+    def test_pose_replicate_uses_server_compiler_without_generic_second_optimization(self):
+        for source, function_name, end_name in (
+            (self.classic, "generateClassicPoseReplicate", "createClassicPoseOutputNode"),
+            (self.smart, "generateSmartPoseReplicate", "createSmartPoseOutputNode"),
+        ):
+            body = re.search(
+                rf"async function {function_name}\(.*?(?=\nfunction {end_name})",
+                source,
+                re.S,
+            ).group(0)
+            self.assertIn("'/api/canvas/pose-replicate-tasks'", body)
+            self.assertIn("template_id:'pose-replicate.v2.1'", body)
+            self.assertNotIn("auto_optimize_prompt:true", body)
 
 
 if __name__ == "__main__":

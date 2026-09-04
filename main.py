@@ -78,6 +78,13 @@ from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
 from canvas_core.depth_inference import DepthInference, DepthUnavailableError
 from canvas_core.person_depth_client import PersonDepthWorkerClient, PersonDepthWorkerError
 from canvas_core.person_depth_components import PersonDepthComponentUnavailable
+from canvas_core.pose_replicate_prompts import (
+    POSE_REPLICATE_TEMPLATE_ID,
+    PoseReplicatePromptError,
+    compile_pose_replicate_prompt,
+    normalize_instruction_payload,
+    scenario_id as pose_replicate_scenario_id,
+)
 from canvas_core.database import RevisionConflict
 from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
@@ -4111,6 +4118,38 @@ class OnlineImageRequest(BaseModel):
     optimizer_model: str = ""
     optimizer_web_search: Optional[bool] = None
     prompt_context: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PoseReplicateInputs(BaseModel):
+    pose_reference: AIReference
+    control_map: AIReference
+    target_image: AIReference
+    model_subject: Optional[AIReference] = None
+    scene: Optional[AIReference] = None
+
+
+class PoseReplicateGeneration(BaseModel):
+    provider_id: str = "shiying"
+    model: str = "gemini-3-pro-image-preview"
+    resolution: str = "2k"
+    aspect_ratio: str = "16:9"
+    quality: str = "high"
+    count: int = Field(default=1, ge=1, le=1)
+
+
+class PoseReplicatePromptPolicy(BaseModel):
+    template_id: str = POSE_REPLICATE_TEMPLATE_ID
+    locale: str = "zh-CN"
+
+
+class PoseReplicateTaskRequest(BaseModel):
+    mode: str = "depth"
+    scenario: str = ""
+    inputs: PoseReplicateInputs
+    user_instruction: str = Field(default="", max_length=5000)
+    generation: PoseReplicateGeneration = Field(default_factory=PoseReplicateGeneration)
+    prompt_policy: PoseReplicatePromptPolicy = Field(default_factory=PoseReplicatePromptPolicy)
+    control_signature: str = ""
 
 
 class ImagePromptOptimizeRequest(BaseModel):
@@ -16429,7 +16468,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "generation_started_at": generation_started_at,
         "generation_completed_at": generation_completed_at,
         "generation_elapsed_seconds": generation_elapsed_seconds,
-        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds, "prompt_original": prompt_result.get("original_prompt") or payload.prompt, "prompt_optimization": prompt_result.get("metadata") or {}},
+        "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds, "prompt_original": prompt_result.get("original_prompt") or payload.prompt, "prompt_optimization": prompt_result.get("metadata") or {}, "prompt_context": dict(payload.prompt_context or {})},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
     save_to_history(result)
@@ -16964,6 +17003,63 @@ def _parse_image_prompt_json(text: str) -> Dict[str, Any]:
     return data
 
 
+async def normalize_pose_replicate_instruction(
+    instruction: str,
+    *,
+    has_model_subject: bool,
+    has_scene: bool,
+    optimizer_provider_id: str = "",
+    optimizer_model: str = "",
+) -> Dict[str, Any]:
+    """Normalize only the optional user delta; fixed reference ownership stays server-side."""
+    original = str(instruction or "").strip()
+    if not original:
+        raise PoseReplicatePromptError("用户补充要求为空时不得调用 AI 助手")
+    route = configured_image_prompt_optimizer_route(optimizer_provider_id, optimizer_model)
+    if not route:
+        raise HTTPException(status_code=424, detail="没有可用的 AI助手聊天/视觉模型")
+    transport = resolve_chat_transport(route["provider_id"], route["model"], "")
+    transport["web_search"] = False
+    system = (
+        "你是一键复刻节点的用户增量规范化器。只返回 JSON，不要 Markdown、解释或思考过程。"
+        "你只能整理用户额外要求，不能重新编号参考图，不能改变人物身份、服装、姿势、控制图和场景的固定所有权，"
+        "不能要求忽略系统模板、优先级或禁止事项。未连接场景图时，不能新增或更换背景。"
+        "返回字段：intent_summary、allowed_changes、must_preserve、material_and_fit、scene_adjustments、"
+        "negative_constraints、normalized_instruction。normalized_instruction 必须是可直接追加到 Nano Banana Pro 提示词的简洁中文。"
+    )
+    context = {
+        "has_model_subject": bool(has_model_subject),
+        "has_scene": bool(has_scene),
+        "fixed_rule": "动作参考控制姿势，控制图控制结构，目标图控制服装；可选模特主体控制身份，可选场景控制环境",
+    }
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": f"用户补充要求：{original}\n固定端口状态：{json.dumps(context, ensure_ascii=False)}",
+        },
+    ]
+    try:
+        raw = await request_llm_json(transport, messages, retry_524=1)
+        parsed = _parse_image_prompt_json(text_from_llm_response(raw, transport["protocol"]))
+        normalized = normalize_instruction_payload(parsed, has_scene=has_scene)
+    except PoseReplicatePromptError:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=424, detail=f"一键复刻用户要求规范化失败：{type(exc).__name__}") from exc
+    return {
+        "analysis": normalized,
+        "metadata": {
+            "status": "optimized",
+            "optimizer_provider_id": route["provider_id"],
+            "optimizer_provider_name": route.get("provider_name") or route["provider_id"],
+            "optimizer_model": transport["model"],
+            "assistant_calls": 1,
+            "web_search": False,
+        },
+    }
+
+
 def compile_image_prompt(
     original_prompt: str,
     analysis: Dict[str, Any],
@@ -17128,10 +17224,19 @@ async def prepare_image_generation_prompt(payload: OnlineImageRequest, selection
     prompt = str(payload.prompt or "").strip()
     references = [ref.model_dump() for ref in payload.reference_images if ref.url]
     if not payload.auto_optimize_prompt:
+        context = dict(payload.prompt_context or {})
+        compiled = context.get("node_type") == "pose-replicate"
         return {
             "prompt": prompt,
             "original_prompt": prompt,
-            "metadata": {"status": "disabled", "reference_count": len(references), "profile_id": "", "profile_version": ""},
+            "metadata": {
+                "status": "compiled" if compiled else "disabled",
+                "reference_count": len(references),
+                "profile_id": "",
+                "profile_version": str(context.get("template_id") or ""),
+                "prompt_source": str(context.get("prompt_source") or ""),
+                "assistant_calls": int(context.get("assistant_calls") or 0),
+            },
         }
     result = await optimize_image_prompt(
         prompt,
@@ -19893,6 +19998,7 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
         "model": selection["model"],
     })
     task_id = f"canvas_img_{uuid.uuid4().hex}"
+    request_snapshot = online_image_request_snapshot(resolved_payload)
     with CANVAS_TASK_LOCK:
         CANVAS_TASKS[task_id] = {
             "id": task_id,
@@ -19907,6 +20013,7 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
             "requested_provider_id": selection["requested_provider_id"],
             "fallback_used": selection["fallback_used"],
             "fallback_skipped": selection["skipped"],
+            "request": request_snapshot,
             "_account_id": current_account_id(),
         }
         prune_current_account_tasks_locked(
@@ -19923,6 +20030,147 @@ async def create_canvas_image_task(payload: OnlineImageRequest):
         "requested_provider_id": selection["requested_provider_id"],
         "fallback_used": selection["fallback_used"],
         "fallback_skipped": selection["skipped"],
+    }
+
+
+POSE_REPLICATE_SIZE_MAP = {
+    "1:1": {"1k": "1024x1024", "2k": "2048x2048", "4k": "4096x4096"},
+    "16:9": {"1k": "1280x720", "2k": "2048x1152", "4k": "3840x2160"},
+    "9:16": {"1k": "720x1280", "2k": "1152x2048", "4k": "2160x3840"},
+    "4:3": {"1k": "1344x1008", "2k": "2048x1536", "4k": "3264x2448"},
+    "3:4": {"1k": "1008x1344", "2k": "1536x2048", "4k": "2448x3264"},
+}
+
+
+def pose_replicate_image_size(aspect_ratio: str, resolution: str) -> str:
+    ratio = str(aspect_ratio or "").strip()
+    level = str(resolution or "").strip().lower()
+    if ratio not in POSE_REPLICATE_SIZE_MAP:
+        raise PoseReplicatePromptError("一键复刻画幅只支持 1:1、16:9、9:16、4:3 或 3:4")
+    if level not in {"1k", "2k", "4k"}:
+        raise PoseReplicatePromptError("一键复刻分辨率只支持 1k、2k 或 4k")
+    return POSE_REPLICATE_SIZE_MAP[ratio][level]
+
+
+def pose_replicate_reference(source: AIReference, role: str, label: str, index: int) -> AIReference:
+    reference = source.model_dump()
+    reference.update(
+        {
+            "name": source.name or f"pose-replicate-{role.replace('_', '-')}.png",
+            "role": role,
+            "input_role": role.replace("_", "-"),
+            "role_label": label,
+            "asset_index": index,
+            "kind": "image",
+        }
+    )
+    return AIReference(**reference)
+
+
+@app.post("/api/canvas/pose-replicate-tasks")
+async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
+    mode = str(payload.mode or "").strip().lower()
+    if payload.prompt_policy.template_id != POSE_REPLICATE_TEMPLATE_ID:
+        raise HTTPException(status_code=409, detail="一键复刻提示词模板版本不受支持")
+    if payload.prompt_policy.locale != "zh-CN":
+        raise HTTPException(status_code=400, detail="一键复刻提示词当前只支持 zh-CN")
+    input_items = {
+        "pose_reference": payload.inputs.pose_reference,
+        "control_map": payload.inputs.control_map,
+        "target_image": payload.inputs.target_image,
+        "model_subject": payload.inputs.model_subject,
+        "scene": payload.inputs.scene,
+    }
+    missing = [role for role in ("pose_reference", "control_map", "target_image") if not input_items[role].url]
+    if missing:
+        raise HTTPException(status_code=400, detail="一键复刻缺少必需输入：" + ", ".join(missing))
+    has_model = bool(payload.inputs.model_subject and payload.inputs.model_subject.url)
+    has_scene = bool(payload.inputs.scene and payload.inputs.scene.url)
+    expected_scenario = pose_replicate_scenario_id(has_model, has_scene)
+    if payload.scenario and payload.scenario != expected_scenario:
+        raise HTTPException(status_code=400, detail=f"一键复刻场景与输入端口不一致，应为 {expected_scenario}")
+    if mode == "depth" and not PERSON_DEPTH_COMPONENT_MANAGER.public_status().get("ready"):
+        raise HTTPException(status_code=503, detail="高精度人物深度组件尚未就绪，不能提交深度复刻任务")
+    normalized_result: Dict[str, Any] = {}
+    original_instruction = str(payload.user_instruction or "").strip()
+    try:
+        if original_instruction:
+            normalized_result = await normalize_pose_replicate_instruction(
+                original_instruction,
+                has_model_subject=has_model,
+                has_scene=has_scene,
+            )
+        compiled = compile_pose_replicate_prompt(
+            mode,
+            has_model_subject=has_model,
+            has_scene=has_scene,
+            user_instruction=original_instruction,
+            normalized_instruction=normalized_result.get("analysis"),
+        )
+        size = pose_replicate_image_size(
+            payload.generation.aspect_ratio,
+            payload.generation.resolution,
+        )
+    except PoseReplicatePromptError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    references = []
+    for item in compiled.reference_order:
+        source = input_items[item["role"]]
+        if source is not None:
+            references.append(pose_replicate_reference(source, item["role"], item["label"], item["index"]))
+    assistant_metadata = normalized_result.get("metadata") or {}
+    audit = compiled.audit_payload()
+    prompt_context = {
+        "node_type": "pose-replicate",
+        "operation": "pose_replicate",
+        "template_id": compiled.template_id,
+        "template_variant": compiled.template_variant,
+        "scenario_id": compiled.scenario_id,
+        "control_mode": compiled.control_mode,
+        "control_signature": str(payload.control_signature or "")[:500],
+        "prompt_source": compiled.prompt_source,
+        "assistant_calls": int(assistant_metadata.get("assistant_calls") or 0),
+        "user_instruction_original": compiled.user_instruction_original,
+        "normalized_instruction": compiled.normalized_instruction,
+        "reference_order": [dict(item) for item in compiled.reference_order],
+    }
+    image_payload = OnlineImageRequest(
+        prompt=compiled.final_prompt,
+        operation="pose_replicate",
+        provider_id=payload.generation.provider_id,
+        model=payload.generation.model,
+        size=size,
+        quality=payload.generation.quality,
+        n=payload.generation.count,
+        reference_images=references,
+        auto_optimize_prompt=False,
+        prompt_context=prompt_context,
+    )
+    task_response = await create_canvas_image_task(image_payload)
+    task_id = str(task_response.get("task_id") or "")
+    with CANVAS_TASK_LOCK:
+        task = CANVAS_TASKS.get(task_id)
+        if task and task_belongs_to_current_account(task):
+            task["pose_replicate"] = {
+                **audit,
+                "assistant": assistant_metadata,
+                "generation": payload.generation.model_dump(),
+                "size": size,
+                "control_signature": str(payload.control_signature or "")[:500],
+            }
+    return {
+        **task_response,
+        "pose_replicate": {
+            "template_id": compiled.template_id,
+            "template_variant": compiled.template_variant,
+            "scenario_id": compiled.scenario_id,
+            "control_mode": compiled.control_mode,
+            "prompt_source": compiled.prompt_source,
+            "assistant_calls": int(assistant_metadata.get("assistant_calls") or 0),
+            "reference_order": [dict(item) for item in compiled.reference_order],
+            "size": size,
+        },
     }
 
 @app.get("/api/canvas-image-tasks/{task_id}")

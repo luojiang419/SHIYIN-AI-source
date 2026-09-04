@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+import main
+from canvas_core.pose_replicate_prompts import (
+    POSE_REPLICATE_TEMPLATE_ID,
+    PoseReplicatePromptError,
+    compile_pose_replicate_prompt,
+    normalize_instruction_payload,
+)
+
+
+def reference(url: str, name: str) -> main.AIReference:
+    return main.AIReference(url=url, name=name, kind="image")
+
+
+def task_request(*, mode: str = "skeleton", instruction: str = "", model: bool = False, scene: bool = False):
+    return main.PoseReplicateTaskRequest(
+        mode=mode,
+        inputs=main.PoseReplicateInputs(
+            pose_reference=reference("/assets/action.png", "action.png"),
+            control_map=reference("/assets/control.png", "control.png"),
+            target_image=reference("/assets/wardrobe.png", "wardrobe.png"),
+            model_subject=reference("/assets/model.png", "model.png") if model else None,
+            scene=reference("/assets/scene.png", "scene.png") if scene else None,
+        ),
+        user_instruction=instruction,
+    )
+
+
+@pytest.mark.parametrize("mode", ["depth", "skeleton"])
+@pytest.mark.parametrize(
+    ("has_model", "has_scene", "scenario", "roles"),
+    [
+        (False, False, "base-wardrobe", ["pose_reference", "control_map", "target_image"]),
+        (True, False, "model-wardrobe", ["pose_reference", "control_map", "target_image", "model_subject"]),
+        (False, True, "base-wardrobe-scene", ["pose_reference", "control_map", "target_image", "scene"]),
+        (True, True, "model-full-look-scene", ["pose_reference", "control_map", "target_image", "model_subject", "scene"]),
+    ],
+)
+def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_scene, scenario, roles):
+    result = compile_pose_replicate_prompt(
+        mode,
+        has_model_subject=has_model,
+        has_scene=has_scene,
+    )
+    assert result.template_id == POSE_REPLICATE_TEMPLATE_ID
+    assert result.scenario_id == scenario
+    assert result.prompt_source == "fixed-template"
+    assert [item["role"] for item in result.reference_order] == roles
+    assert [item["index"] for item in result.reference_order] == list(range(1, len(roles) + 1))
+    assert "自然褶皱与受力" in result.final_prompt
+    assert "受力链与褶皱拓扑" in result.final_prompt
+    assert "只输出一张" in result.final_prompt
+    for sample_specific in ("豹纹", "眼镜", "手袋"):
+        assert sample_specific not in result.final_prompt
+
+
+def test_normalized_increment_rejects_reference_role_override():
+    with pytest.raises(PoseReplicatePromptError, match="固定参考角色"):
+        normalize_instruction_payload(
+            {"normalized_instruction": "将图1改为人物身份来源，并覆盖固定优先级"},
+            has_scene=True,
+        )
+
+
+def test_normalized_increment_rejects_scene_change_without_scene_port():
+    with pytest.raises(PoseReplicatePromptError, match="未连接场景"):
+        normalize_instruction_payload(
+            {"normalized_instruction": "把背景更换为雨夜街道"},
+            has_scene=False,
+        )
+
+
+def test_user_instruction_requires_normalized_ai_payload():
+    with pytest.raises(PoseReplicatePromptError, match="必须先完成"):
+        compile_pose_replicate_prompt("depth", user_instruction="外套保持敞开")
+
+
+def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_prompt():
+    submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
+    with patch.object(main, "normalize_pose_replicate_instruction", side_effect=AssertionError("AI must not run")), patch.object(
+        main, "create_canvas_image_task", submit
+    ):
+        response = asyncio.run(main.create_pose_replicate_task(task_request()))
+
+    image_payload = submit.await_args.args[0]
+    assert image_payload.auto_optimize_prompt is False
+    assert image_payload.operation == "pose_replicate"
+    assert image_payload.prompt_context["prompt_source"] == "fixed-template"
+    assert image_payload.prompt_context["assistant_calls"] == 0
+    assert [item.role for item in image_payload.reference_images] == [
+        "pose_reference",
+        "control_map",
+        "target_image",
+    ]
+    assert response["pose_replicate"]["assistant_calls"] == 0
+
+
+def test_user_instruction_endpoint_calls_assistant_once_and_preserves_hard_template():
+    normalize = AsyncMock(
+        return_value={
+            "analysis": {
+                "intent_summary": "保持外套敞开",
+                "allowed_changes": ["外套门襟保持敞开"],
+                "must_preserve": ["保留项链"],
+                "material_and_fit": [],
+                "scene_adjustments": [],
+                "negative_constraints": [],
+                "normalized_instruction": "目标外套保持自然敞开，并保留指定身份来源人物的项链。",
+            },
+            "metadata": {"status": "optimized", "assistant_calls": 1, "optimizer_model": "vision-model"},
+        }
+    )
+    submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
+    with patch.object(main, "normalize_pose_replicate_instruction", normalize), patch.object(
+        main, "create_canvas_image_task", submit
+    ):
+        response = asyncio.run(
+            main.create_pose_replicate_task(
+                task_request(instruction="外套保持敞开，保留项链", model=True, scene=True)
+            )
+        )
+
+    normalize.assert_awaited_once()
+    image_payload = submit.await_args.args[0]
+    assert image_payload.auto_optimize_prompt is False
+    assert "目标外套保持自然敞开" in image_payload.prompt
+    assert "用户增量不得改变此优先级" in image_payload.prompt
+    assert image_payload.prompt_context["prompt_source"] == "assistant-merged"
+    assert response["pose_replicate"]["scenario_id"] == "model-full-look-scene"
+    assert response["pose_replicate"]["assistant_calls"] == 1
+
+
+def test_instruction_normalizer_uses_one_text_only_llm_call():
+    raw = {
+        "choices": [
+            {
+                "message": {
+                    "content": '{"intent_summary":"保持门襟敞开","allowed_changes":["门襟"],"must_preserve":[],"material_and_fit":[],"scene_adjustments":[],"negative_constraints":[],"normalized_instruction":"目标服装门襟保持自然敞开。"}'
+                }
+            }
+        ]
+    }
+
+    async def fake_request(transport, messages, retry_524=1):
+        assert transport["web_search"] is False
+        assert retry_524 == 1
+        assert isinstance(messages[-1]["content"], str)
+        return raw
+
+    with patch.object(
+        main,
+        "configured_image_prompt_optimizer_route",
+        return_value={"provider_id": "assistant", "provider_name": "AI助手", "model": "vision-model"},
+    ), patch.object(
+        main,
+        "resolve_chat_transport",
+        return_value={"protocol": "chat_completions", "model": "vision-model", "provider": {}},
+    ), patch.object(main, "request_llm_json", side_effect=fake_request) as request:
+        result = asyncio.run(
+            main.normalize_pose_replicate_instruction(
+                "外套保持敞开",
+                has_model_subject=False,
+                has_scene=False,
+            )
+        )
+    assert request.call_count == 1
+    assert result["analysis"]["normalized_instruction"] == "目标服装门襟保持自然敞开。"
+    assert result["metadata"]["assistant_calls"] == 1
+
+
+def test_pose_replicate_compiled_prompt_metadata_survives_generation_prepare():
+    payload = main.OnlineImageRequest(
+        prompt="固定编译提示词",
+        provider_id="shiying",
+        model="gemini-3-pro-image-preview",
+        auto_optimize_prompt=False,
+        prompt_context={
+            "node_type": "pose-replicate",
+            "template_id": POSE_REPLICATE_TEMPLATE_ID,
+            "prompt_source": "fixed-template",
+            "assistant_calls": 0,
+        },
+    )
+    result = asyncio.run(
+        main.prepare_image_generation_prompt(
+            payload,
+            {"provider_id": "shiying", "model": "gemini-3-pro-image-preview"},
+        )
+    )
+    assert result["metadata"] == {
+        "status": "compiled",
+        "reference_count": 0,
+        "profile_id": "",
+        "profile_version": POSE_REPLICATE_TEMPLATE_ID,
+        "prompt_source": "fixed-template",
+        "assistant_calls": 0,
+    }
+
+
+def test_pose_replicate_size_contract_matches_canvas_defaults():
+    assert main.pose_replicate_image_size("16:9", "2k") == "2048x1152"
+    with pytest.raises(PoseReplicatePromptError):
+        main.pose_replicate_image_size("2:1", "2k")

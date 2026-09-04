@@ -1,7 +1,7 @@
 {
   "name": "shiyin-ai-windows-desktop",
   "private": true,
-  "version": "1.0.399",
+  "version": "1.0.400",
   "scripts": {
     "css:build": "node ./node_modules/tailwindcss/lib/cli.js -c tailwind.config.cjs -i ./static/css/tailwind-input.css -o ./static/vendor/css/tailwind.generated.css --minify",
     "desktop:dev": "npm run css:build && tauri dev",

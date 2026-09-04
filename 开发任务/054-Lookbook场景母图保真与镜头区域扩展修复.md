@@ -28,7 +28,7 @@ Lookbook 故事模式已改为“完整场景母图 + 可选镜头区域导航�
 - [x] 强化质量检查与重试场景保真
 - [x] 补充并执行专项测试
 - [x] 更新任务文档
-- [ ] Git 提交并推送
+- [x] Git 提交并推送
 - [ ] 真实付费图片 API 验收
 
 ## 最近验证状态
@@ -37,7 +37,8 @@ Lookbook 故事模式已改为“完整场景母图 + 可选镜头区域导航�
 - 单元测试：`python -m pytest tests/test_lookbook_story.py tests/test_lookbook_premium.py tests/test_ecommerce.py -q`，`202 passed`
 - 编译：本次为后端提示词与参考路由修复，暂未执行桌面安装包构建
 - 运行测试：全量 `python -m pytest -q` 得到 `1134 passed, 15 failed`；15 个失败集中在已有智能画布菜单、特殊节点、快捷键、主题和桌面缓存契约，未命中本次修改
-- 最近 Git commit：`37a8b3e chore: build 1.0.398 installer`
+- 功能 Git commit：`77ce034 fix: preserve lookbook scene references across shots`
+- 远程备份：已推送至 `origin/feat/storyboard-merge-node`
 
 ---
 
@@ -74,7 +75,7 @@ Lookbook 连接场景图片后，所有生成镜头必须以该图片为同一�
 - [x] 阶段 1：根因定位与方案确认
 - [x] 阶段 2：场景参考包和提示词实现
 - [x] 阶段 3：质量门与回归测试
-- [x] 阶段 4：文档与 Git 检查（提交、推送待完成）
+- [x] 阶段 4：文档、Git 提交与远程备份
 
 ## 验收标准
 
@@ -99,6 +100,7 @@ Lookbook 连接场景图片后，所有生成镜头必须以该图片为同一�
 - `canvas_core/lookbook_story.py`：标准化并下发 `scene_region` / `scene_extension`，强化母图与新机位扩展契约。
 - `main.py`：新增场景参考识别、分析优先级、镜头区域裁切、母图 + 派生图打包、场景证据映射、质量门和重试保真逻辑。
 - `tests/test_lookbook_story.py`：覆盖母图保留、参考图上限、区域选择、场景事实分析和质检规则。
+- 对应功能提交：`77ce034`。
 
 ## 已知问题
 
@@ -110,6 +112,7 @@ Lookbook 连接场景图片后，所有生成镜头必须以该图片为同一�
 
 - 2026-09-04：完成输入链路和根因定位，建立修复任务。
 - 2026-09-04：完成场景母图/区域参考、分镜事实、质量门与重试修复；专项 202 项通过，完成全量回归记录。
+- 2026-09-04：功能提交 `77ce034` 已推送到 `origin/feat/storyboard-merge-node`。
 
 ## 接力信息
 

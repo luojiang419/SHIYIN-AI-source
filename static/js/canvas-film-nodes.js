@@ -44,7 +44,7 @@
     function clamp(value,min,max){ return Math.max(min,Math.min(max,Number(value) || min)); }
     function isType(type){ return TYPES.includes(type) || type === LINE_ART_TYPE; }
     function title(type){ return TITLES[type] || ''; }
-    function size(type){ return SIZES[type] || {w:520,h:0}; }
+    function size(type){ return SIZES[type] || null; }
     function isGenerator(type){ return isType(type); }
     function canOutput(type){ return isType(type); }
 

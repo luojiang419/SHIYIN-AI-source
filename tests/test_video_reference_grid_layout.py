@@ -20,20 +20,20 @@ def test_video_reference_list_uses_six_column_wrapping_grid():
 def test_video_node_keeps_six_thumbnails_readable_and_prevents_unbounded_width():
     assert "const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;" in JS
     assert "const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;" in JS
-    assert "const width = Number.isFinite(storedWidth) ? storedWidth : CLASSIC_VIDEO_NODE_MIN_WIDTH;" in JS
+    assert "const width = Number.isFinite(storedWidth) ? storedWidth : limits.minWidth;" in JS
     assert ".video-node { width:440px; min-width:440px; max-width:520px; }" in CSS
-    assert "const minWidth = isAutoHeightVideo ? CLASSIC_VIDEO_NODE_MIN_WIDTH" in JS
-    assert "const maxWidth = isAutoHeightVideo ? CLASSIC_VIDEO_NODE_MAX_WIDTH" in JS
+    assert "const minWidth = limits.minWidth;" in JS
+    assert "const maxWidth = limits.maxWidth;" in JS
     assert "feature=video-reference-grid.2" in HTML
 
 
 def test_video_node_height_is_content_driven_during_render_and_resize():
-    assert "function normalizeClassicVideoNodeLayout(node)" in JS
-    assert "if(node?.type !== 'video') return;" in JS
-    assert "normalizeClassicVideoNodeLayout(node);" in JS
-    assert "if(isAutoHeightVideo) delete resizeNode.node.h;" in JS
+    assert "function normalizeClassicNodeLayout(node)" in JS
+    assert "const autoHeight = isControlNode && !(Number(size.h) > 0);" in JS
+    assert "normalizeClassicNodeLayout(node);" in JS
+    assert "if(isAutoHeightNode) delete resizeNode.node.h;" in JS
     assert "el.classList.remove('sized');" in JS
     assert "el.style.removeProperty('height');" in JS
-    assert ".video-node .resize-handle { cursor:ew-resize; }" in CSS
+    assert ".auto-height-node .resize-handle { cursor:ew-resize; }" in CSS
     assert ".video-node .node-bottom-controls { position:relative; bottom:auto; }" in CSS
     assert "feature=video-auto-height.1" in HTML

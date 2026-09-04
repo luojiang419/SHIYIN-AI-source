@@ -542,6 +542,7 @@ const outputCompareOriginal = document.getElementById('outputCompareOriginal');
 const outputCompareOriginalWrap = document.getElementById('outputCompareOriginalWrap');
 const outputCompareSlider = document.getElementById('outputCompareSlider');
 const outputResolution = document.getElementById('outputResolution');
+const outputCopyImageBtn = document.getElementById('outputCopyImageBtn');
 const outputDownloadBtn = document.getElementById('outputDownloadBtn');
 const outputDownloadAllBtn = document.getElementById('outputDownloadAllBtn');
 const outputLightboxVideo = document.getElementById('outputLightboxVideo');
@@ -10849,25 +10850,55 @@ async function runFilmNode(nodeId, opts={}){
 }
 const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
 const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
-function normalizeClassicVideoNodeLayout(node){
-    if(node?.type !== 'video') return;
+const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
+    image:336,
+    prompt:220,
+    loop:220,
+    group:180,
+    promptGroup:180,
+    output:260,
+    storyboardMerge:260,
+});
+const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
+function classicNodeLayoutLimits(nodeOrType){
+    const type = typeof nodeOrType === 'string' ? nodeOrType : String(nodeOrType?.type || '');
+    const size = defaultNodeSize(type);
+    const isControlNode = !CLASSIC_COMPACT_NODE_TYPES.has(type);
+    const autoHeight = isControlNode && !(Number(size.h) > 0);
+    return {
+        minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0),
+        minHeight:Math.max(96, Number(size.h) || 0, Number(CLASSIC_NODE_MIN_HEIGHTS[type]) || 0, isControlNode ? 320 : 0),
+        maxWidth:type === 'video' ? CLASSIC_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY,
+        autoHeight,
+    };
+}
+function normalizeClassicNodeLayout(node){
+    if(!node?.type) return;
+    const limits = classicNodeLayoutLimits(node);
     const storedWidth = Number(node.w);
-    const width = Number.isFinite(storedWidth) ? storedWidth : CLASSIC_VIDEO_NODE_MIN_WIDTH;
-    node.w = Math.max(CLASSIC_VIDEO_NODE_MIN_WIDTH, Math.min(CLASSIC_VIDEO_NODE_MAX_WIDTH, width));
-    // 视频节点始终由内容决定高度，新增媒体行时参数区和生成按钮会自然下移。
-    delete node.h;
+    const width = Number.isFinite(storedWidth) ? storedWidth : limits.minWidth;
+    node.w = Math.max(limits.minWidth, Math.min(limits.maxWidth, width));
+    if(limits.autoHeight){
+        // 参数型功能节点由内容决定高度，新增媒体行或参数行时底部操作区自然下移。
+        delete node.h;
+        return;
+    }
+    const storedHeight = Number(node.h);
+    if(Number.isFinite(storedHeight) && storedHeight > 0) node.h = Math.max(limits.minHeight, storedHeight);
+    else if(Object.prototype.hasOwnProperty.call(node,'h')) delete node.h;
 }
 function renderNode(node){
     window.CanvasLookbookNode?.normalize?.(node);
     window.CanvasEcommerceNodes?.normalize?.(node);
     window.CanvasFilmNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
-    normalizeClassicVideoNodeLayout(node);
+    normalizeClassicNodeLayout(node);
     if(node.type === 'multiView') normalizeClassicMultiViewNode(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     if(node.type === 'multiView' && (!Number.isFinite(Number(node.h)) || Number(node.h) < 780)) node.h = 780;
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
+    const layoutLimits = classicNodeLayoutLimits(node);
     const autoMultiViewOutput = isMultiViewOutputNode(node);
     const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
@@ -10882,9 +10913,11 @@ function renderNode(node){
         : node.type === 'prompt'
             ? 'prompt-node prompt-text-node'
             : `${node.type}-node`;
-    el.className = `node ${nodeTypeClass} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.className = `node ${nodeTypeClass} ${layoutLimits.autoHeight ? 'auto-height-node' : ''} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
+    el.style.setProperty('--node-min-width', `${layoutLimits.minWidth}px`);
+    el.style.setProperty('--node-min-height', `${layoutLimits.minHeight}px`);
     el.style.width = `${autoMultiViewOutput ? normalizedMultiViewOutputWidth(node) : (node.w || size.w)}px`;
     if(!autoMultiViewOutput && (node.h || size.h)) el.style.height = `${node.h || size.h}px`;
     el.dataset.id = node.id;
@@ -19307,6 +19340,19 @@ function openOutputLightbox(url, out){
         };
     }
     const videoMode = mediaKindForOutputItem(meta && Object.keys(meta).length ? {...meta, url} : url) === 'video';
+    if(outputCopyImageBtn){
+        clearTimeout(outputCopyImageBtn._copyTimer);
+        outputCopyImageBtn.style.display = videoMode ? 'none' : 'flex';
+        outputCopyImageBtn.title = '复制图片';
+        outputCopyImageBtn.classList.remove('copying','copied');
+        outputCopyImageBtn.removeAttribute('aria-busy');
+        outputCopyImageBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i>';
+        outputCopyImageBtn.onclick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            copyCurrentOutputImage();
+        };
+    }
     if(videoLightboxActions){
         videoLightboxActions.hidden = !videoMode;
         if(videoMode) bindVideoLightboxActions();
@@ -19375,12 +19421,79 @@ function closeOutputLightbox(){
         outputDownloadAllBtn.style.display = 'none';
         outputDownloadAllBtn.onclick = null;
     }
+    if(outputCopyImageBtn){
+        clearTimeout(outputCopyImageBtn._copyTimer);
+        outputCopyImageBtn.style.display = 'none';
+        outputCopyImageBtn.onclick = null;
+        outputCopyImageBtn.title = '复制图片';
+        outputCopyImageBtn.classList.remove('copying','copied');
+        outputCopyImageBtn.removeAttribute('aria-busy');
+        outputCopyImageBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i>';
+    }
     resetOutputPreviewZoom();
     currentOutputCompareUrl = '';
     currentOutputMeta = null;
     currentOutputLightboxOutId = '';
     currentOutputLightboxUrl = '';
     setupOutputPromptPanel(null);
+}
+async function outputImageClipboardPng(url, name=''){
+    const response = await fetch(canvasDisplayMediaUrl(url, name));
+    if(!response.ok) throw new Error(`读取图片失败（${response.status}）`);
+    const source = await response.blob();
+    if(!source.type.startsWith('image/')) throw new Error('当前预览不是可复制的图片');
+    if(source.type === 'image/png') return source;
+    const bitmap = await createImageBitmap(source);
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d');
+        if(!context) throw new Error('无法创建图片转换画布');
+        context.drawImage(bitmap, 0, 0);
+        return await new Promise((resolve, reject) => canvas.toBlob(
+            blob => blob ? resolve(blob) : reject(new Error('图片转换 PNG 失败')),
+            'image/png'
+        ));
+    } finally {
+        bitmap.close?.();
+    }
+}
+async function copyCurrentOutputImage(){
+    if(!currentOutputLightboxUrl || outputLightboxVideo.style.display === 'block') return;
+    if(!navigator.clipboard?.write || typeof ClipboardItem === 'undefined'){
+        showErrorModal('当前系统环境不支持复制图片到剪贴板，请使用下载功能。', '复制图片失败');
+        return;
+    }
+    const button = outputCopyImageBtn;
+    const restore = () => {
+        button?.classList.remove('copying','copied');
+        button?.removeAttribute('aria-busy');
+        if(button) button.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i>';
+        refreshIcons(button || document);
+    };
+    if(button){
+        clearTimeout(button._copyTimer);
+        button.classList.remove('copied');
+        button.classList.add('copying');
+        button.setAttribute('aria-busy','true');
+    }
+    try {
+        const png = outputImageClipboardPng(currentOutputLightboxUrl, outputDownloadName(currentOutputLightboxUrl));
+        await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);
+        if(button){
+            button.classList.remove('copying');
+            button.classList.add('copied');
+            button.removeAttribute('aria-busy');
+            button.innerHTML = '<i data-lucide="check" class="w-4 h-4"></i>';
+            button.title = '图片已复制';
+            refreshIcons(button);
+            button._copyTimer = setTimeout(() => { button.title = '复制图片'; restore(); }, 1600);
+        }
+    } catch(error){
+        restore();
+        showErrorModal(error.message || '无法复制图片到系统剪贴板', '复制图片失败');
+    }
 }
 function groupSelectedImages(){
     if(!ensureCanvas()) return;
@@ -21837,20 +21950,20 @@ function startNodeResize(e, node){
 }
 function onNodeResize(e){
     if(!resizeNode) return;
-    const min = defaultNodeSize(resizeNode.node.type);
-    const isAutoHeightVideo = resizeNode.node.type === 'video';
-    const minWidth = isAutoHeightVideo ? CLASSIC_VIDEO_NODE_MIN_WIDTH : Math.min(min.w, 220);
-    const maxWidth = isAutoHeightVideo ? CLASSIC_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY;
+    const limits = classicNodeLayoutLimits(resizeNode.node);
+    const isAutoHeightNode = limits.autoHeight;
+    const minWidth = limits.minWidth;
+    const maxWidth = limits.maxWidth;
     const nextW = Math.max(minWidth, Math.min(maxWidth, resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale));
-    const minHeight = resizeNode.node.type === 'multiView' ? (min.h || 780) : 96;
+    const minHeight = limits.minHeight;
     const nextH = Math.max(minHeight, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
     resizeNode.node.w = Math.round(nextW);
-    if(isAutoHeightVideo) delete resizeNode.node.h;
+    if(isAutoHeightNode) delete resizeNode.node.h;
     else resizeNode.node.h = Math.round(nextH);
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
     if(el){
         el.style.width = `${resizeNode.node.w}px`;
-        if(isAutoHeightVideo){
+        if(isAutoHeightNode){
             el.classList.remove('sized');
             el.style.removeProperty('height');
         } else {

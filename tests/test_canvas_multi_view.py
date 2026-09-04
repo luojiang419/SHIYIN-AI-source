@@ -148,7 +148,8 @@ def test_classic_multi_view_keeps_results_only_in_output_node_and_locks_controls
     assert "5 张资产已在右侧输出节点中生成" in body
     assert ".multiView-node.sized .classic-multi-view-run-row" in MULTI_VIEW_CSS
     assert ".multiView-node.sized .classic-multi-view-input-list" in MULTI_VIEW_CSS
-    assert "resizeNode.node.type === 'multiView' ? (min.h || 780)" in CANVAS_JS
+    assert "const limits = classicNodeLayoutLimits(resizeNode.node);" in CANVAS_JS
+    assert "const minHeight = limits.minHeight;" in CANVAS_JS
     assert "node.specialType === 'multi-view' ? 780" in SMART_JS
 
 

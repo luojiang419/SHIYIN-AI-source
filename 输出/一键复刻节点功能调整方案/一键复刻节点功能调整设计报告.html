@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>一键复刻节点功能调整设计报告</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f4f6f8, #111315);
+      --surface: light-dark(#ffffff, #1a1d20);
+      --surface-2: light-dark(#eef2f5, #23272b);
+      --surface-3: light-dark(#e3e8ec, #2b3035);
+      --text: light-dark(#182027, #eef2f4);
+      --muted: light-dark(#5f6c75, #aeb8be);
+      --line: light-dark(#d5dde2, #353b40);
+      --line-strong: light-dark(#aebbc4, #596168);
+      --blue: light-dark(#1769aa, #6eb7ef);
+      --blue-soft: light-dark(#e5f1fa, #172b3a);
+      --green: light-dark(#19734c, #63c999);
+      --green-soft: light-dark(#e5f5ed, #172d24);
+      --amber: light-dark(#9a5d00, #f0b65d);
+      --amber-soft: light-dark(#fff2d9, #332715);
+      --red: light-dark(#a43f3f, #ee8888);
+      --red-soft: light-dark(#fdeaea, #351d1d);
+      --violet: light-dark(#6946a5, #b89be7);
+      --shadow: 0 12px 32px light-dark(rgba(30, 45, 55, .08), rgba(0, 0, 0, .2));
+      --radius: 8px;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --sans: Inter, "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.72;
+      letter-spacing: 0;
+    }
+    button, select, textarea { font: inherit; letter-spacing: 0; }
+    a { color: inherit; }
+    code, pre { font-family: var(--mono); }
+    .page { min-height: 100vh; }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(14px);
+    }
+    .topbar-inner {
+      max-width: 1480px;
+      margin: 0 auto;
+      min-height: 54px;
+      padding: 0 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 500; }
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      background: var(--text);
+      color: var(--surface);
+      font-size: 12px;
+    }
+    .top-meta { color: var(--muted); font-size: 13px; }
+    .layout {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 34px 28px 72px;
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 36px;
+    }
+    .sidebar { position: sticky; top: 86px; align-self: start; }
+    .sidebar-label { color: var(--muted); font-size: 12px; margin-bottom: 9px; }
+    .sidebar nav { display: grid; gap: 2px; }
+    .sidebar a {
+      padding: 7px 10px;
+      border-left: 2px solid transparent;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .sidebar a:hover, .sidebar a:focus-visible { color: var(--text); border-left-color: var(--blue); }
+    .content { min-width: 0; max-width: 1160px; }
+    .hero {
+      padding: 28px 0 36px;
+      border-bottom: 1px solid var(--line);
+    }
+    .eyebrow { color: var(--blue); font-size: 13px; font-weight: 500; margin-bottom: 10px; }
+    h1, h2, h3 { margin: 0; line-height: 1.3; letter-spacing: 0; font-weight: 500; }
+    h1 { max-width: 860px; font-size: clamp(30px, 5vw, 52px); }
+    h2 { font-size: 25px; }
+    h3 { font-size: 17px; }
+    .hero p { max-width: 820px; margin: 18px 0 0; color: var(--muted); font-size: 17px; }
+    .decision-strip {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .decision-item { padding: 15px 16px; border-right: 1px solid var(--line); min-width: 0; }
+    .decision-item:last-child { border-right: 0; }
+    .decision-item span { display: block; color: var(--muted); font-size: 11px; }
+    .decision-item strong { display: block; margin-top: 3px; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+    section { padding: 38px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 78px; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 22px; }
+    .section-head p { max-width: 620px; margin: 0; color: var(--muted); }
+    .kicker { display: block; color: var(--blue); font-size: 12px; margin-bottom: 7px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+    .panel p { margin: 8px 0 0; color: var(--muted); }
+    .fact-no { color: var(--line-strong); font-family: var(--mono); font-size: 12px; }
+    .issue { display: grid; grid-template-columns: 34px 1fr; gap: 12px; }
+    .issue-mark {
+      width: 30px; height: 30px; display: grid; place-items: center;
+      border-radius: 6px; background: var(--amber-soft); color: var(--amber); font-weight: 500;
+    }
+    .callout {
+      margin-top: 16px;
+      padding: 15px 17px;
+      border-left: 3px solid var(--blue);
+      background: var(--blue-soft);
+      color: var(--text);
+    }
+    .callout.warn { border-left-color: var(--amber); background: var(--amber-soft); }
+    .callout.danger { border-left-color: var(--red); background: var(--red-soft); }
+    .callout strong { font-weight: 500; }
+
+    .node-stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 92px minmax(430px, 640px);
+      align-items: center;
+      gap: 18px;
+      padding: 28px;
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .source-stack { display: grid; gap: 12px; }
+    .source-box {
+      min-height: 64px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .source-thumb { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 4px; background: var(--surface-3); display: grid; place-items: center; color: var(--muted); }
+    .source-box strong, .source-box span { display: block; }
+    .source-box strong { font-size: 13px; font-weight: 500; }
+    .source-box span { color: var(--muted); font-size: 11px; }
+    .connector-lanes { display: grid; gap: 12px; }
+    .connector { height: 64px; position: relative; }
+    .connector::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-strong); }
+    .connector::after { content: "›"; position: absolute; right: -1px; top: 50%; transform: translateY(-53%); color: var(--blue); font-size: 23px; }
+    .replicate-node {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .node-titlebar { height: 42px; padding: 0 15px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .node-titlebar strong { font-weight: 500; }
+    .node-status { color: var(--green); font-size: 11px; }
+    .node-body { padding: 14px; }
+    .input-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+    .input-card { min-width: 0; }
+    .input-card > span { display: block; margin-bottom: 5px; text-align: center; color: var(--muted); font-size: 10px; }
+    .input-visual {
+      aspect-ratio: 3 / 4;
+      display: grid;
+      place-items: center;
+      border: 1px dashed var(--line-strong);
+      border-radius: 5px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 10px;
+      text-align: center;
+      padding: 5px;
+    }
+    .input-visual.depth { color: var(--text); background: var(--surface-3); box-shadow: inset 18px 0 0 color-mix(in srgb, var(--text) 8%, transparent), inset -18px 0 0 color-mix(in srgb, var(--text) 18%, transparent); }
+    .input-visual.optional { opacity: .68; }
+    .prompt-field { margin-top: 11px; padding: 10px 11px; min-height: 56px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--bg); font-size: 11px; }
+    .controls-row { margin-top: 10px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+    .control-box { min-width: 0; }
+    .control-box label { display: block; color: var(--muted); font-size: 9px; }
+    .control-box select { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); background: var(--surface-2); font-size: 10px; padding: 0 5px; }
+    .node-action { margin-top: 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 10px; }
+    .primary-button { border: 0; border-radius: 5px; background: var(--text); color: var(--surface); padding: 8px 13px; font-weight: 500; cursor: pointer; }
+    .port-dot { position: absolute; left: -6px; width: 12px; height: 12px; border-radius: 50%; background: var(--blue); border: 2px solid var(--surface); }
+    .port-dot.p1 { top: 72px; }
+    .port-dot.p2 { top: 144px; }
+    .port-dot.p3 { top: 216px; }
+    .port-dot.p4 { top: 288px; }
+
+    .defaults-table, .matrix-table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+    .defaults-table th, .defaults-table td, .matrix-table th, .matrix-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .defaults-table th, .matrix-table th { color: var(--muted); font-size: 12px; font-weight: 500; }
+    .defaults-table td, .matrix-table td { font-size: 13px; }
+    .mono { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+    .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .tag.green { color: var(--green); background: var(--green-soft); }
+    .tag.blue { color: var(--blue); background: var(--blue-soft); }
+    .tag.amber { color: var(--amber); background: var(--amber-soft); }
+
+    .lab {
+      display: grid;
+      grid-template-columns: 270px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .lab-controls { display: grid; gap: 13px; }
+    .field label, .field > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+    .field select, .field textarea {
+      width: 100%; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--text); padding: 9px 10px;
+    }
+    .field textarea { min-height: 82px; resize: vertical; }
+    .check-row { display: flex; align-items: center; gap: 9px; min-height: 38px; }
+    .check-row input { width: 18px; height: 18px; accent-color: var(--blue); }
+    .scenario-view { min-height: 362px; }
+    .scenario-title { display: flex; justify-content: space-between; gap: 15px; align-items: start; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
+    .scenario-title p { margin: 5px 0 0; color: var(--muted); }
+    .metric-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+    .metric { padding: 11px; background: var(--surface-2); border-radius: 5px; }
+    .metric span { display: block; color: var(--muted); font-size: 11px; }
+    .metric strong { font-size: 18px; font-weight: 500; }
+    .reference-order { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 12px 0; }
+    .ref-chip { padding: 6px 9px; background: var(--blue-soft); color: var(--blue); border-radius: 4px; font-size: 11px; }
+    .ref-arrow { color: var(--muted); }
+    .route-list { display: grid; gap: 8px; margin-top: 10px; }
+    .route-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start; }
+    .route-index { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); font-size: 11px; }
+    .route-row strong { font-weight: 500; }
+    .route-row p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+
+    .flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: stretch; gap: 8px; }
+    .flow-step { min-height: 132px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; position: relative; }
+    .flow-step:not(:last-child)::after { content: "›"; position: absolute; right: -8px; top: 48%; z-index: 2; color: var(--blue); background: var(--bg); width: 15px; text-align: center; }
+    .flow-step b { display: block; color: var(--blue); font-family: var(--mono); font-size: 11px; font-weight: 500; }
+    .flow-step strong { display: block; margin-top: 5px; font-size: 13px; font-weight: 500; }
+    .flow-step p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+
+    .priority-stack { display: grid; gap: 7px; }
+    .priority-row { display: grid; grid-template-columns: 42px minmax(0, 1fr) 170px; gap: 10px; align-items: center; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+    .priority-num { color: var(--blue); font-family: var(--mono); }
+    .priority-source { color: var(--muted); font-size: 12px; }
+    .code-block { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: light-dark(#15191d, #0d0f11); color: light-dark(#e9f0f4, #dbe5ea); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.65; }
+    details { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    details + details { margin-top: 10px; }
+    summary { cursor: pointer; padding: 13px 15px; font-weight: 500; }
+    details[open] summary { border-bottom: 1px solid var(--line); }
+    .details-body { padding: 15px; }
+    .details-body p:first-child { margin-top: 0; }
+    .exact-prompt { max-height: 640px; overflow: auto; }
+
+    .architecture { display: grid; grid-template-columns: 1fr 60px 1fr 60px 1fr; gap: 10px; align-items: center; }
+    .arch-layer { min-height: 180px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+    .arch-layer h3 { margin-bottom: 10px; }
+    .arch-layer ul { margin: 0; padding-left: 18px; color: var(--muted); }
+    .arch-arrow { text-align: center; color: var(--blue); font-size: 28px; }
+    .timeline { display: grid; gap: 0; }
+    .phase { display: grid; grid-template-columns: 90px 1fr; gap: 18px; position: relative; padding-bottom: 22px; }
+    .phase:last-child { padding-bottom: 0; }
+    .phase::before { content: ""; position: absolute; left: 43px; top: 26px; bottom: 0; width: 1px; background: var(--line-strong); }
+    .phase:last-child::before { display: none; }
+    .phase-label { height: 28px; display: grid; place-items: center; border-radius: 4px; background: var(--surface-3); font-family: var(--mono); font-size: 11px; z-index: 1; }
+    .phase-content h3 { margin-top: 2px; }
+    .phase-content p { margin: 6px 0 0; color: var(--muted); }
+    .acceptance-list { counter-reset: qa; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0; list-style: none; }
+    .acceptance-list li { counter-increment: qa; display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+    .acceptance-list li::before { content: counter(qa); width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--green-soft); color: var(--green); font-family: var(--mono); font-size: 11px; }
+    footer { padding: 34px 0 8px; color: var(--muted); font-size: 12px; }
+
+    @media (max-width: 1120px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .decision-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .decision-item:nth-child(3) { border-right: 0; }
+      .decision-item:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+      .node-stage { grid-template-columns: minmax(0, 1fr) 54px minmax(410px, 1.4fr); padding: 18px; }
+      .flow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .flow-step::after { display: none; }
+      .architecture { grid-template-columns: 1fr; }
+      .arch-arrow { transform: rotate(90deg); }
+    }
+    @media (max-width: 760px) {
+      body { font-size: 14px; }
+      .topbar-inner, .layout { padding-left: 16px; padding-right: 16px; }
+      .top-meta { display: none; }
+      .layout { padding-top: 18px; }
+      .hero { padding-top: 16px; }
+      h1 { font-size: 34px; }
+      .section-head { display: block; }
+      .section-head p { margin-top: 9px; }
+      .grid-2, .grid-3, .lab, .acceptance-list { grid-template-columns: 1fr; }
+      .decision-strip { grid-template-columns: 1fr 1fr; }
+      .decision-item { border-bottom: 1px solid var(--line); }
+      .decision-item:nth-child(2n) { border-right: 0; }
+      .decision-item:last-child { grid-column: 1 / -1; border-bottom: 0; }
+      .node-stage { grid-template-columns: 1fr; }
+      .connector-lanes { display: none; }
+      .source-stack { grid-template-columns: 1fr 1fr; }
+      .replicate-node { overflow: visible; }
+      .port-dot { display: none; }
+      .input-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .controls-row { grid-template-columns: 1fr 1fr; }
+      .control-box:last-child { grid-column: 1 / -1; }
+      .flow { grid-template-columns: 1fr 1fr; }
+      .priority-row { grid-template-columns: 32px 1fr; }
+      .priority-source { grid-column: 2; }
+      .architecture { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 72px 1fr; }
+      .phase::before { left: 35px; }
+      .table-wrap { overflow-x: auto; }
+      .defaults-table, .matrix-table { min-width: 680px; }
+    }
+    @media (max-width: 420px) {
+      h1 { font-size: 29px; }
+      .source-stack, .decision-strip, .flow { grid-template-columns: 1fr; }
+      .decision-item { border-right: 0; }
+      .decision-item:last-child { grid-column: auto; }
+      .input-grid { grid-template-columns: 1fr 1fr; }
+      .metric-pair { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span class="brand-mark">SY</span><span>SHIYIN AI · 产品设计报告</span></div>
+      <div class="top-meta">一键复刻节点 / 方案版本 1.0 / 2026-09-04</div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="报告目录">
+      <div class="sidebar-label">目录</div>
+      <nav>
+        <a href="#summary">方案结论</a>
+        <a href="#current">现状与问题</a>
+        <a href="#node">节点示意图</a>
+        <a href="#routing">组合路由</a>
+        <a href="#logic">逻辑链条</a>
+        <a href="#prompt">提示词系统</a>
+        <a href="#api">数据与 API</a>
+        <a href="#compat">兼容与错误</a>
+        <a href="#implementation">开发阶段</a>
+        <a href="#acceptance">验收标准</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <section class="hero" id="summary">
+        <div class="eyebrow">DESIGN DECISION</div>
+        <h1>把“一键复刻”升级为深度优先的多参考图编排节点</h1>
+        <p>保留原有骨架路径作为兼容模式，新增节点级平台与模型选择；通过四个稳定输入角色、一个内部控制图和版本化固定模板，让常见组合零 AI 调用，只有用户写了额外需求时才调用一次 AI 助手。</p>
+        <div class="decision-strip" aria-label="默认生成参数">
+          <div class="decision-item"><span>复刻模式</span><strong>深度图</strong></div>
+          <div class="decision-item"><span>平台</span><strong>shiying</strong></div>
+          <div class="decision-item"><span>模型</span><strong>gemini-3-pro-image-preview</strong></div>
+          <div class="decision-item"><span>分辨率</span><strong>2K</strong></div>
+          <div class="decision-item"><span>画幅</span><strong>16:9</strong></div>
+        </div>
+      </section>
+
+      <section id="current">
+        <div class="section-head">
+          <div><span class="kicker">01 / CURRENT STATE</span><h2>现状与问题定位</h2></div>
+          <p>结论来自当前仓库代码，不是脱离实现的概念设计。经典画布与智能画布共享节点 UI，但生成参数和任务提交各自维护。</p>
+        </div>
+        <div class="grid-2">
+          <article class="panel issue"><div class="issue-mark">1</div><div><h3>控制图只有骨架</h3><p>节点连接动作参考后自动调用 DWPose，内部只保存 <span class="mono">poseSkeletonUrl</span>，缺少深度图分支与模式状态。</p></div></article>
+          <article class="panel issue"><div class="issue-mark">2</div><div><h3>节点级模型缺失</h3><p>当前只显示画幅、分辨率。经典画布取第一个可用图片平台/模型，智能画布继承全局或节点运行设置，结果不可预测。</p></div></article>
+          <article class="panel issue"><div class="issue-mark">3</div><div><h3>角色只有两个</h3><p>外部输入仅有 <span class="mono">pose-reference</span> 和 <span class="mono">target-image</span>，无法显式表达“身份来自谁”和“最终场景来自谁”。</p></div></article>
+          <article class="panel issue"><div class="issue-mark">4</div><div><h3>提示词会被重复优化</h3><p>图片任务当前默认启用 AI 助手优化。如果直接放入固定提示词，仍可能多一次调用并发生二次改写，不符合“无文本快速生成”。</p></div></article>
+        </div>
+        <div class="callout"><strong>可复用基础：</strong>项目已有 <span class="mono">/api/depth/estimate</span> 快速深度接口、DWPose 路径、统一图片任务入口和 AI 助手多模态优化器。本次无需重建生成系统，只需补齐节点状态、角色路由和专用提示词编译层。</div>
+      </section>
+
+      <section id="node">
+        <div class="section-head">
+          <div><span class="kicker">02 / NODE DESIGN</span><h2>节点示意图</h2></div>
+          <p>四个外部端口都在左侧；深度图/骨架图是动作参考派生出的内部控制图，只显示预览，不允许外部连线替换，避免角色顺序失控。</p>
+        </div>
+        <div class="node-stage" aria-label="一键复刻节点结构示意图">
+          <div class="source-stack">
+            <div class="source-box"><div class="source-thumb">A</div><div><strong>动作参考</strong><span>必需 · 姿势与控制图来源</span></div></div>
+            <div class="source-box"><div class="source-thumb">T</div><div><strong>目标图</strong><span>必需 · 新服装来源</span></div></div>
+            <div class="source-box"><div class="source-thumb">M</div><div><strong>模特主体</strong><span>可选 · 身份与身体归属</span></div></div>
+            <div class="source-box"><div class="source-thumb">S</div><div><strong>场景</strong><span>可选 · 环境与光线归属</span></div></div>
+          </div>
+          <div class="connector-lanes" aria-hidden="true"><div class="connector"></div><div class="connector"></div><div class="connector"></div><div class="connector"></div></div>
+          <div class="replicate-node">
+            <span class="port-dot p1"></span><span class="port-dot p2"></span><span class="port-dot p3"></span><span class="port-dot p4"></span>
+            <div class="node-titlebar"><strong>一键复刻</strong><span class="node-status">深度图已就绪</span></div>
+            <div class="node-body">
+              <div class="input-grid">
+                <div class="input-card"><span>动作参考</span><div class="input-visual">图 1<br>动作 / 基础图</div></div>
+                <div class="input-card"><span>内部控制图</span><div class="input-visual depth">图 2<br>深度图</div></div>
+                <div class="input-card"><span>目标图</span><div class="input-visual">图 3<br>服装来源</div></div>
+                <div class="input-card"><span>模特主体</span><div class="input-visual optional">图 4<br>可选</div></div>
+                <div class="input-card"><span>场景</span><div class="input-visual optional">图 5<br>可选</div></div>
+              </div>
+              <div class="prompt-field">简单描述额外需求（可留空）。有内容时由 AI 助手规范化；留空时直接使用固定组合模板。</div>
+              <div class="controls-row">
+                <div class="control-box"><label>复刻模式</label><select aria-label="复刻模式"><option selected>深度图</option><option>骨架图</option></select></div>
+                <div class="control-box"><label>平台</label><select aria-label="平台"><option selected>shiying</option></select></div>
+                <div class="control-box"><label>模型</label><select aria-label="模型"><option selected>gemini-3-pro-image-preview</option></select></div>
+                <div class="control-box"><label>分辨率</label><select aria-label="分辨率"><option selected>2K</option><option>1K</option><option>4K</option></select></div>
+                <div class="control-box"><label>画幅</label><select aria-label="画幅"><option selected>16:9</option><option>1:1</option><option>9:16</option></select></div>
+              </div>
+              <div class="node-action"><span>固定模板 · 0 次 AI 调用</span><button class="primary-button" type="button">一键复刻</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="defaults-table">
+            <thead><tr><th>字段</th><th>建议状态键</th><th>新节点默认</th><th>旧节点迁移</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>复刻模式</td><td class="mono">poseReplicateMode</td><td><span class="tag blue">depth</span></td><td>无字段时按版本判定</td><td>新建节点默认 depth；存量节点无字段时保留 skeleton，避免结果突变。</td></tr>
+              <tr><td>平台</td><td class="mono">poseReplicateProviderId</td><td class="mono">shiying</td><td>沿用当前可用平台</td><td>若 shiying 未配置，显示明确不可用状态，不静默换平台。</td></tr>
+              <tr><td>模型</td><td class="mono">poseReplicateModel</td><td class="mono">gemini-3-pro-image-preview</td><td>沿用旧解析结果</td><td>平台切换后只展示该平台真实图片模型。</td></tr>
+              <tr><td>分辨率</td><td class="mono">poseReplicateResolution</td><td>2k</td><td>缺失时 2k</td><td>继续复用现有尺寸转换函数。</td></tr>
+              <tr><td>画幅</td><td class="mono">poseReplicateRatio</td><td>16:9</td><td>存量缺失按旧默认 1:1</td><td>新旧默认分离，避免打开旧画布即改变结果。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="routing">
+        <div class="section-head">
+          <div><span class="kicker">03 / SCENARIO ROUTER</span><h2>输入组合路由实验台</h2></div>
+          <p>动作参考与目标图始终必需。切换可选端口、控制模式和用户文本，右侧会显示实际模板、参考顺序与 AI 调用次数。</p>
+        </div>
+        <div class="lab">
+          <div class="panel lab-controls">
+            <div class="field"><label for="modeSelect">复刻模式</label><select id="modeSelect"><option value="depth" selected>深度图</option><option value="skeleton">骨架图</option></select></div>
+            <label class="check-row"><input id="modelToggle" type="checkbox">连接“模特主体”</label>
+            <label class="check-row"><input id="sceneToggle" type="checkbox">连接“场景”</label>
+            <div class="field"><label for="intentText">用户额外需求</label><textarea id="intentText" placeholder="留空：固定模板，不调用 AI 助手"></textarea></div>
+            <button class="primary-button" type="button" id="sampleIntent">填入示例需求</button>
+          </div>
+          <div class="panel scenario-view" aria-live="polite">
+            <div class="scenario-title"><div><h3 id="scenarioName">基础局部换装</h3><p id="scenarioDescription">保留动作参考中的人物与场景，只把目标图中的服装迁移到原人物。</p></div><span id="templateBadge" class="tag green">固定模板</span></div>
+            <div class="metric-pair">
+              <div class="metric"><span>参考图数量</span><strong id="referenceCount">3</strong></div>
+              <div class="metric"><span>AI 助手调用</span><strong id="assistantCalls">0</strong></div>
+            </div>
+            <h3>稳定参考顺序</h3>
+            <div class="reference-order" id="referenceOrder"></div>
+            <h3>本次路由</h3>
+            <div class="route-list" id="routeList"></div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="matrix-table">
+            <thead><tr><th>组合</th><th>身份归属</th><th>服装归属</th><th>姿势归属</th><th>场景归属</th><th>固定模板</th></tr></thead>
+            <tbody>
+              <tr><td>A + T</td><td>动作参考</td><td>目标图</td><td>动作参考</td><td>动作参考</td><td class="mono">base-wardrobe</td></tr>
+              <tr><td>A + T + M</td><td>模特主体</td><td>目标图</td><td>动作参考</td><td>动作参考</td><td class="mono">model-wardrobe</td></tr>
+              <tr><td>A + T + S</td><td>动作参考</td><td>目标图</td><td>动作参考</td><td>场景</td><td class="mono">base-wardrobe-scene</td></tr>
+              <tr><td>A + T + M + S</td><td>模特主体</td><td>目标图全部服装</td><td>动作参考</td><td>场景</td><td class="mono">model-full-look-scene</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn"><strong>组合边界：</strong>“模特主体 + 场景”的扩展语义按用户要求定义为完整造型迁移，不再只是替换一件上装。动作参考控制姿势，目标图控制全部服装，模特主体控制身份与身体，场景图控制环境。四种所有权必须写入提示词，不能让模型自行猜测。</div>
+      </section>
+
+      <section id="logic">
+        <div class="section-head">
+          <div><span class="kicker">04 / LOGIC CHAIN</span><h2>从连线到 API 的完整逻辑链条</h2></div>
+          <p>核心原则是先锁角色与控制图，再决定是否需要 AI。无文本路径不经过语言模型，减少延迟、成本和提示词漂移。</p>
+        </div>
+        <div class="flow" aria-label="一键复刻处理流程">
+          <div class="flow-step"><b>01</b><strong>读取端口</strong><p>按 inputRole 收集 A/T/M/S，拒绝错误媒体类型。</p></div>
+          <div class="flow-step"><b>02</b><strong>校验组合</strong><p>A 与 T 必需；M、S 可选；稳定计算 scenarioId。</p></div>
+          <div class="flow-step"><b>03</b><strong>生成控制图</strong><p>depth 调用深度接口；skeleton 走现有 DWPose。</p></div>
+          <div class="flow-step"><b>04</b><strong>编译提示词</strong><p>固定模板 + 模式片段 + 组合片段 + 硬约束。</p></div>
+          <div class="flow-step"><b>05</b><strong>按需 AI</strong><p>仅有用户文本时规范化增量，固定模板不调用。</p></div>
+          <div class="flow-step"><b>06</b><strong>提交任务</strong><p>带明确 provider/model/size 与有角色的 refs。</p></div>
+          <div class="flow-step"><b>07</b><strong>记录结果</strong><p>保存模板版本、原始文本、最终 prompt 与任务快照。</p></div>
+        </div>
+
+        <h3 style="margin:24px 0 12px">状态机</h3>
+        <div class="grid-3">
+          <div class="panel"><span class="tag">idle</span><p>等待动作参考和目标图。可选端口不影响基础可运行性。</p></div>
+          <div class="panel"><span class="tag blue">preparing-control</span><p>正在提取深度图或骨架图。动作参考变化会使旧控制图立即失效。</p></div>
+          <div class="panel"><span class="tag blue">compiling-prompt</span><p>选择固定组合模板；有用户文本时进入 AI 助手规范化。</p></div>
+          <div class="panel"><span class="tag amber">submitting</span><p>创建独立输出节点并提交图片任务，允许重复点击并发抽卡。</p></div>
+          <div class="panel"><span class="tag green">running</span><p>任务已进入后端队列，输出节点负责轮询与恢复。</p></div>
+          <div class="panel"><span class="tag">failed</span><p>区分控制图失败、提示词失败、配置失败和生成失败，提供对应重试入口。</p></div>
+        </div>
+      </section>
+
+      <section id="prompt">
+        <div class="section-head">
+          <div><span class="kicker">05 / PROMPT SYSTEM</span><h2>提示词系统设计</h2></div>
+          <p>用户验证过的三图提示不应散落在前端常量中。建议服务端版本化管理，以“基础模板 + 模式片段 + 组合片段 + 用户增量”编译最终提示词。</p>
+        </div>
+
+        <div class="priority-stack" aria-label="提示词约束优先级">
+          <div class="priority-row"><span class="priority-num">P0</span><strong>端口角色与引用图所有权</strong><span class="priority-source">代码生成 · 不允许 AI 改写</span></div>
+          <div class="priority-row"><span class="priority-num">P1</span><strong>身份、姿势、服装、场景与禁止事项</strong><span class="priority-source">版本化固定模板</span></div>
+          <div class="priority-row"><span class="priority-num">P2</span><strong>用户明确输入的额外需求</strong><span class="priority-source">有内容时保留原意</span></div>
+          <div class="priority-row"><span class="priority-num">P3</span><strong>AI 助手补全的可执行表达</strong><span class="priority-source">仅补足，不改所有权</span></div>
+          <div class="priority-row"><span class="priority-num">P4</span><strong>通用质量与输出约束</strong><span class="priority-source">固定尾段</span></div>
+        </div>
+
+        <div class="grid-2" style="margin-top:16px">
+          <article class="panel"><h3>无用户文本</h3><p><span class="tag green">0 次 AI 调用</span></p><p>根据 <span class="mono">mode + hasModel + hasScene</span> 直接选中组合模板，插入稳定图片编号和角色片段后提交 Nano Banana Pro。</p></article>
+          <article class="panel"><h3>有用户文本</h3><p><span class="tag blue">1 次 AI 调用</span></p><p>AI 助手收到固定角色映射、硬约束、用户原文和模型 profile，只输出规范化的“用户意图增量”；服务端再与固定模板合并。</p></article>
+        </div>
+
+        <details open style="margin-top:16px">
+          <summary>模板拆分建议</summary>
+          <div class="details-body">
+            <pre class="code-block">pose-replicate.v2
+├── base-role-map          # 图 1/2/3 的稳定角色定义
+├── control.depth         # 白近、灰中、黑背景；只控制空间结构
+├── control.skeleton      # 关节、左右语义、动作与遮挡约束
+├── scenario.base         # A + T：原人物局部/服装替换
+├── scenario.model        # A + T + M：换主体，保留动作场景
+├── scenario.scene        # A + T + S：保留人物，更换场景
+├── scenario.model-scene  # A + T + M + S：新主体 + 全服装 + 新场景
+├── user-intent           # 可选，AI 助手规范化后的增量
+└── output-guard          # 单张彩色最终图、禁止过程图与文字说明</pre>
+          </div>
+        </details>
+
+        <details>
+          <summary>AI 助手输出契约</summary>
+          <div class="details-body">
+            <pre class="code-block">{
+  "intent_summary": "用户额外想改变什么",
+  "allowed_changes": ["在既定角色所有权内允许的变化"],
+  "must_preserve": ["用户特别强调的保留项"],
+  "material_and_fit": ["服装材质、版型、穿着状态"],
+  "scene_adjustments": ["仅场景端口存在时允许"],
+  "negative_constraints": ["用户新增禁止项"],
+  "normalized_instruction": "可直接合入固定模板的 Nano Banana Pro 增量"
+}</pre>
+            <p>服务端必须丢弃 AI 返回的引用图重编号、身份交换、角色重定义和与固定硬约束冲突的内容。</p>
+          </div>
+        </details>
+
+        <details>
+          <summary>已验证三图提示词（原文完整保留）</summary>
+          <div class="details-body">
+            <p>建议保存为 <span class="mono">pose-replicate.v2.base-depth.zh-CN</span> 的验收基线。正式实现只做变量化，不改动其角色优先级与禁止事项。</p>
+            <pre class="code-block exact-prompt">请以图1为唯一编辑底图，对图1中的模特进行高保真局部换装：保留原模特、原姿势、原配饰和原背景，只把原来的上装替换为图3中的上装。
+
+【三张图片的用途】
+
+图1：原始人物照片，也是最终结果的基础图。
+
+严格保留图1中的：
+
+- 同一位模特及其面部身份
+- 五官、脸型、肤色、妆容和表情
+- 发型、发色、发丝、耳朵和耳饰
+- 身材比例、站立姿势和身体重心
+- 头部角度、视线方向和肩线
+- 双臂弯曲方式、双手及手指位置
+- 手持眼镜的动作
+- 手袋、包带、裤装和其他配饰
+- 人物在画面中的位置、大小与比例
+- 原始街景、店面、建筑、地面和全部背景
+- 原始镜头视角、透视、构图、裁切、光线、阴影、色温和景深
+
+除原上装区域及其产生的必要阴影外，不要修改图1的其他任何区域。
+
+图2：图1人物对应的深度图，只用于辅助锁定空间结构。
+
+图2中的白色表示靠近镜头，灰色表示中间距离，黑色背景没有场景信息。使用图2保持：
+
+- 头部、肩部、躯干和双臂的空间位置
+- 身体姿势、人物体积和透视
+- 手、眼镜、手袋、头发与服装之间的前后遮挡关系
+- 人物在画面中的位置、大小和裁切范围
+
+图2不提供人物身份、服装款式、服装颜色、服装纹理或背景。尤其不要照搬深度图中原上装的表面和具体外轮廓；上装的新版型应以图3为准。
+
+图3：新上装的唯一设计参考。
+
+无论图3是服装平铺图，还是另一位模特的上身穿着图，都只提取其中上装本身的设计，准确保留：
+
+- 上装类别、整体款式和版型
+- 领口、肩部、袖型、袖口和衣长
+- 门襟、纽扣、拉链、口袋和下摆
+- 面料、颜色、图案、印花和纹理
+- 缝线、褶皱、装饰及其他可见细节
+- 宽松度、厚度、垂坠感和结构感
+
+如果图3由另一位模特穿着，只参考其上装；不要复制该模特的脸、头发、肤色、身体、手部、姿势、背景或拍摄角度。
+
+如果图3是平铺服装图，请把平面的服装结构合理转换成真实穿着状态，不得擅自改变衣领、袖型、长度、图案、颜色或关键设计。
+
+【具体换装任务】
+
+完整移除图1模特原来的豹纹上装，将图3中的上装真实、自然地穿在图1的原模特身上。
+
+新上装必须适应图1模特原有的身体姿势、肩部角度、手臂弯曲和手部动作，同时保持图3服装自身的真实版型。允许服装外轮廓按照图3的款式发生合理变化，但不得改变人物的身体姿势和比例。
+
+如果图3是短款、修身或轻薄上装，不要强制保留原豹纹外套的宽大轮廓。
+
+如果图3是宽松、厚重或廓形上装，应准确表现其真实体积、厚度和下摆形状。
+
+根据图1人物动作生成符合物理规律的面料拉伸、挤压、褶皱和垂坠。腋下、肘部、胸腹、袖口和腰部的褶皱必须自然。
+
+新上装的光照方向、亮度、色温、阴影、清晰度和环境反射必须与图1完全一致，让结果看起来像模特在原拍摄现场真实穿着该服装，而不是后期粘贴。
+
+【遮挡与边缘】
+
+严格保留图1中的正确遮挡关系：
+
+- 头发应自然覆盖服装领口和肩部
+- 双手和手指应位于服装前方
+- 手持眼镜必须保持原来的位置、角度和形状
+- 手袋与包带必须保持原来的位置和遮挡关系
+- 新袖口应自然衔接手腕，不得覆盖或吞没手指
+- 服装边缘不得出现发光、灰边、重影或抠图痕迹
+
+【执行优先级】
+
+1. 图1控制模特身份、面部、姿势、动作、配饰、背景、构图和光线
+2. 图3控制新上装的款式、版型、颜色、面料和细节
+3. 图2辅助控制身体结构、空间深度和遮挡关系
+4. 只允许原上装区域及其必要阴影发生改变
+
+【禁止事项】
+
+不要改变模特的脸、五官、妆容、表情、发型、肤色、身材或年龄感。
+
+不要改变人物的头部方向、视线、姿势、手臂角度、手指位置或手持动作。
+
+不要替换或改变裤装、眼镜、耳饰、手袋、包带及其他配饰。
+
+不要改变背景、街道、店面、招牌、透视、镜头角度、人物位置和画面裁切。
+
+不要保留原豹纹上装的豹纹、颜色、面料、领型、纽扣或款式。
+
+不要复制图3中其他模特的身份、身体、姿势和背景。
+
+避免脸部重绘、身份漂移、身体变形、肩部错位、多余肢体、多余手指、手指粘连、服装粘在皮肤上、图案扭曲、错误遮挡、包带断裂、眼镜变形、边缘光晕、重影和拼贴感。
+
+只输出一张完成换装后的最终彩色照片，不要输出深度图、蒙版、灰度图、分屏图、过程图、对照图或文字说明。</pre>
+          </div>
+        </details>
+
+        <div class="callout danger"><strong>必须变量化的样例词：</strong>原文中的“豹纹上装”“眼镜”“手袋”等是该验证样本的具体事实，不能在任意图片上硬编码。实现时应把这些词拆为视觉解析变量；无法可靠识别时退回“原服装/现有配饰”的通用表达，绝不编造样本不存在的物件。</div>
+      </section>
+
+      <section id="api">
+        <div class="section-head">
+          <div><span class="kicker">06 / DATA & API</span><h2>数据结构与 API 方案</h2></div>
+          <p>推荐增加专用的一键复刻任务入口，把模板选择和 AI 调用决策放在服务端；经典/智能画布只负责收集角色、保存节点状态和展示任务。</p>
+        </div>
+        <div class="architecture" aria-label="前端、编排层与生成层架构">
+          <article class="arch-layer"><h3>节点层</h3><ul><li>四个 inputRole</li><li>模式与生成参数</li><li>控制图预览/缓存</li><li>并发输出节点</li></ul></article>
+          <div class="arch-arrow">→</div>
+          <article class="arch-layer"><h3>复刻编排层</h3><ul><li>组合校验与 reference_map</li><li>版本化固定模板</li><li>按需 AI 用户增量</li><li>最终 prompt 与审计元数据</li></ul></article>
+          <div class="arch-arrow">→</div>
+          <article class="arch-layer"><h3>图片任务层</h3><ul><li>复用现有 provider 解析</li><li>复用异步任务/轮询</li><li>复用尺寸与参考图上传</li><li>保存生成历史与恢复信息</li></ul></article>
+        </div>
+
+        <h3 style="margin:24px 0 10px">建议请求契约</h3>
+        <pre class="code-block">POST /api/canvas/pose-replicate-tasks
+{
+  "mode": "depth",
+  "scenario": "model-full-look-scene",
+  "inputs": {
+    "pose_reference": { "url": "...", "name": "action.jpg" },
+    "control_map": { "url": "...", "name": "depth.png" },
+    "target_image": { "url": "...", "name": "wardrobe.jpg" },
+    "model_subject": { "url": "...", "name": "model.jpg" },
+    "scene": { "url": "...", "name": "scene.jpg" }
+  },
+  "user_instruction": "让外套保持敞开，保留模特项链",
+  "generation": {
+    "provider_id": "shiying",
+    "model": "gemini-3-pro-image-preview",
+    "resolution": "2k",
+    "aspect_ratio": "16:9",
+    "quality": "high",
+    "count": 1
+  },
+  "prompt_policy": {
+    "template_id": "pose-replicate.v2",
+    "locale": "zh-CN"
+  }
+}</pre>
+
+        <h3 style="margin:24px 0 10px">任务快照必须保存</h3>
+        <div class="grid-3">
+          <div class="panel"><h3>可复现</h3><p>实际 provider/model/size、mode、scenario、template_id/version、reference_order。</p></div>
+          <div class="panel"><h3>可审计</h3><p>user_instruction_original、normalized_instruction、final_prompt、prompt_source。</p></div>
+          <div class="panel"><h3>可恢复</h3><p>control_signature、task_id、输出节点 ID、失败阶段、重试所需非敏感参数。</p></div>
+        </div>
+
+        <div class="callout"><strong>为何推荐专用入口：</strong>当前通用图片任务默认强制 AI 优化，而本需求明确要求“无用户提示词时不调用 AI”。专用入口可在服务端完成固定模板编译后，以内部受控方式调用现有生成执行器，避免前端通过 <span class="mono">auto_optimize_prompt:false</span> 随意绕过全局策略。</div>
+      </section>
+
+      <section id="compat">
+        <div class="section-head">
+          <div><span class="kicker">07 / COMPATIBILITY</span><h2>兼容迁移与错误策略</h2></div>
+          <p>新默认只作用于新建节点。存量画布必须保留原骨架语义和原始默认画幅，防止打开旧项目后无操作即改变输出。</p>
+        </div>
+        <div class="grid-2">
+          <article class="panel"><h3>新建节点</h3><p><span class="mono">nodeSchemaVersion: 2</span><br>depth / shiying / gemini-3-pro-image-preview / 2k / 16:9。</p></article>
+          <article class="panel"><h3>存量节点</h3><p>没有 <span class="mono">poseReplicateMode</span> 且 schema &lt; 2 时迁移为 skeleton；画幅缺失仍按 1:1，模型沿用旧解析。</p></article>
+          <article class="panel"><h3>平台或模型不可用</h3><p>节点显示“默认模型未配置”，生成按钮禁用；用户必须显式选择可用模型，不静默切到第一个平台。</p></article>
+          <article class="panel"><h3>控制图失败</h3><p>保留动作参考，显示失败阶段和“重新提取”；切换模式后重新计算签名，不复用另一模式缓存。</p></article>
+          <article class="panel"><h3>AI 助手失败</h3><p>仅阻塞有用户文本的任务；保留用户原文，不降级为忽略用户文本的固定模板生成。</p></article>
+          <article class="panel"><h3>比例冲突</h3><p>16:9 与“保持原裁切”存在潜在冲突。首轮真实 API 回归必须覆盖非 16:9 动作参考，决定是否允许最小背景扩展。</p></article>
+        </div>
+
+        <h3 style="margin:24px 0 10px">深度能力分层</h3>
+        <div class="table-wrap">
+          <table class="matrix-table">
+            <thead><tr><th>档位</th><th>实现</th><th>首版定位</th><th>限制</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag green">默认快速档</span></td><td class="mono">/api/depth/estimate</td><td>画布即时控制图</td><td>当前响应头标识 <span class="mono">midas_v21_small_256</span>，8-bit，相对深度。</td></tr>
+              <tr><td><span class="tag amber">后续高质量档</span></td><td>Depth Anything V2 + 人物分割</td><td>高精度人物、发丝和遮挡边缘</td><td>当前仍是单图原型；模型许可、GPU 依赖和产品化尚未完成。</td></tr>
+              <tr><td><span class="tag">兼容骨架档</span></td><td>现有 DWPose</td><td>旧项目复现和用户手动选择</td><td>只表达关键点，不如深度图完整描述人物体积与遮挡。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="implementation">
+        <div class="section-head">
+          <div><span class="kicker">08 / DELIVERY PLAN</span><h2>建议开发阶段</h2></div>
+          <p>按可独立验证的模块推进，先稳定模板与服务端契约，再落 UI 和双画布，最后做真实图片回归。</p>
+        </div>
+        <div class="timeline">
+          <div class="phase"><div class="phase-label">阶段 1</div><div class="phase-content"><h3>提示词编译器与契约测试</h3><p>新增 <span class="mono">canvas_core/pose_replicate_prompts.py</span>，实现八条路由（2 模式 × 4 组合）、稳定参考编号、固定模板零 AI、有文本单 AI 和冲突过滤。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 2</div><div class="phase-content"><h3>服务端专用任务入口</h3><p>新增请求模型与任务接口，内部复用现有图片生成执行器；记录 prompt_source、模板版本和最终参考图顺序。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 3</div><div class="phase-content"><h3>共用节点 UI 与控制图模式</h3><p>调整 <span class="mono">canvas-special-nodes.js</span> 和样式，增加四输入预览、模式/平台/模型/分辨率/画幅控件，接入 depth 与 DWPose 两条准备路径。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 4</div><div class="phase-content"><h3>经典与智能画布接线</h3><p>分别补齐端口 HTML、连线合法性、角色取图、节点状态持久化、运行快照和输出恢复；公共规则保持同一份。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 5</div><div class="phase-content"><h3>自动化与真实生成回归</h3><p>覆盖旧画布迁移、两模式、四组合、平台切换、空/非空文本、并发生成、失败恢复和非 16:9 输入；使用已验证样例做 Nano Banana Pro 端到端验收。</p></div></div>
+        </div>
+      </section>
+
+      <section id="acceptance">
+        <div class="section-head">
+          <div><span class="kicker">09 / ACCEPTANCE</span><h2>可执行验收标准</h2></div>
+          <p>以下条件全部满足后，才可以把功能标记为完成。</p>
+        </div>
+        <ol class="acceptance-list">
+          <li>新建一键复刻节点默认显示深度图、shiying、gemini-3-pro-image-preview、2K、16:9。</li>
+          <li>存量节点打开后仍走骨架模式，不发生自动默认值漂移。</li>
+          <li>动作参考变化会清除旧控制图并重新提取；模式切换不会误用另一模式缓存。</li>
+          <li>四种端口组合都生成稳定且可审计的 reference_order 与 scenarioId。</li>
+          <li>无用户文本时 AI 助手调用次数为 0，最终提示来自版本化固定模板。</li>
+          <li>有用户文本时 AI 助手只调用 1 次，且不能改变身份、服装、姿势和场景归属。</li>
+          <li>经典画布与智能画布提交同一组合时，生成请求语义和参考顺序一致。</li>
+          <li>平台/模型选项来自真实配置；默认模型不可用时明确阻止提交。</li>
+          <li>任务快照能还原原始需求、最终提示词、模板版本、模型参数与全部引用角色。</li>
+          <li>已验证三图样例、完整四图扩展、非 16:9 输入和失败重试均完成真实 API 回归。</li>
+        </ol>
+        <div class="callout warn"><strong>建议先确认的唯一产品口径：</strong>“目标图”在扩展模式中定义为服装来源，而不是结果底图；“模特主体”一旦连接就成为最终身份来源。这个口径与用户描述最一致，也能避免目标图和模特主体争夺身份控制权。</div>
+      </section>
+
+      <footer>本报告基于 SHIYIN-AI 当前分支 <span class="mono">feat/storyboard-merge-node</span> 的实际实现生成。报告只给出设计与开发边界，尚未修改一键复刻功能代码。</footer>
+    </main>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const modeSelect = document.getElementById('modeSelect');
+    const modelToggle = document.getElementById('modelToggle');
+    const sceneToggle = document.getElementById('sceneToggle');
+    const intentText = document.getElementById('intentText');
+    const sampleIntent = document.getElementById('sampleIntent');
+    const scenarioName = document.getElementById('scenarioName');
+    const scenarioDescription = document.getElementById('scenarioDescription');
+    const templateBadge = document.getElementById('templateBadge');
+    const referenceCount = document.getElementById('referenceCount');
+    const assistantCalls = document.getElementById('assistantCalls');
+    const referenceOrder = document.getElementById('referenceOrder');
+    const routeList = document.getElementById('routeList');
+
+    const scenarios = {
+      '00': {
+        name: '基础局部换装',
+        id: 'base-wardrobe',
+        description: '保留动作参考中的人物与场景，只把目标图中的服装迁移到原人物。'
+      },
+      '10': {
+        name: '换主体的服装迁移',
+        id: 'model-wardrobe',
+        description: '模特主体控制身份与身体，目标图控制服装，动作参考控制姿势并提供原动作场景。'
+      },
+      '01': {
+        name: '原人物进入新场景',
+        id: 'base-wardrobe-scene',
+        description: '动作参考保留人物身份和姿势，目标图提供服装，场景图替换最终环境。'
+      },
+      '11': {
+        name: '完整跨图复刻',
+        id: 'model-full-look-scene',
+        description: '目标图全部服装迁移到模特主体，深度/骨架辅助复刻动作参考姿势，最终置入场景图。'
+      }
+    };
+
+    function addRoute(index, title, text) {
+      const row = document.createElement('div');
+      row.className = 'route-row';
+      row.innerHTML = '<span class="route-index">' + index + '</span><div><strong>' + title + '</strong><p>' + text + '</p></div>';
+      routeList.appendChild(row);
+    }
+
+    function update() {
+      const hasModel = modelToggle.checked;
+      const hasScene = sceneToggle.checked;
+      const mode = modeSelect.value;
+      const hasIntent = intentText.value.trim().length > 0;
+      const scenario = scenarios[(hasModel ? '1' : '0') + (hasScene ? '1' : '0')];
+      const refs = ['图1 动作参考', '图2 ' + (mode === 'depth' ? '深度图' : '骨架图'), '图3 目标图'];
+      if (hasModel) refs.push('图4 模特主体');
+      if (hasScene) refs.push('图' + (hasModel ? '5' : '4') + ' 场景');
+
+      scenarioName.textContent = scenario.name;
+      scenarioDescription.textContent = scenario.description;
+      referenceCount.textContent = String(refs.length);
+      assistantCalls.textContent = hasIntent ? '1' : '0';
+      templateBadge.textContent = hasIntent ? 'AI 增量合并' : '固定模板';
+      templateBadge.className = 'tag ' + (hasIntent ? 'blue' : 'green');
+
+      referenceOrder.replaceChildren();
+      refs.forEach(function (label, index) {
+        const chip = document.createElement('span');
+        chip.className = 'ref-chip';
+        chip.textContent = label;
+        referenceOrder.appendChild(chip);
+        if (index < refs.length - 1) {
+          const arrow = document.createElement('span');
+          arrow.className = 'ref-arrow';
+          arrow.textContent = '→';
+          referenceOrder.appendChild(arrow);
+        }
+      });
+
+      routeList.replaceChildren();
+      addRoute('1', '组合识别', scenario.id + ' · ' + (mode === 'depth' ? 'depth' : 'skeleton'));
+      addRoute('2', '控制图生成', mode === 'depth' ? '动作参考 → /api/depth/estimate → 深度图缓存' : '动作参考 → DWPose → 骨架图缓存');
+      addRoute('3', '提示词来源', hasIntent ? '固定硬约束 + AI 助手规范化用户增量；仅调用一次 AI' : '版本化固定组合模板；跳过 AI 助手');
+      addRoute('4', '生成提交', 'shiying / gemini-3-pro-image-preview / 2k / 16:9');
+    }
+
+    [modeSelect, modelToggle, sceneToggle].forEach(function (control) {
+      control.addEventListener('change', update);
+    });
+    intentText.addEventListener('input', update);
+    sampleIntent.addEventListener('click', function () {
+      intentText.value = intentText.value ? '' : '让外套保持敞开，保留模特项链，整体光线更接近场景图的傍晚暖光。';
+      sampleIntent.textContent = intentText.value ? '清空示例需求' : '填入示例需求';
+      update();
+    });
+    update();
+  }());
+</script>
+</body>
+</html>

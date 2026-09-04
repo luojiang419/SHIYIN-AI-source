@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "component": "person-depth",
+  "version": "1.0.0",
+  "enabled": false,
+  "release_status": "pending",
+  "message": "高精度人物深度组件发布清单尚未配置",
+  "license_notice": "Depth Anything V2 Large 当前为 CC-BY-NC-4.0，正式启用前必须完成许可复核或替换模型。",
+  "required_free_bytes": 0,
+  "command": ["runtime/person-depth-worker.exe"],
+  "required_paths": [
+    "runtime/person-depth-worker.exe",
+    "models/depth-anything-v2-large/config.json",
+    "models/birefnet/config.json"
+  ],
+  "packages": []
+}

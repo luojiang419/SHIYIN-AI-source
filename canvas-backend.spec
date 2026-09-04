@@ -15,7 +15,7 @@ a = Analysis(
     ["backend_entry.py"],
     pathex=["."],
     binaries=[],
-    datas=[],
+    datas=[("canvas_core/person_depth_manifest.json", "canvas_core")],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

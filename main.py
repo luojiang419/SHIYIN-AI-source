@@ -59,6 +59,7 @@ from canvas_core.storage_bootstrap import (
     DWPOSE_MODEL_MANAGER,
     MAINTENANCE,
     MIGRATION_REPORT,
+    PERSON_DEPTH_COMPONENT_MANAGER,
     SECRET_MIGRATION_REPORT,
     SECRET_STORE,
 )
@@ -75,6 +76,8 @@ from canvas_core.account_storage import ScopedPath, current_account_id, reset_cu
 from canvas_core.account_resources import AccountResourceService
 from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
 from canvas_core.depth_inference import DepthInference, DepthUnavailableError
+from canvas_core.person_depth_client import PersonDepthWorkerClient, PersonDepthWorkerError
+from canvas_core.person_depth_components import PersonDepthComponentUnavailable
 from canvas_core.database import RevisionConflict
 from canvas_core.events import entity_changed
 from canvas_core.app_config import read_app_config, update_app_settings
@@ -200,6 +203,7 @@ DEPTH_INFERENCE_LOCK = Lock()
 DEPTH_AUTO_DOWNLOAD_ENABLED = str(os.getenv("CANVAS_DEPTH_AUTO_DOWNLOAD", "1")).strip().lower() not in {
     "0", "false", "no", "off",
 }
+PERSON_DEPTH_WORKER = PersonDepthWorkerClient(PERSON_DEPTH_COMPONENT_MANAGER)
 
 
 def render_dwpose_image(image: Image.Image):
@@ -26389,6 +26393,75 @@ def admin_depth_retry(request: Request):
 def depth_status(request: Request):
     request_identity(request)
     return DEPTH_MODEL_MANAGER.public_status()
+
+
+@app.get("/api/admin/person-depth/component/status")
+def admin_person_depth_component_status(request: Request):
+    require_admin(request)
+    return PERSON_DEPTH_COMPONENT_MANAGER.status()
+
+
+@app.get("/api/person-depth/component/status")
+def person_depth_component_status(request: Request):
+    request_identity(request)
+    return PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+
+
+@app.post("/api/person-depth/component/install", status_code=202)
+def install_person_depth_component(request: Request):
+    require_admin(request)
+    started = PERSON_DEPTH_COMPONENT_MANAGER.start_background()
+    status = PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+    if not started and not status.get("ready") and not status.get("install_available"):
+        raise HTTPException(status_code=409, detail=str(status.get("message") or "高精度人物深度组件暂不可安装"))
+    return {"started": started, "status": status}
+
+
+@app.post("/api/person-depth/component/retry", status_code=202)
+def retry_person_depth_component(request: Request):
+    return install_person_depth_component(request)
+
+
+@app.post("/api/person-depth/estimate")
+async def estimate_person_depth(
+    request: Request,
+    file: UploadFile = File(...),
+    bit_depth: int = Form(8),
+):
+    request_identity(request)
+    if bit_depth not in {8, 16}:
+        raise HTTPException(status_code=400, detail="高精度人物深度输出位深只支持 8 或 16")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="高精度人物深度输入图片为空")
+    if len(content) > DWPOSE_INPUT_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="高精度人物深度输入图片不能超过 25MB")
+    try:
+        content, width, height, _changed = normalize_image_orientation(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="高精度人物深度输入图片无法读取") from exc
+    if width * height > 60_000_000:
+        raise HTTPException(status_code=413, detail="高精度人物深度输入图片像素不能超过 6000 万")
+    status = PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+    if not status.get("ready"):
+        raise HTTPException(status_code=503, detail=str(status.get("message") or "高精度人物深度组件尚未就绪"))
+    try:
+        result = await asyncio.to_thread(PERSON_DEPTH_WORKER.estimate, content, bit_depth=bit_depth)
+    except PersonDepthComponentUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PersonDepthWorkerError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return Response(
+        result.content,
+        media_type="image/png",
+        headers={
+            "X-Person-Depth-Width": str(result.width),
+            "X-Person-Depth-Height": str(result.height),
+            "X-Person-Depth-Bit-Depth": str(result.bit_depth),
+            "X-Person-Depth-Model": "depth-anything-v2-large+birefnet",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.post("/api/depth/estimate")

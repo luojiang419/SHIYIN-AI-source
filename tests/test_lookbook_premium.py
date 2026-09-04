@@ -213,9 +213,8 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "2026 FW REFERENCE FILM LOCK",
             "warm ivory, cream and pale lemon-yellow",
             "faded turquoise/cyan",
-            "FW TONAL CONTRAST LOCK",
-            "structured S-curve",
-            "For 16:9 outputs",
+            "Lift the black floor slightly",
+            "creamy soft shoulder",
             "FW CAMERA GRAMMAR",
             "FW HUMAN VITALITY LOCK",
             "FW ANALOG FINISH",
@@ -223,6 +222,8 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             "FW SERIES COLOR SCRIPT",
         ):
             self.assertIn(marker, prompt)
+        self.assertNotIn("FW TONAL CONTRAST LOCK", prompt)
+        self.assertNotIn("structured S-curve", prompt)
 
     def test_auto_decision_can_route_to_fw_reference_film_lock(self):
         prompt = build_prompt("universal", [{"role":"prop", "reference_type":"prop", "lookbook_role":"人物", "url":"/assets/input/model.png"}], {
@@ -283,20 +284,20 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             self.assertIs(main.apply_lookbook_film_finish(batch, snapshot), batch)
             grain.assert_called_once_with("/assets/generated/levis.jpg", amount=0.025)
 
-    def test_fw_finish_keeps_structured_contrast_and_restores_original_grain_amount(self):
+    def test_fw_finish_restores_original_sun_grade_and_keeps_grain_control(self):
         batch = {"images": ["/assets/generated/fw.jpg"]}
         snapshot = {"options": {"lookbook_style": {"id": "fw-cream-cyan-film"}}}
-        with patch.object(main, "apply_lookbook_fw_contrast_grade", return_value=True) as contrast, patch.object(
+        with patch.object(main, "apply_lookbook_natural_sun_grade", return_value=True) as sun_grade, patch.object(
             main, "apply_lookbook_organic_film_grain", return_value=True
         ) as grain:
             self.assertIs(main.apply_lookbook_film_finish(batch, snapshot), batch)
-            contrast.assert_called_once_with("/assets/generated/fw.jpg")
+            sun_grade.assert_called_once_with("/assets/generated/fw.jpg")
             grain.assert_called_once_with("/assets/generated/fw.jpg", amount=0.095)
 
     def test_fw_finish_uses_user_grain_strength_and_clamps_invalid_values(self):
         batch = {"images": ["/assets/generated/fw.jpg"]}
         snapshot = {"options": {"lookbook_style": {"id": "fw-cream-cyan-film"}, "lookbook_grain_strength": 0.14}}
-        with patch.object(main, "apply_lookbook_fw_contrast_grade", return_value=True), patch.object(
+        with patch.object(main, "apply_lookbook_natural_sun_grade", return_value=True), patch.object(
             main, "apply_lookbook_organic_film_grain", return_value=True
         ) as grain:
             main.apply_lookbook_film_finish(batch, snapshot)
@@ -386,7 +387,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             self.assertNotIn("coarse_h", source)
             self.assertNotIn("clump", source)
 
-    def test_fw_contrast_grade_separates_tones_without_clipping_highlights(self):
+    def test_fw_original_natural_sun_grade_opens_mids_without_clipping_highlights(self):
         import numpy as np
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -399,10 +400,10 @@ class LookbookPremiumResearchTests(unittest.TestCase):
                     pixels[x, y] = (value, min(255, value + 4), min(255, value + 8))
             image.save(path, "JPEG", quality=95)
             with patch.object(main, "output_file_from_url", return_value=path):
-                self.assertTrue(main.apply_lookbook_fw_contrast_grade("/assets/output/contrast.jpg"))
+                self.assertTrue(main.apply_lookbook_natural_sun_grade("/assets/output/contrast.jpg"))
             with Image.open(path) as graded:
                 arr = np.asarray(graded.convert("RGB"), dtype=np.int16)
-            self.assertGreater(float(arr.std()), 48.0)
+            self.assertGreater(float(arr.mean()), 155.0)
             self.assertLessEqual(int(arr.max()), 253)
 
     def test_structured_research_is_normalized_for_generation(self):

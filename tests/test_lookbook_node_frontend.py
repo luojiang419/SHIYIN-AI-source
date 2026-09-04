@@ -33,6 +33,38 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("node.lookbookStylePrompt=defaultStyle.prompt", self.lookbook)
         self.assertIn("node.lookbookPlan=''", self.lookbook)
         self.assertIn("node.lookbookAutoDecision={}", self.lookbook)
+        self.assertIn("node.lookbookFwStyleRevision!=='original-v1'", self.lookbook)
+        self.assertIn("node.lookbookStylePrompt=selectedStyle.prompt", self.lookbook)
+        self.assertIn("lookbookFwStyleRevision:'original-v1'", self.lookbook)
+        self.assertIn("real unfiltered afternoon sunlight with clear airy transparency", self.lookbook)
+        self.assertNotIn("confident structured S-curve", self.lookbook)
+
+    def test_existing_builtin_fw_nodes_restore_original_prompt_without_resetting_grain(self):
+        module_path = ROOT / "static" / "js" / "canvas-lookbook-node.js"
+        script = f"""
+global.window = {{}};
+global.document = {{addEventListener:()=>{{}}}};
+global.localStorage = {{getItem:()=>null,setItem:()=>{{}}}};
+require({json.dumps(str(module_path))});
+const node = {{
+  type:'lookbook',
+  lookbookStyleId:'fw-cream-cyan-film',
+  lookbookStyleSource:'builtin',
+  lookbookStylePrompt:'confident structured S-curve stale prompt',
+  lookbookGrainStrength:0.14,
+  lookbookPlan:'stale plan'
+}};
+window.CanvasLookbookNode.normalize(node);
+if(node.lookbookFwStyleRevision!=='original-v1') process.exit(2);
+if(node.lookbookStylePrompt.includes('structured S-curve')) process.exit(3);
+if(!node.lookbookStylePrompt.includes('creamy highlight roll-off')) process.exit(4);
+if(node.lookbookGrainStrength!==0.14) process.exit(5);
+if(node.lookbookPlan!=='') process.exit(6);
+"""
+        subprocess.run(
+            ["node", "-e", script], cwd=ROOT, check=True, capture_output=True,
+            text=True, encoding="utf-8",
+        )
 
     def test_lookbook_grain_slider_defaults_to_fw_value_and_is_submitted(self):
         self.assertIn("const DEFAULT_GRAIN_STRENGTH = 0.095", self.lookbook)
@@ -260,7 +292,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.03.lookbook.35", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.04.lookbook.36", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertIn("canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260903.2", self.html)
         self.assertIn("canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260903.2", self.html)
@@ -279,7 +311,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("feature=fw-reference-film.1", self.html)
         self.assertIn("feature=fw-natural-sun-grain.1", self.html)
         self.assertIn("feature=fw-model-identity.1", self.html)
-        self.assertIn("feature=fw-structured-contrast.1", self.html)
+        self.assertIn("feature=fw-original-restore.1", self.html)
         self.assertIn("feature=lookbook-grain-slider.1", self.html)
         self.assertIn("feature=lookbook-reference-type-ownership.1", self.html)
         self.assertIn("feature=lookbook-validated-presets-only.1", self.html)

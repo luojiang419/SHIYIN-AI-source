@@ -109,3 +109,12 @@ def test_worker_spec_collects_only_required_model_families():
     assert "collect_all" not in source
     for excluded in ("datasets", "librosa", "torchcodec", "pydub", "kornia", "boto3", "yt_dlp", "bitsandbytes"):
         assert f'"{excluded}"' in source
+
+
+def test_local_installer_requires_explicit_noncommercial_license_acceptance():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "tools" / "install-person-depth-local.py").read_text(encoding="utf-8")
+    assert 'parser.add_argument("--accept-noncommercial-license", action="store_true")' in source
+    assert "local installer only accepts a disabled candidate manifest" in source
+    assert "manager.install_local_archives(packages)" in source
+    assert "PersonDepthComponentManager(args.component_root)" in source

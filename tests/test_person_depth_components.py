@@ -100,6 +100,44 @@ def test_domestic_archive_is_verified_smoked_and_atomically_activated():
         assert manager.public_status()["progress"] == 1.0
 
 
+def test_local_candidate_install_persists_manifest_and_survives_reload():
+    archive = make_archive()
+    smoke_calls = []
+    with tempfile.TemporaryDirectory() as temp_root:
+        root = Path(temp_root)
+        archive_path = root / "candidate.zip"
+        archive_path.write_bytes(archive)
+        component_root = root / "component"
+        manager = PersonDepthComponentManager(
+            component_root,
+            manifest=make_manifest(archive, enabled=False),
+            smoke_runner=lambda command, install_root: smoke_calls.append((list(command), install_root)),
+        )
+
+        assert manager.install_local_archives({"bundle": archive_path}) is True
+        assert manager.local_manifest_path.is_file()
+        assert manager.public_status()["state"] == "ready"
+        assert manager.public_status()["source_label"] == "本机私有候选包"
+        assert smoke_calls
+
+        reloaded = PersonDepthComponentManager(component_root, smoke_runner=lambda _command, _root: None)
+        assert reloaded.manifest_path == manager.local_manifest_path
+        assert reloaded.public_status()["ready"] is True
+        assert reloaded.worker_command()[0].endswith("runtime\\person-depth-worker.exe")
+
+
+def test_local_candidate_install_rejects_incomplete_package_set():
+    archive = make_archive()
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root),
+            manifest=make_manifest(archive, enabled=False),
+            smoke_runner=lambda _command, _root: None,
+        )
+        with pytest.raises(PersonDepthComponentUnavailable, match="本地候选包不完整"):
+            manager.install_local_archives({})
+
+
 def test_domestic_failure_falls_back_to_official_source():
     archive = make_archive()
     calls = []

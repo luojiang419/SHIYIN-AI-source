@@ -89,9 +89,12 @@ class PersonDepthComponentManager:
         self.installations_root = self.component_root / "installations"
         self.staging_root = self.component_root / "staging"
         self.current_path = self.component_root / "current.json"
+        self.local_manifest_path = self.component_root / "manifest.json"
         configured_path = os.getenv(PERSON_DEPTH_MANIFEST_ENV, "").strip()
         self.manifest_path = Path(
-            manifest_path or configured_path or PERSON_DEPTH_BUILTIN_MANIFEST
+            manifest_path
+            or configured_path
+            or (self.local_manifest_path if self.local_manifest_path.is_file() else PERSON_DEPTH_BUILTIN_MANIFEST)
         ).expanduser().resolve()
         self.proxy_provider = proxy_provider
         self.smoke_runner = smoke_runner or self._run_smoke
@@ -295,6 +298,49 @@ class PersonDepthComponentManager:
                     error=message[:2000],
                 )
                 return False
+
+    def install_local_archives(
+        self,
+        package_paths: Mapping[str, Path],
+        *,
+        source_label: str = "本机私有候选包",
+    ) -> bool:
+        """Install already-downloaded archives and persist a local-only manifest override."""
+
+        with self._ensure_lock:
+            expected_ids = {spec.package_id for spec in self.specs}
+            provided_ids = {str(package_id) for package_id in package_paths}
+            if not self.specs or provided_ids != expected_ids:
+                missing = sorted(expected_ids - provided_ids)
+                extra = sorted(provided_ids - expected_ids)
+                details = []
+                if missing:
+                    details.append("缺少 " + ", ".join(missing))
+                if extra:
+                    details.append("未知 " + ", ".join(extra))
+                raise PersonDepthComponentUnavailable("本地候选包不完整" + ("：" + "；".join(details) if details else ""))
+            self._check_disk_space()
+            archives: list[tuple[PersonDepthPackageSpec, Path]] = []
+            for spec in self.specs:
+                archive = Path(package_paths[spec.package_id]).expanduser().resolve()
+                if not self._valid_archive(archive, spec):
+                    raise PersonDepthComponentUnavailable(f"本地候选包校验失败：{spec.package_id}")
+                archives.append((spec, archive))
+            try:
+                self._install_archives(archives, "local", source_label)
+                self.component_root.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(self.local_manifest_path, self.manifest)
+                self.manifest_path = self.local_manifest_path.resolve()
+                self._mark_ready(source_label)
+                return True
+            except Exception as exc:
+                self._update_state(
+                    state="failed",
+                    ready=False,
+                    message="本机高精度人物深度组件安装失败",
+                    error=(str(exc) or exc.__class__.__name__)[:2000],
+                )
+                raise
 
     def _download_and_install(self) -> bool:
         proxies = dict(self.proxy_provider() or {})

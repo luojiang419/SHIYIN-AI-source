@@ -20105,6 +20105,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             mode,
             has_model_subject=has_model,
             has_scene=has_scene,
+            output_aspect_ratio=payload.generation.aspect_ratio,
             user_instruction=original_instruction,
             normalized_instruction=normalized_result.get("analysis"),
         )
@@ -20129,6 +20130,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         "template_variant": compiled.template_variant,
         "scenario_id": compiled.scenario_id,
         "control_mode": compiled.control_mode,
+        "output_aspect_ratio": compiled.output_aspect_ratio,
         "control_signature": str(payload.control_signature or "")[:500],
         "prompt_source": compiled.prompt_source,
         "assistant_calls": int(assistant_metadata.get("assistant_calls") or 0),
@@ -20170,6 +20172,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             "template_variant": compiled.template_variant,
             "scenario_id": compiled.scenario_id,
             "control_mode": compiled.control_mode,
+            "output_aspect_ratio": compiled.output_aspect_ratio,
             "prompt_source": compiled.prompt_source,
             "assistant_calls": int(assistant_metadata.get("assistant_calls") or 0),
             "reference_order": [dict(item) for item in compiled.reference_order],

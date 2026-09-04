@@ -12046,7 +12046,7 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
             inputs:{pose_reference:inputs.action, control_map:inputs.control, target_image:inputs.target, model_subject:inputs.modelSubject || null, scene:inputs.scene || null},
             user_instruction:prompt || '',
             generation:{provider_id:providerId, model, resolution:node.poseReplicateResolution || '2k', aspect_ratio:ratio, quality:runSettings.quality || 'high', count:1},
-            prompt_policy:{template_id:'pose-replicate.v2.1', locale:'zh-CN'},
+            prompt_policy:{template_id:'pose-replicate.v2.2', locale:'zh-CN'},
             control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
         };
         const submitted = await fetch('/api/canvas/pose-replicate-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async response => {

@@ -51,11 +51,15 @@ def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_sce
     assert result.template_id == POSE_REPLICATE_TEMPLATE_ID
     assert result.scenario_id == scenario
     assert result.prompt_source == "fixed-template"
+    assert result.output_aspect_ratio == "16:9"
     assert [item["role"] for item in result.reference_order] == roles
     assert [item["index"] for item in result.reference_order] == list(range(1, len(roles) + 1))
     assert "自然褶皱与受力" in result.final_prompt
     assert "受力链与褶皱拓扑" in result.final_prompt
     assert "只输出一张" in result.final_prompt
+    assert "只能出现一个最终人物实例" in result.final_prompt
+    assert "严禁拼图、分栏、三联画" in result.final_prompt
+    assert "只能在同一个镜头内自然扩展背景或裁切" in result.final_prompt
     for sample_specific in ("豹纹", "眼镜", "手袋"):
         assert sample_specific not in result.final_prompt
 
@@ -93,6 +97,7 @@ def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_p
     assert image_payload.operation == "pose_replicate"
     assert image_payload.prompt_context["prompt_source"] == "fixed-template"
     assert image_payload.prompt_context["assistant_calls"] == 0
+    assert image_payload.prompt_context["output_aspect_ratio"] == "16:9"
     assert [item.role for item in image_payload.reference_images] == [
         "pose_reference",
         "control_map",
@@ -207,6 +212,14 @@ def test_pose_replicate_size_contract_matches_canvas_defaults():
     assert main.pose_replicate_image_size("16:9", "2k") == "2048x1152"
     with pytest.raises(PoseReplicatePromptError):
         main.pose_replicate_image_size("2:1", "2k")
+
+
+def test_portrait_references_use_output_ratio_without_collage_fallback():
+    result = compile_pose_replicate_prompt("depth", output_aspect_ratio="16:9")
+    assert result.audit_payload()["output_aspect_ratio"] == "16:9"
+    assert "最终画布必须为 16:9" in result.final_prompt
+    assert "原图裁切只作为内容取舍参考，不得覆盖最终输出画幅" in result.final_prompt
+    assert "第二个人物副本" in result.final_prompt
 
 
 def test_pose_replicate_rejects_provider_fallback_instead_of_silently_switching():

@@ -144,7 +144,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
             self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.04.pose-replicate-top-ports.1", page)
-            self.assertIn("feature=pose-replicate-v2.1", page)
+            self.assertIn("feature=pose-replicate-v2.2", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
@@ -569,7 +569,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
                 re.S,
             ).group(0)
             self.assertIn("'/api/canvas/pose-replicate-tasks'", body)
-            self.assertIn("template_id:'pose-replicate.v2.1'", body)
+            self.assertIn("template_id:'pose-replicate.v2.2'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
 
 

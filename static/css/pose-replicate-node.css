@@ -9,6 +9,7 @@
 .pose-replicate-column-title { color: var(--faint, #777); font-size: 9px; font-weight: 800; text-align: center; }
 
 .pose-replicate-input-card {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -25,12 +26,48 @@
     overflow: hidden;
 }
 
+.pose-replicate-input-card.is-editable { cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.pose-replicate-input-card.is-editable:hover,
+.pose-replicate-input-card.is-editable:focus-visible { border-color: var(--strong, #222); box-shadow: 0 0 0 2px color-mix(in srgb, var(--strong, #222) 14%, transparent); outline: 0; }
+.pose-replicate-input-card.is-uploading { cursor: wait; opacity: .62; }
 .pose-replicate-input-card svg { width: 30px; height: 30px; }
 .pose-replicate-input-card strong { color: var(--text, #222); font-size: 12px; }
 .pose-replicate-input-card span { color: var(--faint, #777); font-size: 9px; }
 .pose-replicate-input-card.has-image { padding: 0; border-style: solid; background: #151515; }
 .pose-replicate-input-card img { display: block; width: 100%; height: 100%; min-height: 118px; object-fit: contain; }
 .pose-replicate-input-card [data-lucide="loader-2"] { animation: special-spin .8s linear infinite; }
+.pose-replicate-inputs .pose-replicate-input-card { height: 118px; min-height: 118px; }
+.pose-replicate-inputs .pose-replicate-input-card img { height: 118px; min-height: 0; }
+.pose-replicate-file-input { display: none; }
+.pose-replicate-input-card .pose-replicate-source-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    background: rgba(12, 12, 12, .76);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1;
+    pointer-events: none;
+}
+.pose-replicate-remove-input {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    display: grid;
+    place-items: center;
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    border: 1px solid rgba(255,255,255,.4);
+    border-radius: 6px;
+    background: rgba(12,12,12,.76);
+    color: #fff;
+}
+.pose-replicate-remove-input:hover { background: var(--danger, #dc2626); }
+.pose-replicate-remove-input svg { width: 13px; height: 13px; }
 
 .pose-replicate-control-panel {
     display: grid;

@@ -21,6 +21,13 @@
     ].join('\n');
     const DWPOSE_MODEL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
     const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
+    const POSE_REPLICATE_INPUT_ROLES = ['pose-reference','target-image','model-subject','scene'];
+    const POSE_REPLICATE_ROLE_LABELS = {
+        'pose-reference':'动作参考',
+        'target-image':'目标图',
+        'model-subject':'模特主体',
+        'scene':'场景'
+    };
     const panoramaStates = new WeakMap();
     const poseTasks = new Map();
     const personDepthBindings = new Map();
@@ -42,6 +49,21 @@
     function sourceSignature(item){
         if(!item?.url) return '';
         return `${item.url}|${item.name || ''}|${item.natural_w || ''}x${item.natural_h || ''}`;
+    }
+    function poseReplicateManualInputs(node){
+        const source = node?.poseReplicateManualInputs && typeof node.poseReplicateManualInputs === 'object'
+            ? node.poseReplicateManualInputs
+            : {};
+        const normalized = {};
+        POSE_REPLICATE_INPUT_ROLES.forEach(role => {
+            const item = source[role];
+            if(item?.url) normalized[role] = {...item, url:String(item.url), name:String(item.name || nameFromUrl(item.url)), kind:'image'};
+        });
+        node.poseReplicateManualInputs = normalized;
+        return normalized;
+    }
+    function poseReplicateManualInput(node, role){
+        return poseReplicateManualInputs(node)[role] || null;
     }
     async function responseError(response, fallback){
         const data = await response.clone().json().catch(() => null);
@@ -212,13 +234,20 @@
             createDirectorOutputNode: options.createDirectorOutputNode,
         });
     }
-    function poseReplicateImageCard(item, role, label, emptyIcon, emptyText, hint='请从对应端口连接图片'){
+    function poseReplicateImageCard(item, role, label, emptyIcon, emptyText, hint='点击上传，或从对应端口连接图片', options={}){
         const url = item?.url || '';
+        const editable = Boolean(options.editable);
+        const manual = Boolean(options.manual);
+        const sourceLabel = manual ? '手动' : url && editable ? '连线' : '';
+        const title = editable ? (manual ? `点击替换${label}` : `点击上传${label}`) : '';
         return `<div class="pose-replicate-column">
             <div class="pose-replicate-column-title">${esc(label)}</div>
-            <div class="pose-replicate-input-card ${url ? 'has-image' : ''}" data-pose-replicate-slot="${role}">
+            <div class="pose-replicate-input-card ${url ? 'has-image' : ''} ${editable ? 'is-editable' : ''} ${manual ? 'is-manual' : ''}" data-pose-replicate-slot="${role}" ${editable ? `data-pose-replicate-upload-role="${role}" role="button" tabindex="0" title="${esc(title)}"` : ''}>
                 ${url ? `<img src="${esc(url)}" alt="${esc(label)}" draggable="false">` : `<i data-lucide="${emptyIcon}"></i><strong>${esc(emptyText)}</strong><span>${esc(hint)}</span>`}
+                ${sourceLabel ? `<span class="pose-replicate-source-badge">${sourceLabel}</span>` : ''}
+                ${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="${role}" title="移除手动${esc(label)}" aria-label="移除手动${esc(label)}"><i data-lucide="trash-2"></i></button>` : ''}
             </div>
+            ${editable ? `<input class="pose-replicate-file-input" type="file" accept="image/*" data-pose-replicate-file="${role}" tabindex="-1">` : ''}
         </div>`;
     }
     function poseReplicateComponentHtml(status){
@@ -269,10 +298,11 @@
     }
     function poseReplicateBodyHtml(node, options={}){
         normalizePoseReplicateNode(node, options);
-        const action = node.poseReferenceUrl ? {url:node.poseReferenceUrl} : null;
-        const target = node.targetImageUrl ? {url:node.targetImageUrl} : null;
-        const modelSubject = node.modelSubjectUrl ? {url:node.modelSubjectUrl} : null;
-        const scene = node.sceneUrl ? {url:node.sceneUrl} : null;
+        const manualInputs = poseReplicateManualInputs(node);
+        const action = manualInputs['pose-reference'] || (node.poseReferenceUrl ? {url:node.poseReferenceUrl} : null);
+        const target = manualInputs['target-image'] || (node.targetImageUrl ? {url:node.targetImageUrl} : null);
+        const modelSubject = manualInputs['model-subject'] || (node.modelSubjectUrl ? {url:node.modelSubjectUrl} : null);
+        const scene = manualInputs.scene || (node.sceneUrl ? {url:node.sceneUrl} : null);
         const mode = node.poseReplicateMode;
         const control = mode === 'depth'
             ? (node.poseDepthUrl ? {url:node.poseDepthUrl} : null)
@@ -293,19 +323,19 @@
                     : !modelReady
                         ? '所选图片生成平台或模型尚未配置'
                         : action?.url && !control?.url
-                            ? `动作参考已连接，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
-                            : '请连接动作参考和目标图';
+                            ? `动作参考已添加，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
+                            : '请上传或连接动作参考和目标图';
         const ratios = ['1:1','16:9','9:16','4:3','3:4'];
         const resolutions = ['1k','2k','4k'];
         return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
             <div class="pose-replicate-inputs">
-                ${poseReplicateImageCard(action, 'pose-reference', '动作参考', 'person-standing', '连接动作参考')}
-                ${poseReplicateImageCard(target, 'target-image', '目标图', 'shirt', '连接服装来源')}
-                ${poseReplicateImageCard(modelSubject, 'model-subject', '模特主体 · 可选', 'user-round', '连接模特主体')}
-                ${poseReplicateImageCard(scene, 'scene', '场景 · 可选', 'image', '连接场景')}
+                ${poseReplicateImageCard(action, 'pose-reference', '动作参考', 'person-standing', '上传动作参考', undefined, {editable:true, manual:Boolean(manualInputs['pose-reference'])})}
+                ${poseReplicateImageCard(target, 'target-image', '目标图', 'shirt', '上传服装来源', undefined, {editable:true, manual:Boolean(manualInputs['target-image'])})}
+                ${poseReplicateImageCard(modelSubject, 'model-subject', '模特主体 · 可选', 'user-round', '上传模特主体', undefined, {editable:true, manual:Boolean(manualInputs['model-subject'])})}
+                ${poseReplicateImageCard(scene, 'scene', '场景 · 可选', 'image', '上传场景', undefined, {editable:true, manual:Boolean(manualInputs.scene)})}
             </div>
             <div class="pose-replicate-control-panel">
-                ${poseReplicateImageCard(control, 'control-map', mode === 'depth' ? '内部控制图 · 深度' : '内部控制图 · 骨架', status === 'running' ? 'loader-2' : mode === 'depth' ? 'scan-line' : 'activity', status === 'running' ? '控制图提取中' : status === 'failed' ? '提取失败' : '连接动作参考后自动生成', '内部生成，不占用输入端口')}
+                ${poseReplicateImageCard(control, 'control-map', mode === 'depth' ? '内部控制图 · 深度' : '内部控制图 · 骨架', status === 'running' ? 'loader-2' : mode === 'depth' ? 'scan-line' : 'activity', status === 'running' ? '控制图提取中' : status === 'failed' ? '提取失败' : '添加动作参考后自动生成', '内部生成，不占用输入端口')}
                 ${mode === 'depth' ? poseReplicateComponentHtml(personDepthStatus) : ''}
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
@@ -1111,7 +1141,20 @@
     }
 
     function poseReplicateInput(node, options, role){
-        return options.getInputImage?.(node, role) || null;
+        return poseReplicateManualInput(node, role) || options.getInputImage?.(node, role) || null;
+    }
+    function setPoseReplicateManualInput(node, role, item){
+        if(!POSE_REPLICATE_INPUT_ROLES.includes(role) || !item?.url) return false;
+        node.poseReplicateManualInputs = {...poseReplicateManualInputs(node), [role]:{...item, kind:'image'}};
+        return true;
+    }
+    function removePoseReplicateManualInput(node, role){
+        const current = poseReplicateManualInputs(node);
+        if(!current[role]) return false;
+        const next = {...current};
+        delete next[role];
+        node.poseReplicateManualInputs = next;
+        return true;
     }
     function assignPoseReplicateInput(node, role, item){
         const prefixes = {
@@ -1232,6 +1275,7 @@
     }
     function bindPoseReplicate(root, node, options={}){
         if(!root || !node) return;
+        poseReplicateManualInputs(node);
         if(node.poseReplicateMode === 'depth') registerPersonDepthBinding(node, options);
         const action = poseReplicateInput(node, options, 'pose-reference');
         const target = poseReplicateInput(node, options, 'target-image');
@@ -1243,6 +1287,55 @@
         const sceneChanged = assignPoseReplicateInput(node, 'scene', scene);
         if(actionChanged) clearPoseReplicateControls(node);
         if(actionChanged || targetChanged || modelChanged || sceneChanged) notify(options, node, true);
+
+        root.querySelectorAll('[data-pose-replicate-upload-role]').forEach(card => {
+            const role = card.dataset.poseReplicateUploadRole;
+            const fileInput = root.querySelector(`[data-pose-replicate-file="${role}"]`);
+            card.addEventListener('pointerdown', event => event.stopPropagation());
+            card.addEventListener('mousedown', event => event.stopPropagation());
+            card.addEventListener('click', event => {
+                if(event.target.closest('[data-pose-replicate-remove-role]')) return;
+                event.preventDefault(); event.stopPropagation(); fileInput?.click();
+            });
+            card.addEventListener('keydown', event => {
+                if(event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault(); event.stopPropagation(); fileInput?.click();
+            });
+            fileInput?.addEventListener('click', event => event.stopPropagation());
+            fileInput?.addEventListener('change', async event => {
+                event.stopPropagation();
+                const file = event.target.files?.[0];
+                if(!file) return;
+                card.classList.add('is-uploading');
+                try {
+                    const uploaded = await uploadFile(file);
+                    setPoseReplicateManualInput(node, role, uploaded);
+                    const changed = assignPoseReplicateInput(node, role, uploaded);
+                    if(role === 'pose-reference' && changed) clearPoseReplicateControls(node);
+                    notify(options, node, true);
+                    options.toast?.(`已手动添加${POSE_REPLICATE_ROLE_LABELS[role] || '图片'}，该角色将忽略连线输入`);
+                } catch(error){ options.toast?.(error.message || '图片上传失败'); }
+                finally { event.target.value = ''; card.classList.remove('is-uploading'); }
+            });
+        });
+        root.querySelectorAll('[data-pose-replicate-remove-role]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+            button.addEventListener('mousedown', event => event.stopPropagation());
+        });
+        root.addEventListener('click', event => {
+            const button = event.target.closest('[data-pose-replicate-remove-role]');
+            if(!button || !root.contains(button)) return;
+            event.preventDefault(); event.stopPropagation();
+            const role = button.dataset.poseReplicateRemoveRole;
+            if(!removePoseReplicateManualInput(node, role)) return;
+            const fallback = options.getInputImage?.(node, role) || null;
+            const changed = assignPoseReplicateInput(node, role, fallback);
+            if(role === 'pose-reference' && changed) clearPoseReplicateControls(node);
+            notify(options, node, true);
+            options.toast?.(fallback?.url
+                ? `已移除手动${POSE_REPLICATE_ROLE_LABELS[role] || '图片'}，恢复使用连线输入`
+                : `已移除手动${POSE_REPLICATE_ROLE_LABELS[role] || '图片'}`);
+        }, true);
 
         root.querySelectorAll('[data-pose-replicate-field]').forEach(control => {
             control.addEventListener('pointerdown', event => event.stopPropagation());

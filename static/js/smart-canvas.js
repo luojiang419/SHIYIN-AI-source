@@ -12716,7 +12716,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             e.stopPropagation();
             if(nodeForControls?.specialType){
                 if(nodeForControls.specialType === 'pose-replicate'){
-                    toast('一键复刻仅接受端口连线，请连接动作参考、目标图、模特主体或场景');
+                    toast('请点击对应缩略图卡片上传，或通过端口连接动作参考、目标图、模特主体或场景');
                     return;
                 }
                 const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));

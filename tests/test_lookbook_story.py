@@ -527,6 +527,90 @@ class LookbookStoryContractTests(unittest.TestCase):
         self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "85mm tight action close-up, chest-up with hands entering frame"}}), 1.9)
         self.assertEqual(main.lookbook_scene_zoom_for_card({"camera": {"shot_size": "50mm low-angle medium hero two-shot, knees-up"}}), 1.5)
 
+    def test_scene_reference_package_keeps_master_and_appends_derived_region(self):
+        references = [
+            {"url": "/assets/model.png", "reference_type": "subject", "lookbook_role": "人物"},
+            {"url": "/assets/scene.png", "reference_type": "scene", "lookbook_role": "场景", "reference_id": "scene-1"},
+        ]
+        derived = {
+            **references[1],
+            "url": "/output/lookbook_scene_zoom_test.jpg",
+            "lookbook_scene_derived": True,
+            "lookbook_scene_source_index": 2,
+        }
+        card = {"camera": {"shot_size": "85mm tight action close-up, chest-up with hands entering frame"}}
+        with patch.object(main, "lookbook_scene_reference_for_card", return_value=derived):
+            packaged = main.lookbook_references_for_card(references, card, max_references=4)
+        self.assertEqual([item["url"] for item in packaged[:2]], ["/assets/model.png", "/assets/scene.png"])
+        self.assertEqual(packaged[2]["url"], "/output/lookbook_scene_zoom_test.jpg")
+        self.assertIn("Image 2 is an immutable full scene master", main.lookbook_scene_reference_package_prompt(packaged))
+        self.assertIn("derived region navigation crop from scene master Image 2", main.lookbook_scene_reference_package_prompt(packaged))
+
+    def test_scene_reference_package_never_drops_master_at_provider_limit(self):
+        references = [
+            {"url": "/assets/model.png", "reference_type": "subject", "lookbook_role": "人物"},
+            {"url": "/assets/scene.png", "reference_type": "scene", "lookbook_role": "场景"},
+        ]
+        card = {"camera": {"shot_size": "85mm tight action close-up, chest-up with hands entering frame"}}
+        with patch.object(main, "lookbook_scene_reference_for_card") as crop:
+            packaged = main.lookbook_references_for_card(references, card, max_references=2)
+        crop.assert_not_called()
+        self.assertEqual(packaged, references)
+
+    def test_scene_focus_follows_shot_region_and_ground_detail(self):
+        left = main.lookbook_scene_focus_for_card({"scene_region": "画面左侧门廊", "composition": "人物位于左三分"})
+        right_ground = main.lookbook_scene_focus_for_card({"scene_region": "right side pavement and footwear"})
+        self.assertEqual(left, (0.35, 0.48))
+        self.assertEqual(right_ground, (0.65, 0.62))
+
+    def test_reference_analysis_extracts_scene_geometry_and_extension_limits(self):
+        calls = []
+
+        async def fake_canvas_llm(payload):
+            calls.append(payload)
+            return {"text": '{"scene_masters":[]}'}
+
+        snapshot = {
+            "operation": "universal",
+            "inputs": [{"url": "/assets/scene.png", "reference_type": "scene", "lookbook_role": "场景", "label": "海边小屋"}],
+            "options": {"prompt_policy": "lookbook"},
+        }
+        route = {"provider_id": "vision", "model": "vision-model"}
+        with patch.object(main, "configured_ecommerce_vision_route", return_value=route), patch.object(main, "canvas_llm", new=fake_canvas_llm):
+            _enriched, meta = asyncio.run(main.enrich_lookbook_reference_analysis(snapshot))
+        self.assertEqual(meta["status"], "succeeded")
+        self.assertIn("scene_masters", calls[0].message)
+        self.assertIn("门窗/开口数量与相对位置", calls[0].message)
+        self.assertIn("extension_limits", calls[0].message)
+
+    def test_scene_masters_are_prioritized_for_limited_quality_analysis(self):
+        references = [
+            {"url": f"/assets/person-{index}.png", "reference_type": "subject", "lookbook_role": "人物"}
+            for index in range(12)
+        ]
+        references.append({"url": "/assets/scene.png", "reference_type": "scene", "lookbook_role": "场景"})
+        selected = main.prioritize_lookbook_scene_references(references, 10)
+        self.assertEqual(selected[0]["url"], "/assets/scene.png")
+        self.assertEqual(len(selected), 10)
+
+    def test_quality_gate_rejects_replacement_locations_when_scene_is_supplied(self):
+        calls = []
+
+        async def fake_canvas_llm(payload):
+            calls.append(payload)
+            return {"text": '{"passed":true,"score":90,"weak_indices":[],"issues":[],"corrections":{},"summary":"ok"}'}
+
+        snapshot = {
+            "inputs": [{"url": "/assets/scene.png", "reference_type": "scene", "lookbook_role": "场景", "label": "海边小屋"}],
+            "options": {"prompt_policy": "lookbook", "instruction": "人物走近小屋"},
+        }
+        route = {"provider_id": "vision", "model": "vision-model"}
+        with patch.object(main, "configured_ecommerce_vision_route", return_value=route), patch.object(main, "canvas_llm", new=fake_canvas_llm):
+            result = asyncio.run(main.analyze_lookbook_outputs(snapshot, ["/output/frame.png"]))
+        self.assertTrue(result["passed"])
+        self.assertIn("相似风格的另一个地点", calls[0].message)
+        self.assertIn("原始参考：场景", calls[0].image_labels[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17729,18 +17729,53 @@ def lookbook_scene_zoom_for_card(card: Dict[str, Any]) -> float:
     return 1.0
 
 
-def lookbook_scene_reference_for_card(reference: Dict[str, Any], card: Dict[str, Any]) -> Dict[str, Any]:
-    """为非全景镜头生成确定性的放大场景参考；远程或无效素材安全回退。"""
+def is_lookbook_scene_reference(reference: Dict[str, Any]) -> bool:
     role = str(reference.get("lookbook_role") or reference.get("reference_type") or reference.get("role") or "").strip().lower()
+    return role in {"场景", "scene", "lookbook-scene"}
+
+
+def prioritize_lookbook_scene_references(references: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    """视觉分析/质检容量有限时优先保留场景母图，其余输入保持原顺序。"""
+    values = [item for item in references if isinstance(item, dict) and item.get("url")]
+    scenes = [item for item in values if is_lookbook_scene_reference(item)]
+    others = [item for item in values if not is_lookbook_scene_reference(item)]
+    return [*scenes, *others][:max(0, int(limit or 0))]
+
+
+def lookbook_scene_focus_for_card(card: Dict[str, Any]) -> Tuple[float, float]:
+    """从镜头卡的区域/构图语义选择稳定裁切中心，完整母图仍是场景事实源。"""
+    camera = card.get("camera") if isinstance(card.get("camera"), dict) else {}
+    focus_text = " ".join((
+        str(card.get("scene_region") or ""),
+        str(card.get("composition") or ""),
+        str(card.get("location") or ""),
+        str(camera.get("framing_lock") or ""),
+    )).lower()
+    left_markers = ("left third", "frame left", "left side", "画面左", "左侧", "左三分")
+    right_markers = ("right third", "frame right", "right side", "画面右", "右侧", "右三分")
+    ground_markers = ("ground", "feet", "footwear", "pavement", "地面", "脚部", "鞋")
+    upper_markers = ("upper facade", "roof", "sky", "上部", "屋顶", "天空")
+    focus_x = 0.35 if any(marker in focus_text for marker in left_markers) else 0.65 if any(marker in focus_text for marker in right_markers) else 0.5
+    focus_y = 0.62 if any(marker in focus_text for marker in ground_markers) else 0.38 if any(marker in focus_text for marker in upper_markers) else 0.48
+    return focus_x, focus_y
+
+
+def lookbook_scene_reference_for_card(
+    reference: Dict[str, Any],
+    card: Dict[str, Any],
+    source_index: int = 0,
+) -> Dict[str, Any]:
+    """为非全景镜头生成区域导航图；调用方必须同时保留完整场景母图。"""
     zoom = lookbook_scene_zoom_for_card(card)
-    if role not in {"场景", "scene"} or zoom <= 1.01:
+    if not is_lookbook_scene_reference(reference) or zoom <= 1.01:
         return dict(reference)
     source_url = str(reference.get("url") or "").strip()
     source_path = output_file_from_url(source_url)
     if not source_path:
         return dict(reference)
     try:
-        digest = hashlib.sha256(f"{source_url}|{zoom:.2f}".encode("utf-8")).hexdigest()[:12]
+        focus_x, focus_y = lookbook_scene_focus_for_card(card)
+        digest = hashlib.sha256(f"{source_url}|{zoom:.2f}|{focus_x:.2f}|{focus_y:.2f}".encode("utf-8")).hexdigest()[:12]
         target_path = os.path.join(OUTPUT_OUTPUT_DIR, f"lookbook_scene_zoom_{digest}.jpg")
         if not os.path.exists(target_path):
             with Image.open(source_path) as image:
@@ -17748,8 +17783,10 @@ def lookbook_scene_reference_for_card(reference: Dict[str, Any], card: Dict[str,
                 width, height = image.size
                 crop_width = max(1, int(round(width / zoom)))
                 crop_height = max(1, int(round(height / zoom)))
-                left = max(0, (width - crop_width) // 2)
-                top = max(0, int(round((height - crop_height) * 0.42)))
+                center_x = int(round(width * focus_x))
+                center_y = int(round(height * focus_y))
+                left = max(0, min(width - crop_width, center_x - crop_width // 2))
+                top = max(0, min(height - crop_height, center_y - crop_height // 2))
                 crop = image.crop((left, top, left + crop_width, top + crop_height))
                 crop = crop.resize((width, height), Image.Resampling.LANCZOS)
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -17764,14 +17801,53 @@ def lookbook_scene_reference_for_card(reference: Dict[str, Any], card: Dict[str,
             "name": f"scene-framing-{zoom:.2f}x.jpg",
             "label": f"{label} · 当前镜头景别裁切 {zoom:.2f}x",
             "lookbook_scene_zoom": zoom,
+            "lookbook_scene_derived": True,
+            "lookbook_scene_source_index": source_index,
+            "lookbook_scene_source_reference_id": str(reference.get("reference_id") or ""),
+            "lookbook_scene_focus": {"x": focus_x, "y": focus_y},
         }
     except Exception as exc:
         print(f"[lookbook] scene framing fallback zoom={zoom:.2f} error={type(exc).__name__}", flush=True)
         return dict(reference)
 
 
-def lookbook_references_for_card(references: List[Dict[str, Any]], card: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return [lookbook_scene_reference_for_card(reference, card) for reference in references]
+def lookbook_references_for_card(
+    references: List[Dict[str, Any]],
+    card: Dict[str, Any],
+    max_references: int = ONLINE_IMAGE_REFERENCE_MAX,
+) -> List[Dict[str, Any]]:
+    """完整参考始终在前，容量允许时才追加场景区域图，绝不以裁切图替换母图。"""
+    originals = [dict(reference) for reference in references if isinstance(reference, dict) and reference.get("url")]
+    limit = max(len(originals), int(max_references or ONLINE_IMAGE_REFERENCE_MAX))
+    packaged = list(originals)
+    for source_index, reference in enumerate(originals, 1):
+        if len(packaged) >= limit or not is_lookbook_scene_reference(reference):
+            continue
+        derived = lookbook_scene_reference_for_card(reference, card, source_index=source_index)
+        if str(derived.get("url") or "") == str(reference.get("url") or ""):
+            continue
+        packaged.append(derived)
+    return packaged
+
+
+def lookbook_scene_reference_package_prompt(references: List[Dict[str, Any]]) -> str:
+    masters = []
+    derived = []
+    for index, reference in enumerate(references, 1):
+        if not is_lookbook_scene_reference(reference):
+            continue
+        if reference.get("lookbook_scene_derived"):
+            source_index = int(reference.get("lookbook_scene_source_index") or 0)
+            derived.append(f"Image {index} is a derived region navigation crop from scene master Image {source_index}")
+        else:
+            masters.append(f"Image {index} is an immutable full scene master")
+    if not masters:
+        return ""
+    return (
+        "\nSCENE EVIDENCE PACKAGE: "
+        + "; ".join([*masters, *derived])
+        + ". Keep every master as the location source of truth. Select the story-appropriate visible region, and extend a new viewpoint only from evidence in that same master; never synthesize a merely similar replacement location."
+    )
 
 
 async def execute_lookbook_story_batch(
@@ -17787,25 +17863,31 @@ async def execute_lookbook_story_batch(
     cards = enforce_lookbook_story_rhythm_contract(cards, count)
     prompts = lookbook_generation_prompts(snapshot)
     refs = [dict(item) for item in snapshot.get("inputs") or [] if isinstance(item, dict) and item.get("url")]
+    try:
+        max_reference_images = max(len(refs), int(route.get("max_reference_images") or ONLINE_IMAGE_REFERENCE_MAX))
+    except (TypeError, ValueError):
+        max_reference_images = max(len(refs), ONLINE_IMAGE_REFERENCE_MAX)
     semaphore = asyncio.Semaphore(LOOKBOOK_STORY_GENERATION_CONCURRENCY)
     started_at = time.time()
 
     async def generate_card(card: Dict[str, Any], continuity_refs: Optional[List[Dict[str, Any]]] = None):
         index = int(card["index"])
-        card_refs = lookbook_references_for_card(refs, card)
+        card_refs = lookbook_references_for_card(refs, card, max_references=max_reference_images)
         if continuity_refs:
             # 首帧只作为人物/服装/光线/色彩连续性锚点，不拥有后续镜头的
             # 相机、构图或动作；shot prompt 中的强制景别契约仍然优先。
             anchor_refs = [dict(item) for item in continuity_refs if isinstance(item, dict) and item.get("url")]
             # 路由筛选按原始参考图上限进行；加入锚点时保留上限，避免某些
             # provider 因 15 张参考图直接拒绝整个镜头。
-            card_refs = (card_refs[:13] + anchor_refs[:1]) if len(card_refs) >= 14 else (card_refs + anchor_refs)
+            if len(card_refs) < max_reference_images:
+                card_refs.extend(anchor_refs[:max(0, max_reference_images - len(card_refs))])
+        current_prompt = prompts[index - 1] + lookbook_scene_reference_package_prompt(card_refs)
         last_error = ""
         for attempt in range(LOOKBOOK_STORY_MAX_RETRIES + 1):
             try:
                 async with semaphore:
                     batch = await execute_ai_image_batch(
-                        prompt=prompts[index - 1],
+                        prompt=current_prompt,
                         provider_id=route["provider_id"],
                         model=route["model"],
                         size=snapshot["size"],
@@ -18310,31 +18392,36 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
 
 
 async def enrich_lookbook_reference_analysis(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
-    """先分析人物/商品的可见事实，再把事实交给后续案例检索，避免搜索阶段脱离素材。"""
+    """先分析人物、商品和场景的可见事实，再交给后续策划，避免脱离素材。"""
     options = dict(snapshot.get("options") or {})
     if snapshot.get("operation") != "universal" or str(options.get("prompt_policy") or "").strip().lower() != "lookbook":
         return snapshot, None
     if str(options.get("lookbook_reference_analysis") or "").strip():
         return snapshot, {"status": "provided", "summary": str(options["lookbook_reference_analysis"])[:8000]}
     route = configured_ecommerce_vision_route()
-    images = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:12]
+    analysis_items = prioritize_lookbook_scene_references(snapshot.get("inputs") or [], 12)
+    images = [str(item.get("url") or "") for item in analysis_items]
     if not route or not images:
         return snapshot, {"status": "skipped", "reason": "没有可分析的参考图或视觉模型"}
     labels = [
         f"{str(item.get('lookbook_role') or item.get('label') or '参考素材').strip()}：{str(item.get('name') or '')[:100]}"
-        for item in (snapshot.get("inputs") or [])
-        if str(item.get("url") or "").strip()
-    ][:12]
+        for item in analysis_items
+    ]
     request = CanvasLLMRequest(
         message=(
             "请先分析本次 Lookbook 参考图，只记录图片中确实可见的事实，供后续时尚案例研究和造型创作使用。"
             "重点拆解人物身份连续性、面部特征、发型、肤色与表情、体态和穿着层次（廓形、面料、颜色、鞋包配饰）、"
             "现有造型气质、可延展的动作和环境线索；不要美化、臆测品牌，不要替人物换衣，不要把不存在的商品写进去。"
+            "对每张标注为场景的母图，必须逐图记录地点类型、独特地标、建筑体块和空间拓扑、门窗/开口数量与相对位置、道路/围栏走向、材质与主色、植被与地形、光源方向。"
+            "selectable_regions 只能列母图中真实可见且适合承载人物动作的区域；extension_limits 要写改变机位时哪些结构可以沿可见证据保守延展、哪些标志性几何绝不能新增、删除或移动。"
             "输出 JSON，不要 Markdown："
             '{"identity":"","face":"","hair":"","body_and_pose":"","wardrobe":"","silhouette_and_material":"",'
-            '"visible_palette":"","current_mood":"","street_editorial_opportunities":[""],"preserve_facts":[""]}'
+            '"visible_palette":"","current_mood":"","street_editorial_opportunities":[""],"preserve_facts":[""],'
+            '"scene_masters":[{"reference_label":"","location_type":"","landmarks":"","geometry_topology":"",'
+            '"openings":"","roads_and_fences":"","materials_and_colors":"","vegetation_and_terrain":"","lighting":"",'
+            '"selectable_regions":[""],"extension_limits":[""]}]}'
         ),
-        system_prompt="你是严谨的时尚造型与人物参考分析师。只依据所见事实，输出严格 JSON。",
+        system_prompt="你是严谨的时尚造型、人物与场景连续性分析师。只依据所见事实，输出严格 JSON。",
         provider=route["provider_id"], model=route["model"], images=images, image_labels=labels, web_search=False, retry_524=1,
     )
     try:
@@ -18764,6 +18851,8 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             f"以下景别分配是后端强制契约，shot_cards 必须逐项复制对应的 shot_size 和 framing，不能全部规划为大全景或全身照：{json.dumps(lookbook_shot_scale_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
             f"以下节奏分配也是后端强制契约；每张卡必须执行对应 rhythm_role、story_function、transition_rule 和 energy，不能把它们改成同姿势换角度：{json.dumps(lookbook_story_rhythm_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
             "每张卡只承担一个清晰叙事功能，并明确上一张结束状态如何成为本张开始状态；不能只写‘换一个角度’。"
+            "连接场景参考时，每张卡必须在 scene_region 写明从场景母图中选取的真实可见区域或标志物，在 scene_extension 写明新机位需要如何沿用母图可见的建筑结构、空间拓扑、材质、色彩、植被和光线。"
+            "改变机位不等于重新设计地点；不得凭空改变门窗数量与位置、道路/围栏走向、建筑体块、地形、陈设或独特景观。母图没有证据的画外空间应保守、简化并保持非标志性。"
             + (
                 f"用户明确要求 {str(layout_intent.get('specification') or layout_intent.get('source') or '杂志排版')}，因此可以在每张输出中按该规格规划有主次的编辑排版；"
                 "排版必须像顶级时尚杂志专题页，所有分格服务同一叙事节拍，严禁随机拼贴、重复照片或电商商品方阵。"
@@ -18780,7 +18869,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             '"location":"","props":"","palette":"","lighting":"","camera_grammar":"",'
             '"continuity_locks":[""],"must_keep":[""],"must_avoid":[""]},'
             '"shot_cards":[{"index":1,"beat":"开场","story_purpose":"",'
-            '"time_position":"","location":"","emotion_state":"","objective":"",'
+            '"time_position":"","location":"","scene_region":"","scene_extension":"","emotion_state":"","objective":"",'
             '"action_chain":"","micro_expression":"","weight_and_contact":"",'
             '"subjects":[{"id":"","action":"","gaze":""}],"wardrobe_state":"","prop_state":"",'
             '"camera":{"shot_size":"","angle":"","movement":""},"composition":"",'
@@ -18868,7 +18957,8 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
     route = configured_ecommerce_vision_route()
     if not route:
         return {"status": "skipped", "reason": "未配置可用的 AI助手视觉模型"}
-    references = [str(item.get("url") or "") for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
+    quality_reference_items = prioritize_lookbook_scene_references(snapshot.get("inputs") or [], 10)
+    references = [str(item.get("url") or "") for item in quality_reference_items]
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     brief = str(options.get("instruction") or "")
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
@@ -18876,6 +18966,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
     auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
     effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
     levis_style = effective_style_id in {"levis-adaptive-campaign", "levis-high-key-color", "levis-black-white"}
+    has_scene_reference = any(is_lookbook_scene_reference(item) for item in (snapshot.get("inputs") or []) if isinstance(item, dict))
     layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
     rhythm_contract = lookbook_story_rhythm_contract(len(images)) if len(images) > 1 else []
     layout_check = (
@@ -18883,13 +18974,17 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         if layout_intent.get("explicit") else
         "默认严禁任何拼图、宫格、联系表、分屏或多时刻塞入同一画布；发现即判为弱图。"
     )
-    reference_labels = [f"原始参考：{str(item.get('lookbook_role') or item.get('label') or item.get('name') or '素材')}" for item in (snapshot.get("inputs") or []) if str(item.get("url") or "").strip()][:10]
+    reference_labels = [f"原始参考：{str(item.get('lookbook_role') or item.get('label') or item.get('name') or '素材')}" for item in quality_reference_items]
     output_labels = [f"待验收 Lookbook 输出 {index}（weak_indices 使用这个从 0 开始的编号）" for index in range(len(images))]
     request = CanvasLLMRequest(
         message=(
             "请作为时尚广告终审，逐张检查 Lookbook 输出，并与原始参考和创意方案比较。"
             "检查人物身份与人体、商品结构和颜色、材质纹理、Logo/文字拼写、姿态、场景、版式留白、光影透视、商业完成度和系列一致性。"
-            "检查是否真的在讲视觉故事：人物目标、事件因果、情绪变化、环境关系和品牌理念是否可见；电商目录式摆拍、SKU 陈列、白底棚拍、同姿势换角度和无剧情手势都应判弱。"
+            + (
+                "已提供场景母图。必须逐张与母图比较独特建筑体块、门窗/开口数量与相对位置、道路和围栏走向、材质、主色、植被、地形及光源方向。允许从母图证据延展新机位，但若输出只是相似风格的另一个地点，或无依据新增/移动标志性结构，必须判为 weak_indices 并给出恢复母图地理与几何的修复指令。"
+                if has_scene_reference else ""
+            )
+            + "检查是否真的在讲视觉故事：人物目标、事件因果、情绪变化、环境关系和品牌理念是否可见；电商目录式摆拍、SKU 陈列、白底棚拍、同姿势换角度和无剧情手势都应判弱。"
             "按输出顺序检查节奏契约：建立目标后必须启动并推进动作，在指定锚点发生真实转折，随后出现即时反应、恢复/兑现、产品证明和结果收束；相邻张不能只换角度，continuity_out 必须成为下一张可见的 continuity_in。"
             + (
                 "当前是 Levi's 品牌表演风格。逐张检查视线是否先于身体、重心是否真实转移、肩髋是否有反向关系、手部是否有任务、衣物/头发是否响应动作，以及表情是否由事件触发。"
@@ -18929,17 +19024,32 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
     weak_indices = list(initial.get("weak_indices") or [])[:repair_limit] if initial.get("status") == "succeeded" else []
     retry_details = []
     repair_prompts = lookbook_generation_prompts(snapshot) if isinstance(snapshot.get("options"), dict) and snapshot["options"].get("lookbook_shot_cards") else []
+    repair_cards = []
+    if repair_prompts:
+        repair_cards = normalize_lookbook_shot_cards(options.get("lookbook_shot_cards"), len(repair_prompts))
+        repair_cards = enforce_lookbook_shot_scale_contract(repair_cards, len(repair_prompts))
+        repair_cards = enforce_lookbook_story_rhythm_contract(repair_cards, len(repair_prompts))
+    try:
+        repair_reference_limit = max(len(snapshot.get("inputs") or []), int(route.get("max_reference_images") or ONLINE_IMAGE_REFERENCE_MAX))
+    except (TypeError, ValueError):
+        repair_reference_limit = max(len(snapshot.get("inputs") or []), ONLINE_IMAGE_REFERENCE_MAX)
     if not initial.get("passed") and weak_indices and max_retries:
         for index in weak_indices:
             correction = str((initial.get("corrections") or {}).get(str(index)) or "修复该画面的全部明显质量问题")
+            repair_references = [dict(item) for item in (snapshot.get("inputs") or []) if isinstance(item, dict) and item.get("url")]
+            if index < len(repair_cards):
+                repair_references = lookbook_references_for_card(repair_references, repair_cards[index], max_references=repair_reference_limit)
+            scene_package_prompt = lookbook_scene_reference_package_prompt(repair_references)
             refined = await execute_ai_image_batch(
-                prompt=((repair_prompts[index] if index < len(repair_prompts) else snapshot["prompt"]) + f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style and series-continuity attributes. Apply the same publication-grade series quality anchor and shot-scale lock; output one full-bleed image only."),
-                provider_id=route["provider_id"], model=route["model"], size=snapshot["size"], quality=snapshot["quality"], references=snapshot["inputs"], count=1, prefix="lookbook_repair_", allow_edit_endpoint_fallback=False, semantic_mask=True,
+                prompt=((repair_prompts[index] if index < len(repair_prompts) else snapshot["prompt"]) + scene_package_prompt + f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style, scene-master geography and series-continuity attributes. Apply the same publication-grade series quality anchor and shot-scale lock; output one full-bleed image only."),
+                provider_id=route["provider_id"], model=route["model"], size=snapshot["size"], quality=snapshot["quality"], references=repair_references, count=1, prefix="lookbook_repair_", allow_edit_endpoint_fallback=False, semantic_mask=True,
             )
             replacement = (refined.get("images") or [""])[0]
             if replacement:
                 images[index] = replacement
                 replacement_item = (refined.get("image_items") or [{"url": replacement}])[0]
+                if index < len(image_items) and isinstance(image_items[index], dict):
+                    replacement_item = {**image_items[index], **replacement_item}
                 if index < len(image_items):
                     image_items[index] = replacement_item
                 else:

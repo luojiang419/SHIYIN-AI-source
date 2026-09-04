@@ -481,6 +481,15 @@ def normalize_lookbook_shot_cards(value: Any, count: int) -> List[Dict[str, Any]
             card.get("weight_and_contact")
             or f"至少一脚承重并产生真实接触，肩髋与动作方向形成自然不对称；{primary_gaze or '视线与动作目标保持一致'}，衣物/头发保留动作余势"
         ).strip()[:700]
+        card["scene_region"] = str(
+            card.get("scene_region")
+            or card.get("location")
+            or "从场景母图中选择能承载当前动作的真实可见区域"
+        ).strip()[:700]
+        card["scene_extension"] = str(
+            card.get("scene_extension")
+            or "只沿用场景母图可见的建筑结构、空间拓扑、材质、色彩、植被和光线，保守补全新机位露出的画外空间"
+        ).strip()[:900]
         card["reference_ids"] = [str(item) for item in card.get("reference_ids") or [] if str(item).strip()]
         cards.append(card)
     return cards
@@ -735,7 +744,10 @@ def build_lookbook_shot_prompt(
         + _compact_card(card)
         + "\nMANDATORY SHOT-SCALE LOCK: execute camera.shot_size and camera.framing_lock exactly. "
         "This lock overrides any wider framing implied by the scene reference or composition prose. "
-        "The scene reference owns architecture, light direction and spatial continuity only; it never owns the original camera position, crop or subject scale. "
+        "The supplied full scene master owns the location identity, landmark geometry, spatial topology, facade/opening count and placement, materials, dominant colors, vegetation, terrain and motivated light. "
+        "Select a real region visible in that master for CURRENT SHOT CARD.scene_region. The scene reference never owns the original camera position, crop or subject scale, but changing the camera never authorizes redesigning the place. "
+        "When a new angle reveals off-frame space, outpaint it conservatively from visible structural evidence and CURRENT SHOT CARD.scene_extension. Do not invent a different side wall, door, window, fence, road, skyline, interior layout or landscaping; keep unseen areas simple and non-defining when the master provides no evidence. "
+        "Any supplied derived scene crop is only a navigation detail from the same master, never a separate location and never permission to discard the complete master. "
         "Do not widen a medium or close shot merely to show the complete room or every spectator. "
         + "\nCONTINUITY RULE: preserve the incoming state, execute the current decisive action, and leave the outgoing state for the next frame. "
         + "RHYTHM LOCK: execute CURRENT SHOT CARD.rhythm_lock as the unique dramatic function of this frame. Do not repeat the previous frame's action, pose, gaze, composition or emotional state; make the outgoing state visibly prepare the next rhythm role. "
@@ -760,6 +772,8 @@ def _compact_card(card: Dict[str, Any]) -> str:
             "story_purpose",
             "time_position",
             "location",
+            "scene_region",
+            "scene_extension",
             "emotion_state",
             "objective",
             "action_chain",

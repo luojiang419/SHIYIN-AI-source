@@ -578,6 +578,15 @@ const canvasAssetAddCategoryBtn = document.getElementById('canvasAssetAddCategor
 const canvasAssetDropZone = document.getElementById('canvasAssetDropZone');
 const canvasAssetGrid = document.getElementById('canvasAssetGrid');
 const canvasAssetHoverPreview = document.getElementById('canvasAssetHoverPreview');
+const canvasAssetSaveModal = document.getElementById('canvasAssetSaveModal');
+const canvasAssetSaveClose = document.getElementById('canvasAssetSaveClose');
+const canvasAssetSaveCancel = document.getElementById('canvasAssetSaveCancel');
+const canvasAssetSaveConfirm = document.getElementById('canvasAssetSaveConfirm');
+const canvasAssetSaveName = document.getElementById('canvasAssetSaveName');
+const canvasAssetSaveLibrary = document.getElementById('canvasAssetSaveLibrary');
+const canvasAssetSaveCategory = document.getElementById('canvasAssetSaveCategory');
+const canvasAssetSaveKind = document.getElementById('canvasAssetSaveKind');
+const canvasAssetSaveStatus = document.getElementById('canvasAssetSaveStatus');
 const canvasFpsValue = document.getElementById('canvasFpsValue');
 const canvasNodeCountValue = document.getElementById('canvasNodeCountValue');
 const workflowTransferToggle = document.getElementById('workflowTransferToggle');
@@ -933,6 +942,7 @@ let canvasPromptTemplateOverrides = {hiddenBuiltinIds:[], editedBuiltins:{}};
 let canvasAssetLibrary = {categories:[]};
 let canvasAssetLibraryOpen = false;
 let activeCanvasAssetLibraryId = '';
+let canvasAssetSaveTarget = null;
 let activeCanvasAssetCategoryId = '';
 const LOCAL_CANVAS_ASSET_LIBRARY_ID = '__local_assets__';
 let localCanvasAssetLibrary = {items:[], tree:null};
@@ -1106,11 +1116,12 @@ const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'multi-view', label:'三视图', icon:'panels-top-left'},
     {id:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
     {id:'dwpose', label:'动作提取', icon:'person-standing'},
+    {id:'addAsset', label:'添加为素材', icon:'library-big'},
     {id:'download', label:'下载', icon:'download'},
     {id:'run', label:'运行', icon:'play'},
     {id:'connect', label:'连接', icon:'workflow'}
 ];
-const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','storyboardMerge','download'];
+const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','storyboardMerge','addAsset','download'];
 const CANVAS_SESSION_VIEWPORTS_KEY = 'canvas_session_viewports_v1';
 let canvasSessionViewportFallback = {};
 const DEFAULT_VIDEO_MODELS = [
@@ -5349,13 +5360,23 @@ function mediaToolbarItemsForNode(node){
     const kind = mediaKindForNode(node);
     const hasUsableUrl = Boolean(node.url && !isMissingAssetUrl(node.url));
     const available = new Set(['replace']);
-    if(hasUsableUrl && ['image','video'].includes(kind)) available.add('preview');
+    if(hasUsableUrl && ['image','video'].includes(kind)){
+        available.add('preview');
+        available.add('addAsset');
+    }
     if(kind === 'image') available.add('generator');
     if(hasUsableUrl && kind === 'image'){
         ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','storyboardMerge','download']
             .forEach(id => available.add(id));
     }
-    return selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
+    const items = selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
+    // “添加为素材”是媒体节点的固定能力；旧版用户已保存的自定义菜单中没有该 id，
+    // 仍需主动补入，避免只有新用户能看到入口。
+    if(available.has('addAsset') && !items.some(item => item.id === 'addAsset')){
+        const downloadIndex = items.findIndex(item => item.id === 'download');
+        items.splice(downloadIndex >= 0 ? downloadIndex : items.length, 0, definitions.get('addAsset'));
+    }
+    return items;
 }
 function classicMediaToolbarHtml(node){
     // 视频节点的操作统一放在选中节点面板中。若继续生成 hover 快捷栏，
@@ -5381,6 +5402,7 @@ function runClassicMediaToolbarAction(nodeId, action){
     }
     const kind = mediaKindForNode(node);
     if(action === 'preview') openImageNodePreview(node.id);
+    else if(action === 'addAsset' && node.url) openCanvasAssetSaveDialog({url:node.url, name:node.name || outputImageName(node.url), mediaKind:kind});
     else if(action === 'edit' && kind === 'image') openImageEditor(node.id);
     else if(action === 'replace') pickImageForNode(node.id);
     else if(action === 'generator' && !node.url) runImageNodeQuickGenerate(node.id);
@@ -11832,19 +11854,158 @@ function hideCanvasAssetHoverPreview(){
         video.removeAttribute('src');
     }
 }
-async function renameCanvasAssetItem(itemId){
-    const item = currentCanvasAssetItem(itemId);
-    const name = window.prompt('资产名称', item?.name || '');
-    if(!item || !String(name || '').trim()) return;
-    const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {
-        method:'PATCH',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({name:String(name).trim()})
-    }).then(r => r.json());
-    canvasAssetLibrary = data.library || canvasAssetLibrary;
-    renderCanvasAssetLibrary();
-    if(assetManagerModal?.classList.contains('open')) renderAssetManager();
+function canvasWritableAssetLibraries(){
+    return canvasAssetLibraries().filter(library => (library.categories || []).some(category => String(category.type || 'image').toLowerCase() === 'image'));
 }
+function canvasAssetSaveCategories(libraryId=''){
+    const library = canvasWritableAssetLibraries().find(item => item.id === libraryId);
+    return (library?.categories || []).filter(category => String(category.type || 'image').toLowerCase() === 'image');
+}
+function setCanvasAssetSaveStatus(message='', error=false){
+    if(!canvasAssetSaveStatus) return;
+    canvasAssetSaveStatus.textContent = message;
+    canvasAssetSaveStatus.classList.toggle('error', Boolean(error));
+}
+function renderCanvasAssetSaveCategories(preferredId=''){
+    if(!canvasAssetSaveCategory || !canvasAssetSaveLibrary) return;
+    const categories = canvasAssetSaveCategories(canvasAssetSaveLibrary.value || '');
+    canvasAssetSaveCategory.innerHTML = categories.map(category => `<option value="${escapeAttr(category.id)}">${escapeHtml(category.name || '素材分组')}</option>`).join('');
+    canvasAssetSaveCategory.value = categories.some(category => category.id === preferredId) ? preferredId : (categories[0]?.id || '');
+    if(canvasAssetSaveConfirm) canvasAssetSaveConfirm.disabled = !categories.length;
+    setCanvasAssetSaveStatus(categories.length ? '' : '当前素材库没有可用的素材分组', !categories.length);
+}
+function closeCanvasAssetSaveDialog(){
+    canvasAssetSaveTarget = null;
+    canvasAssetSaveModal?.classList.remove('open');
+    canvasAssetSaveModal?.setAttribute('aria-hidden', 'true');
+    setCanvasAssetSaveStatus('');
+}
+async function openCanvasAssetSaveDialog(target={}){
+    const kind = String(target.mediaKind || canvasAssetItemKind(target)).toLowerCase();
+    const url = canvasOriginalMediaUrl(target.url || '');
+    if(!url || !['image','video'].includes(kind)){
+        setStatus('当前节点没有可保存的图片或视频');
+        return;
+    }
+    canvasAssetSaveTarget = {...target, url, mediaKind:kind};
+    setCanvasAssetSaveStatus('正在加载素材库…');
+    canvasAssetSaveModal?.classList.add('open');
+    canvasAssetSaveModal?.setAttribute('aria-hidden', 'false');
+    if(canvasAssetSaveKind) canvasAssetSaveKind.textContent = kind === 'video' ? '视频素材' : '图片素材';
+    if(canvasAssetSaveName) canvasAssetSaveName.value = target.name || outputImageName(url) || (kind === 'video' ? 'video' : 'image');
+    if(canvasAssetSaveConfirm) canvasAssetSaveConfirm.disabled = true;
+    const loaded = await loadCanvasAssetLibrary({renderPanel:false});
+    if(!canvasAssetSaveTarget) return;
+    const libraries = canvasWritableAssetLibraries();
+    if(!libraries.length){
+        if(canvasAssetSaveLibrary) canvasAssetSaveLibrary.innerHTML = '';
+        if(canvasAssetSaveCategory) canvasAssetSaveCategory.innerHTML = '';
+        setCanvasAssetSaveStatus('请先在素材库中创建素材库和分组', true);
+        return;
+    }
+    const preferredLibraryId = activeCanvasAssetLibraryId !== LOCAL_CANVAS_ASSET_LIBRARY_ID && libraries.some(item => item.id === activeCanvasAssetLibraryId)
+        ? activeCanvasAssetLibraryId
+        : (canvasAssetLibrary.active_library_id || libraries[0].id);
+    canvasAssetSaveLibrary.innerHTML = libraries.map(library => `<option value="${escapeAttr(library.id)}">${escapeHtml(library.name || '素材库')}</option>`).join('');
+    canvasAssetSaveLibrary.value = libraries.some(item => item.id === preferredLibraryId) ? preferredLibraryId : libraries[0].id;
+    const preferredCategoryId = canvasAssetSaveLibrary.value === activeCanvasAssetLibraryId ? activeCanvasAssetCategoryId : '';
+    renderCanvasAssetSaveCategories(preferredCategoryId);
+    if(!loaded) setCanvasAssetSaveStatus('素材库加载失败，请重试', true);
+    canvasAssetSaveName?.focus();
+    canvasAssetSaveName?.select();
+    refreshIcons(canvasAssetSaveModal);
+}
+async function confirmCanvasAssetSave(){
+    if(!canvasAssetSaveTarget || !canvasAssetSaveConfirm) return;
+    const libraryId = canvasAssetSaveLibrary?.value || '';
+    const categoryId = canvasAssetSaveCategory?.value || '';
+    const name = String(canvasAssetSaveName?.value || '').trim();
+    if(!libraryId || !categoryId){ setCanvasAssetSaveStatus('请选择素材库和素材分组', true); return; }
+    if(!name){ setCanvasAssetSaveStatus('请输入素材名称', true); canvasAssetSaveName?.focus(); return; }
+    canvasAssetSaveConfirm.disabled = true;
+    setCanvasAssetSaveStatus('正在添加…');
+    try {
+        await addUrlToCanvasAssetLibrary(canvasAssetSaveTarget.url, name, {libraryId, categoryId, render:true});
+        closeCanvasAssetSaveDialog();
+    } catch(error){
+        setCanvasAssetSaveStatus(error.message || '添加素材失败', true);
+        canvasAssetSaveConfirm.disabled = false;
+    }
+}
+function beginCanvasAssetInlineRename(itemId){
+    const item = currentCanvasAssetItem(itemId);
+    const card = [...(canvasAssetGrid?.querySelectorAll('.canvas-asset-item') || [])].find(element => element.dataset.assetId === itemId);
+    const nameElement = card?.querySelector('.canvas-asset-name');
+    if(!item || !card || !nameElement || card.querySelector('.canvas-asset-name-input')) return;
+    hideCanvasAssetHoverPreview();
+    const previousName = item.name || 'asset';
+    const previousDraggable = card.draggable;
+    const input = document.createElement('input');
+    input.className = 'canvas-asset-name-input';
+    input.type = 'text';
+    input.value = previousName;
+    input.maxLength = 180;
+    input.setAttribute('aria-label', '素材名称');
+    card.draggable = false;
+    nameElement.replaceWith(input);
+    input.focus();
+    input.select();
+    let finished = false;
+    const restore = () => {
+        if(input.isConnected) input.replaceWith(nameElement);
+        card.draggable = previousDraggable;
+    };
+    const finish = async save => {
+        if(finished) return;
+        finished = true;
+        const name = input.value.trim();
+        if(!save || !name || name === previousName){ restore(); return; }
+        input.disabled = true;
+        try {
+            const localItem = canvasAssetLibraryIsLocal() || Boolean(item.file);
+            const response = await fetch(localItem ? '/api/local-assets/items' : `/api/asset-library/items/${encodeURIComponent(item.id)}`, {
+                method:'PATCH',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify(localItem ? {path:item.file || item.id, name} : {name})
+            });
+            const data = await response.json().catch(() => ({}));
+            if(!response.ok) throw new Error(data.detail || '重命名失败');
+            if(localItem){
+                localCanvasAssetLibrary = {
+                    items:Array.isArray(data.items) ? data.items : localCanvasAssetLibrary.items,
+                    tree:data.tree || localCanvasAssetLibrary.tree
+                };
+                activeCanvasAssetCategoryId = data.item?.folder || activeCanvasAssetCategoryId;
+                if(data.old_path && data.item?.url){
+                    const oldUrl = `/assets/uploads/${String(data.old_path).split('/').map(encodeURIComponent).join('/')}`;
+                    nodes.forEach(node => {
+                        if(node?.url === oldUrl){
+                            node.url = data.item.url;
+                            node.name = data.item.name || node.name;
+                        }
+                    });
+                    scheduleSave();
+                }
+            } else {
+                canvasAssetLibrary = data.library || canvasAssetLibrary;
+            }
+            renderCanvasAssetLibrary();
+            if(assetManagerModal?.classList.contains('open')) renderAssetManager();
+            setStatus('素材名称已更新');
+        } catch(error){
+            restore();
+            showErrorModal(error.message || '重命名失败', '重命名失败');
+        }
+    };
+    input.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if(event.key === 'Enter'){ event.preventDefault(); finish(true); }
+        else if(event.key === 'Escape'){ event.preventDefault(); finish(false); }
+    });
+    ['pointerdown','mousedown','click','dblclick'].forEach(type => input.addEventListener(type, event => event.stopPropagation()));
+    input.addEventListener('blur', () => finish(true));
+}
+function renameCanvasAssetItem(itemId){ beginCanvasAssetInlineRename(itemId); }
 async function deleteCanvasAssetItem(itemId){
     const item = currentCanvasAssetItem(itemId);
     if(!item || !window.confirm(`删除资产「${item.name || 'asset'}」？`)) return;
@@ -11896,14 +12057,14 @@ function renderCanvasAssetLibrary(){
     if(canvasAssetAddCategoryBtn) canvasAssetAddCategoryBtn.disabled = localMode;
     if(canvasAssetDropZone) {
         canvasAssetDropZone.style.display = localMode ? 'none' : 'flex';
-        canvasAssetDropZone.textContent = '拖入商品图、模特图、平铺图或细节图保存到当前分组';
+        canvasAssetDropZone.textContent = '拖入外部图片、视频或音频保存到当前分组';
     }
     const items = cat?.items || [];
     canvasAssetGrid.innerHTML = items.length ? items.map(item => `
         <div class="canvas-asset-item" draggable="true" data-asset-id="${escapeAttr(item.id || '')}" data-url="${escapeAttr(item.url)}" data-name="${escapeAttr(item.name || 'asset')}" data-kind="${escapeAttr(canvasAssetItemKind(item))}">
             ${canvasAssetThumbHtml(item)}
             <div class="canvas-asset-meta">
-                <span class="canvas-asset-name" title="${escapeAttr(item.name || '')}">${escapeHtml(item.name || 'asset')}</span>
+                <span class="canvas-asset-name" title="双击编辑：${escapeAttr(item.name || '')}">${escapeHtml(item.name || 'asset')}</span>
                 ${localMode
                     ? `<span class="canvas-asset-local-tag">本地</span>`
                     : `<button class="canvas-asset-action" type="button" data-canvas-asset-rename="${escapeAttr(item.id || '')}" title="重命名" aria-label="重命名"><i data-lucide="pencil" class="w-4 h-4"></i></button>
@@ -11918,7 +12079,8 @@ function renderCanvasAssetLibrary(){
             event.dataTransfer.setData('application/x-canvas-asset', JSON.stringify({url:card.dataset.url, name:card.dataset.name, kind:card.dataset.kind || ''}));
             event.dataTransfer.setData('text/plain', card.dataset.url || '');
         });
-        card.addEventListener('dblclick', () => {
+        card.addEventListener('dblclick', event => {
+            if(event.target.closest('.canvas-asset-name,.canvas-asset-name-input,.canvas-asset-action')) return;
             if(card.dataset.kind === 'workflow') importWorkflowAssetUrl(card.dataset.url, card.dataset.name || 'workflow');
             else createImageCardFromUrl(card.dataset.url, defaultPoint(0, 0), card.dataset.name || 'asset');
         });
@@ -11930,11 +12092,16 @@ function renderCanvasAssetLibrary(){
             btn.addEventListener('pointerdown', event => event.stopPropagation());
             btn.addEventListener('dblclick', event => event.stopPropagation());
         });
+        card.querySelector('.canvas-asset-name')?.addEventListener('dblclick', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            beginCanvasAssetInlineRename(card.dataset.assetId || '');
+        });
         card.querySelector('[data-canvas-asset-rename]')?.addEventListener('click', async event => {
             event.preventDefault();
             event.stopPropagation();
             hideCanvasAssetHoverPreview();
-            await renameCanvasAssetItem(event.currentTarget.dataset.canvasAssetRename || '');
+            renameCanvasAssetItem(event.currentTarget.dataset.canvasAssetRename || '');
         });
         card.querySelector('[data-canvas-asset-delete]')?.addEventListener('click', async event => {
             event.preventDefault();
@@ -11952,22 +12119,26 @@ function toggleCanvasAssetLibrary(open=!canvasAssetLibraryOpen){
     if(!canvasAssetLibraryOpen) hideCanvasAssetHoverPreview();
     if(canvasAssetLibraryOpen) loadCanvasAssetLibrary();
 }
-async function addUrlToCanvasAssetLibrary(url, name=''){
-    if(canvasAssetLibraryIsLocal()){ setStatus('本地素材请在素材库管理中上传'); return; }
-    const cat = activeCanvasAssetCategory();
-    if(!cat){ setStatus('请先创建资产分组'); return; }
-    if(String(cat.type || 'image').toLowerCase() === 'workflow'){ setStatus('当前分组不可保存媒体，请切换到服装素材分组'); return; }
+async function addUrlToCanvasAssetLibrary(url, name='', options={}){
+    const libraryId = options.libraryId || activeCanvasAssetLibraryId;
+    const categoryId = options.categoryId || activeCanvasAssetCategoryId;
+    const categories = options.categoryId ? canvasAssetSaveCategories(libraryId) : canvasAssetCategories();
+    const cat = categories.find(item => item.id === categoryId) || (!options.categoryId ? activeCanvasAssetCategory() : null);
+    if(libraryId === LOCAL_CANVAS_ASSET_LIBRARY_ID) throw new Error('本地素材请在素材库管理中上传');
+    if(!cat) throw new Error('请先创建资产分组');
+    if(String(cat.type || 'image').toLowerCase() === 'workflow') throw new Error('当前分组不可保存媒体，请切换到素材分组');
     const data = await fetch('/api/asset-library/items', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({library_id:activeCanvasAssetLibraryId, category_id:cat.id, url, name})
+        body:JSON.stringify({library_id:libraryId, category_id:cat.id, url, name})
     }).then(async r => {
         if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '保存失败');
         return r.json();
     });
     canvasAssetLibrary = data.library || canvasAssetLibrary;
-    renderCanvasAssetLibrary();
+    if(options.render !== false) renderCanvasAssetLibrary();
     setStatus('已保存到素材库');
+    return data.item || null;
 }
 async function uploadFilesToLibrary(files, libraryId, categoryId){
     const form = new FormData();
@@ -18570,6 +18741,28 @@ canvasAssetCategorySelect?.addEventListener('change', () => {
     activeCanvasAssetCategoryId = canvasAssetCategorySelect.value || '';
     renderCanvasAssetLibrary();
 });
+canvasAssetSaveLibrary?.addEventListener('change', () => renderCanvasAssetSaveCategories());
+canvasAssetSaveClose?.addEventListener('click', closeCanvasAssetSaveDialog);
+canvasAssetSaveCancel?.addEventListener('click', closeCanvasAssetSaveDialog);
+canvasAssetSaveConfirm?.addEventListener('click', confirmCanvasAssetSave);
+canvasAssetSaveModal?.addEventListener('mousedown', event => {
+    event.stopPropagation();
+    if(event.target === canvasAssetSaveModal) closeCanvasAssetSaveDialog();
+});
+canvasAssetSaveModal?.addEventListener('pointerdown', event => event.stopPropagation());
+canvasAssetSaveModal?.addEventListener('wheel', event => event.stopPropagation(), {passive:true});
+canvasAssetSaveModal?.addEventListener('keydown', event => {
+    if(event.key === 'Escape'){
+        event.preventDefault();
+        event.stopPropagation();
+        closeCanvasAssetSaveDialog();
+    }
+});
+canvasAssetSaveName?.addEventListener('keydown', event => {
+    event.stopPropagation();
+    if(event.key === 'Enter'){ event.preventDefault(); confirmCanvasAssetSave(); }
+    else if(event.key === 'Escape'){ event.preventDefault(); closeCanvasAssetSaveDialog(); }
+});
 canvasAssetAddCategoryBtn?.addEventListener('click', async () => {
     if(canvasAssetLibraryIsLocal()){ setStatus('本地素材请在素材库管理中管理文件夹'); return; }
     const name = window.prompt('新分组名称', '新分组');
@@ -18618,41 +18811,78 @@ workflowTransferModal?.addEventListener('drop', event => {
     else setStatus('请拖入 JSON 或 ZIP 工作流文件');
 });
 function hasCanvasAssetSaveDrop(dataTransfer){
+    const types = Array.from(dataTransfer?.types || []);
+    if(types.includes('application/x-canvas-asset')) return false;
     return hasOutputImageDrag(dataTransfer) || hasImageDropData(dataTransfer);
 }
-canvasAssetDropZone?.addEventListener('dragover', event => {
-    if(!hasCanvasAssetSaveDrop(event.dataTransfer)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
-    canvasAssetDropZone.classList.add('drag-over');
-});
-canvasAssetDropZone?.addEventListener('dragleave', () => canvasAssetDropZone.classList.remove('drag-over'));
-canvasAssetDropZone?.addEventListener('drop', async event => {
+function setCanvasAssetDropOver(active){
+    canvasAssetDropZone?.classList.toggle('drag-over', Boolean(active));
+    canvasAssetPanel?.classList.toggle('drag-over', Boolean(active));
+}
+function canvasAssetDropDestination(){
+    const category = activeCanvasAssetCategory();
+    if(canvasAssetLibraryIsLocal()) throw new Error('请选择普通素材库后再拖入素材');
+    if(!category) throw new Error('请先创建并选择素材分组');
+    return {libraryId:activeCanvasAssetLibraryId, categoryId:category.id};
+}
+function handleCanvasAssetDragOver(event){
     if(!hasCanvasAssetSaveDrop(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
-    canvasAssetDropZone.classList.remove('drag-over');
+    event.dataTransfer.dropEffect = 'copy';
+    setCanvasAssetDropOver(true);
+}
+async function handleCanvasAssetDrop(event){
+    if(!hasCanvasAssetSaveDrop(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCanvasAssetDropOver(false);
     try {
+        // 在任何异步文件/目录解析前锁定目标，避免用户切换下拉框后素材落入错误分组。
+        const destination = canvasAssetDropDestination();
         if(hasOutputImageDrag(event.dataTransfer)){
-            await addUrlToCanvasAssetLibrary(event.dataTransfer.getData('application/x-canvas-output-image'), 'output');
+            await addUrlToCanvasAssetLibrary(event.dataTransfer.getData('application/x-canvas-output-image'), 'output', destination);
             return;
         }
         const payload = await resolveImageDropPayload(event.dataTransfer);
         if(payload.type === 'files'){
-            const cat = activeCanvasAssetCategory();
-            const data = cat ? await uploadFilesToLibrary(payload.files, activeCanvasAssetLibraryId, cat.id) : null;
+            const data = await uploadFilesToLibrary(payload.files, destination.libraryId, destination.categoryId);
             if(data?.library) {
                 canvasAssetLibrary = data.library;
                 renderCanvasAssetLibrary();
-                setStatus('已保存到素材库');
+                setStatus(`已保存 ${data.items?.length || 0} 个素材`);
             }
+        } else if(payload.type === 'localPaths') {
+            const imported = await importLocalImages(payload.localPaths);
+            const items = imported.filter(item => item?.url).map(item => ({url:item.url, name:item.name || outputImageName(item.url)}));
+            if(!items.length) throw new Error('没有找到可保存的媒体文件');
+            const response = await fetch('/api/asset-library/items/batch', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({library_id:destination.libraryId, category_id:destination.categoryId, items})
+            });
+            const data = await response.json().catch(() => ({}));
+            if(!response.ok) throw new Error(data.detail || '保存素材失败');
+            canvasAssetLibrary = data.library || canvasAssetLibrary;
+            renderCanvasAssetLibrary();
+            setStatus(`已保存 ${data.items?.length || 0} 个素材`);
         } else if(payload.type === 'url') {
-            await addUrlToCanvasAssetLibrary(payload.url, outputImageName(payload.url));
+            await addUrlToCanvasAssetLibrary(payload.url, outputImageName(payload.url), destination);
         }
     } catch(err) {
         showErrorModal(err.message || '保存素材失败', '保存素材失败');
     }
+}
+canvasAssetDropZone?.addEventListener('dragover', handleCanvasAssetDragOver);
+canvasAssetDropZone?.addEventListener('dragleave', event => {
+    if(!canvasAssetDropZone.contains(event.relatedTarget)) setCanvasAssetDropOver(false);
 });
+canvasAssetDropZone?.addEventListener('drop', handleCanvasAssetDrop);
+canvasAssetPanel?.addEventListener('dragover', handleCanvasAssetDragOver);
+canvasAssetPanel?.addEventListener('dragleave', event => {
+    if(!canvasAssetPanel.contains(event.relatedTarget)) setCanvasAssetDropOver(false);
+});
+canvasAssetPanel?.addEventListener('drop', handleCanvasAssetDrop);
 gateAssetManagerBtn?.addEventListener('click', openAssetManager);
 document.querySelectorAll('[data-manager-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -20258,6 +20488,7 @@ function renderSelectionHub(options={}){
         {id:'screenshot-video', label:langIsEn() ? 'Screenshot' : '截图', icon:'camera'},
         {id:'preview', label:langIsEn() ? 'Preview' : '预览', icon:'eye'},
         {id:'replace', label:langIsEn() ? 'Replace' : '替换', icon:'image-plus'},
+        {id:'addAsset', label:langIsEn() ? 'Add to assets' : '添加为素材', icon:'library-big'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
     ] : [
         ...(target.url ? [] : [{id:'upload', label:langIsEn() ? 'Upload image' : '上传图片', icon:'upload'}, {id:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'}]),
@@ -20273,6 +20504,7 @@ function renderSelectionHub(options={}){
         {id:'angle', label:langIsEn() ? 'Multi-angle' : '多角度', icon:'rotate-3d'},
         {id:'multi-view', label:langIsEn() ? 'Create three views' : '创建三视图', icon:'panels-top-left'},
         {id:'dwpose', label:langIsEn() ? 'Extract Pose' : '动作提取', icon:'person-standing'},
+        {id:'addAsset', label:langIsEn() ? 'Add to assets' : '添加为素材', icon:'library-big'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
         ] : [])
     ];
@@ -20829,6 +21061,11 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'addAsset'){
+        if(!target?.url) return;
+        openCanvasAssetSaveDialog({...target, mediaKind:target.mediaKind || (sourceNode ? mediaKindForNode(sourceNode) : 'image')});
+        return;
+    }
     if(action === 'upload' && sourceNode?.type === 'image'){
         pickImageForNode(sourceNode.id);
         return;
@@ -22789,7 +23026,7 @@ canvasDownloadSelectedMenuBtn?.addEventListener('click', e => {
     downloadSelectedCanvasNodes();
 });
 function isZoomPreviewIgnoredTarget(target){
-    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap, #canvasAssetPanel, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
+    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap, #canvasAssetPanel, #canvasAssetSaveModal, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
 }
 board.addEventListener('mousedown', e => {
     if(!zoomPreviewState || e.button !== 0) return;
@@ -23149,7 +23386,7 @@ function classicShortcutBlockedOverlayAction(){
     if(workflowTransferModal?.classList.contains('open')) return 'canvas.toggleWorkflow';
     if(createMenu?.classList.contains('open')) return 'canvas.createMenu';
     if(promptTemplateModal?.classList.contains('open')) return 'canvas.promptTemplates';
-    if(assetManagerModal?.classList.contains('open') || expandedPromptModal?.classList.contains('open')) return '__blocked__';
+    if(assetManagerModal?.classList.contains('open') || canvasAssetSaveModal?.classList.contains('open') || expandedPromptModal?.classList.contains('open')) return '__blocked__';
     return '';
 }
 function runClassicCanvasShortcutAction(actionId){

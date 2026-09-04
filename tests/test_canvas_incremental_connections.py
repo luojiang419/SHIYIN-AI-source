@@ -59,12 +59,13 @@ class IncrementalConnectionTests(unittest.TestCase):
         classic = body(CLASSIC, "function deleteConnection", "function outputDownloadName")
         self.assertIn("beginClassicHistoryTransaction('disconnect')", classic)
         self.assertIn("commitClassicHistoryTransaction(historyTx)", classic)
-        self.assertIn("queueClassicRenderMutation({removedConnectionIds:[id]})", classic)
+        self.assertIn("queueClassicRenderMutation({replaceIds:[removed.to], removedConnectionIds:[id]})", classic)
         self.assertNotIn("pushUndo();", classic)
 
         smart = body(SMART, "function disconnectConnections(spec)", "function connectionMidpoint")
         self.assertIn("beginSmartHistoryTransaction('disconnect')", smart)
         self.assertIn("commitSmartHistoryTransaction(historyTx)", smart)
+        self.assertIn("replaceIds:removed.map(connection => connection.to)", smart)
         self.assertIn("removedConnectionIds:removed.map(connection => connection.id)", smart)
         self.assertIn("requiresFullConnectionRender:removed.length > 1", smart)
 

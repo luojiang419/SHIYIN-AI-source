@@ -17689,7 +17689,7 @@ function deleteConnection(id, event){
     commitClassicHistoryTransaction(historyTx);
     if(hoveredConnectionId === id) hoveredConnectionId = '';
     syncGeneratorInputs(new Set([removed.to]));
-    queueClassicRenderMutation({removedConnectionIds:[id]});
+    queueClassicRenderMutation({replaceIds:[removed.to], removedConnectionIds:[id]});
     render();
     scheduleSave();
 }

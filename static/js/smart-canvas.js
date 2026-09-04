@@ -12906,6 +12906,7 @@ function disconnectConnections(spec){
     });
     if(historyTx) commitSmartHistoryTransaction(historyTx);
     queueSmartRenderMutation({
+        replaceIds:removed.map(connection => connection.to),
         removedConnectionIds:removed.map(connection => connection.id),
         // 合并到分组的可视线没有单一 connection id，必须重建连接 SVG 才能移除整条合并线。
         requiresFullConnectionRender:removed.length > 1

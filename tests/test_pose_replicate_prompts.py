@@ -18,7 +18,14 @@ def reference(url: str, name: str) -> main.AIReference:
     return main.AIReference(url=url, name=name, kind="image")
 
 
-def task_request(*, mode: str = "skeleton", instruction: str = "", model: bool = False, scene: bool = False):
+def task_request(
+    *,
+    mode: str = "skeleton",
+    instruction: str = "",
+    model: bool = False,
+    scene: bool = False,
+    aspect_ratio: str = "16:9",
+):
     return main.PoseReplicateTaskRequest(
         mode=mode,
         inputs=main.PoseReplicateInputs(
@@ -29,6 +36,7 @@ def task_request(*, mode: str = "skeleton", instruction: str = "", model: bool =
             scene=reference("/assets/scene.png", "scene.png") if scene else None,
         ),
         user_instruction=instruction,
+        generation=main.PoseReplicateGeneration(aspect_ratio=aspect_ratio),
     )
 
 
@@ -212,6 +220,42 @@ def test_pose_replicate_size_contract_matches_canvas_defaults():
     assert main.pose_replicate_image_size("16:9", "2k") == "2048x1152"
     with pytest.raises(PoseReplicatePromptError):
         main.pose_replicate_image_size("2:1", "2k")
+
+
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    [
+        ("4000x6000", "3:4"),
+        ("6000x4000", "4:3"),
+        ("1920x1080", "16:9"),
+        ("1080x1920", "9:16"),
+        ("2048x2048", "1:1"),
+    ],
+)
+def test_pose_replicate_auto_ratio_uses_closest_supported_source_ratio(size, expected):
+    with patch.object(main, "image_size_from_reference", return_value=size):
+        assert main.resolve_pose_replicate_aspect_ratio("source", "/assets/action.png") == expected
+
+
+def test_pose_replicate_explicit_ratio_does_not_read_source_dimensions():
+    with patch.object(main, "image_size_from_reference", side_effect=AssertionError("must not read source")):
+        assert main.resolve_pose_replicate_aspect_ratio("3:4", "/assets/action.png") == "3:4"
+
+
+def test_pose_replicate_auto_ratio_is_resolved_before_prompt_and_generation():
+    submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
+    with patch.object(main, "image_size_from_reference", return_value="4000x6000"), patch.object(
+        main, "resolve_image_generation_selection", return_value={"provider_id": "shiying", "model": "gemini-3-pro-image-preview"}
+    ), patch.object(main, "create_canvas_image_task", submit):
+        response = asyncio.run(main.create_pose_replicate_task(task_request(aspect_ratio="source")))
+
+    image_payload = submit.await_args.args[0]
+    assert image_payload.size == "1536x2048"
+    assert image_payload.prompt_context["requested_output_aspect_ratio"] == "source"
+    assert image_payload.prompt_context["output_aspect_ratio"] == "3:4"
+    assert "最终画布必须为 3:4" in image_payload.prompt
+    assert response["pose_replicate"]["requested_output_aspect_ratio"] == "source"
+    assert response["pose_replicate"]["output_aspect_ratio"] == "3:4"
 
 
 def test_portrait_references_use_output_ratio_without_collage_fallback():

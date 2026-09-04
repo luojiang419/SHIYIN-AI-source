@@ -143,8 +143,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.04.pose-replicate-top-ports.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-auto-ratio.1", page)
             self.assertIn("feature=pose-replicate-v2.2", page)
+            self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
@@ -550,7 +551,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
                 "poseReplicateMode:'depth'",
                 "poseReplicateProvider:'shiying'",
                 "poseReplicateModel:'gemini-3-pro-image-preview'",
-                "poseReplicateRatio:'16:9'",
+                "poseReplicateRatio:'source'",
                 "poseReplicateResolution:'2k'",
             ):
                 self.assertIn(marker, source)
@@ -571,6 +572,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("'/api/canvas/pose-replicate-tasks'", body)
             self.assertIn("template_id:'pose-replicate.v2.2'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
+        self.assertIn("'source','1:1','16:9','9:16','4:3','3:4'", self.shared)
+        self.assertIn("自动（跟随原图）", self.shared)
 
 
 if __name__ == "__main__":

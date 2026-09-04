@@ -4133,7 +4133,7 @@ class PoseReplicateGeneration(BaseModel):
     provider_id: str = "shiying"
     model: str = "gemini-3-pro-image-preview"
     resolution: str = "2k"
-    aspect_ratio: str = "16:9"
+    aspect_ratio: str = "source"
     quality: str = "high"
     count: int = Field(default=1, ge=1, le=1)
 
@@ -20043,6 +20043,22 @@ POSE_REPLICATE_SIZE_MAP = {
 }
 
 
+def resolve_pose_replicate_aspect_ratio(aspect_ratio: str, pose_reference_url: str = "") -> str:
+    requested = str(aspect_ratio or "").strip().lower()
+    if requested != "source":
+        if requested not in POSE_REPLICATE_SIZE_MAP:
+            raise PoseReplicatePromptError("一键复刻画幅只支持自动、1:1、16:9、9:16、4:3 或 3:4")
+        return requested
+    width, height = parse_size_pair(image_size_from_reference(pose_reference_url))
+    if not width or not height:
+        raise PoseReplicatePromptError("无法读取动作参考尺寸，不能自动适配输出画幅")
+    source_ratio = width / height
+    return min(
+        POSE_REPLICATE_SIZE_MAP,
+        key=lambda value: abs((int(value.split(":")[0]) / int(value.split(":")[1])) - source_ratio),
+    )
+
+
 def pose_replicate_image_size(aspect_ratio: str, resolution: str) -> str:
     ratio = str(aspect_ratio or "").strip()
     level = str(resolution or "").strip().lower()
@@ -20095,6 +20111,11 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
     normalized_result: Dict[str, Any] = {}
     original_instruction = str(payload.user_instruction or "").strip()
     try:
+        requested_output_ratio = str(payload.generation.aspect_ratio or "source").strip().lower()
+        resolved_output_ratio = resolve_pose_replicate_aspect_ratio(
+            requested_output_ratio,
+            payload.inputs.pose_reference.url,
+        )
         if original_instruction:
             normalized_result = await normalize_pose_replicate_instruction(
                 original_instruction,
@@ -20105,12 +20126,12 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             mode,
             has_model_subject=has_model,
             has_scene=has_scene,
-            output_aspect_ratio=payload.generation.aspect_ratio,
+            output_aspect_ratio=resolved_output_ratio,
             user_instruction=original_instruction,
             normalized_instruction=normalized_result.get("analysis"),
         )
         size = pose_replicate_image_size(
-            payload.generation.aspect_ratio,
+            resolved_output_ratio,
             payload.generation.resolution,
         )
     except PoseReplicatePromptError as exc:
@@ -20130,6 +20151,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         "template_variant": compiled.template_variant,
         "scenario_id": compiled.scenario_id,
         "control_mode": compiled.control_mode,
+        "requested_output_aspect_ratio": requested_output_ratio,
         "output_aspect_ratio": compiled.output_aspect_ratio,
         "control_signature": str(payload.control_signature or "")[:500],
         "prompt_source": compiled.prompt_source,
@@ -20172,6 +20194,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             "template_variant": compiled.template_variant,
             "scenario_id": compiled.scenario_id,
             "control_mode": compiled.control_mode,
+            "requested_output_aspect_ratio": requested_output_ratio,
             "output_aspect_ratio": compiled.output_aspect_ratio,
             "prompt_source": compiled.prompt_source,
             "assistant_calls": int(assistant_metadata.get("assistant_calls") or 0),

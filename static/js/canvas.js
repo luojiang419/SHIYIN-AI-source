@@ -4356,7 +4356,7 @@ function addPoseReplicateNode(point){
         id:uid('replicate'), type:'poseReplicate', x:p.x, y:p.y, w:720, h:820,
         poseReplicateSchemaVersion:2, poseReplicateMode:'depth',
         poseReplicateProvider:'shiying', poseReplicateModel:'gemini-3-pro-image-preview',
-        poseReplicateRatio:'16:9', poseReplicateResolution:'2k', poseReplicatePrompt:'',
+        poseReplicateRatio:'source', poseReplicateResolution:'2k', poseReplicatePrompt:'',
         poseReplicateStatus:'idle', poseStatus:'idle', poseDepthStatus:'idle', poseReplicateRuns:[]
     });
 }
@@ -9300,9 +9300,9 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
     if(!provider || !allImageModels(providerId).includes(model)) throw new Error('所选图片生成平台或模型尚未配置');
     const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
     if(!inputs.action?.url || !inputs.control?.url || !inputs.target?.url) throw new Error('动作参考、内部控制图或目标图缺失');
-    const ratio = node.poseReplicateRatio || '16:9';
+    const ratio = node.poseReplicateRatio || 'source';
     const resolution = node.poseReplicateResolution || '2k';
-    const requestSize = apiImageSize('custom', resolution, ratio, '');
+    const requestSize = ratio === 'source' ? 'auto' : apiImageSize('custom', resolution, ratio, '');
     const payload = {
         mode:inputs.mode || node.poseReplicateMode || 'skeleton',
         inputs:{

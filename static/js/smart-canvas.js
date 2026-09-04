@@ -2232,7 +2232,7 @@ function createPoseReplicateNode(point){
         x:(point?.x || 0) - 360, y:(point?.y || 0) - 410, w:720, h:820,
         title:'一键复刻', images:[], poseReplicateSchemaVersion:2, poseReplicateMode:'depth',
         poseReplicateProvider:'shiying', poseReplicateModel:'gemini-3-pro-image-preview',
-        poseReplicateRatio:'16:9', poseReplicateResolution:'2k', poseReplicatePrompt:'',
+        poseReplicateRatio:'source', poseReplicateResolution:'2k', poseReplicatePrompt:'',
         poseReplicateStatus:'idle', poseStatus:'idle', poseDepthStatus:'idle',
         poseReplicateRuns:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
     };
@@ -12016,12 +12016,14 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
     const model = String(node.poseReplicateModel || '');
     const provider = imageProviders().find(item => item.id === providerId);
     if(!provider || !providerImageModels(providerId).includes(model)) throw new Error('所选图片生成平台或模型尚未配置');
-    const ratio = node.poseReplicateRatio || '16:9';
-    const [ratioWidth, ratioHeight] = ratio.split(':').map(value => Math.max(1, Number(value) || 1));
+    const ratio = node.poseReplicateRatio || 'source';
+    const [ratioWidth, ratioHeight] = ratio === 'source'
+        ? [0, 0]
+        : ratio.split(':').map(value => Math.max(1, Number(value) || 1));
     const runSettings = {
         ...base, provider_id:providerId, model,
-        engine:'api', apiKind:'image', ratio:'custom', resolution:node.poseReplicateResolution || '2k',
-        customRatio:ratio, customRatioWidth:ratioWidth, customRatioHeight:ratioHeight,
+        engine:'api', apiKind:'image', ratio:ratio === 'source' ? 'source' : 'custom', resolution:node.poseReplicateResolution || '2k',
+        customRatio:ratio === 'source' ? '' : ratio, customRatioWidth:ratioWidth, customRatioHeight:ratioHeight,
         customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1
     };
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');

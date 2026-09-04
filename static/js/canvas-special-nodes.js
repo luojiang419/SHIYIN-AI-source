@@ -296,7 +296,7 @@
             if(node.poseReplicatePrompt === DEFAULT_POSE_REPLICATE_PROMPT) node.poseReplicatePrompt = '';
         }
         node.poseReplicateMode = ['depth','skeleton'].includes(node.poseReplicateMode) ? node.poseReplicateMode : (modern ? 'depth' : 'skeleton');
-        node.poseReplicateRatio = ['1:1','16:9','9:16','4:3','3:4'].includes(node.poseReplicateRatio) ? node.poseReplicateRatio : (modern ? '16:9' : '1:1');
+        node.poseReplicateRatio = ['source','1:1','16:9','9:16','4:3','3:4'].includes(node.poseReplicateRatio) ? node.poseReplicateRatio : (modern ? 'source' : '1:1');
         node.poseReplicateResolution = ['1k','2k','4k'].includes(node.poseReplicateResolution) ? node.poseReplicateResolution : '2k';
         node.poseReplicateProvider = String(node.poseReplicateProvider || (modern ? 'shiying' : providers[0]?.id || ''));
         const provider = providers.find(item => item?.id === node.poseReplicateProvider);
@@ -333,7 +333,7 @@
                         : action?.url && !control?.url
                             ? `动作参考已添加，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
                             : '请上传或连接动作参考和目标图';
-        const ratios = ['1:1','16:9','9:16','4:3','3:4'];
+        const ratios = ['source','1:1','16:9','9:16','4:3','3:4'];
         const resolutions = ['1k','2k','4k'];
         return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
             <div class="pose-replicate-input-list" aria-label="一键复刻输入端口">
@@ -358,7 +358,7 @@
                 <label><span>模式</span><select data-pose-replicate-field="poseReplicateMode"><option value="depth" ${mode === 'depth' ? 'selected' : ''}>深度图</option><option value="skeleton" ${mode === 'skeleton' ? 'selected' : ''}>骨架图</option></select></label>
                 <label><span>平台</span><select data-pose-replicate-field="poseReplicateProvider">${poseReplicateProviderOptions(providers, node.poseReplicateProvider)}</select></label>
                 <label class="pose-replicate-model-control"><span>模型</span><select data-pose-replicate-field="poseReplicateModel">${poseReplicateModelOptions(providers, node.poseReplicateProvider, node.poseReplicateModel)}</select></label>
-                <label><span>画幅</span><select data-pose-replicate-field="poseReplicateRatio">${ratios.map(value => `<option value="${value}" ${node.poseReplicateRatio === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+                <label><span>画幅</span><select data-pose-replicate-field="poseReplicateRatio">${ratios.map(value => `<option value="${value}" ${node.poseReplicateRatio === value ? 'selected' : ''}>${value === 'source' ? '自动（跟随原图）' : value}</option>`).join('')}</select></label>
                 <label><span>分辨率</span><select data-pose-replicate-field="poseReplicateResolution">${resolutions.map(value => `<option value="${value}" ${node.poseReplicateResolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select></label>
             </div>
             <div class="special-output-row pose-replicate-run-row">

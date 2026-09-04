@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import sys
 import tempfile
 import traceback
+import types
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +16,47 @@ WORKER_VERSION = "1.0.0"
 PROTOCOL_VERSION = 1
 DEPTH_INPUT_SIZE = 1078
 MASK_INPUT_SIZE = 1024
+TRUSTED_BIREFNET_FILES = {
+    "BiRefNet_config.py": "e7b8c2a74f6cea6a59553d517f71d47f2c1d90e670a13416af17c25fe2f3dc52",
+    "birefnet.py": "208771ae626f653d64128fbf2d6ac9f8e645c5cc5e286258a73ec3322bbfe5ef",
+    "config.json": "c97ea21569daf66b205491a4635147dd3bc42c7c168b89d7d75b53f67ef548ae",
+}
+
+
+def validate_trusted_birefnet_code(
+    model_path: Path,
+    expected_hashes: dict[str, str] = TRUSTED_BIREFNET_FILES,
+) -> None:
+    root = Path(model_path).resolve()
+    for relative, expected in expected_hashes.items():
+        path = (root / relative).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise RuntimeError(f"BiRefNet 受信文件路径越界：{relative}") from exc
+        if not path.is_file():
+            raise RuntimeError(f"BiRefNet 受信文件缺失：{relative}")
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if not hmac.compare_digest(actual, expected):
+            raise RuntimeError(f"BiRefNet 受信文件 SHA-256 不匹配：{relative}")
+
+
+def install_birefnet_inference_compat() -> None:
+    """Provide the training-only Kornia symbol without importing Kornia's JIT modules."""
+
+    if "kornia.filters" in sys.modules:
+        return
+    package = types.ModuleType("kornia")
+    package.__path__ = []
+    filters = types.ModuleType("kornia.filters")
+
+    def training_only_laplacian(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("BiRefNet worker 仅支持推理，不能调用训练期 Laplacian 分支")
+
+    filters.laplacian = training_only_laplacian
+    package.filters = filters
+    sys.modules["kornia"] = package
+    sys.modules["kornia.filters"] = filters
 
 
 class PersonDepthEngine:
@@ -34,6 +78,8 @@ class PersonDepthEngine:
 
         if not self.depth_model_path.is_dir() or not self.mask_model_path.is_dir():
             raise RuntimeError("person-depth 模型目录不完整")
+        validate_trusted_birefnet_code(self.mask_model_path)
+        install_birefnet_inference_compat()
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._dtype = torch.float16 if self._device.type == "cuda" else torch.float32
         self._depth_processor = AutoImageProcessor.from_pretrained(
@@ -44,13 +90,13 @@ class PersonDepthEngine:
         self._depth_model = AutoModelForDepthEstimation.from_pretrained(
             self.depth_model_path,
             local_files_only=True,
-            torch_dtype=self._dtype,
+            dtype=self._dtype,
         ).to(self._device).eval()
         self._mask_model = AutoModelForImageSegmentation.from_pretrained(
             self.mask_model_path,
             local_files_only=True,
-            trust_remote_code=False,
-            torch_dtype=self._dtype,
+            trust_remote_code=True,
+            dtype=self._dtype,
         ).to(self._device).eval()
 
     @staticmethod

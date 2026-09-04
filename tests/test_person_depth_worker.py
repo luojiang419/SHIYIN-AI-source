@@ -82,9 +82,21 @@ def test_release_smoke_uses_component_manager_download_install_and_worker_smoke(
     assert "sys.path.insert(0, str(PROJECT_ROOT))" in source
     assert 'sys.stdout.reconfigure(encoding="utf-8")' in source
     assert "PersonDepthComponentManager" in source
+    assert "PersonDepthWorkerClient" in source
     assert 'manifest["enabled"] = True' in source
     assert "manager.ensure_now()" in source
     assert "manager.verify_installed(run_smoke=False)" in source
+    for marker in (
+        'parser.add_argument("--sample", type=Path)',
+        'parser.add_argument("--output-dir", type=Path)',
+        '"trace-manifest.json"',
+        '"sha256": hashlib.sha256(source_content).hexdigest()',
+        '"sha256": hashlib.sha256(depth.content).hexdigest()',
+        '"foreground_percentiles": [1.0, 99.0]',
+        '"depth_input_size": 1078',
+        '"mask_input_size": 1024',
+    ):
+        assert marker in source
 
 
 def test_worker_spec_collects_only_required_model_families():

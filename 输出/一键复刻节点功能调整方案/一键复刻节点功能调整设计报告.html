@@ -286,6 +286,29 @@
     .arch-layer h3 { margin-bottom: 10px; }
     .arch-layer ul { margin: 0; padding-left: 18px; color: var(--muted); }
     .arch-arrow { text-align: center; color: var(--blue); font-size: 28px; }
+    .component-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(330px, .85fr); gap: 16px; align-items: start; }
+    .download-window { background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+    .download-head { padding: 15px 17px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); }
+    .download-head strong { font-weight: 500; }
+    .download-body { padding: 18px; }
+    .download-body > p { margin: 0 0 14px; color: var(--muted); }
+    .download-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 15px; }
+    .download-fact { padding: 10px; background: var(--surface-2); border-radius: 5px; }
+    .download-fact span { display: block; color: var(--muted); font-size: 10px; }
+    .download-fact strong { display: block; margin-top: 3px; font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+    .progress-track { height: 8px; overflow: hidden; border-radius: 4px; background: var(--surface-3); }
+    .progress-value { width: 38%; height: 100%; background: var(--blue); transition: width .2s ease; }
+    .download-status { margin-top: 8px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+    .download-actions { margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px; }
+    .secondary-button { border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); color: var(--text); padding: 8px 13px; cursor: pointer; }
+    .state-controls { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+    .state-controls button { border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--muted); padding: 7px 9px; cursor: pointer; }
+    .state-controls button[aria-pressed="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
+    .source-chain { display: grid; gap: 8px; }
+    .source-step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 9px; align-items: start; padding: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+    .source-step b { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--blue-soft); color: var(--blue); font-family: var(--mono); font-size: 10px; font-weight: 500; }
+    .source-step strong { display: block; font-size: 13px; font-weight: 500; }
+    .source-step span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
     .timeline { display: grid; gap: 0; }
     .phase { display: grid; grid-template-columns: 90px 1fr; gap: 18px; position: relative; padding-bottom: 22px; }
     .phase:last-child { padding-bottom: 0; }
@@ -310,6 +333,7 @@
       .flow-step::after { display: none; }
       .architecture { grid-template-columns: 1fr; }
       .arch-arrow { transform: rotate(90deg); }
+      .component-layout { grid-template-columns: 1fr; }
     }
     @media (max-width: 760px) {
       body { font-size: 14px; }
@@ -349,6 +373,7 @@
       .decision-item:last-child { grid-column: auto; }
       .input-grid { grid-template-columns: 1fr 1fr; }
       .metric-pair { grid-template-columns: 1fr; }
+      .download-facts { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -357,7 +382,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand"><span class="brand-mark">SY</span><span>SHIYIN AI · 产品设计报告</span></div>
-      <div class="top-meta">一键复刻节点 / 方案版本 1.0 / 2026-09-04</div>
+      <div class="top-meta">一键复刻节点 / 方案版本 1.1 / 2026-09-04</div>
     </div>
   </header>
 
@@ -373,6 +398,7 @@
         <a href="#prompt">提示词系统</a>
         <a href="#api">数据与 API</a>
         <a href="#compat">兼容与错误</a>
+        <a href="#component">高精度组件</a>
         <a href="#implementation">开发阶段</a>
         <a href="#acceptance">验收标准</a>
       </nav>
@@ -403,7 +429,7 @@
           <article class="panel issue"><div class="issue-mark">3</div><div><h3>角色只有两个</h3><p>外部输入仅有 <span class="mono">pose-reference</span> 和 <span class="mono">target-image</span>，无法显式表达“身份来自谁”和“最终场景来自谁”。</p></div></article>
           <article class="panel issue"><div class="issue-mark">4</div><div><h3>提示词会被重复优化</h3><p>图片任务当前默认启用 AI 助手优化。如果直接放入固定提示词，仍可能多一次调用并发生二次改写，不符合“无文本快速生成”。</p></div></article>
         </div>
-        <div class="callout"><strong>可复用基础：</strong>项目已有 <span class="mono">/api/depth/estimate</span> 快速深度接口、DWPose 路径、统一图片任务入口和 AI 助手多模态优化器。本次无需重建生成系统，只需补齐节点状态、角色路由和专用提示词编译层。</div>
+        <div class="callout"><strong>可复用基础：</strong>项目已有 DWPose 式模型管理器、系统代理读取、断点续传、哈希校验、状态轮询、统一图片任务入口和 AI 助手优化器。现有 <span class="mono">/api/depth/estimate</span> 继续服务快速角度参考；一键复刻的高精度深度结果由独立下载的 <span class="mono">person-depth-worker</span> 提供，不能静默用 Small ONNX 冒充。</div>
       </section>
 
       <section id="node">
@@ -503,7 +529,7 @@
         <div class="flow" aria-label="一键复刻处理流程">
           <div class="flow-step"><b>01</b><strong>读取端口</strong><p>按 inputRole 收集 A/T/M/S，拒绝错误媒体类型。</p></div>
           <div class="flow-step"><b>02</b><strong>校验组合</strong><p>A 与 T 必需；M、S 可选；稳定计算 scenarioId。</p></div>
-          <div class="flow-step"><b>03</b><strong>生成控制图</strong><p>depth 调用深度接口；skeleton 走现有 DWPose。</p></div>
+          <div class="flow-step"><b>03</b><strong>生成控制图</strong><p>depth 调用高精度 worker；skeleton 走现有 DWPose。</p></div>
           <div class="flow-step"><b>04</b><strong>编译提示词</strong><p>固定模板 + 模式片段 + 组合片段 + 硬约束。</p></div>
           <div class="flow-step"><b>05</b><strong>按需 AI</strong><p>仅有用户文本时规范化增量，固定模板不调用。</p></div>
           <div class="flow-step"><b>06</b><strong>提交任务</strong><p>带明确 provider/model/size 与有角色的 refs。</p></div>
@@ -543,7 +569,7 @@
         <details open style="margin-top:16px">
           <summary>模板拆分建议</summary>
           <div class="details-body">
-            <pre class="code-block">pose-replicate.v2
+            <pre class="code-block">pose-replicate.v2.1
 ├── base-role-map          # 图 1/2/3 的稳定角色定义
 ├── control.depth         # 白近、灰中、黑背景；只控制空间结构
 ├── control.skeleton      # 关节、左右语义、动作与遮挡约束
@@ -573,9 +599,9 @@
         </details>
 
         <details>
-          <summary>已验证三图提示词（原文完整保留）</summary>
+          <summary>已验证三图提示词（原文保留并加入自然褶皱增强）</summary>
           <div class="details-body">
-            <p>建议保存为 <span class="mono">pose-replicate.v2.base-depth.zh-CN</span> 的验收基线。正式实现只做变量化，不改动其角色优先级与禁止事项。</p>
+            <p>建议保存为 <span class="mono">pose-replicate.v2.1.base-depth.zh-CN</span> 的验收基线。版本 2.1 保留原提示的角色优先级与禁止事项，并新增动作受力褶皱拓扑的高保真复刻约束。</p>
             <pre class="code-block exact-prompt">请以图1为唯一编辑底图，对图1中的模特进行高保真局部换装：保留原模特、原姿势、原配饰和原背景，只把原来的上装替换为图3中的上装。
 
 【三张图片的用途】
@@ -609,6 +635,10 @@
 
 图2不提供人物身份、服装款式、服装颜色、服装纹理或背景。尤其不要照搬深度图中原上装的表面和具体外轮廓；上装的新版型应以图3为准。
 
+图2还用于辅助恢复图1中由动作、身体转折和真实受力产生的自然褶皱结构。严格复刻肩线牵拉、腋下挤压、肘部弯曲褶、胸腹与腰部堆叠、袖口收束、下摆垂坠等褶皱出现的位置、走向、层次、受力原因和前后深度关系，不得把新上装处理成平整贴图或无受力的塑料表面。
+
+这些褶皱只提供动作、体积和受力依据，不提供原上装的图案、材质、剪裁或旧衣外轮廓。最终褶皱的数量、幅度、锐利度、厚度和垂坠方式必须结合图3新上装的面料、版型、松量与结构重新计算：既要完整保留图1动作造成的自然褶皱逻辑，也不能把原上装的表面褶皱机械粘贴到不同材质的新衣上。
+
 图3：新上装的唯一设计参考。
 
 无论图3是服装平铺图，还是另一位模特的上身穿着图，都只提取其中上装本身的设计，准确保留：
@@ -634,7 +664,7 @@
 
 如果图3是宽松、厚重或廓形上装，应准确表现其真实体积、厚度和下摆形状。
 
-根据图1人物动作生成符合物理规律的面料拉伸、挤压、褶皱和垂坠。腋下、肘部、胸腹、袖口和腰部的褶皱必须自然。
+根据图1人物动作和图2深度起伏，高保真复刻动作参考中已经形成的自然受力链与褶皱拓扑，再按图3服装材质与版型生成符合物理规律的面料拉伸、挤压、堆叠和垂坠。腋下、肘部、胸腹、袖口、腰部和下摆的褶皱位置、方向、空间层次必须与原动作一致，同时保留新服装应有的厚度、弹性和垂坠差异。
 
 新上装的光照方向、亮度、色温、阴影、清晰度和环境反射必须与图1完全一致，让结果看起来像模特在原拍摄现场真实穿着该服装，而不是后期粘贴。
 
@@ -714,7 +744,7 @@
     "count": 1
   },
   "prompt_policy": {
-    "template_id": "pose-replicate.v2",
+    "template_id": "pose-replicate.v2.1",
     "locale": "zh-CN"
   }
 }</pre>
@@ -748,31 +778,112 @@
           <table class="matrix-table">
             <thead><tr><th>档位</th><th>实现</th><th>首版定位</th><th>限制</th></tr></thead>
             <tbody>
-              <tr><td><span class="tag green">默认快速档</span></td><td class="mono">/api/depth/estimate</td><td>画布即时控制图</td><td>当前响应头标识 <span class="mono">midas_v21_small_256</span>，8-bit，相对深度。</td></tr>
-              <tr><td><span class="tag amber">后续高质量档</span></td><td>Depth Anything V2 + 人物分割</td><td>高精度人物、发丝和遮挡边缘</td><td>当前仍是单图原型；模型许可、GPU 依赖和产品化尚未完成。</td></tr>
+              <tr><td><span class="tag green">一键复刻默认</span></td><td class="mono">/api/person-depth/estimate</td><td>Depth Anything V2 Large + BiRefNet 高精度人物深度</td><td>通过安装包外置组件提供；未下载时弹窗提示，不静默降级。</td></tr>
+              <tr><td><span class="tag">快速兼容档</span></td><td class="mono">/api/depth/estimate</td><td>角度参考和轻量 CPU 深度</td><td>当前响应头标识 <span class="mono">midas_v21_small_256</span>，8-bit，相对深度；不冒充高精度。</td></tr>
               <tr><td><span class="tag">兼容骨架档</span></td><td>现有 DWPose</td><td>旧项目复现和用户手动选择</td><td>只表达关键点，不如深度图完整描述人物体积与遮挡。</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
+      <section id="component">
+        <div class="section-head">
+          <div><span class="kicker">08 / OPTIONAL COMPONENT</span><h2>高精度组件如何进入软件</h2></div>
+          <p>保留已经验证的 PyTorch 推理结果，同时不扩大正式安装包：把重型运行时和模型权重一起拆成首次运行后下载的系统级组件。</p>
+        </div>
+
+        <div class="decision-strip" aria-label="高精度组件关键事实">
+          <div class="decision-item"><span>Large 权重</span><strong>1,341,322,868 bytes</strong></div>
+          <div class="decision-item"><span>BiRefNet</span><strong>约 444,566,235 bytes</strong></div>
+          <div class="decision-item"><span>权重合计</span><strong>约 1.79GB</strong></div>
+          <div class="decision-item"><span>安装位置</span><strong>data/system</strong></div>
+          <div class="decision-item"><span>升级策略</span><strong>持久化复用</strong></div>
+        </div>
+
+        <div class="component-layout" style="margin-top:16px">
+          <div>
+            <div class="state-controls" aria-label="下载状态示意切换">
+              <button type="button" data-install-state="consent" aria-pressed="true">首次提示</button>
+              <button type="button" data-install-state="downloading" aria-pressed="false">下载中</button>
+              <button type="button" data-install-state="verifying" aria-pressed="false">校验中</button>
+              <button type="button" data-install-state="failed" aria-pressed="false">失败</button>
+              <button type="button" data-install-state="ready" aria-pressed="false">已就绪</button>
+            </div>
+            <div class="download-window" aria-live="polite">
+              <div class="download-head"><strong id="installTitle">下载高精度人物深度组件</strong><span id="installBadge" class="tag amber">等待确认</span></div>
+              <div class="download-body">
+                <p id="installCopy">该组件用于一键复刻的高精度姿势、体积、遮挡和自然褶皱控制。模型不会打包进安装程序，下载一次后软件升级继续复用。</p>
+                <div class="download-facts">
+                  <div class="download-fact"><span>已确认权重</span><strong>约 1.79GB</strong></div>
+                  <div class="download-fact"><span>运行时</span><strong>构建后显示实测大小</strong></div>
+                  <div class="download-fact"><span>保存位置</span><strong>共享系统数据目录</strong></div>
+                </div>
+                <div class="progress-track" role="progressbar" aria-label="组件下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-value" id="installProgress" style="width:0"></div></div>
+                <div class="download-status"><span id="installStatus">准备下载前将检查磁盘空间</span><span id="installPercent">0%</span></div>
+                <div class="download-actions"><button class="secondary-button" type="button" id="installSecondary">稍后</button><button class="primary-button" type="button" id="installPrimary">立即下载</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="source-chain" aria-label="自动下载源回退顺序">
+            <div class="source-step"><b>01</b><div><strong>国内镜像直连</strong><span>项目维护的版本化国内对象存储或 ModelScope 资产，固定大小与 SHA-256。</span></div></div>
+            <div class="source-step"><b>02</b><div><strong>官方源 + Windows 系统代理</strong><span>国内源失败后读取 <span class="mono">urllib.request.getproxies()</span>，自动通过用户系统代理访问外网。</span></div></div>
+            <div class="source-step"><b>03</b><div><strong>官方源直连</strong><span>作为最后回退；若全部失败，保留合法 .part 并提供明确重试，不重复下载已完成分包。</span></div></div>
+            <div class="source-step"><b>04</b><div><strong>统一校验与安装</strong><span>任何来源都必须通过相同 SHA-256、受控解包、原子切换和小图 smoke。</span></div></div>
+          </div>
+        </div>
+
+        <h3 style="margin:24px 0 10px">组件拆分</h3>
+        <div class="architecture" aria-label="高精度组件拆分结构">
+          <article class="arch-layer"><h3>正式安装包</h3><ul><li>轻量组件管理器</li><li>状态/安装/重试 API</li><li>首次运行弹窗</li><li>worker 协议与 manifest</li></ul></article>
+          <div class="arch-arrow">+</div>
+          <article class="arch-layer"><h3>运行时包</h3><ul><li>person-depth-worker</li><li>固定 PyTorch/CUDA 栈</li><li>审查后的 BiRefNet 本地代码</li><li>不依赖用户 Python</li></ul></article>
+          <div class="arch-arrow">+</div>
+          <article class="arch-layer"><h3>模型包</h3><ul><li>Depth Anything V2 Large</li><li>BiRefNet 固定 revision</li><li>文件大小与 SHA-256</li><li>许可证和来源清单</li></ul></article>
+        </div>
+
+        <h3 style="margin:24px 0 10px">组件管理接口</h3>
+        <pre class="code-block">GET  /api/person-depth/component/status   # 公开安全状态：阶段、进度、版本、是否可用
+POST /api/person-depth/component/install  # 本机用户确认后开始后台下载
+POST /api/person-depth/component/retry    # 从合法分包或 .part 继续，不重复完整下载
+GET  /api/admin/person-depth/component    # 本机管理员诊断：文件、来源尝试与脱敏错误
+POST /api/person-depth/estimate           # 组件 ready 后执行高精度人物深度推理</pre>
+        <div class="callout"><strong>弹窗范围：</strong>首次运行提示只由本机桌面会话触发，不能让局域网普通账号同时启动系统级下载。后台启动只做轻量 manifest 检查，不自动拉取重型组件；用户点“稍后”时软件其余功能照常可用，进入一键复刻深度模式再按需提示。</div>
+
+        <h3 style="margin:24px 0 10px">安装状态机</h3>
+        <div class="flow" aria-label="高精度组件安装状态机">
+          <div class="flow-step"><b>01</b><strong>missing</strong><p>只检查 manifest，不在后端启动时自动下载。</p></div>
+          <div class="flow-step"><b>02</b><strong>consent</strong><p>本机桌面用户确认；稍后不阻塞软件使用。</p></div>
+          <div class="flow-step"><b>03</b><strong>space</strong><p>检查压缩包、解包文件与安全余量。</p></div>
+          <div class="flow-step"><b>04</b><strong>download</strong><p>分包下载、Range 续传、系统级互斥锁。</p></div>
+          <div class="flow-step"><b>05</b><strong>verify</strong><p>大小、SHA-256、Zip Slip 防护和版本检查。</p></div>
+          <div class="flow-step"><b>06</b><strong>smoke</strong><p>worker 握手、设备检测与内置小图推理。</p></div>
+          <div class="flow-step"><b>07</b><strong>ready</strong><p>原子激活；节点才显示“高精度深度已就绪”。</p></div>
+        </div>
+
+        <div class="grid-2" style="margin-top:16px">
+          <article class="panel"><h3>为什么需要独立 worker</h3><p>当前安装版的 <span class="mono">canvas-backend.spec</span> 明确排除 torch 与 transformers。只下载模型权重仍无法运行已验证原型；独立 worker 才能同时保证结果一致、安装包小和环境可控。</p></article>
+          <article class="panel"><h3>必须消除的安全风险</h3><p>原型通过 <span class="mono">trust_remote_code=True</span> 加载 BiRefNet。产品化必须固定 revision、审查模型结构代码并放入 worker，禁止运行时执行远端代码。</p></article>
+        </div>
+        <div class="callout danger"><strong>许可证门：</strong>Depth Anything V2 Large 当前标注为 <span class="mono">CC-BY-NC-4.0</span>。即使改成首次下载也不会自动消除分发和使用限制；正式启用前必须确认本软件使用场景符合非商业条款，或替换为可商业分发并重新通过质量回归的模型。</div>
+      </section>
+
       <section id="implementation">
         <div class="section-head">
-          <div><span class="kicker">08 / DELIVERY PLAN</span><h2>建议开发阶段</h2></div>
+          <div><span class="kicker">09 / DELIVERY PLAN</span><h2>建议开发阶段</h2></div>
           <p>按可独立验证的模块推进，先稳定模板与服务端契约，再落 UI 和双画布，最后做真实图片回归。</p>
         </div>
         <div class="timeline">
-          <div class="phase"><div class="phase-label">阶段 1</div><div class="phase-content"><h3>提示词编译器与契约测试</h3><p>新增 <span class="mono">canvas_core/pose_replicate_prompts.py</span>，实现八条路由（2 模式 × 4 组合）、稳定参考编号、固定模板零 AI、有文本单 AI 和冲突过滤。</p></div></div>
-          <div class="phase"><div class="phase-label">阶段 2</div><div class="phase-content"><h3>服务端专用任务入口</h3><p>新增请求模型与任务接口，内部复用现有图片生成执行器；记录 prompt_source、模板版本和最终参考图顺序。</p></div></div>
-          <div class="phase"><div class="phase-label">阶段 3</div><div class="phase-content"><h3>共用节点 UI 与控制图模式</h3><p>调整 <span class="mono">canvas-special-nodes.js</span> 和样式，增加四输入预览、模式/平台/模型/分辨率/画幅控件，接入 depth 与 DWPose 两条准备路径。</p></div></div>
-          <div class="phase"><div class="phase-label">阶段 4</div><div class="phase-content"><h3>经典与智能画布接线</h3><p>分别补齐端口 HTML、连线合法性、角色取图、节点状态持久化、运行快照和输出恢复；公共规则保持同一份。</p></div></div>
-          <div class="phase"><div class="phase-label">阶段 5</div><div class="phase-content"><h3>自动化与真实生成回归</h3><p>覆盖旧画布迁移、两模式、四组合、平台切换、空/非空文本、并发生成、失败恢复和非 16:9 输入；使用已验证样例做 Nano Banana Pro 端到端验收。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 1</div><div class="phase-content"><h3>独立 worker 与可复现推理</h3><p>把单图原型提取为版本化 worker，移除远端代码执行，完成 CUDA/显存/Unicode 路径与 16-bit/8-bit 输出测试。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 2</div><div class="phase-content"><h3>组件包、镜像和下载管理器</h3><p>构建运行时/模型分包，实测体积，发布国内镜像与官方源，完成断点续传、系统代理、哈希、原子安装和 smoke。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 3</div><div class="phase-content"><h3>首次运行弹窗与高精度 API</h3><p>新增系统级状态、安装、重试接口与弹窗；实现 <span class="mono">/api/person-depth/estimate</span>，保留快速深度接口不变。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 4</div><div class="phase-content"><h3>提示词编译器与任务入口</h3><p>实现八条路由、稳定参考编号、自然褶皱受力片段、固定模板零 AI、有文本单 AI 和冲突过滤。</p></div></div>
+          <div class="phase"><div class="phase-label">阶段 5</div><div class="phase-content"><h3>双画布接线与真实回归</h3><p>补齐节点 UI、端口、模型参数、状态恢复；覆盖下载失败、两模式、四组合、非 16:9 和已验证样例端到端生成。</p></div></div>
         </div>
       </section>
 
       <section id="acceptance">
         <div class="section-head">
-          <div><span class="kicker">09 / ACCEPTANCE</span><h2>可执行验收标准</h2></div>
+          <div><span class="kicker">10 / ACCEPTANCE</span><h2>可执行验收标准</h2></div>
           <p>以下条件全部满足后，才可以把功能标记为完成。</p>
         </div>
         <ol class="acceptance-list">
@@ -786,11 +897,15 @@
           <li>平台/模型选项来自真实配置；默认模型不可用时明确阻止提交。</li>
           <li>任务快照能还原原始需求、最终提示词、模板版本、模型参数与全部引用角色。</li>
           <li>已验证三图样例、完整四图扩展、非 16:9 输入和失败重试均完成真实 API 回归。</li>
+          <li>干净安装包不含 person-depth 权重、torch、transformers 或 CUDA worker，安装体积不因高精度组件增加。</li>
+          <li>首次运行弹窗可稍后处理；确认后按国内镜像、系统代理外网源、官方直连顺序自动回退并可断点续传。</li>
+          <li>组件只有在 SHA-256、原子安装、worker 握手和小图 smoke 全部通过后才进入 ready。</li>
+          <li>深度提示词同时复刻动作造成的自然褶皱拓扑，并按目标服装材质重新计算幅度，不复制旧衣纹理或版型。</li>
         </ol>
         <div class="callout warn"><strong>建议先确认的唯一产品口径：</strong>“目标图”在扩展模式中定义为服装来源，而不是结果底图；“模特主体”一旦连接就成为最终身份来源。这个口径与用户描述最一致，也能避免目标图和模特主体争夺身份控制权。</div>
       </section>
 
-      <footer>本报告基于 SHIYIN-AI 当前分支 <span class="mono">feat/storyboard-merge-node</span> 的实际实现生成。报告只给出设计与开发边界，尚未修改一键复刻功能代码。</footer>
+      <footer>本报告基于 SHIYIN-AI 当前分支 <span class="mono">feat/storyboard-merge-node</span> 的实际实现生成。版本 1.1 已补充安装包外置高精度组件、首次运行下载与自然褶皱复刻方案；尚未修改一键复刻功能代码。</footer>
     </main>
   </div>
 </div>
@@ -809,6 +924,16 @@
     const assistantCalls = document.getElementById('assistantCalls');
     const referenceOrder = document.getElementById('referenceOrder');
     const routeList = document.getElementById('routeList');
+    const installStateButtons = [...document.querySelectorAll('[data-install-state]')];
+    const installTitle = document.getElementById('installTitle');
+    const installBadge = document.getElementById('installBadge');
+    const installCopy = document.getElementById('installCopy');
+    const installProgress = document.getElementById('installProgress');
+    const installProgressTrack = installProgress?.parentElement;
+    const installStatus = document.getElementById('installStatus');
+    const installPercent = document.getElementById('installPercent');
+    const installSecondary = document.getElementById('installSecondary');
+    const installPrimary = document.getElementById('installPrimary');
 
     const scenarios = {
       '00': {
@@ -873,9 +998,54 @@
 
       routeList.replaceChildren();
       addRoute('1', '组合识别', scenario.id + ' · ' + (mode === 'depth' ? 'depth' : 'skeleton'));
-      addRoute('2', '控制图生成', mode === 'depth' ? '动作参考 → /api/depth/estimate → 深度图缓存' : '动作参考 → DWPose → 骨架图缓存');
+      addRoute('2', '控制图生成', mode === 'depth' ? '组件状态检查 → /api/person-depth/estimate → 高精度人物深度图缓存' : '动作参考 → DWPose → 骨架图缓存');
       addRoute('3', '提示词来源', hasIntent ? '固定硬约束 + AI 助手规范化用户增量；仅调用一次 AI' : '版本化固定组合模板；跳过 AI 助手');
       addRoute('4', '生成提交', 'shiying / gemini-3-pro-image-preview / 2k / 16:9');
+    }
+
+    const installStates = {
+      consent: {
+        title: '下载高精度人物深度组件', badge: '等待确认', tone: 'amber', progress: 0,
+        copy: '该组件用于一键复刻的高精度姿势、体积、遮挡和自然褶皱控制。模型不会打包进安装程序，下载一次后软件升级继续复用。',
+        status: '准备下载前将检查磁盘空间', secondary: '稍后', primary: '立即下载'
+      },
+      downloading: {
+        title: '正在下载高精度组件', badge: '国内镜像', tone: 'blue', progress: 38,
+        copy: '下载在后端系统任务中进行，切换页面不会中断。若国内镜像失败，将自动读取 Windows 系统代理访问官方源。',
+        status: '模型包 681MB / 1.79GB · 支持断点续传', secondary: '后台继续', primary: '查看详情'
+      },
+      verifying: {
+        title: '正在校验并安装', badge: 'SHA-256', tone: 'blue', progress: 86,
+        copy: '下载已完成。系统正在校验所有分包、受控解压到 staging，并准备运行 worker 小图 smoke。',
+        status: '校验模型包与运行时版本', secondary: '后台继续', primary: '查看详情'
+      },
+      failed: {
+        title: '高精度组件下载失败', badge: '需要处理', tone: '', progress: 38,
+        copy: '已保留可继续使用的 .part 文件。请检查磁盘空间或系统代理后重试；也可以暂时切换到骨架图模式。',
+        status: '官方源经系统代理连接失败', secondary: '使用骨架图', primary: '继续下载'
+      },
+      ready: {
+        title: '高精度人物深度组件已就绪', badge: '可用', tone: 'green', progress: 100,
+        copy: '模型、运行时、版本握手和小图 smoke 均已通过。一键复刻深度模式现在可以直接生成控制图。',
+        status: 'person-depth v1 · 升级后继续复用', secondary: '重新校验', primary: '完成'
+      }
+    };
+
+    function setInstallState(stateId) {
+      const state = installStates[stateId] || installStates.consent;
+      installStateButtons.forEach(function (button) {
+        button.setAttribute('aria-pressed', String(button.dataset.installState === stateId));
+      });
+      installTitle.textContent = state.title;
+      installBadge.textContent = state.badge;
+      installBadge.className = 'tag ' + state.tone;
+      installCopy.textContent = state.copy;
+      installProgress.style.width = state.progress + '%';
+      installProgressTrack.setAttribute('aria-valuenow', String(state.progress));
+      installStatus.textContent = state.status;
+      installPercent.textContent = state.progress + '%';
+      installSecondary.textContent = state.secondary;
+      installPrimary.textContent = state.primary;
     }
 
     [modeSelect, modelToggle, sceneToggle].forEach(function (control) {
@@ -887,7 +1057,11 @@
       sampleIntent.textContent = intentText.value ? '清空示例需求' : '填入示例需求';
       update();
     });
+    installStateButtons.forEach(function (button) {
+      button.addEventListener('click', function () { setInstallState(button.dataset.installState); });
+    });
     update();
+    setInstallState('consent');
   }());
 </script>
 </body>

@@ -21718,6 +21718,8 @@ function canConnect(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    // 图片节点底部的快速生成会直接创建 image -> output；保存前的连接清理必须保留它。
+    if(from.type === 'image' && to.type === 'output') return true;
     if(to.type === 'multiView'){
         if(!classicMultiViewInputSlots(to).some(([role]) => role === inputRole)) return false;
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){

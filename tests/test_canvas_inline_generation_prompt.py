@@ -56,6 +56,22 @@ class CanvasInlineGenerationPromptTests(unittest.TestCase):
         self.assertNotIn("node.url = images[0]", body)
         self.assertNotIn("node.generatedOutputs = images", body)
 
+    def test_image_quick_output_connection_survives_sanitization(self):
+        can_connect = re.search(
+            r"function canConnect\(fromId, toId, inputRole=''\)\{(?P<body>.*?)\n\}",
+            self.javascript,
+            re.DOTALL,
+        )
+        sanitize = re.search(
+            r"function sanitizeConnections\(\)\{(?P<body>.*?)\n\}",
+            self.javascript,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(can_connect)
+        self.assertIsNotNone(sanitize)
+        self.assertIn("if(from.type === 'image' && to.type === 'output') return true", can_connect.group("body"))
+        self.assertIn("filter(c => canConnect(c.from, c.to, c.inputRole || ''))", sanitize.group("body"))
+
     def test_image_quick_generate_button_reflects_running_state(self):
         prompt = re.search(
             r"function imageNodeQuickPromptHtml\(node\)\{(?P<body>.*?)\n\}",

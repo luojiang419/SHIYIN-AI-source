@@ -253,17 +253,18 @@
     }
     function h3VideoSettingsHtml(node, providerOptions='', modelOptions=''){
         return `<div class="film-video-settings film-video-settings-h3">
-            <div class="gen-settings-row"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select></div>
-            <div class="film-video-model-note"><strong>MiniMax H3 参数</strong><span>支持全能参考最多 9 图 + 3 视频；关键帧模式使用前两张图</span></div>
-            <div class="gen-settings-row">
+            <div class="gen-settings-row film-video-provider-grid"><select class="select-lite" data-film-field="apiProvider">${providerOptions}</select><select class="select-lite" data-film-field="model">${modelOptions}</select></div>
+            <div class="muted-note film-video-h3-note">MiniMax H3 参数</div>
+            <div class="gen-settings-row film-video-primary-grid">
                 <label class="field"><div class="setting-title">时长（1–15 秒）</div><input class="setting-input" data-film-field="duration" type="number" min="1" max="15" step="1" value="${Number(node.duration || 5)}"></label>
                 <label class="field"><div class="setting-title">画幅比例</div><select class="select-lite" data-film-field="aspectRatio">${['21:9','16:9','4:3','1:1','3:4','9:16'].map(value => `<option value="${value}" ${value === (node.aspectRatio || '16:9') ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
                 <label class="field"><div class="setting-title">分辨率</div><select class="select-lite" data-film-field="resolution">${h3ResolutionOptions(node.resolution)}</select></label>
             </div>
-            <div class="gen-settings-row">
+            <div class="gen-settings-row film-video-secondary-grid">
                 <label class="field"><div class="setting-title">采样步数（4–30）</div><input class="setting-input" data-film-field="steps" type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}"></label>
+                <div class="field film-video-reference-field"><div class="setting-title">参考能力</div><div class="film-video-field-note">全能参考最多 9 图 + 3 视频；关键帧模式使用前两张图</div></div>
             </div>
-            <div class="gen-settings-row">
+            <div class="gen-settings-row film-video-toggle-grid">
                 <button type="button" class="setting-check ${node.multimodal ? 'active' : ''}" data-film-toggle="multimodal"><span class="check-dot"></span>全能参考</button>
                 <button type="button" class="setting-check ${node.useFrameRoles ? 'active' : ''}" data-film-toggle="useFrameRoles"><span class="check-dot"></span>首尾帧模式</button>
             </div>
@@ -271,8 +272,8 @@
     }
     function genericVideoSettingsHtml(node, providerOptions, modelOptions){
         return `<div class="film-video-settings">
-            <div class="gen-settings-row"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select></div>
-            <div class="gen-settings-row"><label class="field"><div class="setting-title">时长</div><input data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label class="field"><div class="setting-title">画幅</div><select data-film-field="aspectRatio">${['16:9','9:16','1:1','4:3'].map(value => `<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select></label><label class="field"><div class="setting-title">分辨率</div><select data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P（推荐）</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label></div>
+            <div class="gen-settings-row film-video-provider-grid"><select class="select-lite" data-film-field="apiProvider">${providerOptions}</select><select class="select-lite" data-film-field="model">${modelOptions}</select></div>
+            <div class="gen-settings-row film-video-primary-grid"><label class="field"><div class="setting-title">时长</div><input class="setting-input" data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label class="field"><div class="setting-title">画幅</div><select class="select-lite" data-film-field="aspectRatio">${['16:9','9:16','1:1','4:3'].map(value => `<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select></label><label class="field"><div class="setting-title">分辨率</div><select class="select-lite" data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P（推荐）</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label></div>
         </div>`;
     }
     function bodyHtml(node, options={}){

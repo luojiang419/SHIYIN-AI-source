@@ -10825,11 +10825,22 @@ async function runFilmNode(nodeId, opts={}){
         refreshRunNodes(node,out);
     }
 }
+const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
+const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
+function normalizeClassicVideoNodeLayout(node){
+    if(node?.type !== 'video') return;
+    const storedWidth = Number(node.w);
+    const width = Number.isFinite(storedWidth) ? storedWidth : CLASSIC_VIDEO_NODE_MIN_WIDTH;
+    node.w = Math.max(CLASSIC_VIDEO_NODE_MIN_WIDTH, Math.min(CLASSIC_VIDEO_NODE_MAX_WIDTH, width));
+    // 视频节点始终由内容决定高度，新增媒体行时参数区和生成按钮会自然下移。
+    delete node.h;
+}
 function renderNode(node){
     window.CanvasLookbookNode?.normalize?.(node);
     window.CanvasEcommerceNodes?.normalize?.(node);
     window.CanvasFilmNodes?.normalize?.(node);
     normalizeApiNodeLayout(node);
+    normalizeClassicVideoNodeLayout(node);
     if(node.type === 'multiView') normalizeClassicMultiViewNode(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
     if(node.type === 'multiView' && (!Number.isFinite(Number(node.h)) || Number(node.h) < 780)) node.h = 780;
@@ -11411,7 +11422,7 @@ function defaultNodeSize(type){
     if(type === 'llm') return {w:420, h:590};
     if(type === 'generator' || type === 'batchGenerator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
-    if(type === 'video') return {w:400, h:0};
+    if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:0};
     if(type === 'linkfox-video') return {w:480, h:0};
     if(type === 'topazVideo') return {w:400, h:0};
     if(type === 'blenderDirector') return {w:440, h:0};
@@ -21590,16 +21601,25 @@ function startNodeResize(e, node){
 function onNodeResize(e){
     if(!resizeNode) return;
     const min = defaultNodeSize(resizeNode.node.type);
-    const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
+    const isAutoHeightVideo = resizeNode.node.type === 'video';
+    const minWidth = isAutoHeightVideo ? CLASSIC_VIDEO_NODE_MIN_WIDTH : Math.min(min.w, 220);
+    const maxWidth = isAutoHeightVideo ? CLASSIC_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY;
+    const nextW = Math.max(minWidth, Math.min(maxWidth, resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale));
     const minHeight = resizeNode.node.type === 'multiView' ? (min.h || 780) : 96;
     const nextH = Math.max(minHeight, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
     resizeNode.node.w = Math.round(nextW);
-    resizeNode.node.h = Math.round(nextH);
+    if(isAutoHeightVideo) delete resizeNode.node.h;
+    else resizeNode.node.h = Math.round(nextH);
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
     if(el){
-        el.classList.add('sized');
         el.style.width = `${resizeNode.node.w}px`;
-        el.style.height = `${resizeNode.node.h}px`;
+        if(isAutoHeightVideo){
+            el.classList.remove('sized');
+            el.style.removeProperty('height');
+        } else {
+            el.classList.add('sized');
+            el.style.height = `${resizeNode.node.h}px`;
+        }
     }
     invalidateCanvasGeometry([resizeNode.node.id]);
     markClassicConnectionsDirtyForNodes([resizeNode.node.id]);

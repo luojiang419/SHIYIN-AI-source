@@ -255,6 +255,37 @@ def test_film_video_switches_to_minimax_h3_specific_settings_panel():
     assert "videoIsH3 = node.type === 'film-video' && modelRule(node.apiProvider, node.model).id === 'minimax'" in FILM
 
 
+def test_film_video_h3_settings_reuse_a_self_contained_parameter_grid():
+    for class_name in (
+        "film-video-provider-grid",
+        "film-video-primary-grid",
+        "film-video-secondary-grid",
+        "film-video-toggle-grid",
+        "film-video-reference-field",
+    ):
+        assert class_name in FILM
+        assert class_name in FILM_CSS
+    assert ".film-video-settings .film-video-primary-grid" in FILM_CSS
+    assert "grid-template-columns:repeat(3,minmax(0,1fr))" in FILM_CSS
+    assert "align-items:stretch" in FILM_CSS
+    assert ".film-video-settings .film-video-toggle-grid" in FILM_CSS
+    assert "grid-template-columns:repeat(2,minmax(0,1fr))" in FILM_CSS
+    assert ".film-video-settings .setting-check .check-dot" in FILM_CSS
+    assert "class=\"muted-note film-video-h3-note\"" in FILM
+    assert "film-video-model-note" not in FILM
+
+
+def test_generic_and_h3_film_video_panels_share_the_same_control_language():
+    assert FILM.count('class="gen-settings-row film-video-provider-grid"') == 2
+    assert FILM.count('class="gen-settings-row film-video-primary-grid"') == 2
+    assert FILM.count('class="select-lite" data-film-field="apiProvider"') == 2
+    assert FILM.count('class="select-lite" data-film-field="model"') == 2
+    assert ".film-video-settings .select-lite" in FILM_CSS
+    assert ".film-video-settings .setting-input" in FILM_CSS
+    assert "2026.09.04.film-video-layout.1" in CLASSIC_HTML
+    assert "2026.09.04.film-video-layout.1" in SMART_HTML
+
+
 def test_film_video_h3_settings_are_normalized_and_submitted_on_both_canvases():
     assert "if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;" in FILM
     assert "key==='steps' ? clamp(control.value,4,30)" in FILM

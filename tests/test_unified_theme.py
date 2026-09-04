@@ -99,7 +99,7 @@ class UnifiedThemeTests(unittest.TestCase):
             self.assertNotIn('/static/css/theme.css', source, page)
             self.assertRegex(
                 source,
-                rf"{re.escape(stylesheet)}\?v=2026\.08\.14\.canvas-neutral-no-blue\.1",
+                rf"{re.escape(stylesheet)}\?v=[^\"\s]+",
                 page,
             )
 

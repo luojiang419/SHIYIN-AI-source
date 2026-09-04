@@ -107,18 +107,18 @@ class ShellDefaultsTests(unittest.TestCase):
         self.assertIn('id="product-identity"', self.source)
         self.assertIn('concat!("SHIYIN AI V", env!("CARGO_PKG_VERSION"))', tauri_host)
 
-    def test_windows_shell_reuses_stable_webview_profile_and_prunes_legacy_caches(self):
+    def test_windows_shell_preserves_the_active_versioned_webview_profile(self):
         tauri_host = TAURI_HOST.read_text(encoding="utf-8")
         self.assertRegex(
             tauri_host,
             re.compile(
                 r'let webview_root = data_root\.join\("cache"\)\.join\("webview2"\);\s*'
-                r'let webview_data_root = webview_root\.join\("shared"\);',
+                r'let webview_data_root = webview_root\.join\(env!\("CARGO_PKG_VERSION"\)\);',
                 re.S,
             ),
         )
-        self.assertNotIn('join("webview2").join(env!("CARGO_PKG_VERSION"))', tauri_host)
-        self.assertIn("schedule_legacy_webview_profile_cleanup", tauri_host)
+        self.assertIn("if path == active_profile", tauri_host)
+        self.assertIn("schedule_legacy_webview_profile_cleanup(webview_root, webview_data_root)", tauri_host)
         self.assertIn("is_legacy_webview_version_dir", tauri_host)
         self.assertIn("Duration::from_secs(20)", tauri_host)
 

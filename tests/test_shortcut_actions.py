@@ -24,7 +24,7 @@ class ShortcutActionRegistryTests(unittest.TestCase):
         for action_id in (
             "create.image", "create.group", "create.prompt", "create.h3Video",
             "create.panorama", "create.dwpose", "create.poseReplicate",
-            "create.relight", "create.multiView", "create.batch",
+            "create.multiView", "create.batch",
         ):
             self.assertIn(action_id, action_ids)
 
@@ -61,7 +61,7 @@ class ShortcutActionRegistryTests(unittest.TestCase):
         for action_id in (
             "create.image", "create.group", "create.prompt", "create.h3Video",
             "create.panorama", "create.dwpose", "create.poseReplicate",
-            "create.relight", "create.multiView", "create.batch",
+            "create.multiView", "create.batch",
         ):
             self.assertIn(f"'{action_id}'", SMART_JS)
 
@@ -84,7 +84,7 @@ class ShortcutActionRegistryTests(unittest.TestCase):
         for action_id in (
             "create.image", "create.group", "create.prompt", "create.h3Video",
             "create.panorama", "create.dwpose", "create.poseReplicate",
-            "create.relight", "create.multiView", "create.batch",
+            "create.multiView", "create.batch",
         ):
             self.assertIn(f"'{action_id}'", CLASSIC_JS)
 

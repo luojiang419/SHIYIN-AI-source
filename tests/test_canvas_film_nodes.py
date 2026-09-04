@@ -42,7 +42,7 @@ def test_line_art_storyboard_node_has_classic_and_smart_execution_branches():
     assert "if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);" in CLASSIC
     assert "if(node.specialType === 'film-line-art')" in SMART
     assert "window.CanvasFilmNodes.lineArtPrompt(node)" in SMART
-    assert "if(filmPorts.length || rolePorts.length > 1)" in CLASSIC
+    assert "if(filmPorts.length || inputPorts.length > 1)" in CLASSIC
 
 
 def test_line_art_storyboard_reuses_batch_image_collection_and_parallel_submission():

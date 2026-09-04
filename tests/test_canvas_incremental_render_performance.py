@@ -139,8 +139,7 @@ class CanvasIncrementalRenderPerformanceTests(unittest.TestCase):
             body(SMART_CANVAS_JS, "function createFilmNode", "function smartFilmLineArtRunSettings"),
             body(SMART_CANVAS_JS, "function createPanoramaNode", "function createDWPoseNode"),
             body(SMART_CANVAS_JS, "function createDWPoseNode", "function createPoseReplicateNode"),
-            body(SMART_CANVAS_JS, "function createPoseReplicateNode", "function createRelightNode"),
-            body(SMART_CANVAS_JS, "function createRelightNode", "function createAngleNode"),
+            body(SMART_CANVAS_JS, "function createPoseReplicateNode", "function createAngleNode"),
         )
         for section in sections:
             self.assertIn("commitSmartNodeCreate", section)

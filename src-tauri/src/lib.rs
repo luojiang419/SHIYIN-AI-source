@@ -49,7 +49,7 @@ fn is_legacy_webview_version_dir(name: &str) -> bool {
         })
 }
 
-fn prune_legacy_webview_profiles(webview_root: &Path) {
+fn prune_legacy_webview_profiles(webview_root: &Path, active_profile: &Path) {
     let Ok(entries) = fs::read_dir(webview_root) else {
         return;
     };
@@ -68,17 +68,20 @@ fn prune_legacy_webview_profiles(webview_root: &Path) {
             continue;
         }
         let path = entry.path();
+        if path == active_profile {
+            continue;
+        }
         if path.parent() == Some(webview_root) {
             let _ = fs::remove_dir_all(path);
         }
     }
 }
 
-fn schedule_legacy_webview_profile_cleanup(webview_root: PathBuf) {
+fn schedule_legacy_webview_profile_cleanup(webview_root: PathBuf, active_profile: PathBuf) {
     thread::spawn(move || {
         // 首屏与当前操作页完成加载后再清理，避免旧缓存删除占用启动阶段磁盘 IO。
         thread::sleep(Duration::from_secs(20));
-        prune_legacy_webview_profiles(&webview_root);
+        prune_legacy_webview_profiles(&webview_root, &active_profile);
     });
 }
 
@@ -697,7 +700,7 @@ pub fn run() {
                 .title(APP_DISPLAY_NAME)
                 .min_inner_size(960.0, 640.0)
                 .inner_size(1440.0, 900.0)
-                .data_directory(webview_data_root)
+                .data_directory(webview_data_root.clone())
                 .disable_drag_drop_handler()
                 .on_download(native_download_handler);
             // 旧版 window.json 记录的是物理像素，不能再直接恢复；否则高 DPI
@@ -714,7 +717,7 @@ pub fn run() {
             match window.build() {
                 Ok(view) => {
                     if placement.maximized { let _ = view.maximize(); }
-                    schedule_legacy_webview_profile_cleanup(webview_root);
+                    schedule_legacy_webview_profile_cleanup(webview_root, webview_data_root);
                 }
                 Err(error) => {
                     stop_backend(app.handle());
@@ -801,7 +804,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_legacy_webview_version_dir, suggested_download_name, write_download_file};
+    use super::{
+        is_legacy_webview_version_dir, prune_legacy_webview_profiles, suggested_download_name,
+        write_download_file,
+    };
     use std::fs;
     use std::path::Path;
 
@@ -834,6 +840,27 @@ mod tests {
         for protected in ["shared", "1.0", "1.0.1-beta", "v1.0.1", "1..1", ""] {
             assert!(!is_legacy_webview_version_dir(protected));
         }
+    }
+
+    #[test]
+    fn legacy_webview_cleanup_preserves_active_profile() {
+        let root = std::env::temp_dir().join(format!(
+            "shiyin-webview-cleanup-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let active = root.join("1.0.400");
+        let legacy = root.join("1.0.399");
+        let shared = root.join("shared");
+        for directory in [&active, &legacy, &shared] {
+            fs::create_dir_all(directory).expect("create webview test profile");
+        }
+
+        prune_legacy_webview_profiles(&root, &active);
+
+        assert!(active.is_dir());
+        assert!(!legacy.exists());
+        assert!(shared.is_dir());
+        fs::remove_dir_all(root).expect("remove webview cleanup fixture");
     }
 
     #[test]

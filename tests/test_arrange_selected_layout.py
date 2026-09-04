@@ -32,7 +32,7 @@ def test_context_menu_can_be_opened_from_a_selected_node_in_both_canvases():
     assert "selectedNodeEl = e.target.closest?.('.node[data-id]')" in CANVAS_JS
     assert "selectedNodeEl?.dataset?.id && selected.size > 1" in CANVAS_JS
     assert "nodeEl?.dataset?.id && selected.size > 1 && selected.has(nodeEl.dataset.id)" in SMART_JS
-    assert "smartArrangeMenuBtn.hidden = selectedNodeIds().length < 2" in SMART_JS
+    assert "smartArrangeMenuBtn.hidden = selectionCount < 2" in SMART_JS
 
 
 def test_connected_node_creation_uses_non_overlapping_arranged_spacing_in_both_canvases():

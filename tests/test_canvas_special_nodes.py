@@ -19,14 +19,15 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         cls.classic_html = (STATIC / "canvas.html").read_text(encoding="utf-8")
         cls.smart_html = (STATIC / "smart-canvas.html").read_text(encoding="utf-8")
 
-    def test_both_canvas_pages_load_shared_assets_and_offer_released_special_nodes(self):
+    def test_canvas_pages_load_shared_assets_and_offer_current_special_nodes(self):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("/static/css/canvas-special-nodes.css", page)
             self.assertIn("/static/js/canvas-special-nodes.js", page)
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
-            self.assertIn("灯光重塑", page)
             self.assertIn("pose-replicate.2", page)
+            self.assertNotIn("灯光重塑", page)
+        self.assertIn("location.replace(target)", self.smart_html)
 
     def test_angle_node_creation_is_hidden_but_legacy_canvas_data_remains_compatible(self):
         self.assertNotIn('onclick="addAngleNode()"', self.classic_html)
@@ -141,7 +142,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.08.18.pose-replicate.2", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.27.relight-v2.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.08.30.static-angle-reference.1", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
@@ -213,7 +214,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
 
     def test_relight_and_angle_inputs_fall_back_to_node_input_ids_when_connection_cache_is_stale(self):
         for marker in (
-            "if(!sources.length && !inputRole && Array.isArray(node?.inputNodeIds))",
+            "if(!orderedSources.length && !inputRole && Array.isArray(node?.inputNodeIds))",
         ):
             self.assertIn(marker, self.classic)
         for marker in (
@@ -357,10 +358,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for marker in (
             "function addPanoramaNode(point)",
             "function addDWPoseNode(point)",
-            "function addRelightNode(point)",
             "function addAngleNode(point)",
             "function bindClassicSpecialNode(el, node)",
-            "['panorama','dwpose','relight','angle'].includes(node.type)",
+            "['panorama','dwpose','director3d','poseReplicate','angle'].includes(node.type)",
             "function generateClassicSpecialEdit(node, prompt, source, kind)",
             "delete copy.panoramaGenerating",
             "delete copy.specialRunning",
@@ -368,6 +368,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "scheduleClassicRender();\n    scheduleSave();",
         ):
             self.assertIn(marker, self.classic)
+        self.assertNotIn("function addRelightNode(point)", self.classic)
         self.assertRegex(
             self.classic,
             re.compile(r"specialTypes\.includes\(from\.type\).*?CANVAS_GENERATOR_TYPES\.includes\(to\.type\)", re.S),
@@ -377,7 +378,6 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for marker in (
             "specialType:'panorama'",
             "specialType:'dwpose'",
-            "specialType:'relight'",
             "specialType:'angle'",
             "function bindSmartSpecialNode(el, node)",
             "function smartSpecialInputImage(node, inputRole='')",
@@ -390,6 +390,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "output.images = [{...item, kind:'image'}];\n    render();\n    scheduleSave();",
         ):
             self.assertIn(marker, self.smart)
+        self.assertNotIn("specialType:'relight'", self.smart)
         self.assertIn("images = [item]", self.shared)
         self.assertIn("inputImagesFor(node)", self.smart)
 

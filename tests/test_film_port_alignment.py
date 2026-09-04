@@ -14,7 +14,6 @@ def test_classic_film_ports_share_the_input_row_baseline():
 
 
 def test_both_canvas_pages_bust_the_film_port_alignment_cache():
-    token = "canvas-film-nodes.css?v=2026.08.24.film-nodes.3&feature=video-prompt-scroll.1&feature=film-port-alignment.1"
+    token = "canvas-film-nodes.css?v=2026.09.04.film-video-layout.1&feature=video-prompt-scroll.1&feature=film-port-alignment.1"
     assert token in CLASSIC_HTML
     assert token in SMART_HTML
-

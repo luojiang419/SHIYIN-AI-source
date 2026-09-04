@@ -250,6 +250,14 @@
             ${editable ? `<input class="pose-replicate-file-input" type="file" accept="image/*" data-pose-replicate-file="${role}" tabindex="-1">` : ''}
         </div>`;
     }
+    function poseReplicateInputRow(item, role, label, manual=false, optional=false){
+        const ready = Boolean(item?.url);
+        const state = manual ? '手动图片' : ready ? '已连接' : optional ? '可选输入' : '等待输入';
+        return `<div class="pose-replicate-input-row ${ready ? 'has-input' : ''} ${manual ? 'is-manual' : ''}" data-pose-replicate-input-role="${role}">
+            <span><i data-lucide="${ready ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(label)}</strong></span>
+            <b class="${ready ? 'has-input' : ''}">${ready ? '<span class="pose-replicate-input-status-dot" aria-hidden="true"></span>' : ''}${state}</b>
+        </div>`;
+    }
     function poseReplicateComponentHtml(status){
         const state = String(status?.state || 'loading');
         if(status?.ready) return '';
@@ -328,6 +336,12 @@
         const ratios = ['1:1','16:9','9:16','4:3','3:4'];
         const resolutions = ['1k','2k','4k'];
         return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
+            <div class="pose-replicate-input-list" aria-label="一键复刻输入端口">
+                ${poseReplicateInputRow(action, 'pose-reference', '动作参考', Boolean(manualInputs['pose-reference']))}
+                ${poseReplicateInputRow(target, 'target-image', '目标图', Boolean(manualInputs['target-image']))}
+                ${poseReplicateInputRow(modelSubject, 'model-subject', '模特主体', Boolean(manualInputs['model-subject']), true)}
+                ${poseReplicateInputRow(scene, 'scene', '场景', Boolean(manualInputs.scene), true)}
+            </div>
             <div class="pose-replicate-inputs">
                 ${poseReplicateImageCard(action, 'pose-reference', '动作参考', 'person-standing', '上传动作参考', undefined, {editable:true, manual:Boolean(manualInputs['pose-reference'])})}
                 ${poseReplicateImageCard(target, 'target-image', '目标图', 'shirt', '上传服装来源', undefined, {editable:true, manual:Boolean(manualInputs['target-image'])})}

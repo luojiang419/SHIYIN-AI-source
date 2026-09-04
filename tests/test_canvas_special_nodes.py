@@ -25,7 +25,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("/static/js/canvas-special-nodes.js", page)
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
-            self.assertIn("pose-replicate.5", page)
+            self.assertIn("pose-replicate.6", page)
+            self.assertIn("feature=pose-replicate-top-ports.1", page)
             self.assertNotIn("灯光重塑", page)
         self.assertIn("location.replace(target)", self.smart_html)
 
@@ -141,8 +142,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
     def test_pose_replicate_node_is_available_on_both_canvases_with_four_role_ports(self):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
-            self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.5", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.04.pose-replicate-manual-input.3", page)
+            self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.04.pose-replicate-top-ports.1", page)
             self.assertIn("feature=pose-replicate-v2.1", page)
 
         for marker in (
@@ -195,8 +196,18 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             ".poseReplicate-node",
             ".pose-replicate-node",
             ".smart-pose-replicate-node",
+            ".pose-replicate-input-list",
+            ".pose-replicate-input-row",
+            "top: calc(69px + var(--pose-port-index) * 36px)",
         ):
             self.assertIn(marker, self.pose_replicate_styles)
+        self.assertNotIn("--pose-port-top:${20 + index * 20}%", self.classic)
+        self.assertNotIn("--pose-port-top:${20 + index * 20}%", self.smart)
+        self.assertIn("poseReplicateInputRow(action, 'pose-reference', '动作参考'", self.shared)
+        self.assertIn("poseReplicateInputRow(scene, 'scene', '场景'", self.shared)
+        self.assertIn("type:'poseReplicate', x:p.x, y:p.y, w:720, h:820", self.classic)
+        self.assertIn("specialType:'pose-replicate'", self.smart)
+        self.assertIn("w:720, h:820", self.smart)
 
     def test_relight_compiles_mature_direction_temperature_and_consistency_controls(self):
         for marker in (

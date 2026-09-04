@@ -4353,7 +4353,7 @@ function addDirector3dNode(point){
 function addPoseReplicateNode(point){
     const p = point || defaultPoint(120, 40);
     return addNode({
-        id:uid('replicate'), type:'poseReplicate', x:p.x, y:p.y, w:720, h:680,
+        id:uid('replicate'), type:'poseReplicate', x:p.x, y:p.y, w:720, h:820,
         poseReplicateSchemaVersion:2, poseReplicateMode:'depth',
         poseReplicateProvider:'shiying', poseReplicateModel:'gemini-3-pro-image-preview',
         poseReplicateRatio:'16:9', poseReplicateResolution:'2k', poseReplicatePrompt:'',
@@ -11267,7 +11267,7 @@ function renderNode(node){
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
-        el.insertAdjacentHTML('beforeend', [['pose-reference','动作参考'],['target-image','目标图'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};--pose-port-top:${20 + index * 20}%" title="连接${label}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', [['pose-reference','动作参考'],['target-image','目标图'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -11562,7 +11562,7 @@ function defaultNodeSize(type){
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
-    if(type === 'poseReplicate') return {w:720, h:680};
+    if(type === 'poseReplicate') return {w:720, h:820};
     if(type === 'angle') return {w:460, h:660};
     if(type === 'storyboardMerge') return {w:460, h:0};
     return {w:260, h:0};

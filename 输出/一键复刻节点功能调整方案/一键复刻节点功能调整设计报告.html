@@ -208,13 +208,21 @@
     }
     .input-visual.depth { color: var(--text); background: var(--surface-3); box-shadow: inset 18px 0 0 color-mix(in srgb, var(--text) 8%, transparent), inset -18px 0 0 color-mix(in srgb, var(--text) 18%, transparent); }
     .input-visual.optional { opacity: .68; }
+    .input-visual strong { display: block; margin-top: 4px; font-size: 13px; font-weight: 500; }
     .prompt-field { margin-top: 11px; padding: 10px 11px; min-height: 56px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--bg); font-size: 11px; }
+    .node-model-download { margin-top: 10px; padding: 10px; border-left: 3px solid var(--blue); background: var(--blue-soft); }
+    .node-model-download[hidden] { display: none; }
+    .node-model-download-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; font-size: 10px; }
+    .node-model-download-head strong { font-family: var(--mono); font-size: 11px; font-weight: 500; }
+    .node-model-download .progress-track { height: 6px; }
+    .node-model-download-detail { margin-top: 6px; color: var(--muted); font-size: 9px; }
     .controls-row { margin-top: 10px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
     .control-box { min-width: 0; }
     .control-box label { display: block; color: var(--muted); font-size: 9px; }
     .control-box select { width: 100%; height: 30px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); background: var(--surface-2); font-size: 10px; padding: 0 5px; }
     .node-action { margin-top: 11px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 10px; }
     .primary-button { border: 0; border-radius: 5px; background: var(--text); color: var(--surface); padding: 8px 13px; font-weight: 500; cursor: pointer; }
+    .primary-button:disabled { cursor: not-allowed; opacity: .48; }
     .port-dot { position: absolute; left: -6px; width: 12px; height: 12px; border-radius: 50%; background: var(--blue); border: 2px solid var(--surface); }
     .port-dot.p1 { top: 72px; }
     .port-dot.p2 { top: 144px; }
@@ -382,7 +390,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand"><span class="brand-mark">SY</span><span>SHIYIN AI · 产品设计报告</span></div>
-      <div class="top-meta">一键复刻节点 / 方案版本 1.1 / 2026-09-04</div>
+      <div class="top-meta">一键复刻节点 / 方案版本 1.2 / 2026-09-04</div>
     </div>
   </header>
 
@@ -447,14 +455,19 @@
           <div class="connector-lanes" aria-hidden="true"><div class="connector"></div><div class="connector"></div><div class="connector"></div><div class="connector"></div></div>
           <div class="replicate-node">
             <span class="port-dot p1"></span><span class="port-dot p2"></span><span class="port-dot p3"></span><span class="port-dot p4"></span>
-            <div class="node-titlebar"><strong>一键复刻</strong><span class="node-status">深度图已就绪</span></div>
+            <div class="node-titlebar"><strong>一键复刻</strong><span class="node-status" id="nodeDepthStatus">模型下载中 · 38%</span></div>
             <div class="node-body">
               <div class="input-grid">
                 <div class="input-card"><span>动作参考</span><div class="input-visual">图 1<br>动作 / 基础图</div></div>
-                <div class="input-card"><span>内部控制图</span><div class="input-visual depth">图 2<br>深度图</div></div>
+                <div class="input-card"><span>内部控制图</span><div class="input-visual depth"><span id="nodeControlLabel">模型下载中</span><strong id="nodeControlPercent">38%</strong></div></div>
                 <div class="input-card"><span>目标图</span><div class="input-visual">图 3<br>服装来源</div></div>
                 <div class="input-card"><span>模特主体</span><div class="input-visual optional">图 4<br>可选</div></div>
                 <div class="input-card"><span>场景</span><div class="input-visual optional">图 5<br>可选</div></div>
+              </div>
+              <div class="node-model-download" id="nodeDownloadPanel">
+                <div class="node-model-download-head"><span id="nodeDownloadLabel">高精度模型下载中 · 国内镜像</span><strong id="nodeDownloadPercent">38%</strong></div>
+                <div class="progress-track" role="progressbar" aria-label="节点内模型下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="38" id="nodeDownloadTrack"><div class="progress-value" id="nodeDownloadProgress" style="width:38%"></div></div>
+                <div class="node-model-download-detail" id="nodeDownloadDetail">681MB / 1.79GB · 下载完成后自动校验并提取深度图</div>
               </div>
               <div class="prompt-field">简单描述额外需求（可留空）。有内容时由 AI 助手规范化；留空时直接使用固定组合模板。</div>
               <div class="controls-row">
@@ -464,7 +477,7 @@
                 <div class="control-box"><label>分辨率</label><select aria-label="分辨率"><option selected>2K</option><option>1K</option><option>4K</option></select></div>
                 <div class="control-box"><label>画幅</label><select aria-label="画幅"><option selected>16:9</option><option>1:1</option><option>9:16</option></select></div>
               </div>
-              <div class="node-action"><span>固定模板 · 0 次 AI 调用</span><button class="primary-button" type="button">一键复刻</button></div>
+              <div class="node-action"><span id="nodeActionHint">下载期间仍可编辑参数与提示词</span><button class="primary-button" type="button" id="nodeGenerateButton" disabled>等待模型 38%</button></div>
             </div>
           </div>
         </div>
@@ -848,6 +861,7 @@ POST /api/person-depth/component/retry    # 从合法分包或 .part 继续，�
 GET  /api/admin/person-depth/component    # 本机管理员诊断：文件、来源尝试与脱敏错误
 POST /api/person-depth/estimate           # 组件 ready 后执行高精度人物深度推理</pre>
         <div class="callout"><strong>弹窗范围：</strong>首次运行提示只由本机桌面会话触发，不能让局域网普通账号同时启动系统级下载。后台启动只做轻量 manifest 检查，不自动拉取重型组件；用户点“稍后”时软件其余功能照常可用，进入一键复刻深度模式再按需提示。</div>
+        <div class="callout"><strong>节点内进度：</strong>一键复刻节点在组件下载期间每 1.5 秒读取同一个系统级状态，持续显示整数百分比、已下载/总量、当前来源和当前阶段。下载字节达到 100% 后改为“下载完成，正在校验 / 安装 / smoke”，不让用户误以为卡死；多个节点共享状态，不会启动重复下载。</div>
 
         <h3 style="margin:24px 0 10px">安装状态机</h3>
         <div class="flow" aria-label="高精度组件安装状态机">
@@ -901,11 +915,12 @@ POST /api/person-depth/estimate           # 组件 ready 后执行高精度人�
           <li>首次运行弹窗可稍后处理；确认后按国内镜像、系统代理外网源、官方直连顺序自动回退并可断点续传。</li>
           <li>组件只有在 SHA-256、原子安装、worker 握手和小图 smoke 全部通过后才进入 ready。</li>
           <li>深度提示词同时复刻动作造成的自然褶皱拓扑，并按目标服装材质重新计算幅度，不复制旧衣纹理或版型。</li>
+          <li>下载期间节点内持续显示百分比、已下载/总量、当前来源和阶段，生成按钮保持禁用但其他编辑能力不受影响。</li>
         </ol>
         <div class="callout warn"><strong>建议先确认的唯一产品口径：</strong>“目标图”在扩展模式中定义为服装来源，而不是结果底图；“模特主体”一旦连接就成为最终身份来源。这个口径与用户描述最一致，也能避免目标图和模特主体争夺身份控制权。</div>
       </section>
 
-      <footer>本报告基于 SHIYIN-AI 当前分支 <span class="mono">feat/storyboard-merge-node</span> 的实际实现生成。版本 1.1 已补充安装包外置高精度组件、首次运行下载与自然褶皱复刻方案；尚未修改一键复刻功能代码。</footer>
+      <footer>本报告基于 SHIYIN-AI 当前分支 <span class="mono">feat/storyboard-merge-node</span> 的实际实现生成。版本 1.2 已补充安装包外置高精度组件、首次运行下载、节点内下载进度与自然褶皱复刻方案；尚未修改一键复刻功能代码。</footer>
     </main>
   </div>
 </div>
@@ -934,6 +949,17 @@ POST /api/person-depth/estimate           # 组件 ready 后执行高精度人�
     const installPercent = document.getElementById('installPercent');
     const installSecondary = document.getElementById('installSecondary');
     const installPrimary = document.getElementById('installPrimary');
+    const nodeDepthStatus = document.getElementById('nodeDepthStatus');
+    const nodeControlLabel = document.getElementById('nodeControlLabel');
+    const nodeControlPercent = document.getElementById('nodeControlPercent');
+    const nodeDownloadPanel = document.getElementById('nodeDownloadPanel');
+    const nodeDownloadLabel = document.getElementById('nodeDownloadLabel');
+    const nodeDownloadPercent = document.getElementById('nodeDownloadPercent');
+    const nodeDownloadProgress = document.getElementById('nodeDownloadProgress');
+    const nodeDownloadTrack = document.getElementById('nodeDownloadTrack');
+    const nodeDownloadDetail = document.getElementById('nodeDownloadDetail');
+    const nodeActionHint = document.getElementById('nodeActionHint');
+    const nodeGenerateButton = document.getElementById('nodeGenerateButton');
 
     const scenarios = {
       '00': {
@@ -1046,6 +1072,28 @@ POST /api/person-depth/estimate           # 组件 ready 后执行高精度人�
       installPercent.textContent = state.progress + '%';
       installSecondary.textContent = state.secondary;
       installPrimary.textContent = state.primary;
+
+      const nodeStates = {
+        consent: {status:'高精度模型未安装', label:'等待下载', percent:'0%', progress:0, detail:'确认下载后将在节点内持续显示进度', hint:'可切换到骨架图模式继续', button:'等待模型'},
+        downloading: {status:'模型下载中 · 38%', label:'模型下载中', percent:'38%', progress:38, detail:'681MB / 1.79GB · 国内镜像 · 完成后自动提取', hint:'下载期间仍可编辑参数与提示词', button:'等待模型 38%'},
+        verifying: {status:'下载完成 · 校验中', label:'正在校验', percent:'86%', progress:86, detail:'下载 100% · 正在进行 SHA-256、安装与小图 smoke', hint:'校验期间无需保持节点选中', button:'校验中 86%'},
+        failed: {status:'模型下载失败', label:'下载失败', percent:'38%', progress:38, detail:'已保留 681MB 断点 · 检查系统代理后可继续', hint:'可重试下载或切换骨架图模式', button:'模型不可用'},
+        ready: {status:'高精度深度已就绪', label:'图 2 · 深度图', percent:'', progress:100, detail:'', hint:'固定模板 · 0 次 AI 调用', button:'一键复刻'}
+      };
+      const nodeState = nodeStates[stateId] || nodeStates.consent;
+      nodeDepthStatus.textContent = nodeState.status;
+      nodeControlLabel.textContent = nodeState.label;
+      nodeControlPercent.textContent = nodeState.percent;
+      nodeControlPercent.hidden = !nodeState.percent;
+      nodeDownloadPanel.hidden = stateId === 'ready';
+      nodeDownloadLabel.textContent = stateId === 'downloading' ? '高精度模型下载中 · 国内镜像' : nodeState.status;
+      nodeDownloadPercent.textContent = nodeState.percent;
+      nodeDownloadProgress.style.width = nodeState.progress + '%';
+      nodeDownloadTrack.setAttribute('aria-valuenow', String(nodeState.progress));
+      nodeDownloadDetail.textContent = nodeState.detail;
+      nodeActionHint.textContent = nodeState.hint;
+      nodeGenerateButton.textContent = nodeState.button;
+      nodeGenerateButton.disabled = stateId !== 'ready';
     }
 
     [modeSelect, modelToggle, sceneToggle].forEach(function (control) {
@@ -1061,7 +1109,7 @@ POST /api/person-depth/estimate           # 组件 ready 后执行高精度人�
       button.addEventListener('click', function () { setInstallState(button.dataset.installState); });
     });
     update();
-    setInstallState('consent');
+    setInstallState('downloading');
   }());
 </script>
 </body>

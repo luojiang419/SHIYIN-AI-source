@@ -29,7 +29,7 @@ def test_video_node_keeps_six_thumbnails_readable_and_prevents_unbounded_width()
 
 def test_video_node_height_is_content_driven_during_render_and_resize():
     assert "function normalizeClassicNodeLayout(node)" in JS
-    assert "const autoHeight = isControlNode && !(Number(size.h) > 0);" in JS
+    assert "const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0));" in JS
     assert "normalizeClassicNodeLayout(node);" in JS
     assert "if(isAutoHeightNode) delete resizeNode.node.h;" in JS
     assert "el.classList.remove('sized');" in JS

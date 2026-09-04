@@ -256,11 +256,14 @@ function canvasActivateVideoPreview(img){
     }
     const original = canvasOriginalMediaUrl(target.dataset.originalSrc || target.dataset.url || target.getAttribute('src') || '');
     if(!original) return false;
+    const nodeEl = target.closest?.('.image-node');
+    const node = classicPreviewNodeForImage(target);
     const tpl = document.createElement('template');
     tpl.innerHTML = canvasVideoPlayerHtml(original, target.dataset.videoPlayerAttrs || '');
     const video = tpl.content.firstElementChild;
     if(!video) return false;
     target.replaceWith(video);
+    video.addEventListener('loadedmetadata', () => syncClassicMediaNodeOrientation(nodeEl, node, video), {once:true});
     const outputWrap = video.closest?.('.output-img-wrap');
     if(outputWrap) bindCanvasOutputMediaDrag(video, outputWrap.dataset.outputUrl || original, 'video');
     video.parentElement?.querySelector?.('.canvas-video-play')?.style?.setProperty('display', 'none');
@@ -292,11 +295,14 @@ function replaceCanvasVideoPreviewWithFallback(img){
     if(!img?.isConnected) return false;
     const original = img.dataset.originalSrc || img.dataset.url || '';
     if(!original) return false;
+    const nodeEl = img.closest?.('.image-node');
+    const node = classicPreviewNodeForImage(img);
     const video = document.createElement('template');
     video.innerHTML = canvasVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
     const fallback = video.content.firstElementChild;
     if(!fallback) return false;
     img.replaceWith(fallback);
+    fallback.addEventListener('loadedmetadata', () => syncClassicMediaNodeOrientation(nodeEl, node, fallback), {once:true});
     return true;
 }
 const CANVAS_SELECTED_HIGH_RES_DELAY = 320;
@@ -6481,7 +6487,9 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
             y:base.y + i * 36,
             url:file.url,
             name:file.name,
-            mediaKind:kind
+            mediaKind:kind,
+            natural_w:Number(file.natural_w || file.width || 0),
+            natural_h:Number(file.natural_h || file.height || 0)
         };
         nodes.push(node);
         created.push(node);
@@ -6628,7 +6636,7 @@ async function createImageCardsFromLocalPaths(paths, point){
         const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
         const created = [];
         files.forEach((file, i) => {
-            const node = {id:uid('img'), type:'image', x:base.x + i * 36, y:base.y + i * 36, url:file.url, name:file.name, mediaKind:'image'};
+            const node = {id:uid('img'), type:'image', x:base.x + i * 36, y:base.y + i * 36, url:file.url, name:file.name, mediaKind:'image', natural_w:Number(file.natural_w || file.width || 0), natural_h:Number(file.natural_h || file.height || 0)};
             nodes.push(node);
             created.push(node);
         });
@@ -6672,6 +6680,8 @@ async function applyImageDropPayloadToNode(nodeId, payload){
             node.url = file.url;
             node.name = file.name || outputImageName(file.url);
             node.mediaKind = 'image';
+            node.natural_w = Number(file.natural_w || file.width || 0);
+            node.natural_h = Number(file.natural_h || file.height || 0);
             render();
             scheduleSave();
         }
@@ -6682,6 +6692,9 @@ async function applyImageDropPayloadToNode(nodeId, payload){
         node.url = payload.url;
         node.name = outputImageName(payload.url);
         node.mediaKind = isVideoUrl(payload.url) ? 'video' : isAudioUrl(payload.url) ? 'audio' : 'image';
+        delete node.natural_w;
+        delete node.natural_h;
+        classicPortraitMediaNodeIds.delete(node.id);
         render();
         scheduleSave();
     }
@@ -6760,6 +6773,8 @@ async function fillImageNode(nodeId, files, opts={}){
         node.url = file.url;
         node.name = file.name;
         node.mediaKind = file.kind || mediaKindForUpload(imgs[0]);
+        node.natural_w = Number(file.natural_w || file.width || 0);
+        node.natural_h = Number(file.natural_h || file.height || 0);
         render();
         scheduleSave();
     }
@@ -6771,6 +6786,9 @@ function setImageNodeFromOutput(nodeId, url){
     node.url = url;
     node.name = outputImageName(url);
     node.mediaKind = 'image';
+    delete node.natural_w;
+    delete node.natural_h;
+    classicPortraitMediaNodeIds.delete(node.id);
     render();
     scheduleSave();
 }
@@ -6786,6 +6804,9 @@ function clearImageNode(nodeId, event=null){
     node.url = '';
     node.mediaKind = 'image';
     node.name = '空白图片';
+    delete node.natural_w;
+    delete node.natural_h;
+    classicPortraitMediaNodeIds.delete(node.id);
     render();
     scheduleSave();
 }
@@ -8741,6 +8762,7 @@ function measureCanvasOriginalImageNodesNow(root=nodesEl){
             if(!size || node.natural_w || node.natural_h) return;
             node.natural_w = size.w;
             node.natural_h = size.h;
+            refreshNodes([node.id]);
             scheduleSave();
         });
     });
@@ -10850,6 +10872,8 @@ async function runFilmNode(nodeId, opts={}){
 }
 const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
 const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
+const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = 520;
+const classicPortraitMediaNodeIds = new Set();
 const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     image:336,
     prompt:220,
@@ -10860,13 +10884,21 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     storyboardMerge:260,
 });
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
+function classicMediaNodeIsPortrait(node){
+    if(!node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
+    const width = Number(node.natural_w || node.width || 0);
+    const height = Number(node.natural_h || node.height || 0);
+    if(width > 0 && height > 0) return height > width;
+    return classicPortraitMediaNodeIds.has(node.id);
+}
 function classicNodeLayoutLimits(nodeOrType){
     const type = typeof nodeOrType === 'string' ? nodeOrType : String(nodeOrType?.type || '');
     const size = defaultNodeSize(type);
+    const portraitMedia = classicMediaNodeIsPortrait(nodeOrType);
     const isControlNode = !CLASSIC_COMPACT_NODE_TYPES.has(type);
-    const autoHeight = isControlNode && !(Number(size.h) > 0);
+    const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0));
     return {
-        minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0),
+        minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0, portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0),
         minHeight:Math.max(96, Number(size.h) || 0, Number(CLASSIC_NODE_MIN_HEIGHTS[type]) || 0, isControlNode ? 320 : 0),
         maxWidth:type === 'video' ? CLASSIC_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY,
         autoHeight,
@@ -10887,6 +10919,31 @@ function normalizeClassicNodeLayout(node){
     if(Number.isFinite(storedHeight) && storedHeight > 0) node.h = Math.max(limits.minHeight, storedHeight);
     else if(Object.prototype.hasOwnProperty.call(node,'h')) delete node.h;
 }
+function syncClassicMediaNodeOrientation(el, node, mediaEl=null){
+    if(!el || !node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
+    const width = Number(node.natural_w || node.width || mediaEl?.naturalWidth || mediaEl?.videoWidth || 0);
+    const height = Number(node.natural_h || node.height || mediaEl?.naturalHeight || mediaEl?.videoHeight || 0);
+    if(!(width > 0 && height > 0)) return false;
+    const portrait = height > width;
+    const wasPortrait = classicPortraitMediaNodeIds.has(node.id);
+    if(portrait) classicPortraitMediaNodeIds.add(node.id);
+    else classicPortraitMediaNodeIds.delete(node.id);
+    el.classList.toggle('portrait-media-node', portrait);
+    if(portrait){
+        node.w = Math.max(CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH, Number(node.w) || 0);
+        delete node.h;
+        el.style.setProperty('--node-min-width', `${CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH}px`);
+        el.style.width = `${node.w}px`;
+        el.style.removeProperty('height');
+        el.classList.add('auto-height-node');
+        el.classList.remove('sized');
+    }
+    if(portrait !== wasPortrait && el.isConnected){
+        scheduleClassicNodeRectMeasure([node.id]);
+        scheduleSave();
+    }
+    return portrait;
+}
 function renderNode(node){
     window.CanvasLookbookNode?.normalize?.(node);
     window.CanvasEcommerceNodes?.normalize?.(node);
@@ -10899,8 +10956,9 @@ function renderNode(node){
     const el = document.createElement('div');
     const size = defaultNodeSize(node.type);
     const layoutLimits = classicNodeLayoutLimits(node);
+    const portraitMedia = classicMediaNodeIsPortrait(node);
     const autoMultiViewOutput = isMultiViewOutputNode(node);
-    const hasFixedSize = Boolean((!autoMultiViewOutput && node.h) || size.h);
+    const hasFixedSize = !layoutLimits.autoHeight && Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
     const canvasLodSafe = ![
         'panorama','multiView','dwpose','director3d','poseReplicate','angle','group','promptGroup'
@@ -10913,7 +10971,7 @@ function renderNode(node){
         : node.type === 'prompt'
             ? 'prompt-node prompt-text-node'
             : `${node.type}-node`;
-    el.className = `node ${nodeTypeClass} ${layoutLimits.autoHeight ? 'auto-height-node' : ''} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.className = `node ${nodeTypeClass} ${layoutLimits.autoHeight ? 'auto-height-node' : ''} ${portraitMedia ? 'portrait-media-node' : ''} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.setProperty('--node-min-width', `${layoutLimits.minWidth}px`);
@@ -10974,6 +11032,7 @@ function renderNode(node){
             const previewWrap = body.querySelector('.image-preview-wrap');
             const loadedImg = body.querySelector('img');
             const videoPlayBtn = body.querySelector('.canvas-video-play');
+            const syncMediaOrientation = () => syncClassicMediaNodeOrientation(el, node, loadedImg);
             const openPreview = e => {
                 if(!node.url || missing) return;
                 e.preventDefault();
@@ -11034,10 +11093,15 @@ function renderNode(node){
                 }, true);
             }
             body.addEventListener('dblclick', openPreview, true);
+            if(loadedImg){
+                loadedImg.addEventListener('load', () => {
+                    syncMediaOrientation();
+                    scheduleClassicNodeRectMeasure([node.id]);
+                });
+            }
             if(loadedImg && loadedImg.complete && loadedImg.naturalHeight > 0){
+                syncMediaOrientation();
                 scheduleClassicNodeRectMeasure([node.id]);
-            } else if(loadedImg) {
-                loadedImg.onload = () => scheduleClassicNodeRectMeasure([node.id]);
             }
         } else {
         body.innerHTML = `<div class="blank-image"><i data-lucide="image-plus" class="w-7 h-7"></i><div class="text-[11px] font-bold">${tr('canvas.clickDragPasteImage')}</div></div>`;
@@ -20674,27 +20738,36 @@ function imageQuickProviderLabel(providerId){
 function imageQuickModelLabel(model){
     return model || (tr('canvas.noImageModelsHint') || '暂无模型');
 }
+function imageQuickProviderItemsHtml(providerId){
+    const providers = imageApiProviders();
+    return providers.length
+        ? providers.map(provider => `<button type="button" class="image-quick-choice-item ${provider.id === providerId ? 'active' : ''}" role="menuitem" data-image-quick-provider-value="${escapeAttr(provider.id)}"><span>${escapeHtml(provider.name || provider.id)}</span><i data-lucide="${provider.id === providerId ? 'check' : 'chevron-right'}"></i></button>`).join('')
+        : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noApiProviders') || '暂无 API 平台')}</button>`;
+}
+function imageQuickModelItemsHtml(providerId, selectedModel){
+    const models = uniqueModels([selectedModel, ...allImageModels(providerId)]).filter(Boolean);
+    return models.length
+        ? models.map(model => `<button type="button" class="image-quick-choice-item ${model === selectedModel ? 'active' : ''}" role="menuitem" data-image-quick-model-value="${escapeAttr(model)}"><span>${escapeHtml(model)}</span>${model === selectedModel ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
+        : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noImageModelsHint') || '暂无生图模型')}</button>`;
+}
 function imageQuickChoiceMenuHtml(node){
     const providerId = resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
     const models = allImageModels(providerId);
     const selectedModel = node.model || models[0] || '';
-    const modelChoices = uniqueModels([selectedModel, ...models]).filter(Boolean);
-    const providers = imageApiProviders();
-    const providerItems = providers.length
-        ? providers.map(provider => `<button type="button" class="image-quick-choice-item ${provider.id === providerId ? 'active' : ''}" role="menuitem" data-image-quick-provider-value="${escapeAttr(provider.id)}"><span>${escapeHtml(provider.name || provider.id)}</span>${provider.id === providerId ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
-        : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noApiProviders') || '暂无 API 平台')}</button>`;
-    const modelItems = modelChoices.length
-        ? modelChoices.map(model => `<button type="button" class="image-quick-choice-item ${model === selectedModel ? 'active' : ''}" role="menuitem" data-image-quick-model-value="${escapeAttr(model)}"><span>${escapeHtml(model)}</span>${model === selectedModel ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
-        : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noImageModelsHint') || '暂无生图模型')}</button>`;
-    return `<div class="image-quick-choice image-quick-choice-provider" data-image-quick-choice="provider">
-            <input type="hidden" data-image-quick-provider value="${escapeAttr(providerId)}">
-            <button type="button" class="image-quick-select image-quick-choice-trigger" data-image-quick-choice-trigger="provider" aria-haspopup="menu" aria-expanded="false" title="图片生成平台"><span>${escapeHtml(imageQuickProviderLabel(providerId))}</span><i data-lucide="chevron-down"></i></button>
-            <div class="image-quick-choice-panel" data-image-quick-choice-panel="provider" role="menu">${providerItems}</div>
-        </div>
-        <div class="image-quick-choice image-quick-choice-model image-quick-model" data-image-quick-choice="model">
-            <input type="hidden" data-image-quick-model value="${escapeAttr(selectedModel)}">
-            <button type="button" class="image-quick-select image-quick-choice-trigger" data-image-quick-choice-trigger="model" aria-haspopup="menu" aria-expanded="false" title="图片生成模型"><span>${escapeHtml(imageQuickModelLabel(selectedModel))}</span><i data-lucide="chevron-down"></i></button>
-            <div class="image-quick-choice-panel" data-image-quick-choice-panel="model" role="menu">${modelItems}</div>
+    const drawerId = `image-quick-drawer-${String(node.id || 'node').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    return `<input type="hidden" data-image-quick-provider value="${escapeAttr(providerId)}">
+        <input type="hidden" data-image-quick-model value="${escapeAttr(selectedModel)}">
+        <button type="button" class="image-quick-select image-quick-choice-trigger image-quick-provider" data-image-quick-drawer-trigger="provider" aria-haspopup="menu" aria-controls="${escapeAttr(drawerId)}" aria-expanded="false" title="图片生成平台"><span data-image-quick-provider-label>${escapeHtml(imageQuickProviderLabel(providerId))}</span><i data-lucide="chevrons-up-down"></i></button>
+        <button type="button" class="image-quick-select image-quick-choice-trigger image-quick-model" data-image-quick-drawer-trigger="model" aria-haspopup="menu" aria-controls="${escapeAttr(drawerId)}" aria-expanded="false" title="图片生成模型"><span data-image-quick-model-label>${escapeHtml(imageQuickModelLabel(selectedModel))}</span><i data-lucide="chevrons-up-down"></i></button>
+        <div class="image-quick-choice-drawer" id="${escapeAttr(drawerId)}" data-image-quick-drawer aria-hidden="true">
+            <section class="image-quick-drawer-level" data-image-quick-drawer-level="provider" role="menu" aria-label="一级：图片生成平台">
+                <div class="image-quick-drawer-head"><span><b>一级</b> · 生成平台</span></div>
+                <div class="image-quick-drawer-items" data-image-quick-provider-items>${imageQuickProviderItemsHtml(providerId)}</div>
+            </section>
+            <section class="image-quick-drawer-level" data-image-quick-drawer-level="model" role="menu" aria-label="二级：图片生成模型">
+                <div class="image-quick-drawer-head"><span><b>二级</b> · 模型</span><button type="button" class="image-quick-drawer-close" data-image-quick-drawer-close title="收起菜单" aria-label="收起平台与模型菜单"><i data-lucide="x"></i></button></div>
+                <div class="image-quick-drawer-items" data-image-quick-model-items>${imageQuickModelItemsHtml(providerId, selectedModel)}</div>
+            </section>
         </div>`;
 }
 function imageNodeQuickPromptHtml(node){
@@ -20734,91 +20807,129 @@ function bindImageNodeQuickPrompt(node, panelRoot=selectionHub){
     const resolution = root.querySelector('[data-image-quick-resolution]');
     const cameraButton = root.querySelector('[data-image-quick-camera]');
     const cameraPanel = root.querySelector('[data-image-quick-camera-panel]');
-    const choiceRoot = root.closest('[data-image-quick-compose]') || root;
-    const closeChoices = except => choiceRoot.querySelectorAll('[data-image-quick-choice]').forEach(menu => {
-        const open = menu === except;
-        menu.classList.toggle('open', open);
-        menu.querySelector('[data-image-quick-choice-trigger]')?.setAttribute('aria-expanded', String(open));
-    });
-    choiceRoot.querySelectorAll('[data-image-quick-choice]').forEach(menu => {
-        const trigger = menu.querySelector('[data-image-quick-choice-trigger]');
-        let closeTimer = 0;
-        const cancelClose = () => { if(closeTimer){ clearTimeout(closeTimer); closeTimer = 0; } };
-        const scheduleClose = () => {
-            cancelClose();
-            closeTimer = window.setTimeout(() => {
-                closeTimer = 0;
-                menu.classList.remove('open');
-                trigger?.setAttribute('aria-expanded', 'false');
-            }, 140);
-        };
-        trigger?.addEventListener('pointerenter', () => closeChoices(menu));
-        trigger?.addEventListener('focus', () => closeChoices(menu));
-        menu.addEventListener('pointerenter', cancelClose);
-        menu.addEventListener('pointerleave', scheduleClose);
-        trigger?.addEventListener('click', event => {
-            event.preventDefault(); event.stopPropagation();
-            closeChoices(menu.classList.contains('open') ? null : menu);
+    const drawer = root.querySelector('[data-image-quick-drawer]');
+    const drawerTriggers = [...root.querySelectorAll('[data-image-quick-drawer-trigger]')];
+    const providerItems = root.querySelector('[data-image-quick-provider-items]');
+    const modelItems = root.querySelector('[data-image-quick-model-items]');
+    const initialProvider = resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
+    const initialModel = node.model || allImageModels(initialProvider)[0] || '';
+    node.apiProvider = initialProvider;
+    node.model = initialModel;
+    if(provider) provider.value = initialProvider;
+    if(model) model.value = initialModel;
+    let drawerCloseTimer = 0;
+    function cancelImageQuickDrawerClose(){
+        if(!drawerCloseTimer) return;
+        clearTimeout(drawerCloseTimer);
+        drawerCloseTimer = 0;
+    }
+    function setImageQuickDrawerOpen(open, level=''){
+        cancelImageQuickDrawerClose();
+        root.classList.toggle('image-quick-drawer-open', open);
+        drawer?.setAttribute('aria-hidden', String(!open));
+        if(drawer) drawer.dataset.activeLevel = open ? (level || drawer.dataset.activeLevel || 'provider') : '';
+        drawerTriggers.forEach(trigger => {
+            const active = open && trigger.dataset.imageQuickDrawerTrigger === drawer?.dataset.activeLevel;
+            trigger.setAttribute('aria-expanded', String(open));
+            trigger.classList.toggle('drawer-active', active);
         });
+    }
+    function scheduleImageQuickDrawerClose(){
+        cancelImageQuickDrawerClose();
+        drawerCloseTimer = window.setTimeout(() => {
+            drawerCloseTimer = 0;
+            if(!root.matches(':hover') && !root.contains(document.activeElement)) setImageQuickDrawerOpen(false);
+        }, 180);
+    }
+    function renderImageQuickProviderDrawerItems(){
+        if(providerItems) providerItems.innerHTML = imageQuickProviderItemsHtml(node.apiProvider || provider?.value || '');
+    }
+    function renderImageQuickModelDrawerItems(){
+        if(modelItems) modelItems.innerHTML = imageQuickModelItemsHtml(node.apiProvider || provider?.value || '', node.model || model?.value || '');
+    }
+    function syncImageQuickDrawerLabels(){
+        const providerLabel = root.querySelector('[data-image-quick-provider-label]');
+        const modelLabel = root.querySelector('[data-image-quick-model-label]');
+        if(providerLabel) providerLabel.textContent = imageQuickProviderLabel(node.apiProvider || provider?.value || '');
+        if(modelLabel) modelLabel.textContent = imageQuickModelLabel(node.model || model?.value || '');
+    }
+    function bindImageQuickModelDrawerItems(){
+        modelItems?.querySelectorAll('[data-image-quick-model-value]').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            node.model = button.dataset.imageQuickModelValue || '';
+            if(model) model.value = node.model;
+            syncImageQuickDrawerLabels();
+            renderImageQuickModelDrawerItems();
+            refreshIcons(modelItems);
+            bindImageQuickModelDrawerItems();
+            setImageQuickDrawerOpen(false);
+            update();
+        }));
+    }
+    function bindImageQuickProviderDrawerItems(){
+        providerItems?.querySelectorAll('[data-image-quick-provider-value]').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            node.apiProvider = resolveImageProviderId(button.dataset.imageQuickProviderValue);
+            node.model = allImageModels(node.apiProvider)[0] || '';
+            if(provider) provider.value = node.apiProvider;
+            if(model) model.value = node.model;
+            syncImageQuickDrawerLabels();
+            renderImageQuickProviderDrawerItems();
+            renderImageQuickModelDrawerItems();
+            refreshIcons(drawer);
+            bindImageQuickProviderDrawerItems();
+            bindImageQuickModelDrawerItems();
+            setImageQuickDrawerOpen(true, 'model');
+            modelItems?.querySelector('[data-image-quick-model-value]')?.focus({preventScroll:true});
+            update();
+        }));
+    }
+    drawerTriggers.forEach(trigger => trigger.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const level = trigger.dataset.imageQuickDrawerTrigger || 'provider';
+        const alreadyActive = root.classList.contains('image-quick-drawer-open') && drawer?.dataset.activeLevel === level;
+        setImageQuickDrawerOpen(!alreadyActive, level);
+    }));
+    root.querySelector('[data-image-quick-drawer-close]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        setImageQuickDrawerOpen(false);
+    });
+    root.addEventListener('pointerenter', cancelImageQuickDrawerClose);
+    root.addEventListener('pointerleave', scheduleImageQuickDrawerClose);
+    root.addEventListener('focusout', () => window.setTimeout(() => {
+        if(!root.contains(document.activeElement)) setImageQuickDrawerOpen(false);
+    }, 0));
+    root.addEventListener('keydown', event => {
+        if(event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        setImageQuickDrawerOpen(false);
     });
     const update = () => scheduleSave();
     prompt?.addEventListener('input', event => { event.stopPropagation(); node.prompt = prompt.value; update(); });
-    choiceRoot.querySelectorAll('[data-image-quick-provider-value]').forEach(button => button.addEventListener('click', event => {
-        event.stopPropagation();
-        const value = resolveImageProviderId(button.dataset.imageQuickProviderValue);
-        node.apiProvider = value;
-        const nextModel = allImageModels(node.apiProvider)[0] || '';
-        node.model = nextModel;
-        const providerInput = choiceRoot.querySelector('[data-image-quick-provider]');
-        const modelInput = choiceRoot.querySelector('[data-image-quick-model]');
-        if(providerInput) providerInput.value = value;
-        if(modelInput) modelInput.value = nextModel;
-        const providerMenu = choiceRoot.querySelector('[data-image-quick-choice="provider"]');
-        const modelMenu = choiceRoot.querySelector('[data-image-quick-choice="model"]');
-        if(providerMenu){
-            providerMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickProviderLabel(value);
-            providerMenu.querySelectorAll('[data-image-quick-provider-value]').forEach(item => item.classList.toggle('active', item.dataset.imageQuickProviderValue === value));
-        }
-        if(modelMenu){
-            modelMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickModelLabel(nextModel);
-            const panel = modelMenu.querySelector('[data-image-quick-choice-panel="model"]');
-            if(panel){
-                panel.innerHTML = allImageModels(value).length
-                    ? allImageModels(value).map(item => `<button type="button" class="image-quick-choice-item ${item === nextModel ? 'active' : ''}" role="menuitem" data-image-quick-model-value="${escapeAttr(item)}"><span>${escapeHtml(item)}</span>${item === nextModel ? '<i data-lucide="check"></i>' : ''}</button>`).join('')
-                    : `<button type="button" class="image-quick-choice-item empty" disabled>${escapeHtml(tr('canvas.noImageModelsHint') || '暂无生图模型')}</button>`;
-                refreshIcons(panel);
-                panel.querySelectorAll('[data-image-quick-model-value]').forEach(item => item.addEventListener('click', modelEvent => {
-                    modelEvent.stopPropagation();
-                    node.model = item.dataset.imageQuickModelValue || '';
-                    if(modelInput) modelInput.value = node.model;
-                    modelMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickModelLabel(node.model);
-                    panel.querySelectorAll('[data-image-quick-model-value]').forEach(option => option.classList.toggle('active', option === item));
-                    closeChoices(null); update();
-                }));
-            }
-        }
-        closeChoices(null); update();
-    }));
-    choiceRoot.querySelectorAll('[data-image-quick-model-value]').forEach(button => button.addEventListener('click', event => {
-        event.stopPropagation();
-        node.model = button.dataset.imageQuickModelValue || '';
-        const modelInput = choiceRoot.querySelector('[data-image-quick-model]');
-        if(modelInput) modelInput.value = node.model;
-        const modelMenu = choiceRoot.querySelector('[data-image-quick-choice="model"]');
-        modelMenu?.querySelector('.image-quick-choice-trigger span') && (modelMenu.querySelector('.image-quick-choice-trigger span').textContent = imageQuickModelLabel(node.model));
-        choiceRoot.querySelectorAll('[data-image-quick-model-value]').forEach(item => item.classList.toggle('active', item === button));
-        closeChoices(null); update();
-    }));
+    bindImageQuickProviderDrawerItems();
+    bindImageQuickModelDrawerItems();
     /* 保留旧 select 的兼容路径，便于外部扩展脚本传入传统面板。 */
     provider?.addEventListener('change', event => {
         event.stopPropagation();
         node.apiProvider = resolveImageProviderId(provider.value);
         const nextModel = allImageModels(node.apiProvider)[0] || '';
         node.model = nextModel;
-        if(model) model.innerHTML = imageModelOptions(node.model, node.apiProvider);
+        if(model?.tagName === 'SELECT') model.innerHTML = imageModelOptions(node.model, node.apiProvider);
+        else if(model) model.value = node.model;
+        syncImageQuickDrawerLabels();
+        renderImageQuickProviderDrawerItems();
+        renderImageQuickModelDrawerItems();
+        refreshIcons(drawer);
+        bindImageQuickProviderDrawerItems();
+        bindImageQuickModelDrawerItems();
         update();
     });
-    model?.addEventListener('change', event => { event.stopPropagation(); node.model = model.value; update(); });
+    model?.addEventListener('change', event => { event.stopPropagation(); node.model = model.value; syncImageQuickDrawerLabels(); renderImageQuickModelDrawerItems(); refreshIcons(modelItems); bindImageQuickModelDrawerItems(); update(); });
     ratio?.addEventListener('change', event => { event.stopPropagation(); node.ratio = ratio.value; update(); });
     resolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = resolution.value; node._apiResolutionUserSet = true; update(); });
     cameraButton?.addEventListener('click', event => {

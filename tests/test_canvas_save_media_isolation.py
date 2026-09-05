@@ -17,7 +17,7 @@ class CanvasSaveMediaIsolationTests(unittest.TestCase):
     def test_classic_save_has_revision_sequence_guard(self):
         self.assertIn("const CLASSIC_SAVE_QUEUE_ENABLED = true;", CANVAS_JS)
         self.assertIn("let localCanvasSaveSequence = 0;", CANVAS_JS)
-        save = body(CANVAS_JS, "async function saveCanvas()", "function scheduleCanvasConfigSecondary")
+        save = body(CANVAS_JS, "async function saveCanvas()", "function applyCanvasRuntimeConfig")
         self.assertIn("const savingSequence = localCanvasSaveSequence;", save)
         self.assertIn("saveHadNewerEdits", save)
         self.assertIn("nodes:localNodes, connections:localConnections", save)

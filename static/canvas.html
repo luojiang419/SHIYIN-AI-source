@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>无限画布</title>
-    <script src="/static/js/canvas-startup.js?v=2026.09.05.cold-start.1"></script>
+    <script src="/static/js/canvas-startup.js?v=2026.09.05.startup-lifecycle.2"></script>
     <script defer src="/static/js/quick-save.js?v=2026.09.02.1"></script>
     <script>
         (function(){
@@ -34,7 +34,7 @@
     <script defer src="/static/js/i18n/studio.js?v=2026.09.05.cold-start.1"></script>
     <script defer src="/static/js/i18n/canvas.js?v=2026.09.05.cold-start.1"></script>
     <script defer src="/static/js/i18n/smart-canvas.js?v=2026.09.05.cold-start.1"></script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260904.4&feature=lookbook-style-picker.2&feature=lookbook-port-layout.1&feature=lookbook-port-labels.2&feature=selection-hub-responsive.1&feature=prompt-text-node.1&feature=prompt-node-resize.1&feature=multi-select-surfaces.1&feature=storyboard-merge.2&feature=lookbook-port-spacing.1&feature=image-quick-compact.1&feature=image-quick-single-row.1&feature=lookbook-agent.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=explicit-visibility-cull.1&feature=canvas-package.1&feature=video-reference-grid.2&feature=lookbook-layout-editor.1&feature=node-frame-standards.1&feature=preview-fixed-position.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1">
+    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260904.4&feature=lookbook-style-picker.2&feature=lookbook-port-layout.1&feature=lookbook-port-labels.2&feature=selection-hub-responsive.1&feature=prompt-text-node.1&feature=prompt-node-resize.1&feature=multi-select-surfaces.1&feature=storyboard-merge.2&feature=lookbook-port-spacing.1&feature=image-quick-compact.1&feature=image-quick-single-row.1&feature=lookbook-agent.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=explicit-visibility-cull.1&feature=canvas-package.1&feature=video-reference-grid.2&feature=lookbook-layout-editor.1&feature=node-frame-standards.1&feature=preview-fixed-position.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=startup-lifecycle.2">
     <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.09.05.depth-map.1">
     <link rel="stylesheet" href="/static/css/canvas-angle-3d.css?v=2026.08.21.angle-3d.1">
     <link rel="stylesheet" href="/static/css/canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.2">
@@ -46,6 +46,9 @@
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.14.blender-neutral.1&feature=classic-prompt-neutral.1">
 </head>
 <body>
+    <div id="canvasStartupNotice" class="canvas-startup-notice" role="status" aria-live="polite" hidden>
+        <div class="canvas-startup-card"><span data-startup-message></span><button type="button" hidden>重试</button></div>
+    </div>
     <div id="shell" class="shell no-canvas">
         <div class="topbar">
             <div class="panel canvas-nav">
@@ -567,6 +570,6 @@
     <script defer src="/static/js/canvas-linkfox-video.js?v=2026.08.28.linkfox-video.3"></script>
     <script defer src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
     <script defer src="/static/js/canvas-legacy-migration.js?v=2026.08.30.legacy-smart-migration.1"></script>
-<script defer src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260904.4&feature=story-campaign-node.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&feature=lookbook-picker.1&feature=lookbook-output-node.1&feature=lookbook-multi-run.1&feature=lookbook-auto-mode.1&feature=output-lightbox-menu.1&feature=lookbook-port-layout.1&feature=selection-hub-responsive.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&feature=vision-provider-default.1&feature=video-prompt-scroll.1&feature=prompt-node-resize.1&feature=storyboard-merge.2&feature=lookbook-submenu-exclusive.1&app-version=1.0.378&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=lookbook-count.1&feature=provider-model-menu.1&feature=lookbook-reference-type-ownership.1&feature=media-eager-queue.1&feature=media-residency-idle.3&feature=media-restore-idle.2&feature=canvas-package.1&feature=selected-download.1&feature=grid-split-return.1&feature=video-menu-unified.1&feature=lookbook-text-count-priority.1&feature=lookbook-series-anchor.1&feature=lookbook-layout-editor.1&feature=video-auto-height.1&feature=asset-quick-save.1&feature=preview-copy-image.1&feature=node-frame-standards.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=pose-replicate-v2.4&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1&feature=cold-start.1"></script>
+<script defer src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260904.4&feature=story-campaign-node.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&feature=lookbook-picker.1&feature=lookbook-output-node.1&feature=lookbook-multi-run.1&feature=lookbook-auto-mode.1&feature=output-lightbox-menu.1&feature=lookbook-port-layout.1&feature=selection-hub-responsive.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&feature=vision-provider-default.1&feature=video-prompt-scroll.1&feature=prompt-node-resize.1&feature=storyboard-merge.2&feature=lookbook-submenu-exclusive.1&app-version=1.0.378&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=lookbook-count.1&feature=provider-model-menu.1&feature=lookbook-reference-type-ownership.1&feature=media-eager-queue.1&feature=media-residency-idle.3&feature=media-restore-idle.2&feature=canvas-package.1&feature=selected-download.1&feature=grid-split-return.1&feature=video-menu-unified.1&feature=lookbook-text-count-priority.1&feature=lookbook-series-anchor.1&feature=lookbook-layout-editor.1&feature=video-auto-height.1&feature=asset-quick-save.1&feature=preview-copy-image.1&feature=node-frame-standards.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=pose-replicate-v2.4&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1&feature=startup-lifecycle.2"></script>
 </body>
 </html>

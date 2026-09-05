@@ -376,18 +376,21 @@ function syncCanvasSelectedImageResolution(root=nodesEl, affectedNodeIds=null){
 }
 function applyLanguage(lang){
     if(lang && window.StudioI18n) StudioI18n.set(lang);
+    else refreshCanvasLanguage();
+}
+function refreshCanvasLanguage(){
+    const language = window.StudioI18n?.lang?.() || 'zh';
+    if(language === classicRenderedLanguage) return;
+    classicRenderedLanguage = language;
     document.title = tr('canvas.title');
     refreshGateViewControls();
-    if(canvas) {
-        currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
-    }
+    if(canvas) currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
     renderCanvasList();
     applyQuickToolbarState();
-    render();
+    if(canvas) render();
 }
 async function refreshCanvasConfigFromSettings(){
-    await loadConfig();
-    pruneMissingComfyWorkflows();
+    if(!await loadConfig()) return;
     (nodes || []).forEach(node => {
         sanitizeImageNodeProviderModel(node);
         sanitizeVideoNodeProviderModel(node);
@@ -410,6 +413,7 @@ function resumeCanvasRouteMedia(){
 }
 function setCanvasRouteActive(active){
     canvasRouteActive = Boolean(active);
+    window.CanvasStartup?.setVisible(canvasRouteActive && !document.hidden);
     document.documentElement.classList.toggle('studio-route-inactive', !canvasRouteActive);
     syncClassicParentShortcutListeners();
     if(!canvasRouteActive || document.hidden){
@@ -447,25 +451,25 @@ window.addEventListener('message', event => {
     }
 });
 window.addEventListener('pagehide', () => {
+    window.CanvasStartup?.cancel();
     detachClassicParentShortcutListeners();
     stopCanvasRemotePolling();
     pauseCanvasRouteMedia();
 });
 document.addEventListener('visibilitychange', () => setCanvasRouteActive(canvasRouteActive));
+window.addEventListener('pageshow', event => {
+    if(event.persisted){
+        const id = new URLSearchParams(window.location.search).get('id');
+        if(id) void openCanvas(id);
+    }
+});
 window.addEventListener('canvas-realtime-message', event => {
     const data = event.detail || {};
     if(data.type === 'entity.changed' && data.topic === 'canvas') handleCanvasUpdatedMessage(data);
     if(data.type === 'entity.changed' && ['platform','workflow'].includes(data.topic)) refreshCanvasConfigFromSettings();
     if(data.type === 'sync.reconnected' && canvas) syncRemoteCanvasNow();
 });
-window.addEventListener('studio-lang-change', () => {
-    document.title = tr('canvas.title');
-    refreshGateViewControls();
-    if(canvas) currentCanvasTitle.textContent = canvas?.title || tr('canvas.untitled');
-    renderCanvasList();
-    applyQuickToolbarState();
-    render();
-});
+window.addEventListener('studio-lang-change', refreshCanvasLanguage);
 const shell = document.getElementById('shell');
 const canvasGate = document.getElementById('canvasGate');
 const board = document.getElementById('board');
@@ -884,6 +888,9 @@ let chatModels = ['gpt-4o-mini'];
 let videoModels = [];
 let msChatModels = [];
 let apiProviders = [];
+let classicRenderedLanguage = '';
+let canvasConfigRevision = 0;
+let canvasConfigRequestSequence = 0;
 let klingCliState = {
     loaded:false,
     loading:false,
@@ -895,6 +902,7 @@ let klingCliState = {
     error:'',
     capabilities:{text_to_video:[], image_to_video:[], video_elements:[], video_reference_supported:false, video_reference_message:''}
 };
+let minimaxH3StatusTask = null;
 let minimaxH3State = {
     loaded:false,
     loading:false,
@@ -1535,25 +1543,31 @@ async function loadKlingCapabilities({renderAfter=true}={}){
     return klingCliState;
 }
 async function loadMiniMaxH3Status({renderAfter=false}={}){
-    if(minimaxH3State.loading) return minimaxH3State;
-    minimaxH3State = {...minimaxH3State, loading:true};
-    try {
-        const response = await fetch('/api/minimax-h3/status', {cache:'no-store'});
-        const data = await response.json().catch(() => ({}));
-        if(!response.ok) throw new Error(data.detail || '读取 MiniMax H3 状态失败');
-        minimaxH3State = {
-            loaded:true,
-            loading:false,
-            generationEnabled:Boolean(data.generation_enabled),
-            resolutions:Array.isArray(data.resolutions) ? data.resolutions : [],
-            defaults:data.defaults && typeof data.defaults === 'object' ? data.defaults : {},
-            error:String(data.error || '')
-        };
-    } catch(error) {
-        minimaxH3State = {...minimaxH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 MiniMax H3 状态失败'};
+    // 首屏探测和用户点击生成共享同一 Promise，不能把“加载中”当成最终不可用状态。
+    if(!minimaxH3StatusTask){
+        minimaxH3State = {...minimaxH3State, loading:true};
+        minimaxH3StatusTask = (async () => {
+            try {
+                const response = await fetch('/api/minimax-h3/status', {cache:'no-store'});
+                const data = await response.json().catch(() => ({}));
+                if(!response.ok) throw new Error(data.detail || '读取 MiniMax H3 状态失败');
+                minimaxH3State = {
+                    loaded:true,
+                    loading:false,
+                    generationEnabled:Boolean(data.generation_enabled),
+                    resolutions:Array.isArray(data.resolutions) ? data.resolutions : [],
+                    defaults:data.defaults && typeof data.defaults === 'object' ? data.defaults : {},
+                    error:String(data.error || '')
+                };
+            } catch(error) {
+                minimaxH3State = {...minimaxH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 MiniMax H3 状态失败'};
+            }
+            return minimaxH3State;
+        })().finally(() => { minimaxH3StatusTask = null; });
     }
+    const state = await minimaxH3StatusTask;
     if(renderAfter) render();
-    return minimaxH3State;
+    return state;
 }
 function minimaxH3ConnectionNote(){
     if(minimaxH3State.loading) return '正在检查 MiniMax H3 服务…';
@@ -3007,46 +3021,47 @@ async function saveCanvas(){
     }
 }
 
-function scheduleCanvasConfigSecondary(task){
-    const run = () => {
-        Promise.resolve()
-            .then(task)
-            .then(() => {
-                if(!canvas) return;
-                pruneMissingComfyWorkflows();
-                render();
-            })
-            .catch(error => console.warn('canvas secondary config load failed', error));
-    };
-    if('requestIdleCallback' in window) window.requestIdleCallback(run, {timeout:1200});
-    else setTimeout(run, 0);
-}
-async function loadConfig({deferSecondary=false}={}){
+function applyCanvasRuntimeConfig(cfg){
     loadLocalModelLists();
+    imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
+    chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
+    videoModels = cfg.video_models?.length ? cfg.video_models : DEFAULT_VIDEO_MODELS;
+    msChatModels = cfg.ms_chat_models?.length ? cfg.ms_chat_models : msChatModels;
+    apiProviders = cfg.api_providers.length ? cfg.api_providers : defaultApiProviders();
+    managedProviderId = cfg.primary_provider_id
+        || apiProviders.find(provider => provider.primary === true)?.id
+        || managedProviderId;
+    models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
+    models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
+    runningHubWorkflowCache = {};
+    canvasConfigRevision++;
+}
+async function loadCanvasConfigCapabilities({isCurrent=() => true, refresh=true}={}){
+    const revision = canvasConfigRevision;
+    const rhNodes = nodes.filter(node => node.type === 'rh' && node.workflowId);
+    const h3Nodes = nodes.filter(isMiniMaxH3VideoNode);
+    const workflowIds = [...new Set(rhNodes.map(node => String(node.workflowId).trim()).filter(Boolean))];
+    const tasks = workflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
+    // H3 状态也供用户随后新建的节点使用，保留已配置平台的单次后台探测。
+    if(h3Nodes.length || apiProviders.some(provider => provider.id === 'minimax-h3')) tasks.push(loadMiniMaxH3Status());
+    await Promise.allSettled(tasks);
+    if(!isCurrent() || revision !== canvasConfigRevision) return;
+    // 外部能力只影响相应节点，不因配置返回而重建全部媒体、连线和输入框。
+    const ids = [...rhNodes, ...h3Nodes].filter(node => nodes.includes(node)).map(node => node.id);
+    if(refresh && ids.length) refreshNodes(ids);
+}
+async function loadConfig(){
+    const requestSequence = ++canvasConfigRequestSequence;
     try {
-        const cfg = await fetch('/api/runtime/config').then(r=>r.json());
-        imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
-        chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
-        videoModels = cfg.video_models?.length ? cfg.video_models : DEFAULT_VIDEO_MODELS;
-        msChatModels = cfg.ms_chat_models?.length ? cfg.ms_chat_models : msChatModels;
-        apiProviders = Array.isArray(cfg.api_providers) && cfg.api_providers.length ? cfg.api_providers : defaultApiProviders();
-        managedProviderId = cfg.primary_provider_id
-            || apiProviders.find(provider => provider.primary === true)?.id
-            || managedProviderId;
-        models.nano = imageModels.find(m => m.toLowerCase().includes('nano')) || 'nano-banana-pro';
-        models.gpt = imageModels.find(m => !m.toLowerCase().includes('nano')) || cfg.image_model || 'gpt-image-2';
-        runningHubWorkflowCache = {};
-        const rhProvider = apiProviders.find(p => p.id === 'runninghub');
-        const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
-        const loadSecondary = async () => {
-            const tasks = rhWorkflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
-            if(apiProviders.some(provider => provider.id === 'minimax-h3')) tasks.push(loadMiniMaxH3Status());
-            await Promise.allSettled(tasks);
-        };
-        if(deferSecondary) scheduleCanvasConfigSecondary(loadSecondary);
-        else await loadSecondary();
-    } catch(e) {
-        apiProviders = defaultApiProviders();
+        const cfg = await window.CanvasStartup.readConfig();
+        if(requestSequence !== canvasConfigRequestSequence) return false;
+        applyCanvasRuntimeConfig(cfg);
+        await loadCanvasConfigCapabilities({isCurrent:() => requestSequence === canvasConfigRequestSequence, refresh:false});
+        return requestSequence === canvasConfigRequestSequence;
+    } catch(error) {
+        // 读取失败保留已知配置，不能用默认平台重写用户保存的节点参数。
+        console.warn('canvas config refresh failed', error);
+        return false;
     }
 }
 
@@ -3225,25 +3240,24 @@ async function touchCanvasOpened(id){
         return null;
     }
 }
-function scheduleCanvasSecondaryStartup(openedCanvasId){
-    const run = () => {
-        if(!canvas || canvas.id !== openedCanvasId || document.hidden) return;
-        // 恢复任务、轮询、touch 和资源检查让出首屏关键帧与视口预览队列。
-        resumeCanvasImageTasks();
-        resumeCanvasVideoTasks();
-        resumeTopazVideoTasks();
-        startCanvasRemotePolling();
-        void touchCanvasOpened(openedCanvasId).then(touched => {
-            if(canvas?.id !== openedCanvasId || !touched?.updated_at) return;
+async function startCanvasSecondaryStartup(session){
+    const openedCanvasId = session.id;
+    if(!session.isCurrent() || canvas?.id !== openedCanvasId) return;
+    resumeCanvasImageTasks();
+    resumeCanvasVideoTasks();
+    resumeTopazVideoTasks();
+    startCanvasRemotePolling();
+    await Promise.allSettled([
+        loadCanvasConfigCapabilities({isCurrent:session.isCurrent}),
+        touchCanvasOpened(openedCanvasId).then(touched => {
+            if(!session.isCurrent() || canvas?.id !== openedCanvasId || !touched?.updated_at) return;
             canvas.updated_at = Number(touched.updated_at);
             lastCanvasUpdatedAt = Math.max(lastCanvasUpdatedAt, canvas.updated_at);
-        });
-        void refreshMissingCanvasAssets(openedCanvasId).then(assetsChanged => {
-            if(assetsChanged && canvas?.id === openedCanvasId) render();
-        });
-    };
-    if('requestIdleCallback' in window) window.requestIdleCallback(run, {timeout:1500});
-    else window.setTimeout(run, 180);
+        }),
+        refreshMissingCanvasAssets(openedCanvasId).then(assetsChanged => {
+            if(assetsChanged && session.isCurrent() && canvas?.id === openedCanvasId) render();
+        })
+    ]);
 }
 function renderCanvasListInto(list){
     if(!list) return;
@@ -3582,25 +3596,24 @@ async function setCanvasTitle(id, title){
 }
 async function openCanvas(id){
     setStatus('Opening...');
-    const initialTask = window.CanvasStartup?.takeCanvas(id);
-    // performance 时间原点就是页面导航；首次进入需包含脚本和样式加载的等待。
-    classicNavigationStartedAt = initialTask ? 0 : performance.now();
+    const session = window.CanvasStartup.open(id);
+    const configRevision = session.sequence === 1 ? 0 : canvasConfigRevision;
+    // 首次会话从页面导航计时；后续打开从本次请求开始计时。
+    classicNavigationStartedAt = session.sequence === 1 ? 0 : session.timings.requestStartedAt;
     classicFirstRenderCanvasId = '';
     classicFirstPreviewCanvasId = '';
+    showCanvasStartupNotice(id);
     try {
-        let data;
-        if(initialTask){
-            const initial = await initialTask;
-            if(initial.error) throw initial.error;
-            data = initial.data;
-            const timings = window.CanvasStartup.timings;
-            window.CanvasPerformance?.record?.('classic.initial-data-ready', timings.dataReadyAt);
-            window.CanvasPerformance?.record?.('classic.initial-data-request', timings.dataReadyAt - timings.requestStartedAt);
-        } else {
-            const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
-            if(!res.ok) throw new Error(tr('canvas.openFailed'));
-            data = await res.json();
-        }
+        const result = await session.ready;
+        if(!session.isCurrent()) return;
+        if(result.error) throw result.error;
+        // 已在设置广播中应用的新配置优先于启动时发出的旧请求。
+        if(configRevision === canvasConfigRevision) applyCanvasRuntimeConfig(result.config);
+        const data = result.data;
+        const timings = session.timings;
+        window.CanvasPerformance?.record?.('classic.initial-data-ready', timings.dataReadyAt);
+        window.CanvasPerformance?.record?.('classic.initial-config-ready', timings.configReadyAt);
+        window.CanvasPerformance?.record?.('classic.initial-data-request', timings.dataReadyAt - timings.requestStartedAt);
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
@@ -3622,14 +3635,35 @@ async function openCanvas(id){
         render();
         if(prunedRuntimeCollections || legacyMigration.changed) scheduleSave();
         setStatus('Ready');
-        const openedCanvasId = canvas.id;
-        scheduleCanvasSecondaryStartup(openedCanvasId);
+        hideCanvasStartupNotice();
+        session.afterPaint(startCanvasSecondaryStartup);
     } catch(e) {
+        if(!session.isCurrent()) return;
         setStatus(tr('canvas.openFailed'));
         console.error(e);
-        // 打开失败（id 无效/已删除）：回到选画布页面，避免停在空白编辑器。
-        window.location.replace(canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject()));
+        if(e.resource === 'canvas' && e.status === 404){
+            window.location.replace(canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject()));
+        } else {
+            showCanvasStartupNotice(id, e);
+        }
     }
+}
+function showCanvasStartupNotice(id, error=null){
+    const notice = document.getElementById('canvasStartupNotice');
+    if(!notice) return;
+    notice.hidden = false;
+    const message = notice.querySelector('[data-startup-message]');
+    message.textContent = error
+        ? (langIsEn() ? 'Could not load the canvas. Please retry.' : '画布加载失败，请重试。')
+        : (langIsEn() ? 'Opening canvas…' : '正在打开画布…');
+    const retry = notice.querySelector('button');
+    retry.hidden = !error;
+    retry.textContent = langIsEn() ? 'Retry' : '重试';
+    retry.onclick = () => openCanvas(id);
+}
+function hideCanvasStartupNotice(){
+    const notice = document.getElementById('canvasStartupNotice');
+    if(notice) notice.hidden = true;
 }
 function migrateLegacySmartCanvasNodes(sourceNodes){
     const helper = window.CanvasLegacySmartMigration;
@@ -3736,6 +3770,7 @@ function canvasLocalAssetUrls(){
 }
 async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
     const targetCanvasId = String(expectedCanvasId || '');
+    const targetNodes = nodes;
     const previousMissing = new Set(missingAssetUrls);
     const hasChanged = () => previousMissing.size !== missingAssetUrls.size
         || [...previousMissing].some(url => !missingAssetUrls.has(url));
@@ -3751,6 +3786,7 @@ async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
             body:JSON.stringify({urls})
         }).then(r => r.json());
         if(canvas?.id !== targetCanvasId) return;
+        if(nodes !== targetNodes) return;
         missingAssetUrls.clear();
         const exists = data.exists || {};
         Object.entries(exists).forEach(([url, ok]) => { if(!ok) missingAssetUrls.add(url); });
@@ -14417,15 +14453,16 @@ function currentRunningHubWorkflow(node){
 async function ensureRunningHubWorkflow(workflowId){
     workflowId = validRunningHubWorkflowId(workflowId);
     if(!workflowId) return null;
-    if(runningHubWorkflowCache[workflowId]) return runningHubWorkflowCache[workflowId];
+    const cache = runningHubWorkflowCache;
+    if(cache[workflowId]) return cache[workflowId];
     const res = await fetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
     if(!res.ok){
-        delete runningHubWorkflowCache[workflowId];
+        delete cache[workflowId];
         return null;
     }
     const data = await res.json();
-    runningHubWorkflowCache[workflowId] = data.workflow || null;
-    return runningHubWorkflowCache[workflowId];
+    cache[workflowId] = data.workflow || null;
+    return cache[workflowId];
 }
 function comfyFieldKind(f){
     if(['image','video','audio'].includes(f?.type)) return f.type;
@@ -24013,13 +24050,7 @@ async function initializeCanvasPage(){
     // 编辑器页只负责打开单个画布：必须带 ?id；没有 id 就回到独立的选画布页面。
     const openId = new URLSearchParams(window.location.search).get('id');
     if(openId){
-        const configTask = loadConfig({deferSecondary:true});
         await openCanvas(openId);
-        void configTask.then(() => {
-            if(canvas?.id !== openId) return;
-            pruneMissingComfyWorkflows();
-            render();
-        });
     } else {
         window.location.replace(canvasListUrlForProject(rememberedCanvasListProject()));
     }

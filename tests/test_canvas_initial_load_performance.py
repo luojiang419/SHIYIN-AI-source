@@ -18,18 +18,16 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
     def test_classic_canvas_schedules_touch_and_asset_check_after_first_render(self):
         body = function_body(CANVAS_JS, "async function openCanvas(id)", "function applyRemoteCanvasData")
         render_at = body.index("render();")
-        self.assertLess(render_at, body.index("scheduleCanvasSecondaryStartup(openedCanvasId)"))
-        self.assertIn("function scheduleCanvasSecondaryStartup(openedCanvasId)", CANVAS_JS)
-        self.assertIn("requestIdleCallback", CANVAS_JS)
+        self.assertLess(render_at, body.index("session.afterPaint(startCanvasSecondaryStartup)"))
+        self.assertIn("async function startCanvasSecondaryStartup(session)", CANVAS_JS)
         self.assertNotIn("await touchCanvasOpened", body)
         self.assertNotIn("await refreshMissingCanvasAssets", body)
 
-    def test_classic_canvas_starts_config_and_canvas_requests_in_parallel(self):
-        onload = CANVAS_JS[CANVAS_JS.index("async function initializeCanvasPage(){"):]
-        self.assertIn("const configTask = loadConfig({deferSecondary:true});", onload)
-        self.assertIn("await openCanvas(openId);", onload)
-        self.assertLess(onload.index("const configTask"), onload.index("await openCanvas(openId)"))
-        self.assertIn("scheduleCanvasConfigSecondary(loadSecondary)", CANVAS_JS)
+    def test_classic_canvas_applies_required_config_before_first_render(self):
+        body = function_body(CANVAS_JS, "async function openCanvas(id)", "function showCanvasStartupNotice")
+        self.assertLess(body.index("applyCanvasRuntimeConfig(result.config)"), body.index("render();"))
+        self.assertNotIn("scheduleCanvasConfigSecondary", CANVAS_JS)
+        self.assertNotIn("pruneMissingComfyWorkflows();", body)
 
     def test_classic_asset_check_cannot_apply_to_a_newer_canvas(self):
         body = function_body(

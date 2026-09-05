@@ -1,4 +1,8 @@
 @import url('/static/vendor/css/fonts.css?v=2026.05.22.1');
+.canvas-startup-notice { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; background:var(--page); color:var(--text); }
+.canvas-startup-notice[hidden] { display:none; }
+.canvas-startup-card { display:flex; align-items:center; gap:16px; padding:24px; background:var(--panel); border:1px solid var(--line); border-radius:16px; font-size:14px; }
+.canvas-startup-card button { padding:8px 16px; border:1px solid var(--line); border-radius:8px; cursor:pointer; background:var(--card); color:var(--text); }
 :root { --ease:cubic-bezier(.4,0,.2,1); --page:#f7f1e6; --grid:rgba(120,100,76,.18); --panel:rgba(251,245,238,.92); --card:rgba(252,247,241,.96); --card-solid:#fcf7f1; --soft:#f7efe5; --soft-2:#f1e5d7; --line:rgba(91,74,54,.12); --line-2:rgba(91,74,54,.24); --text:#332d28; --muted:#766f68; --faint:#9b9288; --shadow:rgba(110,86,58,.10); --strong:#9a6636; --strong-text:#fff9f2; }
 .theme-dark { --page:#1a1a1a; --grid:rgba(255,255,255,.12); --panel:rgba(30,30,30,.9); --card:rgba(32,32,31,.96); --card-solid:#20201f; --soft:#292928; --soft-2:#30302f; --line:rgba(255,255,255,.08); --line-2:rgba(255,255,255,.16); --text:#f0eee9; --muted:#a7a6a2; --faint:#7b7a77; --shadow:rgba(0,0,0,.30); --strong:#3a3a39; --strong-text:#f4f2ed; }
 :root { --canvas-node-fill:#e7e5df; --canvas-node-panel:#fbfaf7; --canvas-node-stroke:#d6d3ca; --canvas-node-text:#292524; --canvas-node-muted:#78716c; --canvas-selection:hsl(214 100% 59%); }

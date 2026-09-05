@@ -45,9 +45,9 @@ def task_request(
     ("has_model", "has_scene", "scenario", "roles"),
     [
         (False, False, "base-wardrobe", ["pose_reference", "control_map", "target_image"]),
-        (True, False, "model-wardrobe", ["pose_reference", "control_map", "target_image", "model_subject"]),
+        (True, False, "model-wardrobe", ["model_subject", "pose_reference", "control_map", "target_image"]),
         (False, True, "base-wardrobe-scene", ["pose_reference", "control_map", "target_image", "scene"]),
-        (True, True, "model-full-look-scene", ["pose_reference", "control_map", "target_image", "model_subject", "scene"]),
+        (True, True, "model-full-look-scene", ["model_subject", "pose_reference", "control_map", "target_image", "scene"]),
     ],
 )
 def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_scene, scenario, roles):
@@ -68,6 +68,8 @@ def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_sce
     assert "只能出现一个最终人物实例" in result.final_prompt
     assert "严禁拼图、分栏、三联画" in result.final_prompt
     assert "只能在同一个镜头内自然扩展背景或裁切" in result.final_prompt
+    if has_model:
+        assert "以图1模特主体为唯一人物编辑底图" in result.final_prompt
     for sample_specific in ("豹纹", "眼镜", "手袋"):
         assert sample_specific not in result.final_prompt
 

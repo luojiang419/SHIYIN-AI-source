@@ -144,7 +144,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
             self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-auto-ratio.1", page)
-            self.assertIn("feature=pose-replicate-v2.2", page)
+            self.assertIn("feature=pose-replicate-v2.3", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
         for marker in (
@@ -570,7 +570,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
                 re.S,
             ).group(0)
             self.assertIn("'/api/canvas/pose-replicate-tasks'", body)
-            self.assertIn("template_id:'pose-replicate.v2.2'", body)
+            self.assertIn("template_id:'pose-replicate.v2.3'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
         self.assertIn("'source','1:1','16:9','9:16','4:3','3:4'", self.shared)
         self.assertIn("自动（跟随原图）", self.shared)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 
-POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v2.2"
+POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v2.3"
 POSE_REPLICATE_LOCALE = "zh-CN"
 POSE_REPLICATE_MODES = {"depth", "skeleton"}
 POSE_REPLICATE_OUTPUT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4"}
@@ -76,9 +76,11 @@ def reference_order(control_mode: str, has_model_subject: bool, has_scene: bool)
     mode = str(control_mode or "").strip().lower()
     if mode not in POSE_REPLICATE_MODES:
         raise PoseReplicatePromptError("一键复刻模式只支持 depth 或 skeleton")
-    roles = ["pose_reference", "control_map", "target_image"]
-    if has_model_subject:
-        roles.append("model_subject")
+    roles = (
+        ["model_subject", "pose_reference", "control_map", "target_image"]
+        if has_model_subject
+        else ["pose_reference", "control_map", "target_image"]
+    )
     if has_scene:
         roles.append("scene")
     return tuple(
@@ -189,9 +191,9 @@ def _clean_list(value: Any, limit: int = 12) -> list[str]:
 
 def _base_instruction(has_model_subject: bool, has_scene: bool) -> str:
     if has_model_subject and has_scene:
-        return "请完成高保真跨图人物复刻：使用模特主体的身份与身体、目标图的完整服装、动作参考的姿势结构，并将最终人物自然置入场景图。"
+        return "请以图1模特主体为唯一人物编辑底图完成高保真跨图复刻：保留其身份与身体，换上目标图完整服装，严格应用动作参考的姿势结构，并将最终人物自然置入场景图。"
     if has_model_subject:
-        return "请完成高保真人物与服装迁移：使用模特主体的身份与身体、目标图的服装，并严格复刻动作参考的姿势、主体相对构图和原场景。"
+        return "请以图1模特主体为唯一人物编辑底图完成高保真人物与服装迁移：保留其身份与身体，换上目标图服装，并严格复刻动作参考的姿势、主体相对构图和原场景。"
     if has_scene:
         return "请以动作参考中的人物身份与姿势为基础，换上目标图服装，并将人物自然置入场景图；不得让场景图改变人物身份。"
     return "请以图1为唯一编辑底图进行高保真服装替换：保留原人物、原姿势、原配饰、原背景和主体相对构图，只替换与图3目标服装对应的服装区域。"

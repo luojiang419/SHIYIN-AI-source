@@ -1275,6 +1275,7 @@ function canvasForStorage(){
         delete node.specialRunning;
         delete node.poseReplicateActiveRuns;
         if(node.poseStatus === 'running') node.poseStatus = 'idle';
+        if(node.depthMapStatus === 'running') node.depthMapStatus = 'idle';
     });
     return clean;
 }
@@ -2220,6 +2221,27 @@ function createDWPoseNode(point){
     };
     return commitSmartNodeCreate(node);
 }
+function createDepthMapNode(point, sourceNode=null){
+    pushUndo();
+    const sourceRect = sourceNode ? nodeRect(sourceNode) : null;
+    const node = {
+        id:uid('depth'), type:'smart-image', specialType:'depth-map',
+        x:sourceRect ? sourceRect.x + sourceRect.width + 150 : (point?.x || 0) - 260,
+        y:sourceRect ? sourceRect.y : (point?.y || 0) - 235,
+        w:520, h:560, title:'深度图', images:[], depthMapStatus:'idle',
+        depthMapSourceImageIndex:sourceNode?.id === selectedImage.nodeId ? Math.max(0, Number(selectedImage.index) || 0) : 0,
+        scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()
+    };
+    commitSmartNodeCreate(node, {select:false, deferRender:true, deferSave:true});
+    if(sourceNode?.id) connectInputNode(sourceNode.id, node.id);
+    selectedId = node.id;
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    queueSmartRenderMutation({createdIds:[node.id]});
+    render();
+    scheduleSave();
+    return node;
+}
 function createDirector3dNode(point){
     pushUndo();
     const node = {id:uid('director3d'), type:'smart-image', specialType:'director3d', x:(point?.x||0)-230, y:(point?.y||0)-210, w:460, h:420, title:'3D导演台', images:[], directorProject:null, directorCaptures:[], scale:MEDIA_NODE_DEFAULT_SCALE, created_at:Date.now()};
@@ -3024,6 +3046,7 @@ function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'linkfox-video') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 480)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
+    if(node?.specialType === 'depth-map') return {cols:1, rows:1, width:Math.max(520, Math.round(Number(node.w) || 520)), height:Math.max(560, Math.round(Number(node.h) || 560)), thumb:96, single:true};
     if(node?.specialType === 'director3d') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(380, Math.round(Number(node.h) || 420)), thumb:96, single:true};
     if(node?.specialType === 'pose-replicate') return {cols:1, rows:1, width:Math.max(640, Math.round(Number(node.w) || 720)), height:Math.max(760, Math.round(Number(node.h) || 820)), thumb:96, single:true};
     if(node?.specialType === 'angle') return {cols:1, rows:1, width:Math.max(400, Math.round(Number(node.w) || 460)), height:Math.max(600, Math.round(Number(node.h) || 660)), thumb:96, single:true};
@@ -9423,7 +9446,7 @@ function runSmartCanvasShortcutAction(actionId){
         const nodeTypeMap = {
             'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
             'create.h3Video':'h3-video', 'create.panorama':'panorama', 'create.director3d':'director3d',
-            'create.dwpose':'dwpose', 'create.poseReplicate':'pose-replicate',
+            'create.dwpose':'dwpose', 'create.depthMap':'depth-map', 'create.poseReplicate':'pose-replicate',
             'create.multiView':'multi-view', 'create.batch':'batch'
         };
         createNodeFromMenu(nodeTypeMap[actionId], viewportCenter());
@@ -9723,6 +9746,7 @@ function nodeBodyHtml(node, layout){
     if(node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art') return window.CanvasFilmNodes?.bodyHtml(node,{providerOptions:filmSmartProviderOptions,modelOptions:filmSmartModelOptions,imageProviderOptions:filmSmartImageProviderOptions,imageModelOptions:filmSmartImageModelOptions,assets:filmSmartAssets}) || '<div class="smart-group-empty">影视节点加载失败</div>';
     if(node.specialType === 'panorama') return window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="smart-group-empty">720°取景器加载失败</div>';
     if(node.specialType === 'dwpose') return window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="smart-group-empty">动作提取节点加载失败</div>';
+    if(node.specialType === 'depth-map') return window.CanvasSpecialNodes?.depthMapBodyHtml(node) || '<div class="smart-group-empty">深度图节点加载失败</div>';
     if(node.specialType === 'director3d') return window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="smart-group-empty">3D导演台加载失败</div>';
     if(node.specialType === 'pose-replicate') return window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:providerImageModels(provider.id)}))}) || '<div class="smart-group-empty">一键复刻节点加载失败</div>';
     if(node.specialType === 'angle'){
@@ -9861,6 +9885,7 @@ function smartNodeToolbarHtml(node){
     const actions = [
         {key:'preview', icon:'eye', label:'预览', enabled:kind === 'image' || kind === 'video'},
         {key:'multi-view', icon:'panels-top-left', label:'创建三视图', enabled:canEditImage},
+        {key:'depth-map', icon:'scan', label:'深度图', enabled:canEditImage},
         {key:'batch', icon:'layers-3', label:'批量处理', enabled:canEditImage},
         {key:'crop', icon:'crop', label:'裁剪', enabled:canEditImage},
         {key:'outpaint', icon:'expand', label:'扩图', enabled:canEditImage},
@@ -9901,6 +9926,10 @@ function runSmartNodeToolbarAction(nodeId, action){
     selectedImage = {nodeId, index};
     if(action === 'multi-view'){
         createMultiViewNode(null, node);
+        return;
+    }
+    if(action === 'depth-map'){
+        createDepthMapNode(null, node);
         return;
     }
     if(action === 'batch'){
@@ -10086,7 +10115,7 @@ function smartNodeHtml(node){
     const layoutImages = generationSlots.length ? generationSlots.map(slot => slot.image || {}) : imgs;
     const slotLoading = generationSlots.some(slot => slot.status === 'loading');
     const slotFailed = generationSlots.some(slot => slot.status === 'error');
-    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
+    const title = node.specialType === 'linkfox-video' ? 'LinkFox视频生成' : node.specialType === 'film-storyboard' ? '分镜合成' : node.specialType === 'film-line-art' ? '生成线稿分镜' : node.specialType === 'film-video' ? '生成视频' : node.specialType === 'panorama' ? '720°取景器' : node.specialType === 'dwpose' ? '动作提取 · DWPose' : node.specialType === 'depth-map' ? '深度图' : node.specialType === 'director3d' ? '3D导演台' : node.specialType === 'pose-replicate' ? '一键复刻' : node.specialType === 'angle' ? '角度调整' : node.specialType === 'multi-view' ? '创建三视图' : node.specialType === 'batch-generator' ? '批量处理' : node.type === 'smart-group' ? (node.title === '万能分组' ? '智能分组' : (node.title || '智能分组')) : node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (displayCount > 1 ? 'Group' : displayCount ? 'Image' : escapeHtml(tr('smart.createImportNode')));
     const scale = nodeScale(node);
     const layout = imageLayout(layoutImages, scale, node);
     const isPrompt = node.type === 'smart-prompt';
@@ -11132,6 +11161,13 @@ function smartAngleGeometryReference(node){
     return captures.length ? {...captures[captures.length - 1], kind:'image'} : null;
 }
 function smartSpecialInputImage(node, inputRole=''){
+    if(!inputRole && node?.specialType === 'depth-map'){
+        const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id);
+        const source = connection ? nodes.find(item => item.id === connection.from) : null;
+        const index = Math.max(0, Number(node.depthMapSourceImageIndex) || 0);
+        const selected = source ? imagesForNode(source)[index] : null;
+        if(selected?.url && mediaKindForItem(selected) === 'image') return selected;
+    }
     if(inputRole){
         const connection = [...(canvas?.connections || [])].reverse().find(item => item.to === node.id && (
             inputRole === 'pose-reference' ? item.inputRole === 'pose-reference' :
@@ -12344,6 +12380,7 @@ function bindSmartSpecialNode(el, node){
     };
     if(node.specialType === 'panorama') api.bindPanorama(el, node, options);
     if(node.specialType === 'dwpose') api.bindPose(el, node, options);
+    if(node.specialType === 'depth-map') api.bindDepthMap?.(el, node, options);
     if(node.specialType === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createSmartDirectorOutputNode});
     if(node.specialType === 'pose-replicate') api.bindPoseReplicate?.(el, node, options);
     if(node.specialType === 'angle') api.bindAngle(el, node, options);
@@ -12732,6 +12769,11 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
                         nodeForControls.poseSourceUrl = uploaded.url;
                         nodeForControls.poseSourceName = uploaded.name || file.name;
                         delete nodeForControls.poseSourceSignature;
+                    } else if(nodeForControls.specialType === 'depth-map') {
+                        nodeForControls.depthMapManualInput = {...uploaded, kind:'image'};
+                        nodeForControls.depthMapStatus = 'idle';
+                        delete nodeForControls.depthMapGeneratedSignature;
+                        delete nodeForControls.depthMapFailedSignature;
                     } else {
                         const prefix = nodeForControls.specialType;
                         nodeForControls[`${prefix}SourceUrl`] = uploaded.url;
@@ -16630,6 +16672,7 @@ function connectInputNode(fromId, toId, inputRole=''){
         if(!['pose-reference','target-image','model-subject','scene'].includes(inputRole)) return false;
         if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
+    if(to.specialType === 'depth-map' && !imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     if(to.specialType === 'multi-view'){
         if(!smartMultiViewInputSlots(to).some(item => item[0] === inputRole)) return false;
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
@@ -20082,6 +20125,7 @@ function createNodeFromMenu(type, point=null){
         if(type === 'panorama') return createPanoramaNode(p);
         if(type === 'director3d') return createDirector3dNode(p);
         if(type === 'dwpose') return createDWPoseNode(p);
+        if(type === 'depth-map') return createDepthMapNode(p);
         if(type === 'pose-replicate') return createPoseReplicateNode(p);
         if(type === 'multi-view') return createMultiViewNode(p);
         if(type === 'batch') return createSmartBatchGeneratorNode(null, p);
@@ -20342,8 +20386,8 @@ window.onmousemove = e => {
         if(!node) return;
         const dx = (e.clientX - resizeState.startX) / viewport.scale;
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
-        const minW = node.specialType === 'multi-view' ? 620 : node.specialType === 'batch-generator' ? 400 : node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
-        const minH = node.specialType === 'multi-view' ? 780 : node.specialType === 'batch-generator' ? 470 : node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+        const minW = node.specialType === 'multi-view' ? 620 : node.specialType === 'depth-map' ? 520 : node.specialType === 'batch-generator' ? 400 : node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
+        const minH = node.specialType === 'multi-view' ? 780 : node.specialType === 'depth-map' ? 560 : node.specialType === 'batch-generator' ? 470 : node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。

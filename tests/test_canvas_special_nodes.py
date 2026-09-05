@@ -143,7 +143,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-auto-ratio.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-map.1", page)
             self.assertIn("feature=pose-replicate-v2.4", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -377,7 +377,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "function addDWPoseNode(point)",
             "function addAngleNode(point)",
             "function bindClassicSpecialNode(el, node)",
-            "['panorama','dwpose','director3d','poseReplicate','angle'].includes(node.type)",
+            "['panorama','dwpose','depthMap','director3d','poseReplicate','angle'].includes(node.type)",
             "function generateClassicSpecialEdit(node, prompt, source, kind)",
             "delete copy.panoramaGenerating",
             "delete copy.specialRunning",
@@ -543,6 +543,65 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "SHA-256、原子安装和小图 smoke 验证",
         ):
             self.assertIn(marker, self.shared)
+
+    def test_depth_map_node_reuses_person_depth_on_both_canvases(self):
+        for page in (self.classic_html, self.smart_html):
+            self.assertIn("深度图", page)
+            self.assertIn("feature=depth-map-node.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-map.1", page)
+
+        for marker in (
+            "function depthMapBodyHtml(node)",
+            "function bindDepthMap(root, node, options={})",
+            "function estimatePersonDepthFile(source, options",
+            "'/api/person-depth/estimate'",
+            "depthMapGeneratedSignature",
+            "depthMapFailedSignature",
+            "setOutputItem(node, file, options)",
+            "连接或导入一张图片后自动生成深度图",
+        ):
+            self.assertIn(marker, self.shared)
+
+        for marker in (
+            "function addDepthMapNode(point)",
+            "type:'depthMap'",
+            "w:520, h:560, depthMapStatus:'idle'",
+            "if(type === 'depthMap') return {w:520, h:560}",
+            "api.bindDepthMap?.(el, node, options)",
+            "{id:'depthMap', label:'深度图', icon:'scan'}",
+            "addQuickActionNode(image, action, historyTx)",
+            "const specialTypes = ['panorama','dwpose','depthMap','angle']",
+        ):
+            self.assertIn(marker, self.classic)
+
+        for marker in (
+            "function createDepthMapNode(point, sourceNode=null)",
+            "specialType:'depth-map'",
+            "w:520, h:560, title:'深度图'",
+            "node.specialType === 'depth-map' ? 520",
+            "node.specialType === 'depth-map' ? 560",
+            "{key:'depth-map', icon:'scan', label:'深度图'",
+            "createDepthMapNode(null, node)",
+            "depthMapSourceImageIndex",
+            "api.bindDepthMap?.(el, node, options)",
+            "if(to.specialType === 'depth-map'",
+        ):
+            self.assertIn(marker, self.smart)
+
+        connect_body = re.search(
+            r"function connectInputNode\(.*?(?=\nfunction upstreamNodesForKinds)",
+            self.smart,
+            re.S,
+        ).group(0)
+        self.assertIn("if(to.specialType === 'depth-map'", connect_body)
+        self.assertNotIn("if(to.specialType === 'depth-map'", self.smart[self.smart.index("async function optimizeSmartModelscopePrompt"):self.smart.index("async function urlToBase64")])
+        self.assertIn(".depth-map-preview-grid", self.styles)
+        depth_styles = self.styles[self.styles.index("/* 深度图节点"):]
+        for blue_token in ("hsl(214", "#2563eb", "#3b82f6", "#60a5fa", "59,130,246"):
+            self.assertNotIn(blue_token, depth_styles)
+        self.assertIn(".depthMap-node.selected{outline-color:var(--strong", depth_styles)
+        self.assertIn(".smart-special-node.smart-depth-map-node .node-port{border-color:var(--strong", depth_styles)
+        self.assertIn(".smart-special-node.smart-depth-map-node{min-width:520px;min-height:560px", depth_styles)
 
     def test_pose_replicate_new_defaults_and_legacy_mode_are_explicit(self):
         for source in (self.classic, self.smart):

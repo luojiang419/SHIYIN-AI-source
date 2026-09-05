@@ -1103,6 +1103,7 @@ const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'panorama', label:'720°取景器', icon:'scan-line', action:() => addPanoramaNode()},
     {id:'director3d', label:'3D导演台', icon:'clapperboard', action:() => addDirector3dNode()},
     {id:'dwpose', label:'动作提取', icon:'person-standing', action:() => addDWPoseNode()},
+    {id:'depthMap', label:'深度图', icon:'scan', action:() => addDepthMapNode()},
     {id:'poseReplicate', label:'一键复刻', icon:'refresh-cw', action:() => addPoseReplicateNode()},
     {id:'blenderDirector', label:'外部导演台', icon:'box', action:() => addBlenderDirectorNode()},
     {id:'output', label:'Output', icon:'circle-dot', action:() => addOutputNode()},
@@ -1123,12 +1124,13 @@ const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'multi-view', label:'三视图', icon:'panels-top-left'},
     {id:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
     {id:'dwpose', label:'动作提取', icon:'person-standing'},
+    {id:'depthMap', label:'深度图', icon:'scan'},
     {id:'addAsset', label:'添加为素材', icon:'library-big'},
     {id:'download', label:'下载', icon:'download'},
     {id:'run', label:'运行', icon:'play'},
     {id:'connect', label:'连接', icon:'workflow'}
 ];
-const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','storyboardMerge','addAsset','download'];
+const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','depthMap','addAsset','download'];
 const CANVAS_SESSION_VIEWPORTS_KEY = 'canvas_session_viewports_v1';
 let canvasSessionViewportFallback = {};
 const DEFAULT_VIDEO_MODELS = [
@@ -2810,6 +2812,7 @@ function serializableCanvasNode(node){
     delete copy.poseReplicateActiveRuns;
     delete copy.topazRunSnapshot;
     if(copy.poseStatus === 'running') copy.poseStatus = 'idle';
+    if(copy.depthMapStatus === 'running') copy.depthMapStatus = 'idle';
     return copy;
 }
 function beginCanvasMutationBatch(){
@@ -4346,6 +4349,10 @@ function addDWPoseNode(point){
     const p = point || defaultPoint(100, 20);
     return addNode({id:uid('pose'), type:'dwpose', x:p.x, y:p.y, w:380, h:390, poseStatus:'idle'});
 }
+function addDepthMapNode(point){
+    const p = point || defaultPoint(110, 30);
+    return addNode({id:uid('depth'), type:'depthMap', x:p.x, y:p.y, w:520, h:560, depthMapStatus:'idle'});
+}
 function addDirector3dNode(point){
     const p = point || defaultPoint(140, 40);
     return addNode({id:uid('director3d'), type:'director3d', x:p.x, y:p.y, w:460, h:420, directorProject:null, directorCaptures:[]});
@@ -5245,7 +5252,7 @@ function linkCreateOptions(state){
         if(node.type === 'storyboardMerge'){
             return [{type:'output', label:'Output', icon:'circle-dot'}];
         }
-        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
             return [
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
@@ -5268,7 +5275,7 @@ function linkCreateOptions(state){
             {type:'group', label:tr('canvas.group'), icon:'group'}
         ];
     }
-    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','angle'].includes(node.type)){
+    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','depthMap','angle'].includes(node.type)){
         return [
             {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
@@ -5277,6 +5284,7 @@ function linkCreateOptions(state){
             {type:'panorama', label:'720°取景器', icon:'scan-line'},
             {type:'director3d', label:'3D导演台', icon:'clapperboard'},
             {type:'dwpose', label:'动作提取', icon:'person-standing'},
+            {type:'depthMap', label:'深度图', icon:'scan'},
                 {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
                 {type:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
                 {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
@@ -5376,7 +5384,7 @@ function mediaToolbarItemsForNode(node){
     }
     if(kind === 'image') available.add('generator');
     if(hasUsableUrl && kind === 'image'){
-        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','storyboardMerge','download']
+        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','depthMap','storyboardMerge','download']
             .forEach(id => available.add(id));
     }
     const items = selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
@@ -5888,6 +5896,7 @@ function createNodeByType(type, point){
     if(type === 'multiView' || type === 'multi-view') return addMultiViewNode(point);
     if(type === 'director3d') return addDirector3dNode(point);
     if(type === 'dwpose') return addDWPoseNode(point);
+    if(type === 'depthMap') return addDepthMapNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
     if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
@@ -5918,6 +5927,7 @@ function menuAdd(type){
         else if(type === 'multiView') created = addMultiViewNode(point);
         else if(type === 'director3d') created = addDirector3dNode(point);
         else if(type === 'dwpose') created = addDWPoseNode(point);
+        else if(type === 'depthMap') created = addDepthMapNode(point);
         else if(type === 'poseReplicate') created = addPoseReplicateNode(point);
         else if(type === 'blenderDirector') created = addBlenderDirectorNode(point);
         else if(type === 'rh') created = addRhNode(point);
@@ -10090,6 +10100,7 @@ function bindClassicSpecialNode(el, node){
     };
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
+    if(node.type === 'depthMap') api.bindDepthMap?.(el, node, options);
     if(node.type === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createClassicDirectorOutputNode});
     if(node.type === 'poseReplicate') api.bindPoseReplicate(el, node, options);
     if(node.type === 'angle') api.bindAngle(el, node, options);
@@ -10970,7 +10981,7 @@ function renderNode(node){
     const hasFixedSize = !layoutLimits.autoHeight && Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
     const canvasLodSafe = ![
-        'panorama','multiView','dwpose','director3d','poseReplicate','angle','group','promptGroup'
+        'panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','group','promptGroup'
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
         && !window.CanvasLookbookNode?.isType?.(node.type)
@@ -11006,7 +11017,7 @@ function renderNode(node){
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
-    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
@@ -11198,6 +11209,7 @@ function renderNode(node){
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
     if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
+    if(node.type === 'depthMap') body.innerHTML = window.CanvasSpecialNodes?.depthMapBodyHtml(node) || '<div class="muted-note">深度图节点加载失败</div>';
     if(node.type === 'director3d') body.innerHTML = window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="muted-note">3D导演台加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageApiProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:allImageModels(provider.id)}))}) || '<div class="muted-note">一键复刻节点加载失败</div>';
     if(node.type === 'angle'){
@@ -11258,8 +11270,8 @@ function renderNode(node){
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const inputPorts = filmPorts.length ? filmPorts : (lookbookPorts.length ? lookbookPorts : ecommercePorts);
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
-    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
+    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','depthMap','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
     if(filmPorts.length || inputPorts.length > 1){
         el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;${node.type === 'lookbook' ? `--lookbook-port-top:${72 + index * 46}px;` : ''}" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length || lookbookPorts.length){
@@ -11351,7 +11363,7 @@ function renderNode(node){
     multiViewModel?.addEventListener('change', event => { event.stopPropagation(); node.model = event.target.value; scheduleSave(); });
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
-    if(['panorama','dwpose','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    if(['panorama','dwpose','depthMap','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
@@ -11562,6 +11574,7 @@ function defaultNodeSize(type){
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
+    if(type === 'depthMap') return {w:520, h:560};
     if(type === 'poseReplicate') return {w:720, h:820};
     if(type === 'angle') return {w:460, h:660};
     if(type === 'storyboardMerge') return {w:460, h:0};
@@ -15682,7 +15695,7 @@ function mediaRefsFromNode(node, context={}){
         }).filter(Boolean);
     }
     if(node.type === 'director3d') return (node.directorCaptures || []).filter(item => item?.url).map((item, i) => ({...item, kind:'image', nodeId:node.id, outputIndex:i}));
-    if(['panorama','dwpose','angle'].includes(node.type)){
+    if(['panorama','dwpose','depthMap','angle'].includes(node.type)){
         const item = window.CanvasSpecialNodes?.outputItem(node);
         return item?.url ? [{url:item.url, name:item.name || `${node.type}.png`, kind:'image'}] : [];
     }
@@ -15715,9 +15728,9 @@ function generatorSources(gen){
                 }));
             }
         }
-        if(['panorama','dwpose','angle'].includes(n.type)){
+        if(['panorama','dwpose','depthMap','angle'].includes(n.type)){
             const refs = mediaRefsFromNode(n);
-            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : '新视角结果';
+            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'depthMap' ? '深度图' : '新视角结果';
             if(refs.length) return {id:n.id, type:n.type, label, preview:refs[0].url, refs, prompt:''};
         }
         if(n.type === 'image' && n.url) {
@@ -22215,7 +22228,7 @@ function canConnect(fromId, toId, inputRole=''){
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
             return ['prompt','promptGroup','llm'].includes(from.type) && !wouldCreateGeneratorCycle(fromId, toId);
         }
-        return ['image','group','output','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','multiView'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','multiView'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId, toId);
     }
     if(from.type === 'multiView'){
@@ -22230,7 +22243,7 @@ function canConnect(fromId, toId, inputRole=''){
             return ['prompt','promptGroup','loop','llm','group'].includes(from.type)
                 && !wouldCreateGeneratorCycle(fromId,toId);
         }
-        return ['image','group','output','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'storyboardMerge'){
@@ -22244,18 +22257,18 @@ function canConnect(fromId, toId, inputRole=''){
     if(['ecom-model','ecom-product','ecom-scene'].includes(to.type)){
         const valid = (window.CanvasEcommerceNodes?.inputPorts?.(to.type) || []).some(port => port.role === inputRole);
         if(!valid) return false;
-        return ['image','group','output','generator','batchGenerator','rh','panorama','dwpose','director3d','poseReplicate','angle'].includes(from.type)
+        return ['image','group','output','generator','batchGenerator','rh','panorama','dwpose','depthMap','director3d','poseReplicate','angle'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-compose'){
         if(!['ecom-model','ecom-product','ecom-scene','ecom-pose'].includes(inputRole)) return false;
-        const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','director3d','poseReplicate','angle','generator','rh'];
+        const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh'];
         return allowed.includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'lookbook'){
         const lookbookRoles = new Set(['lookbook-person','lookbook-product','lookbook-scene','lookbook-material','lookbook-logo','lookbook-pose','lookbook-layout']);
         if(inputRole && !lookbookRoles.has(inputRole)) return false;
-        return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
+        return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-video'){
         if(inputRole && inputRole !== 'video-input') return false;
@@ -22277,10 +22290,10 @@ function canConnect(fromId, toId, inputRole=''){
         return ['video','generator','rh','ecom-video','lookbook'].includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(from.type === 'ecom-video') return to.type === 'output';
-    const specialTypes = ['panorama','dwpose','angle'];
+    const specialTypes = ['panorama','dwpose','depthMap','angle'];
     if(to.type === 'poseReplicate'){
         if(!['pose-reference','target-image','model-subject','scene'].includes(inputRole)) return false;
-        return ['image','group','output','panorama','dwpose','angle'].includes(from.type);
+        return ['image','group','output','panorama','dwpose','depthMap','angle'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';
     if(from.type === 'director3d') { if(to.type === 'output') return true; if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId); return false; }
@@ -22310,7 +22323,7 @@ function canConnect(fromId, toId, inputRole=''){
     }
     if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','angle'].includes(from.type);
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','depthMap','angle'].includes(from.type);
 }
 function sanitizeConnections(){
     const source = connections || [];
@@ -23627,7 +23640,7 @@ function runClassicCanvasShortcutAction(actionId){
         const typeMap = {
             'create.image':'image', 'create.group':'group', 'create.prompt':'prompt',
             'create.h3Video':'h3-video', 'create.panorama':'panorama',
-            'create.dwpose':'dwpose', 'create.poseReplicate':'poseReplicate',
+            'create.dwpose':'dwpose', 'create.depthMap':'depthMap', 'create.poseReplicate':'poseReplicate',
             'create.multiView':'multiView', 'create.batch':'batchGenerator'
         };
         const type = typeMap[actionId];

@@ -103,9 +103,9 @@ def test_canvas_preferences_preserve_an_explicit_empty_selection():
 
 
 def test_image_media_toolbar_exposes_grid_and_downstream_actions_with_two_row_cap():
-    for action in ("grid", "generator", "batchGenerator", "video", "panorama", "angle", "multi-view", "dwpose"):
+    for action in ("grid", "generator", "batchGenerator", "video", "panorama", "angle", "multi-view", "dwpose", "depthMap"):
         assert f"{{id:'{action}'" in JS
-    assert "['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','storyboardMerge','download']" in JS
+    assert "['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','depthMap','storyboardMerge','download']" in JS
     assert "else if(node.url) runMediaQuickAction(action" in JS
 
 

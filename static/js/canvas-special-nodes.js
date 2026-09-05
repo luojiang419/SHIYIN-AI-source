@@ -124,6 +124,7 @@
     function specialTitle(node){
         const type = node?.specialType || node?.type;
         if(type === 'dwpose') return '动作提取';
+        if(type === 'depth-map' || type === 'depthMap') return '深度图';
         if(type === 'pose-replicate' || type === 'poseReplicate') return '一键复刻';
         if(type === 'relight') return '灯光重塑';
         if(type === 'angle') return '角度调整';
@@ -248,6 +249,69 @@
                 ${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="${role}" title="移除手动${esc(label)}" aria-label="移除手动${esc(label)}"><i data-lucide="trash-2"></i></button>` : ''}
             </div>
             ${editable ? `<input class="pose-replicate-file-input" type="file" accept="image/*" data-pose-replicate-file="${role}" tabindex="-1">` : ''}
+        </div>`;
+    }
+
+    function depthMapInput(node, options){
+        const connected = options.getInputImage?.(node);
+        if(connected?.url) return connected;
+        const manual = node?.depthMapManualInput;
+        return manual?.url ? {...manual, kind:'image'} : null;
+    }
+
+    function syncDepthMapInput(node, source){
+        const previous = String(node.depthMapInputSignature || '');
+        const next = sourceSignature(source);
+        node.depthMapInputSignature = next;
+        node.depthMapInputUrl = source?.url || '';
+        node.depthMapInputName = source?.name || '';
+        node.depthMapInputWidth = source?.natural_w || source?.width || 0;
+        node.depthMapInputHeight = source?.natural_h || source?.height || 0;
+        return previous !== next;
+    }
+
+    function clearDepthMapResult(node, options){
+        clearOutputItem(node, options);
+        delete node.depthMapGeneratedSignature;
+        delete node.depthMapFailedSignature;
+        node.depthMapStatus = 'idle';
+        node.depthMapError = '';
+    }
+
+    function depthMapBodyHtml(node){
+        const output = outputItem(node);
+        const inputUrl = node.depthMapInputUrl || node.depthMapManualInput?.url || '';
+        const inputName = node.depthMapInputName || node.depthMapManualInput?.name || '输入图片';
+        const status = node.depthMapStatus || (output?.url ? 'done' : 'idle');
+        const statusText = status === 'running'
+            ? '正在生成高精度人物深度图…'
+            : status === 'failed'
+                ? (node.depthMapError || '深度图生成失败')
+                : output?.url
+                    ? '深度图已就绪，可从右侧端口连接下游节点'
+                    : inputUrl
+                        ? (personDepthStatus?.ready ? '图片已连接，正在准备深度推理' : '图片已连接，等待高精度组件就绪')
+                        : '连接或导入一张图片后自动生成深度图';
+        return `<div class="special-node depth-map-special" data-special-node="depth-map">
+            <input class="special-file-input" type="file" accept="image/*" data-special-file="depth-map" hidden>
+            <div class="depth-map-preview-grid">
+                <div class="depth-map-preview-card ${inputUrl ? 'has-image' : ''}">
+                    <span class="depth-map-preview-label">输入图片</span>
+                    ${inputUrl ? `<img src="${esc(inputUrl)}" alt="${esc(inputName)}" draggable="false">` : `<div class="special-empty"><i data-lucide="image-plus"></i><strong>等待图片输入</strong><span>连接图片节点或点击导入</span></div>`}
+                </div>
+                <div class="depth-map-preview-card ${output?.url ? 'has-image' : ''}">
+                    <span class="depth-map-preview-label">深度图</span>
+                    ${output?.url ? `<img src="${esc(output.url)}" alt="深度图输出" draggable="false">` : `<div class="special-empty"><i data-lucide="scan-line"></i><strong>${status === 'running' ? '正在推理' : '等待生成'}</strong><span>近处更亮 · 远处更暗</span></div>`}
+                    ${status === 'running' ? '<div class="pose-running"><i data-lucide="loader-2"></i></div>' : ''}
+                </div>
+            </div>
+            ${poseReplicateComponentHtml(personDepthStatus)}
+            <div class="special-toolbar depth-map-toolbar">
+                <button type="button" data-special-action="upload-depth-map"><i data-lucide="upload"></i><span>导入图片</span></button>
+                <button type="button" data-special-action="retry-depth-map" ${!inputUrl || status === 'running' || !personDepthStatus?.ready ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
+            </div>
+            <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
+            <div class="special-output-row"><span>${output?.url ? esc(output.name || 'person-depth.png') : '输出：8-bit PNG 相对深度图'}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
         </div>`;
     }
     function poseReplicateInputRow(item, role, label, manual=false, optional=false){
@@ -693,7 +757,7 @@
         backdrop.className = 'person-depth-dialog-backdrop';
         backdrop.innerHTML = `<div class="person-depth-dialog" role="dialog" aria-modal="true" aria-labelledby="personDepthDialogTitle">
             <div class="person-depth-dialog-head"><div><strong id="personDepthDialogTitle">${retry ? '重试高精度人物深度组件' : '下载高精度人物深度组件'}</strong><span>${total ? `下载量 ${formatBytes(total)}` : '下载量与磁盘需求以正式组件清单为准'}</span></div><button type="button" data-person-depth-dialog-close aria-label="关闭"><i data-lucide="x"></i></button></div>
-            <p>该系统级组件用于一键复刻的高精度姿势、体积、遮挡和自然褶皱控制。组件独立保存在软件数据目录，升级后继续复用；下载完成后还会执行 SHA-256、原子安装和小图 smoke 验证。</p>
+            <p>该系统级组件用于深度图节点和一键复刻的高精度姿势、体积、遮挡与自然褶皱控制。组件独立保存在软件数据目录，升级后继续复用；下载完成后还会执行 SHA-256、原子安装和小图 smoke 验证。</p>
             <div class="person-depth-dialog-actions"><button type="button" data-person-depth-dialog-close>稍后</button><button type="button" class="primary" data-person-depth-dialog-confirm>${retry ? '确认重试' : '确认下载'}</button></div>
         </div>`;
         backdrop.addEventListener('click', event => { if(event.target === backdrop) closePersonDepthDialog(); });
@@ -1244,6 +1308,22 @@
             kind:'image'
         } : null;
     }
+    async function estimatePersonDepthFile(source, options, filename='person-depth.png'){
+        const sourceUrl = options.resolveUrl?.(source.url) || source.url;
+        const imageResponse = await fetch(sourceUrl);
+        if(!imageResponse.ok) throw new Error('输入图片读取失败');
+        const form = new FormData();
+        form.append('file', await imageResponse.blob(), source.name || 'depth-source.png');
+        form.append('bit_depth', '8');
+        const response = await fetch('/api/person-depth/estimate', {method:'POST', body:form});
+        if(!response.ok) throw new Error(await responseError(response, '高精度人物深度图生成失败'));
+        const width = Number(response.headers.get('X-Person-Depth-Width') || 0);
+        const height = Number(response.headers.get('X-Person-Depth-Height') || 0);
+        const file = await uploadBlob(await response.blob(), filename);
+        file.natural_w = width || file.natural_w || file.width || source.natural_w || 0;
+        file.natural_h = height || file.natural_h || file.height || source.natural_h || 0;
+        return file;
+    }
     async function runPersonDepth(node, options, force=false){
         const source = poseReplicateInput(node, options, 'pose-reference');
         const signature = `depth|${sourceSignature(source)}`;
@@ -1258,21 +1338,11 @@
         const task = (async () => {
             node.poseDepthStatus = 'running'; node.poseDepthError = ''; notify(options, node, true);
             try {
-                const sourceUrl = options.resolveUrl?.(source.url) || source.url;
-                const imageResponse = await fetch(sourceUrl);
-                if(!imageResponse.ok) throw new Error('动作参考图片读取失败');
-                const form = new FormData();
-                form.append('file', await imageResponse.blob(), source.name || 'pose-reference.png');
-                form.append('bit_depth', '8');
-                const response = await fetch('/api/person-depth/estimate', {method:'POST', body:form});
-                if(!response.ok) throw new Error(await responseError(response, '高精度人物深度图生成失败'));
-                const width = Number(response.headers.get('X-Person-Depth-Width') || 0);
-                const height = Number(response.headers.get('X-Person-Depth-Height') || 0);
-                const file = await uploadBlob(await response.blob(), `person-depth-${Date.now()}.png`);
+                const file = await estimatePersonDepthFile(source, options, `person-depth-${Date.now()}.png`);
                 node.poseDepthUrl = file.url || '';
                 node.poseDepthName = file.name || 'person-depth.png';
-                node.poseDepthWidth = width || file.natural_w || file.width || source.natural_w || 0;
-                node.poseDepthHeight = height || file.natural_h || file.height || source.natural_h || 0;
+                node.poseDepthWidth = file.natural_w || file.width || source.natural_w || 0;
+                node.poseDepthHeight = file.natural_h || file.height || source.natural_h || 0;
                 node.poseDepthSourceSignature = signature;
                 delete node.poseDepthFailedSignature;
                 node.poseDepthStatus = 'done'; node.poseDepthError = '';
@@ -1286,6 +1356,95 @@
         })();
         poseTasks.set(taskKey, task);
         return task;
+    }
+
+    async function runDepthMap(node, options, force=false){
+        const source = depthMapInput(node, options);
+        const signature = sourceSignature(source);
+        if(!signature) return null;
+        if(!personDepthStatus?.ready){
+            registerPersonDepthBinding(node, options);
+            return null;
+        }
+        const currentOutput = outputItem(node);
+        if(!force && node.depthMapGeneratedSignature === signature && currentOutput?.url) return currentOutput;
+        const taskKey = `${options.canvasKey || 'canvas'}:${node.id}:depth-map:${signature}`;
+        if(poseTasks.has(taskKey)) return poseTasks.get(taskKey);
+        const task = (async () => {
+            node.depthMapStatus = 'running';
+            node.depthMapError = '';
+            notify(options, node, true);
+            try {
+                const file = await estimatePersonDepthFile(source, options, `depth-map-${Date.now()}.png`);
+                if(sourceSignature(depthMapInput(node, options)) !== signature) return null;
+                node.depthMapGeneratedSignature = signature;
+                delete node.depthMapFailedSignature;
+                node.depthMapStatus = 'done';
+                node.depthMapError = '';
+                setOutputItem(node, file, options);
+                notify(options, node, true);
+                options.toast?.('深度图已生成，可继续连接下游节点');
+                return file;
+            } catch(error){
+                if(sourceSignature(depthMapInput(node, options)) === signature){
+                    node.depthMapStatus = 'failed';
+                    node.depthMapFailedSignature = signature;
+                    node.depthMapError = error.message || '高精度人物深度图生成失败';
+                    notify(options, node, true);
+                }
+                throw error;
+            } finally {
+                poseTasks.delete(taskKey);
+            }
+        })();
+        poseTasks.set(taskKey, task);
+        return task;
+    }
+
+    function bindDepthMap(root, node, options={}){
+        if(!root || !node) return;
+        registerPersonDepthBinding(node, options);
+        let source = depthMapInput(node, options);
+        const changed = syncDepthMapInput(node, source);
+        if(changed){
+            clearDepthMapResult(node, options);
+            notify(options, node, true);
+        }
+        const fileInput = root.querySelector('[data-special-file="depth-map"]');
+        if(fileInput) fileInput.onchange = async () => {
+            try {
+                const file = await uploadFile(fileInput.files?.[0]);
+                node.depthMapManualInput = {...file, kind:'image'};
+                source = depthMapInput(node, options);
+                syncDepthMapInput(node, source);
+                clearDepthMapResult(node, options);
+                notify(options, node, true);
+                runDepthMap(node, options, true).catch(error => options.toast?.(error.message));
+            } catch(error){ options.toast?.(error.message || '图片导入失败'); }
+            finally { fileInput.value = ''; }
+        };
+        root.querySelectorAll('[data-special-action]').forEach(button => {
+            button.addEventListener('pointerdown', event => event.stopPropagation());
+        });
+        root.querySelector('[data-special-action="upload-depth-map"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); fileInput?.click();
+        });
+        root.querySelector('[data-special-action="retry-depth-map"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            delete node.depthMapGeneratedSignature;
+            delete node.depthMapFailedSignature;
+            runDepthMap(node, options, true).catch(error => options.toast?.(error.message));
+        });
+        root.querySelector('[data-special-action="install-person-depth"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); openPersonDepthDialog(options, false);
+        });
+        root.querySelector('[data-special-action="retry-person-depth"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); openPersonDepthDialog(options, true);
+        });
+        const signature = sourceSignature(source);
+        if(signature && personDepthStatus?.ready && (node.depthMapStatus !== 'failed' || node.depthMapFailedSignature !== signature)){
+            runDepthMap(node, options, false).catch(() => {});
+        }
     }
     function bindPoseReplicate(root, node, options={}){
         if(!root || !node) return;
@@ -1753,8 +1912,8 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
-        bindPanorama, bindPose, bindDirector3d, bindPoseReplicate, bindAngle,
+        panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
+        bindPanorama, bindPose, bindDepthMap, bindDirector3d, bindPoseReplicate, bindAngle,
         buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
     };

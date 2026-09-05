@@ -30,7 +30,7 @@
     <script src="/static/js/canvas-media-queue.js?v=2026.09.02.media-queue-runtime.5"></script>
     <script src="/static/js/i18n.js?v=2026.06.30.1782788290"></script>
     <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260904.4&feature=lookbook-style-picker.2&feature=lookbook-port-layout.1&feature=lookbook-port-labels.2&feature=selection-hub-responsive.1&feature=prompt-text-node.1&feature=prompt-node-resize.1&feature=multi-select-surfaces.1&feature=storyboard-merge.2&feature=lookbook-port-spacing.1&feature=image-quick-compact.1&feature=image-quick-single-row.1&feature=lookbook-agent.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=explicit-visibility-cull.1&feature=canvas-package.1&feature=video-reference-grid.2&feature=lookbook-layout-editor.1&feature=node-frame-standards.1&feature=preview-fixed-position.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1">
-    <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.08.30.static-angle-reference.1">
+    <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.09.05.depth-map.1">
     <link rel="stylesheet" href="/static/css/canvas-angle-3d.css?v=2026.08.21.angle-3d.1">
     <link rel="stylesheet" href="/static/css/canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.2">
     <link rel="stylesheet" href="/static/css/canvas-topaz-node.css?v=2026.08.19.topaz-video.1">
@@ -102,6 +102,7 @@
                         <button class="menu-btn" type="button" onclick="menuAdd('linkfox-video')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频生成</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('dwpose')"><i data-lucide="person-standing" class="w-4 h-4"></i><span>动作提取</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('director3d')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('depthMap')"><i data-lucide="scan" class="w-4 h-4"></i><span>深度图</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('poseReplicate')"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('multiView')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>创建三视图</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('panorama')"><i data-lucide="scan-line" class="w-4 h-4"></i><span>720°取景器</span></button>
@@ -110,6 +111,7 @@
                     </div>
                 </div>
                 <button class="menu-btn" onclick="menuAdd('director3d')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
+                <button class="menu-btn" onclick="menuAdd('depthMap')"><i data-lucide="scan" class="w-4 h-4"></i><span>深度图</span></button>
                 <button class="menu-btn" onclick="menuAdd('poseReplicate')"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
@@ -552,7 +554,7 @@
 
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
     <script src="/static/js/director-3d.js?v=2026.08.28.director-3d.1"></script>
-    <script src="/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-auto-ratio.1"></script>
+    <script src="/static/js/canvas-special-nodes.js?v=2026.09.05.depth-map.1"></script>
     <script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1"></script>
     <script src="/static/js/canvas-lookbook-node.js?v=2026.09.04.lookbook.36&feature=story-campaign-node.1&feature=picker-mousedown.1&feature=picker-dialog-top-layer.1&feature=output-node-results.1&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=yangpeilin-methods.1&feature=lookbook-style-taxonomy.1&feature=lookbook-bottom-status.1&feature=lookbook-simple-params.1&feature=remove-output-hint.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=soft-film-natural-light.1&feature=lookbook-single-dispatch.1&feature=fw-reference-film.1&feature=fw-natural-sun-grain.1&feature=fw-model-identity.1&feature=fw-original-restore.1&feature=lookbook-grain-slider.1&feature=lookbook-validated-presets-only.1&feature=lookbook-research-evidence.1&feature=levis-adaptive-campaign.2&feature=levis-advertising-variants.1&feature=optional-web-research.1&feature=ime-composition.1&feature=lookbook-layout-editor.1&feature=lookbook-settings-collapse.1"></script>
@@ -560,6 +562,6 @@
     <script src="/static/js/canvas-linkfox-video.js?v=2026.08.28.linkfox-video.3"></script>
     <script src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
     <script src="/static/js/canvas-legacy-migration.js?v=2026.08.30.legacy-smart-migration.1"></script>
-<script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260904.4&feature=story-campaign-node.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&feature=lookbook-picker.1&feature=lookbook-output-node.1&feature=lookbook-multi-run.1&feature=lookbook-auto-mode.1&feature=output-lightbox-menu.1&feature=lookbook-port-layout.1&feature=selection-hub-responsive.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&feature=vision-provider-default.1&feature=video-prompt-scroll.1&feature=prompt-node-resize.1&feature=storyboard-merge.2&feature=lookbook-submenu-exclusive.1&app-version=1.0.378&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=lookbook-count.1&feature=provider-model-menu.1&feature=lookbook-reference-type-ownership.1&feature=media-eager-queue.1&feature=media-residency-idle.3&feature=media-restore-idle.2&feature=canvas-package.1&feature=selected-download.1&feature=grid-split-return.1&feature=video-menu-unified.1&feature=lookbook-text-count-priority.1&feature=lookbook-series-anchor.1&feature=lookbook-layout-editor.1&feature=video-auto-height.1&feature=asset-quick-save.1&feature=preview-copy-image.1&feature=node-frame-standards.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=pose-replicate-v2.4&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1"></script>
+<script src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260904.4&feature=story-campaign-node.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&feature=lookbook-picker.1&feature=lookbook-output-node.1&feature=lookbook-multi-run.1&feature=lookbook-auto-mode.1&feature=output-lightbox-menu.1&feature=lookbook-port-layout.1&feature=selection-hub-responsive.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&feature=vision-provider-default.1&feature=video-prompt-scroll.1&feature=prompt-node-resize.1&feature=storyboard-merge.2&feature=lookbook-submenu-exclusive.1&app-version=1.0.378&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=lookbook-count.1&feature=provider-model-menu.1&feature=lookbook-reference-type-ownership.1&feature=media-eager-queue.1&feature=media-residency-idle.3&feature=media-restore-idle.2&feature=canvas-package.1&feature=selected-download.1&feature=grid-split-return.1&feature=video-menu-unified.1&feature=lookbook-text-count-priority.1&feature=lookbook-series-anchor.1&feature=lookbook-layout-editor.1&feature=video-auto-height.1&feature=asset-quick-save.1&feature=preview-copy-image.1&feature=node-frame-standards.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=pose-replicate-v2.4&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1"></script>
 </body>
 </html>

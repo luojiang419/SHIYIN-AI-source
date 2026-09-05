@@ -62,60 +62,61 @@ def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_sce
     assert result.output_aspect_ratio == "16:9"
     assert [item["role"] for item in result.reference_order] == roles
     assert [item["index"] for item in result.reference_order] == list(range(1, len(roles) + 1))
-    assert "不要改变目标图片的头部方向" in result.final_prompt
+    assert "【参考图角色：按编号分别使用】" in result.final_prompt
     assert "（目标图片）" in result.final_prompt
     assert "（服装参考）" in result.final_prompt
-    assert "不得混入其他色号或款号" in result.final_prompt
-    assert "只输出一张" in result.final_prompt
-    assert "只能出现一个最终人物实例" in result.final_prompt
-    assert "严禁拼图、分栏、三联画" in result.final_prompt
-    assert "只能在同一个镜头内自然扩展背景或裁切" in result.final_prompt
+    assert "不是复制参考图拼成新画面" in result.final_prompt
+    assert "本次补充要求只覆盖明确涉及的默认项" in result.final_prompt
+    assert "只输出一张单镜头、连续的彩色照片" in result.final_prompt
+    assert "只有一个最终模特主体实例" in result.final_prompt
+    assert "不输出拼图、分栏、重复模特" in result.final_prompt
+    assert "以连续背景扩展或只裁切空余背景适配" in result.final_prompt
     if has_model:
-        assert "以图1模特主体为唯一人物编辑底图" in result.final_prompt
+        assert "图1（模特主体）：只提供最终人物身份" in result.final_prompt
+        assert "不得把图1当作布局底图" in result.final_prompt
     for sample_specific in ("豹纹上装", "手持眼镜的动作", "原豹纹外套"):
         assert sample_specific not in result.final_prompt
 
 
-def test_depth_mode_treats_depth_as_registered_surface_geometry_instead_of_loose_guidance():
+def test_depth_mode_targets_fold_alignment_without_claiming_native_depth_control():
     result = compile_pose_replicate_prompt("depth", output_aspect_ratio="3:4")
 
-    required_depth_locks = (
-        "像素级三维几何证据",
-        "【深度几何硬锁：不是构图建议】",
-        "逐像素配准的三维表面",
-        "不得把深度图仅当作大致姿势参考",
-        "同一人物、同一画面的配准输入",
-        "二维位置、关节角度、朝向、长度比例、透视缩短",
-        "每条主要褶皱的空间位置、起止点、走向",
-        "不得抹平、挪位、减少、补造或重新设计",
-        "服装参考到锁定几何的映射",
-        "不得改变主要褶皱的拓扑、峰谷位置与受力路径",
-        "任何位置、角度、轮廓、遮挡或主要褶皱峰谷不一致",
-        "深度模式还硬锁主要褶皱峰谷与表面几何",
+    required_depth_targets = (
+        "提供可辨认的人体前后关系、表面起伏、遮挡边界和服装褶皱形状",
+        "【服装褶皱复刻：本次重点】",
+        "不要把它只当成大致站姿参考",
+        "最大限度逐褶复刻",
+        "褶皱的相对位置、起止点、走向、曲率",
+        "不合并、不抹平、不无故增减",
+        "【褶皱与新衣结构冲突的唯一例外】",
+        "只在确实不对应的衣片、边界和必要材料适配处局部调整",
+        "不继承旧面料的亮暗与纹样",
     )
-    for rule in required_depth_locks:
+    for rule in required_depth_targets:
         assert rule in result.final_prompt
-    assert "不得照搬原服装外轮廓或表面" not in result.final_prompt
-    assert "最终褶皱的数量、幅度、锐利度、厚度与垂坠必须根据目标服装" not in result.final_prompt
+    assert "【深度几何硬锁：不是构图建议】" not in result.final_prompt
+    assert "逐像素配准的三维表面" not in result.final_prompt
+    assert "像素级三维几何证据" not in result.final_prompt
 
 
 def test_base_depth_route_preserves_non_garment_pixels_and_extended_route_maps_geometry():
     base = compile_pose_replicate_prompt("depth")
     extended = compile_pose_replicate_prompt("depth", has_model_subject=True, has_scene=True)
 
-    assert "除服装参考对应的换装区域" in base.final_prompt
-    assert "其他区域不得重绘、重构或重新生成" in base.final_prompt
-    assert "人物区域内的二维位置、轮廓、遮挡与主要褶皱峰谷必须一一对齐" in base.final_prompt
-    assert "按人物区域归一化一一映射" in extended.final_prompt
-    assert "不得用身份迁移作为放松动作的理由" in extended.final_prompt
-    assert "只允许为身份、服装参考或新场景的明确归属进行必要适配" in extended.final_prompt
+    assert "只改新旧目标衣物覆盖区域的并集" in base.final_prompt
+    assert "其余可保留像素尽量沿用，不整图重绘" in base.final_prompt
+    assert "同画幅时以图1的人物位置和尺寸逐部位对齐" in base.final_prompt
+    assert "随新体型作最小映射，不贴死旧人物的绝对像素" in extended.final_prompt
+    assert "必要的主体调整只能整体等比" in extended.final_prompt
+    assert "允许修改的内容仅限指定人物身份、发型、体型适配、指定服装、背景" in extended.final_prompt
 
 
 def test_skeleton_mode_does_not_claim_depth_surface_or_fold_geometry():
     result = compile_pose_replicate_prompt("skeleton")
 
-    assert "骨架图不包含服装表面深度" in result.final_prompt
-    assert "根据服装参考的材质、版型、松量和结构生成自然褶皱" in result.final_prompt
+    assert "不提供表面深度、衣物体积或褶皱" in result.final_prompt
+    assert "【褶皱参考：来自目标原图，不来自骨架】" in result.final_prompt
+    assert "不宣称骨架能提供精确深度" in result.final_prompt
     assert "【深度几何硬锁：不是构图建议】" not in result.final_prompt
     assert "逐像素配准的三维表面" not in result.final_prompt
     assert "禁止忽略、平滑、弱化、平均化或重新想象深度图" not in result.final_prompt
@@ -197,7 +198,7 @@ def test_user_instruction_endpoint_calls_assistant_once_and_preserves_hard_templ
     image_payload = submit.await_args.args[0]
     assert image_payload.auto_optimize_prompt is False
     assert "目标外套保持自然敞开" in image_payload.prompt
-    assert "用户增量不得改变此优先级" in image_payload.prompt
+    assert "本次补充要求只覆盖明确涉及的默认项" in image_payload.prompt
     assert image_payload.prompt_context["prompt_source"] == "assistant-merged"
     assert response["pose_replicate"]["scenario_id"] == "model-full-look-scene"
     assert response["pose_replicate"]["assistant_calls"] == 1
@@ -312,7 +313,7 @@ def test_pose_replicate_auto_ratio_is_resolved_before_prompt_and_generation():
     assert image_payload.size == "1536x2048"
     assert image_payload.prompt_context["requested_output_aspect_ratio"] == "source"
     assert image_payload.prompt_context["output_aspect_ratio"] == "3:4"
-    assert "最终画布必须为 3:4" in image_payload.prompt
+    assert "输出画幅为 3:4" in image_payload.prompt
     assert response["pose_replicate"]["requested_output_aspect_ratio"] == "source"
     assert response["pose_replicate"]["output_aspect_ratio"] == "3:4"
 
@@ -330,7 +331,7 @@ def test_pose_replicate_four_by_five_reaches_image_task_unchanged():
     assert image_payload.size == "1632x2040"
     assert image_payload.prompt_context["requested_output_aspect_ratio"] == "4:5"
     assert image_payload.prompt_context["output_aspect_ratio"] == "4:5"
-    assert "最终画布必须为 4:5" in image_payload.prompt
+    assert "输出画幅为 4:5" in image_payload.prompt
     assert response["pose_replicate"]["output_aspect_ratio"] == "4:5"
 
 
@@ -428,9 +429,9 @@ def test_gemini_transport_keeps_untyped_references_without_extra_role_text():
 def test_portrait_references_use_output_ratio_without_collage_fallback():
     result = compile_pose_replicate_prompt("depth", output_aspect_ratio="16:9")
     assert result.audit_payload()["output_aspect_ratio"] == "16:9"
-    assert "最终画布必须为 16:9" in result.final_prompt
-    assert "原图裁切只作为内容取舍参考，不得覆盖最终输出画幅" in result.final_prompt
-    assert "第二个人物副本" in result.final_prompt
+    assert "输出画幅为 16:9" in result.final_prompt
+    assert "不同时优先保持完整可见动作与主体比例" in result.final_prompt
+    assert "不输出拼图、分栏、重复模特" in result.final_prompt
 
 
 def test_pose_replicate_rejects_provider_fallback_instead_of_silently_switching():

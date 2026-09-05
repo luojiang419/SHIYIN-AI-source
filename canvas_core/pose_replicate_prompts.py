@@ -4,8 +4,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from canvas_core.pose_replicate_templates_v3 import POSE_REPLICATE_V3_TEMPLATES
 
-POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v2.5"
+POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v3.0"
 POSE_REPLICATE_LOCALE = "zh-CN"
 POSE_REPLICATE_MODES = {"depth", "skeleton"}
 POSE_REPLICATE_OUTPUT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4", "4:5"}
@@ -168,21 +169,15 @@ def compile_pose_replicate_prompt(
     elif normalized_instruction:
         raise PoseReplicatePromptError("没有用户补充要求时不得注入 AI 助手增量")
 
-    parts = [
-        _output_contract(output_ratio),
-        _base_instruction(has_model_subject, has_scene),
-        _reference_contract(mode, order, has_model_subject, has_scene),
-        _scenario_contract(has_model_subject, has_scene, order),
-        _preservation_contract(has_model_subject, has_scene, order),
-        _control_contract(mode, has_model_subject),
-        _fold_contract(mode),
-        _occlusion_contract(has_model_subject),
-        _priority_contract(has_model_subject, has_scene, order, output_ratio),
-    ]
-    if normalized:
-        parts.append(_user_increment_contract(normalized))
-    parts.extend([_negative_contract(mode), _final_output_check(output_ratio)])
-    prompt = "\n\n".join(part.strip() for part in parts if part.strip())
+    template_key = f"{mode}:{scenario}"
+    try:
+        template = POSE_REPLICATE_V3_TEMPLATES[template_key]
+    except KeyError as error:
+        raise PoseReplicatePromptError("一键复刻内置模板缺失") from error
+    instruction = str((normalized or {}).get("normalized_instruction") or "")
+    prompt = template.replace("{{output_aspect_ratio}}", output_ratio).replace(
+        "{{user_instruction}}", instruction
+    )
     return PoseReplicatePrompt(
         final_prompt=prompt,
         template_id=POSE_REPLICATE_TEMPLATE_ID,
@@ -193,7 +188,7 @@ def compile_pose_replicate_prompt(
         prompt_source="assistant-merged" if normalized else "fixed-template",
         reference_order=order,
         user_instruction_original=original,
-        normalized_instruction=str((normalized or {}).get("normalized_instruction") or ""),
+        normalized_instruction=instruction,
     )
 
 
@@ -208,11 +203,12 @@ def pose_replicate_template_catalog() -> list[dict[str, Any]]:
                 labels.append("模特主体")
             if has_scene:
                 labels.append("场景")
+            template_key = f"{mode}:{compiled.scenario_id}"
             entries.append({
                 "key": f"{mode}:{compiled.scenario_id}", "mode": mode,
                 "title": " + ".join(labels), "scenario": compiled.scenario_id,
                 "reference_order": list(compiled.reference_order),
-                "prompt": compiled.final_prompt.replace("16:9", "{{output_aspect_ratio}}"),
+                "prompt": POSE_REPLICATE_V3_TEMPLATES[template_key],
             })
     return entries
 

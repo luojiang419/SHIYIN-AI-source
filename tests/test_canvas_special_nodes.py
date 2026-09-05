@@ -144,7 +144,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.05.pose-replicate-batch.1", page)
             self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1", page)
-            self.assertIn("feature=pose-replicate-v2.5", page)
+            self.assertIn("feature=pose-replicate-v3.0", page)
             self.assertIn("feature=pose-replicate-batch.1", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -697,7 +697,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             if function_name == "generateClassicPoseReplicate":
                 self.assertIn("window.PoseReplicateSettings.promptPolicy(node, taskInputs)", body)
             else:
-                self.assertIn("template_id:'pose-replicate.v2.5'", body)
+                self.assertIn("template_id:'pose-replicate.v3.0'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
         self.assertIn("'source','1:1','16:9','9:16','4:3','3:4'", self.shared)
         self.assertIn("自动（跟随原图）", self.shared)

@@ -8,7 +8,7 @@
     }
     function promptPolicy(node, inputs){
         const key = combinationKey(inputs.mode || node.poseReplicateMode || 'skeleton', Boolean(inputs.modelSubject?.url), Boolean(inputs.scene?.url));
-        const policy = {template_id:'pose-replicate.v2.5', locale:'zh-CN'};
+        const policy = {template_id:'pose-replicate.v3.0', locale:'zh-CN'};
         const overrides = node.poseReplicatePromptTemplates || {};
         if(Object.prototype.hasOwnProperty.call(overrides, key)){
             policy.custom_template = overrides[key];

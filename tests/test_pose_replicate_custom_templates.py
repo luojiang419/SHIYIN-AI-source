@@ -5,15 +5,22 @@ import pytest
 
 import main
 from canvas_core.pose_replicate_prompts import (
-    PoseReplicatePromptError, compile_pose_replicate_prompt, pose_replicate_template_catalog,
+    POSE_REPLICATE_TEMPLATE_ID, PoseReplicatePromptError, compile_pose_replicate_prompt,
+    pose_replicate_template_catalog,
 )
+from canvas_core.pose_replicate_templates_v3 import POSE_REPLICATE_V3_TEMPLATES
 from tests.test_pose_replicate_prompts import task_request
 
 
 def test_catalog_is_the_actual_compiler_for_all_eight_combinations():
+    assert POSE_REPLICATE_TEMPLATE_ID == 'pose-replicate.v3.0'
     entries = pose_replicate_template_catalog()
     assert len(entries) == len({entry['key'] for entry in entries}) == 8
+    assert {entry['key'] for entry in entries} == set(POSE_REPLICATE_V3_TEMPLATES)
     for entry in entries:
+        assert entry['prompt'] == POSE_REPLICATE_V3_TEMPLATES[entry['key']]
+        assert entry['prompt'].count('{{output_aspect_ratio}}') == 1
+        assert entry['prompt'].count('{{user_instruction}}') == 1
         roles = {item['role'] for item in entry['reference_order']}
         params = dict(has_model_subject='model_subject' in roles, has_scene='scene' in roles)
         default = compile_pose_replicate_prompt(entry['mode'], output_aspect_ratio='3:4', **params)

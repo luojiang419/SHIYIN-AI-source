@@ -11123,14 +11123,62 @@ def gemini_reference_part(ref):
         return {"fileData": {"mimeType": "image/png", "fileUri": value}}
     return None
 
+
+GEMINI_REFERENCE_ROLE_CONTRACTS = {
+    "pose_reference": "只提供姿势、动作、身体重心、主体相对构图与空间遮挡，不提供最终人物身份、服装或场景。",
+    "control_map": "只提供人物空间结构、体积、姿势与前后遮挡，不提供最终人物身份、服装纹理或场景。",
+    "target_image": "只提供最终服装设计、材质、版型、颜色、图案与结构细节，不提供最终人物身份、姿势或场景。",
+    "model_subject": "只提供最终人物身份、面部、肤色、发型与身体比例，不提供最终服装、姿势或场景。",
+    "scene": "只提供最终环境、背景结构、透视与环境光，不提供最终人物身份、服装或姿势。",
+}
+
+
+def gemini_reference_role_text(ref, fallback_index: int) -> str:
+    role = str((ref or {}).get("role") or "").strip().lower()
+    label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
+    instruction = str((ref or {}).get("instruction") or "").strip()
+    raw_index = (ref or {}).get("asset_index")
+    try:
+        index = max(1, int(raw_index or fallback_index))
+    except (TypeError, ValueError):
+        index = max(1, int(fallback_index))
+    contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
+    if not label and not instruction and not contract:
+        return ""
+    title = label or role.replace("_", "-") or "参考素材"
+    details = " ".join(part for part in (contract, instruction) if part)
+    return f"以下紧邻图片是图{index}（{title}）。{details}".strip()
+
+
+def gemini_reference_roles_anchor(reference_images) -> str:
+    roles = {
+        str((ref or {}).get("role") or "").strip().lower()
+        for ref in (reference_images or [])
+        if isinstance(ref, dict)
+    }
+    if not {"pose_reference", "control_map", "target_image"}.issubset(roles):
+        return ""
+    return (
+        "以上参考图已按图号和角色逐一绑定。执行时不得交换角色：最终人物身份只取模特主体（若未提供则取动作参考），"
+        "最终服装只取目标图，姿势只取动作参考与控制图，最终环境只取场景图（若未提供则取动作参考背景）。"
+    )
+
+
 async def generate_gemini_provider_image(prompt, size, model, reference_images=None, provider=None):
     model_name = gemini_model_name(model)
     endpoint = gemini_endpoint_url(provider, model_name)
     parts = [{"text": prompt.strip()}]
-    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+    references = (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]
+    for index, ref in enumerate(references, 1):
         part = gemini_reference_part(ref)
         if part:
+            role_text = gemini_reference_role_text(ref, index)
+            if role_text:
+                parts.append({"text": role_text})
             parts.append(part)
+    roles_anchor = gemini_reference_roles_anchor(references)
+    if roles_anchor:
+        parts.append({"text": roles_anchor})
     body = {
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {

@@ -258,6 +258,75 @@ def test_pose_replicate_auto_ratio_is_resolved_before_prompt_and_generation():
     assert response["pose_replicate"]["output_aspect_ratio"] == "3:4"
 
 
+def test_gemini_transport_binds_pose_replicate_role_text_to_each_reference_image():
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"candidates": []}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, endpoint, *, headers, json):
+            captured.update({"endpoint": endpoint, "headers": headers, "body": json})
+            return FakeResponse()
+
+    roles = [
+        ("pose_reference", "动作参考"),
+        ("control_map", "深度图"),
+        ("target_image", "目标服装"),
+        ("model_subject", "模特主体"),
+        ("scene", "场景"),
+    ]
+    references = [
+        {
+            "url": f"/assets/input/{index}.png",
+            "asset_index": index,
+            "role": role,
+            "role_label": label,
+        }
+        for index, (role, label) in enumerate(roles, 1)
+    ]
+    with patch.object(main.httpx, "AsyncClient", return_value=FakeClient()), patch.object(
+        main, "api_headers", return_value={"Authorization": "Bearer test"}
+    ), patch.object(
+        main, "reference_to_data_url", return_value="data:image/png;base64,aW1hZ2U="
+    ), patch.object(main, "extract_image", return_value={"type": "base64", "value": "result"}):
+        image, _ = asyncio.run(
+            main.generate_gemini_provider_image(
+                "固定编译提示词",
+                "1536x2048",
+                "gemini-3-pro-image-preview",
+                references,
+                {"id": "shiying", "base_url": "https://example.test"},
+            )
+        )
+
+    assert image == {"type": "base64", "value": "result"}
+    parts = captured["body"]["contents"][0]["parts"]
+    assert parts[0] == {"text": "固定编译提示词"}
+    assert ["inlineData" in part for part in parts].count(True) == 5
+    for index, (_, label) in enumerate(roles, 1):
+        role_text = parts[1 + (index - 1) * 2]["text"]
+        assert f"图{index}（{label}）" in role_text
+        assert "inlineData" in parts[2 + (index - 1) * 2]
+    assert "不得交换角色" in parts[-1]["text"]
+    assert "最终服装只取目标图" in parts[-1]["text"]
+
+
+def test_gemini_transport_keeps_untyped_references_without_extra_role_text():
+    assert main.gemini_reference_role_text({"url": "/assets/input/plain.png"}, 1) == ""
+    assert main.gemini_reference_roles_anchor([{"url": "/assets/input/plain.png"}]) == ""
+
+
 def test_portrait_references_use_output_ratio_without_collage_fallback():
     result = compile_pose_replicate_prompt("depth", output_aspect_ratio="16:9")
     assert result.audit_payload()["output_aspect_ratio"] == "16:9"

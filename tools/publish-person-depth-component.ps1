@@ -64,6 +64,9 @@ try {
         if ($asset.Count -ne 1 -or [int64]$asset[0].size -ne [int64]$package.size) {
             throw "Remote package verification failed: $($package.id)"
         }
+        if ($asset[0].digest -and $asset[0].digest -ne "sha256:$($package.sha256)") {
+            throw "Remote package digest verification failed: $($package.id)"
+        }
         $url = "https://github.com/$ReleaseRepo/releases/download/$tag/$($package.local_file)"
         $package.domestic_url = ""
         $package.official_url = $url
@@ -72,7 +75,8 @@ try {
 
     $candidate.enabled = $true
     $candidate.release_status = "released"
-    $candidate.message = "高精度人物深度组件尚未安装，将在需要时自动下载"
+    $candidate.message = ('"\u9ad8\u7cbe\u5ea6\u4eba\u7269\u6df1\u5ea6\u7ec4\u4ef6\u5c1a\u672a\u5b89\u88c5\uff0c\u5c06\u5728\u9700\u8981\u65f6\u81ea\u52a8\u4e0b\u8f7d"' | ConvertFrom-Json)
+    $candidate.license_notice = "Depth Anything V2 Large: CC-BY-NC-4.0; BiRefNet: MIT. This optional component is for noncommercial use only; model weights are redistributed unchanged."
     $destination = Join-Path $projectRoot $ManifestDestination
     $json = ($candidate | ConvertTo-Json -Depth 20) + "`n"
     [IO.File]::WriteAllText($destination, $json, [Text.UTF8Encoding]::new($false))

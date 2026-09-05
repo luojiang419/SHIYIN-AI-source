@@ -246,7 +246,7 @@ def test_public_status_hides_local_paths_and_attempt_details():
     with tempfile.TemporaryDirectory() as temp_root:
         manager = PersonDepthComponentManager(Path(temp_root), manifest=make_manifest(archive))
         public = manager.public_status()
-        assert public["consent_required"] is True
+        assert public["consent_required"] is False
         for private_key in ("component_root", "manifest_path", "attempts", "license_notice", "error"):
             assert private_key not in public
 
@@ -291,6 +291,7 @@ def test_backend_exposes_person_depth_contract_without_replacing_fast_depth():
     root = Path(__file__).resolve().parents[1]
     main = (root / "main.py").read_text(encoding="utf-8")
     spec = (root / "canvas-backend.spec").read_text(encoding="utf-8")
+    installer = (root / "tools/build-installer.ps1").read_text(encoding="utf-8")
     assert '@app.get("/api/person-depth/component/status")' in main
     assert '@app.post("/api/person-depth/component/install", status_code=202)' in main
     assert '@app.post("/api/person-depth/component/retry", status_code=202)' in main
@@ -298,6 +299,9 @@ def test_backend_exposes_person_depth_contract_without_replacing_fast_depth():
     assert '@app.post("/api/depth/estimate")' in main
     assert 'datas=[("canvas_core/person_depth_manifest.json", "canvas_core")]' in spec
     assert '"torch"' in spec and '"transformers"' in spec
+    assert "person_depth_manifest.json" in installer
+    assert "personDepthManifest.enabled" in installer
+    assert "maybeAutoInstallPersonDepth" in installer
 
 
 def test_builtin_manifest_is_a_downloadable_split_release():
@@ -322,4 +326,6 @@ def test_component_release_script_enforces_verified_prerelease_assets():
     assert "gh release create $tag" in script and "--draft" in script
     assert "gh release edit $tag" in script and "--prerelease" in script
     assert "Remote package verification failed" in script
+    assert "Remote package digest verification failed" in script
     assert "$candidate.enabled = $true" in script
+    assert "model weights are redistributed unchanged" in script

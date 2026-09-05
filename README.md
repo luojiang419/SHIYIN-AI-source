@@ -5,6 +5,8 @@
 
 运行 `SHIYIN-AI-Setup-{版本}.exe` 安装，默认目录为 `D:\Program Files\SHIYIN AI`。程序资源位于安装根目录的 `app`，所有设置、数据库、媒体、缓存和日志继续写入同级 `data`，升级安装会保留 `data`。桌面版会从公开 GitHub Release 检查更新，校验安装器 EXE 的 SHA-256 后打开独立更新器窗口，关闭旧版本、静默安装并重启新版本；可在“设置 → 软件设置”选择自动、手动或关闭更新，以及自动代理、手动代理或直连。v1.0.101 是兼容旧 ZIP 的桥接版本，后续正式版本只发布 EXE 安装器；发布者执行 `npm run release:publish` 即可构建、递增版本并发布标准更新资产。默认监听 3000 端口并允许可信局域网访问，同一局域网设备输入显示的 `IP:3000` 后使用账号和密码登录；账号可包含中文、英文字母大小写和数字，英文字母大小写视为同一账号，密码仅要求非空且不限制长度或复杂度。首次访问可自动注册，每个账号的数据保存在 `data/accounts/<内部ID>` 独立目录。普通局域网账号只能调整主题和显示语言，不能查看或修改 API 与软件配置。本机管理员使用 `jiang` / `jiang` 登录并通过“账号管理”查看、修改用户账号密码及其资源。DWPose 模型不内置进安装包：首次启动会优先从腾讯国内镜像后台下载并持久化到 `data/system/models/dwpose`，失败后自动尝试 Windows 系统代理和官方源，升级无需重复下载。请勿将端口直接映射到公网。
 
+高精度人物深度组件同样不内置进安装包：用户添加一键复刻或深度图节点后，若组件缺失会自动下载约 5.98GB 的分包；节点持续显示百分比、已下载/总量、来源与校验/安装阶段，完成后自动加载并继续生成深度图。组件保存在 `data/system/components/person-depth`，升级安装无需重复下载；下载需要约 13.2GB 可用磁盘空间，使用 `Depth Anything V2 Large (CC-BY-NC-4.0)` 与 `BiRefNet (MIT)`，仅限非商业用途。
+
 历史 ZIP 版本仍可通过 v1.0.101 桥接版本升级到后续 EXE 安装器。
 
 配套的chrome采集插件已经上线：https://chromewebstore.google.com/detail/infinite-canvas-%E5%9B%BE%E5%83%8F%E8%A7%86%E9%A2%91%E6%96%87%E5%AD%97%E6%8A%93%E5%8F%96%E5%B7%A5/ajfhnbklbmpfaaookhfakohabnpmlcic?authuser=0&hl=en

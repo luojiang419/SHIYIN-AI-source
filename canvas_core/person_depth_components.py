@@ -116,7 +116,7 @@ class PersonDepthComponentManager:
             "state": "idle" if available else "unavailable",
             "ready": False,
             "install_available": available,
-            "consent_required": available,
+            "consent_required": False,
             "version": str(self.manifest.get("version") or ""),
             "source": "",
             "source_label": "",

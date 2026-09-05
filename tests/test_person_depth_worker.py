@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -39,10 +40,10 @@ def test_trusted_birefnet_code_rejects_missing_or_tampered_files(tmp_path: Path,
         validate_trusted_birefnet_code(tmp_path, expected)
 
 
-def test_candidate_builder_keeps_noncommercial_release_disabled():
+def test_candidate_builder_stays_disabled_and_released_manifest_keeps_license_gate():
     root = Path(__file__).resolve().parents[1]
     builder = (root / "tools" / "build-person-depth-component.ps1").read_text(encoding="utf-8")
-    manifest = (root / "canvas_core" / "person_depth_manifest.json").read_text(encoding="utf-8")
+    manifest = json.loads((root / "canvas_core" / "person_depth_manifest.json").read_text(encoding="utf-8"))
     assert "[switch]$AllowNonCommercialModel" in builder
     assert "[switch]$Resume" in builder
     assert "[switch]$KeepBuildDirectories" in builder
@@ -55,7 +56,13 @@ def test_candidate_builder_keeps_noncommercial_release_disabled():
     assert "[pscustomobject][ordered]" in builder
     assert "$Resume -and $runtimeArchiveExists -and $modelsArchiveExists" in builder
     assert "Refusing to clean a path outside the candidate output root" in builder
-    assert '"enabled": false' in manifest
+    assert manifest["enabled"] is True
+    assert manifest["release_status"] == "released"
+    assert "CC-BY-NC-4.0" in manifest["license_notice"]
+    assert "noncommercial use only" in manifest["license_notice"]
+    assert "redistributed unchanged" in manifest["license_notice"]
+    assert manifest["model_sources"]["depth"]["revision"] == "7581137eff8d4e94f6e796d3baea0e9fa79b22d2"
+    assert manifest["model_sources"]["depth"]["license"] == "CC-BY-NC-4.0"
 
 
 def test_birefnet_inference_compat_replaces_training_only_kornia_import():

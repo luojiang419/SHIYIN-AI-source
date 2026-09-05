@@ -40,8 +40,10 @@ function Remove-BuildPath([string]$Path, [string]$AllowedRoot) {
 function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     $canvasPath = Join-Path $Root 'app\web\canvas.html'
     $canvasListPath = Join-Path $Root 'app\web\js\canvas-list.js'
+    $specialNodesPath = Join-Path $Root 'app\web\js\canvas-special-nodes.js'
     $topazPath = Join-Path $Root 'app\web\js\canvas-topaz-node.js'
-    foreach ($requiredPath in @($canvasPath, $canvasListPath, $topazPath)) {
+    $personDepthManifestPath = Join-Path $Root 'app\backend\canvas-backend\_internal\canvas_core\person_depth_manifest.json'
+    foreach ($requiredPath in @($canvasPath, $canvasListPath, $specialNodesPath, $topazPath, $personDepthManifestPath)) {
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
             throw "Staged web asset is missing: $requiredPath"
         }
@@ -72,6 +74,14 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     $canvasListJs = [IO.File]::ReadAllText($canvasListPath)
     if (-not $canvasListJs.Contains("&v=$ExpectedVersion")) {
         throw "Staged canvas navigation cache version is not $ExpectedVersion."
+    }
+    $specialNodesJs = [IO.File]::ReadAllText($specialNodesPath)
+    if (-not $specialNodesJs.Contains('maybeAutoInstallPersonDepth')) {
+        throw 'Staged canvas special nodes are missing person-depth automatic installation.'
+    }
+    $personDepthManifest = Get-Content -Raw -Encoding UTF8 -LiteralPath $personDepthManifestPath | ConvertFrom-Json
+    if (-not $personDepthManifest.enabled -or @($personDepthManifest.packages).Count -lt 3) {
+        throw 'Staged person-depth release manifest is disabled or incomplete.'
     }
 }
 

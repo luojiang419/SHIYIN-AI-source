@@ -143,7 +143,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-map.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.1", page)
             self.assertIn("feature=pose-replicate-v2.4", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -541,6 +541,10 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "openPersonDepthDialog(options, false)",
             "data-person-depth-dialog-confirm",
             "SHA-256、原子安装和小图 smoke 验证",
+            "personDepthInstallPromise",
+            "personDepthAutoInstallAttempted",
+            "maybeAutoInstallPersonDepth(options)",
+            "installPersonDepthComponent(false)",
         ):
             self.assertIn(marker, self.shared)
 
@@ -548,7 +552,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("深度图", page)
             self.assertIn("feature=depth-map-node.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-map.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.1", page)
 
         for marker in (
             "function depthMapBodyHtml(node)",

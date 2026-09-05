@@ -27,6 +27,14 @@ def make_archive(*, unsafe: bool = False) -> bytes:
     return buffer.getvalue()
 
 
+def make_archive_with_files(files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as bundle:
+        for name, content in files.items():
+            bundle.writestr(name, content)
+    return buffer.getvalue()
+
+
 def make_manifest(archive: bytes, *, enabled: bool = True) -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -162,6 +170,61 @@ def test_domestic_failure_falls_back_to_official_source():
         assert manager.public_status()["source_label"] == "官方源直连"
 
 
+def test_split_packages_are_downloaded_and_merged_before_activation():
+    archives = {
+        "runtime-001": make_archive_with_files({"runtime/person-depth-worker.exe": b"worker"}),
+        "runtime-002": make_archive_with_files({"runtime/_internal/torch_cuda.dll": b"cuda"}),
+        "models": make_archive_with_files(
+            {
+                "models/depth-anything-v2-large/config.json": b"{}",
+                "models/birefnet/config.json": b"{}",
+            }
+        ),
+    }
+    manifest = {
+        "schema_version": 1,
+        "component": "person-depth",
+        "version": "1.0.0-split-test",
+        "enabled": True,
+        "command": ["runtime/person-depth-worker.exe"],
+        "required_paths": [
+            "runtime/person-depth-worker.exe",
+            "runtime/_internal/torch_cuda.dll",
+            "models/depth-anything-v2-large/config.json",
+            "models/birefnet/config.json",
+        ],
+        "packages": [
+            {
+                "id": package_id,
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "domestic_url": f"memory://{package_id}",
+                "official_url": "",
+            }
+            for package_id, content in archives.items()
+        ],
+    }
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root),
+            manifest=manifest,
+            proxy_provider=lambda: {},
+            smoke_runner=lambda _command, _root: None,
+        )
+
+        def fake_download(url, target, *_args):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archives[url.removeprefix("memory://")])
+
+        with patch.object(manager, "_download_url", side_effect=fake_download):
+            assert manager.ensure_now() is True
+        installation = manager.installation_path()
+        assert installation is not None
+        assert (installation / "runtime/person-depth-worker.exe").read_bytes() == b"worker"
+        assert (installation / "runtime/_internal/torch_cuda.dll").read_bytes() == b"cuda"
+        assert manager.public_status()["downloaded_bytes"] == sum(map(len, archives.values()))
+
+
 def test_zip_path_traversal_is_rejected_before_activation():
     archive = make_archive(unsafe=True)
     with tempfile.TemporaryDirectory() as temp_root:
@@ -235,3 +298,28 @@ def test_backend_exposes_person_depth_contract_without_replacing_fast_depth():
     assert '@app.post("/api/depth/estimate")' in main
     assert 'datas=[("canvas_core/person_depth_manifest.json", "canvas_core")]' in spec
     assert '"torch"' in spec and '"transformers"' in spec
+
+
+def test_builtin_manifest_is_a_downloadable_split_release():
+    root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((root / "canvas_core/person_depth_manifest.json").read_text(encoding="utf-8"))
+    packages = manifest.get("packages") or []
+    if not manifest.get("enabled"):
+        pytest.skip("正式组件发布后由发布脚本启用内置 manifest")
+    assert manifest["release_status"] == "released"
+    assert len(packages) >= 3
+    assert sum(str(package["id"]).startswith("runtime-windows-x64-") for package in packages) >= 2
+    assert all(0 < int(package["size"]) < 2_000_000_000 for package in packages)
+    assert all(len(str(package["sha256"])) == 64 for package in packages)
+    assert all(str(package["official_url"]).startswith("https://github.com/") for package in packages)
+
+
+def test_component_release_script_enforces_verified_prerelease_assets():
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "tools/publish-person-depth-component.ps1").read_text(encoding="utf-8")
+    assert "Package exceeds the GitHub safe asset limit" in script
+    assert "Get-FileHash -LiteralPath $asset -Algorithm SHA256" in script
+    assert "gh release create $tag" in script and "--draft" in script
+    assert "gh release edit $tag" in script and "--prerelease" in script
+    assert "Remote package verification failed" in script
+    assert "$candidate.enabled = $true" in script

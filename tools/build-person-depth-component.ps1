@@ -3,6 +3,7 @@ param(
     [string]$DepthSnapshot = "",
     [string]$BiRefNetSnapshot = "",
     [string]$Version = "1.0.0-candidate.1",
+    [int64]$MaxRuntimePackageBytes = 1900000000,
     [switch]$AllowNonCommercialModel,
     [switch]$Resume,
     [switch]$KeepBuildDirectories
@@ -70,6 +71,71 @@ function Get-PackageInfo([string]$Id, [string]$Path, [string]$LocalFile) {
     }
 }
 
+function New-SplitArchivesFromDirectory(
+    [string]$Source,
+    [string]$Destination,
+    [string]$ArchivePrefix,
+    [int64]$MaximumBytes
+) {
+    if ($MaximumBytes -le 0 -or $MaximumBytes -ge 2000000000) {
+        throw "MaxRuntimePackageBytes must be between 1 and 1,999,999,999 bytes."
+    }
+    $sourceRoot = [IO.Path]::GetFullPath($Source)
+    $files = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -File | Sort-Object -Property @{Expression = 'Length'; Descending = $true}, FullName)
+    if ($files.Count -eq 0) { throw "Runtime staging directory is empty: $sourceRoot" }
+    $oversized = @($files | Where-Object { $_.Length -gt $MaximumBytes })
+    if ($oversized.Count -gt 0) {
+        throw "A runtime file exceeds the configured package limit: $($oversized[0].FullName)"
+    }
+
+    $bins = [Collections.Generic.List[object]]::new()
+    foreach ($file in $files) {
+        $targetBin = $null
+        foreach ($bin in $bins) {
+            if ([int64]$bin.Bytes + [int64]$file.Length -le $MaximumBytes) {
+                $targetBin = $bin
+                break
+            }
+        }
+        if ($null -eq $targetBin) {
+            $targetBin = [pscustomobject]@{
+                Bytes = [int64]0
+                Files = [Collections.Generic.List[object]]::new()
+            }
+            $bins.Add($targetBin)
+        }
+        $targetBin.Files.Add($file)
+        $targetBin.Bytes = [int64]$targetBin.Bytes + [int64]$file.Length
+    }
+
+    $archives = [Collections.Generic.List[string]]::new()
+    for ($index = 0; $index -lt $bins.Count; $index++) {
+        $archive = Join-Path $Destination ("{0}-part-{1:d3}.zip" -f $ArchivePrefix, ($index + 1))
+        if (Test-Path -LiteralPath $archive) { throw "Runtime archive already exists: $archive" }
+        $stream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $bundle = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $false)
+        try {
+            foreach ($file in $bins[$index].Files) {
+                $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/') -replace '\\', '/'
+                $entry = $bundle.CreateEntry($relative, [IO.Compression.CompressionLevel]::NoCompression)
+                $input = $file.OpenRead()
+                $output = $entry.Open()
+                try { $input.CopyTo($output) }
+                finally { $output.Dispose(); $input.Dispose() }
+            }
+        } finally {
+            $bundle.Dispose()
+            $stream.Dispose()
+        }
+        $archiveItem = Get-Item -LiteralPath $archive
+        if ($archiveItem.Length -ge 2000000000) {
+            throw "Runtime archive exceeds GitHub's safe asset limit: $archive"
+        }
+        $archives.Add($archiveItem.FullName)
+    }
+    return @($archives)
+}
+
 New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 $runtimeDist = Join-Path $outputPath "runtime-dist"
 $runtimeWork = Join-Path $outputPath "runtime-work"
@@ -109,24 +175,28 @@ $modelSources = [ordered]@{
 }
 Write-Utf8Json (Join-Path $modelsRoot "model-sources.json") $modelSources
 
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$runtimeArchive = Join-Path $outputPath "person-depth-runtime-$Version-windows-x64.zip"
+$runtimeArchivePrefix = "person-depth-runtime-$Version-windows-x64"
 $modelsArchive = Join-Path $outputPath "person-depth-models-$Version.zip"
-$runtimeArchiveExists = Test-Path -LiteralPath $runtimeArchive -PathType Leaf
+$runtimeArchives = @(Get-ChildItem -LiteralPath $outputPath -File -Filter "$runtimeArchivePrefix-part-*.zip" | Sort-Object Name | Select-Object -ExpandProperty FullName)
+$runtimeArchiveExists = $runtimeArchives.Count -gt 0
 $modelsArchiveExists = Test-Path -LiteralPath $modelsArchive -PathType Leaf
 if ($Resume -and $runtimeArchiveExists -and $modelsArchiveExists) {
     Write-Output "Reusing existing candidate archives."
 } elseif ($runtimeArchiveExists -or $modelsArchiveExists) {
     throw "Candidate archives already exist; refusing to overwrite"
 } else {
-    [IO.Compression.ZipFile]::CreateFromDirectory($runtimeStage, $runtimeArchive, [IO.Compression.CompressionLevel]::NoCompression, $false)
+    $runtimeArchives = @(New-SplitArchivesFromDirectory $runtimeStage $outputPath $runtimeArchivePrefix $MaxRuntimePackageBytes)
     [IO.Compression.ZipFile]::CreateFromDirectory($modelStage, $modelsArchive, [IO.Compression.CompressionLevel]::NoCompression, $false)
 }
 
-$packages = @(
-    (Get-PackageInfo "runtime-windows-x64" $runtimeArchive (Split-Path -Leaf $runtimeArchive)),
-    (Get-PackageInfo "models" $modelsArchive (Split-Path -Leaf $modelsArchive))
-)
+$packages = [Collections.Generic.List[object]]::new()
+for ($index = 0; $index -lt $runtimeArchives.Count; $index++) {
+    $runtimeArchive = $runtimeArchives[$index]
+    $packages.Add((Get-PackageInfo ("runtime-windows-x64-{0:d3}" -f ($index + 1)) $runtimeArchive (Split-Path -Leaf $runtimeArchive)))
+}
+$packages.Add((Get-PackageInfo "models" $modelsArchive (Split-Path -Leaf $modelsArchive)))
 $totalBytes = [int64](($packages | Measure-Object -Property size -Sum).Sum)
 $manifest = [ordered]@{
     schema_version = 1
@@ -149,7 +219,7 @@ $manifest = [ordered]@{
         "models/model-sources.json"
     )
     model_sources = $modelSources
-    packages = $packages
+    packages = @($packages)
 }
 Write-Utf8Json (Join-Path $outputPath "candidate-manifest.json") $manifest
 
@@ -160,7 +230,7 @@ $metadata = [ordered]@{
     built_at_utc = [DateTime]::UtcNow.ToString("o")
     python = (& python --version 2>&1).ToString()
     dependencies = ($versions | ConvertFrom-Json)
-    packages = $packages
+    packages = @($packages)
 }
 Write-Utf8Json (Join-Path $outputPath "build-metadata.json") $metadata
 
@@ -178,7 +248,7 @@ if (-not $KeepBuildDirectories) {
 Write-Output ([ordered]@{
     output_root = $outputPath
     manifest = (Join-Path $outputPath "candidate-manifest.json")
-    runtime_archive = $runtimeArchive
+    runtime_archives = @($runtimeArchives)
     models_archive = $modelsArchive
     total_bytes = $totalBytes
 } | ConvertTo-Json -Depth 5)

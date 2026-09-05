@@ -33,6 +33,8 @@
     const personDepthBindings = new Map();
     let personDepthStatus = {state:'loading', ready:false, install_available:false, progress:0, message:'正在检查高精度人物深度组件'};
     let personDepthStatusPromise = null;
+    let personDepthInstallPromise = null;
+    let personDepthAutoInstallAttempted = false;
     let personDepthPollTimer = 0;
     let personDepthUpdatedAt = 0;
 
@@ -721,6 +723,7 @@
                 personDepthUpdatedAt = Date.now();
                 notifyPersonDepthBindings();
                 schedulePersonDepthPoll();
+                maybeAutoInstallPersonDepth();
                 return personDepthStatus;
             })
             .catch(error => {
@@ -734,18 +737,42 @@
     }
     function registerPersonDepthBinding(node, options){
         personDepthBindings.set(`${options.canvasKey || 'canvas'}:${node.id}`, {node, options});
-        refreshPersonDepthStatus(false).catch(() => {});
+        refreshPersonDepthStatus(false).then(() => maybeAutoInstallPersonDepth(options)).catch(() => {});
     }
     async function installPersonDepthComponent(retry=false){
+        if(personDepthInstallPromise) return personDepthInstallPromise;
         const endpoint = retry ? '/api/person-depth/component/retry' : '/api/person-depth/component/install';
-        const response = await fetch(endpoint, {method:'POST'});
-        if(!response.ok) throw new Error(await responseError(response, '高精度人物深度组件安装无法启动'));
-        const data = await response.json();
-        personDepthStatus = data.status || personDepthStatus;
-        personDepthUpdatedAt = Date.now();
-        notifyPersonDepthBindings();
-        schedulePersonDepthPoll();
-        return personDepthStatus;
+        personDepthInstallPromise = fetch(endpoint, {method:'POST'})
+            .then(async response => {
+                if(!response.ok) throw new Error(await responseError(response, '高精度人物深度组件安装无法启动'));
+                const data = await response.json();
+                personDepthStatus = data.status || personDepthStatus;
+                personDepthUpdatedAt = Date.now();
+                notifyPersonDepthBindings();
+                schedulePersonDepthPoll();
+                return personDepthStatus;
+            })
+            .catch(error => {
+                personDepthStatus = {
+                    ...personDepthStatus,
+                    state:'failed',
+                    ready:false,
+                    message:error.message || '高精度人物深度组件安装无法启动'
+                };
+                personDepthUpdatedAt = Date.now();
+                notifyPersonDepthBindings();
+                throw error;
+            })
+            .finally(() => { personDepthInstallPromise = null; });
+        return personDepthInstallPromise;
+    }
+    function maybeAutoInstallPersonDepth(options){
+        if(personDepthAutoInstallAttempted || personDepthInstallPromise || !personDepthBindings.size) return;
+        const state = String(personDepthStatus?.state || '');
+        if(personDepthStatus?.ready || PERSON_DEPTH_ACTIVE_STATES.has(state) || !personDepthStatus?.install_available) return;
+        if(!['idle','missing'].includes(state)) return;
+        personDepthAutoInstallAttempted = true;
+        installPersonDepthComponent(false).catch(error => options?.toast?.(error.message || '高精度人物深度组件自动下载无法启动'));
     }
     function closePersonDepthDialog(){
         document.querySelector('.person-depth-dialog-backdrop')?.remove();

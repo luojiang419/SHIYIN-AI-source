@@ -61,7 +61,7 @@ def test_prompt_ports_only_accept_prompt_sources_and_inactive_connections_are_hi
 
 
 def test_shared_script_and_building_styles_are_loaded_by_both_canvases():
-    script = '<script src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>'
+    script = 'src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"'
     assert script in CANVAS_HTML
     assert script in SMART_HTML
     # 构建缓存版本会随发布日递增，检查固定资源签名和 rev 参数即可，

@@ -69,7 +69,7 @@ def test_migration_is_idempotent_after_classic_save():
 def test_unified_editor_loads_legacy_migration_before_canvas_runtime():
     page = CANVAS_HTML.read_text(encoding="utf-8")
     assert "canvas-legacy-migration.js" in page
-    assert page.index("canvas-legacy-migration.js") < page.index("<script src=\"/static/js/canvas.js")
+    assert page.index("canvas-legacy-migration.js") < page.index("/static/js/canvas.js")
 
 
 def test_media_service_worker_serves_cached_previews_before_background_refresh():

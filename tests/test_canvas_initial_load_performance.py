@@ -25,7 +25,7 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
         self.assertNotIn("await refreshMissingCanvasAssets", body)
 
     def test_classic_canvas_starts_config_and_canvas_requests_in_parallel(self):
-        onload = CANVAS_JS[CANVAS_JS.index("window.onload = async () => {"):]
+        onload = CANVAS_JS[CANVAS_JS.index("async function initializeCanvasPage(){"):]
         self.assertIn("const configTask = loadConfig({deferSecondary:true});", onload)
         self.assertIn("await openCanvas(openId);", onload)
         self.assertLess(onload.index("const configTask"), onload.index("await openCanvas(openId)"))

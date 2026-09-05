@@ -185,7 +185,7 @@ function ensureClassicMediaResidency(){
     return classicMediaResidencyController;
 }
 function recordClassicFirstPreviewStart(){
-    if(canvas?.id && classicNavigationStartedAt && classicFirstPreviewCanvasId !== canvas.id){
+    if(canvas?.id && classicNavigationStartedAt !== null && classicFirstPreviewCanvasId !== canvas.id){
         classicFirstPreviewCanvasId = canvas.id;
         window.CanvasPerformance?.record?.('classic.navigation-to-first-preview', performance.now() - classicNavigationStartedAt, {nodes:nodes.length});
     }
@@ -677,7 +677,7 @@ const videoFrameCancel = document.getElementById('videoFrameCancel');
 let canvases = [];
 let deletedCanvases = [];
 let canvas = null;
-let classicNavigationStartedAt = 0;
+let classicNavigationStartedAt = null;
 let classicFirstRenderCanvasId = '';
 let classicFirstPreviewCanvasId = '';
 let nodes = [];
@@ -3582,13 +3582,25 @@ async function setCanvasTitle(id, title){
 }
 async function openCanvas(id){
     setStatus('Opening...');
-    classicNavigationStartedAt = performance.now();
+    const initialTask = window.CanvasStartup?.takeCanvas(id);
+    // performance 时间原点就是页面导航；首次进入需包含脚本和样式加载的等待。
+    classicNavigationStartedAt = initialTask ? 0 : performance.now();
     classicFirstRenderCanvasId = '';
     classicFirstPreviewCanvasId = '';
     try {
-        const res = await fetch(`/api/canvases/${id}`);
-        if(!res.ok) throw new Error(tr('canvas.openFailed'));
-        const data = await res.json();
+        let data;
+        if(initialTask){
+            const initial = await initialTask;
+            if(initial.error) throw initial.error;
+            data = initial.data;
+            const timings = window.CanvasStartup.timings;
+            window.CanvasPerformance?.record?.('classic.initial-data-ready', timings.dataReadyAt);
+            window.CanvasPerformance?.record?.('classic.initial-data-request', timings.dataReadyAt - timings.requestStartedAt);
+        } else {
+            const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
+            if(!res.ok) throw new Error(tr('canvas.openFailed'));
+            data = await res.json();
+        }
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
@@ -8847,7 +8859,7 @@ function render(){
     restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
-    if(canvas?.id && classicNavigationStartedAt && classicFirstRenderCanvasId !== canvas.id){
+    if(canvas?.id && classicNavigationStartedAt !== null && classicFirstRenderCanvasId !== canvas.id){
         classicFirstRenderCanvasId = canvas.id;
         window.CanvasPerformance?.record?.('classic.navigation-to-first-render', performance.now() - classicNavigationStartedAt, {nodes:nodes.length, connections:connections.length});
     }
@@ -23985,7 +23997,8 @@ function outputMediaDragPayload(dataTransfer){
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 function escapeAttr(str){ return escapeHtml(str); }
 
-window.onload = async () => {
+async function initializeCanvasPage(){
+    window.CanvasPerformance?.record?.('classic.editor-ready', performance.now());
     startCanvasStatsLoop();
     updateCanvasStats();
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem(CANVAS_THEME_KEY) || 'light');
@@ -24010,4 +24023,11 @@ window.onload = async () => {
     } else {
         window.location.replace(canvasListUrlForProject(rememberedCanvasListProject()));
     }
-};
+}
+
+// 不等待图片/媒体等 load 资源；defer 脚本已按顺序注册全部节点能力。
+if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', initializeCanvasPage, {once:true});
+} else {
+    void initializeCanvasPage();
+}

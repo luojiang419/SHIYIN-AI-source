@@ -30,8 +30,16 @@ foreach ($package in $packages) {
 }
 
 $tag = "person-depth-v$($candidate.version)"
-$existing = gh release view $tag --repo $ReleaseRepo --json isDraft,tagName 2>$null
-if ($LASTEXITCODE -eq 0) { throw "Release already exists: $ReleaseRepo/$tag" }
+$previousErrorAction = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $existing = gh release view $tag --repo $ReleaseRepo --json isDraft,tagName 2>$null
+    $releaseViewExitCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousErrorAction
+}
+if ($releaseViewExitCode -eq 0) { throw "Release already exists: $ReleaseRepo/$tag" }
+if ($releaseViewExitCode -ne 1) { throw "Unable to check whether component release exists (exit $releaseViewExitCode)." }
 $notes = (Resolve-Path -LiteralPath (Join-Path $projectRoot $ReleaseNotesPath)).Path
 $target = (git -C $projectRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $target -notmatch '^[0-9a-f]{40}$') { throw "Cannot resolve source commit." }

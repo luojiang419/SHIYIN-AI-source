@@ -20118,6 +20118,7 @@ POSE_REPLICATE_SIZE_MAP = {
     "9:16": {"1k": "720x1280", "2k": "1152x2048", "4k": "2160x3840"},
     "4:3": {"1k": "1344x1008", "2k": "2048x1536", "4k": "3264x2448"},
     "3:4": {"1k": "1008x1344", "2k": "1536x2048", "4k": "2448x3264"},
+    "4:5": {"1k": "1024x1280", "2k": "1632x2040", "4k": "2560x3200"},
 }
 
 
@@ -20125,7 +20126,7 @@ def resolve_pose_replicate_aspect_ratio(aspect_ratio: str, pose_reference_url: s
     requested = str(aspect_ratio or "").strip().lower()
     if requested != "source":
         if requested not in POSE_REPLICATE_SIZE_MAP:
-            raise PoseReplicatePromptError("一键复刻画幅只支持自动、1:1、16:9、9:16、4:3 或 3:4")
+            raise PoseReplicatePromptError("一键复刻画幅只支持自动、1:1、16:9、9:16、4:3、3:4 或 4:5")
         return requested
     width, height = parse_size_pair(image_size_from_reference(pose_reference_url))
     if not width or not height:
@@ -20141,7 +20142,7 @@ def pose_replicate_image_size(aspect_ratio: str, resolution: str) -> str:
     ratio = str(aspect_ratio or "").strip()
     level = str(resolution or "").strip().lower()
     if ratio not in POSE_REPLICATE_SIZE_MAP:
-        raise PoseReplicatePromptError("一键复刻画幅只支持 1:1、16:9、9:16、4:3 或 3:4")
+        raise PoseReplicatePromptError("一键复刻画幅只支持 1:1、16:9、9:16、4:3、3:4 或 4:5")
     if level not in {"1k", "2k", "4k"}:
         raise PoseReplicatePromptError("一键复刻分辨率只支持 1k、2k 或 4k")
     return POSE_REPLICATE_SIZE_MAP[ratio][level]

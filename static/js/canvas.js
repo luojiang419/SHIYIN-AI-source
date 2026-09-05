@@ -1084,6 +1084,7 @@ const SIZE_MAP = {
     square: { '1k':'1024x1024', '2k':'2048x2048', '4k':'4096x4096' },
     portrait: { '1k':'1024x1536', '2k':'1360x2048', '4k':'2352x3520' },
     portrait43: { '1k':'1008x1344', '2k':'1536x2048', '4k':'2448x3264' },
+    portrait45: { '1k':'1024x1280', '2k':'1632x2040', '4k':'2560x3200' },
     landscape43: { '1k':'1344x1008', '2k':'2048x1536', '4k':'3264x2448' },
     landscape: { '1k':'1536x1024', '2k':'2048x1360', '4k':'3520x2352' },
     story: { '1k':'720x1280', '2k':'1152x2048', '4k':'2160x3840' },
@@ -1872,7 +1873,7 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', custom
             return `${Math.max(64, width)}x${Math.max(64, height)}`;
         }
     }
-    const ratioAliases = {'1:1':'square','16:9':'wide','9:16':'story','4:3':'landscape43','3:4':'portrait43'};
+    const ratioAliases = {'1:1':'square','16:9':'wide','9:16':'story','4:3':'landscape43','3:4':'portrait43','4:5':'portrait45'};
     const ratioKey = ratioValue && (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) ? (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) : 'square';
     return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
 }
@@ -4804,6 +4805,7 @@ function renderMsGenBody(node){
                     <option value="portrait">2:3</option>
                     <option value="landscape">3:2</option>
                         <option value="portrait43">3:4</option>
+                        <option value="portrait45">4:5</option>
                         <option value="landscape43">4:3</option>
                         <option value="story">9:16</option>
                         <option value="wide">16:9</option>
@@ -13885,6 +13887,7 @@ function renderGeneratorBody(node){
                     <option value="portrait">2:3</option>
                     <option value="landscape">3:2</option>
                     <option value="portrait43">3:4</option>
+                    <option value="portrait45">4:5</option>
                     <option value="landscape43">4:3</option>
                     <option value="story">9:16</option>
                     <option value="wide">16:9</option>
@@ -20384,7 +20387,7 @@ async function runGroupTransformation(operation, groupId, options={}){
     const model = providerModels.includes(options.model) ? options.model : (providerModels[0] || '');
     if(!providerId || !model){ showErrorModal('请先在 API 设置中配置图片生成模型', '生成衍生分镜'); return; }
     const transformOptions = {
-        ratio:['source','16:9','1:1','9:16','3:2','2:3'].includes(options.ratio)
+        ratio:['source','16:9','1:1','9:16','3:2','2:3','4:5'].includes(options.ratio)
             ? options.ratio
             : (operation === 'line-art' ? 'source' : '16:9'),
         resolution:['1k','2k','4k'].includes(options.resolution) ? options.resolution : '2k',
@@ -20941,7 +20944,7 @@ function imageNodeQuickPromptHtml(node){
     const model = node.model || allImageModels(providerId)[0] || '';
     const ratio = node.ratio || 'square';
     const resolution = node.resolution || defaultApiImageResolution(model);
-    const ratioOptions = [['square','1:1'],['wide','16:9'],['landscape43','4:3'],['portrait43','3:4'],['story','9:16'],['source','跟随原图']];
+    const ratioOptions = [['square','1:1'],['wide','16:9'],['landscape43','4:3'],['portrait43','3:4'],['portrait45','4:5'],['story','9:16'],['source','跟随原图']];
     const resolutionOptions = ['auto','1k','2k','4k'];
     const running = Boolean(node.running);
     return `<div class="image-quick-compose" data-image-quick-compose>

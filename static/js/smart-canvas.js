@@ -717,6 +717,7 @@ const SIZE_MAP = {
     square: {'1k':'1024x1024','2k':'2048x2048','4k':'4096x4096'},
     portrait: {'1k':'1024x1536','2k':'1360x2048','4k':'2352x3520'},
     portrait43: {'1k':'1008x1344','2k':'1536x2048','4k':'2448x3264'},
+    portrait45: {'1k':'1024x1280','2k':'1632x2040','4k':'2560x3200'},
     landscape43: {'1k':'1344x1008','2k':'2048x1536','4k':'3264x2448'},
     landscape: {'1k':'1536x1024','2k':'2048x1360','4k':'3520x2352'},
     story: {'1k':'720x1280','2k':'1152x2048','4k':'2160x3840'},
@@ -4464,7 +4465,7 @@ function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSi
             return `${Math.max(64, width)}x${Math.max(64, height)}`;
         }
     }
-    const ratioAliases = {'1:1':'square','16:9':'wide','9:16':'story','4:3':'landscape43','3:4':'portrait43'};
+    const ratioAliases = {'1:1':'square','16:9':'wide','9:16':'story','4:3':'landscape43','3:4':'portrait43','4:5':'portrait45'};
     const ratioKey = ratioValue && (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) ? (SIZE_MAP[ratioValue] ? ratioValue : ratioAliases[ratioValue]) : 'square';
     return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
 }
@@ -4798,7 +4799,7 @@ function renderSizeControls(prefix='', includeSource=false){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
     const ratios = [
-        ['square','1:1'], ['portrait','2:3'], ['landscape','3:2'], ['portrait43','3:4'], ['landscape43','4:3'], ['story','9:16'], ['wide','16:9'], ['ultrawide','21:9'], ['ultratall','9:21'],
+        ['square','1:1'], ['portrait','2:3'], ['landscape','3:2'], ['portrait43','3:4'], ['portrait45','4:5'], ['landscape43','4:3'], ['story','9:16'], ['wide','16:9'], ['ultrawide','21:9'], ['ultratall','9:21'],
         ...(includeSource ? [['source', tr('canvas.adaptiveRatio') || '适配比例']] : []),
         ['custom', tr('canvas.custom') || '自定义']
     ];
@@ -4814,7 +4815,7 @@ function ratioLabel(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
     const customKey = prefix ? `${prefix}CustomRatio` : 'customRatio';
     const sourceLabel = sourceImageRatioLabel(prefix) || tr('smart.imageRatio');
-    const map = {square:'1:1', portrait:'2:3', landscape:'3:2', portrait43:'3:4', landscape43:'4:3', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21', source:sourceLabel, custom:settings[customKey] || tr('smart.custom')};
+    const map = {square:'1:1', portrait:'2:3', landscape:'3:2', portrait43:'3:4', portrait45:'4:5', landscape43:'4:3', story:'9:16', wide:'16:9', ultrawide:'21:9', ultratall:'9:21', source:sourceLabel, custom:settings[customKey] || tr('smart.custom')};
     return map[settings[ratioKey] || 'square'] || '1:1';
 }
 function gcdInt(a, b){
@@ -4870,7 +4871,7 @@ function resolutionLabel(prefix=''){
 }
 function ratioIconClass(value){
     if(value === 'portrait') return 'r-portrait';
-    if(value === 'portrait43') return 'r-portrait43';
+    if(value === 'portrait43' || value === 'portrait45') return 'r-portrait43';
     if(value === 'landscape') return 'r-landscape';
     if(value === 'landscape43') return 'r-landscape43';
     if(value === 'wide' || value === 'ultrawide') return 'r-wide';
@@ -4943,7 +4944,7 @@ function renderRatioControl(prefix='', includeSource=false){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
     const resKey = prefix ? `${prefix}Resolution` : 'resolution';
     const ratios = [
-        ['square','1:1'], ['portrait','2:3'], ['landscape','3:2'], ['portrait43','3:4'], ['landscape43','4:3'],
+        ['square','1:1'], ['portrait','2:3'], ['landscape','3:2'], ['portrait43','3:4'], ['portrait45','4:5'], ['landscape43','4:3'],
         ['story','9:16'], ['wide','16:9'], ['ultrawide','21:9'], ['ultratall','9:21'],
         ...(includeSource ? [['source', tr('smart.imageRatio')]] : []),
         ['custom', tr('smart.custom')]
@@ -5009,7 +5010,7 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const currentRatio = settings[ratioKey] || 'square';
     const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && isGptImageAutoSizeModel(settings.model);
     const ratios = [
-        ['square','1:1','正方形'], ['portrait','2:3','竖图'], ['landscape','3:2','横图'], ['portrait43','3:4','竖图'], ['landscape43','4:3','横图'],
+        ['square','1:1','正方形'], ['portrait','2:3','竖图'], ['landscape','3:2','横图'], ['portrait43','3:4','竖图'], ['portrait45','4:5','竖图'], ['landscape43','4:3','横图'],
         ['story','9:16','竖屏'], ['wide','16:9','宽屏'], ['ultrawide','21:9','超宽'], ['ultratall','9:21','超竖'],
         ...(includeSource ? [['source', sourceImageRatioLabel(prefix) || '原图', '适配输入']] : [])
     ];

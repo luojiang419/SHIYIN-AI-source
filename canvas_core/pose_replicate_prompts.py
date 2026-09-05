@@ -8,7 +8,7 @@ from typing import Any, Mapping
 POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v2.5"
 POSE_REPLICATE_LOCALE = "zh-CN"
 POSE_REPLICATE_MODES = {"depth", "skeleton"}
-POSE_REPLICATE_OUTPUT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4"}
+POSE_REPLICATE_OUTPUT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4", "4:5"}
 
 SCENARIOS = {
     (False, False): "base-wardrobe",

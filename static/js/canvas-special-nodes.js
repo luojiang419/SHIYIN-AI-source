@@ -233,11 +233,11 @@
         node.panoramaYaw = Number.isFinite(Number(node.panoramaYaw)) ? Number(node.panoramaYaw) : 0;
         node.panoramaPitch = clamp(Number.isFinite(Number(node.panoramaPitch)) ? node.panoramaPitch : 0, -85, 85);
         node.panoramaFov = clamp(Number.isFinite(Number(node.panoramaFov)) ? node.panoramaFov : 72, 35, 100);
-        node.panoramaAspect = ['16:9','9:16','1:1','4:3','3:4'].includes(node.panoramaAspect) ? node.panoramaAspect : '16:9';
+        node.panoramaAspect = ['16:9','9:16','1:1','4:3','3:4','4:5'].includes(node.panoramaAspect) ? node.panoramaAspect : '16:9';
         node.mannequinX = clamp(Number.isFinite(Number(node.mannequinX)) ? node.mannequinX : 0.5, 0.04, 0.96);
         node.mannequinY = clamp(Number.isFinite(Number(node.mannequinY)) ? node.mannequinY : 0.68, 0.12, 0.96);
         node.mannequinScale = clamp(Number.isFinite(Number(node.mannequinScale)) ? node.mannequinScale : 0.32, 0.12, 0.7);
-        node.panoramaResolution = ['1280x720','1024x1024','720x1280','1440x1080','1080x1440'].includes(node.panoramaResolution) ? node.panoramaResolution : '1280x720';
+        node.panoramaResolution = ['1280x720','1024x1024','720x1280','1440x1080','1080x1440','1024x1280'].includes(node.panoramaResolution) ? node.panoramaResolution : '1280x720';
         return node;
     }
     function panoramaBodyHtml(node){
@@ -259,8 +259,8 @@
                 <button type="button" data-special-action="reset-view"><i data-lucide="rotate-ccw"></i><span>复位</span></button>
             </div>
             <div class="special-settings-grid">
-                <label><span>画幅</span><select data-special-field="panoramaAspect"><option value="16:9" ${node.panoramaAspect === '16:9' ? 'selected' : ''}>16:9</option><option value="9:16" ${node.panoramaAspect === '9:16' ? 'selected' : ''}>9:16</option><option value="1:1" ${node.panoramaAspect === '1:1' ? 'selected' : ''}>1:1</option><option value="4:3" ${node.panoramaAspect === '4:3' ? 'selected' : ''}>4:3</option><option value="3:4" ${node.panoramaAspect === '3:4' ? 'selected' : ''}>3:4</option></select></label>
-                <label><span>导出</span><select data-special-field="panoramaResolution"><option value="1280x720" ${node.panoramaResolution === '1280x720' ? 'selected' : ''}>1280×720</option><option value="1024x1024" ${node.panoramaResolution === '1024x1024' ? 'selected' : ''}>1024×1024</option><option value="720x1280" ${node.panoramaResolution === '720x1280' ? 'selected' : ''}>720×1280</option><option value="1440x1080" ${node.panoramaResolution === '1440x1080' ? 'selected' : ''}>1440×1080</option><option value="1080x1440" ${node.panoramaResolution === '1080x1440' ? 'selected' : ''}>1080×1440</option></select></label>
+                <label><span>画幅</span><select data-special-field="panoramaAspect"><option value="16:9" ${node.panoramaAspect === '16:9' ? 'selected' : ''}>16:9</option><option value="9:16" ${node.panoramaAspect === '9:16' ? 'selected' : ''}>9:16</option><option value="1:1" ${node.panoramaAspect === '1:1' ? 'selected' : ''}>1:1</option><option value="4:3" ${node.panoramaAspect === '4:3' ? 'selected' : ''}>4:3</option><option value="3:4" ${node.panoramaAspect === '3:4' ? 'selected' : ''}>3:4</option><option value="4:5" ${node.panoramaAspect === '4:5' ? 'selected' : ''}>4:5</option></select></label>
+                <label><span>导出</span><select data-special-field="panoramaResolution"><option value="1280x720" ${node.panoramaResolution === '1280x720' ? 'selected' : ''}>1280×720</option><option value="1024x1024" ${node.panoramaResolution === '1024x1024' ? 'selected' : ''}>1024×1024</option><option value="720x1280" ${node.panoramaResolution === '720x1280' ? 'selected' : ''}>720×1280</option><option value="1440x1080" ${node.panoramaResolution === '1440x1080' ? 'selected' : ''}>1440×1080</option><option value="1080x1440" ${node.panoramaResolution === '1080x1440' ? 'selected' : ''}>1080×1440</option><option value="1024x1280" ${node.panoramaResolution === '1024x1280' ? 'selected' : ''}>1024×1280</option></select></label>
                 <label class="special-range"><span>焦距</span><input type="range" min="35" max="100" step="1" value="${node.panoramaFov}" data-special-field="panoramaFov"></label>
                 <label class="special-range ${node.mannequinEnabled ? '' : 'disabled'}"><span>人偶大小</span><input type="range" min="12" max="70" step="1" value="${Math.round(node.mannequinScale * 100)}" data-special-field="mannequinScale" ${node.mannequinEnabled ? '' : 'disabled'}></label>
             </div>
@@ -801,7 +801,7 @@
             if(node.poseReplicatePrompt === DEFAULT_POSE_REPLICATE_PROMPT) node.poseReplicatePrompt = '';
         }
         node.poseReplicateMode = ['depth','skeleton'].includes(node.poseReplicateMode) ? node.poseReplicateMode : (modern ? 'depth' : 'skeleton');
-        node.poseReplicateRatio = ['source','1:1','16:9','9:16','4:3','3:4'].includes(node.poseReplicateRatio) ? node.poseReplicateRatio : (modern ? 'source' : '1:1');
+        node.poseReplicateRatio = ['source','1:1','16:9','9:16','4:3','3:4','4:5'].includes(node.poseReplicateRatio) ? node.poseReplicateRatio : (modern ? 'source' : '1:1');
         node.poseReplicateResolution = ['1k','2k','4k'].includes(node.poseReplicateResolution) ? node.poseReplicateResolution : '2k';
         node.poseReplicateProvider = String(node.poseReplicateProvider || (modern ? 'shiying' : providers[0]?.id || ''));
         const provider = providers.find(item => item?.id === node.poseReplicateProvider);
@@ -842,7 +842,7 @@
                         : action?.url && !control?.url
                             ? `目标图片已添加，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
                             : '请上传或连接目标图片和服装参考';
-        const ratios = ['source','1:1','16:9','9:16','4:3','3:4'];
+        const ratios = ['source','1:1','16:9','9:16','4:3','3:4','4:5'];
         const resolutions = ['1k','2k','4k'];
         return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
             <div class="pose-replicate-input-list" aria-label="一键复刻输入端口">
@@ -889,7 +889,7 @@
     };
     const EDIT_RESOLUTIONS = ['1k','2k','4k'];
     const EDIT_QUALITIES = ['standard','high'];
-    const EDIT_RATIOS = ['source','1:1','16:9','9:16','4:3','3:4'];
+    const EDIT_RATIOS = ['source','1:1','16:9','9:16','4:3','3:4','4:5'];
     function normalizeEditGeneration(node){
         node.editResolution = EDIT_RESOLUTIONS.includes(String(node.editResolution)) ? String(node.editResolution) : '2k';
         node.editQuality = EDIT_QUALITIES.includes(String(node.editQuality)) ? String(node.editQuality) : 'high';
@@ -902,7 +902,7 @@
         return `<div class="special-settings-grid edit-generation-settings">
             <label><span>分辨率</span><select data-edit-field="editResolution"><option value="1k" ${node.editResolution === '1k' ? 'selected' : ''}>1K</option><option value="2k" ${node.editResolution === '2k' ? 'selected' : ''}>2K</option><option value="4k" ${node.editResolution === '4k' ? 'selected' : ''}>4K</option></select></label>
             <label><span>质量</span><select data-edit-field="editQuality"><option value="standard" ${node.editQuality === 'standard' ? 'selected' : ''}>标准</option><option value="high" ${node.editQuality === 'high' ? 'selected' : ''}>高质量</option></select></label>
-            <label><span>输出画幅</span><select data-edit-field="editRatio"><option value="source" ${node.editRatio === 'source' ? 'selected' : ''}>跟随原图</option><option value="1:1" ${node.editRatio === '1:1' ? 'selected' : ''}>1:1</option><option value="16:9" ${node.editRatio === '16:9' ? 'selected' : ''}>16:9</option><option value="9:16" ${node.editRatio === '9:16' ? 'selected' : ''}>9:16</option><option value="4:3" ${node.editRatio === '4:3' ? 'selected' : ''}>4:3</option><option value="3:4" ${node.editRatio === '3:4' ? 'selected' : ''}>3:4</option></select></label>
+            <label><span>输出画幅</span><select data-edit-field="editRatio"><option value="source" ${node.editRatio === 'source' ? 'selected' : ''}>跟随原图</option><option value="1:1" ${node.editRatio === '1:1' ? 'selected' : ''}>1:1</option><option value="16:9" ${node.editRatio === '16:9' ? 'selected' : ''}>16:9</option><option value="9:16" ${node.editRatio === '9:16' ? 'selected' : ''}>9:16</option><option value="4:3" ${node.editRatio === '4:3' ? 'selected' : ''}>4:3</option><option value="3:4" ${node.editRatio === '3:4' ? 'selected' : ''}>3:4</option><option value="4:5" ${node.editRatio === '4:5' ? 'selected' : ''}>4:5</option></select></label>
             <label class="edit-model-field"><span>模型覆盖</span><input type="text" value="${esc(node.editModel)}" data-edit-field="editModel" placeholder="留空使用画布默认模型"></label>
         </div>`;
     }

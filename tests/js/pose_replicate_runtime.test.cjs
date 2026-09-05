@@ -48,7 +48,7 @@ async function run(){
     assert.equal(batchHarness.requests.length,3);
     assert.equal(batchOutput._pending.length,3);
     assert.deepEqual(batchHarness.requests.map(item=>item.payload.inputs.target_image.url),['red','blue','green']);
-    assert.deepEqual(batchHarness.requests.map(item=>item.payload.prompt_policy.template_id),['pose-replicate.v3.0','pose-replicate.v3.0','pose-replicate.v3.0']);
+    assert.deepEqual(batchHarness.requests.map(item=>item.payload.prompt_policy.template_id),['pose-replicate.v3.1','pose-replicate.v3.1','pose-replicate.v3.1']);
     batchHarness.requests[2].resolve({ok:true,json:async()=>({task_id:'green-result'})});
     batchHarness.requests[0].resolve({ok:true,json:async()=>({task_id:'red-result'})});
     batchHarness.requests[1].resolve({ok:true,json:async()=>({task_id:'blue-result'})});

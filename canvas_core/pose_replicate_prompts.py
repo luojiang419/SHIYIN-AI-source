@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from canvas_core.pose_replicate_templates_v3 import POSE_REPLICATE_V3_TEMPLATES
 
-POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v3.0"
+POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v3.1"
 POSE_REPLICATE_LOCALE = "zh-CN"
 POSE_REPLICATE_MODES = {"depth", "skeleton"}
 POSE_REPLICATE_OUTPUT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4", "4:5"}

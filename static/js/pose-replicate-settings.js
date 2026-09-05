@@ -8,7 +8,7 @@
     }
     function promptPolicy(node, inputs){
         const key = combinationKey(inputs.mode || node.poseReplicateMode || 'skeleton', Boolean(inputs.modelSubject?.url), Boolean(inputs.scene?.url));
-        const policy = {template_id:'pose-replicate.v3.0', locale:'zh-CN'};
+        const policy = {template_id:'pose-replicate.v3.1', locale:'zh-CN'};
         const overrides = node.poseReplicatePromptTemplates || {};
         if(Object.prototype.hasOwnProperty.call(overrides, key)){
             policy.custom_template = overrides[key];
@@ -36,7 +36,7 @@
             <div class="pose-template-list"><p role="status">正在加载组合提示词…</p></div>
             <section class="pose-template-editor" hidden><div class="pose-template-editor-heading"><button type="button" data-back>返回组合列表</button><h3></h3><button type="button" data-reset>恢复此组合默认值</button></div>
             <p class="pose-template-role-help"></p><p>可使用 {{output_aspect_ratio}} 自动填入画幅、{{user_instruction}} 填入节点补充要求。自定义文本将完整替换内置提示词；未放入补充变量时，补充要求会附加到末尾。</p>
-            <textarea aria-label="组合完整提示词" maxlength="14000" spellcheck="false"></textarea><footer><span role="status" aria-live="polite"></span><button type="button" data-done>完成编辑</button></footer></section>`;
+            <textarea aria-label="组合完整提示词" maxlength="30000" spellcheck="false"></textarea><footer><span role="status" aria-live="polite"></span><button type="button" data-done>应用并返回</button></footer></section>`;
         document.body.appendChild(dialog);
         let entries = [], active = null, undoRecorded = false;
         const list = dialog.querySelector('.pose-template-list');

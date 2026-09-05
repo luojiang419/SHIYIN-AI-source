@@ -14,6 +14,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         cls.styles = (STATIC / "css" / "canvas-special-nodes.css").read_text(encoding="utf-8")
         cls.angle_styles = (STATIC / "css" / "canvas-angle-3d.css").read_text(encoding="utf-8")
         cls.pose_replicate_styles = (STATIC / "css" / "pose-replicate-node.css").read_text(encoding="utf-8")
+        cls.pose_settings = (STATIC / "js" / "pose-replicate-settings.js").read_text(encoding="utf-8")
         cls.classic = (STATIC / "js" / "canvas.js").read_text(encoding="utf-8")
         cls.smart = (STATIC / "js" / "smart-canvas.js").read_text(encoding="utf-8")
         cls.classic_html = (STATIC / "canvas.html").read_text(encoding="utf-8")
@@ -144,7 +145,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.05.pose-replicate-batch.1", page)
             self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1", page)
-            self.assertIn("feature=pose-replicate-v3.0", page)
+            self.assertIn("feature=pose-replicate-v3.1", page)
             self.assertIn("feature=pose-replicate-batch.1", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -697,10 +698,19 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             if function_name == "generateClassicPoseReplicate":
                 self.assertIn("window.PoseReplicateSettings.promptPolicy(node, taskInputs)", body)
             else:
-                self.assertIn("template_id:'pose-replicate.v3.0'", body)
+                self.assertIn("template_id:'pose-replicate.v3.1'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
         self.assertIn("'source','1:1','16:9','9:16','4:3','3:4'", self.shared)
         self.assertIn("自动（跟随原图）", self.shared)
+
+    def test_pose_replicate_settings_freely_persist_and_submit_full_custom_templates(self):
+        self.assertIn('maxlength="30000"', self.pose_settings)
+        self.assertIn("textarea.addEventListener('input', persist)", self.pose_settings)
+        self.assertIn("node.poseReplicatePromptTemplates = {...node.poseReplicatePromptTemplates", self.pose_settings)
+        self.assertIn("policy.custom_template = overrides[key]", self.pose_settings)
+        self.assertIn("policy.custom_template_key = key", self.pose_settings)
+        self.assertIn("onChange(node)", self.pose_settings)
+        self.assertIn("应用并返回", self.pose_settings)
 
 
 if __name__ == "__main__":

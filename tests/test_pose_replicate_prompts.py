@@ -62,18 +62,27 @@ def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_sce
     assert result.output_aspect_ratio == "16:9"
     assert [item["role"] for item in result.reference_order] == roles
     assert [item["index"] for item in result.reference_order] == list(range(1, len(roles) + 1))
-    assert "【参考图角色：按编号分别使用】" in result.final_prompt
     assert "（目标图片）" in result.final_prompt
     assert "（服装参考）" in result.final_prompt
-    assert "不是复制参考图拼成新画面" in result.final_prompt
-    assert "本次补充要求只覆盖明确涉及的默认项" in result.final_prompt
-    assert "只输出一张单镜头、连续的彩色照片" in result.final_prompt
     assert "只有一个最终模特主体实例" in result.final_prompt
-    assert "不输出拼图、分栏、重复模特" in result.final_prompt
-    assert "以连续背景扩展或只裁切空余背景适配" in result.final_prompt
-    if has_model:
-        assert "图1（模特主体）：只提供最终人物身份" in result.final_prompt
-        assert "不得把图1当作布局底图" in result.final_prompt
+    if has_scene:
+        assert "【参考图分工】" in result.final_prompt
+        assert "场景不是背板" in result.final_prompt
+        assert "补充要求只修改明确涉及的项目" in result.final_prompt
+        assert "只输出一张单镜头、连续彩色照片" in result.final_prompt
+        assert "不出现拼图、对照面板、重复主体" in result.final_prompt
+        if has_model:
+            assert "图1（模特主体）：唯一身份来源" in result.final_prompt
+    else:
+        assert "【参考图角色：按编号分别使用】" in result.final_prompt
+        assert "不是复制参考图拼成新画面" in result.final_prompt
+        assert "本次补充要求只覆盖明确涉及的默认项" in result.final_prompt
+        assert "只输出一张单镜头、连续的彩色照片" in result.final_prompt
+        assert "不输出拼图、分栏、重复模特" in result.final_prompt
+        assert "以连续背景扩展或只裁切空余背景适配" in result.final_prompt
+        if has_model:
+            assert "图1（模特主体）：只提供最终人物身份" in result.final_prompt
+            assert "不得把图1当作布局底图" in result.final_prompt
     for sample_specific in ("豹纹上装", "手持眼镜的动作", "原豹纹外套"):
         assert sample_specific not in result.final_prompt
 
@@ -101,14 +110,34 @@ def test_depth_mode_targets_fold_alignment_without_claiming_native_depth_control
 
 def test_base_depth_route_preserves_non_garment_pixels_and_extended_route_maps_geometry():
     base = compile_pose_replicate_prompt("depth")
-    extended = compile_pose_replicate_prompt("depth", has_model_subject=True, has_scene=True)
+    extended = compile_pose_replicate_prompt("depth", has_model_subject=True)
+    scene = compile_pose_replicate_prompt("depth", has_model_subject=True, has_scene=True)
 
     assert "只改新旧目标衣物覆盖区域的并集" in base.final_prompt
     assert "其余可保留像素尽量沿用，不整图重绘" in base.final_prompt
     assert "同画幅时以图1的人物位置和尺寸逐部位对齐" in base.final_prompt
     assert "随新体型作最小映射，不贴死旧人物的绝对像素" in extended.final_prompt
     assert "必要的主体调整只能整体等比" in extended.final_prompt
-    assert "允许修改的内容仅限指定人物身份、发型、体型适配、指定服装、背景" in extended.final_prompt
+    assert "随新体型作最小映射，再按场景镜头呈现" in scene.final_prompt
+    assert "允许重绘人物的光照、透视和边缘" in scene.final_prompt
+
+
+@pytest.mark.parametrize("mode", ["depth", "skeleton"])
+@pytest.mark.parametrize("has_model", [False, True])
+def test_v31_scene_routes_rebuild_camera_lighting_contact_and_imaging(mode, has_model):
+    result = compile_pose_replicate_prompt(mode, has_model_subject=has_model, has_scene=True)
+
+    for rule in (
+        "场景不是背板",
+        "最终空间与摄影条件的主参考",
+        "【先确定场景中的相机和人物位置】",
+        "【全主体重打光：脸、头发、身体、服装、配饰一起处理】",
+        "【接触、投影、遮挡与环境反馈】",
+        "【统一摄影成像与边缘】",
+        "不能保留旧图视角再将场景当背板",
+        "【输出前场景融合检查】",
+    ):
+        assert rule in result.final_prompt
 
 
 def test_skeleton_mode_does_not_claim_depth_surface_or_fold_geometry():
@@ -198,7 +227,7 @@ def test_user_instruction_endpoint_calls_assistant_once_and_preserves_hard_templ
     image_payload = submit.await_args.args[0]
     assert image_payload.auto_optimize_prompt is False
     assert "目标外套保持自然敞开" in image_payload.prompt
-    assert "本次补充要求只覆盖明确涉及的默认项" in image_payload.prompt
+    assert "补充要求只修改明确涉及的项目" in image_payload.prompt
     assert image_payload.prompt_context["prompt_source"] == "assistant-merged"
     assert response["pose_replicate"]["scenario_id"] == "model-full-look-scene"
     assert response["pose_replicate"]["assistant_calls"] == 1

@@ -13,7 +13,7 @@ from tests.test_pose_replicate_prompts import task_request
 
 
 def test_catalog_is_the_actual_compiler_for_all_eight_combinations():
-    assert POSE_REPLICATE_TEMPLATE_ID == 'pose-replicate.v3.0'
+    assert POSE_REPLICATE_TEMPLATE_ID == 'pose-replicate.v3.1'
     entries = pose_replicate_template_catalog()
     assert len(entries) == len({entry['key'] for entry in entries}) == 8
     assert {entry['key'] for entry in entries} == set(POSE_REPLICATE_V3_TEMPLATES)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 
-POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v2.3"
+POSE_REPLICATE_TEMPLATE_ID = "pose-replicate.v2.4"
 POSE_REPLICATE_LOCALE = "zh-CN"
 POSE_REPLICATE_MODES = {"depth", "skeleton"}
 POSE_REPLICATE_OUTPUT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4"}
@@ -155,15 +155,16 @@ def compile_pose_replicate_prompt(
         _output_contract(output_ratio),
         _base_instruction(has_model_subject, has_scene),
         _reference_contract(mode, order, has_model_subject, has_scene),
-        _control_contract(mode),
         _scenario_contract(has_model_subject, has_scene, order),
-        _fold_contract(),
+        _preservation_contract(has_model_subject, has_scene, order),
+        _control_contract(mode, has_model_subject),
+        _fold_contract(mode),
         _occlusion_contract(has_model_subject),
         _priority_contract(has_model_subject, has_scene, order, output_ratio),
     ]
     if normalized:
         parts.append(_user_increment_contract(normalized))
-    parts.extend([_negative_contract(), _final_output_check(output_ratio)])
+    parts.extend([_negative_contract(mode), _final_output_check(output_ratio)])
     prompt = "\n\n".join(part.strip() for part in parts if part.strip())
     return PoseReplicatePrompt(
         final_prompt=prompt,
@@ -203,8 +204,12 @@ def _reference_contract(mode: str, order: tuple[dict[str, Any], ...], has_model:
     index = {item["role"]: item["index"] for item in order}
     lines = [
         "【参考图用途】",
-        f"图{index['pose_reference']}（动作参考）：控制姿势、动作、身体重心、主体相对构图与空间遮挡；原图裁切只作为内容取舍参考，不得覆盖最终输出画幅。",
-        f"图{index['control_map']}（{'人物深度图' if mode == 'depth' else '人物骨架图'}）：只控制人物空间结构与姿势，不提供身份、服装款式、纹理或背景。",
+        f"图{index['pose_reference']}（动作参考）：控制每个可见身体部位的精确姿势、动作、左右关系、身体重心、头脸朝向、视线、手势、持物动作、主体相对构图与空间遮挡；原图裁切只作为内容取舍参考，不得覆盖最终输出画幅。",
+        (
+            f"图{index['control_map']}（人物深度图）：是动作参考对应的像素级三维几何证据。它严格控制人物体积、可见轮廓、各部位前后距离、遮挡边界，以及服装表面的隆起、凹陷、褶皱峰谷和堆叠层次；只是不提供身份、服装款式、颜色、图案、面料纹理或背景。"
+            if mode == "depth"
+            else f"图{index['control_map']}（人物骨架图）：控制关节位置、肢体方向、左右关系和身体重心；不提供人体表面、服装褶皱、身份、服装款式、纹理或背景。"
+        ),
         f"图{index['target_image']}（目标图）：服装设计的唯一来源，准确保留类别、版型、领口、肩袖、门襟、口袋、下摆、面料、颜色、图案、缝线、装饰、松量、厚度与垂坠。",
     ]
     if has_model:
@@ -215,9 +220,44 @@ def _reference_contract(mode: str, order: tuple[dict[str, Any], ...], has_model:
     return "\n".join(lines)
 
 
-def _control_contract(mode: str) -> str:
+def _preservation_contract(has_model: bool, has_scene: bool, order: tuple[dict[str, Any], ...]) -> str:
+    index = {item["role"]: item["index"] for item in order}
+    identity = f"图{index['model_subject']}模特主体" if has_model else f"图{index['pose_reference']}动作参考人物"
+    scene = f"图{index['scene']}场景" if has_scene else f"图{index['pose_reference']}原背景"
+    lines = [
+        "【必须保持不变】",
+        f"最终人物必须是同一位{identity}：严格保留其五官、脸型、肤色、妆容、表情、发型、发色、发丝、耳朵、年龄感和可识别身份特征。",
+        f"严格保留图{index['pose_reference']}中头部角度、视线方向、肩线、脊柱倾斜、肩髋关系、双臂弯曲方式、双手与每根可见手指的位置、持物动作、身体重心、人物在画面中的相对位置与尺度。",
+        f"严格保留{scene}的镜头视角、透视、结构、光照方向、亮度、色温、阴影和景深；不得擅自增删或替换环境内容。",
+        "严格保留所有不属于目标换装范围的裤装、鞋、眼镜、耳饰、项链、手袋、包带、手持物及其他配饰的款式、位置、角度、形状与遮挡关系。",
+    ]
+    if not has_model and not has_scene:
+        lines.append(
+            f"这是以图{index['pose_reference']}为底图的最小区域编辑：除目标服装覆盖区域、由新服装外轮廓实际占用的相邻像素及其必要接触阴影外，其他区域不得重绘、重构或重新生成，并应保持与底图一致。"
+        )
+    else:
+        lines.append("只允许为身份、目标服装或新场景的明确归属进行必要适配；不得借迁移之名改变未授权的动作、手势、配饰、镜头关系或局部几何。")
+    return "\n".join(lines)
+
+
+def _control_contract(mode: str, has_model: bool) -> str:
     if mode == "depth":
-        return "【深度控制】深度图中白色表示靠近镜头、灰色表示中间距离、黑色背景不含场景信息。用它锁定头肩躯干、双臂、双手、人物体积、透视和前后遮挡；不得照搬原服装外轮廓或表面。"
+        alignment = (
+            "当接入独立模特主体时，在保持其身份与身体比例的前提下，把上述关节关系、朝向、透视、遮挡和褶皱峰谷按人物区域归一化一一映射；不得用身份迁移作为放松动作的理由。"
+            if has_model
+            else "动作参考与深度图是同一人物、同一画面的配准输入，人物区域内的二维位置、轮廓、遮挡与主要褶皱峰谷必须一一对齐。"
+        )
+        return "\n".join(
+            [
+                "【深度几何硬锁：不是构图建议】",
+                "深度图中白色表示靠近镜头、灰色表示中间距离、黑色背景不含场景信息。先把非黑色人物区域理解成一张与动作参考逐像素配准的三维表面，再在这张表面上完成换装；不得把深度图仅当作大致姿势参考。",
+                alignment,
+                "严格锁定头部、颈部、双肩、胸廓、腰腹、骨盆、双臂、肘、腕、双手、手指和可见腿部的二维位置、关节角度、朝向、长度比例、透视缩短、前后距离与身体重心。不得美化、拉直、对称化、镜像、简化或改成更常见的姿势。",
+                "严格锁定人物外轮廓及所有遮挡交界：头发与肩颈、上臂与躯干、前臂与胸腹、手与衣服、持物与手、包带与身体之间的边界必须落在深度图和动作参考对应的位置。",
+                "深度图中的服装形态属于几何证据而非服装设计证据：保留可对应服装区域内每条主要褶皱的空间位置、起止点、走向、弯折节奏、峰谷极性、深浅层级、交汇关系、拉伸区、挤压区和堆叠区；不得抹平、挪位、减少、补造或重新设计这些几何起伏。",
+                "禁止继承动作参考原服装的颜色、图案、面料纹理、领型、袖型、门襟、口袋、纽扣、缝线和装饰。需要继承的是深度记录的姿势与表面几何，不是原服装的视觉身份。",
+            ]
+        )
     return "【骨架控制】骨架图只用于锁定关节位置、肢体方向、左右语义、身体重心与动作节奏。结合动作参考恢复真实人体体积与遮挡；不得把骨架线、节点颜色或空白背景画入结果。"
 
 
@@ -232,8 +272,18 @@ def _scenario_contract(has_model: bool, has_scene: bool, order: tuple[dict[str, 
     return f"【具体换装任务】完整移除图{index['pose_reference']}中与目标服装对应的原服装，将图{index['target_image']}服装真实、自然地穿在原人物身上。新版型可按目标服装合理改变外轮廓，但不得改变人物身体姿势、比例、身份、配饰、背景和主体相对构图。"
 
 
-def _fold_contract() -> str:
-    return "【自然褶皱与受力】高保真复刻动作参考中由肩线牵拉、腋下挤压、肘部弯曲、胸腹与腰部堆叠、袖口收束和下摆垂坠形成的受力链与褶皱拓扑，包括位置、走向、层次、拉伸、堆叠及前后深度关系。动作参考只提供受力依据；最终褶皱的数量、幅度、锐利度、厚度与垂坠必须根据目标服装的材质、版型、松量和结构重新计算，禁止把旧服装纹理、剪裁、轮廓或表面褶皱机械粘贴到新服装上。"
+def _fold_contract(mode: str) -> str:
+    if mode == "depth":
+        return "\n".join(
+            [
+                "【目标服装到锁定几何的映射】",
+                "把目标服装的类别、剪裁、领口、肩袖、门襟、口袋、下摆、颜色、图案、面料纹理、缝线和装饰映射到深度图锁定的穿着表面，而不是先生成一件平整的新衣再自由摆姿势。目标服装必须随锁定动作发生同位置、同方向、同层级的变形。",
+                "肩线牵拉、腋下挤压、肘部弯曲、胸腹与腰部堆叠、袖口收束、手部接触和下摆垂坠必须逐区对齐深度图。目标材质只改变褶皱的表面观感，例如光泽、织纹和边缘软硬，不得改变主要褶皱的拓扑、峰谷位置与受力路径。",
+                "只有当目标服装确实不存在对应部件时，才允许在该部件边界内做最小必要拓扑变化，例如无袖款移除原袖体、短款在目标下摆处终止原衣身。变化必须局部化；裸露肢体仍保持原姿势与深度，且不得借机重画其他区域。",
+                "完成前按头颈、肩线、左右上臂、左右肘、左右前臂、左右手指、胸腹、腰胯、下摆逐区比对动作参考与深度图；任何位置、角度、轮廓、遮挡或主要褶皱峰谷不一致，都视为未完成并在输出前重做。",
+            ]
+        )
+    return "【自然褶皱与受力】骨架图不包含服装表面深度。严格复刻动作参考中的关节、身体重心和动作受力关系，并根据目标服装的材质、版型、松量和结构生成自然褶皱。肩线牵拉、腋下挤压、肘部弯曲、胸腹与腰部堆叠、袖口收束和下摆垂坠必须与动作一致；不得继承原服装的颜色、图案、剪裁或面料纹理。"
 
 
 def _occlusion_contract(has_model: bool) -> str:
@@ -249,8 +299,8 @@ def _priority_contract(has_model: bool, has_scene: bool, order: tuple[dict[str, 
         [
             "【执行优先级】",
             f"1. {identity}控制最终人物身份、面部和身体归属。",
-            f"2. 图{index['target_image']}控制最终服装设计、材质、版型和细节。",
-            f"3. 图{index['pose_reference']}与图{index['control_map']}共同控制姿势、体积、遮挡和动作受力。",
+            f"2. 图{index['pose_reference']}与图{index['control_map']}共同硬锁姿势、关节、体积、轮廓、遮挡和动作受力；深度模式还硬锁主要褶皱峰谷与表面几何。",
+            f"3. 图{index['target_image']}控制最终服装设计、材质、版型和细节，但必须服从第 2 项锁定的穿着几何。",
             f"4. {scene}控制最终场景、透视、主体相对构图与环境光。",
             f"5. 最终画布必须为 {output_ratio}；画幅与源图冲突时，只能对同一连续背景自然扩展或裁切，不能复制人物或并列参考图。",
             "6. 发生冲突时严格按以上所有权处理，用户增量不得改变此优先级。",
@@ -275,8 +325,13 @@ def _user_increment_contract(payload: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _negative_contract() -> str:
-    return "【禁止事项】不要改变指定身份来源的脸、五官、妆容、表情、发型、肤色、身材或年龄感。不要改变动作参考的头部方向、视线、姿势、手臂角度、手指位置和持物动作。不要复制目标图中其他人物的身份、身体、姿势和背景。严禁拼图、分栏、三联画、九宫格、before/after、对比布局、多机位、多版本、参考图复现和人物重复。避免脸部重绘、身份漂移、身体变形、肩部错位、多余肢体、多余手指、手指粘连、服装贴皮、图案扭曲、错误遮挡、配饰断裂、边缘光晕、重影和拼贴感。"
+def _negative_contract(mode: str) -> str:
+    mode_rule = (
+        "禁止忽略、平滑、弱化、平均化或重新想象深度图中的人物轮廓、遮挡边界、局部体积和主要褶皱峰谷。"
+        if mode == "depth"
+        else "不得把骨架线、节点颜色或空白背景画入结果，也不得宣称骨架图提供了不存在的服装表面深度。"
+    )
+    return f"【禁止事项】不要改变指定身份来源的脸、五官、妆容、表情、发型、肤色、身材或年龄感。不要改变动作参考的头部方向、视线、姿势、身体重心、肩髋倾斜、手臂角度、肘腕位置、手指位置、左右关系或持物动作。{mode_rule}不要复制目标图中其他人物的身份、身体、姿势和背景。严禁拼图、分栏、三联画、九宫格、before/after、对比布局、多机位、多版本、参考图复现和人物重复。避免脸部重绘、身份漂移、身体变形、肩部错位、多余肢体、多余手指、手指粘连、服装贴皮、图案扭曲、错误遮挡、配饰断裂、边缘光晕、重影和拼贴感。"
 
 
 def _output_contract(output_ratio: str) -> str:

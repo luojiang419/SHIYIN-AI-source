@@ -9314,7 +9314,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         },
         user_instruction:prompt || '',
         generation:{provider_id:providerId, model, resolution, aspect_ratio:ratio, quality:'high', count:1},
-        prompt_policy:{template_id:'pose-replicate.v2.3', locale:'zh-CN'},
+        prompt_policy:{template_id:'pose-replicate.v2.4', locale:'zh-CN'},
         control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
     };
     const position = classicPoseReplicateOutputPosition(node);

@@ -9283,8 +9283,8 @@ def convert_output_to_jpg(url, quality=88):
         print(f"转换 JPG 失败: {e}")
         return url
 
-def reference_to_data_url(ref, max_size=None):
-    """把本地输出文件转为 data URL（base64）。max_size 限制最长边像素，避免 payload 过大。"""
+def reference_to_data_url(ref, max_size=None, *, lossless=False):
+    """把本地输出文件转为 data URL（base64）。max_size 限制最长边，控制图可要求无损 PNG。"""
     path = output_file_from_url(ref.get("url", ""))
     if not path:
         return ref.get("url", "")
@@ -9295,11 +9295,17 @@ def reference_to_data_url(ref, max_size=None):
                 w, h = img.size
                 if max(w, h) > max_size:
                     img.thumbnail((max_size, max_size), Image.LANCZOS)
-                if img.mode not in ("RGB", "RGBA"):
+                if lossless:
+                    if img.mode not in ("L", "LA", "RGB", "RGBA"):
+                        img = img.convert("RGB")
+                elif img.mode not in ("RGB", "RGBA"):
                     img = img.convert("RGB")
                 buf = BytesIO()
-                fmt = "PNG" if img.mode == "RGBA" else "JPEG"
-                img.save(buf, format=fmt, quality=88 if fmt == "JPEG" else None)
+                fmt = "PNG" if lossless or img.mode == "RGBA" else "JPEG"
+                if fmt == "PNG":
+                    img.save(buf, format=fmt, compress_level=4)
+                else:
+                    img.save(buf, format=fmt, quality=88)
                 encoded = base64.b64encode(buf.getvalue()).decode("ascii")
                 mime = "image/png" if fmt == "PNG" else "image/jpeg"
                 return f"data:{mime};base64,{encoded}"
@@ -11112,7 +11118,15 @@ def gemini_image_config(size):
     return {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()}
 
 def gemini_reference_part(ref):
-    value = reference_to_data_url(ref, max_size=1536)
+    role = str((ref or {}).get("role") or "").strip().lower()
+    label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
+    is_depth_map = role == "control_map" and "深度" in label
+    pose_pair = role in {"pose_reference", "control_map"}
+    value = reference_to_data_url(
+        ref,
+        max_size=2048 if pose_pair else 1536,
+        lossless=is_depth_map,
+    )
     if not value:
         return None
     if isinstance(value, str) and value.startswith("data:image/") and ";base64," in value:
@@ -11126,7 +11140,7 @@ def gemini_reference_part(ref):
 
 GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "pose_reference": "只提供姿势、动作、身体重心、主体相对构图与空间遮挡，不提供最终人物身份、服装或场景。",
-    "control_map": "只提供人物空间结构、体积、姿势与前后遮挡，不提供最终人物身份、服装纹理或场景。",
+    "control_map": "只提供控制图所记录的人物结构，不提供最终人物身份、服装视觉设计或场景。",
     "target_image": "只提供最终服装设计、材质、版型、颜色、图案与结构细节，不提供最终人物身份、姿势或场景。",
     "model_subject": "只提供最终人物身份、面部、肤色、发型与身体比例，不提供最终服装、姿势或场景。",
     "scene": "只提供最终环境、背景结构、透视与环境光，不提供最终人物身份、服装或姿势。",
@@ -11143,6 +11157,10 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
     except (TypeError, ValueError):
         index = max(1, int(fallback_index))
     contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
+    if role == "control_map" and "深度" in label:
+        contract = "这是与动作参考配准的三维几何硬约束，严格提供人物体积、姿势、前后遮挡、可见轮廓与服装褶皱峰谷；不提供最终人物身份、服装款式、颜色、图案、面料纹理或场景。"
+    elif role == "control_map" and "骨架" in label:
+        contract = "只提供关节位置、肢体方向、左右关系和身体重心；不提供人物表面、服装褶皱、最终人物身份、服装设计或场景。"
     if not label and not instruction and not contract:
         return ""
     title = label or role.replace("_", "-") or "参考素材"

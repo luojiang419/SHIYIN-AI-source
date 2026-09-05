@@ -1,0 +1,21 @@
+.pose-template-dialog { width:min(1060px,calc(100vw - 40px)); max-width:none; max-height:calc(100dvh - 40px); padding:24px; border:1px solid var(--line); border-radius:22px; background:var(--card-solid); color:var(--text); box-shadow:0 24px 80px var(--shadow); }
+.pose-template-dialog::backdrop { background:rgba(0,0,0,.48); }
+.pose-template-dialog header,.pose-template-editor-heading,.pose-template-dialog footer { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.pose-template-dialog h2 { font-size:20px; font-weight:800; margin:0; }
+.pose-template-dialog h3 { font-size:15px; font-weight:750; flex:1; }
+.pose-template-dialog p { color:var(--muted); font-size:12px; line-height:1.65; margin:8px 0; }
+.pose-template-dialog button { padding:9px 13px; border:1px solid var(--line); border-radius:10px; background:var(--soft); color:var(--text); cursor:pointer; }
+.pose-template-dialog button:focus-visible,.pose-template-dialog textarea:focus-visible { outline:2px solid var(--strong); outline-offset:2px; }
+.pose-template-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:20px; }
+.pose-template-dialog .pose-template-card { text-align:left; padding:18px; background:var(--card-solid); }
+.pose-template-card:hover { background:var(--soft); border-color:var(--strong); }
+.pose-template-card strong { display:block; font-size:13px; }
+.pose-template-card > span { display:inline-block; margin-top:8px; color:var(--muted); font-size:11px; }
+.pose-template-card p { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; }
+.pose-template-dialog.editing { position:fixed; inset:0; width:100vw; height:100dvh; max-height:none; margin:0; border-radius:0; display:flex; flex-direction:column; box-sizing:border-box; }
+.pose-template-editor { flex:1; min-height:0; display:flex; flex-direction:column; gap:10px; margin-top:16px; }
+.pose-template-editor textarea { flex:1; min-height:140px; width:100%; box-sizing:border-box; resize:none; padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--soft); color:var(--text); font-size:15px; line-height:1.8; }
+.pose-template-dialog footer { color:var(--muted); font-size:12px; flex-shrink:0; }
+.pose-template-dialog [data-done] { background:var(--strong); color:var(--strong-text); }
+.pose-template-dialog [hidden] { display:none !important; }
+@media(max-width:680px){ .pose-template-dialog { padding:16px; } .pose-template-list { grid-template-columns:1fr; } .pose-template-editor-heading { flex-wrap:wrap; gap:8px; } .pose-template-editor-heading h3 { order:-1; flex-basis:100%; } }

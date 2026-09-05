@@ -428,7 +428,7 @@
                 <label><span>分辨率</span><select data-pose-replicate-field="poseReplicateResolution">${resolutions.map(value => `<option value="${value}" ${node.poseReplicateResolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select></label>
             </div>
             <div class="special-output-row pose-replicate-run-row">
-                <span>${activeRuns ? `${activeRuns} 个复刻任务正在并发生成` : '每次点击都会创建一个独立输出节点'}</span>
+                <span>${activeRuns ? `${activeRuns} 个复刻任务正在并发生成` : '多次生成的结果将保存在同一个输出节点'}</span>
                 <button type="button" class="special-primary" data-special-action="run-pose-replicate" ${ready ? '' : 'disabled'}><i data-lucide="wand-sparkles"></i><span>一键复刻</span></button>
             </div>
         </div>`;
@@ -715,7 +715,7 @@
     }
     async function refreshPersonDepthStatus(force=false){
         if(!force && personDepthUpdatedAt && Date.now() - personDepthUpdatedAt < 5000) return personDepthStatus;
-        if(personDepthStatusPromise && !force) return personDepthStatusPromise;
+        if(personDepthStatusPromise) return personDepthStatusPromise;
         personDepthStatusPromise = fetch('/api/person-depth/component/status', {cache:'no-store'})
             .then(async response => {
                 if(!response.ok) throw new Error(await responseError(response, '高精度人物深度组件状态读取失败'));

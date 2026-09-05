@@ -135,6 +135,7 @@ def compile_pose_replicate_prompt(
     output_aspect_ratio: str = "16:9",
     user_instruction: str = "",
     normalized_instruction: Mapping[str, Any] | None = None,
+    custom_template: str | None = None,
 ) -> PoseReplicatePrompt:
     mode = str(control_mode or "").strip().lower()
     output_ratio = str(output_aspect_ratio or "").strip()
@@ -143,6 +144,22 @@ def compile_pose_replicate_prompt(
     order = reference_order(mode, has_model_subject, has_scene)
     scenario = scenario_id(has_model_subject, has_scene)
     original = _clean_text(user_instruction, 5000)
+    if custom_template is not None:
+        if not custom_template.strip() or len(custom_template) > 30000:
+            raise PoseReplicatePromptError("自定义模板不能为空且不能超过 30000 字符")
+        # 字面替换而非 format/eval；用户文本中的花括号保持原样。
+        prompt = custom_template.replace("{{output_aspect_ratio}}", output_ratio)
+        if "{{user_instruction}}" in prompt:
+            prompt = prompt.replace("{{user_instruction}}", str(user_instruction or ""))
+        elif original:
+            prompt += "\n\n【用户补充要求】\n" + str(user_instruction)
+        return PoseReplicatePrompt(
+            final_prompt=prompt, template_id=POSE_REPLICATE_TEMPLATE_ID,
+            template_variant=f"{POSE_REPLICATE_TEMPLATE_ID}.{scenario}.{mode}.{POSE_REPLICATE_LOCALE}",
+            scenario_id=scenario, control_mode=mode, output_aspect_ratio=output_ratio,
+            prompt_source="custom-template", reference_order=order,
+            user_instruction_original=original, normalized_instruction="",
+        )
     normalized = None
     if original:
         if normalized_instruction is None:
@@ -178,6 +195,26 @@ def compile_pose_replicate_prompt(
         user_instruction_original=original,
         normalized_instruction=str((normalized or {}).get("normalized_instruction") or ""),
     )
+
+
+def pose_replicate_template_catalog() -> list[dict[str, Any]]:
+    """从同一编译器导出完整的八种组合，避免前后端维护两套默认提示词。"""
+    entries = []
+    for mode in ("depth", "skeleton"):
+        for has_model, has_scene in SCENARIOS:
+            compiled = compile_pose_replicate_prompt(mode, has_model_subject=has_model, has_scene=has_scene)
+            labels = ["动作参考", "目标服装"]
+            if has_model:
+                labels.append("模特主体")
+            if has_scene:
+                labels.append("场景")
+            entries.append({
+                "key": f"{mode}:{compiled.scenario_id}", "mode": mode,
+                "title": " + ".join(labels), "scenario": compiled.scenario_id,
+                "reference_order": list(compiled.reference_order),
+                "prompt": compiled.final_prompt.replace("16:9", "{{output_aspect_ratio}}"),
+            })
+    return entries
 
 
 def _clean_text(value: Any, limit: int) -> str:

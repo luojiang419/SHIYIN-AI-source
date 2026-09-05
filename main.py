@@ -82,6 +82,7 @@ from canvas_core.pose_replicate_prompts import (
     POSE_REPLICATE_TEMPLATE_ID,
     PoseReplicatePromptError,
     compile_pose_replicate_prompt,
+    pose_replicate_template_catalog,
     normalize_instruction_payload,
     scenario_id as pose_replicate_scenario_id,
 )
@@ -4141,6 +4142,8 @@ class PoseReplicateGeneration(BaseModel):
 class PoseReplicatePromptPolicy(BaseModel):
     template_id: str = POSE_REPLICATE_TEMPLATE_ID
     locale: str = "zh-CN"
+    custom_template: Optional[str] = Field(default=None, min_length=1, max_length=30000)
+    custom_template_key: str = ""
 
 
 class PoseReplicateTaskRequest(BaseModel):
@@ -7998,7 +8001,9 @@ def build_media_preview(path: str, width: int, webp_path: str, png_path: str):
 
 async def get_or_build_media_preview(path: str, width: int, webp_path: str, png_path: str):
     """返回预览文件路径，并合并相同预览键的并发生成任务。"""
-    key = f"{os.path.abspath(path)}|{os.path.getmtime(path)}|{os.path.getsize(path)}|{width}"
+    # 磁盘检查阶段已按路径、mtime_ns、大小、宽度生成缓存键；这里不再同步访问源文件。
+    key = os.path.abspath(webp_path)
+    forget = None
     with MEDIA_PREVIEW_INFLIGHT_LOCK:
         failure = MEDIA_PREVIEW_FAILURES.get(key)
         if failure:
@@ -8024,23 +8029,30 @@ async def get_or_build_media_preview(path: str, width: int, webp_path: str, png_
                     else:
                         MEDIA_PREVIEW_FAILURES.pop(cache_key, None)
 
-            future.add_done_callback(forget)
+    # Future 已完成时 add_done_callback 会在当前线程同步执行，不能持有上述 Lock。
+    if forget is not None:
+        future.add_done_callback(forget)
     # shield 防止某个浏览器请求取消时连带取消共享的底层生成任务。
     return await asyncio.shield(asyncio.wrap_future(future))
 
-@app.get("/api/media-preview")
-async def media_preview(url: str, w: int = 512):
+def resolve_media_preview_request(url: str, width: int):
     path = output_file_from_url(url)
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="媒体文件不存在")
-
-    width = max(64, min(2048, int(w or 512)))
     webp_path, png_path = media_preview_cache_paths(path, width)
-
     if os.path.exists(webp_path):
-        return FileResponse(webp_path, media_type="image/webp")
+        return path, webp_path, png_path, (webp_path, "image/webp")
     if os.path.exists(png_path):
-        return FileResponse(png_path, media_type="image/png")
+        return path, webp_path, png_path, (png_path, "image/png")
+    return path, webp_path, png_path, None
+
+
+@app.get("/api/media-preview")
+async def media_preview(url: str, w: int = 512):
+    width = max(64, min(2048, int(w or 512)))
+    path, webp_path, png_path, cached = await asyncio.to_thread(resolve_media_preview_request, url, width)
+    if cached:
+        return FileResponse(cached[0], media_type=cached[1])
 
     try:
         out_path, media_type = await get_or_build_media_preview(path, width, webp_path, png_path)
@@ -20150,6 +20162,11 @@ def pose_replicate_reference(source: AIReference, role: str, label: str, index: 
     return AIReference(**reference)
 
 
+@app.get("/api/canvas/pose-replicate-templates")
+async def get_pose_replicate_templates():
+    return {"template_id": POSE_REPLICATE_TEMPLATE_ID, "items": pose_replicate_template_catalog()}
+
+
 @app.post("/api/canvas/pose-replicate-tasks")
 async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
     mode = str(payload.mode or "").strip().lower()
@@ -20170,6 +20187,9 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
     has_model = bool(payload.inputs.model_subject and payload.inputs.model_subject.url)
     has_scene = bool(payload.inputs.scene and payload.inputs.scene.url)
     expected_scenario = pose_replicate_scenario_id(has_model, has_scene)
+    if payload.prompt_policy.custom_template is not None:
+        if payload.prompt_policy.custom_template_key != f"{mode}:{expected_scenario}":
+            raise HTTPException(status_code=400, detail="自定义模板组合与当前模式和输入不一致")
     if payload.scenario and payload.scenario != expected_scenario:
         raise HTTPException(status_code=400, detail=f"一键复刻场景与输入端口不一致，应为 {expected_scenario}")
     if mode == "depth" and not PERSON_DEPTH_COMPONENT_MANAGER.public_status().get("ready"):
@@ -20182,7 +20202,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             requested_output_ratio,
             payload.inputs.pose_reference.url,
         )
-        if original_instruction:
+        if original_instruction and payload.prompt_policy.custom_template is None:
             normalized_result = await normalize_pose_replicate_instruction(
                 original_instruction,
                 has_model_subject=has_model,
@@ -20195,11 +20215,14 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             output_aspect_ratio=resolved_output_ratio,
             user_instruction=original_instruction,
             normalized_instruction=normalized_result.get("analysis"),
+            custom_template=payload.prompt_policy.custom_template,
         )
         size = pose_replicate_image_size(
             resolved_output_ratio,
             payload.generation.resolution,
         )
+        if len(compiled.final_prompt) > ONLINE_IMAGE_PROMPT_MAX_LENGTH:
+            raise PoseReplicatePromptError(f"组合提示词展开后超过 {ONLINE_IMAGE_PROMPT_MAX_LENGTH} 字符，请缩短模板或补充要求")
     except PoseReplicatePromptError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -23806,7 +23829,7 @@ async def get_canvas(canvas_id: str):
     global ACTIVE_CANVAS_ID, ACTIVE_CANVAS_LAST_SEEN
     ACTIVE_CANVAS_ID = canvas_id
     ACTIVE_CANVAS_LAST_SEEN = time.time()
-    return {"canvas": load_canvas(canvas_id)}
+    return {"canvas": await asyncio.to_thread(load_canvas, canvas_id)}
 
 @app.get("/api/canvases/{canvas_id}/export-package")
 async def export_canvas_package(canvas_id: str, name: str = ""):

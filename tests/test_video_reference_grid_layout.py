@@ -27,9 +27,9 @@ def test_video_node_keeps_six_thumbnails_readable_and_prevents_unbounded_width()
     assert "feature=video-reference-grid.2" in HTML
 
 
-def test_video_node_height_is_content_driven_during_render_and_resize():
+def test_video_node_default_height_is_content_driven_and_explicit_resize_is_preserved():
     assert "function normalizeClassicNodeLayout(node)" in JS
-    assert "const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0));" in JS
+    assert "const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0) && !CLASSIC_FLEX_GENERATOR_NODE_TYPES.has(type));" in JS
     assert "normalizeClassicNodeLayout(node);" in JS
     assert "if(isAutoHeightNode) delete resizeNode.node.h;" in JS
     assert "el.classList.remove('sized');" in JS

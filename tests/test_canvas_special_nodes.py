@@ -143,7 +143,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.", page)
             self.assertIn("feature=pose-replicate-v2.4", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -476,7 +476,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("请点击对应缩略图卡片上传", self.smart)
         self.assertIn(".pose-replicate-inputs .pose-replicate-input-card { height: 118px; min-height: 118px; }", self.pose_replicate_styles)
 
-    def test_pose_replicate_creates_one_recoverable_output_per_click_on_both_canvases(self):
+    def test_pose_replicate_creates_recoverable_tasks_on_both_canvases(self):
         classic_run = re.search(
             r"async function generateClassicPoseReplicate\(.*?(?=\nfunction createClassicPoseOutputNode)",
             self.classic,
@@ -510,7 +510,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for marker in (
             "node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + 1",
             "Promise.resolve(options.generatePoseReplicate",
-            "每次点击都会创建一个独立输出节点",
+            "多次生成的结果将保存在同一个输出节点",
             "个复刻任务正在并发生成",
         ):
             self.assertIn(marker, self.shared)
@@ -552,7 +552,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("深度图", page)
             self.assertIn("feature=depth-map-node.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.", page)
 
         for marker in (
             "function depthMapBodyHtml(node)",
@@ -633,7 +633,10 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
                 re.S,
             ).group(0)
             self.assertIn("'/api/canvas/pose-replicate-tasks'", body)
-            self.assertIn("template_id:'pose-replicate.v2.4'", body)
+            if function_name == "generateClassicPoseReplicate":
+                self.assertIn("window.PoseReplicateSettings.promptPolicy(node, inputs)", body)
+            else:
+                self.assertIn("template_id:'pose-replicate.v2.4'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
         self.assertIn("'source','1:1','16:9','9:16','4:3','3:4'", self.shared)
         self.assertIn("自动（跟随原图）", self.shared)

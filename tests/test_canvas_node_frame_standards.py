@@ -15,7 +15,7 @@ def test_all_classic_nodes_share_type_aware_minimum_frame_limits():
     assert "normalizeClassicNodeLayout(node);" in JS
     assert "Number.isFinite(storedHeight) && storedHeight > 0" in JS
     assert "Object.prototype.hasOwnProperty.call(node,'h')" in JS
-    assert "const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0));" in JS
+    assert "const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0) && !CLASSIC_FLEX_GENERATOR_NODE_TYPES.has(type));" in JS
     assert "layoutLimits.autoHeight ? 'auto-height-node' : ''" in JS
     assert "--node-min-width" in JS
     assert "--node-min-height" in JS

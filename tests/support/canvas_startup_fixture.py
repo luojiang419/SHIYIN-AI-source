@@ -7,10 +7,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, unquote
 import mimetypes
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from canvas_core.pose_replicate_prompts import pose_replicate_template_catalog, POSE_REPLICATE_TEMPLATE_ID
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jEOsAAAAASUVORK5CYII=')
-STATE = {'requests': [], 'saves': []}
+STATE = {'requests': [], 'saves': [], 'projects': {}}
 CONFIG = {'image_models':['private-image'], 'video_models':['private-video'], 'chat_models':['private-chat'],
     'api_providers':[
         {'id':'custom','name':'Fixture Custom','enabled':True,'image_models':['private-image'],'video_models':['private-video'],'chat_models':['private-chat']},
@@ -57,10 +60,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.fail_config_once=False
                 return self.send({'detail':'fixture transient failure'},503)
             return self.send(CONFIG)
+        if path=='/api/canvas/pose-replicate-templates':
+            return self.send({'template_id':POSE_REPLICATE_TEMPLATE_ID,'items':pose_replicate_template_catalog()})
         if path.startswith('/api/canvases/'):
             canvas_id=path.split('/')[3]
             if path.endswith('/meta'): return self.send({'id':canvas_id,'updated_at':1})
-            return self.send({'canvas':project(canvas_id)})
+            return self.send({'canvas':STATE['projects'].get(canvas_id) or project(canvas_id)})
         if path.startswith('/api/runninghub/workflows/'):
             time.sleep(self.server.capability_delay)
             return self.send({'workflow':{'workflowId':'fixture-workflow','title':'Fixture workflow','fields':[]}})
@@ -78,7 +83,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         payload=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))))
         STATE['saves'].append(payload)
-        return self.send({'canvas':{**payload,'updated_at':1,'revision':1}})
+        canvas_id = self.path.split('/')[3]
+        saved = {**project(canvas_id), **payload, 'id':canvas_id, 'updated_at':1, 'revision':1}
+        STATE['projects'][canvas_id] = saved
+        return self.send({'canvas':saved})
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()

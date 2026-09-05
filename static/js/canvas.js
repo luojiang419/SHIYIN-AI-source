@@ -146,6 +146,10 @@ function ensureClassicMediaQueue(){
         onStart:() => recordClassicFirstPreviewStart(),
         onRecord:entry => {
             scheduleClassicMediaResidency();
+            if(entry.outcome === 'loaded' && canvas?.id && classicNavigationStartedAt !== null && classicFirstPreviewLoadedCanvasId !== canvas.id){
+                classicFirstPreviewLoadedCanvasId = canvas.id;
+                window.CanvasPerformance?.record?.('classic.navigation-to-first-preview-loaded', performance.now() - classicNavigationStartedAt, {kind:entry.kind});
+            }
             window.CanvasPerformance?.record?.('classic.media-preview', entry.duration, {
                 kind:entry.kind,
                 ok:entry.outcome === 'loaded',
@@ -684,6 +688,7 @@ let canvas = null;
 let classicNavigationStartedAt = null;
 let classicFirstRenderCanvasId = '';
 let classicFirstPreviewCanvasId = '';
+let classicFirstPreviewLoadedCanvasId = '';
 let nodes = [];
 let connections = [];
 let canvasNodeIndex = new Map();
@@ -3602,6 +3607,7 @@ async function openCanvas(id){
     classicNavigationStartedAt = session.sequence === 1 ? 0 : session.timings.requestStartedAt;
     classicFirstRenderCanvasId = '';
     classicFirstPreviewCanvasId = '';
+    classicFirstPreviewLoadedCanvasId = '';
     showCanvasStartupNotice(id);
     try {
         const result = await session.ready;
@@ -8868,7 +8874,7 @@ function render(){
     syncClassicFilmAutoReuse();
     const reusableMediaNodes = new Map();
     nodesEl.querySelectorAll('.node').forEach(el => {
-        const node = nodes.find(n => n.id === el.dataset.id);
+        const node = canvasNodeIndex.get(el.dataset.id);
         if(nodeHasLiveMedia(node)) reusableMediaNodes.set(node.id, el);
     });
     applyViewport();
@@ -9372,7 +9378,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         },
         user_instruction:prompt || '',
         generation:{provider_id:providerId, model, resolution, aspect_ratio:ratio, quality:'high', count:1},
-        prompt_policy:{template_id:'pose-replicate.v2.4', locale:'zh-CN'},
+        prompt_policy:window.PoseReplicateSettings.promptPolicy(node, inputs),
         control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
     };
     const position = classicPoseReplicateOutputPosition(node);
@@ -9380,19 +9386,30 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
     const run = runSnapshot({...node, id:''}, prompt, refs);
     run.nodeType = 'poseReplicate';
     run.taskLabel = '一键复刻';
-    const output = {
-        id:uid('out'), type:'output', x:position.x, y:position.y, images:[],
-        poseReplicateSourceId:node.id,
-        _pending:[makePendingForRun(pendingId, run, node, {refs, requestSize}, {
-            canvasTaskType:'online-image', providerId, model
-        })]
-    };
     pushUndo();
-    nodes.push(output);
-    positionCanvasNodeRelative(output, node, 'downstream');
-    connections.push({id:uid('c'), from:node.id, to:output.id});
+    // 在首次 await 前确定并发布共享输出，连续点击与并发请求使用独立 pending 槽。
+    let output = nodes.find(candidate => candidate.type === 'output' && candidate.id === node.poseReplicateOutputNodeId && candidate.poseReplicateSourceId === node.id)
+        || nodes.find(candidate => candidate.type === 'output' && candidate.poseReplicateSourceId === node.id)
+        || outputNodesForSource(node.id)[0];
+    const createdOutput = !output;
+    if(!output){
+        output = {id:uid('out'), type:'output', x:position.x, y:position.y, images:[], poseReplicateSourceId:node.id, _pending:[]};
+        nodes.push(output);
+        positionCanvasNodeRelative(output, node, 'downstream');
+    }
+    node.poseReplicateOutputNodeId = output.id;
+    output.poseReplicateSourceId = node.id;
+    if(!connections.some(connection => connection.from === node.id && connection.to === output.id)){
+        const connection = {id:uid('c'), from:node.id, to:output.id};
+        connections.push(connection);
+        indexClassicConnectionModel(connection);
+    }
+    (output._pending ||= []).push(makePendingForRun(pendingId, run, node, {refs, requestSize}, {
+        canvasTaskType:'online-image', providerId, model
+    }));
     selected.clear(); selected.add(output.id);
-    render(); scheduleSave();
+    if(createdOutput) render(); else refreshRunNodes(node, output);
+    scheduleSave();
     try {
         const response = await cascadeFetch('/api/canvas/pose-replicate-tasks', {
             method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
@@ -9402,7 +9419,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         const pending = pendingById(output, pendingId);
         if(!pending) throw new Error('复刻输出节点已被删除');
         pending.canvasTaskId = task.task_id;
-        render(); scheduleSave();
+        refreshRunNodes(node, output); scheduleSave();
         await saveCanvas();
         const status = await pollCanvasImageTask(task.task_id);
         if(status === 'failed') throw new Error('一键复刻生成失败，请查看输出节点或生成日志');
@@ -9413,7 +9430,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
             pending.failed = true;
             pending.error = error.message || '一键复刻任务创建失败';
             addGenerationLog({run, outputs:[], runMs:nowMs() - Number(pending.startedAt || nowMs()), error:pending.error});
-            render(); scheduleSave();
+            refreshRunNodes(node, output); scheduleSave();
         }
         throw error;
     }
@@ -10120,6 +10137,19 @@ async function runClassicMultiViewNode(nodeId){
         showErrorModal(node.multiViewError,'创建三视图');
     }
 }
+const classicSpecialRefreshes = new Set();
+let classicSpecialRefreshFrame = 0;
+function queueClassicSpecialRefresh(node){
+    classicSpecialRefreshes.add(node);
+    if(classicSpecialRefreshFrame) return;
+    classicSpecialRefreshFrame = requestAnimationFrame(() => {
+        classicSpecialRefreshFrame = 0;
+        const currentNodes = new Set(nodes);
+        const ids = [...classicSpecialRefreshes].filter(item => currentNodes.has(item)).map(item => item.id);
+        classicSpecialRefreshes.clear();
+        if(ids.length) refreshNodes(ids);
+    });
+}
 function bindClassicSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(!api) return;
@@ -10138,8 +10168,9 @@ function bindClassicSpecialNode(el, node){
         createEditOutputNode:createClassicSpecialOutputNode,
         toast:message => setStatus(String(message || '').slice(0, 120)),
         onChange:(_changed, meta={}) => {
+            if(!nodes.includes(node)) return;
             scheduleSave();
-            if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); }, 0);
+            if(meta.render) queueClassicSpecialRefresh(node);
         },
         onOutput:() => {
             syncGeneratorInputs();
@@ -10952,6 +10983,7 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     storyboardMerge:260,
 });
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
+const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','batchGenerator','video','ecom-video','msgen']);
 function classicMediaNodeIsPortrait(node){
     if(!node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || 0);
@@ -10964,7 +10996,7 @@ function classicNodeLayoutLimits(nodeOrType){
     const size = defaultNodeSize(type);
     const portraitMedia = classicMediaNodeIsPortrait(nodeOrType);
     const isControlNode = !CLASSIC_COMPACT_NODE_TYPES.has(type);
-    const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0));
+    const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0) && !CLASSIC_FLEX_GENERATOR_NODE_TYPES.has(type));
     return {
         minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0, portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0),
         minHeight:Math.max(96, Number(size.h) || 0, Number(CLASSIC_NODE_MIN_HEIGHTS[type]) || 0, isControlNode ? 320 : 0),
@@ -11083,6 +11115,17 @@ function renderNode(node){
         ? `<button type="button" class="storyboard-merge-sequence-toggle ${node.addSequence ? 'active' : ''}" data-storyboard-merge-sequence-toggle="${escapeAttr(node.id)}" role="switch" aria-checked="${Boolean(node.addSequence)}" title="${node.addSequence ? '关闭图片序号' : '开启图片序号'}"><i data-lucide="list-ordered"></i><span>添加序号</span></button>`
         : '';
     el.innerHTML = `<div class="node-head"><div class="node-title-wrap"><span class="node-title">${displayTitle}</span>${groupCountHtml}</div><div class="node-head-actions" style="display:flex;align-items:center;gap:8px">${multiViewModeHtml}${statusHtml}${storyboardMergeSequenceHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    if(node.type === 'poseReplicate'){
+        const settings = document.createElement('button');
+        settings.type = 'button'; settings.title = '组合提示词设置';
+        settings.setAttribute('aria-label', '一键复刻提示词设置');
+        settings.innerHTML = '<i data-lucide="settings" class="w-4 h-4"></i>';
+        settings.onclick = event => {
+            event.stopPropagation();
+            window.PoseReplicateSettings.open(node, {beforeChange:pushUndo, onChange:() => scheduleSave()});
+        };
+        el.querySelector('.node-head-actions').prepend(settings);
+    }
     const body = document.createElement('div');
     body.className = 'node-body';
     if(node.type === 'image') {

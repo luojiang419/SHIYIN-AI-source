@@ -22,9 +22,10 @@
     const DWPOSE_MODEL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
     const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
     const POSE_REPLICATE_INPUT_ROLES = ['pose-reference','target-image','model-subject','scene'];
+    const POSE_REPLICATE_TARGET_MAX = 20;
     const POSE_REPLICATE_ROLE_LABELS = {
-        'pose-reference':'动作参考',
-        'target-image':'目标图',
+        'pose-reference':'目标图片',
+        'target-image':'服装参考',
         'model-subject':'模特主体',
         'scene':'场景'
     };
@@ -111,13 +112,26 @@
         const normalized = {};
         POSE_REPLICATE_INPUT_ROLES.forEach(role => {
             const item = source[role];
+            if(role === 'target-image'){
+                const items = (Array.isArray(item) ? item : item?.url ? [item] : [])
+                    .filter(entry => entry?.url)
+                    .slice(0, POSE_REPLICATE_TARGET_MAX)
+                    .map(entry => ({...entry, url:String(entry.url), name:String(entry.name || nameFromUrl(entry.url)), kind:'image'}));
+                if(items.length) normalized[role] = items;
+                return;
+            }
             if(item?.url) normalized[role] = {...item, url:String(item.url), name:String(item.name || nameFromUrl(item.url)), kind:'image'};
         });
         node.poseReplicateManualInputs = normalized;
         return normalized;
     }
     function poseReplicateManualInput(node, role){
-        return poseReplicateManualInputs(node)[role] || null;
+        const value = poseReplicateManualInputs(node)[role];
+        return Array.isArray(value) ? value[0] || null : value || null;
+    }
+    function poseReplicateManualInputList(node, role){
+        const value = poseReplicateManualInputs(node)[role];
+        return (Array.isArray(value) ? value : value?.url ? [value] : []).filter(item => item?.url);
     }
     async function responseError(response, fallback){
         const data = await response.clone().json().catch(() => null);
@@ -303,6 +317,19 @@
                 ${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="${role}" title="移除手动${esc(label)}" aria-label="移除手动${esc(label)}"><i data-lucide="trash-2"></i></button>` : ''}
             </div>
             ${editable ? `<input class="pose-replicate-file-input" type="file" accept="image/*" data-pose-replicate-file="${role}" tabindex="-1">` : ''}
+        </div>`;
+    }
+
+    function poseReplicateTargetGrid(items, manual=false){
+        const targets = (Array.isArray(items) ? items : []).filter(item => item?.url);
+        const sourceLabel = manual ? '手动' : targets.length ? '连线' : '';
+        return `<div class="pose-replicate-column">
+            <div class="pose-replicate-column-title">服装参考${targets.length ? ` · ${targets.length} 张` : ''}</div>
+            <div class="pose-replicate-input-card pose-replicate-target-grid ${targets.length ? 'has-image' : ''} is-editable ${manual ? 'is-manual' : ''}" data-pose-replicate-slot="target-image" data-pose-replicate-upload-role="target-image" role="button" tabindex="0" title="点击继续添加服装参考">
+                ${targets.length ? `<div class="pose-replicate-target-thumbs">${targets.map((item, index) => `<div class="pose-replicate-target-thumb" title="${esc(item.name || `服装参考 ${index + 1}`)}"><img src="${esc(item.url)}" alt="服装参考 ${index + 1}" draggable="false"><span>${index + 1}</span>${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="target-image" data-pose-replicate-remove-index="${index}" title="移除第 ${index + 1} 张服装参考" aria-label="移除第 ${index + 1} 张服装参考"><i data-lucide="trash-2"></i></button>` : ''}</div>`).join('')}</div>` : '<i data-lucide="shirt"></i><strong>上传服装参考</strong><span>可一次选择多张，最多 20 张</span>'}
+                ${sourceLabel ? `<span class="pose-replicate-source-badge">${sourceLabel} · ${targets.length}</span>` : ''}
+            </div>
+            <input class="pose-replicate-file-input" type="file" accept="image/*" data-pose-replicate-file="target-image" tabindex="-1" multiple>
         </div>`;
     }
 
@@ -728,8 +755,9 @@
         overlay.querySelector('.depth-map-control-close')?.focus();
     }
     function poseReplicateInputRow(item, role, label, manual=false, optional=false){
-        const ready = Boolean(item?.url);
-        const state = manual ? '手动图片' : ready ? '已连接' : optional ? '可选输入' : '等待输入';
+        const count = Array.isArray(item) ? item.filter(entry => entry?.url).length : item?.url ? 1 : 0;
+        const ready = count > 0;
+        const state = manual ? `${count} 张手动图片` : ready ? `${count} 张已连接` : optional ? '可选输入' : '等待输入';
         return `<div class="pose-replicate-input-row ${ready ? 'has-input' : ''} ${manual ? 'is-manual' : ''}" data-pose-replicate-input-role="${role}">
             <span><i data-lucide="${ready ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(label)}</strong></span>
             <b class="${ready ? 'has-input' : ''}">${ready ? '<span class="pose-replicate-input-status-dot" aria-hidden="true"></span>' : ''}${state}</b>
@@ -785,7 +813,11 @@
         normalizePoseReplicateNode(node, options);
         const manualInputs = poseReplicateManualInputs(node);
         const action = manualInputs['pose-reference'] || (node.poseReferenceUrl ? {url:node.poseReferenceUrl} : null);
-        const target = manualInputs['target-image'] || (node.targetImageUrl ? {url:node.targetImageUrl} : null);
+        const targets = Array.isArray(manualInputs['target-image']) && manualInputs['target-image'].length
+            ? manualInputs['target-image']
+            : (Array.isArray(node.targetImages) && node.targetImages.length
+                ? node.targetImages.filter(item => item?.url)
+                : node.targetImageUrl ? [{url:node.targetImageUrl, name:node.targetImageName || ''}] : []);
         const modelSubject = manualInputs['model-subject'] || (node.modelSubjectUrl ? {url:node.modelSubjectUrl} : null);
         const scene = manualInputs.scene || (node.sceneUrl ? {url:node.sceneUrl} : null);
         const mode = node.poseReplicateMode;
@@ -797,7 +829,7 @@
         const provider = providers.find(item => item?.id === node.poseReplicateProvider);
         const modelReady = Boolean(provider && Array.isArray(provider.models) && provider.models.includes(node.poseReplicateModel));
         const componentReady = mode !== 'depth' || Boolean(personDepthStatus?.ready);
-        const ready = Boolean(action?.url && control?.url && target?.url && componentReady && modelReady);
+        const ready = Boolean(action?.url && control?.url && targets.length && componentReady && modelReady);
         const activeRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0);
         const statusText = status === 'running'
             ? (mode === 'depth' ? '正在生成高精度人物深度图…' : (node.posePreparing || '正在自动提取动作骨架…'))
@@ -808,25 +840,25 @@
                     : !modelReady
                         ? '所选图片生成平台或模型尚未配置'
                         : action?.url && !control?.url
-                            ? `动作参考已添加，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
-                            : '请上传或连接动作参考和目标图';
+                            ? `目标图片已添加，等待${mode === 'depth' ? '深度图' : '骨架图'}提取`
+                            : '请上传或连接目标图片和服装参考';
         const ratios = ['source','1:1','16:9','9:16','4:3','3:4'];
         const resolutions = ['1k','2k','4k'];
         return `<div class="special-node pose-replicate-special" data-special-node="pose-replicate">
             <div class="pose-replicate-input-list" aria-label="一键复刻输入端口">
-                ${poseReplicateInputRow(action, 'pose-reference', '动作参考', Boolean(manualInputs['pose-reference']))}
-                ${poseReplicateInputRow(target, 'target-image', '目标图', Boolean(manualInputs['target-image']))}
+                ${poseReplicateInputRow(action, 'pose-reference', '目标图片', Boolean(manualInputs['pose-reference']))}
+                ${poseReplicateInputRow(targets, 'target-image', '服装参考', Boolean(manualInputs['target-image']))}
                 ${poseReplicateInputRow(modelSubject, 'model-subject', '模特主体', Boolean(manualInputs['model-subject']), true)}
                 ${poseReplicateInputRow(scene, 'scene', '场景', Boolean(manualInputs.scene), true)}
             </div>
             <div class="pose-replicate-inputs">
-                ${poseReplicateImageCard(action, 'pose-reference', '动作参考', 'person-standing', '上传动作参考', undefined, {editable:true, manual:Boolean(manualInputs['pose-reference'])})}
-                ${poseReplicateImageCard(target, 'target-image', '目标图', 'shirt', '上传服装来源', undefined, {editable:true, manual:Boolean(manualInputs['target-image'])})}
+                ${poseReplicateImageCard(action, 'pose-reference', '目标图片', 'person-standing', '上传目标图片', '将以此图生成深度图或骨架图', {editable:true, manual:Boolean(manualInputs['pose-reference'])})}
+                ${poseReplicateTargetGrid(targets, Boolean(manualInputs['target-image']))}
                 ${poseReplicateImageCard(modelSubject, 'model-subject', '模特主体 · 可选', 'user-round', '上传模特主体', undefined, {editable:true, manual:Boolean(manualInputs['model-subject'])})}
                 ${poseReplicateImageCard(scene, 'scene', '场景 · 可选', 'image', '上传场景', undefined, {editable:true, manual:Boolean(manualInputs.scene)})}
             </div>
             <div class="pose-replicate-control-panel">
-                ${poseReplicateImageCard(control, 'control-map', mode === 'depth' ? '内部控制图 · 深度' : '内部控制图 · 骨架', status === 'running' ? 'loader-2' : mode === 'depth' ? 'scan-line' : 'activity', status === 'running' ? '控制图提取中' : status === 'failed' ? '提取失败' : '添加动作参考后自动生成', '内部生成，不占用输入端口')}
+                ${poseReplicateImageCard(control, 'control-map', mode === 'depth' ? '内部控制图 · 深度' : '内部控制图 · 骨架', status === 'running' ? 'loader-2' : mode === 'depth' ? 'scan-line' : 'activity', status === 'running' ? '控制图提取中' : status === 'failed' ? '提取失败' : '添加目标图片后自动生成', '内部生成，不占用输入端口')}
                 ${mode === 'depth' ? poseReplicateComponentHtml(personDepthStatus) : ''}
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
@@ -839,8 +871,8 @@
                 <label><span>分辨率</span><select data-pose-replicate-field="poseReplicateResolution">${resolutions.map(value => `<option value="${value}" ${node.poseReplicateResolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select></label>
             </div>
             <div class="special-output-row pose-replicate-run-row">
-                <span>${activeRuns ? `${activeRuns} 个复刻任务正在并发生成` : '多次生成的结果将保存在同一个输出节点'}</span>
-                <button type="button" class="special-primary" data-special-action="run-pose-replicate" ${ready ? '' : 'disabled'}><i data-lucide="wand-sparkles"></i><span>一键复刻</span></button>
+                <span>${activeRuns ? `${activeRuns} 个复刻任务正在并发生成` : targets.length > 1 ? `将并发生成 ${targets.length} 款服装` : '生成结果将保存在同一个输出节点'}</span>
+                <button type="button" class="special-primary" data-special-action="run-pose-replicate" ${ready ? '' : 'disabled'}><i data-lucide="wand-sparkles"></i><span>${targets.length > 1 ? `批量复刻 ${targets.length} 张` : '一键复刻'}</span></button>
             </div>
         </div>`;
     }
@@ -1659,16 +1691,46 @@
     function poseReplicateInput(node, options, role){
         return poseReplicateManualInput(node, role) || options.getInputImage?.(node, role) || null;
     }
+    function uniquePoseReplicateImages(items){
+        const seen = new Set();
+        return (Array.isArray(items) ? items : []).filter(item => {
+            const url = String(item?.url || '');
+            if(!url || seen.has(url)) return false;
+            seen.add(url);
+            return true;
+        }).slice(0, POSE_REPLICATE_TARGET_MAX).map(item => ({...item, kind:'image'}));
+    }
+    function poseReplicateInputs(node, options, role){
+        const manual = poseReplicateManualInputList(node, role);
+        if(manual.length) return uniquePoseReplicateImages(manual);
+        const connected = options.getInputImages?.(node, role);
+        if(Array.isArray(connected) && connected.length) return uniquePoseReplicateImages(connected);
+        const single = options.getInputImage?.(node, role);
+        return single?.url ? [{...single, kind:'image'}] : [];
+    }
     function setPoseReplicateManualInput(node, role, item){
         if(!POSE_REPLICATE_INPUT_ROLES.includes(role) || !item?.url) return false;
         node.poseReplicateManualInputs = {...poseReplicateManualInputs(node), [role]:{...item, kind:'image'}};
         return true;
     }
-    function removePoseReplicateManualInput(node, role){
+    function setPoseReplicateManualInputs(node, role, items){
+        if(role !== 'target-image') return false;
+        const normalized = uniquePoseReplicateImages(items);
+        const next = {...poseReplicateManualInputs(node)};
+        if(normalized.length) next[role] = normalized;
+        else delete next[role];
+        node.poseReplicateManualInputs = next;
+        return true;
+    }
+    function removePoseReplicateManualInput(node, role, index=-1){
         const current = poseReplicateManualInputs(node);
         if(!current[role]) return false;
         const next = {...current};
-        delete next[role];
+        if(role === 'target-image' && Array.isArray(current[role]) && index >= 0){
+            const remaining = current[role].filter((_, itemIndex) => itemIndex !== index);
+            if(remaining.length) next[role] = remaining;
+            else delete next[role];
+        } else delete next[role];
         node.poseReplicateManualInputs = next;
         return true;
     }
@@ -1688,6 +1750,15 @@
         node[`${prefix}Name`] = item?.name || '';
         node[`${prefix}Width`] = item?.natural_w || item?.width || 0;
         node[`${prefix}Height`] = item?.natural_h || item?.height || 0;
+        return previous !== next;
+    }
+    function assignPoseReplicateTargets(node, items){
+        const targets = uniquePoseReplicateImages(items);
+        const previous = String(node.targetImagesSignature || '');
+        const next = targets.map(sourceSignature).join('||');
+        node.targetImagesSignature = next;
+        node.targetImages = targets;
+        assignPoseReplicateInput(node, 'target-image', targets[0] || null);
         return previous !== next;
     }
     function clearPoseReplicateControls(node){
@@ -1919,11 +1990,11 @@
         poseReplicateManualInputs(node);
         if(node.poseReplicateMode === 'depth') registerPersonDepthBinding(node, options);
         const action = poseReplicateInput(node, options, 'pose-reference');
-        const target = poseReplicateInput(node, options, 'target-image');
+        const targets = poseReplicateInputs(node, options, 'target-image');
         const modelSubject = poseReplicateInput(node, options, 'model-subject');
         const scene = poseReplicateInput(node, options, 'scene');
         const actionChanged = assignPoseReplicateInput(node, 'pose-reference', action);
-        const targetChanged = assignPoseReplicateInput(node, 'target-image', target);
+        const targetChanged = assignPoseReplicateTargets(node, targets);
         const modelChanged = assignPoseReplicateInput(node, 'model-subject', modelSubject);
         const sceneChanged = assignPoseReplicateInput(node, 'scene', scene);
         if(actionChanged) clearPoseReplicateControls(node);
@@ -1945,11 +2016,27 @@
             fileInput?.addEventListener('click', event => event.stopPropagation());
             fileInput?.addEventListener('change', async event => {
                 event.stopPropagation();
-                const file = event.target.files?.[0];
-                if(!file) return;
+                const files = [...(event.target.files || [])];
+                if(!files.length) return;
                 card.classList.add('is-uploading');
                 try {
-                    const uploaded = await uploadFile(file);
+                    if(role === 'target-image'){
+                        const existing = poseReplicateManualInputList(node, role);
+                        const available = Math.max(0, POSE_REPLICATE_TARGET_MAX - existing.length);
+                        if(!available) throw new Error(`服装参考最多上传 ${POSE_REPLICATE_TARGET_MAX} 张`);
+                        const selected = files.slice(0, available);
+                        const results = await Promise.allSettled(selected.map(uploadFile));
+                        const uploaded = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+                        if(!uploaded.length) throw results.find(result => result.status === 'rejected')?.reason || new Error('服装参考上传失败');
+                        const combined = uniquePoseReplicateImages([...existing, ...uploaded]);
+                        setPoseReplicateManualInputs(node, role, combined);
+                        assignPoseReplicateTargets(node, combined);
+                        const failed = results.length - uploaded.length;
+                        notify(options, node, true);
+                        options.toast?.(`已添加 ${uploaded.length} 张服装参考${failed ? `，${failed} 张上传失败` : ''}，生成时将并发处理`);
+                        return;
+                    }
+                    const uploaded = await uploadFile(files[0]);
                     setPoseReplicateManualInput(node, role, uploaded);
                     const changed = assignPoseReplicateInput(node, role, uploaded);
                     if(role === 'pose-reference' && changed) clearPoseReplicateControls(node);
@@ -1968,7 +2055,16 @@
             if(!button || !root.contains(button)) return;
             event.preventDefault(); event.stopPropagation();
             const role = button.dataset.poseReplicateRemoveRole;
-            if(!removePoseReplicateManualInput(node, role)) return;
+            const index = Number(button.dataset.poseReplicateRemoveIndex ?? -1);
+            if(!removePoseReplicateManualInput(node, role, Number.isFinite(index) ? index : -1)) return;
+            if(role === 'target-image'){
+                const manualTargets = poseReplicateManualInputList(node, role);
+                const fallbackTargets = manualTargets.length ? manualTargets : (options.getInputImages?.(node, role) || []).filter(item => item?.url);
+                assignPoseReplicateTargets(node, fallbackTargets.length ? fallbackTargets : [options.getInputImage?.(node, role)].filter(Boolean));
+                notify(options, node, true);
+                options.toast?.(manualTargets.length ? `已移除服装参考，剩余 ${manualTargets.length} 张` : fallbackTargets.length ? '已移除手动服装参考，恢复使用连线输入' : '已移除服装参考');
+                return;
+            }
             const fallback = options.getInputImage?.(node, role) || null;
             const changed = assignPoseReplicateInput(node, role, fallback);
             if(role === 'pose-reference' && changed) clearPoseReplicateControls(node);
@@ -2002,20 +2098,21 @@
         root.querySelector('[data-special-action="run-pose-replicate"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             const currentAction = poseReplicateInput(node, options, 'pose-reference');
-            const currentTarget = poseReplicateInput(node, options, 'target-image');
+            const currentTargets = poseReplicateInputs(node, options, 'target-image');
             const currentModel = poseReplicateInput(node, options, 'model-subject');
             const currentScene = poseReplicateInput(node, options, 'scene');
             const control = poseReplicateControlItem(node);
-            if(!currentAction?.url || !currentTarget?.url || !control?.url){ options.toast?.(`请等待${node.poseReplicateMode === 'depth' ? '深度图' : '骨架图'}提取完成，并确认目标图已连接`); return; }
+            if(!currentAction?.url || !currentTargets.length || !control?.url){ options.toast?.(`请等待${node.poseReplicateMode === 'depth' ? '深度图' : '骨架图'}提取完成，并确认服装参考已添加`); return; }
             if(node.poseReplicateMode === 'depth' && !personDepthStatus?.ready){ options.toast?.('高精度人物深度组件尚未就绪'); return; }
             if(!options.generatePoseReplicate){ options.toast?.('当前画布尚未配置一键复刻生成能力'); return; }
             const prompt = String(node.poseReplicatePrompt || '').trim();
-            node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + 1;
+            const taskCount = currentTargets.length;
+            node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + taskCount;
             notify(options, node, true);
-            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, control, target:currentTarget, modelSubject:currentModel, scene:currentScene, mode:node.poseReplicateMode}, prompt))
+            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, control, targets:currentTargets, target:currentTargets[0], modelSubject:currentModel, scene:currentScene, mode:node.poseReplicateMode}, prompt))
                 .catch(error => options.toast?.(error?.message || '一键复刻任务创建失败'))
                 .finally(() => {
-                    node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) - 1;
+                    node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) - taskCount;
                     notify(options, node, true);
                 });
         });

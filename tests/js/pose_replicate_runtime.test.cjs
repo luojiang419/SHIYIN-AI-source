@@ -37,6 +37,37 @@ function harness(){
     return {ctx,node,inputs,requests,frames};
 }
 async function run(){
+    const batchHarness=harness();
+    batchHarness.inputs.targets=[
+        {url:'red',name:'red.png'},
+        {url:'blue',name:'blue.png'},
+        {url:'green',name:'green.png'}
+    ];
+    const batchPromise=batchHarness.ctx.generateClassicPoseReplicate(batchHarness.node,batchHarness.inputs,'batch');
+    const batchOutput=batchHarness.ctx.nodes.find(node=>node.type==='output');
+    assert.equal(batchHarness.requests.length,3);
+    assert.equal(batchOutput._pending.length,3);
+    assert.deepEqual(batchHarness.requests.map(item=>item.payload.inputs.target_image.url),['red','blue','green']);
+    assert.deepEqual(batchHarness.requests.map(item=>item.payload.prompt_policy.template_id),['pose-replicate.v2.5','pose-replicate.v2.5','pose-replicate.v2.5']);
+    batchHarness.requests[2].resolve({ok:true,json:async()=>({task_id:'green-result'})});
+    batchHarness.requests[0].resolve({ok:true,json:async()=>({task_id:'red-result'})});
+    batchHarness.requests[1].resolve({ok:true,json:async()=>({task_id:'blue-result'})});
+    await batchPromise;
+    assert.equal(batchOutput.images.length,3);
+    assert.equal(batchOutput._pending.length,0);
+
+    const partialHarness=harness();
+    partialHarness.inputs.targets=[{url:'one'},{url:'two'},{url:'three'}];
+    const partialPromise=partialHarness.ctx.generateClassicPoseReplicate(partialHarness.node,partialHarness.inputs,'partial');
+    const partialOutput=partialHarness.ctx.nodes.find(node=>node.type==='output');
+    partialHarness.requests[0].resolve({ok:true,json:async()=>({task_id:'one-result'})});
+    partialHarness.requests[1].resolve({ok:false});
+    partialHarness.requests[2].resolve({ok:true,json:async()=>({task_id:'three-result'})});
+    await assert.rejects(partialPromise,/1\/3 款服装复刻失败/);
+    assert.equal(partialOutput.images.length,2);
+    assert.equal(partialOutput._pending.length,1);
+    assert.equal(partialOutput._pending[0].failed,true);
+
     const h=harness();
     h.node.poseReplicatePromptTemplates={'skeleton:base-wardrobe':'custom rules'};
     const a=h.ctx.generateClassicPoseReplicate(h.node,h.inputs,'first');

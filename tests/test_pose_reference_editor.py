@@ -33,8 +33,8 @@ class PoseReferenceRemovalContractTests(unittest.TestCase):
     def test_action_reference_inputs_for_one_click_replicate_remain(self):
         for source in (self.classic, self.smart, self.shared):
             self.assertIn("pose-reference", source)
-        self.assertIn("['pose-reference','动作参考']", self.classic)
-        self.assertIn("['pose-reference','动作参考']", self.smart)
+        self.assertIn("['pose-reference','目标图片']", self.classic)
+        self.assertIn("['pose-reference','目标图片']", self.smart)
 
 
 if __name__ == "__main__":

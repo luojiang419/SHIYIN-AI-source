@@ -9124,7 +9124,9 @@ function renderPendingOutput(pending, useGridLayout=false){
     const canCancel = pending?.canvasTaskType === 'online-video' && pending?.canvasTaskId;
     const slot = pending?.canvasTaskType === 'ecommerce-lookbook' && pending.lookbookSlotIndex
         ? `<span class="output-time-pill running">镜头 ${pending.lookbookSlotIndex}/${pending.lookbookTotal || '?'}</span>`
-        : `<span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span>`;
+        : pending?.poseReplicateBatchTotal > 1
+            ? `<span class="output-time-pill running" title="${escapeAttr(pending.poseReplicateTargetName || '')}">服装 ${pending.poseReplicateBatchIndex}/${pending.poseReplicateBatchTotal}</span>`
+            : `<span class="output-time-pill running">${formatRunDuration(nowMs() - Number(pending.startedAt || nowMs()))}</span>`;
     return `<div class="output-img-wrap loading-wrap" data-pending-id="${escapeAttr(pending.id)}"${pendingOutputStyle(pending, useGridLayout)}>${slot}<div class="output-spinner"></div>${canCancel ? `<button class="output-cancel-task" type="button" title="取消视频任务" aria-label="取消视频任务">×</button>` : `<button class="output-del" title="${tr('common.delete')}">×</button>`}</div>`;
 }
 function selectedCanvasDownloadItems(){
@@ -9239,6 +9241,32 @@ function classicSpecialInputImage(node, inputRole=''){
         if(ref) return ref;
     }
     return null;
+}
+function classicSpecialInputImages(node, inputRole=''){
+    if(inputRole !== 'target-image'){
+        const single = classicSpecialInputImage(node, inputRole);
+        return single?.url ? [single] : [];
+    }
+    const seen = new Set();
+    const items = [];
+    connections
+        .filter(connection => connection.to === node.id && connection.inputRole === inputRole)
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .filter(Boolean)
+        .reverse()
+        .forEach(source => {
+            const refs = [
+                ...mediaRefsFromNode(source),
+                ...(source.type === 'image' && source.url ? [{url:source.url, name:source.name || 'image', kind:'image'}] : []),
+                ...(source.type === 'output' ? (source.images || []).map(item => ({url:outputUrlValue(item), name:outputImageName(outputUrlValue(item)), kind:'image'})) : [])
+            ];
+            refs.filter(item => item?.url && (item.kind || 'image') === 'image').forEach(item => {
+                if(seen.has(item.url)) return;
+                seen.add(item.url);
+                items.push(item);
+            });
+        });
+    return items.slice(0, 20);
 }
 async function generateClassicPanorama(node, prompt){
     const providerId = imageApiProviders()[0]?.id || '';
@@ -9362,30 +9390,18 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
     const model = String(node.poseReplicateModel || '');
     const provider = imageApiProviders().find(item => item.id === providerId);
     if(!provider || !allImageModels(providerId).includes(model)) throw new Error('所选图片生成平台或模型尚未配置');
-    const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
-    if(!inputs.action?.url || !inputs.control?.url || !inputs.target?.url) throw new Error('动作参考、内部控制图或目标图缺失');
+    const seenTargets = new Set();
+    const targets = (Array.isArray(inputs.targets) && inputs.targets.length ? inputs.targets : [inputs.target])
+        .filter(item => {
+            if(!item?.url || seenTargets.has(item.url)) return false;
+            seenTargets.add(item.url);
+            return true;
+        });
+    if(!inputs.action?.url || !inputs.control?.url || !targets.length) throw new Error('目标图片、内部控制图或服装参考缺失');
     const ratio = node.poseReplicateRatio || 'source';
     const resolution = node.poseReplicateResolution || '2k';
     const requestSize = ratio === 'source' ? 'auto' : apiImageSize('custom', resolution, ratio, '');
-    const payload = {
-        mode:inputs.mode || node.poseReplicateMode || 'skeleton',
-        inputs:{
-            pose_reference:inputs.action,
-            control_map:inputs.control,
-            target_image:inputs.target,
-            model_subject:inputs.modelSubject || null,
-            scene:inputs.scene || null
-        },
-        user_instruction:prompt || '',
-        generation:{provider_id:providerId, model, resolution, aspect_ratio:ratio, quality:'high', count:1},
-        prompt_policy:window.PoseReplicateSettings.promptPolicy(node, inputs),
-        control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
-    };
     const position = classicPoseReplicateOutputPosition(node);
-    const pendingId = uid('p');
-    const run = runSnapshot({...node, id:''}, prompt, refs);
-    run.nodeType = 'poseReplicate';
-    run.taskLabel = '一键复刻';
     pushUndo();
     // 在首次 await 前确定并发布共享输出，连续点击与并发请求使用独立 pending 槽。
     let output = nodes.find(candidate => candidate.type === 'output' && candidate.id === node.poseReplicateOutputNodeId && candidate.poseReplicateSourceId === node.id)
@@ -9404,36 +9420,70 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         connections.push(connection);
         indexClassicConnectionModel(connection);
     }
-    (output._pending ||= []).push(makePendingForRun(pendingId, run, node, {refs, requestSize}, {
-        canvasTaskType:'online-image', providerId, model
-    }));
+    const batch = targets.map((target, index) => {
+        const refs = [inputs.action, inputs.control, target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
+        const pendingId = uid('p');
+        const run = runSnapshot({...node, id:''}, prompt, refs);
+        run.nodeType = 'poseReplicate';
+        run.taskLabel = targets.length > 1 ? `一键复刻 ${index + 1}/${targets.length}` : '一键复刻';
+        const pending = makePendingForRun(pendingId, run, node, {refs, requestSize}, {
+            canvasTaskType:'online-image', providerId, model,
+            poseReplicateBatchIndex:index + 1,
+            poseReplicateBatchTotal:targets.length,
+            poseReplicateTargetName:target.name || `服装参考 ${index + 1}`
+        });
+        (output._pending ||= []).push(pending);
+        return {target, pendingId, run};
+    });
     selected.clear(); selected.add(output.id);
     if(createdOutput) render(); else refreshRunNodes(node, output);
     scheduleSave();
-    try {
-        const response = await cascadeFetch('/api/canvas/pose-replicate-tasks', {
-            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
-        });
-        if(!response.ok) throw new Error(await responseErrorMessage(response, '一键复刻任务创建失败'));
-        const task = await response.json();
-        const pending = pendingById(output, pendingId);
-        if(!pending) throw new Error('复刻输出节点已被删除');
-        pending.canvasTaskId = task.task_id;
-        refreshRunNodes(node, output); scheduleSave();
-        await saveCanvas();
-        const status = await pollCanvasImageTask(task.task_id);
-        if(status === 'failed') throw new Error('一键复刻生成失败，请查看输出节点或生成日志');
-        return output;
-    } catch(error){
-        const pending = pendingById(output, pendingId);
-        if(pending && !pending.canvasTaskId){
-            pending.failed = true;
-            pending.error = error.message || '一键复刻任务创建失败';
-            addGenerationLog({run, outputs:[], runMs:nowMs() - Number(pending.startedAt || nowMs()), error:pending.error});
+    const submit = async ({target, pendingId, run}) => {
+        const taskInputs = {...inputs, target};
+        const payload = {
+            mode:inputs.mode || node.poseReplicateMode || 'skeleton',
+            inputs:{
+                pose_reference:inputs.action,
+                control_map:inputs.control,
+                target_image:target,
+                model_subject:inputs.modelSubject || null,
+                scene:inputs.scene || null
+            },
+            user_instruction:prompt || '',
+            generation:{provider_id:providerId, model, resolution, aspect_ratio:ratio, quality:'high', count:1},
+            prompt_policy:window.PoseReplicateSettings.promptPolicy(node, taskInputs),
+            control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
+        };
+        try {
+            const response = await cascadeFetch('/api/canvas/pose-replicate-tasks', {
+                method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+            });
+            if(!response.ok) throw new Error(await responseErrorMessage(response, '一键复刻任务创建失败'));
+            const task = await response.json();
+            const pending = pendingById(output, pendingId);
+            if(!pending) throw new Error('复刻输出节点已被删除');
+            pending.canvasTaskId = task.task_id;
             refreshRunNodes(node, output); scheduleSave();
+            await saveCanvas();
+            const status = await pollCanvasImageTask(task.task_id);
+            if(status === 'failed') throw new Error('一键复刻生成失败，请查看输出节点或生成日志');
+            return task.task_id;
+        } catch(error){
+            const pending = pendingById(output, pendingId);
+            if(pending && !pending.canvasTaskId){
+                pending.failed = true;
+                pending.error = error.message || '一键复刻任务创建失败';
+                addGenerationLog({run, outputs:[], runMs:nowMs() - Number(pending.startedAt || nowMs()), error:pending.error});
+                refreshRunNodes(node, output); scheduleSave();
+            }
+            throw error;
         }
-        throw error;
-    }
+    };
+    const settled = await Promise.allSettled(batch.map(submit));
+    const failures = settled.filter(result => result.status === 'rejected');
+    if(failures.length === 1 && targets.length === 1) throw failures[0].reason;
+    if(failures.length) throw new Error(`${failures.length}/${targets.length} 款服装复刻失败，其余任务已继续完成`);
+    return output;
 }
 function createClassicPoseOutputNode(sourceNode, item){
     if(!sourceNode?.id || !item?.url) return null;
@@ -10157,6 +10207,7 @@ function bindClassicSpecialNode(el, node){
         smart:false,
         canvasKey:`classic:${canvas?.id || ''}`,
         getInputImage:classicSpecialInputImage,
+        getInputImages:classicSpecialInputImages,
         getAngleGeometryReference:classicAngleGeometryReference,
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
@@ -11370,7 +11421,7 @@ function renderNode(node){
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
-        el.insertAdjacentHTML('beforeend', [['pose-reference','动作参考'],['target-image','目标图'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);

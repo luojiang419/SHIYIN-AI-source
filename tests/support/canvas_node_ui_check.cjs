@@ -27,6 +27,19 @@ const path = require('node:path');
             await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
             return image===document.querySelector('.image-node img');
         }),true,'unrelated media DOM remains connected');
+        await page.evaluate(()=>{
+            const pose=nodes.find(n=>n.id==='pose');
+            pose.poseReplicateManualInputs={'target-image':[
+                {url:'/fixture.png?garment=red',name:'red.png',kind:'image'},
+                {url:'/fixture.png?garment=blue',name:'blue.png',kind:'image'}
+            ]};
+            refreshNodes(['pose']);
+        });
+        const poseNode=page.locator('.poseReplicate-node');
+        assert.equal(await poseNode.locator('[data-pose-replicate-input-role="pose-reference"] strong').textContent(),'目标图片');
+        assert.equal(await poseNode.locator('[data-pose-replicate-input-role="target-image"] strong').textContent(),'服装参考');
+        assert.equal(await poseNode.locator('.pose-replicate-target-thumb').count(),2);
+        assert.equal(await poseNode.locator('input[data-pose-replicate-file="target-image"]').getAttribute('multiple'),'');
         // 同一通用框架覆盖普通图片、批量图片和视频生成节点。
         await page.evaluate(()=>{
             const original=nodes.find(n=>n.id==='generator');

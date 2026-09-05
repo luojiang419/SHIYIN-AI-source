@@ -62,7 +62,10 @@ def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_sce
     assert result.output_aspect_ratio == "16:9"
     assert [item["role"] for item in result.reference_order] == roles
     assert [item["index"] for item in result.reference_order] == list(range(1, len(roles) + 1))
-    assert "不要改变动作参考的头部方向" in result.final_prompt
+    assert "不要改变目标图片的头部方向" in result.final_prompt
+    assert "（目标图片）" in result.final_prompt
+    assert "（服装参考）" in result.final_prompt
+    assert "不得混入其他色号或款号" in result.final_prompt
     assert "只输出一张" in result.final_prompt
     assert "只能出现一个最终人物实例" in result.final_prompt
     assert "严禁拼图、分栏、三联画" in result.final_prompt
@@ -85,7 +88,7 @@ def test_depth_mode_treats_depth_as_registered_surface_geometry_instead_of_loose
         "二维位置、关节角度、朝向、长度比例、透视缩短",
         "每条主要褶皱的空间位置、起止点、走向",
         "不得抹平、挪位、减少、补造或重新设计",
-        "目标服装到锁定几何的映射",
+        "服装参考到锁定几何的映射",
         "不得改变主要褶皱的拓扑、峰谷位置与受力路径",
         "任何位置、角度、轮廓、遮挡或主要褶皱峰谷不一致",
         "深度模式还硬锁主要褶皱峰谷与表面几何",
@@ -100,19 +103,19 @@ def test_base_depth_route_preserves_non_garment_pixels_and_extended_route_maps_g
     base = compile_pose_replicate_prompt("depth")
     extended = compile_pose_replicate_prompt("depth", has_model_subject=True, has_scene=True)
 
-    assert "除目标服装覆盖区域" in base.final_prompt
+    assert "除服装参考对应的换装区域" in base.final_prompt
     assert "其他区域不得重绘、重构或重新生成" in base.final_prompt
     assert "人物区域内的二维位置、轮廓、遮挡与主要褶皱峰谷必须一一对齐" in base.final_prompt
     assert "按人物区域归一化一一映射" in extended.final_prompt
     assert "不得用身份迁移作为放松动作的理由" in extended.final_prompt
-    assert "只允许为身份、目标服装或新场景的明确归属进行必要适配" in extended.final_prompt
+    assert "只允许为身份、服装参考或新场景的明确归属进行必要适配" in extended.final_prompt
 
 
 def test_skeleton_mode_does_not_claim_depth_surface_or_fold_geometry():
     result = compile_pose_replicate_prompt("skeleton")
 
     assert "骨架图不包含服装表面深度" in result.final_prompt
-    assert "根据目标服装的材质、版型、松量和结构生成自然褶皱" in result.final_prompt
+    assert "根据服装参考的材质、版型、松量和结构生成自然褶皱" in result.final_prompt
     assert "【深度几何硬锁：不是构图建议】" not in result.final_prompt
     assert "逐像素配准的三维表面" not in result.final_prompt
     assert "禁止忽略、平滑、弱化、平均化或重新想象深度图" not in result.final_prompt
@@ -156,6 +159,11 @@ def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_p
         "pose_reference",
         "control_map",
         "target_image",
+    ]
+    assert [item.role_label for item in image_payload.reference_images] == [
+        "目标图片",
+        "骨架图",
+        "服装参考",
     ]
     assert response["pose_replicate"]["assistant_calls"] == 0
 
@@ -326,9 +334,9 @@ def test_gemini_transport_binds_pose_replicate_role_text_to_each_reference_image
             return FakeResponse()
 
     roles = [
-        ("pose_reference", "动作参考"),
+        ("pose_reference", "目标图片"),
         ("control_map", "深度图"),
-        ("target_image", "目标服装"),
+        ("target_image", "服装参考"),
         ("model_subject", "模特主体"),
         ("scene", "场景"),
     ]
@@ -367,7 +375,8 @@ def test_gemini_transport_binds_pose_replicate_role_text_to_each_reference_image
     assert "三维几何硬约束" in parts[3]["text"]
     assert "服装褶皱峰谷" in parts[3]["text"]
     assert "不得交换角色" in parts[-1]["text"]
-    assert "最终服装只取目标图" in parts[-1]["text"]
+    assert "最终服装只取当前服装参考" in parts[-1]["text"]
+    assert "姿势只取目标图片与控制图" in parts[-1]["text"]
 
 
 def test_gemini_transport_preserves_registered_pose_depth_pair_resolution_and_depth_losslessness():
@@ -378,9 +387,9 @@ def test_gemini_transport_preserves_registered_pose_depth_pair_resolution_and_de
         return "data:image/png;base64,aW1hZ2U="
 
     with patch.object(main, "reference_to_data_url", side_effect=capture):
-        main.gemini_reference_part({"role": "pose_reference", "role_label": "动作参考"})
+        main.gemini_reference_part({"role": "pose_reference", "role_label": "目标图片"})
         main.gemini_reference_part({"role": "control_map", "role_label": "深度图"})
-        main.gemini_reference_part({"role": "target_image", "role_label": "目标服装"})
+        main.gemini_reference_part({"role": "target_image", "role_label": "服装参考"})
 
     assert calls == [
         ("pose_reference", 2048, False),

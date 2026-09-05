@@ -10157,7 +10157,7 @@ function smartNodeHtml(node){
         ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
         <div class="node-hint">${hint}</div>
         ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','动作参考'],['target-image','目标图'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
         <div class="node-port port-out" data-port="out" title="output"></div>
     </div>`;
 }
@@ -11209,6 +11209,29 @@ function smartSpecialInputImage(node, inputRole=''){
     }
     return null;
 }
+function smartSpecialInputImages(node, inputRole=''){
+    if(inputRole !== 'target-image'){
+        const single = smartSpecialInputImage(node, inputRole);
+        return single?.url ? [single] : [];
+    }
+    const seen = new Set();
+    const items = [];
+    [...(canvas?.connections || [])]
+        .filter(connection => connection.to === node.id && connection.inputRole === inputRole)
+        .reverse()
+        .map(connection => nodes.find(item => item.id === connection.from))
+        .filter(Boolean)
+        .forEach(source => {
+            const refs = imagesForNode(source).filter(item => item?.url && mediaKindForItem(item) === 'image');
+            if(!refs.length && source.url) refs.push({...source, kind:'image'});
+            refs.forEach(item => {
+                if(seen.has(item.url)) return;
+                seen.add(item.url);
+                items.push(item);
+            });
+        });
+    return items.slice(0, 20);
+}
 async function generateSmartPanorama(node, prompt){
     const base = {...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(node) || {})};
     const runSettings = {
@@ -12063,8 +12086,15 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
         customSize:'', customWidth:'', customHeight:'', quality:base.quality || 'high', count:1
     };
     if(!runSettings.provider_id || !runSettings.model) throw new Error('请先在 API 设置中配置图片生成模型');
-    const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
-    if(!inputs.action?.url || !inputs.control?.url || !inputs.target?.url) throw new Error('动作参考、内部控制图或目标图缺失');
+    const seenTargets = new Set();
+    const targets = (Array.isArray(inputs.targets) && inputs.targets.length ? inputs.targets : [inputs.target])
+        .filter(item => {
+            if(!item?.url || seenTargets.has(item.url)) return false;
+            seenTargets.add(item.url);
+            return true;
+        });
+    const refs = [inputs.action, inputs.control, ...targets, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
+    if(!inputs.action?.url || !inputs.control?.url || !targets.length) throw new Error('目标图片、内部控制图或服装参考缺失');
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
     meta.settings = settingsForStorage(runSettings);
     const runLog = {
@@ -12073,39 +12103,52 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
     };
     const startedAt = nowMs();
     pushUndo();
-    const output = createPendingOutputFromSource(node, 1, meta, {selectOutput:true, refs});
+    const output = createPendingOutputFromSource(node, targets.length, meta, {selectOutput:true, refs});
     output.title = '复刻结果';
     output.poseReplicateSourceId = node.id;
     output.runSettings = settingsForStorage(runSettings);
     render(); scheduleSave();
     try {
-        const payload = {
-            mode:inputs.mode || node.poseReplicateMode || 'skeleton',
-            inputs:{pose_reference:inputs.action, control_map:inputs.control, target_image:inputs.target, model_subject:inputs.modelSubject || null, scene:inputs.scene || null},
-            user_instruction:prompt || '',
-            generation:{provider_id:providerId, model, resolution:node.poseReplicateResolution || '2k', aspect_ratio:ratio, quality:runSettings.quality || 'high', count:1},
-            prompt_policy:{template_id:'pose-replicate.v2.4', locale:'zh-CN'},
-            control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
-        };
-        const submitted = await fetch('/api/canvas/pose-replicate-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async response => {
-            if(!response.ok) throw new Error(await responseErrorMessage(response, '一键复刻任务创建失败'));
-            return response.json();
+        const submissions = await Promise.allSettled(targets.map(async (target, targetIndex) => {
+            const payload = {
+                mode:inputs.mode || node.poseReplicateMode || 'skeleton',
+                inputs:{pose_reference:inputs.action, control_map:inputs.control, target_image:target, model_subject:inputs.modelSubject || null, scene:inputs.scene || null},
+                user_instruction:prompt || '',
+                generation:{provider_id:providerId, model, resolution:node.poseReplicateResolution || '2k', aspect_ratio:ratio, quality:runSettings.quality || 'high', count:1},
+                prompt_policy:{template_id:'pose-replicate.v2.5', locale:'zh-CN'},
+                control_signature:inputs.mode === 'depth' ? node.poseDepthSourceSignature || '' : node.poseSourceSignature || ''
+            };
+            const submitted = await fetch('/api/canvas/pose-replicate-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async response => {
+                if(!response.ok) throw new Error(await responseErrorMessage(response, '一键复刻任务创建失败'));
+                return response.json();
+            });
+            if(!submitted?.task_id) throw new Error('一键复刻任务创建失败');
+            return {taskId:submitted.task_id, kind:'image', providerId:submitted.provider_id || providerId, model:submitted.model || model, targetIndex};
+        }));
+        const successful = submissions.filter(result => result.status === 'fulfilled').map(result => result.value);
+        initializeSmartGenerationSlots(output, successful);
+        (output.pendingTasks || []).forEach(task => {
+            const slot = smartGenerationSlots(output).find(item => item.id === task.slotId);
+            if(slot) slot.index = Number(task.targetIndex) || 0;
         });
-        const taskIds = [submitted?.task_id].filter(Boolean);
-        if(!taskIds.length) throw new Error('一键复刻任务创建失败');
-        initializeSmartGenerationSlots(output, taskIds.map(taskId => ({
-            taskId, kind:'image', providerId:submitted.provider_id || providerId, model:submitted.model || model
-        })));
-        output.pending = taskIds.length;
+        submissions.forEach((result, targetIndex) => {
+            if(result.status === 'fulfilled') return;
+            output.generationSlots.push({id:uid('generation-slot'), index:targetIndex, status:'error', error:result.reason?.message || '一键复刻任务创建失败'});
+        });
+        output.pending = successful.length;
         output.running = false;
         output.runStartedAt = startedAt;
         render(); scheduleSave();
         await saveCanvas();
-        await resumeSmartPendingNode(output, {run:runLog, runLogStart:startedAt});
+        if(successful.length) await resumeSmartPendingNode(output, {run:runLog, runLogStart:startedAt});
+        else settleSmartGenerationSlots(output, 'image');
         if((output.images || []).length){
             addSmartGenerationLog({run:runLog, outputs:output.images, runMs:nowMs() - startedAt});
         }
         scheduleSave();
+        const failedCount = submissions.length - successful.length;
+        if(failedCount === 1 && submissions.length === 1) throw submissions[0].reason;
+        if(failedCount) throw new Error(`${failedCount}/${submissions.length} 款服装复刻失败，其余任务已继续完成`);
         return output;
     } catch(error){
         if(!smartGenerationSlots(output).length){
@@ -12359,6 +12402,7 @@ function bindSmartSpecialNode(el, node){
         smart:true,
         canvasKey:`smart:${canvas?.id || ''}`,
         getInputImage:smartSpecialInputImage,
+        getInputImages:smartSpecialInputImages,
         getAngleGeometryReference:smartAngleGeometryReference,
         resolveUrl:url => displayMediaUrl({url:smartOriginalMediaUrl(url)}),
         generatePanorama:generateSmartPanorama,
@@ -12755,7 +12799,7 @@ function bindNodeEvents(nodeIndex=new Map(nodes.map(node => [node.id, node])), n
             e.stopPropagation();
             if(nodeForControls?.specialType){
                 if(nodeForControls.specialType === 'pose-replicate'){
-                    toast('请点击对应缩略图卡片上传，或通过端口连接动作参考、目标图、模特主体或场景');
+                    toast('请点击对应缩略图卡片上传，或通过端口连接目标图片、服装参考、模特主体或场景');
                     return;
                 }
                 const file = [...(e.dataTransfer?.files || [])].find(item => String(item.type || '').startsWith('image/'));

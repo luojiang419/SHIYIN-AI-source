@@ -11151,9 +11151,9 @@ def gemini_reference_part(ref):
 
 
 GEMINI_REFERENCE_ROLE_CONTRACTS = {
-    "pose_reference": "只提供姿势、动作、身体重心、主体相对构图与空间遮挡，不提供最终人物身份、服装或场景。",
+    "pose_reference": "这是目标图片，只提供需要换装的人物、姿势、动作、身体重心、主体相对构图与空间遮挡，不提供最终服装或新场景。",
     "control_map": "只提供控制图所记录的人物结构，不提供最终人物身份、服装视觉设计或场景。",
-    "target_image": "只提供最终服装设计、材质、版型、颜色、图案与结构细节，不提供最终人物身份、姿势或场景。",
+    "target_image": "这是当前任务的服装参考，只提供最终服装设计、材质、版型、颜色、图案与结构细节，不提供最终人物身份、姿势或场景，也不得混入同批其他款式。",
     "model_subject": "只提供最终人物身份、面部、肤色、发型与身体比例，不提供最终服装、姿势或场景。",
     "scene": "只提供最终环境、背景结构、透视与环境光，不提供最终人物身份、服装或姿势。",
 }
@@ -11170,7 +11170,7 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
         index = max(1, int(fallback_index))
     contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
     if role == "control_map" and "深度" in label:
-        contract = "这是与动作参考配准的三维几何硬约束，严格提供人物体积、姿势、前后遮挡、可见轮廓与服装褶皱峰谷；不提供最终人物身份、服装款式、颜色、图案、面料纹理或场景。"
+        contract = "这是与目标图片配准的三维几何硬约束，严格提供人物体积、姿势、前后遮挡、可见轮廓与服装褶皱峰谷；不提供最终人物身份、服装款式、颜色、图案、面料纹理或场景。"
     elif role == "control_map" and "骨架" in label:
         contract = "只提供关节位置、肢体方向、左右关系和身体重心；不提供人物表面、服装褶皱、最终人物身份、服装设计或场景。"
     if not label and not instruction and not contract:
@@ -11189,8 +11189,8 @@ def gemini_reference_roles_anchor(reference_images) -> str:
     if not {"pose_reference", "control_map", "target_image"}.issubset(roles):
         return ""
     return (
-        "以上参考图已按图号和角色逐一绑定。执行时不得交换角色：最终人物身份只取模特主体（若未提供则取动作参考），"
-        "最终服装只取目标图，姿势只取动作参考与控制图，最终环境只取场景图（若未提供则取动作参考背景）。"
+        "以上参考图已按图号和角色逐一绑定。执行时不得交换角色：最终人物身份只取模特主体（若未提供则取目标图片），"
+        "最终服装只取当前服装参考，姿势只取目标图片与控制图，最终环境只取场景图（若未提供则取目标图片背景）。"
     )
 
 
@@ -17109,7 +17109,7 @@ async def normalize_pose_replicate_instruction(
     context = {
         "has_model_subject": bool(has_model_subject),
         "has_scene": bool(has_scene),
-        "fixed_rule": "动作参考控制姿势，控制图控制结构，目标图控制服装；可选模特主体控制身份，可选场景控制环境",
+        "fixed_rule": "目标图片控制人物与姿势，控制图控制结构，当前服装参考控制服装；可选模特主体控制身份，可选场景控制环境",
     }
     messages = [
         {"role": "system", "content": system},
@@ -20129,7 +20129,7 @@ def resolve_pose_replicate_aspect_ratio(aspect_ratio: str, pose_reference_url: s
         return requested
     width, height = parse_size_pair(image_size_from_reference(pose_reference_url))
     if not width or not height:
-        raise PoseReplicatePromptError("无法读取动作参考尺寸，不能自动适配输出画幅")
+        raise PoseReplicatePromptError("无法读取目标图片尺寸，不能自动适配输出画幅")
     source_ratio = width / height
     return min(
         POSE_REPLICATE_SIZE_MAP,

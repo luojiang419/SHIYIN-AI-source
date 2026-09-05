@@ -25,7 +25,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn("/static/js/canvas-special-nodes.js", page)
             self.assertIn("720°取景器", page)
             self.assertIn("动作提取", page)
-            self.assertIn("pose-replicate.6", page)
+            self.assertIn("pose-replicate-batch.1", page)
             self.assertIn("feature=pose-replicate-top-ports.1", page)
             self.assertNotIn("灯光重塑", page)
         self.assertIn("location.replace(target)", self.smart_html)
@@ -142,16 +142,17 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
     def test_pose_replicate_node_is_available_on_both_canvases_with_four_role_ports(self):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
-            self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-manual-input.1", page)
-            self.assertIn("feature=pose-replicate-v2.4", page)
+            self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.05.pose-replicate-batch.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1", page)
+            self.assertIn("feature=pose-replicate-v2.5", page)
+            self.assertIn("feature=pose-replicate-batch.1", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
         for marker in (
             "function addPoseReplicateNode(point)",
             "type:'poseReplicate'",
-            "['pose-reference','动作参考']",
-            "['target-image','目标图']",
+            "['pose-reference','目标图片']",
+            "['target-image','服装参考']",
             "['model-subject','模特主体']",
             "['scene','场景']",
             "poseReplicateBodyHtml(node, {providers:",
@@ -163,8 +164,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for marker in (
             "function createPoseReplicateNode(point)",
             "specialType:'pose-replicate'",
-            "['pose-reference','动作参考']",
-            "['target-image','目标图']",
+            "['pose-reference','目标图片']",
+            "['target-image','服装参考']",
             "['model-subject','模特主体']",
             "['scene','场景']",
             "poseReplicateBodyHtml(node, {providers:",
@@ -204,7 +205,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             self.assertIn(marker, self.pose_replicate_styles)
         self.assertNotIn("--pose-port-top:${20 + index * 20}%", self.classic)
         self.assertNotIn("--pose-port-top:${20 + index * 20}%", self.smart)
-        self.assertIn("poseReplicateInputRow(action, 'pose-reference', '动作参考'", self.shared)
+        self.assertIn("poseReplicateInputRow(action, 'pose-reference', '目标图片'", self.shared)
+        self.assertIn("poseReplicateInputRow(targets, 'target-image', '服装参考'", self.shared)
         self.assertIn("poseReplicateInputRow(scene, 'scene', '场景'", self.shared)
         self.assertIn("type:'poseReplicate', x:p.x, y:p.y, w:720, h:820", self.classic)
         self.assertIn("specialType:'pose-replicate'", self.smart)
@@ -433,7 +435,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "DEFAULT_POSE_REPLICATE_PROMPT",
             "function bindPoseReplicate(root, node, options={})",
             "poseReplicateInput(node, options, 'pose-reference')",
-            "poseReplicateInput(node, options, 'target-image')",
+            "poseReplicateInputs(node, options, 'target-image')",
             "poseInputRole:'pose-reference'",
             "setPoseOutput:(node, file)",
             "runPose(node, poseOptions, false)",
@@ -455,8 +457,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(body)
         body_source = body.group(0)
-        self.assertIn("动作参考", body_source)
-        self.assertIn("目标图", body_source)
+        self.assertIn("目标图片", body_source)
+        self.assertIn("服装参考", body_source)
         self.assertIn("模特主体", body_source)
         self.assertIn("场景", body_source)
         self.assertIn("内部控制图", body_source)
@@ -465,9 +467,13 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("data-pose-replicate-upload-role", self.shared)
         self.assertIn("data-pose-replicate-remove-role", self.shared)
         self.assertIn("poseReplicateManualInputs", body_source)
-        self.assertIn("请上传或连接动作参考和目标图", body_source)
+        self.assertIn("请上传或连接目标图片和服装参考", body_source)
         self.assertIn("function poseReplicateInput(node, options, role)", self.shared)
         self.assertIn("return poseReplicateManualInput(node, role) || options.getInputImage?.(node, role) || null", self.shared)
+        self.assertIn("function poseReplicateInputs(node, options, role)", self.shared)
+        self.assertIn("multiple>", self.shared)
+        self.assertIn("Promise.allSettled(selected.map(uploadFile))", self.shared)
+        self.assertIn("data-pose-replicate-remove-index", self.shared)
         self.assertIn("const fallback = options.getInputImage?.(node, role) || null", self.shared)
         self.assertIn("恢复使用连线输入", self.shared)
         self.assertIn("card.addEventListener('mousedown', event => event.stopPropagation())", self.shared)
@@ -475,6 +481,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("}, true);", self.shared)
         self.assertIn("请点击对应缩略图卡片上传", self.smart)
         self.assertIn(".pose-replicate-inputs .pose-replicate-input-card { height: 118px; min-height: 118px; }", self.pose_replicate_styles)
+        self.assertIn(".pose-replicate-target-thumbs", self.pose_replicate_styles)
 
     def test_pose_replicate_creates_recoverable_tasks_on_both_canvases(self):
         classic_run = re.search(
@@ -484,7 +491,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(classic_run)
         classic_source = classic_run.group(0)
-        self.assertIn("const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene]", classic_source)
+        self.assertIn("const batch = targets.map((target, index) =>", classic_source)
+        self.assertIn("Promise.allSettled(batch.map(submit))", classic_source)
         self.assertIn("type:'output'", classic_source)
         self.assertIn("canvasTaskType:'online-image'", classic_source)
         self.assertIn("nodes.push(output)", classic_source)
@@ -499,18 +507,19 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(smart_run)
         smart_source = smart_run.group(0)
-        self.assertIn("const refs = [inputs.action, inputs.control, inputs.target, inputs.modelSubject, inputs.scene]", smart_source)
-        self.assertIn("createPendingOutputFromSource(node, 1", smart_source)
+        self.assertIn("const refs = [inputs.action, inputs.control, ...targets, inputs.modelSubject, inputs.scene]", smart_source)
+        self.assertIn("createPendingOutputFromSource(node, targets.length", smart_source)
+        self.assertIn("Promise.allSettled(targets.map", smart_source)
         self.assertIn("'/api/canvas/pose-replicate-tasks'", smart_source)
-        self.assertLess(smart_source.index("createPendingOutputFromSource(node, 1"), smart_source.index("'/api/canvas/pose-replicate-tasks'"))
+        self.assertLess(smart_source.index("createPendingOutputFromSource(node, targets.length"), smart_source.index("'/api/canvas/pose-replicate-tasks'"))
         self.assertIn("initializeSmartGenerationSlots", smart_source)
         self.assertIn("resumeSmartPendingNode(output", smart_source)
 
     def test_pose_replicate_button_stays_clickable_while_previous_runs_continue(self):
         for marker in (
-            "node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + 1",
+            "node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + taskCount",
             "Promise.resolve(options.generatePoseReplicate",
-            "多次生成的结果将保存在同一个输出节点",
+            "将并发生成 ${targets.length} 款服装",
             "个复刻任务正在并发生成",
         ):
             self.assertIn(marker, self.shared)
@@ -552,7 +561,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("深度图", page)
             self.assertIn("feature=depth-map-node.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-manual-input.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1", page)
             self.assertIn("/static/css/canvas-special-nodes.css?v=2026.09.05.depth-manual-input.1", page)
 
         for marker in (
@@ -686,9 +695,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             ).group(0)
             self.assertIn("'/api/canvas/pose-replicate-tasks'", body)
             if function_name == "generateClassicPoseReplicate":
-                self.assertIn("window.PoseReplicateSettings.promptPolicy(node, inputs)", body)
+                self.assertIn("window.PoseReplicateSettings.promptPolicy(node, taskInputs)", body)
             else:
-                self.assertIn("template_id:'pose-replicate.v2.4'", body)
+                self.assertIn("template_id:'pose-replicate.v2.5'", body)
             self.assertNotIn("auto_optimize_prompt:true", body)
         self.assertIn("'source','1:1','16:9','9:16','4:3','3:4'", self.shared)
         self.assertIn("自动（跟随原图）", self.shared)

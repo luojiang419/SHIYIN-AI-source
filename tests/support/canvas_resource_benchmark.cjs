@@ -3,11 +3,14 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
 (async()=>{
     const base=process.argv[2] || 'http://127.0.0.1:3013';
     const dir=process.argv[3] || '测试/画布资源与节点回归-20260905';
-    const png=fs.readFileSync(path.join(dir,'preview-fixture.png'));
-    const baseline=fs.readFileSync(path.join(dir,'baseline-canvas.js'),'utf8');
+    fs.mkdirSync(dir,{recursive:true});
+    const png=execFileSync('python',['-c',"from PIL import Image; import sys; Image.effect_noise((512,512),64).convert('RGB').save(sys.stdout.buffer,format='PNG')"],{maxBuffer:4*1024*1024});
+    const baselineRef=process.argv[4] || 'b6e762c';
+    const baseline=execFileSync('git',['show',`${baselineRef}:static/js/canvas.js`],{encoding:'utf8',maxBuffer:8*1024*1024});
     const browser=await chromium.launch({headless:true,channel:'chrome'});
     const report=[];
     try {

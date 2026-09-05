@@ -6,6 +6,7 @@ import {
   CONTROL_RANGES,
   controlsFromConfig,
   DEFAULT_CONTROLS,
+  formatErrorMessage,
   normalizeControls,
 } from "../frontend/depth-controls.mjs";
 
@@ -63,4 +64,10 @@ test("parameter object values can be imported without compatibility metadata", (
   assert.equal(imported.nearPoint, 91);
   assert.equal(imported.contrast, 210);
   assert.equal(imported.invert, true);
+});
+
+test("Tauri string rejections keep their real diagnostic message", () => {
+  assert.equal(formatErrorMessage("worker 找不到中文路径", "深度提取失败"), "worker 找不到中文路径");
+  assert.equal(formatErrorMessage(new Error("CUDA out of memory"), "深度提取失败"), "CUDA out of memory");
+  assert.equal(formatErrorMessage({}, "深度提取失败"), "深度提取失败");
 });

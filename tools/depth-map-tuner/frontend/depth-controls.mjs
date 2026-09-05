@@ -77,6 +77,14 @@ export function controlSignature(source = {}) {
   ].join("|");
 }
 
+export function formatErrorMessage(error, fallback = "操作失败") {
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (typeof error?.message === "string" && error.message.trim()) return error.message.trim();
+  if (typeof error?.error === "string" && error.error.trim()) return error.error.trim();
+  const rendered = String(error ?? "").trim();
+  return rendered && rendered !== "[object Object]" ? rendered : fallback;
+}
+
 export function presetKeyFor(source = {}) {
   const signature = controlSignature(source);
   return Object.entries(CONTROL_PRESETS).find(([, preset]) => controlSignature(preset.values) === signature)?.[0] || "";

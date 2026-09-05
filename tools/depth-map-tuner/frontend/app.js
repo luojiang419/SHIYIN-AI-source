@@ -5,6 +5,7 @@ import {
   CONTROL_RANGES,
   controlsFromConfig,
   DEFAULT_CONTROLS,
+  formatErrorMessage,
   normalizeControls,
   presetKeyFor,
 } from "./depth-controls.mjs";
@@ -112,7 +113,7 @@ async function refreshModelStatus() {
   try {
     setModelStatus(await tauriInvoke("get_component_status"));
   } catch (error) {
-    setModelStatus({ ready: false, message: error.message || String(error) });
+    setModelStatus({ ready: false, message: formatErrorMessage(error, "共享模型状态读取失败") });
   }
 }
 
@@ -174,8 +175,9 @@ function schedulePreviewRender() {
       elements.exportDepth.disabled = false;
       setStatus("实时预览已更新；导出时会按原始分辨率重新计算");
     } catch (error) {
-      toast(error.message || "实时预览失败", "error");
-      setStatus(error.message || "实时预览失败");
+      const message = formatErrorMessage(error, "实时预览失败");
+      toast(message, "error");
+      setStatus(message);
     }
   });
 }
@@ -257,8 +259,9 @@ async function applyInputPayload(payload) {
   } catch (error) {
     if (generation !== state.generation) return;
     clearDepth();
-    toast(error.message || "深度提取失败", "error");
-    setStatus(error.message || "深度提取失败");
+    const message = formatErrorMessage(error, "深度提取失败");
+    toast(message, "error");
+    setStatus(message);
   } finally {
     if (generation === state.generation) setBusy(false);
   }
@@ -270,7 +273,7 @@ async function chooseImage() {
     const payload = await tauriInvoke("choose_input_image");
     if (payload) await applyInputPayload(payload);
   } catch (error) {
-    toast(error.message || "选择图片失败", "error");
+    toast(formatErrorMessage(error, "选择图片失败"), "error");
   }
 }
 
@@ -280,7 +283,7 @@ async function loadDroppedPath(path) {
     const payload = await tauriInvoke("load_input_image", { path });
     await applyInputPayload(payload);
   } catch (error) {
-    toast(error.message || "拖入图片失败", "error");
+    toast(formatErrorMessage(error, "拖入图片失败"), "error");
   }
 }
 
@@ -312,8 +315,9 @@ async function exportDepth() {
       setStatus("已取消深度图导出");
     }
   } catch (error) {
-    toast(error.message || "深度图导出失败", "error");
-    setStatus(error.message || "深度图导出失败");
+    const message = formatErrorMessage(error, "深度图导出失败");
+    toast(message, "error");
+    setStatus(message);
   } finally {
     elements.exportDepth.disabled = !state.depthImage;
   }
@@ -337,7 +341,7 @@ async function exportConfig() {
       setStatus("已取消参数配置导出");
     }
   } catch (error) {
-    toast(error.message || "参数配置导出失败", "error");
+    toast(formatErrorMessage(error, "参数配置导出失败"), "error");
   }
 }
 
@@ -350,7 +354,7 @@ async function importConfig() {
     toast("参数配置已导入并应用", "success");
     setStatus("已载入外部参数配置");
   } catch (error) {
-    toast(error.message || "参数配置导入失败", "error");
+    toast(formatErrorMessage(error, "参数配置导入失败"), "error");
   }
 }
 
@@ -362,8 +366,9 @@ async function locateModel() {
       toast("共享模型位置已更新，没有复制或安装文件", "success");
     }
   } catch (error) {
-    toast(error.message || "共享模型定位失败", "error");
-    setModelStatus({ ready: false, message: error.message || String(error) });
+    const message = formatErrorMessage(error, "共享模型定位失败");
+    toast(message, "error");
+    setModelStatus({ ready: false, message });
   }
 }
 

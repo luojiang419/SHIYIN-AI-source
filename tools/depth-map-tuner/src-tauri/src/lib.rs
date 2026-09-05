@@ -294,19 +294,20 @@ fn component_candidates() -> Vec<PathBuf> {
             candidates.push(PathBuf::from(value.trim()));
         }
     }
-    push_ancestor_candidates(&mut candidates, Path::new(env!("CARGO_MANIFEST_DIR")));
-    if let Ok(executable) = std::env::current_exe() {
-        push_ancestor_candidates(&mut candidates, &executable);
-    }
-    if let Ok(current) = std::env::current_dir() {
-        push_ancestor_candidates(&mut candidates, &current);
-    }
+    // 优先复用正式安装版组件，避免源码目录中的本机候选包抢占选择。
     candidates.push(PathBuf::from(
         r"D:\Program Files\SHIYIN AI\data\system\components\person-depth",
     ));
     candidates.push(PathBuf::from(
         r"C:\Program Files\SHIYIN AI\data\system\components\person-depth",
     ));
+    if let Ok(executable) = std::env::current_exe() {
+        push_ancestor_candidates(&mut candidates, &executable);
+    }
+    if let Ok(current) = std::env::current_dir() {
+        push_ancestor_candidates(&mut candidates, &current);
+    }
+    push_ancestor_candidates(&mut candidates, Path::new(env!("CARGO_MANIFEST_DIR")));
     let mut seen = HashSet::new();
     candidates
         .into_iter()
@@ -444,6 +445,9 @@ fn infer_depth(component: &ResolvedComponent, input: &Path) -> Result<DepthPaylo
     let temporary_root =
         std::env::temp_dir().join(format!("shiyin-depth-tuner-{}", Uuid::new_v4()));
     fs::create_dir_all(&temporary_root).map_err(|error| format!("无法创建临时目录：{error}"))?;
+    // Packaged Python/Pillow 在部分 Windows 中文或网络路径上会误报文件不存在。
+    // 与主应用保持一致，将输入复制到纯 ASCII 临时路径后再交给共享 worker。
+    let worker_input = temporary_root.join("input.png");
     let output = temporary_root.join("depth.png");
     let mut command = Command::new(&component.worker);
     command
@@ -459,6 +463,8 @@ fn infer_depth(component: &ResolvedComponent, input: &Path) -> Result<DepthPaylo
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
     let result = (|| {
+        fs::copy(input, &worker_input)
+            .map_err(|error| format!("无法准备深度推理临时输入：{error}"))?;
         let mut child = command
             .spawn()
             .map_err(|error| format!("无法启动共享深度 worker：{error}"))?;
@@ -496,7 +502,7 @@ fn infer_depth(component: &ResolvedComponent, input: &Path) -> Result<DepthPaylo
             json!({
                 "id": estimate_id,
                 "op": "estimate",
-                "input": input.display().to_string(),
+                "input": worker_input.display().to_string(),
                 "output": output.display().to_string(),
                 "bit_depth": 8
             }),

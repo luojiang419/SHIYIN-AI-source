@@ -307,10 +307,10 @@
     }
 
     function depthMapInput(node, options){
-        const connected = options.getInputImage?.(node);
-        if(connected?.url) return connected;
         const manual = node?.depthMapManualInput;
-        return manual?.url ? {...manual, kind:'image'} : null;
+        if(manual?.url) return {...manual, kind:'image'};
+        const connected = options.getInputImage?.(node);
+        return connected?.url ? connected : null;
     }
 
     function depthMapBaseOutput(node){
@@ -373,8 +373,10 @@
     function depthMapBodyHtml(node){
         node.depthMapControls = normalizeDepthMapControls(node);
         const output = outputItem(node);
-        const inputUrl = node.depthMapInputUrl || node.depthMapManualInput?.url || '';
-        const inputName = node.depthMapInputName || node.depthMapManualInput?.name || '输入图片';
+        const manualInput = node.depthMapManualInput?.url ? node.depthMapManualInput : null;
+        const inputUrl = manualInput?.url || node.depthMapInputUrl || '';
+        const inputName = manualInput?.name || node.depthMapInputName || '输入图片';
+        const inputSource = manualInput ? '手动优先' : inputUrl ? '连线' : '';
         const status = node.depthMapStatus || (output?.url ? 'done' : 'idle');
         const statusText = status === 'running'
             ? '正在生成高精度人物深度图…'
@@ -383,14 +385,16 @@
                 : output?.url
                     ? '深度图已就绪，可从右侧端口连接下游节点'
                     : inputUrl
-                        ? (personDepthStatus?.ready ? '图片已连接，正在准备深度推理' : '图片已连接，等待高精度组件就绪')
-                        : '连接或导入一张图片后自动生成深度图';
+                        ? (personDepthStatus?.ready ? `${manualInput ? '手动图片' : '连线图片'}已就绪，正在准备深度推理` : `${manualInput ? '手动图片' : '连线图片'}已就绪，等待高精度组件就绪`)
+                        : '连接或手动上传一张图片后自动生成深度图';
         return `<div class="special-node depth-map-special" data-special-node="depth-map">
             <input class="special-file-input" type="file" accept="image/*" data-special-file="depth-map" hidden>
             <div class="depth-map-preview-grid">
-                <div class="depth-map-preview-card ${inputUrl ? 'has-image' : ''}">
+                <div class="depth-map-preview-card depth-map-input-card ${inputUrl ? 'has-image' : ''} ${manualInput ? 'is-manual' : ''}" data-depth-map-input-card role="button" tabindex="0" title="${manualInput ? '点击替换手动输入图片' : '点击手动上传输入图片'}">
                     <span class="depth-map-preview-label">输入图片</span>
-                    ${inputUrl ? `<img src="${esc(inputUrl)}" alt="${esc(inputName)}" draggable="false">` : `<div class="special-empty"><i data-lucide="image-plus"></i><strong>等待图片输入</strong><span>连接图片节点或点击导入</span></div>`}
+                    ${inputUrl ? `<img src="${esc(inputUrl)}" alt="${esc(inputName)}" draggable="false">` : `<div class="special-empty"><i data-lucide="image-plus"></i><strong>点击上传输入图片</strong><span>也支持从左侧端口连接图片</span></div>`}
+                    ${inputSource ? `<span class="depth-map-input-source ${manualInput ? 'is-manual' : ''}">${inputSource}</span>` : ''}
+                    ${manualInput ? '<button type="button" class="depth-map-remove-input" data-depth-map-remove-input title="移除手动输入图片并恢复连线" aria-label="移除手动输入图片并恢复连线"><i data-lucide="trash-2"></i></button>' : ''}
                 </div>
                 <div class="depth-map-preview-card ${output?.url ? 'has-image' : ''}">
                     <span class="depth-map-preview-label">深度图</span>
@@ -1848,6 +1852,7 @@
             notify(options, node, true);
         }
         const fileInput = root.querySelector('[data-special-file="depth-map"]');
+        const inputCard = root.querySelector('[data-depth-map-input-card]');
         if(fileInput) fileInput.onchange = async () => {
             try {
                 const file = await uploadFile(fileInput.files?.[0]);
@@ -1857,9 +1862,32 @@
                 clearDepthMapResult(node, options);
                 notify(options, node, true);
                 runDepthMap(node, options, true).catch(error => options.toast?.(error.message));
+                options.toast?.('已手动添加输入图片，连线输入暂时忽略');
             } catch(error){ options.toast?.(error.message || '图片导入失败'); }
             finally { fileInput.value = ''; }
         };
+        inputCard?.addEventListener('pointerdown', event => event.stopPropagation());
+        inputCard?.addEventListener('mousedown', event => event.stopPropagation());
+        inputCard?.addEventListener('click', event => {
+            if(event.target.closest('[data-depth-map-remove-input]')) return;
+            event.preventDefault(); event.stopPropagation(); fileInput?.click();
+        });
+        inputCard?.addEventListener('keydown', event => {
+            if(event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault(); event.stopPropagation(); fileInput?.click();
+        });
+        fileInput?.addEventListener('click', event => event.stopPropagation());
+        root.querySelector('[data-depth-map-remove-input]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            if(!node.depthMapManualInput?.url) return;
+            delete node.depthMapManualInput;
+            source = depthMapInput(node, options);
+            syncDepthMapInput(node, source);
+            clearDepthMapResult(node, options);
+            notify(options, node, true);
+            if(source?.url) runDepthMap(node, options, true).catch(error => options.toast?.(error.message));
+            options.toast?.(source?.url ? '已移除手动输入图片，恢复使用连线输入' : '已移除手动输入图片');
+        });
         root.querySelectorAll('[data-special-action]').forEach(button => {
             button.addEventListener('pointerdown', event => event.stopPropagation());
         });

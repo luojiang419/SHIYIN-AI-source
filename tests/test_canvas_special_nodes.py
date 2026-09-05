@@ -143,7 +143,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-controls.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-manual-input.1", page)
             self.assertIn("feature=pose-replicate-v2.4", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -552,8 +552,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("深度图", page)
             self.assertIn("feature=depth-map-node.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-controls.1", page)
-            self.assertIn("/static/css/canvas-special-nodes.css?v=2026.09.05.depth-controls.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-manual-input.1", page)
+            self.assertIn("/static/css/canvas-special-nodes.css?v=2026.09.05.depth-manual-input.1", page)
 
         for marker in (
             "function depthMapBodyHtml(node)",
@@ -563,7 +563,12 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "depthMapGeneratedSignature",
             "depthMapFailedSignature",
             "setOutputItem(node, file, options)",
-            "连接或导入一张图片后自动生成深度图",
+            "连接或手动上传一张图片后自动生成深度图",
+            "data-depth-map-input-card",
+            "data-depth-map-remove-input",
+            "手动优先",
+            "已手动添加输入图片，连线输入暂时忽略",
+            "已移除手动输入图片，恢复使用连线输入",
             "data-special-action=\"open-depth-controls\"",
             "DEFAULT_DEPTH_MAP_CONTROLS",
             "DEPTH_MAP_CONTROL_PRESETS",
@@ -583,6 +588,28 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "overlay.querySelector('.depth-map-control-close')?.focus()",
         ):
             self.assertIn(marker, self.shared)
+
+        input_resolver = re.search(
+            r"function depthMapInput\(node, options\)\{.*?\n    \}",
+            self.shared,
+            re.S,
+        ).group(0)
+        self.assertLess(input_resolver.index("node?.depthMapManualInput"), input_resolver.index("options.getInputImage?.(node)"))
+
+        depth_binding = re.search(
+            r"function bindDepthMap\(root, node, options=\{\}\)\{.*?(?=\n    function bindPoseReplicate)",
+            self.shared,
+            re.S,
+        ).group(0)
+        remove_handler = depth_binding[depth_binding.index("data-depth-map-remove-input"):]
+        for marker in (
+            "delete node.depthMapManualInput",
+            "source = depthMapInput(node, options)",
+            "syncDepthMapInput(node, source)",
+            "clearDepthMapResult(node, options)",
+            "if(source?.url) runDepthMap(node, options, true)",
+        ):
+            self.assertIn(marker, remove_handler)
 
         for marker in (
             "function addDepthMapNode(point)",
@@ -618,6 +645,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("if(to.specialType === 'depth-map'", connect_body)
         self.assertNotIn("if(to.specialType === 'depth-map'", self.smart[self.smart.index("async function optimizeSmartModelscopePrompt"):self.smart.index("async function urlToBase64")])
         self.assertIn(".depth-map-preview-grid", self.styles)
+        self.assertIn(".depth-map-input-card", self.styles)
+        self.assertIn(".depth-map-remove-input", self.styles)
         depth_styles = self.styles[self.styles.index("/* 深度图节点"):]
         for blue_token in ("hsl(214", "#2563eb", "#3b82f6", "#60a5fa", "59,130,246"):
             self.assertNotIn(blue_token, depth_styles)

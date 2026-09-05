@@ -62,6 +62,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(CONFIG)
         if path=='/api/canvas/pose-replicate-templates':
             return self.send({'template_id':POSE_REPLICATE_TEMPLATE_ID,'items':pose_replicate_template_catalog()})
+        if path=='/api/person-depth/component/status':
+            return self.send({'state':'ready','ready':True,'install_available':True,'progress':1,'message':'高精度人物深度组件已就绪'})
         if path.startswith('/api/canvases/'):
             canvas_id=path.split('/')[3]
             if path.endswith('/meta'): return self.send({'id':canvas_id,'updated_at':1})
@@ -77,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.send({},404)
     def do_POST(self):
         self.rfile.read(int(self.headers.get('Content-Length',0)))
+        if self.path=='/api/ai/upload':
+            return self.send({'files':[{'url':'/static/images/logo.png','name':'fixture-depth-adjusted.png','natural_w':150,'natural_h':150,'kind':'image'}]})
         if self.path.endswith('/touch'): return self.send({'canvas':{'id':self.path.split('/')[3],'updated_at':1}})
         if self.path.endswith('/check'): return self.send({'missing':[]})
         return self.send({'detail':'Fixture server: generation is disabled'},503)

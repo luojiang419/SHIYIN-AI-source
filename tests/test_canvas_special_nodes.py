@@ -143,7 +143,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.04.pose-replicate.6", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-controls.1", page)
             self.assertIn("feature=pose-replicate-v2.4", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
 
@@ -552,7 +552,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("深度图", page)
             self.assertIn("feature=depth-map-node.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.person-depth-auto.", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.depth-controls.1", page)
+            self.assertIn("/static/css/canvas-special-nodes.css?v=2026.09.05.depth-controls.1", page)
 
         for marker in (
             "function depthMapBodyHtml(node)",
@@ -563,6 +564,23 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "depthMapFailedSignature",
             "setOutputItem(node, file, options)",
             "连接或导入一张图片后自动生成深度图",
+            "data-special-action=\"open-depth-controls\"",
+            "DEFAULT_DEPTH_MAP_CONTROLS",
+            "DEPTH_MAP_CONTROL_PRESETS",
+            "function openDepthMapControls(node, options, trigger=null)",
+            "function renderDepthMapControls(image, values, target, maxEdge=0)",
+            "function scheduleDepthMapControlApply(node, options, delay=360)",
+            "depthMapBaseOutputUrl",
+            "depth-map-adjusted-",
+            "data-depth-control-preview",
+            "data-depth-control-field=\"farPoint\"",
+            "data-depth-control-field=\"nearPoint\"",
+            "data-depth-control-field=\"midtone\"",
+            "data-depth-control-field=\"contrast\"",
+            "data-depth-control-field=\"brightness\"",
+            "data-depth-control-field=\"smooth\"",
+            "data-depth-control-field=\"invert\"",
+            "overlay.querySelector('.depth-map-control-close')?.focus()",
         ):
             self.assertIn(marker, self.shared)
 
@@ -606,6 +624,11 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn(".depthMap-node.selected{outline-color:var(--strong", depth_styles)
         self.assertIn(".smart-special-node.smart-depth-map-node .node-port{border-color:var(--strong", depth_styles)
         self.assertIn(".smart-special-node.smart-depth-map-node{min-width:520px;min-height:560px", depth_styles)
+        self.assertIn(".depth-map-control-overlay", depth_styles)
+        self.assertIn(".depth-map-control-dialog", depth_styles)
+        self.assertIn(".depth-map-control-previews", depth_styles)
+        self.assertIn(".depth-map-control-range", depth_styles)
+        self.assertIn(".depth-map-control-toggle", depth_styles)
 
     def test_pose_replicate_new_defaults_and_legacy_mode_are_explicit(self):
         for source in (self.classic, self.smart):

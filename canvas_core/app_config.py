@@ -10,6 +10,7 @@ from typing import Any
 DEFAULT_CLOSE_BEHAVIOR = "ask_on_close"
 CLOSE_BEHAVIORS = frozenset({DEFAULT_CLOSE_BEHAVIOR, "minimize_to_tray", "exit"})
 DEFAULT_GENERATED_OUTPUT_DIR = ""
+DEFAULT_BATCH_OUTFIT_OUTPUT_DIR = ""
 DEFAULT_QUICK_SAVE_MODE = "manual"
 QUICK_SAVE_MODES = frozenset({DEFAULT_QUICK_SAVE_MODE, "silent"})
 DEFAULT_QUICK_SAVE_DIR = ""
@@ -50,6 +51,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
             return {
                 "close_behavior": DEFAULT_CLOSE_BEHAVIOR,
                 "generated_output_dir": DEFAULT_GENERATED_OUTPUT_DIR,
+                "batch_outfit_output_dir": DEFAULT_BATCH_OUTFIT_OUTPUT_DIR,
                 "quick_save_mode": DEFAULT_QUICK_SAVE_MODE,
                 "quick_save_dir": DEFAULT_QUICK_SAVE_DIR,
                 "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
@@ -64,6 +66,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         behavior = str(value.get("close_behavior") or DEFAULT_CLOSE_BEHAVIOR)
         value["close_behavior"] = behavior if behavior in CLOSE_BEHAVIORS else DEFAULT_CLOSE_BEHAVIOR
         value["generated_output_dir"] = str(value.get("generated_output_dir") or "").strip()
+        value["batch_outfit_output_dir"] = str(value.get("batch_outfit_output_dir") or "").strip()
         quick_save_mode = str(value.get("quick_save_mode") or DEFAULT_QUICK_SAVE_MODE).strip()
         value["quick_save_mode"] = quick_save_mode if quick_save_mode in QUICK_SAVE_MODES else DEFAULT_QUICK_SAVE_MODE
         value["quick_save_dir"] = str(value.get("quick_save_dir") or "").strip()
@@ -79,12 +82,13 @@ def update_app_settings(
     *,
     close_behavior: str | None = None,
     generated_output_dir: str | None = None,
+    batch_outfit_output_dir: str | None = None,
     quick_save_mode: str | None = None,
     quick_save_dir: str | None = None,
     topaz_video_install_dir: str | None = None,
     shortcut_bindings: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
+    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -99,6 +103,11 @@ def update_app_settings(
             if directory and not Path(directory).expanduser().is_absolute():
                 raise ValueError("生成图片保存目录必须是绝对路径")
             value["generated_output_dir"] = directory
+        if batch_outfit_output_dir is not None:
+            directory = str(batch_outfit_output_dir or "").strip()
+            if directory and not Path(directory).expanduser().is_absolute():
+                raise ValueError("批量换款保存目录必须是绝对路径")
+            value["batch_outfit_output_dir"] = directory
         if quick_save_mode is not None:
             mode = str(quick_save_mode or "").strip()
             if mode not in QUICK_SAVE_MODES:

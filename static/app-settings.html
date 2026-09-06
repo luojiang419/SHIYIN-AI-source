@@ -22,7 +22,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.02.quick-save.1">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.06.batch-outfit.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -79,6 +79,25 @@
                 <p id="generatedOutputHint"></p>
             </div>
             <p class="app-settings-note" data-i18n="appSettings.generatedOutputNaming">生成成功后自动保存副本，文件名格式为 SHIYIN-000001-YYYYMMDD。</p>
+        </section>
+
+        <section class="app-settings-card" aria-labelledby="batchOutfitOutputTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>BATCH OUTFIT</span>
+                    <h2 id="batchOutfitOutputTitle" data-i18n="appSettings.batchOutfitOutput">批量换款保存</h2>
+                </div>
+            </div>
+            <div class="app-settings-output-control">
+                <label for="batchOutfitOutputDir" data-i18n="appSettings.currentOutputDirectory">当前保存目录</label>
+                <div class="app-settings-output-row">
+                    <input id="batchOutfitOutputDir" type="text" readonly>
+                    <button id="chooseBatchOutfitOutput" type="button" data-i18n="appSettings.chooseDirectory">选择文件夹</button>
+                    <button id="resetBatchOutfitOutput" type="button" class="secondary" data-i18n="appSettings.useDefaultDirectory">恢复默认</button>
+                </div>
+                <p id="batchOutfitOutputHint"></p>
+            </div>
+            <p class="app-settings-note" data-i18n="appSettings.batchOutfitOutputHint">批量换款生成成功后，会在此目录下按款号名称自动创建子文件夹并归档图片。</p>
         </section>
 
         <section class="app-settings-card" aria-labelledby="quickSaveTitle">
@@ -227,6 +246,6 @@
         </section>
     </main>
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
-    <script src="/static/js/app-settings.js?v=2026.09.02.quick-save.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.09.06.batch-outfit.1"></script>
 </body>
 </html>

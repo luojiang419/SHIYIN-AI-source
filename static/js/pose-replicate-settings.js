@@ -1,6 +1,50 @@
 (function(global){
     'use strict';
+    const SHARED_STORAGE_KEY = 'pose_replicate_prompt_templates_v1';
+    const SHARED_CHANNEL_NAME = 'pose-replicate-prompt-templates';
     let catalogPromise = null;
+    let sharedChannel = null;
+
+    function cleanOverrides(value){
+        if(!value || typeof value !== 'object') return {};
+        return Object.fromEntries(Object.entries(value).filter(([key,prompt]) =>
+            /^(depth|skeleton):[a-z-]+$/.test(key)
+            && typeof prompt === 'string'
+            && Boolean(prompt.trim())
+            && prompt.length <= 30000
+        ));
+    }
+    function sharedSnapshot(){
+        try {
+            const raw = localStorage.getItem(SHARED_STORAGE_KEY);
+            if(raw === null) return {exists:false, overrides:{}};
+            const parsed = JSON.parse(raw);
+            return {exists:true, overrides:cleanOverrides(parsed?.overrides ?? parsed)};
+        } catch(error) {
+            return {exists:false, overrides:{}};
+        }
+    }
+    function publishSharedOverrides(overrides, source='local'){
+        const detail = {overrides:cleanOverrides(overrides), source};
+        if(typeof global.dispatchEvent === 'function' && typeof global.CustomEvent === 'function') {
+            global.dispatchEvent(new global.CustomEvent('pose-replicate-templates-changed', {detail}));
+        }
+        if(source === 'local') try { sharedChannel?.postMessage(detail); } catch(error) {}
+    }
+    function writeSharedOverrides(overrides){
+        const clean = cleanOverrides(overrides);
+        try {
+            localStorage.setItem(SHARED_STORAGE_KEY, JSON.stringify({schema_version:1, overrides:clean, updated_at:Date.now()}));
+        } catch(error) {}
+        publishSharedOverrides(clean);
+        return clean;
+    }
+    function sharedOverridesForNode(node={}){
+        const snapshot = sharedSnapshot();
+        if(snapshot.exists) return snapshot.overrides;
+        const legacy = cleanOverrides(node.poseReplicatePromptTemplates);
+        return Object.keys(legacy).length ? writeSharedOverrides(legacy) : legacy;
+    }
     function combinationKey(mode, hasModel, hasScene){
         const scenario = hasModel ? (hasScene ? 'model-full-look-scene' : 'model-wardrobe')
             : (hasScene ? 'base-wardrobe-scene' : 'base-wardrobe');
@@ -9,12 +53,15 @@
     function promptPolicy(node, inputs){
         const key = combinationKey(inputs.mode || node.poseReplicateMode || 'skeleton', Boolean(inputs.modelSubject?.url), Boolean(inputs.scene?.url));
         const policy = {template_id:'pose-replicate.v3.1', locale:'zh-CN'};
-        const overrides = node.poseReplicatePromptTemplates || {};
+        const overrides = sharedOverridesForNode(node);
         if(Object.prototype.hasOwnProperty.call(overrides, key)){
             policy.custom_template = overrides[key];
             policy.custom_template_key = key;
         }
         return policy;
+    }
+    function sharedPromptPolicy(inputs={}){
+        return promptPolicy({}, inputs);
     }
     function loadCatalog(){
         if(!catalogPromise) catalogPromise = fetch('/api/canvas/pose-replicate-templates')
@@ -43,7 +90,8 @@
         const editor = dialog.querySelector('.pose-template-editor');
         const textarea = editor.querySelector('textarea');
         const status = editor.querySelector('[role="status"]');
-        const valueFor = entry => node.poseReplicatePromptTemplates?.[entry.key] ?? entry.prompt;
+        let overrides = sharedOverridesForNode(node);
+        const valueFor = entry => overrides?.[entry.key] ?? entry.prompt;
         const changed = () => { if(!undoRecorded){ beforeChange(); undoRecorded = true; } };
         function persist(){
             if(!active) return true;
@@ -53,8 +101,10 @@
             }
             if(textarea.value !== valueFor(active)){
                 changed();
-                node.poseReplicatePromptTemplates = {...node.poseReplicatePromptTemplates, [active.key]:textarea.value};
-                if(textarea.value === active.prompt) delete node.poseReplicatePromptTemplates[active.key];
+                overrides = {...overrides, [active.key]:textarea.value};
+                if(textarea.value === active.prompt) delete overrides[active.key];
+                overrides = writeSharedOverrides(overrides);
+                node.poseReplicatePromptTemplates = {...overrides};
                 onChange(node);
             }
             status.textContent = '已应用到当前组合，下次生成立即使用';
@@ -68,7 +118,7 @@
                 const title = document.createElement('strong');
                 title.textContent = `${entry.mode === 'depth' ? '深度图' : '骨架图'} · ${entry.title}`;
                 const badge = document.createElement('span');
-                badge.textContent = node.poseReplicatePromptTemplates?.[entry.key] != null ? '自定义' : '内置默认';
+                badge.textContent = overrides?.[entry.key] != null ? '共享自定义' : '内置默认';
                 const preview = document.createElement('p'); preview.textContent = valueFor(entry);
                 card.append(title, badge, preview);
                 card.onclick = () => {
@@ -101,5 +151,19 @@
         loadCatalog().then(data => { if(dialog.isConnected){ entries = data; drawList(); } })
             .catch(error => { if(dialog.isConnected) list.textContent = error.message; });
     }
-    global.PoseReplicateSettings = {open, promptPolicy, combinationKey};
+    try {
+        sharedChannel = new BroadcastChannel(SHARED_CHANNEL_NAME);
+        sharedChannel.addEventListener('message', event => publishSharedOverrides(event.data?.overrides || {}, 'broadcast'));
+    } catch(error) {}
+    if(typeof global.addEventListener === 'function') global.addEventListener('storage', event => {
+        if(event.key === SHARED_STORAGE_KEY) publishSharedOverrides(sharedSnapshot().overrides, 'storage');
+    });
+    global.PoseReplicateSettings = {
+        open,
+        promptPolicy,
+        sharedPromptPolicy,
+        combinationKey,
+        sharedOverrides:() => sharedSnapshot().overrides,
+        sharedStorageKey:SHARED_STORAGE_KEY,
+    };
 })(window);

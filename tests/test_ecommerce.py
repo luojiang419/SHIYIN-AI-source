@@ -2037,11 +2037,11 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("data-task-candidate-time", self.javascript)
         self.assertIn("syncCandidateTimer()", self.javascript)
         self.assertIn("const IS_FREE_CREATION = false", self.javascript)
-        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.08.10.universal-plan-banner-removed.1&feature=free-creation-removed.1"', self.index_html)
+        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.09.06.batch-outfit.1"', self.index_html)
         self.assertNotIn('id="frame-free-creation"', self.index_html)
         self.assertNotIn("switchUI(this, 'free-creation')", self.index_html)
-        self.assertIn('/static/js/ecommerce.js?v=2026.08.10.universal-plan-banner-removed.1', self.html)
-        self.assertIn('/static/css/ecommerce.css?v=2026.08.10.universal-plan-banner-removed.1', self.html)
+        self.assertIn('/static/js/ecommerce.js?v=2026.09.06.batch-outfit.1', self.html)
+        self.assertIn('/static/css/ecommerce.css?v=2026.09.06.batch-outfit.1', self.html)
 
     def test_generation_parameters_render_before_slow_server_bootstrap(self):
         self.assertIn("initializing:true", self.javascript)
@@ -2138,10 +2138,10 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("normalize_image_orientation(content)", backend)
         self.assertIn('"orientation_normalized"', backend)
 
-    def test_prompt_only_background_controls_remove_mask_and_manual_composition_switch(self):
+    def test_removed_background_page_has_no_mask_or_composition_controls(self):
         for marker in ("maskToggle", "maskEditor", "maskCanvas", "bindMaskEditor", "uploadMaskIfNeeded", "preserve_source_composition"):
             self.assertNotIn(marker, self.html + self.javascript + self.css)
-        self.assertIn("const sourceCompositionLocked = state.operation === 'background_change';", self.javascript)
+        self.assertNotIn("background_change", self.html + self.javascript)
         incoming = re.search(r"function applyIncomingSettings\(serialized\)\{(.*?)\n    \}", self.javascript, re.S)
         self.assertIsNotNone(incoming)
         for marker in ("syncGenerationParameterControls()", "populateModelSelectors()"):

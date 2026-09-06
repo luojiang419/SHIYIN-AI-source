@@ -2756,6 +2756,7 @@ class PreferencesUpdateRequest(BaseModel):
 class AppSettingsUpdateRequest(BaseModel):
     close_behavior: Optional[str] = None
     generated_output_dir: Optional[str] = None
+    batch_outfit_output_dir: Optional[str] = None
     quick_save_mode: Optional[str] = None
     quick_save_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
@@ -3032,14 +3033,23 @@ def default_generated_output_directory() -> str:
     return str((DATA_LAYOUT.exports / "generated").resolve())
 
 
+def default_batch_outfit_output_directory() -> str:
+    return str((DATA_LAYOUT.exports / "batch-outfit").resolve())
+
+
 def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
     custom_directory = str(config.get("generated_output_dir") or "").strip()
     effective_directory = custom_directory or default_generated_output_directory()
+    batch_outfit_directory = str(config.get("batch_outfit_output_dir") or "").strip()
+    batch_outfit_effective_directory = batch_outfit_directory or default_batch_outfit_output_directory()
     return {
         "close_behavior": config["close_behavior"],
         "generated_output_dir": custom_directory,
         "generated_output_effective_dir": effective_directory,
         "generated_output_uses_default": not bool(custom_directory),
+        "batch_outfit_output_dir": batch_outfit_directory,
+        "batch_outfit_output_effective_dir": batch_outfit_effective_directory,
+        "batch_outfit_output_uses_default": not bool(batch_outfit_directory),
         "quick_save_mode": str(config.get("quick_save_mode") or "manual"),
         "quick_save_dir": str(config.get("quick_save_dir") or "").strip(),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
@@ -3058,6 +3068,15 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
                 raise ValueError("生成图片保存目录必须是绝对路径")
             directory.mkdir(parents=True, exist_ok=True)
             fd, probe = tempfile.mkstemp(prefix=".shiyin-write-test-", dir=str(directory))
+            os.close(fd)
+            os.remove(probe)
+        if payload.batch_outfit_output_dir is not None:
+            requested_batch_outfit = str(payload.batch_outfit_output_dir or "").strip()
+            batch_outfit_directory = Path(requested_batch_outfit).expanduser() if requested_batch_outfit else Path(default_batch_outfit_output_directory())
+            if not batch_outfit_directory.is_absolute():
+                raise ValueError("批量换款保存目录必须是绝对路径")
+            batch_outfit_directory.mkdir(parents=True, exist_ok=True)
+            fd, probe = tempfile.mkstemp(prefix=".shiyin-write-test-", dir=str(batch_outfit_directory))
             os.close(fd)
             os.remove(probe)
         if payload.quick_save_dir is not None:
@@ -3085,6 +3104,7 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             APP_PATHS.data_root,
             close_behavior=payload.close_behavior,
             generated_output_dir=payload.generated_output_dir,
+            batch_outfit_output_dir=payload.batch_outfit_output_dir,
             quick_save_mode=payload.quick_save_mode,
             quick_save_dir=payload.quick_save_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
@@ -3253,6 +3273,47 @@ async def select_generated_output_directory():
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
         "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
         "$dialog.Description='选择 SHIYIN AI 生成图片保存目录';"
+        "$dialog.ShowNewFolderButton=$true;"
+        "$initialPath=[string]$env:SHIYIN_FOLDER_INITIAL_PATH;"
+        "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
+        "if($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){Write-Output $dialog.SelectedPath}"
+    )
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        raise HTTPException(status_code=501, detail="未找到 Windows PowerShell，无法打开目录选择器")
+    powershell_env = os.environ.copy()
+    powershell_env["SHIYIN_FOLDER_INITIAL_PATH"] = initial
+    try:
+        process = await asyncio.to_thread(
+            subprocess.run,
+            [powershell, "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            env=powershell_env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=408, detail="目录选择超时") from exc
+    if process.returncode != 0:
+        raise HTTPException(status_code=500, detail=(process.stderr or "无法打开目录选择器").strip()[:300])
+    selected = process.stdout.strip().splitlines()[-1].strip() if process.stdout.strip() else ""
+    return {"selected": bool(selected), "path": selected}
+
+
+@app.post("/api/app-settings/select-batch-outfit-output-directory")
+async def select_batch_outfit_output_directory():
+    if os.name != "nt":
+        raise HTTPException(status_code=501, detail="当前系统不支持原生目录选择")
+    config = read_app_config(APP_PATHS.data_root)
+    initial = str(config.get("batch_outfit_output_dir") or default_batch_outfit_output_directory())
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+        "$dialog=New-Object System.Windows.Forms.FolderBrowserDialog;"
+        "$dialog.Description='选择 SHIYIN AI 批量换款保存目录';"
         "$dialog.ShowNewFolderButton=$true;"
         "$initialPath=[string]$env:SHIYIN_FOLDER_INITIAL_PATH;"
         "if($initialPath -and (Test-Path -LiteralPath $initialPath)){$dialog.SelectedPath=$initialPath};"
@@ -4146,6 +4207,11 @@ class PoseReplicatePromptPolicy(BaseModel):
     custom_template_key: str = ""
 
 
+class BatchOutfitContext(BaseModel):
+    group_id: str = Field(min_length=1, max_length=96)
+    style_name: str = Field(min_length=1, max_length=120)
+
+
 class PoseReplicateTaskRequest(BaseModel):
     mode: str = "depth"
     scenario: str = ""
@@ -4154,6 +4220,12 @@ class PoseReplicateTaskRequest(BaseModel):
     generation: PoseReplicateGeneration = Field(default_factory=PoseReplicateGeneration)
     prompt_policy: PoseReplicatePromptPolicy = Field(default_factory=PoseReplicatePromptPolicy)
     control_signature: str = ""
+    batch_outfit: Optional[BatchOutfitContext] = None
+
+
+class BatchOutfitDeleteImagesRequest(BaseModel):
+    work_ids: List[str] = Field(default_factory=list)
+    archive_paths: List[str] = Field(default_factory=list)
 
 
 class ImagePromptOptimizeRequest(BaseModel):
@@ -4835,6 +4907,68 @@ class PromptLibraryCategoryRequest(BaseModel):
     library_id: str = ""
 
 # --- 负载均衡 ---
+
+_WINDOWS_RESERVED_DIRECTORY_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
+def validate_batch_outfit_style_name(value: str) -> str:
+    name = re.sub(r"\s+", " ", str(value or "").strip())
+    if not name:
+        raise ValueError("款号名称不能为空")
+    if len(name) > 80:
+        raise ValueError("款号名称不能超过 80 个字符")
+    if any(ord(character) < 32 for character in name) or re.search(r'[<>:"/\\|?*]', name):
+        raise ValueError("款号名称不能包含 Windows 文件夹非法字符")
+    if name in {".", ".."} or name.endswith((".", " ")):
+        raise ValueError("款号名称不能以点或空格结尾")
+    if name.split(".", 1)[0].upper() in _WINDOWS_RESERVED_DIRECTORY_NAMES:
+        raise ValueError("款号名称不能使用 Windows 保留名")
+    return name
+
+
+def batch_outfit_output_root() -> Path:
+    config = read_app_config(APP_PATHS.data_root)
+    configured = str(config.get("batch_outfit_output_dir") or "").strip()
+    return Path(configured or default_batch_outfit_output_directory()).expanduser().resolve()
+
+
+def archive_batch_outfit_images(record: Dict[str, Any], context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    style_name = validate_batch_outfit_style_name(context.get("style_name") or "")
+    root = batch_outfit_output_root()
+    destination_dir = (root / style_name).resolve()
+    try:
+        destination_dir.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("款号输出目录超出批量换款保存根目录") from exc
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    history_id = str(record.get("id") or "")
+    token = hashlib.sha256(history_id.encode("utf-8")).hexdigest()[:10]
+    archived = []
+    for index, url in enumerate(record.get("images") or [], 1):
+        source = output_file_from_url(str(url or ""))
+        if not source or not os.path.isfile(source):
+            continue
+        extension = os.path.splitext(source)[1].lower()
+        if extension not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        filename = f"{style_name}-{token}-{index:02d}{extension}"
+        destination = (destination_dir / filename).resolve()
+        destination.relative_to(root)
+        if not destination.exists():
+            shutil.copy2(source, destination)
+        archived.append({
+            "source_url": str(url),
+            "name": filename,
+            "path": str(destination),
+            "relative_path": destination.relative_to(root).as_posix(),
+        })
+    if not archived:
+        raise ValueError("批量换款没有可归档的本地生成图片")
+    return archived
 
 def save_generated_images_to_user_directory(record: Dict[str, Any]) -> None:
     if record.get("saved_images"):
@@ -16550,6 +16684,19 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds, "prompt_original": prompt_result.get("original_prompt") or payload.prompt, "prompt_optimization": prompt_result.get("metadata") or {}, "prompt_context": dict(payload.prompt_context or {})},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
+    batch_outfit_context = payload.prompt_context.get("batch_outfit") if isinstance(payload.prompt_context, dict) else None
+    if isinstance(batch_outfit_context, dict):
+        result["id"] = f"batch_outfit_{uuid.uuid4().hex}"
+        result["batch_outfit"] = {
+            "group_id": str(batch_outfit_context.get("group_id") or ""),
+            "style_name": validate_batch_outfit_style_name(batch_outfit_context.get("style_name") or ""),
+        }
+        try:
+            result["batch_outfit_archive"] = archive_batch_outfit_images(result, result["batch_outfit"])
+            result["batch_outfit_output_directory"] = str(batch_outfit_output_root())
+        except (OSError, ValueError) as exc:
+            result["batch_outfit_save_error"] = str(exc)[:500]
+        result["work_ids"] = [work_item_id(result["id"], index, url) for index, url in enumerate(result["images"])]
     save_to_history(result)
     if GLOBAL_LOOP:
         asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
@@ -20193,6 +20340,16 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             raise HTTPException(status_code=400, detail="自定义模板组合与当前模式和输入不一致")
     if payload.scenario and payload.scenario != expected_scenario:
         raise HTTPException(status_code=400, detail=f"一键复刻场景与输入端口不一致，应为 {expected_scenario}")
+    batch_outfit_context = None
+    if payload.batch_outfit is not None:
+        try:
+            style_name = validate_batch_outfit_style_name(payload.batch_outfit.style_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        group_id = str(payload.batch_outfit.group_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", group_id):
+            raise HTTPException(status_code=400, detail="批量换款任务组标识不合法")
+        batch_outfit_context = {"group_id": group_id, "style_name": style_name}
     if mode == "depth" and not PERSON_DEPTH_COMPONENT_MANAGER.public_status().get("ready"):
         raise HTTPException(status_code=503, detail="高精度人物深度组件尚未就绪，不能提交深度复刻任务")
     normalized_result: Dict[str, Any] = {}
@@ -20250,6 +20407,8 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         "normalized_instruction": compiled.normalized_instruction,
         "reference_order": [dict(item) for item in compiled.reference_order],
     }
+    if batch_outfit_context:
+        prompt_context["batch_outfit"] = batch_outfit_context
     image_payload = OnlineImageRequest(
         prompt=compiled.final_prompt,
         operation="pose_replicate",
@@ -26165,6 +26324,34 @@ def _delete_selected_work_files(works: List[Dict[str, Any]]) -> Dict[str, Any]:
         history_id = str(item.get("history_id") or "").strip()
         if history_id:
             grouped.setdefault(history_id, []).append(item)
+    deleted_batch_archives = 0
+    for history_id, selected_items in grouped.items():
+        record = history_records.get(history_id) or {}
+        archive_items = record.get("batch_outfit_archive") if isinstance(record.get("batch_outfit_archive"), list) else []
+        batch_context = record.get("batch_outfit") if isinstance(record.get("batch_outfit"), dict) else {}
+        try:
+            style_name = validate_batch_outfit_style_name(batch_context.get("style_name") or "")
+        except ValueError:
+            style_name = ""
+        for item in selected_items:
+            output_index = int(item.get("output_index") or 0)
+            source_url = str(item.get("url") or "")
+            archive = next((value for value in archive_items if isinstance(value, dict) and str(value.get("source_url") or "") == source_url), None)
+            if archive is None and 0 <= output_index < len(archive_items) and isinstance(archive_items[output_index], dict):
+                archive = archive_items[output_index]
+            archive_path = Path(str((archive or {}).get("path") or "")).expanduser()
+            if not style_name or not archive_path.is_absolute() or archive_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                continue
+            try:
+                resolved_archive = archive_path.resolve()
+                if resolved_archive.parent.name != style_name:
+                    continue
+                resolved_archive.unlink()
+                deleted_batch_archives += 1
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                file_errors.append({"path": str(archive_path), "error": str(exc)[:240]})
     deleted_records = 0
     with HISTORY_LOCK:
         for history_id, selected_items in grouped.items():
@@ -26206,6 +26393,7 @@ def _delete_selected_work_files(works: List[Dict[str, Any]]) -> Dict[str, Any]:
         "deleted_files": deleted_files,
         "skipped_files": skipped_files,
         "removed_canvas_assets": removed_canvas_assets,
+        "deleted_batch_archives": deleted_batch_archives,
         "file_errors": file_errors[:20],
         "revision": revision,
     }
@@ -26242,6 +26430,58 @@ async def batch_work_action(payload: WorkBatchRequest):
             changed.append(changed_work)
     publish_entity_changed("history", "global")
     return {"success": True, "action": action, "count": len(changed), "works": changed}
+
+
+@app.delete("/api/ecommerce/batch-outfit/images")
+async def delete_batch_outfit_images(payload: BatchOutfitDeleteImagesRequest):
+    work_ids = list(dict.fromkeys(str(value or "").strip() for value in payload.work_ids if str(value or "").strip()))
+    archive_paths = list(dict.fromkeys(str(value or "").strip() for value in payload.archive_paths if str(value or "").strip()))
+    if not work_ids and not archive_paths:
+        raise HTTPException(status_code=400, detail="没有需要删除的批量换款图片")
+    if len(work_ids) > 100 or len(archive_paths) > 100:
+        raise HTTPException(status_code=400, detail="单次最多删除 100 张图片")
+
+    deleted_works = {"deleted_files": 0, "deleted_records": 0, "file_errors": []}
+    if work_ids:
+        available = {str(item.get("id") or ""): item for item in all_works_with_canvas()}
+        works = [available[work_id] for work_id in work_ids if work_id in available]
+        if works:
+            deleted_works = _delete_selected_work_files(works)
+
+    root = batch_outfit_output_root()
+    deleted_archives = int(deleted_works.get("deleted_batch_archives") or 0)
+    skipped_archives = 0
+    archive_errors = []
+    for relative_value in archive_paths:
+        relative = Path(relative_value)
+        if relative.is_absolute():
+            archive_errors.append({"path": relative_value, "error": "归档路径必须相对于批量换款保存目录"})
+            continue
+        destination = (root / relative).resolve()
+        try:
+            destination.relative_to(root)
+        except ValueError:
+            archive_errors.append({"path": relative_value, "error": "归档路径超出批量换款保存目录"})
+            continue
+        if destination.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            archive_errors.append({"path": relative_value, "error": "只允许删除批量换款图片归档"})
+            continue
+        try:
+            destination.unlink()
+            deleted_archives += 1
+        except FileNotFoundError:
+            skipped_archives += 1
+        except OSError as exc:
+            archive_errors.append({"path": relative_value, "error": str(exc)[:240]})
+
+    return {
+        "success": not deleted_works.get("file_errors") and not archive_errors,
+        "deleted_work_files": int(deleted_works.get("deleted_files") or 0),
+        "deleted_records": int(deleted_works.get("deleted_records") or 0),
+        "deleted_archives": deleted_archives,
+        "skipped_archives": skipped_archives,
+        "errors": [*(deleted_works.get("file_errors") or []), *archive_errors][:20],
+    }
 
 
 @app.post("/api/works/{work_id}/reveal")

@@ -2894,3 +2894,537 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     color:var(--ec-text) !important;
     box-shadow:0 8px 22px rgba(23,23,23,.12) !important;
 }
+
+/* 批量换款：复用自由换衣双栏语言，组卡保持五个固定格子。 */
+.ec-page.is-batch-outfit {
+    padding-bottom:22px;
+}
+.ec-page.is-batch-outfit .ec-operation-tabs,
+.ec-operation-tabs {
+    grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.ec-page.is-batch-outfit .ec-workspace {
+    grid-template-columns:minmax(0,1fr) minmax(380px,440px);
+    gap:20px;
+}
+.ec-page.is-batch-outfit .ec-control-panel {
+    min-width:0;
+    min-height:0;
+    display:grid;
+    grid-template-rows:minmax(0,1fr) auto;
+    gap:14px;
+    overflow:hidden;
+    padding:18px;
+    border-radius:22px;
+    background:color-mix(in srgb,var(--ec-panel-raised) 94%,transparent);
+    box-shadow:var(--ec-shadow-raised);
+}
+.ec-page.is-batch-outfit #controlInputMount,
+.ec-page.is-batch-outfit .ec-operation-controls,
+.ec-page.is-batch-outfit #controlActionMount {
+    display:none !important;
+}
+.ec-page.is-batch-outfit .ec-model-panel {
+    grid-row:2;
+    margin:0;
+}
+.ec-page.is-batch-outfit .ec-parameter-grid label:last-child {
+    display:none;
+}
+.ec-batch-outfit-control {
+    min-height:0;
+    display:grid;
+    grid-template-rows:auto minmax(0,1fr) auto auto;
+    gap:12px;
+}
+.ec-batch-outfit-heading {
+    margin:0;
+}
+.ec-batch-outfit-heading > strong {
+    max-width:260px;
+    padding:6px 9px;
+    overflow:hidden;
+    border:1px solid var(--ec-border);
+    border-radius:999px;
+    background:var(--ec-control);
+    color:var(--ec-muted);
+    font-size:8px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-outfit-groups {
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    overflow:auto;
+    padding:2px 3px 10px;
+    scrollbar-gutter:stable;
+}
+.ec-batch-outfit-groups.is-single {
+    justify-content:center;
+}
+.ec-batch-group {
+    position:relative;
+    flex:0 0 auto;
+    min-width:0;
+    padding:12px;
+    border:1px solid var(--ec-border);
+    border-radius:19px;
+    outline:0;
+    background:linear-gradient(155deg,color-mix(in srgb,var(--ec-panel-raised) 94%,transparent),color-mix(in srgb,var(--ec-panel-soft) 64%,transparent));
+    box-shadow:0 12px 28px rgba(92,72,48,.08),inset 0 1px 0 rgba(255,255,255,.58);
+    transition:border-color .18s ease,box-shadow .18s ease,transform .18s ease;
+}
+.ec-batch-group:hover,
+.ec-batch-group:focus-visible {
+    border-color:var(--ec-border-strong);
+    transform:translateY(-1px);
+}
+.ec-batch-group.is-selected {
+    border-color:color-mix(in srgb,var(--ec-accent) 58%,var(--ec-border));
+    box-shadow:0 16px 36px rgba(92,72,48,.12),0 0 0 2px color-mix(in srgb,var(--ec-accent) 12%,transparent);
+}
+.ec-batch-group-head {
+    min-width:0;
+    display:grid;
+    grid-template-columns:38px minmax(0,1fr) auto 30px;
+    align-items:center;
+    gap:9px;
+    margin-bottom:10px;
+}
+.ec-batch-group-number {
+    width:38px;
+    height:30px;
+    display:grid;
+    place-items:center;
+    border-radius:9px;
+    background:var(--ec-accent);
+    color:var(--ec-accent-contrast);
+    font:800 10px "JetBrains Mono",monospace;
+}
+.ec-batch-group-head > div {
+    min-width:0;
+    display:grid;
+    gap:2px;
+}
+.ec-batch-group-head > div strong,
+.ec-batch-group-head > div small {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-group-head > div strong {
+    font-size:12px;
+}
+.ec-batch-group-head > div small {
+    color:var(--ec-muted);
+    font-size:8px;
+}
+.ec-batch-group-head > div small.status-succeeded {
+    color:var(--ec-success);
+}
+.ec-batch-group-head > div small.status-failed,
+.ec-batch-group-head > div small.status-interrupted {
+    color:var(--ec-danger);
+}
+.ec-batch-group-head > button,
+.ec-batch-work-toolbar button,
+.ec-batch-empty button {
+    min-height:30px;
+    padding:0 11px;
+    border:1px solid var(--ec-border);
+    border-radius:9px;
+    background:var(--ec-control);
+    color:var(--ec-text-soft);
+    font-size:9px;
+    font-weight:800;
+    cursor:pointer;
+}
+.ec-batch-group-head > button:disabled {
+    opacity:.38;
+    cursor:not-allowed;
+}
+.ec-batch-group-head > button.danger {
+    width:30px;
+    padding:0;
+    color:var(--ec-danger);
+}
+.ec-batch-group-slots {
+    min-width:0;
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:8px;
+}
+.ec-batch-input-card,
+.ec-batch-view-card {
+    position:relative;
+    min-width:0;
+    height:132px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    gap:4px;
+    overflow:hidden;
+    padding:24px 8px 9px;
+    border:1px dashed var(--ec-border-strong);
+    border-radius:14px;
+    background:var(--ec-panel-soft);
+    color:var(--ec-text);
+    cursor:pointer;
+}
+.ec-batch-input-card:hover,
+.ec-batch-view-card:hover {
+    border-color:var(--ec-accent);
+    background:var(--ec-control-hover);
+}
+.ec-batch-input-label {
+    position:absolute;
+    top:7px;
+    left:8px;
+    z-index:2;
+    max-width:calc(100% - 16px);
+    overflow:hidden;
+    color:var(--ec-muted);
+    font-size:8px;
+    font-weight:900;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-input-label em {
+    margin-left:2px;
+    color:var(--ec-danger);
+    font-style:normal;
+}
+.ec-batch-input-card strong,
+.ec-batch-view-card strong {
+    max-width:100%;
+    overflow:hidden;
+    font-size:10px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-input-card small,
+.ec-batch-view-card small {
+    display:-webkit-box;
+    overflow:hidden;
+    color:var(--ec-muted);
+    font-size:7px;
+    line-height:1.35;
+    text-align:center;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+}
+.ec-batch-input-plus,
+.ec-batch-view-icon {
+    width:28px;
+    height:28px;
+    display:grid;
+    place-items:center;
+    border-radius:50%;
+    background:var(--ec-control);
+    color:var(--ec-accent);
+    font-size:18px;
+}
+.ec-batch-input-card.has-image,
+.ec-batch-view-card.has-image {
+    justify-content:flex-end;
+    border-style:solid;
+    background:var(--ec-control);
+}
+.ec-batch-input-card.has-image img,
+.ec-batch-view-card.has-image img {
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+}
+.ec-batch-input-card.has-image::after,
+.ec-batch-view-card.has-image::after {
+    content:"";
+    position:absolute;
+    inset:58% 0 0;
+    background:linear-gradient(transparent,rgba(0,0,0,.72));
+}
+.ec-batch-input-card.has-image .ec-batch-input-label,
+.ec-batch-view-card.has-image .ec-batch-input-label,
+.ec-batch-input-card.has-image small,
+.ec-batch-view-card.has-image strong {
+    z-index:2;
+    color:#fff;
+    text-shadow:0 1px 5px rgba(0,0,0,.5);
+}
+.ec-batch-input-replace {
+    position:absolute;
+    right:6px;
+    bottom:6px;
+    z-index:3;
+    padding:3px 5px;
+    border-radius:6px;
+    background:rgba(0,0,0,.58);
+    color:#fff;
+    font-size:7px;
+}
+.ec-batch-input-remove {
+    position:absolute;
+    top:5px;
+    right:5px;
+    z-index:4;
+    width:22px;
+    height:22px;
+    display:grid;
+    place-items:center;
+    border-radius:7px;
+    background:rgba(20,20,20,.68);
+    color:#fff;
+    font-size:14px;
+}
+.ec-batch-group-error {
+    margin:8px 0 0;
+    color:var(--ec-danger);
+    font-size:8px;
+    line-height:1.45;
+}
+.ec-batch-outfit-actions {
+    display:grid;
+    grid-template-columns:minmax(150px,.72fr) minmax(180px,1.28fr);
+    gap:9px;
+}
+.ec-batch-outfit-actions .ec-secondary-button,
+.ec-batch-outfit-actions .ec-primary-button {
+    width:100%;
+    min-height:48px;
+    margin:0;
+}
+.ec-batch-empty,
+.ec-batch-works-empty {
+    min-height:260px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    padding:24px;
+    border:1px dashed var(--ec-border-strong);
+    border-radius:18px;
+    color:var(--ec-muted);
+    text-align:center;
+}
+.ec-batch-empty > span {
+    width:52px;
+    height:52px;
+    display:grid;
+    place-items:center;
+    border-radius:50%;
+    background:var(--ec-control);
+    color:var(--ec-accent);
+    font-size:28px;
+}
+.ec-batch-empty h3,
+.ec-batch-works-empty h3 {
+    margin:14px 0 4px;
+    color:var(--ec-text);
+    font-size:14px;
+}
+.ec-batch-empty p,
+.ec-batch-works-empty p {
+    max-width:420px;
+    margin:0 0 14px;
+    font-size:9px;
+    line-height:1.55;
+}
+.ec-page.is-batch-outfit .ec-result-panel {
+    min-width:0;
+    display:grid;
+    grid-template-rows:auto minmax(0,1fr);
+    overflow:hidden;
+    padding:18px 16px 14px;
+    border-radius:22px;
+    background:var(--ec-result-raised-bg);
+    box-shadow:var(--ec-shadow-raised);
+}
+.ec-page.is-batch-outfit .ec-result-head {
+    min-height:28px;
+    margin:0 4px 14px;
+}
+.ec-page.is-batch-outfit .ec-result-head > div > span,
+.ec-page.is-batch-outfit #compareReset,
+.ec-page.is-batch-outfit .ec-result-body > #emptyResult,
+.ec-page.is-batch-outfit .ec-result-body > #resultWorkspace {
+    display:none !important;
+}
+.ec-page.is-batch-outfit .ec-result-body,
+.ec-batch-outfit-works,
+.ec-batch-works-shell {
+    min-height:0;
+    height:100%;
+}
+.ec-batch-works-shell {
+    display:grid;
+    grid-template-rows:auto minmax(0,1fr) auto auto auto;
+    gap:10px;
+}
+.ec-batch-works-shell > header {
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+}
+.ec-batch-works-shell > header > div {
+    min-width:0;
+}
+.ec-batch-works-shell > header span {
+    display:block;
+    margin-bottom:3px;
+    color:var(--ec-muted);
+    font:800 8px "JetBrains Mono",monospace;
+    letter-spacing:.16em;
+}
+.ec-batch-works-shell > header h2 {
+    margin:0;
+    overflow:hidden;
+    font-size:15px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-works-shell > header > strong {
+    flex:0 0 auto;
+    color:var(--ec-muted);
+    font:800 9px "JetBrains Mono",monospace;
+}
+.ec-batch-work-stage {
+    min-height:300px;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    border:1px solid var(--ec-border);
+    border-radius:18px;
+    background:var(--ec-result-soft-bg);
+}
+.ec-batch-work-stage img {
+    width:100%;
+    height:100%;
+    object-fit:contain;
+}
+.ec-batch-work-toolbar {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+}
+.ec-batch-work-toolbar button {
+    min-height:36px;
+}
+.ec-batch-work-toolbar button.danger {
+    color:var(--ec-danger);
+}
+.ec-batch-work-thumbs {
+    display:flex;
+    gap:8px;
+    overflow-x:auto;
+    padding:2px 1px 6px;
+}
+.ec-batch-work-thumbs button {
+    position:relative;
+    flex:0 0 66px;
+    height:66px;
+    overflow:hidden;
+    padding:0;
+    border:2px solid transparent;
+    border-radius:11px;
+    background:var(--ec-control);
+    cursor:pointer;
+}
+.ec-batch-work-thumbs button.active {
+    border-color:var(--ec-accent);
+}
+.ec-batch-work-thumbs img {
+    width:100%;
+    height:100%;
+    object-fit:cover;
+}
+.ec-batch-work-thumbs span {
+    position:absolute;
+    right:4px;
+    bottom:4px;
+    min-width:17px;
+    padding:2px 4px;
+    border-radius:999px;
+    background:rgba(0,0,0,.64);
+    color:#fff;
+    font-size:7px;
+}
+.ec-batch-archive-path {
+    margin:0;
+    overflow:hidden;
+    color:var(--ec-muted);
+    font-size:8px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-outfit-dialog .ec-dialog-shell {
+    width:min(520px,calc(100vw - 30px));
+}
+.ec-batch-outfit-dialog .ec-field {
+    margin:18px 0 0;
+}
+.ec-batch-outfit-dialog .ec-field input {
+    min-height:48px;
+    font-size:13px;
+}
+
+@media (max-width:1180px) {
+    .ec-page.is-batch-outfit .ec-workspace {
+        grid-template-columns:minmax(0,1fr) 360px;
+    }
+    .ec-batch-input-card,
+    .ec-batch-view-card {
+        height:118px;
+    }
+}
+
+@media (max-width:920px) {
+    .ec-page.is-batch-outfit {
+        height:auto;
+        min-height:100%;
+        overflow:auto;
+    }
+    .ec-page.is-batch-outfit .ec-workspace {
+        grid-template-columns:1fr;
+        grid-template-rows:auto minmax(620px,1fr);
+    }
+    .ec-page.is-batch-outfit .ec-control-panel {
+        min-height:560px;
+        overflow:visible;
+    }
+    .ec-page.is-batch-outfit .ec-result-panel {
+        min-height:620px;
+    }
+    .ec-batch-outfit-groups {
+        overflow:visible;
+    }
+}
+
+@media (max-width:660px) {
+    .ec-page.is-batch-outfit .ec-operation-tabs,
+    .ec-operation-tabs {
+        grid-template-columns:none;
+        grid-auto-flow:column;
+        grid-auto-columns:112px;
+    }
+    .ec-batch-group-slots {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+    .ec-batch-view-card {
+        grid-column:1 / -1;
+    }
+    .ec-batch-outfit-actions,
+    .ec-batch-work-toolbar {
+        grid-template-columns:1fr;
+    }
+    .ec-batch-outfit-heading {
+        align-items:flex-start;
+        flex-direction:column;
+    }
+}

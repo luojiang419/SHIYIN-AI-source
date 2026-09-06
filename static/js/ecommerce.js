@@ -12,7 +12,7 @@
     const SETTINGS_KEY = 'studio_ecommerce_settings_v2';
     const LEGACY_SETTINGS_KEY = 'studio_ecommerce_settings_v1';
     const CURRENT_TASK_KEY = 'ecommerce_current_task';
-    const SETTINGS_SCHEMA_VERSION = 4;
+    const SETTINGS_SCHEMA_VERSION = 5;
     const DEFAULT_OPERATION = 'universal';
     const ASPECT_RATIOS = ['source','1:1','2:3','3:2','3:4','4:3','4:5','9:16','16:9'];
     const RESOLUTIONS = ['auto','1k','2k','4k'];
@@ -50,31 +50,16 @@
                 {role:'pose', labelKey:'ecommerce.poseImage', required:false},
             ],
         },
+        batch_outfit: {
+            titleKey:'ecommerce.batchOutfit',
+            inputs:[],
+            batchOutfit:true,
+        },
         pose_transfer: {
             titleKey:'ecommerce.poseTransfer',
             inputs:[
                 {role:'source', labelKey:'ecommerce.personImage', required:true},
                 {role:'pose', labelKey:'ecommerce.poseImage', required:false},
-            ],
-        },
-        prop_replace: {
-            titleKey:'ecommerce.propReplace',
-            inputs:[
-                {role:'source', labelKey:'ecommerce.sourceImage', required:true},
-                {role:'prop', labelKey:'ecommerce.propImage', required:true},
-            ],
-        },
-        angle_change: {
-            titleKey:'ecommerce.angleChange',
-            inputs:[
-                {role:'source', labelKey:'ecommerce.subjectImage', required:true},
-            ],
-        },
-        background_change: {
-            titleKey:'ecommerce.backgroundChange',
-            inputs:[
-                {role:'source', labelKey:'ecommerce.sourceImage', required:true},
-                {role:'background', labelKey:'ecommerce.backgroundImage', required:false},
             ],
         },
     };
@@ -102,10 +87,8 @@
     const DEFAULT_OPTIONS = {
         universal:{instruction:'', studio_reference:''},
         try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, studio_reference:''},
+        batch_outfit:{},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
-        prop_replace:{target_description:'', instruction:'', studio_reference:''},
-        angle_change:{azimuth:45, elevation:0, distance:'medium', instruction:'', studio_reference:''},
-        background_change:{background_mode:'preset', background_preset:'studio_white', background_prompt:'', instruction:'', studio_reference:''},
     };
 
     const createWorkspace = () => ({
@@ -160,6 +143,7 @@
         preferenceEchoGuardUntil:0,
         lastPointerDownAt:0,
         analysisPreview:null,
+        batchOutfit:{groups:[], selectedGroupId:'', selectedImageIndex:0},
         initializing:true,
     };
 
@@ -184,7 +168,7 @@
 
     function cacheElements(){
         [
-            'ecommercePage','ecommerceWorkspace','controlPanel','controlInputMount','controlActionMount',
+            'ecommercePage','ecommerceWorkspace','controlPanel','controlInputMount','controlActionMount','batchOutfitControl','batchOutfitWorks',
             'inputModule','universalDock','universalDockInputs','universalDockActions','generateActions',
             'operationTabs','modeToggle','capabilityStatus','routeSummary','inputSlots','inputProgress',
             'operationControls','advancedSettings','modelPanelToggle','modelPanelBody',
@@ -347,7 +331,7 @@
             const schemaVersion = Number(saved.schema_version || 0);
             state.settingsNeedsMigration = schemaVersion !== SETTINGS_SCHEMA_VERSION;
             if(IS_FREE_CREATION) state.operation = DEFAULT_OPERATION;
-            else if(schemaVersion === SETTINGS_SCHEMA_VERSION && OPERATION_CONFIG[saved.operation]) state.operation = saved.operation;
+            else if(OPERATION_CONFIG[saved.operation]) state.operation = saved.operation;
             else state.operation = DEFAULT_OPERATION;
             state.mode = 'standard';
             if(saved.options && typeof saved.options === 'object') {
@@ -364,6 +348,7 @@
             state.quality = QUALITIES.includes(saved.quality) ? saved.quality : 'auto';
             state.count = [0,1,2,3,4].includes(Number(saved.count)) ? Number(saved.count) : 0;
             state.modelPanelCollapsed = saved.model_panel_collapsed === true;
+            if(saved.batch_outfit && typeof saved.batch_outfit === 'object') state.batchOutfit = saved.batch_outfit;
             if(saved.workspaces && typeof saved.workspaces === 'object') {
                 Object.keys(OPERATION_CONFIG).forEach(operation => {
                     const value = saved.workspaces[operation];
@@ -437,6 +422,7 @@
             quality:state.quality,
             count:state.count,
             model_panel_collapsed:state.modelPanelCollapsed,
+            batch_outfit:window.EcommerceBatchOutfit?.snapshot?.() || state.batchOutfit,
             workspaces:serializableWorkspaces(),
         };
         const serialized = JSON.stringify(snapshot);
@@ -524,6 +510,7 @@
             updateRouteSummary();
         } else updateModelPanelSelection();
         if(state.currentTask) renderTaskResult(state.currentTask); else hideResult();
+        window.EcommerceBatchOutfit?.hydrate?.(state.batchOutfit);
     }
 
     function currentConfig(){ return OPERATION_CONFIG[state.operation]; }
@@ -550,13 +537,19 @@
         syncUniversalLayout();
         const inputHeading = el.inputModule?.querySelector('.ec-section-head h2');
         if(inputHeading) inputHeading.textContent = t(IS_FREE_CREATION ? 'freeCreation.referenceAssets' : (currentConfig()?.universal ? 'ecommerce.referenceAssets' : 'ecommerce.inputs'));
+        const resultHeading = document.querySelector('.ec-result-head h2');
+        if(resultHeading) resultHeading.textContent = t(state.operation === 'batch_outfit' ? 'ecommerce.viewWorks' : 'ecommerce.resultPreview');
     }
 
     function syncUniversalLayout(){
         const universal = Boolean(currentConfig()?.universal);
         const tryOn = state.operation === 'try_on';
+        const batchOutfit = state.operation === 'batch_outfit';
         el.ecommercePage?.classList.toggle('is-universal', universal);
         el.ecommercePage?.classList.toggle('is-try-on', tryOn);
+        el.ecommercePage?.classList.toggle('is-batch-outfit', batchOutfit);
+        el.batchOutfitControl?.classList.toggle('hidden', !batchOutfit);
+        el.batchOutfitWorks?.classList.toggle('hidden', !batchOutfit);
         if(!universal) el.ecommercePage?.classList.remove('has-many-universal-references');
         el.universalDock?.classList.toggle('hidden', !universal);
         if(!universal) el.universalDock?.classList.remove('has-many-references');
@@ -578,6 +571,10 @@
         const focusSnapshot = window.StudioFocusGuard?.capture?.();
         const editingControl = isTextEditingElement() ? document.activeElement : null;
         const config = currentConfig();
+        if(config.batchOutfit) {
+            window.EcommerceBatchOutfit?.render?.();
+            return;
+        }
         if(config.universal) {
             renderUniversalInputs();
             if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
@@ -1963,25 +1960,6 @@
                 <button type="button" data-option-button="pose_source" data-value="reference" class="${options.pose_source === 'reference' ? 'active':''}">${escapeHtml(t('ecommerce.uploadPose'))}</button>
                 <button type="button" data-option-button="pose_source" data-value="preset" class="${options.pose_source === 'preset' ? 'active':''}">${escapeHtml(t('ecommerce.posePreset'))}</button>
             </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.posePreset'))}</span><div id="posePresetGrid" class="ec-chip-grid">${presetButtons('pose_presets', options.pose_preset)}</div></div>${instructionHtml(options.instruction)}`;
-        } else if(state.operation === 'prop_replace') {
-            html = `<label class="ec-field"><span>${escapeHtml(t('ecommerce.targetDescription'))}</span><input data-option="target_description" maxlength="240" value="${escapeHtml(options.target_description)}" placeholder="${escapeHtml(t('ecommerce.targetDescriptionHint'))}"></label>${instructionHtml(options.instruction)}`;
-        } else if(state.operation === 'angle_change') {
-            html = `<div class="ec-field"><span>${escapeHtml(t('ecommerce.viewPreset'))}</span><div class="ec-chip-grid">
-                <button type="button" data-angle-preset="0,0">${escapeHtml(t('ecommerce.frontView'))}</button>
-                <button type="button" data-angle-preset="-45,0">${escapeHtml(t('ecommerce.leftThreeQuarter'))}</button>
-                <button type="button" data-angle-preset="45,0">${escapeHtml(t('ecommerce.rightThreeQuarter'))}</button>
-                <button type="button" data-angle-preset="90,0">${escapeHtml(t('ecommerce.sideView'))}</button>
-                <button type="button" data-angle-preset="0,20">${escapeHtml(t('ecommerce.topView'))}</button>
-            </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.azimuth'))}</span><div class="ec-range-row"><input data-option="azimuth" type="range" min="-180" max="180" step="15" value="${Number(options.azimuth)}"><span class="ec-range-value" data-value-for="azimuth">${Number(options.azimuth)}°</span></div></div>
-                <div class="ec-field"><span>${escapeHtml(t('ecommerce.elevation'))}</span><div class="ec-range-row"><input data-option="elevation" type="range" min="-30" max="30" step="10" value="${Number(options.elevation)}"><span class="ec-range-value" data-value-for="elevation">${Number(options.elevation)}°</span></div></div>
-                <label class="ec-field"><span>${escapeHtml(t('ecommerce.distance'))}</span><select data-option="distance">${optionHtml('close','ecommerce.close',options.distance)}${optionHtml('medium','ecommerce.medium',options.distance)}${optionHtml('wide','ecommerce.wide',options.distance)}</select></label>${instructionHtml(options.instruction)}`;
-        } else if(state.operation === 'background_change') {
-            html = `<div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundMode'))}</span><div class="ec-chip-grid">
-                <button type="button" data-option-button="background_mode" data-value="preset" class="${options.background_mode === 'preset' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundPreset'))}</button>
-                <button type="button" data-option-button="background_mode" data-value="prompt" class="${options.background_mode === 'prompt' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundPrompt'))}</button>
-                <button type="button" data-option-button="background_mode" data-value="reference" class="${options.background_mode === 'reference' ? 'active':''}">${escapeHtml(t('ecommerce.backgroundReference'))}</button>
-            </div></div><div class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPreset'))}</span><div id="backgroundPresetGrid" class="ec-chip-grid">${presetButtons('background_presets', options.background_preset)}</div></div>
-            <label class="ec-field"><span>${escapeHtml(t('ecommerce.backgroundPrompt'))}</span><textarea data-option="background_prompt" maxlength="1000" placeholder="${escapeHtml(t('ecommerce.backgroundPromptHint'))}">${escapeHtml(options.background_prompt)}</textarea></label>${instructionHtml(options.instruction)}`;
         } else if(state.operation === 'universal') {
             const promptLabelKey = IS_FREE_CREATION ? 'freeCreation.prompt' : 'ecommerce.finalInstruction';
             const promptHintKey = IS_FREE_CREATION ? 'freeCreation.promptHint' : 'ecommerce.finalInstructionHint';
@@ -2172,7 +2150,9 @@
         updateTabs();
         renderInputs();
         renderOperationControls();
-        if(state.currentTask) renderTaskResult(state.currentTask);
+        if(state.operation === 'batch_outfit') {
+            window.EcommerceBatchOutfit?.activate?.();
+        } else if(state.currentTask) renderTaskResult(state.currentTask);
         else {
             hideResult();
             if(workspace.taskId) loadTask(workspace.taskId, false);
@@ -2968,7 +2948,6 @@
             return !state.inputs[item.role]?.url;
         });
         if(state.operation === 'pose_transfer' && currentOptions().pose_source === 'reference' && !state.inputs.pose?.url) missing.push({role:'pose'});
-        if(state.operation === 'background_change' && currentOptions().background_mode === 'reference' && !state.inputs.background?.url) missing.push({role:'background'});
         if(missing.length) {
             if(show) showFormError(t('ecommerce.inputRequired'));
             return false;
@@ -3943,6 +3922,8 @@
             referenceCount = universalEntries().filter(([,item]) => item.url).length;
         } else if(state.operation === 'try_on') {
             referenceCount = taskInputsForRequest().length;
+        } else if(state.operation === 'batch_outfit') {
+            referenceCount = 3;
         }
         if(referenceCount <= 1) return models;
         return models.filter(item => Number(item.max_reference_images || 0) >= referenceCount);
@@ -3973,10 +3954,12 @@
     }
 
     function syncGenerationParameterControls(){
-        const sourceCompositionLocked = state.operation === 'background_change';
+        const batchOutfit = state.operation === 'batch_outfit';
         if(el.ratioSelect) {
-            el.ratioSelect.value = sourceCompositionLocked ? 'source' : (ASPECT_RATIOS.includes(state.aspectRatio) ? state.aspectRatio : 'source');
-            el.ratioSelect.disabled = sourceCompositionLocked;
+            const poseRatio = ['source','1:1','16:9','9:16','4:3','3:4','4:5'].includes(state.aspectRatio) ? state.aspectRatio : 'source';
+            el.ratioSelect.value = batchOutfit ? poseRatio : (ASPECT_RATIOS.includes(state.aspectRatio) ? state.aspectRatio : 'source');
+            el.ratioSelect.disabled = false;
+            el.ratioSelect.querySelectorAll('option').forEach(option => { option.disabled = batchOutfit && ['2:3','3:2'].includes(option.value); });
         }
         if(el.resolutionSelect) el.resolutionSelect.value = RESOLUTIONS.includes(state.resolution) ? state.resolution : 'auto';
         if(el.qualitySelect) el.qualitySelect.value = QUALITIES.includes(state.quality) ? state.quality : 'auto';
@@ -4215,6 +4198,7 @@
         void waitForPreferenceBootstrap().catch(() => {});
         loadSettings();
         restoreWorkspace(state.operation);
+        window.EcommerceBatchOutfit?.hydrate?.(state.batchOutfit);
         state.settingsNeedsMigration = false;
         syncGenerationParameterControls();
         updateTabs();
@@ -4258,6 +4242,10 @@
         comparisonReferenceForTask,
         syncComparisonReference,
         renderTaskResult,
+        persistSettings,
+        showToast,
+        compatibleModels,
+        resolveRecommendedRoute,
     };
     document.addEventListener('DOMContentLoaded', init, {once:true});
 })();

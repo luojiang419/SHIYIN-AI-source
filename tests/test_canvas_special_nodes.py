@@ -706,7 +706,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
     def test_pose_replicate_settings_freely_persist_and_submit_full_custom_templates(self):
         self.assertIn('maxlength="30000"', self.pose_settings)
         self.assertIn("textarea.addEventListener('input', persist)", self.pose_settings)
-        self.assertIn("node.poseReplicatePromptTemplates = {...node.poseReplicatePromptTemplates", self.pose_settings)
+        self.assertIn("node.poseReplicatePromptTemplates = {...overrides}", self.pose_settings)
+        self.assertIn("writeSharedOverrides(overrides)", self.pose_settings)
+        self.assertIn("sharedPromptPolicy", self.pose_settings)
         self.assertIn("policy.custom_template = overrides[key]", self.pose_settings)
         self.assertIn("policy.custom_template_key = key", self.pose_settings)
         self.assertIn("onChange(node)", self.pose_settings)

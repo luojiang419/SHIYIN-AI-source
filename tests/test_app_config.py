@@ -14,6 +14,7 @@ class AppConfigTests(unittest.TestCase):
             settings = read_app_config(Path(tmp))
             self.assertEqual(settings["close_behavior"], "ask_on_close")
             self.assertEqual(settings["generated_output_dir"], "")
+            self.assertEqual(settings["batch_outfit_output_dir"], "")
             self.assertEqual(settings["quick_save_mode"], "manual")
             self.assertEqual(settings["quick_save_dir"], "")
             self.assertEqual(settings["topaz_video_install_dir"], "")
@@ -62,6 +63,16 @@ class AppConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 update_app_settings(Path(tmp), generated_output_dir="relative/output")
+
+    def test_batch_outfit_output_directory_is_persisted_and_rejects_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            destination = data_root / "批量换款"
+            saved = update_app_settings(data_root, batch_outfit_output_dir=str(destination))
+            self.assertEqual(saved["batch_outfit_output_dir"], str(destination))
+            self.assertEqual(read_app_config(data_root)["batch_outfit_output_dir"], str(destination))
+            with self.assertRaisesRegex(ValueError, "绝对路径"):
+                update_app_settings(data_root, batch_outfit_output_dir="relative/batch")
 
     def test_shortcut_bindings_are_persisted_and_can_disable_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -8,6 +8,10 @@
     const closeBehaviorNote = document.getElementById('closeBehaviorNote');
     const chooseOutput = document.getElementById('chooseGeneratedOutput');
     const resetOutput = document.getElementById('resetGeneratedOutput');
+    const batchOutfitOutputInput = document.getElementById('batchOutfitOutputDir');
+    const batchOutfitOutputHint = document.getElementById('batchOutfitOutputHint');
+    const chooseBatchOutfitOutput = document.getElementById('chooseBatchOutfitOutput');
+    const resetBatchOutfitOutput = document.getElementById('resetBatchOutfitOutput');
     const quickSaveOptions = document.getElementById('quickSaveOptions');
     const quickSaveStatus = document.getElementById('quickSaveStatus');
     const quickSaveDirectoryControl = document.getElementById('quickSaveDirectoryControl');
@@ -48,6 +52,7 @@
     const shortcutList = document.getElementById('shortcutList');
     let currentBehavior = 'ask_on_close';
     let currentOutputDirectory = '';
+    let currentBatchOutfitOutputDirectory = '';
     let currentQuickSaveMode = 'manual';
     let currentQuickSaveDirectory = '';
     let quickSaveStatusTimer = null;
@@ -391,6 +396,18 @@
         resetOutput.disabled = !currentOutputDirectory;
     }
 
+    function setBatchOutfitOutputBusy(busy){
+        if(chooseBatchOutfitOutput) chooseBatchOutfitOutput.disabled = busy;
+        if(resetBatchOutfitOutput) resetBatchOutfitOutput.disabled = busy || !currentBatchOutfitOutputDirectory;
+    }
+
+    function applyBatchOutfitOutputSettings(data){
+        currentBatchOutfitOutputDirectory = String(data.batch_outfit_output_dir || '');
+        if(batchOutfitOutputInput) batchOutfitOutputInput.value = String(data.batch_outfit_output_effective_dir || currentBatchOutfitOutputDirectory);
+        if(batchOutfitOutputHint) batchOutfitOutputHint.textContent = currentBatchOutfitOutputDirectory ? '已使用自定义批量换款保存目录' : '已使用软件默认批量换款保存目录';
+        if(resetBatchOutfitOutput) resetBatchOutfitOutput.disabled = !currentBatchOutfitOutputDirectory;
+    }
+
     function selectQuickSaveMode(mode){
         quickSaveOptions?.querySelectorAll('input[name="quickSaveMode"]').forEach(input => {
             input.checked = input.value === mode;
@@ -547,6 +564,7 @@
     async function loadSettings(){
         options.disabled = true;
         setOutputBusy(true);
+        setBatchOutfitOutputBusy(true);
         applyShortcutSettings({shortcut_bindings:{}});
         try {
             const data = await requestSettings('/api/app-settings', {cache:'no-store'});
@@ -554,6 +572,7 @@
             selectBehavior(currentBehavior);
             updateCloseBehaviorNote();
             applyOutputSettings(data);
+            applyBatchOutfitOutputSettings(data);
             applyQuickSaveSettings(data);
             applyTopazSettings(data);
             applyShortcutSettings(data);
@@ -562,6 +581,7 @@
         } finally {
             options.disabled = false;
             setOutputBusy(false);
+            setBatchOutfitOutputBusy(false);
             setQuickSaveBusy(false);
         }
     }
@@ -616,6 +636,34 @@
             showStatus(`${t('appSettings.saveFailed')}：${error.message}`, true);
         } finally {
             setOutputBusy(false);
+        }
+    }
+
+    async function chooseBatchOutfitOutputDirectory(){
+        setBatchOutfitOutputBusy(true);
+        try {
+            const selection = await requestSettings('/api/app-settings/select-batch-outfit-output-directory', {method:'POST'});
+            if(!selection.selected || !selection.path) return;
+            const data = await saveSettings({batch_outfit_output_dir:selection.path});
+            applyBatchOutfitOutputSettings(data);
+            showStatus(t('appSettings.saved'));
+        } catch(error) {
+            showStatus(`${t('appSettings.saveFailed')}：${error.message}`, true);
+        } finally {
+            setBatchOutfitOutputBusy(false);
+        }
+    }
+
+    async function resetBatchOutfitOutputDirectory(){
+        setBatchOutfitOutputBusy(true);
+        try {
+            const data = await saveSettings({batch_outfit_output_dir:''});
+            applyBatchOutfitOutputSettings(data);
+            showStatus(t('appSettings.saved'));
+        } catch(error) {
+            showStatus(`${t('appSettings.saveFailed')}：${error.message}`, true);
+        } finally {
+            setBatchOutfitOutputBusy(false);
         }
     }
 
@@ -702,6 +750,8 @@
     cleanupOrphanMedia?.addEventListener('click', cleanupOrphans);
     chooseOutput.addEventListener('click', chooseOutputDirectory);
     resetOutput.addEventListener('click', resetOutputDirectory);
+    chooseBatchOutfitOutput?.addEventListener('click', chooseBatchOutfitOutputDirectory);
+    resetBatchOutfitOutput?.addEventListener('click', resetBatchOutfitOutputDirectory);
     quickSaveOptions?.addEventListener('change', event => {
         const input = event.target.closest('input[name="quickSaveMode"]');
         if(!input) return;

@@ -24,7 +24,7 @@
     <script src="/static/js/i18n.js?v=2026.08.09.universal-routes.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.22.1">
     <link rel="stylesheet" href="/static/css/compare-viewer.css?v=2026.07.22.1">
-    <link rel="stylesheet" href="/static/css/ecommerce.css?v=2026.08.10.universal-plan-banner-removed.1&feature=free-creation-removed.1">
+    <link rel="stylesheet" href="/static/css/ecommerce.css?v=2026.09.06.batch-outfit.1">
 </head>
 <body>
     <main id="ecommercePage" class="ec-page">
@@ -32,10 +32,8 @@
             <nav id="operationTabs" class="ec-operation-tabs" aria-label="电商功能">
                 <button class="active" type="button" data-operation="universal"><span>01</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3ZM18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg><b data-i18n="ecommerce.universal">全能模式</b></button>
                 <button type="button" data-operation="try_on"><span>02</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 2-2h4l2 2 3 2-2 4-2-1v10H9V10l-2 1-2-4 3-2Z"/><path d="M10 3c0 1.3.7 2 2 2s2-.7 2-2"/></svg><b data-i18n="ecommerce.tryOn">自由换衣</b></button>
-                <button type="button" data-operation="pose_transfer"><span>03</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="2"/></svg><b data-i18n="ecommerce.poseTransfer">动作迁移</b></button>
-                <button type="button" data-operation="prop_replace"><span>04</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14l1 11H4L5 9Z"/><path d="M9 9V7a3 3 0 0 1 6 0v2M8 14h8"/></svg><b data-i18n="ecommerce.propReplace">道具替换</b></button>
-                <button type="button" data-operation="angle_change"><span>05</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 8v4l3 2M4 5l2 2M20 5l-2 2"/></svg><b data-i18n="ecommerce.angleChange">角度修改</b></button>
-                <button type="button" data-operation="background_change"><span>06</span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><b data-i18n="ecommerce.backgroundChange">背景修改</b></button>
+                <button type="button" data-operation="batch_outfit"><span>03</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 2-2h4l2 2 3 2-2 4-2-1v10H9V10l-2 1-2-4 3-2Z"/><path d="M4 16v4h4M20 8V4h-4"/></svg><b>批量换款</b></button>
+                <button type="button" data-operation="pose_transfer"><span>04</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="2"/></svg><b data-i18n="ecommerce.poseTransfer">动作迁移</b></button>
             </nav>
             <div class="ec-header-actions">
                 <button id="historyToggle" class="ec-icon-button" type="button" data-i18n-title="ecommerce.history" aria-label="任务历史">
@@ -46,6 +44,18 @@
 
         <section id="ecommerceWorkspace" class="ec-workspace">
             <aside id="controlPanel" class="ec-control-panel">
+                <section id="batchOutfitControl" class="ec-batch-outfit-control hidden" aria-label="批量换款任务">
+                    <div class="ec-section-head ec-batch-outfit-heading">
+                        <div><span>BATCH OUTFIT</span><h2>换款任务</h2></div>
+                        <strong id="batchOutfitPromptStatus">一键复刻提示词已同步</strong>
+                    </div>
+                    <div id="batchOutfitGroups" class="ec-batch-outfit-groups"></div>
+                    <div id="batchOutfitError" class="ec-inline-error hidden" role="alert"></div>
+                    <div class="ec-batch-outfit-actions">
+                        <button id="addBatchOutfit" class="ec-secondary-button" type="button">+  添加换款</button>
+                        <button id="runAllBatchOutfit" class="ec-primary-button compact" type="button">一键生成全部</button>
+                    </div>
+                </section>
                 <div id="controlInputMount">
                     <section id="inputModule" class="ec-input-module">
                         <div class="ec-section-head">
@@ -132,6 +142,7 @@
                 </div>
 
                 <div class="ec-result-body">
+                    <section id="batchOutfitWorks" class="ec-batch-outfit-works hidden" aria-label="查看作品"></section>
                     <div id="emptyResult" class="ec-empty-result">
                         <div id="emptyResultNotice" class="ec-result-notice hidden" role="alert">
                             <strong id="emptyResultNoticeTitle"></strong>
@@ -227,6 +238,15 @@
         </form>
     </dialog>
 
+    <dialog id="batchOutfitDialog" class="ec-dialog ec-batch-outfit-dialog">
+        <form id="batchOutfitForm" method="dialog" class="ec-dialog-shell">
+            <header><div><small>NEW STYLE</small><h2>添加换款任务</h2></div><button value="cancel" class="ec-icon-button" aria-label="关闭">×</button></header>
+            <label class="ec-field"><span>款号名称</span><input id="batchOutfitStyleName" type="text" maxlength="80" autocomplete="off" placeholder="例如：SS26-JK-001" required></label>
+            <p id="batchOutfitDialogError" class="ec-inline-error hidden" role="alert"></p>
+            <div class="ec-dialog-actions"><button value="cancel" class="ec-secondary-button" type="button">取消</button><button id="confirmBatchOutfit" class="ec-primary-button compact" type="submit">创建换款</button></div>
+        </form>
+    </dialog>
+
     <dialog id="referencePreview" class="ec-reference-preview">
         <form method="dialog" class="ec-reference-preview-shell">
             <header class="ec-reference-preview-header">
@@ -273,7 +293,10 @@
 
     <div id="toast" class="ec-toast" role="status"></div>
     <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+    <input id="batchOutfitFileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
     <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
-    <script src="/static/js/ecommerce.js?v=2026.08.10.universal-plan-banner-removed.1&feature=free-creation-removed.1"></script>
+    <script src="/static/js/pose-replicate-settings.js?v=2026.09.06.shared-prompts.1"></script>
+    <script src="/static/js/ecommerce.js?v=2026.09.06.batch-outfit.1"></script>
+    <script src="/static/js/ecommerce-batch-outfit.js?v=2026.09.06.batch-outfit.1"></script>
 </body>
 </html>

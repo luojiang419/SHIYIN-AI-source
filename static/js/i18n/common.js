@@ -40,6 +40,8 @@
         "appSettings.loadFailed": { zh: "加载失败", en: "Load failed" },
         "appSettings.saveFailed": { zh: "保存失败", en: "Save failed" },
         "appSettings.generatedOutput": { zh: "生成图片保存位置", en: "Generated image location" },
+        "appSettings.batchOutfitOutput": { zh: "批量换款保存", en: "Batch outfit output" },
+        "appSettings.batchOutfitOutputHint": { zh: "批量换款生成成功后，会在此目录下按款号名称自动创建子文件夹并归档图片。", en: "Successful batch outfit images are archived in a subfolder named after each style code." },
         "appSettings.currentOutputDirectory": { zh: "当前保存目录", en: "Current output directory" },
         "appSettings.chooseDirectory": { zh: "选择文件夹", en: "Choose folder" },
         "appSettings.useDefaultDirectory": { zh: "恢复默认", en: "Use default" },

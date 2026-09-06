@@ -4652,8 +4652,8 @@ class CanvasLLMRequest(BaseModel):
     web_search_content_types: List[str] = []
     web_search_image_max_results: int = Field(default=0, ge=0, le=12)
     web_search_include_sources: bool = False
-    # 视频润色/自动解析始终使用完整版导演规则；Responses 请求通过 SSE 保持长任务连接，
-    # retry_524 仅用于上游明确返回 524 时对同一请求重试。
+    # 视频润色/自动解析始终使用完整版导演规则；Responses 请求通过 SSE 保持长任务连接。
+    # retry_524 为兼容历史字段名，也控制网络中断及 HTTP 200 空流/不完整输出的有限重试。
     retry_524: int = Field(default=2, ge=0, le=2)
 
 class CanvasPromptPolishRequest(BaseModel):
@@ -5886,6 +5886,67 @@ def build_llm_request_body(transport, messages, stream=False):
         body["stream"] = False
     return body
 
+class ResponsesTransientOutputError(RuntimeError):
+    """Responses 请求成功建立连接，但没有得到可交付的完整文本。"""
+
+
+def normalize_responses_stream_event(value):
+    event = value
+    while (
+        isinstance(event, dict)
+        and isinstance(event.get("data"), dict)
+        and not any(event.get(key) for key in ("type", "response", "output", "output_text", "choices"))
+    ):
+        event = event["data"]
+    return event if isinstance(event, dict) else {}
+
+
+def responses_stream_event_text(event):
+    """兼容 Responses 标准事件及常见兼容网关的文本事件。"""
+    event = normalize_responses_stream_event(event)
+    event_type = str(event.get("type") or "").strip().lower()
+    if event_type == "response.output_text.delta":
+        delta = event.get("delta")
+        if isinstance(delta, str):
+            return delta
+        if isinstance(delta, dict):
+            text = delta.get("text") or delta.get("content")
+            return text if isinstance(text, str) else ""
+    chat_delta = text_delta_from_chat_chunk(event)
+    if chat_delta:
+        return chat_delta
+    return ""
+
+
+def responses_stream_completed_text(event):
+    event = normalize_responses_stream_event(event)
+    event_type = str(event.get("type") or "").strip().lower()
+    if event_type == "response.output_text.done":
+        text = event.get("text")
+        return text if isinstance(text, str) else ""
+    if event_type in {"response.content_part.added", "response.content_part.done"}:
+        part = event.get("part")
+        if isinstance(part, dict):
+            text = part.get("text") or part.get("content")
+            return text if isinstance(text, str) else ""
+    if event_type in {"response.output_item.added", "response.output_item.done"}:
+        item = event.get("item")
+        if isinstance(item, dict):
+            return text_from_responses_response({"output": [item]})
+    return ""
+
+
+def validate_responses_result(result):
+    result = unwrap_apimart_response(result) if isinstance(result, dict) else {}
+    status = str(result.get("status") or "").strip().lower()
+    if status in {"failed", "incomplete", "cancelled", "canceled"}:
+        detail = result.get("incomplete_details") or result.get("error") or status
+        raise ResponsesTransientOutputError(f"Responses 上游返回未完成状态：{detail}")
+    if not text_from_responses_response(result).strip():
+        raise ResponsesTransientOutputError("Responses 上游未返回有效文本")
+    return result
+
+
 async def request_responses_stream_json(client, transport, body, on_text_delta=None):
     """消费 Responses SSE，并聚合成现有解析器可使用的响应对象。
 
@@ -5917,13 +5978,15 @@ async def request_responses_stream_json(client, transport, body, on_text_delta=N
         if "text/event-stream" not in content_type:
             content = await response.aread()
             if not content:
-                raise HTTPException(status_code=502, detail="Responses 上游返回了空响应")
+                raise ResponsesTransientOutputError("Responses 上游返回了空响应")
             try:
-                return json.loads(content.decode("utf-8", errors="replace"))
+                result = json.loads(content.decode("utf-8", errors="replace"))
             except json.JSONDecodeError as exc:
-                raise HTTPException(status_code=502, detail="Responses 上游返回了无法解析的响应") from exc
+                raise ResponsesTransientOutputError("Responses 上游返回了无法解析的响应") from exc
+            return validate_responses_result(result)
 
         output_text_parts = []
+        completed_text_parts = []
         final_response = None
         usage = None
         async for line in response.aiter_lines():
@@ -5938,21 +6001,20 @@ async def request_responses_stream_json(client, transport, body, on_text_delta=N
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(event, dict):
+            event = normalize_responses_stream_event(event)
+            if not event:
                 continue
-            event_type = str(event.get("type") or "").strip().lower()
-            if event_type == "response.output_text.delta":
-                delta = event.get("delta")
-                if isinstance(delta, str) and delta:
-                    output_text_parts.append(delta)
-                    if on_text_delta is not None:
-                        callback_result = on_text_delta(delta)
-                        if asyncio.iscoroutine(callback_result):
-                            await callback_result
-            elif event_type == "response.output_text.done":
-                text = event.get("text")
-                if isinstance(text, str) and text and not output_text_parts:
-                    output_text_parts.append(text)
+            delta = responses_stream_event_text(event)
+            if delta:
+                output_text_parts.append(delta)
+                if on_text_delta is not None:
+                    callback_result = on_text_delta(delta)
+                    if asyncio.iscoroutine(callback_result):
+                        await callback_result
+            else:
+                completed_text = responses_stream_completed_text(event)
+                if completed_text:
+                    completed_text_parts.append(completed_text)
             response_payload = event.get("response")
             if isinstance(response_payload, dict):
                 final_response = response_payload
@@ -5965,14 +6027,12 @@ async def request_responses_stream_json(client, transport, body, on_text_delta=N
             result = dict(final_response)
         else:
             result = {}
-        merged_text = "".join(output_text_parts).strip()
+        merged_text = "".join(output_text_parts or completed_text_parts).strip()
         if merged_text and not str(result.get("output_text") or "").strip():
             result["output_text"] = merged_text
         if usage is not None and not isinstance(result.get("usage"), dict):
             result["usage"] = usage
-        if not result.get("output_text") and not result.get("output"):
-            raise HTTPException(status_code=502, detail="Responses 上游未返回有效文本")
-        return result
+        return validate_responses_result(result)
 
 
 async def request_llm_json(transport, messages, retry_524=2, on_text_delta=None):
@@ -5991,9 +6051,9 @@ async def request_llm_json(transport, messages, retry_524=2, on_text_delta=None)
             flush=True,
         )
         response = None
-        # 部分兼容 Responses 的代理在大尺寸视觉请求上会偶发返回 Cloudflare 524。
-        # 该状态表示网关等待上游超时，不代表 API Key 或模型配置错误；短暂退避后重试，
-        # 避免用户必须反复点击按钮。仅重试 524，防止鉴权/参数错误造成重复请求。
+        # 部分兼容 Responses 的代理在大尺寸视觉请求上会偶发返回 Cloudflare 524、
+        # 网络中断或 HTTP 200 空流。它们都没有可交付结果，短暂退避后重试；
+        # 鉴权、参数等其他 HTTP 状态仍直接返回，避免无意义重复请求。
         retry_limit = max(0, min(2, int(retry_524 or 0)))
         for attempt in range(retry_limit + 1):
             try:
@@ -6006,6 +6066,22 @@ async def request_llm_json(transport, messages, retry_524=2, on_text_delta=None)
                     headers=transport["headers"],
                     json=body,
                 )
+            except ResponsesTransientOutputError as exc:
+                if attempt >= retry_limit:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            f"Responses 上游连续 {attempt + 1} 次未返回完整有效文本，"
+                            f"已自动重试 {retry_limit} 次，请稍后重试。"
+                        ),
+                    ) from exc
+                print(
+                    f"[llm-retry] transient Responses output, retry={attempt + 1}/{retry_limit} "
+                    f"model={transport.get('model', '')} error={exc}",
+                    flush=True,
+                )
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code != 524 or attempt >= retry_limit:
                     raise
@@ -6159,6 +6235,7 @@ def text_from_chat_response(data):
 def text_from_responses_response(data):
     if not isinstance(data, dict):
         return ""
+    data = unwrap_apimart_response(data)
     direct = data.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct

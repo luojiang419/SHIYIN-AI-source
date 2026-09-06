@@ -323,6 +323,10 @@ class ResponsesProtocolTests(unittest.TestCase):
 
         self.assertEqual(self.main.text_from_responses_response(raw), "视觉识别结果")
         self.assertEqual(self.main.text_from_responses_response({"output_text": "直接结果"}), "直接结果")
+        self.assertEqual(
+            self.main.text_from_responses_response({"code": 200, "data": {"output_text": "代理包装结果"}}),
+            "代理包装结果",
+        )
 
     def test_canvas_ai_assistant_posts_responses_visual_payload(self):
         client = FakeAsyncClient(
@@ -402,6 +406,115 @@ class ResponsesProtocolTests(unittest.TestCase):
         self.assertEqual(result["usage"]["total_tokens"], 7)
         self.assertEqual(deltas, ["第一段", "第二段"])
         self.assertEqual(client.requests[0][2]["json"]["stream"], True)
+
+    def test_responses_sse_accepts_nested_content_part_and_output_item_events(self):
+        content_part_client = FakeAsyncClient(post_responses=[FakeResponse(
+            200,
+            stream_lines=[
+                'data: {"data":{"type":"response.content_part.done","part":{"type":"output_text","text":"内容段结果"}}}',
+                "data: [DONE]",
+            ],
+        )])
+        output_item_client = FakeAsyncClient(post_responses=[FakeResponse(
+            200,
+            stream_lines=[
+                'data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text","text":"输出项结果"}]}}',
+                "data: [DONE]",
+            ],
+        )])
+        transport = {
+            "provider": {"id": "responses-provider"},
+            "protocol": "responses",
+            "url": "https://relay.test/v1/responses",
+            "headers": {},
+            "model": "gpt-5.6-sol",
+        }
+
+        first = asyncio.run(self.main.request_responses_stream_json(content_part_client, transport, {"stream": True}))
+        second = asyncio.run(self.main.request_responses_stream_json(output_item_client, transport, {"stream": True}))
+
+        self.assertEqual(first["output_text"], "内容段结果")
+        self.assertEqual(second["output_text"], "输出项结果")
+
+    def test_responses_sse_accepts_chat_compatible_delta(self):
+        client = FakeAsyncClient(post_responses=[FakeResponse(
+            200,
+            stream_lines=[
+                'data: {"choices":[{"delta":{"content":"兼容网关文本"}}]}',
+                "data: [DONE]",
+            ],
+        )])
+        transport = {
+            "provider": {"id": "responses-provider"},
+            "protocol": "responses",
+            "url": "https://relay.test/v1/responses",
+            "headers": {},
+            "model": "gpt-5.6-sol",
+        }
+
+        result = asyncio.run(self.main.request_responses_stream_json(client, transport, {"stream": True}))
+
+        self.assertEqual(result["output_text"], "兼容网关文本")
+
+    def test_responses_empty_stream_retries_and_recovers(self):
+        client = FakeAsyncClient(post_responses=[
+            FakeResponse(200, stream_lines=[
+                'data: {"type":"response.created","response":{"id":"empty","status":"in_progress"}}',
+                'data: {"type":"response.completed","response":{"id":"empty","status":"completed"}}',
+            ]),
+            FakeResponse(200, stream_lines=[
+                'data: {"type":"response.output_text.delta","delta":"重试成功"}',
+                'data: {"type":"response.completed","response":{"id":"ok","status":"completed"}}',
+            ]),
+        ])
+        transport = {
+            "provider": {"id": "responses-provider"},
+            "protocol": "responses",
+            "url": "https://relay.test/v1/responses",
+            "headers": {},
+            "model": "gpt-5.6-sol",
+        }
+
+        with (
+            patch.object(self.main.httpx, "AsyncClient", return_value=client),
+            patch.object(self.main.asyncio, "sleep", return_value=None),
+        ):
+            result = asyncio.run(self.main.request_llm_json(
+                transport,
+                [{"role": "user", "content": "分析图片"}],
+                retry_524=1,
+            ))
+
+        self.assertEqual(result["output_text"], "重试成功")
+        self.assertEqual(len(client.requests), 2)
+
+    def test_responses_empty_stream_reports_attempt_count_after_retries(self):
+        client = FakeAsyncClient(post_responses=[
+            FakeResponse(200, stream_lines=['data: {"type":"response.completed","response":{"status":"completed"}}']),
+            FakeResponse(200, stream_lines=['data: {"type":"response.completed","response":{"status":"completed"}}']),
+        ])
+        transport = {
+            "provider": {"id": "responses-provider"},
+            "protocol": "responses",
+            "url": "https://relay.test/v1/responses",
+            "headers": {},
+            "model": "gpt-5.6-sol",
+        }
+
+        with (
+            patch.object(self.main.httpx, "AsyncClient", return_value=client),
+            patch.object(self.main.asyncio, "sleep", return_value=None),
+        ):
+            with self.assertRaises(self.main.HTTPException) as raised:
+                asyncio.run(self.main.request_llm_json(
+                    transport,
+                    [{"role": "user", "content": "分析图片"}],
+                    retry_524=1,
+                ))
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("连续 2 次", str(raised.exception.detail))
+        self.assertIn("已自动重试 1 次", str(raised.exception.detail))
 
 
 if __name__ == "__main__":

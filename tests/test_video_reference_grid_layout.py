@@ -20,22 +20,24 @@ def test_video_reference_list_uses_six_column_wrapping_grid():
 def test_video_node_keeps_six_thumbnails_readable_and_prevents_unbounded_width():
     assert "const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;" in JS
     assert "const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;" in JS
+    assert "const CLASSIC_VIDEO_NODE_MIN_HEIGHT = 700;" in JS
     assert "const width = Number.isFinite(storedWidth) ? storedWidth : limits.minWidth;" in JS
-    assert ".video-node { width:440px; min-width:440px; max-width:520px; }" in CSS
+    assert ".video-node { width:440px; min-width:440px; min-height:700px; max-width:520px; }" in CSS
     assert "const minWidth = limits.minWidth;" in JS
     assert "const maxWidth = limits.maxWidth;" in JS
     assert "feature=video-reference-grid.2" in HTML
+    assert "feature=video-fixed-frame.1" in HTML
 
 
-def test_video_node_default_height_is_content_driven_and_explicit_resize_is_preserved():
+def test_video_node_uses_fixed_minimum_frame_and_non_collapsing_footer():
     assert "function normalizeClassicNodeLayout(node)" in JS
-    assert "const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0) && !CLASSIC_FLEX_GENERATOR_NODE_TYPES.has(type));" in JS
+    assert "video:CLASSIC_VIDEO_NODE_MIN_HEIGHT" in JS
+    assert "if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:CLASSIC_VIDEO_NODE_MIN_HEIGHT};" in JS
     assert "normalizeClassicNodeLayout(node);" in JS
-    assert "if(isAutoHeightNode) delete resizeNode.node.h;" in JS
-    assert "el.classList.remove('sized');" in JS
-    assert "el.style.removeProperty('height');" in JS
-    assert ".auto-height-node .resize-handle { cursor:ew-resize; }" in CSS
-    assert ".video-node .node-bottom-controls { position:relative; bottom:auto; }" in CSS
+    assert ".node.sized.video-node .node-body { overflow:hidden; }" in CSS
+    assert ".node.sized.video-node .generator-canvas-content { flex:1 1 auto; min-height:64px; overflow-x:hidden; overflow-y:auto;" in CSS
+    assert ".node.sized.video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; }" in CSS
+    assert "if(contentScroll) contentScroll.onwheel = event => event.stopPropagation();" in JS
     assert "feature=video-auto-height.1" in HTML
 
 

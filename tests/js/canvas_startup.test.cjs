@@ -56,7 +56,7 @@ function editor(h){
     vm.createContext(ctx);
     for(const name of ['uniqueModels','defaultApiProviders','imageApiProviders','resolveImageProviderId',
         'providerImageModels','resolveImageModel','sanitizeImageNodeProviderModel','videoApiProviders',
-        'resolveVideoProviderId','providerVideoModels','sanitizeVideoNodeProviderModel','applyCanvasRuntimeConfig',
+        'resolveVideoProviderId','providerVideoModels','isMiniMaxH3VideoNode','sanitizeVideoNodeProviderModel','applyCanvasRuntimeConfig',
         'openCanvas']) vm.runInContext(fn(name),ctx);
     ctx.render=()=>{
         calls.push('render');

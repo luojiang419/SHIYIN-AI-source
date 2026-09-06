@@ -1486,6 +1486,7 @@ function sanitizeVideoNodeProviderModel(node){
     const models = providerVideoModels(node.apiProvider);
     if(!models.length) node.model = '';
     else if(!models.includes(node.model)) node.model = models[0] || '';
+    if(isMiniMaxH3VideoNode(node)) applyMiniMaxH3VideoDefaults(node);
 }
 function isMiniMaxH3VideoNode(node){
     return Boolean(node && (node.apiProvider === 'minimax-h3' || node.model === 'MiniMax H3'));
@@ -1620,6 +1621,19 @@ function h3VideoResolutionOptions(selected=''){
         '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
     ];
     return options.map(value => `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('');
+}
+const MINIMAX_H3_VIDEO_DEFAULTS = Object.freeze({
+    duration:5,
+    aspectRatio:'16:9',
+    resolution:'0.2MP 16:9 - 608x352',
+});
+function applyMiniMaxH3VideoDefaults(node, {force=false}={}){
+    if(!node) return node;
+    if(force || !(Number(node.duration) > 0)) node.duration = MINIMAX_H3_VIDEO_DEFAULTS.duration;
+    if(force || !String(node.aspectRatio || '').trim()) node.aspectRatio = MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio;
+    if(force || !String(node.resolution || '').trim()) node.resolution = MINIMAX_H3_VIDEO_DEFAULTS.resolution;
+    if(!(Number(node.steps) > 0)) node.steps = 12;
+    return node;
 }
 function videoModelOptions(selectedModel, providerId){
     const models = providerVideoModels(providerId);
@@ -4280,7 +4294,7 @@ function addVideoNode(point){
     const p = point || defaultPoint(160, 0);
     const providerId = videoApiProviders()[0]?.id || 'comfly';
     const models = providerVideoModels(providerId);
-    return addNode({
+    const node = {
         id:uid('vid'),
         type:'video',
         x:p.x,
@@ -4301,7 +4315,9 @@ function addVideoNode(point){
         prompt:'',
         inputs:[],
         running:false
-    });
+    };
+    if(isMiniMaxH3VideoNode(node)) applyMiniMaxH3VideoDefaults(node, {force:true});
+    return addNode(node);
 }
 function addLinkfoxVideoNode(point){
     const p=point || defaultPoint(180,0);
@@ -4380,10 +4396,7 @@ function addH3VideoNode(point){
     if(!node) return node;
     node.apiProvider = 'minimax-h3';
     node.model = 'MiniMax H3';
-    node.duration = 5;
-    node.aspectRatio = '16:9';
-    node.resolution = '0.2MP 16:9 - 608x352';
-    node.steps = 12;
+    applyMiniMaxH3VideoDefaults(node, {force:true});
     node.multimodal = true;
     node.useFrameRoles = false;
     render();
@@ -11024,6 +11037,7 @@ async function runFilmNode(nodeId, opts={}){
 }
 const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
 const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
+const CLASSIC_VIDEO_NODE_MIN_HEIGHT = 700;
 const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = 520;
 const classicPortraitMediaNodeIds = new Set();
 const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
@@ -11034,6 +11048,7 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     promptGroup:180,
     output:260,
     storyboardMerge:260,
+    video:CLASSIC_VIDEO_NODE_MIN_HEIGHT,
 });
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
 const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','batchGenerator','video','ecom-video','msgen']);
@@ -11706,7 +11721,7 @@ function defaultNodeSize(type){
     if(type === 'llm') return {w:420, h:590};
     if(type === 'generator' || type === 'batchGenerator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
-    if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:0};
+    if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:CLASSIC_VIDEO_NODE_MIN_HEIGHT};
     if(type === 'linkfox-video') return {w:480, h:0};
     if(type === 'topazVideo') return {w:400, h:0};
     if(type === 'blenderDirector') return {w:440, h:0};
@@ -14196,11 +14211,11 @@ function h3VideoSettingsHtml(node){
     return `
         <div class="muted-note">${escapeHtml(minimaxH3ConnectionNote())}</div>
         <div class="gen-settings-row">
-            <label class="field"><div class="setting-title">${tr('canvas.videoDuration')}</div><input class="setting-input video-duration" type="number" min="1" max="15" step="1" value="${Number(node.duration || 5)}"></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoDuration')}</div><input class="setting-input video-duration" type="number" min="1" max="15" step="1" value="${Number(node.duration || MINIMAX_H3_VIDEO_DEFAULTS.duration)}"></label>
             <label class="field"><div class="setting-title">${tr('canvas.videoAspect')}</div><select class="select-lite video-aspect compact-select">
-                ${['21:9','16:9','4:3','1:1','3:4','9:16'].map(value => `<option value="${value}" ${value === (node.aspectRatio || '16:9') ? 'selected' : ''}>${value}</option>`).join('')}
+                ${['21:9','16:9','4:3','1:1','3:4','9:16'].map(value => `<option value="${value}" ${value === (node.aspectRatio || MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio) ? 'selected' : ''}>${value}</option>`).join('')}
             </select></label>
-            <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${h3VideoResolutionOptions(node.resolution || '0.2MP 16:9 - 608x352')}</select></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${h3VideoResolutionOptions(node.resolution || MINIMAX_H3_VIDEO_DEFAULTS.resolution)}</select></label>
         </div>
         <div class="gen-settings-row">
             <label class="field"><div class="setting-title">采样步数（4–30）</div><input class="setting-input" data-h3-steps type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}"></label>
@@ -14344,8 +14359,7 @@ function renderVideoBody(node){
         }
         if(isMiniMaxH3VideoNode(node)){
             node.model = 'MiniMax H3';
-            node.resolution = '0.2MP 16:9 - 608x352';
-            node.steps = Number(node.steps || 12);
+            applyMiniMaxH3VideoDefaults(node, {force:true});
             node.multimodal = true;
             node.useFrameRoles = false;
         }
@@ -14438,6 +14452,8 @@ function renderVideoBody(node){
         };
     });
     const list = wrap.querySelector('.video-img-list');
+    const contentScroll = wrap.querySelector('.generator-canvas-content');
+    if(contentScroll) contentScroll.onwheel = event => event.stopPropagation();
     renderVideoImageInputs(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     bindGeneratorInlinePrompt(wrap, node);

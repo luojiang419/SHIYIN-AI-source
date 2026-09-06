@@ -345,9 +345,12 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .gen-run-row .gen-btn,
 .gen-run-row .comfy-run { flex:0 0 40px; margin-top:0; }
 .gen-run-row .llm-run { flex:0 0 36px; margin-top:0; }
-.video-node { width:440px; min-width:440px; max-width:520px; }
+.video-node { width:440px; min-width:440px; min-height:700px; max-width:520px; }
 .auto-height-node .resize-handle { cursor:ew-resize; }
-.video-node .node-bottom-controls { position:relative; bottom:auto; }
+.node.sized.video-node .node-body { overflow:hidden; }
+.node.sized.video-node .generator-body { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; height:100%; overflow:hidden; }
+.node.sized.video-node .generator-canvas-content { flex:1 1 auto; min-height:64px; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; }
+.node.sized.video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; }
 .video-input-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .video-input-head .tool-btn { height:28px; min-width:0; padding:0 10px; font-size:10px; white-space:nowrap; }
 .video-input-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
@@ -366,7 +369,6 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .kling-parameter-field { min-width:0; }
 .kling-parameter-field .select-lite,.kling-parameter-field .setting-input { width:100%; }
 .kling-parameter-help { margin-top:3px; color:var(--muted); font-size:9px; line-height:1.35; }
-.node.sized.video-node .generator-body { display:flex; flex-direction:column; }
 .node.sized.video-node .input-list { flex:1; min-height:64px; max-height:none; }
 .node.sized.video-node .gen-run-row,
 .node.sized.video-node .gen-btn { margin-top:auto; }

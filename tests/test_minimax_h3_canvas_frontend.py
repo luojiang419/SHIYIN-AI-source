@@ -26,6 +26,13 @@ class MiniMaxH3CanvasFrontendTests(unittest.TestCase):
         self.assertIn("0.2MP 16:9 - 608x352", self.javascript)
         self.assertIn("0.4MP 9:16 - 480x864", self.javascript)
 
+    def test_h3_new_node_defaults_are_explicit_and_reused(self):
+        self.assertIn("const MINIMAX_H3_VIDEO_DEFAULTS = Object.freeze({", self.javascript)
+        self.assertIn("duration:5", self.javascript)
+        self.assertIn("aspectRatio:'16:9'", self.javascript)
+        self.assertIn("resolution:'0.2MP 16:9 - 608x352'", self.javascript)
+        self.assertIn("applyMiniMaxH3VideoDefaults(node, {force:true})", self.javascript)
+
     def test_h3_request_preserves_local_multimodal_references(self):
         self.assertIn("const isH3 = isMiniMaxH3VideoNode(node);", self.javascript)
         self.assertIn("videos:isH3", self.javascript)

@@ -10,6 +10,7 @@ SETTINGS_HTML = (ROOT / "static" / "app-settings.html").read_text(encoding="utf-
 SETTINGS_JS = (ROOT / "static" / "js" / "app-settings.js").read_text(encoding="utf-8")
 TUNER_HTML = (ROOT / "static" / "depth-map-tuner.html").read_text(encoding="utf-8")
 TUNER_JS = (ROOT / "static" / "js" / "depth-map-tuner.js").read_text(encoding="utf-8")
+COMPARE_JS = (ROOT / "static" / "js" / "compare-viewer.js").read_text(encoding="utf-8")
 INDEX_HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
 
@@ -50,6 +51,13 @@ def test_result_compare_node_has_two_ports_inline_compare_and_fullscreen():
         ".result-compare-stage.is-portrait",
     ):
         assert marker in CANVAS_HTML + CANVAS_JS + CANVAS_CSS
+
+
+def test_compare_handle_remains_draggable_while_other_buttons_are_ignored():
+    assert "const onHandle = Boolean(event.target.closest('.compare-viewer-handle'))" in COMPARE_JS
+    assert "(!onHandle && event.target.closest('button'))" in COMPARE_JS
+    assert "this.dragMode = 'divider'" in COMPARE_JS
+    assert "this.root.setPointerCapture(event.pointerId)" in COMPARE_JS
 
 
 def test_image_and_pose_replicate_output_compare_shortcuts_are_connected():

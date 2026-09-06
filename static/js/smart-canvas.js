@@ -927,7 +927,8 @@ function smartVideoFallbackHtml(url, attrs=''){
 function smartVideoPlayerHtml(url, attrs=''){
     const original = smartOriginalMediaUrl(url);
     const safe = escapeHtml(displayMediaUrl({url:original}));
-    return `<video src="${safe}" data-url="${escapeAttr(original)}" data-inline-video-active="1" controls autoplay playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
+    // 画布内视频只能由用户点击播放按钮启动；避免 autoplay 在节点重绘/迁移时误触发播放。
+    return `<video src="${safe}" data-url="${escapeAttr(original)}" data-inline-video-active="1" controls playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
 }
 function smartActivateVideoPreview(target){
     const root = target?.closest?.('.media-video-card,.video-thumb,.image-wrap,.thumb-item') || target?.parentElement || null;

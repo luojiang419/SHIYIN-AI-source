@@ -243,7 +243,8 @@ function canvasVideoFallbackHtml(url, attrs=''){
 function canvasVideoPlayerHtml(url, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const src = canvasDisplayMediaUrl(original);
-    return `<video src="${escapeAttr(src)}" data-url="${escapeAttr(original)}" controls autoplay playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
+    // 画布内视频只能由用户点击播放按钮启动；避免 autoplay 在节点重绘/迁移时误触发播放。
+    return `<video src="${escapeAttr(src)}" data-url="${escapeAttr(original)}" controls playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
 }
 function canvasActivateVideoPreview(img){
     if(!img) return false;

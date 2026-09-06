@@ -13643,16 +13643,8 @@ async def receive_film_bridge_direct(
     if requested_id:
         canvas = load_canvas(requested_id)
     else:
-        active_id = str(ACTIVE_CANVAS_ID or ACTIVE_CANVAS_BY_ACCOUNT.get(current_account_id()) or "").strip()
-        canvas = None
-        if active_id:
-            try:
-                canvas = load_canvas(active_id)
-            except HTTPException:
-                ACTIVE_CANVAS_BY_ACCOUNT.pop(current_account_id(), None)
-                active_id = ""
-        if canvas is None:
-            canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id)
+        # 自动联动按来源画板匹配，不能把不同画板注入当前打开的无关工程。
+        canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id)
         if canvas is None:
             title = (canvas_title.strip() or str(storyboard.get("board_name") or "film 故事板").strip() or "film 故事板")[:80]
             canvas = new_canvas(title=title, icon="clapperboard", kind="classic", project=DEFAULT_PROJECT_ID)

@@ -180,7 +180,7 @@ function onBoardWheel(e){
 function currentProject(){ return projects.find(p => p.id === currentProjectId) || projects[0] || null; }
 function canvasesInProject(pid){ return canvases.filter(c => (c.project || 'default') === pid); }
 
-async function loadAll(){
+async function loadAll({preserveViewport = false} = {}){
     try {
         const [pRes, cRes] = await Promise.all([
             fetch('/api/projects'),
@@ -199,7 +199,7 @@ async function loadAll(){
         rememberProjectId(currentProjectId);
         renderProjects();
         renderBoard();
-        resetView();
+        if(!preserveViewport) resetView();
         refreshTrashCount();
     } catch(e){
         console.error(e);
@@ -597,14 +597,14 @@ function updateCanvasPackageProgress(percent, message, state = 'busy'){
     if(closeBtn) closeBtn.hidden = state === 'busy';
 }
 
-function openCanvasPackageProgress(file){
+function openCanvasPackageProgress(file, exporting = false){
     canvasPackageProgressEl?.remove();
     const el = document.createElement('div');
     el.className = 'ws-package-progress-backdrop';
     el.innerHTML = `<div class="ws-package-progress" role="dialog" aria-modal="true" aria-labelledby="wsPackageProgressTitle">
         <div class="ws-package-progress-head">
             <div class="ws-package-progress-icon"><i data-lucide="package" class="w-5 h-5"></i></div>
-            <div><div id="wsPackageProgressTitle" class="ws-package-progress-title">${L('正在导入工程包','Importing project package')}</div><div class="ws-package-progress-file"></div></div>
+            <div><div id="wsPackageProgressTitle" class="ws-package-progress-title">${exporting ? L('正在导出工程包','Exporting project package') : L('正在导入工程包','Importing project package')}</div><div class="ws-package-progress-file"></div></div>
         </div>
         <div class="ws-package-progress-value">0%</div>
         <div class="ws-package-progress-track"><span class="ws-package-progress-bar"></span></div>
@@ -723,17 +723,44 @@ function showCardDeleteConfirm(canvasId){
 
 /* ===== Export canvas (download the full canvas JSON) ===== */
 async function exportCanvas(id){
+    if(canvasPackageImporting) return;
     const c = canvases.find(x => x.id === id);
-    setStatus(L('正在导出...','Exporting...'));
+    const filename = `${safeExportBase(c?.title || 'canvas')}-工程包.zip`;
+    canvasPackageImporting = true;
+    openCanvasPackageProgress({name:filename}, true);
+    updateCanvasPackageProgress(5, L('正在打包画布和资源，大工程可能需要一些时间...','Packing canvas and assets. Large projects may take a while...'));
+    let objectUrl = '';
     try {
-        const base = safeExportBase((c?.title) || 'canvas');
-        const filename = `${base}-工程包.zip`;
+        const response = await fetch(`/api/canvases/${encodeURIComponent(id)}/export-package?name=${encodeURIComponent(filename)}`, {signal:AbortSignal.timeout(300000)});
+        if(!response.ok){
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        if(!blob.size || !(response.headers.get('content-type') || '').includes('application/zip')){
+            throw new Error(L('服务器未返回有效的 ZIP 工程包','The server did not return a ZIP project package'));
+        }
+        updateCanvasPackageProgress(95, L('工程包已生成，正在保存...','Package ready. Saving...'));
+        const saved = await window.ShiyinQuickSave?.save({blob, name:filename});
+        if(saved?.handled){
+            updateCanvasPackageProgress(100, L('工程包已保存到快捷保存目录','Package saved to quick-save directory'), 'success');
+            return;
+        }
+        objectUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = `/api/canvases/${encodeURIComponent(id)}/export-package?name=${encodeURIComponent(filename)}`;
+        a.href = objectUrl;
         a.download = filename;
+        a.dataset.quickSaveBypass = '1';
         document.body.appendChild(a); a.click(); a.remove();
-        setStatus(L('已开始导出工程包','Project package export started'));
-    } catch(e){ console.error(e); setStatus(L('导出失败','Export failed')); }
+        updateCanvasPackageProgress(100, L('工程包已生成，请在保存窗口或浏览器下载列表中查看','Package ready. Check the save dialog or browser downloads'), 'success');
+    } catch(e){
+        console.error(e);
+        updateCanvasPackageProgress(0, `${L('导出失败：','Export failed: ')}${e.message || e}`, 'error');
+    } finally {
+        canvasPackageImporting = false;
+        // WebView 下载异步读取 Blob，不能在 click 后立即释放。
+        if(objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    }
 }
 
 /* ===== Export canvas package (built by the backend) ===== */
@@ -1002,6 +1029,7 @@ document.addEventListener('keydown', e => {
 // language switch from parent (index.html) via postMessage
 window.addEventListener('message', event => {
     if(event.origin && event.origin !== location.origin) return;
+    handleCanvasListSync(event.data);
     if(event.data?.type === 'studio-lang'){
         if(event.data.lang && window.StudioI18n) StudioI18n.set(event.data.lang);
         window.StudioI18n?.apply?.();
@@ -1010,6 +1038,18 @@ window.addEventListener('message', event => {
         if(trashPanel.classList.contains('active')) renderTrash();
         refreshIcons();
     }
+});
+
+let canvasListSyncTimer = null;
+function handleCanvasListSync(message){
+    if(message?.type !== 'sync.reconnected' && !(message?.type === 'entity.changed' && ['canvas','project'].includes(message.topic))) return;
+    clearTimeout(canvasListSyncTimer);
+    canvasListSyncTimer = setTimeout(() => loadAll({preserveViewport:true}), 250);
+}
+window.addEventListener('canvas-realtime-message', event => handleCanvasListSync(event.detail));
+window.addEventListener('focus', () => handleCanvasListSync({type:'sync.reconnected'}));
+document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) handleCanvasListSync({type:'sync.reconnected'});
 });
 
 /* ===== Boot ===== */

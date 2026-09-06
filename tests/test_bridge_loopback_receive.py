@@ -54,11 +54,50 @@ manifest = {
     "shots": [],
 }
 with TestClient(main.app, client=("127.0.0.1", 50000)) as client:
+    unrelated = main.new_canvas(title="已打开的无关画布")
+    main.ACTIVE_CANVAS_ID = unrelated["id"]
     response = client.post(
         "/api/canvas-bridges/film/receive-direct",
         data={"manifest": json.dumps(manifest), "canvas_title": "直接故事板"},
         files={"frames": ("frame_0000.png", content, "image/png")},
     )
+    assert response.status_code == 200, response.text
+    first = response.json()
+    assert first["canvas_id"] != unrelated["id"], first
+    manifest["bridge_id"] = "film:direct:board-b"
+    second = client.post(
+        "/api/canvas-bridges/film/receive-direct",
+        data={"manifest": json.dumps(manifest), "canvas_title": "画板 B"},
+        files={"frames": ("frame_0000.png", content, "image/png")},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["canvas_id"] not in {first["canvas_id"], unrelated["id"]}
+    manifest["bridge_id"] = "film:direct:board"
+    repeated = client.post(
+        "/api/canvas-bridges/film/receive-direct",
+        data={"manifest": json.dumps(manifest)},
+        files={"frames": ("frame_0000.png", content, "image/png")},
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["canvas_id"] == first["canvas_id"]
+    assert repeated.json()["group_id"] == first["group_id"]
+    assert repeated.json()["sync_mode"] == "unchanged"
+    assert len(main.DATABASE.list_canvases(include_deleted=False)) == 3
+    assert main.load_canvas(unrelated["id"])["nodes"] == []
+    # 不经过 mock 的 HTTP 工程包导出、重新导入和媒体读取。
+    login = client.post('/api/account/login', json={'account':'jiang','password':'jiang'})
+    assert login.status_code == 200, login.text
+    archive = client.get(f'/api/canvases/{first["canvas_id"]}/export-package')
+    assert archive.status_code == 200, archive.text
+    assert archive.content.startswith(b'PK')
+    imported = client.post('/api/canvas-packages/import', files={'file':('roundtrip.zip',archive.content,'application/zip')})
+    assert imported.status_code == 200, imported.text
+    restored = imported.json()['canvas']
+    assert restored['id'] != first['canvas_id']
+    media = next(n for n in restored['nodes'] if n.get('type') == 'image')
+    asset = client.get(media['url'])
+    assert asset.status_code == 200, asset.text
+    assert asset.content == content
 assert response.status_code == 200, response.text
 payload = response.json()
 assert payload["transport"] == "direct-multipart", payload

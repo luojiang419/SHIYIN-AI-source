@@ -1,0 +1,7 @@
+# 本地部署产物（源码副本、虚拟环境、模型、缓存与推理结果）
+runtime/
+src-tauri/target/
+src-tauri/gen/
+__pycache__/
+*.py[cod]
+.pytest_cache/

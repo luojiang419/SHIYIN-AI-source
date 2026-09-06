@@ -1,0 +1,38 @@
+{
+  "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "SHIYIN 视频深度验证台",
+  "version": "0.1.0",
+  "identifier": "com.shiyin.video.depth.lab",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "SHIYIN 视频深度验证台",
+        "width": 1520,
+        "height": 940,
+        "minWidth": 1120,
+        "minHeight": 740,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; media-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": [],
+    "icon": ["../../depth-map-tuner/src-tauri/icons/icon.ico"]
+  }
+}

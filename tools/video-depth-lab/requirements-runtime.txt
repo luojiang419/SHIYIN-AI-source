@@ -1,0 +1,2 @@
+# Minimal inference dependency missing from the existing CUDA PyTorch runtime.
+easydict==1.13

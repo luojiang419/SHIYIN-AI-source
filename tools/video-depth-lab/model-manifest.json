@@ -1,0 +1,21 @@
+{
+  "schema": "shiyin.video-depth-lab.models/v1",
+  "models": [
+    {
+      "key": "gemdepth_vda_8f",
+      "repository": "https://github.com/Yuecheng919/GemDepth.git",
+      "revision": "652865b0ed20e727784a6b77314da1dca2f14e36",
+      "file": "runtime/models/gemdepth/gemdepth.pth",
+      "bytes": 2844171337,
+      "sha256": "F7C3FB7791862CC82684DDB1804480FB0314FDDBA4CF0E3B706553D98292FCAD"
+    },
+    {
+      "key": "vda_base_fp16_relative",
+      "repository": "https://github.com/DepthAnything/Video-Depth-Anything.git",
+      "revision": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+      "file": "runtime/models/video-depth-anything-base/video_depth_anything_vitb.pth",
+      "bytes": 458247082,
+      "sha256": "775E578E8F9431EC0496514AA466BD0A1F67C28D0F518267809F35A43C04329B"
+    }
+  ]
+}

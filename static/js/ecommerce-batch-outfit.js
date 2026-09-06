@@ -23,6 +23,8 @@
         previewScale:1,
         previewPanX:0,
         previewPanY:0,
+        previewDivider:50,
+        previewDragMode:'',
         previewPointerId:null,
         previewLastPoint:null,
         initialized:false,
@@ -319,7 +321,9 @@
         el.previewStage.style.setProperty('--ec-batch-preview-scale', String(state.previewScale));
         el.previewStage.style.setProperty('--ec-batch-preview-pan-x', `${state.previewPanX}px`);
         el.previewStage.style.setProperty('--ec-batch-preview-pan-y', `${state.previewPanY}px`);
+        el.previewStage.style.setProperty('--ec-batch-preview-divider', `${state.previewDivider}%`);
         el.previewStage.classList.toggle('is-zoomed', state.previewScale > 1);
+        if(el.previewCompareHandle) el.previewCompareHandle.setAttribute('aria-valuenow', String(Math.round(state.previewDivider)));
         el.previewZoomReset.textContent = `${state.previewScale.toFixed(state.previewScale % 1 ? 2 : 0).replace(/0$/,'')}×`;
         el.previewZoomOut.disabled = state.previewScale <= 1;
         el.previewZoomIn.disabled = state.previewScale >= 8;
@@ -338,31 +342,57 @@
         state.previewScale = 1;
         state.previewPanX = 0;
         state.previewPanY = 0;
+        state.previewDivider = 50;
         applyPreviewView();
     }
 
-    function beginPreviewPan(event){
-        if(event.button !== 0 || state.previewScale <= 1 || event.target.closest('button')) return;
+    function setPreviewDivider(value){
+        state.previewDivider = Math.max(0, Math.min(100, Number(value) || 0));
+        applyPreviewView();
+    }
+
+    function updatePreviewDividerFromPointer(event){
+        const rect = el.previewMedia?.getBoundingClientRect();
+        if(!rect?.width) return;
+        setPreviewDivider((event.clientX - rect.left) / rect.width * 100);
+    }
+
+    function beginPreviewInteraction(event){
+        if(event.button !== 0) return;
+        const compareHandle = event.target.closest('#batchOutfitPreviewCompareHandle');
+        if(compareHandle && !compareHandle.disabled) {
+            state.previewDragMode = 'divider';
+            updatePreviewDividerFromPointer(event);
+        } else {
+            if(state.previewScale <= 1 || event.target.closest('button')) return;
+            state.previewDragMode = 'pan';
+            state.previewLastPoint = {x:event.clientX, y:event.clientY};
+            el.previewStage.classList.add('is-panning');
+        }
         event.preventDefault();
         state.previewPointerId = event.pointerId;
-        state.previewLastPoint = {x:event.clientX, y:event.clientY};
-        el.previewStage.classList.add('is-panning');
         try { el.previewStage.setPointerCapture(event.pointerId); } catch(error) {}
     }
 
-    function movePreviewPan(event){
-        if(event.pointerId !== state.previewPointerId || !state.previewLastPoint) return;
+    function movePreviewInteraction(event){
+        if(event.pointerId !== state.previewPointerId) return;
+        if(state.previewDragMode === 'divider') {
+            updatePreviewDividerFromPointer(event);
+            return;
+        }
+        if(state.previewDragMode !== 'pan' || !state.previewLastPoint) return;
         state.previewPanX += event.clientX - state.previewLastPoint.x;
         state.previewPanY += event.clientY - state.previewLastPoint.y;
         state.previewLastPoint = {x:event.clientX, y:event.clientY};
         applyPreviewView();
     }
 
-    function endPreviewPan(event){
+    function endPreviewInteraction(event){
         if(event.pointerId !== state.previewPointerId) return;
         try { el.previewStage.releasePointerCapture(event.pointerId); } catch(error) {}
         state.previewPointerId = null;
         state.previewLastPoint = null;
+        state.previewDragMode = '';
         el.previewStage.classList.remove('is-panning');
     }
 
@@ -376,6 +406,12 @@
         }
         el.previewTitle.textContent = group.styleName;
         el.previewCount.textContent = `${state.selectedImageIndex + 1} / ${group.works.length}`;
+        const target = group.inputs?.pose_reference;
+        const hasComparison = Boolean(target?.url);
+        if(hasComparison) el.previewTargetImage.src = target.url;
+        else el.previewTargetImage.removeAttribute('src');
+        el.previewMedia.classList.toggle('has-comparison', hasComparison);
+        el.previewCompareHandle.disabled = !hasComparison;
         el.previewImage.src = work.url;
         el.previewImage.alt = `${group.styleName} 生成作品 ${state.selectedImageIndex + 1}`;
         el.preview.querySelector('[data-batch-preview-step="-1"]').disabled = state.selectedImageIndex <= 0;
@@ -930,10 +966,10 @@
             resetPreviewView();
             if(state.initialized && isActive()) renderWorks();
         });
-        el.previewStage?.addEventListener('pointerdown', beginPreviewPan);
-        el.previewStage?.addEventListener('pointermove', movePreviewPan);
-        el.previewStage?.addEventListener('pointerup', endPreviewPan);
-        el.previewStage?.addEventListener('pointercancel', endPreviewPan);
+        el.previewStage?.addEventListener('pointerdown', beginPreviewInteraction);
+        el.previewStage?.addEventListener('pointermove', movePreviewInteraction);
+        el.previewStage?.addEventListener('pointerup', endPreviewInteraction);
+        el.previewStage?.addEventListener('pointercancel', endPreviewInteraction);
         el.previewStage?.addEventListener('wheel', event => {
             if(!previewIsOpen() || event.target.closest('button')) return;
             event.preventDefault();
@@ -943,6 +979,13 @@
             if(!event.target.closest('button')) resetPreviewView();
         });
         el.previewImage?.addEventListener('load', applyPreviewView);
+        el.previewTargetImage?.addEventListener('load', applyPreviewView);
+        el.previewCompareHandle?.addEventListener('keydown', event => {
+            const steps = {ArrowLeft:-2, ArrowDown:-2, ArrowRight:2, ArrowUp:2};
+            if(event.key in steps) { event.preventDefault(); setPreviewDivider(state.previewDivider + steps[event.key]); }
+            if(event.key === 'Home') { event.preventDefault(); setPreviewDivider(0); }
+            if(event.key === 'End') { event.preventDefault(); setPreviewDivider(100); }
+        });
         el.previewZoomOut?.addEventListener('click', () => setPreviewZoom(state.previewScale - .25));
         el.previewZoomIn?.addEventListener('click', () => setPreviewZoom(state.previewScale + .25));
         el.previewZoomReset?.addEventListener('click', resetPreviewView);
@@ -979,6 +1022,9 @@
             gridRatio:document.getElementById('batchOutfitGridRatio'),
             preview:document.getElementById('batchOutfitPreview'),
             previewStage:document.getElementById('batchOutfitPreviewStage'),
+            previewMedia:document.getElementById('batchOutfitPreviewMedia'),
+            previewTargetImage:document.getElementById('batchOutfitPreviewTargetImage'),
+            previewCompareHandle:document.getElementById('batchOutfitPreviewCompareHandle'),
             previewImage:document.getElementById('batchOutfitPreviewImage'),
             previewTitle:document.getElementById('batchOutfitPreviewTitle'),
             previewCount:document.getElementById('batchOutfitPreviewCount'),

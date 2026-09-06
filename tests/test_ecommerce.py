@@ -2041,7 +2041,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertNotIn('id="frame-free-creation"', self.index_html)
         self.assertNotIn("switchUI(this, 'free-creation')", self.index_html)
         self.assertIn('/static/js/ecommerce.js?v=2026.09.06.batch-outfit.4', self.html)
-        self.assertIn('/static/css/ecommerce.css?v=2026.09.06.batch-outfit-preview.1', self.html)
+        self.assertIn('/static/css/ecommerce.css?v=2026.09.06.batch-outfit-compare.1', self.html)
 
     def test_generation_parameters_render_before_slow_server_bootstrap(self):
         self.assertIn("initializing:true", self.javascript)

@@ -22,9 +22,15 @@ use tauri::{
     webview::DownloadEvent,
     AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use uuid::Uuid;
 
 mod updater;
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" {
+    fn GetForegroundWindow() -> *mut std::ffi::c_void;
+}
 
 pub fn run_update_session_window_from_args() -> bool {
     updater::run_update_session_window_from_args()
@@ -36,38 +42,34 @@ const CLOSE_BEHAVIOR_TRAY: &str = "minimize_to_tray";
 const CLOSE_BEHAVIOR_EXIT: &str = "exit";
 const CLOSE_ACTION_MINIMIZE_LABEL: &str = "最小化到托盘";
 const CLOSE_ACTION_EXIT_LABEL: &str = "退出软件";
-const FULLSCREEN_SHORTCUT_SCRIPT: &str = r#"
-(() => {
-    if (window.__shiyinFullscreenShortcutInstalled) return;
-    window.__shiyinFullscreenShortcutInstalled = true;
-
-    window.addEventListener('keydown', async (event) => {
-        if (
-            event.key !== 'F11'
-            || event.repeat
-            || event.altKey
-            || event.ctrlKey
-            || event.metaKey
-            || event.shiftKey
-        ) return;
-
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        try {
-            await window.__TAURI__.core.invoke('toggle_fullscreen');
-        } catch (error) {
-            console.error('切换桌面全屏失败', error);
-        }
-    }, true);
-})();
-"#;
 
 fn boxed_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
     Box::new(std::io::Error::other(message.into()))
 }
 
-#[tauri::command]
-fn toggle_fullscreen(window: WebviewWindow) -> Result<bool, String> {
+fn fullscreen_shortcut() -> Shortcut {
+    Shortcut::new(None, Code::F11)
+}
+
+fn should_toggle_fullscreen(shortcut: &Shortcut, state: ShortcutState, focused: bool) -> bool {
+    focused && state == ShortcutState::Pressed && shortcut.id() == fullscreen_shortcut().id()
+}
+
+fn is_window_foreground(window: &WebviewWindow) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        window
+            .hwnd()
+            .map(|handle| handle.0 == unsafe { GetForegroundWindow() })
+            .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        window.is_focused().unwrap_or(false)
+    }
+}
+
+fn toggle_fullscreen(window: &WebviewWindow) -> Result<bool, String> {
     let fullscreen = window
         .is_fullscreen()
         .map_err(|error| format!("读取窗口全屏状态失败：{error}"))?;
@@ -76,6 +78,20 @@ fn toggle_fullscreen(window: WebviewWindow) -> Result<bool, String> {
         .set_fullscreen(next_fullscreen)
         .map_err(|error| format!("切换窗口全屏状态失败：{error}"))?;
     Ok(next_fullscreen)
+}
+
+fn set_fullscreen_shortcut_registration(app: &AppHandle, register: bool) {
+    let manager = app.global_shortcut();
+    let shortcut = fullscreen_shortcut();
+    let is_registered = manager.is_registered(shortcut);
+    let result = match (register, is_registered) {
+        (true, false) => manager.register(shortcut),
+        (false, true) => manager.unregister(shortcut),
+        _ => return,
+    };
+    if let Err(error) = result {
+        eprintln!("更新 F11 全屏快捷键注册失败：{error}");
+    }
 }
 
 fn is_legacy_webview_version_dir(name: &str) -> bool {
@@ -711,6 +727,21 @@ pub fn run() {
     }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    let Some(window) = app.get_webview_window("main") else {
+                        return;
+                    };
+                    let focused = is_window_foreground(&window);
+                    if should_toggle_fullscreen(shortcut, event.state, focused) {
+                        if let Err(error) = toggle_fullscreen(&window) {
+                            eprintln!("F11 切换桌面全屏失败：{error}");
+                        }
+                    }
+                })
+                .build(),
+        )
         .setup(|app| {
             let root = discover_portable_root().map_err(boxed_error)?;
             let data_root = root.join("data");
@@ -739,7 +770,6 @@ pub fn run() {
                 .inner_size(1440.0, 900.0)
                 .data_directory(webview_data_root.clone())
                 .disable_drag_drop_handler()
-                .initialization_script(FULLSCREEN_SHORTCUT_SCRIPT)
                 .on_download(native_download_handler);
             // 旧版 window.json 记录的是物理像素，不能再直接恢复；否则高 DPI
             // 环境会把已保存尺寸再次按系统缩放放大，导致窗口和界面被裁切。
@@ -755,6 +785,7 @@ pub fn run() {
             match window.build() {
                 Ok(view) => {
                     if placement.maximized { let _ = view.maximize(); }
+                    set_fullscreen_shortcut_registration(app.handle(), true);
                     schedule_legacy_webview_profile_cleanup(webview_root, webview_data_root);
                 }
                 Err(error) => {
@@ -778,6 +809,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::Focused(focused) = event {
+                set_fullscreen_shortcut_registration(window.app_handle(), *focused);
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<DesktopState>();
                 if state.quitting.load(Ordering::SeqCst) {
@@ -834,7 +868,6 @@ pub fn run() {
             updater::apply_downloaded_update,
             choose_download_directory,
             write_download_file,
-            toggle_fullscreen,
         ]);
     builder
         .run(tauri::generate_context!())
@@ -844,11 +877,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_legacy_webview_version_dir, prune_legacy_webview_profiles, suggested_download_name,
-        write_download_file, FULLSCREEN_SHORTCUT_SCRIPT,
+        fullscreen_shortcut, is_legacy_webview_version_dir, prune_legacy_webview_profiles,
+        should_toggle_fullscreen, suggested_download_name, write_download_file,
     };
     use std::fs;
     use std::path::Path;
+    use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutState};
 
     #[test]
     fn download_name_prefers_query_name_and_sanitizes_windows_characters() {
@@ -927,22 +961,25 @@ mod tests {
     }
 
     #[test]
-    fn fullscreen_shortcut_captures_plain_non_repeating_f11() {
-        for contract in [
-            "event.key !== 'F11'",
-            "event.repeat",
-            "event.altKey",
-            "event.ctrlKey",
-            "event.metaKey",
-            "event.shiftKey",
-            "event.preventDefault()",
-            "event.stopImmediatePropagation()",
-            "invoke('toggle_fullscreen')",
-        ] {
-            assert!(
-                FULLSCREEN_SHORTCUT_SCRIPT.contains(contract),
-                "missing fullscreen shortcut contract: {contract}"
-            );
-        }
+    fn fullscreen_shortcut_only_toggles_for_focused_f11_press() {
+        let f11 = fullscreen_shortcut();
+        let f10 = Shortcut::new(None, Code::F10);
+
+        assert!(should_toggle_fullscreen(&f11, ShortcutState::Pressed, true));
+        assert!(!should_toggle_fullscreen(
+            &f11,
+            ShortcutState::Released,
+            true
+        ));
+        assert!(!should_toggle_fullscreen(
+            &f11,
+            ShortcutState::Pressed,
+            false
+        ));
+        assert!(!should_toggle_fullscreen(
+            &f10,
+            ShortcutState::Pressed,
+            true
+        ));
     }
 }

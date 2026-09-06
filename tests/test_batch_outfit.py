@@ -56,6 +56,7 @@ def test_batch_outfit_works_support_hover_and_fullscreen_navigation():
     for element_id in (
         "batchOutfitPreview", "batchOutfitPreviewStage", "batchOutfitPreviewImage",
         "batchOutfitPreviewTitle", "batchOutfitPreviewCount", "closeBatchOutfitPreview",
+        "batchOutfitPreviewZoomOut", "batchOutfitPreviewZoomReset", "batchOutfitPreviewZoomIn",
     ):
         assert f'id="{element_id}"' in ECOMMERCE_HTML
     assert 'data-batch-work-preview' in BATCH_JS
@@ -65,6 +66,10 @@ def test_batch_outfit_works_support_hover_and_fullscreen_navigation():
     assert 'data-batch-preview-step="1"' in ECOMMERCE_HTML
     assert "function openWorkPreview()" in BATCH_JS
     assert "function stepWork(delta)" in BATCH_JS
+    assert "function setPreviewZoom(value)" in BATCH_JS
+    assert "function beginPreviewPan(event)" in BATCH_JS
+    assert "setPointerCapture(event.pointerId)" in BATCH_JS
+    assert "event.target.closest('button')" in BATCH_JS
     assert "['ArrowLeft','ArrowRight'].includes(event.key)" in BATCH_JS
     assert "workStageHovered:false" in BATCH_JS
     assert "workStage?.matches?.(':hover')" in BATCH_JS
@@ -72,6 +77,9 @@ def test_batch_outfit_works_support_hover_and_fullscreen_navigation():
     assert ".ec-batch-preview-stage .ec-batch-work-nav:not(:disabled)" in BATCH_CSS
     assert "width:100vw" in BATCH_CSS
     assert "height:100vh" in BATCH_CSS
+    assert "box-sizing:border-box" in BATCH_CSS
+    assert "--ec-batch-preview-scale" in BATCH_CSS
+    assert ".ec-batch-preview-stage.is-panning" in BATCH_CSS
 
 
 def test_model_settings_are_collapsed_by_default_and_remember_manual_expansion():

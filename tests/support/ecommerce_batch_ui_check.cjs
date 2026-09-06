@@ -93,7 +93,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.deepEqual(await page.locator('.ec-batch-group-number').allTextContents(), ['01','02']);
         assert.equal(await page.locator('.ec-batch-outfit-groups.is-single').count(), 0);
 
-        const pixel = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="600" height="800" fill="#c89468"/><circle cx="300" cy="290" r="130" fill="#f3eadf"/></svg>');
+        const pixel = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#c89468"/><circle cx="800" cy="420" r="210" fill="#f3eadf"/></svg>');
         await page.evaluate(pixelUrl => {
             const saved = EcommerceBatchOutfit.snapshot();
             saved.grid_ratio = '16:9';
@@ -126,12 +126,39 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('#batchOutfitPreview[open]').waitFor();
         const previewBox = await page.locator('#batchOutfitPreview').boundingBox();
         assert.ok(previewBox.width >= 1439 && previewBox.height >= 979);
+        const previewGeometry = await page.locator('#batchOutfitPreviewStage').evaluate(stage => {
+            const image = stage.querySelector('img');
+            const stageRect = stage.getBoundingClientRect();
+            const imageRect = image.getBoundingClientRect();
+            return {
+                stage:{left:stageRect.left,top:stageRect.top,right:stageRect.right,bottom:stageRect.bottom},
+                image:{left:imageRect.left,top:imageRect.top,right:imageRect.right,bottom:imageRect.bottom},
+                objectFit:getComputedStyle(image).objectFit,
+                boxSizing:getComputedStyle(stage).boxSizing,
+            };
+        });
+        assert.equal(previewGeometry.objectFit, 'contain');
+        assert.equal(previewGeometry.boxSizing, 'border-box');
+        assert.ok(previewGeometry.image.left >= previewGeometry.stage.left && previewGeometry.image.right <= previewGeometry.stage.right);
+        assert.ok(previewGeometry.image.top >= previewGeometry.stage.top && previewGeometry.image.bottom <= previewGeometry.stage.bottom);
+        assert.equal(await page.locator('#batchOutfitPreviewZoomOut').isDisabled(), true);
+        await page.locator('#batchOutfitPreviewZoomIn').click();
+        assert.equal((await page.locator('#batchOutfitPreviewZoomReset').textContent()).trim(), '1.25×');
+        const previewStageBox = await page.locator('#batchOutfitPreviewStage').boundingBox();
+        const panBefore = await page.locator('#batchOutfitPreviewStage').evaluate(stage => getComputedStyle(stage).getPropertyValue('--ec-batch-preview-pan-x').trim());
+        await page.mouse.move(previewStageBox.x + previewStageBox.width / 2, previewStageBox.y + previewStageBox.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(previewStageBox.x + previewStageBox.width / 2 + 55, previewStageBox.y + previewStageBox.height / 2 + 35, {steps:4});
+        await page.mouse.up();
+        const panAfter = await page.locator('#batchOutfitPreviewStage').evaluate(stage => getComputedStyle(stage).getPropertyValue('--ec-batch-preview-pan-x').trim());
+        assert.notEqual(panAfter, panBefore);
         assert.equal((await page.locator('#batchOutfitPreviewCount').textContent()).trim(), '1 / 2');
         assert.equal(await page.locator('[data-batch-preview-step="-1"]').isDisabled(), true);
         assert.equal(Number(await page.locator('[data-batch-preview-step="-1"]').evaluate(element => getComputedStyle(element).opacity)), 0);
         if(screenshotPath) await page.screenshot({path:screenshotPath.replace(/(\.[^.]+)$/, '-fullscreen$1')});
         await page.keyboard.press('ArrowRight');
         assert.equal((await page.locator('#batchOutfitPreviewCount').textContent()).trim(), '2 / 2');
+        assert.equal((await page.locator('#batchOutfitPreviewZoomReset').textContent()).trim(), '1×');
         assert.equal(await page.locator('[data-batch-preview-step="1"]').isDisabled(), true);
         await page.locator('[data-batch-preview-step="-1"]').click();
         assert.equal((await page.locator('#batchOutfitPreviewCount').textContent()).trim(), '1 / 2');

@@ -20,6 +20,11 @@
         controlPromises:new Map(),
         gridRatio:'16:9',
         workStageHovered:false,
+        previewScale:1,
+        previewPanX:0,
+        previewPanY:0,
+        previewPointerId:null,
+        previewLastPoint:null,
         initialized:false,
     };
     const el = {};
@@ -293,6 +298,74 @@
         return Boolean(el.preview?.open);
     }
 
+    function clampPreviewPan(){
+        if(!el.previewStage || state.previewScale <= 1) {
+            state.previewPanX = 0;
+            state.previewPanY = 0;
+            return;
+        }
+        const style = getComputedStyle(el.previewStage);
+        const width = Math.max(0, el.previewStage.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0));
+        const height = Math.max(0, el.previewStage.clientHeight - parseFloat(style.paddingTop || 0) - parseFloat(style.paddingBottom || 0));
+        const maxX = width * (state.previewScale - 1) / 2;
+        const maxY = height * (state.previewScale - 1) / 2;
+        state.previewPanX = Math.max(-maxX, Math.min(maxX, state.previewPanX));
+        state.previewPanY = Math.max(-maxY, Math.min(maxY, state.previewPanY));
+    }
+
+    function applyPreviewView(){
+        if(!el.previewStage) return;
+        clampPreviewPan();
+        el.previewStage.style.setProperty('--ec-batch-preview-scale', String(state.previewScale));
+        el.previewStage.style.setProperty('--ec-batch-preview-pan-x', `${state.previewPanX}px`);
+        el.previewStage.style.setProperty('--ec-batch-preview-pan-y', `${state.previewPanY}px`);
+        el.previewStage.classList.toggle('is-zoomed', state.previewScale > 1);
+        el.previewZoomReset.textContent = `${state.previewScale.toFixed(state.previewScale % 1 ? 2 : 0).replace(/0$/,'')}×`;
+        el.previewZoomOut.disabled = state.previewScale <= 1;
+        el.previewZoomIn.disabled = state.previewScale >= 8;
+    }
+
+    function setPreviewZoom(value){
+        state.previewScale = Math.round(Math.max(1, Math.min(8, Number(value) || 1)) * 100) / 100;
+        if(state.previewScale === 1) {
+            state.previewPanX = 0;
+            state.previewPanY = 0;
+        }
+        applyPreviewView();
+    }
+
+    function resetPreviewView(){
+        state.previewScale = 1;
+        state.previewPanX = 0;
+        state.previewPanY = 0;
+        applyPreviewView();
+    }
+
+    function beginPreviewPan(event){
+        if(event.button !== 0 || state.previewScale <= 1 || event.target.closest('button')) return;
+        event.preventDefault();
+        state.previewPointerId = event.pointerId;
+        state.previewLastPoint = {x:event.clientX, y:event.clientY};
+        el.previewStage.classList.add('is-panning');
+        try { el.previewStage.setPointerCapture(event.pointerId); } catch(error) {}
+    }
+
+    function movePreviewPan(event){
+        if(event.pointerId !== state.previewPointerId || !state.previewLastPoint) return;
+        state.previewPanX += event.clientX - state.previewLastPoint.x;
+        state.previewPanY += event.clientY - state.previewLastPoint.y;
+        state.previewLastPoint = {x:event.clientX, y:event.clientY};
+        applyPreviewView();
+    }
+
+    function endPreviewPan(event){
+        if(event.pointerId !== state.previewPointerId) return;
+        try { el.previewStage.releasePointerCapture(event.pointerId); } catch(error) {}
+        state.previewPointerId = null;
+        state.previewLastPoint = null;
+        el.previewStage.classList.remove('is-panning');
+    }
+
     function renderWorkPreview(){
         if(!el.preview) return;
         const group = selectedGroup();
@@ -307,13 +380,16 @@
         el.previewImage.alt = `${group.styleName} 生成作品 ${state.selectedImageIndex + 1}`;
         el.preview.querySelector('[data-batch-preview-step="-1"]').disabled = state.selectedImageIndex <= 0;
         el.preview.querySelector('[data-batch-preview-step="1"]').disabled = state.selectedImageIndex >= group.works.length - 1;
+        applyPreviewView();
     }
 
     function selectWorkIndex(index){
         const group = selectedGroup();
         if(!group?.works.length) return false;
         const nextIndex = Math.max(0, Math.min(group.works.length - 1, Number(index || 0)));
+        const changed = nextIndex !== state.selectedImageIndex;
         state.selectedImageIndex = nextIndex;
+        if(changed) resetPreviewView();
         persist();
         if(previewIsOpen()) renderWorkPreview();
         else renderWorks();
@@ -327,6 +403,7 @@
     function openWorkPreview(){
         const group = selectedGroup();
         if(!currentWork(group) || !el.preview) return;
+        resetPreviewView();
         renderWorkPreview();
         if(!el.preview.open) el.preview.showModal();
         requestAnimationFrame(() => el.previewStage?.focus());
@@ -850,8 +927,25 @@
             if(step) stepWork(Number(step.dataset.batchPreviewStep || 0));
         });
         el.preview?.addEventListener('close', () => {
+            resetPreviewView();
             if(state.initialized && isActive()) renderWorks();
         });
+        el.previewStage?.addEventListener('pointerdown', beginPreviewPan);
+        el.previewStage?.addEventListener('pointermove', movePreviewPan);
+        el.previewStage?.addEventListener('pointerup', endPreviewPan);
+        el.previewStage?.addEventListener('pointercancel', endPreviewPan);
+        el.previewStage?.addEventListener('wheel', event => {
+            if(!previewIsOpen() || event.target.closest('button')) return;
+            event.preventDefault();
+            setPreviewZoom(state.previewScale + (event.deltaY < 0 ? .25 : -.25));
+        }, {passive:false});
+        el.previewStage?.addEventListener('dblclick', event => {
+            if(!event.target.closest('button')) resetPreviewView();
+        });
+        el.previewImage?.addEventListener('load', applyPreviewView);
+        el.previewZoomOut?.addEventListener('click', () => setPreviewZoom(state.previewScale - .25));
+        el.previewZoomIn?.addEventListener('click', () => setPreviewZoom(state.previewScale + .25));
+        el.previewZoomReset?.addEventListener('click', resetPreviewView);
         el.closePreview?.addEventListener('click', closeWorkPreview);
         document.addEventListener('keydown', event => {
             if(!isActive()) return;
@@ -888,6 +982,9 @@
             previewImage:document.getElementById('batchOutfitPreviewImage'),
             previewTitle:document.getElementById('batchOutfitPreviewTitle'),
             previewCount:document.getElementById('batchOutfitPreviewCount'),
+            previewZoomOut:document.getElementById('batchOutfitPreviewZoomOut'),
+            previewZoomReset:document.getElementById('batchOutfitPreviewZoomReset'),
+            previewZoomIn:document.getElementById('batchOutfitPreviewZoomIn'),
             closePreview:document.getElementById('closeBatchOutfitPreview'),
         });
         state.initialized = true;

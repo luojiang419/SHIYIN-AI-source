@@ -3620,15 +3620,32 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     display:grid;
     place-items:center;
     overflow:hidden;
+    box-sizing:border-box;
+    padding:18px 72px 70px;
     outline:0;
     background:#080808;
+    touch-action:none;
 }
 .ec-batch-preview-stage img {
     width:100%;
     height:100%;
-    padding:18px 72px;
+    min-width:0;
+    min-height:0;
     object-fit:contain;
+    transform:translate3d(var(--ec-batch-preview-pan-x,0px),var(--ec-batch-preview-pan-y,0px),0) scale(var(--ec-batch-preview-scale,1));
+    transform-origin:center;
+    transition:transform .14s ease;
     user-select:none;
+    will-change:transform;
+}
+.ec-batch-preview-stage.is-zoomed {
+    cursor:grab;
+}
+.ec-batch-preview-stage.is-panning {
+    cursor:grabbing;
+}
+.ec-batch-preview-stage.is-panning img {
+    transition:none;
 }
 .ec-batch-preview-stage .ec-batch-work-nav:not(:disabled) {
     opacity:.82;
@@ -3639,6 +3656,48 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
 }
 .ec-batch-preview-stage .ec-batch-work-nav.previous { left:20px; }
 .ec-batch-preview-stage .ec-batch-work-nav.next { right:20px; }
+.ec-batch-preview-tools {
+    position:absolute;
+    z-index:3;
+    left:50%;
+    bottom:18px;
+    display:flex;
+    align-items:center;
+    gap:4px;
+    padding:5px;
+    border:1px solid rgba(255,255,255,.16);
+    border-radius:12px;
+    background:rgba(20,20,20,.76);
+    box-shadow:0 12px 30px rgba(0,0,0,.28);
+    backdrop-filter:blur(12px);
+    transform:translateX(-50%);
+}
+.ec-batch-preview-tools button {
+    min-width:36px;
+    height:34px;
+    display:grid;
+    place-items:center;
+    padding:0 9px;
+    border:0;
+    border-radius:8px;
+    background:transparent;
+    color:#fff;
+    font-size:18px;
+    font-weight:800;
+    cursor:pointer;
+}
+.ec-batch-preview-tools button:hover:not(:disabled),
+.ec-batch-preview-tools button:focus-visible {
+    background:rgba(255,255,255,.14);
+}
+.ec-batch-preview-tools button:disabled {
+    color:rgba(255,255,255,.3);
+    cursor:default;
+}
+.ec-batch-preview-tools .zoom-value {
+    min-width:52px;
+    font:800 10px "JetBrains Mono",monospace;
+}
 .ec-batch-outfit-dialog .ec-dialog-shell {
     width:min(520px,calc(100vw - 30px));
 }
@@ -3717,8 +3776,11 @@ html.studio-theme-dark .ec-batch-card-shadow {
         padding:0 10px 0 14px;
     }
     .ec-batch-preview-stage img {
-        padding:12px 52px;
+        width:100%;
+        height:100%;
     }
+    .ec-batch-preview-stage { padding:12px 52px 64px; }
+    .ec-batch-preview-tools { bottom:12px; }
     .ec-batch-preview-stage .ec-batch-work-nav.previous { left:8px; }
     .ec-batch-preview-stage .ec-batch-work-nav.next { right:8px; }
 }

@@ -24,7 +24,7 @@
     <script src="/static/js/i18n.js?v=2026.08.09.universal-routes.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.22.1">
     <link rel="stylesheet" href="/static/css/compare-viewer.css?v=2026.07.22.1">
-    <link rel="stylesheet" href="/static/css/ecommerce.css?v=2026.09.06.batch-outfit.4">
+    <link rel="stylesheet" href="/static/css/ecommerce.css?v=2026.09.06.batch-outfit-preview.1">
 </head>
 <body>
     <main id="ecommercePage" class="ec-page">
@@ -265,8 +265,13 @@
             </header>
             <div id="batchOutfitPreviewStage" class="ec-batch-preview-stage" tabindex="0">
                 <button class="ec-batch-work-nav previous" type="button" data-batch-preview-step="-1" aria-label="上一张作品">‹</button>
-                <img id="batchOutfitPreviewImage" alt="">
+                <img id="batchOutfitPreviewImage" alt="" draggable="false">
                 <button class="ec-batch-work-nav next" type="button" data-batch-preview-step="1" aria-label="下一张作品">›</button>
+                <div class="ec-batch-preview-tools" aria-label="图片查看工具">
+                    <button id="batchOutfitPreviewZoomOut" type="button" title="缩小" aria-label="缩小">−</button>
+                    <button id="batchOutfitPreviewZoomReset" class="zoom-value" type="button" title="恢复完整显示" aria-label="恢复完整显示">1×</button>
+                    <button id="batchOutfitPreviewZoomIn" type="button" title="放大" aria-label="放大">+</button>
+                </div>
             </div>
         </div>
     </dialog>
@@ -321,6 +326,6 @@
     <script src="/static/js/compare-viewer.js?v=2026.07.22.1"></script>
     <script src="/static/js/pose-replicate-settings.js?v=2026.09.06.shared-prompts.1"></script>
     <script src="/static/js/ecommerce.js?v=2026.09.06.batch-outfit.4"></script>
-    <script src="/static/js/ecommerce-batch-outfit.js?v=2026.09.06.batch-outfit.3"></script>
+    <script src="/static/js/ecommerce-batch-outfit.js?v=2026.09.06.batch-outfit-preview.1"></script>
 </body>
 </html>

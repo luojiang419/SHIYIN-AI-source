@@ -1,6 +1,8 @@
 use arboard::Clipboard;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::{
     fs::{self, OpenOptions},
     io::Read,
@@ -14,13 +16,11 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::DownloadEvent,
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use uuid::Uuid;
 
@@ -36,9 +36,46 @@ const CLOSE_BEHAVIOR_TRAY: &str = "minimize_to_tray";
 const CLOSE_BEHAVIOR_EXIT: &str = "exit";
 const CLOSE_ACTION_MINIMIZE_LABEL: &str = "最小化到托盘";
 const CLOSE_ACTION_EXIT_LABEL: &str = "退出软件";
+const FULLSCREEN_SHORTCUT_SCRIPT: &str = r#"
+(() => {
+    if (window.__shiyinFullscreenShortcutInstalled) return;
+    window.__shiyinFullscreenShortcutInstalled = true;
+
+    window.addEventListener('keydown', async (event) => {
+        if (
+            event.key !== 'F11'
+            || event.repeat
+            || event.altKey
+            || event.ctrlKey
+            || event.metaKey
+            || event.shiftKey
+        ) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        try {
+            await window.__TAURI__.core.invoke('toggle_fullscreen');
+        } catch (error) {
+            console.error('切换桌面全屏失败', error);
+        }
+    }, true);
+})();
+"#;
 
 fn boxed_error(message: impl Into<String>) -> Box<dyn std::error::Error> {
     Box::new(std::io::Error::other(message.into()))
+}
+
+#[tauri::command]
+fn toggle_fullscreen(window: WebviewWindow) -> Result<bool, String> {
+    let fullscreen = window
+        .is_fullscreen()
+        .map_err(|error| format!("读取窗口全屏状态失败：{error}"))?;
+    let next_fullscreen = !fullscreen;
+    window
+        .set_fullscreen(next_fullscreen)
+        .map_err(|error| format!("切换窗口全屏状态失败：{error}"))?;
+    Ok(next_fullscreen)
 }
 
 fn is_legacy_webview_version_dir(name: &str) -> bool {
@@ -702,6 +739,7 @@ pub fn run() {
                 .inner_size(1440.0, 900.0)
                 .data_directory(webview_data_root.clone())
                 .disable_drag_drop_handler()
+                .initialization_script(FULLSCREEN_SHORTCUT_SCRIPT)
                 .on_download(native_download_handler);
             // 旧版 window.json 记录的是物理像素，不能再直接恢复；否则高 DPI
             // 环境会把已保存尺寸再次按系统缩放放大，导致窗口和界面被裁切。
@@ -796,6 +834,7 @@ pub fn run() {
             updater::apply_downloaded_update,
             choose_download_directory,
             write_download_file,
+            toggle_fullscreen,
         ]);
     builder
         .run(tauri::generate_context!())
@@ -806,7 +845,7 @@ pub fn run() {
 mod tests {
     use super::{
         is_legacy_webview_version_dir, prune_legacy_webview_profiles, suggested_download_name,
-        write_download_file,
+        write_download_file, FULLSCREEN_SHORTCUT_SCRIPT,
     };
     use std::fs;
     use std::path::Path;
@@ -885,5 +924,25 @@ mod tests {
         )
         .is_err());
         fs::remove_dir_all(directory).expect("remove test directory");
+    }
+
+    #[test]
+    fn fullscreen_shortcut_captures_plain_non_repeating_f11() {
+        for contract in [
+            "event.key !== 'F11'",
+            "event.repeat",
+            "event.altKey",
+            "event.ctrlKey",
+            "event.metaKey",
+            "event.shiftKey",
+            "event.preventDefault()",
+            "event.stopImmediatePropagation()",
+            "invoke('toggle_fullscreen')",
+        ] {
+            assert!(
+                FULLSCREEN_SHORTCUT_SCRIPT.contains(contract),
+                "missing fullscreen shortcut contract: {contract}"
+            );
+        }
     }
 }

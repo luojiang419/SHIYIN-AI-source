@@ -11,7 +11,10 @@ const {spawn} = require('node:child_process');
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-package-browser-'));
     const port = Number(process.env.CANVAS_TEST_PORT || 13097);
     const base = `http://127.0.0.1:${port}`;
-    const server = spawn(process.env.PYTHON || 'python', ['-m','uvicorn','main:app','--host','127.0.0.1','--port',String(port)], {
+    const packagedBackend = process.env.CANVAS_TEST_BACKEND;
+    const server = spawn(packagedBackend || process.env.PYTHON || 'python', packagedBackend
+        ? ['--app-root',process.env.CANVAS_TEST_APP_ROOT,'--host','127.0.0.1','--port',String(port)]
+        : ['-m','uvicorn','main:app','--host','127.0.0.1','--port',String(port)], {
         cwd:root, windowsHide:true, env:{...process.env, CANVAS_DATA_DIR:path.join(work,'data'), CANVAS_PORT:String(port), PYTHONUTF8:'1', CANVAS_DWPOSE_AUTO_DOWNLOAD:'0', CANVAS_DEPTH_AUTO_DOWNLOAD:'0'},
         stdio:['ignore','pipe','pipe'],
     });

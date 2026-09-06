@@ -42,9 +42,19 @@
 - 使用 `farPoint=5 / nearPoint=95 / midtone=10 / contrast=125 / brightness=2 / smooth=3` 完成真实后处理，成功生成第二份 H.264 参数视频。
 - Python 覆盖值域、归一化、反转与模型注册；JavaScript 覆盖模型项、参数边界和版本化配置往返。
 
+## 完整 1080p 提取复核
+
+根据用户复核，界面已把“模型推理尺寸”和“输出分辨率”拆开。模型推理尺寸仍为 14 的倍数，只影响内部计算；输出新增原始分辨率、720p、1080p、1440p 和 4K 档。
+
+- 默认改为原始 FPS、全部帧、原始分辨率。
+- 原始 FPS 不再经过 FFmpeg `fps` 滤镜；全部帧不再传递 `-frames:v`，因此不会由工具主动抽帧或截断。
+- 新增 6/12/15/24/25/30/48/50/60/90/120 FPS 完整选项，以及常用限定帧数选项。
+- 输入视频载入时探测宽高、FPS、时长和帧数；增加显式“更换视频”和“移除视频”。
+- 使用 1920×1080、30 FPS、8 帧视频真实复核：GemDepth-VDA 与 VDA Base 输出均为 1920×1080、30 FPS、8 帧、H.264/yuv420p，且元数据 `completeExtraction/sourceFpsPreserved/sourceResolutionPreserved` 均为 `true`。
+
 ## 软件验证
 
-- Tauri 2 release 成功构建，成品 `SHIYIN-Video-Depth-Lab.exe` 为 3,495,936 bytes，SHA-256 `159EB5DF96120E80C049C6D9FCF39423BC6F44CC5ECF6FD9406C5AFD192E4674`。
+- Tauri 2 完整提取优化版 `v0.2.0` release 成功构建，成品 `SHIYIN-Video-Depth-Lab.exe` 为 3,499,520 bytes，SHA-256 `4DA28165F40A08D391A5D99B4E8501500DB8861F5BD8FA9FC278CB6022798310`。
 - release 进程启动后正常响应并显示主窗口标题。
 - 975×920 浏览器视口视觉 QA：`body.scrollWidth/Height` 与 viewport 完全一致，无横向或纵向溢出；四区布局、模型下拉、预设、七项参数和右下操作区均完整显示。
 - 模型下拉从 GemDepth-VDA 切换到 VDA Base 后，输入尺寸从 392 自动变为 322，模型说明更新为 `32-frame · overlap 10 · FP16`，证明不是静态文案。

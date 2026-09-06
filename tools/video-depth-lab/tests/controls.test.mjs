@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MODEL_OPTIONS, buildParameterConfig, defaultParameters, normalizeParameters, parseParameterConfig } from "../frontend/controls.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 test("模型注册项包含真实 8-frame 与 VDA Base 配置", () => {
   assert.deepEqual(Object.keys(MODEL_OPTIONS), ["gemdepth_vda_8f", "vda_base_fp16_relative"]);
@@ -19,9 +21,22 @@ test("参数归一化遵守扩大后的边界", () => {
 });
 
 test("版本化配置可完整往返模型与参数", () => {
-  const config = buildParameterConfig({ model: "gemdepth_vda_8f", parameters: { ...defaultParameters(), smooth: 7 }, options: { inputSize: 392, targetFps: 12, maxFrames: 48, maxResolution: 960 } });
+  const config = buildParameterConfig({ model: "gemdepth_vda_8f", parameters: { ...defaultParameters(), smooth: 7 }, options: { inputSize: 392, targetFps: -1, maxFrames: -1, maxResolution: -1 } });
   const parsed = parseParameterConfig(JSON.stringify(config));
   assert.equal(parsed.model, "gemdepth_vda_8f");
   assert.equal(parsed.parameters.smooth, 7);
   assert.equal(parsed.inference.inputSize, 392);
+  assert.equal(parsed.inference.targetFps, -1);
+  assert.equal(parsed.inference.maxFrames, -1);
+  assert.equal(parsed.inference.maxResolution, -1);
+});
+
+test("界面提供完整提取、1080p 和输入更换移除入口", () => {
+  const htmlPath = fileURLToPath(new URL("../frontend/index.html", import.meta.url));
+  const html = readFileSync(htmlPath, "utf8");
+  assert.match(html, /value="-1" selected>原始 FPS · 完整/);
+  assert.match(html, /value="-1" selected>全部帧 · 不截断/);
+  assert.match(html, /value="1920">1080p 档/);
+  assert.match(html, /data-action="replace-video"/);
+  assert.match(html, /data-action="remove-video"/);
 });

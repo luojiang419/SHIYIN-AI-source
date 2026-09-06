@@ -29,6 +29,10 @@
               <video data-input-video controls loop muted playsinline hidden></video>
               <span class="empty-state" data-input-empty><span class="empty-icon"><svg viewBox="0 0 24 24"><path d="M12 3v11M7 8l5-5 5 5M5 14v5h14v-5"/></svg></span><strong>点击选择或拖入视频</strong><small>MP4 · MOV · MKV · AVI · WEBM · M4V，最大 20GB</small></span>
               <span class="source-badge" data-input-name hidden></span>
+              <div class="input-actions" data-input-actions hidden>
+                <button class="stage-action" type="button" data-action="replace-video">更换视频</button>
+                <button class="stage-action danger" type="button" data-action="remove-video">移除视频</button>
+              </div>
             </div>
           </article>
 
@@ -54,10 +58,10 @@
                 <header><strong>推理模型</strong><span>切换后重新测试</span></header>
                 <label class="select-control"><span>模型</span><select data-field="model"><option value="gemdepth_vda_8f">GemDepth-VDA · 8-frame</option><option value="vda_base_fp16_relative">VDA Base · FP16 · Relative</option></select></label>
                 <div class="option-grid">
-                  <label><span>输入尺寸</span><select data-field="inputSize"><option value="322">322</option><option value="392" selected>392</option><option value="448">448</option><option value="518">518</option></select></label>
-                  <label><span>采样 FPS</span><input type="number" min="1" max="60" step="1" value="12" data-field="targetFps"></label>
-                  <label><span>最大帧数</span><input type="number" min="8" max="5000" step="1" value="48" data-field="maxFrames"></label>
-                  <label><span>最长边</span><select data-field="maxResolution"><option value="640">640</option><option value="960" selected>960</option><option value="1280">1280</option></select></label>
+                  <label><span>模型推理尺寸（非输出）</span><select data-field="inputSize"><option value="322">322</option><option value="392" selected>392</option><option value="448">448</option><option value="518">518</option><option value="630">630 · 高显存</option><option value="756">756 · 极高显存</option></select></label>
+                  <label><span>采样帧率</span><select data-field="targetFps"><option value="-1" selected>原始 FPS · 完整</option><option value="6">6 FPS</option><option value="12">12 FPS</option><option value="15">15 FPS</option><option value="24">24 FPS</option><option value="25">25 FPS</option><option value="30">30 FPS</option><option value="48">48 FPS</option><option value="50">50 FPS</option><option value="60">60 FPS</option><option value="90">90 FPS</option><option value="120">120 FPS</option></select></label>
+                  <label><span>提取帧数</span><select data-field="maxFrames"><option value="-1" selected>全部帧 · 不截断</option><option value="48">前 48 帧</option><option value="96">前 96 帧</option><option value="240">前 240 帧</option><option value="600">前 600 帧</option><option value="1200">前 1200 帧</option></select></label>
+                  <label><span>输出分辨率</span><select data-field="maxResolution"><option value="-1" selected>原始分辨率 · 完整</option><option value="960">最长边 960</option><option value="1280">720p 档 · 最长边 1280</option><option value="1920">1080p 档 · 最长边 1920</option><option value="2560">1440p 档 · 最长边 2560</option><option value="3840">4K 档 · 最长边 3840</option></select></label>
                 </div>
                 <p class="model-note" data-model-note>8-frame · overlap 4 · FP16 autocast</p>
               </section>

@@ -1,6 +1,6 @@
 [package]
 name = "shiyin-video-depth-lab"
-version = "0.1.0"
+version = "0.2.0"
 description = "SHIYIN AI video depth model validation workbench"
 authors = ["SHIYIN AI contributors"]
 edition = "2021"

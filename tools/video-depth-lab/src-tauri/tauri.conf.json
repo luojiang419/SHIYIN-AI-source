@@ -1,7 +1,7 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SHIYIN 视频深度验证台",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.shiyin.video.depth.lab",
   "build": {
     "frontendDist": "../frontend"

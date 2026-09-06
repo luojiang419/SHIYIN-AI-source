@@ -26,6 +26,7 @@ const $ = (selector) => document.querySelector(selector);
 const elements = {
   runtime: $(".runtime-status"), runtimeTitle: $("[data-runtime-title]"), runtimeDetail: $("[data-runtime-detail]"),
   inputStage: $(".input-stage"), inputVideo: $("[data-input-video]"), inputEmpty: $("[data-input-empty]"), inputName: $("[data-input-name]"), inputMeta: $("[data-input-meta]"),
+  inputActions: $("[data-input-actions]"),
   outputVideo: $("[data-output-video]"), outputEmpty: $("[data-output-empty]"), outputMeta: $("[data-output-meta]"), previewState: $("[data-preview-state]"),
   processing: $("[data-processing]"), processingTitle: $("[data-processing-title]"), processingDetail: $("[data-processing-detail]"), progressBar: $("[data-progress-bar]"),
   status: $("[data-status-message]"), outputRoot: $("[data-output-root]"), runSummary: $("[data-run-summary]"), toastRegion: $("[data-toast-region]"),
@@ -79,6 +80,29 @@ function inferenceOptions() {
     maxFrames: Number($("[data-field='maxFrames']").value),
     maxResolution: Number($("[data-field='maxResolution']").value),
   };
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor(value % 3600 / 60);
+  const remaining = value % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
+    : `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function updateExtractionSummary() {
+  const options = inferenceOptions();
+  const fps = options.targetFps < 0 ? "原始 FPS" : `${options.targetFps} FPS`;
+  const frames = options.maxFrames < 0 ? "全部帧" : `前 ${options.maxFrames} 帧`;
+  const resolution = options.maxResolution < 0 ? "原始分辨率" : `最长边 ${options.maxResolution}`;
+  const complete = options.targetFps < 0 && options.maxFrames < 0 && options.maxResolution < 0;
+  const estimate = state.input?.frameCount ? `，预计 ${state.input.frameCount.toLocaleString()} 帧` : "";
+  elements.runSummary.textContent = complete
+    ? `完整提取：${fps} · ${frames} · ${resolution}${estimate}。长视频耗时和磁盘占用较高，可随时停止。`
+    : `采样提取：${fps} · ${frames} · ${resolution}${estimate}。`;
+  elements.runSummary.dataset.complete = complete ? "true" : "false";
 }
 
 function renderModelNote() {
@@ -191,11 +215,41 @@ async function acceptInput(payload) {
   elements.inputEmpty.hidden = true;
   elements.inputName.hidden = false;
   elements.inputName.textContent = payload.name;
-  elements.inputMeta.textContent = `${(payload.size / 1024 / 1024).toFixed(1)} MB`;
+  elements.inputActions.hidden = false;
+  const dimensions = payload.width && payload.height ? `${payload.width}×${payload.height}` : "未知尺寸";
+  const fps = payload.fps ? `${Number(payload.fps).toFixed(3).replace(/\.0+$/, "")} FPS` : "未知 FPS";
+  const frameCount = payload.frameCount ? `${Number(payload.frameCount).toLocaleString()} 帧` : "帧数待解码";
+  elements.inputMeta.textContent = `${dimensions} · ${fps} · ${formatDuration(payload.duration)} · ${frameCount} · ${(payload.size / 1024 / 1024).toFixed(1)} MB`;
   elements.outputVideo.hidden = true;
   elements.outputEmpty.hidden = false;
   elements.previewState.hidden = true;
+  updateExtractionSummary();
   setStatus(`已选择 ${payload.name}，请选择模型并开始测试`);
+  setBusy(false);
+}
+
+function removeVideo() {
+  if (state.busy) return;
+  state.input = null;
+  state.result = null;
+  state.currentVideoPath = "";
+  elements.inputVideo.pause();
+  elements.inputVideo.removeAttribute("src");
+  elements.inputVideo.load();
+  elements.inputVideo.hidden = true;
+  elements.inputEmpty.hidden = false;
+  elements.inputName.hidden = true;
+  elements.inputActions.hidden = true;
+  elements.inputMeta.textContent = "等待视频";
+  elements.outputVideo.pause();
+  elements.outputVideo.removeAttribute("src");
+  elements.outputVideo.load();
+  elements.outputVideo.hidden = true;
+  elements.outputEmpty.hidden = false;
+  elements.outputMeta.textContent = "RELATIVE · H.264";
+  elements.previewState.hidden = true;
+  updateExtractionSummary();
+  setStatus("已移除输入视频，可重新选择或拖入视频");
   setBusy(false);
 }
 
@@ -235,7 +289,7 @@ async function runModel() {
     elements.previewState.hidden = false;
     elements.previewState.textContent = `${result.model.label} · ${result.elapsedSeconds}s`;
     elements.outputMeta.textContent = `${result.input.processedWidth}×${result.input.processedHeight} · ${result.input.processedFrames} 帧`;
-    elements.runSummary.textContent = `本次耗时 ${result.elapsedSeconds}s；结果和原始 Relative Depth 已保存。`;
+    elements.runSummary.textContent = `${result.input.completeExtraction ? "完整" : "采样"}提取完成：${result.input.processedFrames} 帧，本次耗时 ${result.elapsedSeconds}s。`;
     setStatus(`测试完成：${result.outputDirectory}`);
     toast(`${result.model.label} 深度视频生成完成`);
   } catch (error) {
@@ -307,9 +361,11 @@ async function openOutput() {
 }
 
 function bind() {
-  $("[data-action='choose-video']").addEventListener("click", (event) => { if (event.target !== elements.inputVideo) chooseVideo(); });
+  $("[data-action='choose-video']").addEventListener("click", (event) => { if (event.target !== elements.inputVideo && !event.target.closest(".input-actions")) chooseVideo(); });
   $("[data-action='choose-video']").addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); chooseVideo(); } });
   $("[data-action='refresh-runtime']").addEventListener("click", refreshRuntime);
+  $("[data-action='replace-video']").addEventListener("click", chooseVideo);
+  $("[data-action='remove-video']").addEventListener("click", removeVideo);
   $("[data-action='choose-output']").addEventListener("click", chooseOutput);
   $("[data-action='run-model']").addEventListener("click", runModel);
   $("[data-action='cancel-model']").addEventListener("click", cancelModel);
@@ -329,6 +385,9 @@ function bind() {
     setBusy(false);
     setStatus(`已切换到 ${model.label}，需重新运行模型测试`);
   });
+  for (const field of ["targetFps", "maxFrames", "maxResolution"]) {
+    $(`[data-field='${field}']`).addEventListener("change", updateExtractionSummary);
+  }
   for (const key of Object.keys(CONTROL_DEFINITIONS)) {
     const input = $(`[data-field='${key}']`);
     input.addEventListener("input", () => { updateControl(key, input.value); markPending(); });
@@ -349,5 +408,6 @@ function bind() {
 buildPresets();
 renderParameters();
 renderModelNote();
+updateExtractionSummary();
 bind();
 refreshRuntime();

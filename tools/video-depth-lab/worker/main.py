@@ -87,7 +87,7 @@ def probe_video(path: Path) -> dict[str, Any]:
 
 
 def _scaled_size(width: int, height: int, max_resolution: int) -> tuple[int, int]:
-    scale = min(1.0, max_resolution / max(width, height))
+    scale = 1.0 if max_resolution <= 0 else min(1.0, max_resolution / max(width, height))
     output_width = max(2, int(round(width * scale / 2.0)) * 2)
     output_height = max(2, int(round(height * scale / 2.0)) * 2)
     return output_width, output_height
@@ -105,6 +105,11 @@ def read_video_frames(
         fps = min(fps, float(info["fps"]))
     fps = max(fps, 1.0)
     width, height = _scaled_size(info["width"], info["height"], max_resolution)
+    filters = []
+    if target_fps > 0:
+        filters.append(f"fps={fps:.8f}")
+    if (width, height) != (info["width"], info["height"]):
+        filters.append(f"scale={width}:{height}:flags=lanczos")
     command = [
         find_binary("ffmpeg"),
         "-v",
@@ -113,13 +118,15 @@ def read_video_frames(
         str(path),
         "-an",
         "-sn",
-        "-vf",
-        f"fps={fps:.8f},scale={width}:{height}:flags=lanczos",
+    ]
+    if filters:
+        command.extend(["-vf", ",".join(filters)])
+    command.extend([
         "-pix_fmt",
         "rgb24",
         "-f",
         "rawvideo",
-    ]
+    ])
     if max_frames > 0:
         command.extend(["-frames:v", str(max_frames)])
     command.append("pipe:1")
@@ -141,7 +148,17 @@ def read_video_frames(
         raise RuntimeError(f"FFmpeg 视频解码失败：{stderr.strip()}")
     if not frames:
         raise ValueError("输入视频没有可解码帧")
-    info.update({"processedWidth": width, "processedHeight": height, "processedFps": fps, "processedFrames": len(frames)})
+    info.update(
+        {
+            "processedWidth": width,
+            "processedHeight": height,
+            "processedFps": fps,
+            "processedFrames": len(frames),
+            "completeExtraction": target_fps <= 0 and max_frames <= 0,
+            "sourceFpsPreserved": target_fps <= 0,
+            "sourceResolutionPreserved": max_resolution <= 0,
+        }
+    )
     return np.stack(frames, axis=0), fps, info
 
 
@@ -286,15 +303,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SHIYIN 视频深度统一推理 worker")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("status")
+    probe = subparsers.add_parser("probe")
+    probe.add_argument("--input", required=True)
 
     infer = subparsers.add_parser("infer")
     infer.add_argument("--model", choices=sorted(MODEL_PROFILES), required=True)
     infer.add_argument("--input", required=True)
     infer.add_argument("--output-dir", required=True)
     infer.add_argument("--input-size", type=int, required=True)
-    infer.add_argument("--target-fps", type=float, default=12.0)
-    infer.add_argument("--max-frames", type=int, default=48)
-    infer.add_argument("--max-resolution", type=int, default=960)
+    infer.add_argument("--target-fps", type=float, default=-1.0)
+    infer.add_argument("--max-frames", type=int, default=-1)
+    infer.add_argument("--max-resolution", type=int, default=-1)
     infer.add_argument("--params-json", default="{}")
 
     post = subparsers.add_parser("postprocess")
@@ -309,6 +328,9 @@ def main() -> int:
     try:
         if args.command == "status":
             result = run_status()
+        elif args.command == "probe":
+            input_path = Path(args.input).resolve()
+            result = {"path": str(input_path), "name": input_path.name, **probe_video(input_path)}
         elif args.command == "infer":
             result = run_infer(args)
         else:

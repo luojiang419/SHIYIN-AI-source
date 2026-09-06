@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT))
 
 from worker.depth_controls import DepthControls, apply_depth_controls, normalize_relative_depth
 from worker.models import MODEL_PROFILES, get_profile
+from worker.main import _scaled_size
 
 
 class DepthControlTests(unittest.TestCase):
@@ -39,6 +40,10 @@ class DepthControlTests(unittest.TestCase):
         self.assertEqual(vda.depth_type, "Relative Depth")
         self.assertIn("FP16", vda.precision)
         self.assertEqual(set(MODEL_PROFILES), {"gemdepth_vda_8f", "vda_base_fp16_relative"})
+
+    def test_original_and_1080p_output_sizing(self):
+        self.assertEqual(_scaled_size(1920, 1080, -1), (1920, 1080))
+        self.assertEqual(_scaled_size(3840, 2160, 1920), (1920, 1080))
 
 
 if __name__ == "__main__":

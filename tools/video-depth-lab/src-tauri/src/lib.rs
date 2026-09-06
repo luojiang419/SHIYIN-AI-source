@@ -1,6 +1,6 @@
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     fs,
     io::{BufRead, BufReader, Read},
@@ -45,7 +45,7 @@ struct InferenceRequest {
     input_size: u32,
     target_fps: f64,
     max_frames: i32,
-    max_resolution: u32,
+    max_resolution: i32,
     parameters: Value,
 }
 
@@ -128,6 +128,30 @@ fn validate_video(path: &Path) -> Result<VideoPayload, String> {
             .to_string(),
         size: metadata.len(),
     })
+}
+
+fn load_video_payload(root: &Path, path: &Path) -> Result<Value, String> {
+    let payload = validate_video(path)?;
+    let probe = run_worker(
+        None,
+        root,
+        &[
+            "probe".to_string(),
+            "--input".to_string(),
+            payload.path.clone(),
+        ],
+        None,
+    )?;
+    Ok(json!({
+        "path": payload.path,
+        "name": payload.name,
+        "size": payload.size,
+        "width": probe.get("width").and_then(Value::as_u64).unwrap_or(0),
+        "height": probe.get("height").and_then(Value::as_u64).unwrap_or(0),
+        "fps": probe.get("fps").and_then(Value::as_f64).unwrap_or(0.0),
+        "duration": probe.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+        "frameCount": probe.get("frameCount").and_then(Value::as_u64).unwrap_or(0)
+    }))
 }
 
 fn hidden_command(program: &Path) -> Command {
@@ -274,7 +298,7 @@ async fn get_runtime_status(state: State<'_, LabState>) -> Result<Value, String>
 }
 
 #[tauri::command]
-fn choose_input_video() -> Result<Option<VideoPayload>, String> {
+fn choose_input_video(state: State<'_, LabState>) -> Result<Option<Value>, String> {
     let Some(path) = FileDialog::new()
         .set_title("选择输入视频")
         .add_filter("视频", &["mp4", "mov", "mkv", "avi", "webm", "m4v"])
@@ -282,12 +306,12 @@ fn choose_input_video() -> Result<Option<VideoPayload>, String> {
     else {
         return Ok(None);
     };
-    validate_video(&path).map(Some)
+    load_video_payload(&state.root, &path).map(Some)
 }
 
 #[tauri::command]
-fn load_input_video(path: String) -> Result<VideoPayload, String> {
-    validate_video(Path::new(path.trim()))
+fn load_input_video(state: State<'_, LabState>, path: String) -> Result<Value, String> {
+    load_video_payload(&state.root, Path::new(path.trim()))
 }
 
 #[tauri::command]
@@ -314,14 +338,14 @@ async fn run_inference(
         if !(196..=756).contains(&request.input_size) || request.input_size % 14 != 0 {
             return Err("模型输入尺寸必须位于 196–756 且为 14 的倍数".to_string());
         }
-        if !(1.0..=60.0).contains(&request.target_fps) {
-            return Err("目标 FPS 必须位于 1–60".to_string());
+        if request.target_fps != -1.0 && !(1.0..=240.0).contains(&request.target_fps) {
+            return Err("目标 FPS 必须为 -1（原始 FPS）或位于 1–240".to_string());
         }
-        if request.max_frames != -1 && !(8..=5000).contains(&request.max_frames) {
-            return Err("最大帧数必须为 -1 或 8–5000".to_string());
+        if request.max_frames != -1 && !(1..=1_000_000).contains(&request.max_frames) {
+            return Err("最大帧数必须为 -1（全部帧）或 1–1000000".to_string());
         }
-        if !(256..=4096).contains(&request.max_resolution) {
-            return Err("输出最长边必须位于 256–4096".to_string());
+        if request.max_resolution != -1 && !(256..=8192).contains(&request.max_resolution) {
+            return Err("输出最长边必须为 -1（原始分辨率）或位于 256–8192".to_string());
         }
         let base = if request.output_root.trim().is_empty() {
             snapshot.root.join("runtime/outputs")
@@ -578,5 +602,12 @@ mod tests {
             result.get("models").and_then(Value::as_array).map(Vec::len),
             Some(2)
         );
+        let sample = root.join(
+            "runtime/sources/video-depth-anything/assets/example_videos/davis_rollercoaster.mp4",
+        );
+        let payload = load_video_payload(&root, &sample).unwrap();
+        assert_eq!(payload.get("width").and_then(Value::as_u64), Some(960));
+        assert_eq!(payload.get("height").and_then(Value::as_u64), Some(540));
+        assert_eq!(payload.get("frameCount").and_then(Value::as_u64), Some(70));
     }
 }

@@ -16,7 +16,7 @@ class MiniMaxH3VideoTests(unittest.TestCase):
         self.assertEqual(provider["base_url"], "http://127.0.0.1:7860")
         self.assertEqual(provider["video_models"], ["MiniMax H3"])
 
-    def test_legacy_public_tunnel_address_is_migrated_to_local_service(self):
+    def test_public_tunnel_address_is_preserved_for_remote_clients(self):
         providers = self.main.merge_default_api_providers([
             {
                 "id": "minimax-h3",
@@ -28,7 +28,7 @@ class MiniMaxH3VideoTests(unittest.TestCase):
             }
         ])
         provider = next(item for item in providers if item["id"] == "minimax-h3")
-        self.assertEqual(provider["base_url"], "http://127.0.0.1:7860")
+        self.assertEqual(provider["base_url"], "http://115.231.35.105:7866")
 
     def test_custom_remote_h3_address_is_preserved(self):
         self.assertEqual(

@@ -37,3 +37,7 @@ def test_video_node_default_height_is_content_driven_and_explicit_resize_is_pres
     assert ".auto-height-node .resize-handle { cursor:ew-resize; }" in CSS
     assert ".video-node .node-bottom-controls { position:relative; bottom:auto; }" in CSS
     assert "feature=video-auto-height.1" in HTML
+
+
+def test_video_output_port_dot_stays_outside_the_node_frame():
+    assert ".video-node > .port.out { right:-29px; }" in CSS

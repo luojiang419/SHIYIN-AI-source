@@ -753,9 +753,6 @@ LOCAL_VISION_BUILTIN_API_KEY = "sk-lm-VF0plfgx:ZdOB4jyCcB63K1N1tIQg"
 LOCAL_VISION_SECRET_SEED_SETTING = "local_vision_builtin_secret_v1"
 MINIMAX_H3_ENV_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "").strip().rstrip("/")
 MINIMAX_H3_LOCAL_BASE_URL = "http://127.0.0.1:7860"
-MINIMAX_H3_LEGACY_PUBLIC_BASE_URLS = {
-    "http://115.231.35.105:7866",
-}
 MINIMAX_H3_DEFAULT_BASE_URL = MINIMAX_H3_ENV_BASE_URL or MINIMAX_H3_LOCAL_BASE_URL
 MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
 KLING_CLI_PLACEHOLDER_VIDEO_MODELS = ["可灵（连接后选择模型）"]
@@ -1406,17 +1403,8 @@ def default_api_providers():
 
 
 def normalize_minimax_h3_base_url(value: Any = "") -> str:
-    """Resolve the built-in H3 endpoint used by this backend.
-
-    SHIYIN and MiniMax H3 run on the same workstation. Older releases saved the
-    public FRP address in the provider database, which made the backend leave the
-    machine and hairpin through the tunnel before reaching H3 again. Migrate only
-    that known legacy address; explicit environment overrides and custom remote
-    deployments remain supported.
-    """
+    """Keep an explicitly configured local or remote H3 endpoint unchanged."""
     base_url = str(value or "").strip().rstrip("/")
-    if not MINIMAX_H3_ENV_BASE_URL and base_url in MINIMAX_H3_LEGACY_PUBLIC_BASE_URLS:
-        return MINIMAX_H3_LOCAL_BASE_URL
     return base_url or MINIMAX_H3_DEFAULT_BASE_URL
 
 def merge_default_api_providers(providers):
@@ -22124,7 +22112,7 @@ async def minimax_h3_status():
             "generation_enabled": False,
             "resolutions": [],
             "defaults": {},
-            "error": "MiniMax H3 本地服务未启动或尚未就绪，请联系本机管理员启动 H3 控制面板。",
+            "error": "无法连接 MiniMax H3 服务或服务尚未就绪，请检查服务地址与运行状态。",
         }
     return {
         "available": True,

@@ -881,6 +881,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .lookbook-node .node-body { padding-left:74px; }
 .lookbook-node .port.in::before { content:attr(data-role-label); position:absolute; left:calc(100% + 7px); right:auto; top:50%; transform:translateY(-50%); max-width:86px; padding:3px 7px; border:1px solid var(--line); border-radius:7px; background:var(--card-solid); color:var(--text); box-shadow:0 5px 14px rgba(0,0,0,.12); font-size:10px; font-weight:850; line-height:1.1; white-space:nowrap; pointer-events:none; }
 .port.out { right:-15px; }
+.video-node > .port.out { right:-29px; }
 .node > .port { top:50%; }
 .ltxDirector-node > .port,
 .ltx-director-node > .port { top:50%; }

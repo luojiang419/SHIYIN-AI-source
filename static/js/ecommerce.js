@@ -12,7 +12,7 @@
     const SETTINGS_KEY = 'studio_ecommerce_settings_v2';
     const LEGACY_SETTINGS_KEY = 'studio_ecommerce_settings_v1';
     const CURRENT_TASK_KEY = 'ecommerce_current_task';
-    const SETTINGS_SCHEMA_VERSION = 5;
+    const SETTINGS_SCHEMA_VERSION = 6;
     const DEFAULT_OPERATION = 'universal';
     const ASPECT_RATIOS = ['source','1:1','2:3','3:2','3:4','4:3','4:5','9:16','16:9'];
     const RESOLUTIONS = ['auto','1k','2k','4k'];
@@ -112,7 +112,7 @@
         resolution:'auto',
         quality:'auto',
         count:0,
-        modelPanelCollapsed:false,
+        modelPanelCollapsed:true,
         currentTask:null,
         tasks:[],
         selectedOutput:0,
@@ -347,7 +347,9 @@
             state.resolution = RESOLUTIONS.includes(saved.resolution) ? saved.resolution : 'auto';
             state.quality = QUALITIES.includes(saved.quality) ? saved.quality : 'auto';
             state.count = [0,1,2,3,4].includes(Number(saved.count)) ? Number(saved.count) : 0;
-            state.modelPanelCollapsed = saved.model_panel_collapsed === true;
+            state.modelPanelCollapsed = schemaVersion >= SETTINGS_SCHEMA_VERSION
+                ? saved.model_panel_collapsed !== false
+                : true;
             if(saved.batch_outfit && typeof saved.batch_outfit === 'object') state.batchOutfit = saved.batch_outfit;
             if(saved.workspaces && typeof saved.workspaces === 'object') {
                 Object.keys(OPERATION_CONFIG).forEach(operation => {

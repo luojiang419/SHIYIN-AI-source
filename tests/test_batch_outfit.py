@@ -44,6 +44,14 @@ def test_batch_outfit_layout_and_work_actions_are_explicit():
     assert "<textarea" not in batch_control
 
 
+def test_model_settings_are_collapsed_by_default_and_remember_manual_expansion():
+    assert 'id="advancedSettings" class="ec-model-panel collapsed"' in ECOMMERCE_HTML
+    assert 'id="modelPanelToggle" class="ec-model-panel-toggle" type="button" aria-expanded="false"' in ECOMMERCE_HTML
+    assert "modelPanelCollapsed:true" in ECOMMERCE_JS
+    assert "saved.model_panel_collapsed !== false" in ECOMMERCE_JS
+    assert "state.modelPanelCollapsed = !state.modelPanelCollapsed" in ECOMMERCE_JS
+
+
 def test_batch_page_reuses_pose_replicate_runtime_and_shared_prompts():
     assert "/api/dwpose/detect" in BATCH_JS
     assert "/api/canvas/pose-replicate-tasks" in BATCH_JS

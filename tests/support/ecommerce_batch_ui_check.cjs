@@ -19,6 +19,13 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('[data-operation="batch_outfit"]').click();
         await page.waitForSelector('#batchOutfitControl:not(.hidden)');
         assert.equal((await page.locator('.ec-result-head h2').textContent()).trim(), '查看作品');
+        assert.equal(await page.locator('#advancedSettings.collapsed').count(), 1);
+        assert.equal(await page.locator('#modelPanelToggle').getAttribute('aria-expanded'), 'false');
+        assert.equal(await page.locator('#modelPanelBody').isVisible(), false);
+        await page.locator('#modelPanelToggle').click();
+        assert.equal(await page.locator('#advancedSettings.collapsed').count(), 0);
+        assert.equal(await page.locator('#modelPanelToggle').getAttribute('aria-expanded'), 'true');
+        assert.equal(await page.locator('#modelPanelBody').isVisible(), true);
         assert.equal(await page.locator('.ec-batch-empty').count(), 1);
 
         await page.locator('#addBatchOutfit').click();

@@ -466,7 +466,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "1.0.409"
+APP_VERSION = "1.0.410"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -1403,8 +1403,12 @@ def default_api_providers():
 
 
 def normalize_minimax_h3_base_url(value: Any = "") -> str:
-    """Keep an explicitly configured local or remote H3 endpoint unchanged."""
+    """Normalize a configured local or remote H3 endpoint for HTTP requests."""
     base_url = str(value or "").strip().rstrip("/")
+    if base_url.startswith("//"):
+        base_url = f"http:{base_url}"
+    elif base_url and "://" not in base_url:
+        base_url = f"http://{base_url}"
     return base_url or MINIMAX_H3_DEFAULT_BASE_URL
 
 def merge_default_api_providers(providers):
@@ -1929,6 +1933,8 @@ def normalize_provider(item):
     base_url = str(item.get("base_url") or "").strip().rstrip("/")
     if provider_id == "local-vision":
         base_url = normalize_openai_compatible_base_url(base_url or LOCAL_VISION_DEFAULT_BASE_URL)
+    if provider_id == "minimax-h3":
+        base_url = normalize_minimax_h3_base_url(base_url)
     if base_url and not re.match(r"^https?://", base_url):
         raise HTTPException(status_code=400, detail=f"{name} 的 Base URL 需要以 http:// 或 https:// 开头")
     protocol = str(item.get("protocol") or "openai").strip().lower()
@@ -1964,7 +1970,6 @@ def normalize_provider(item):
         image_request_mode = "openai"
     if provider_id == "minimax-h3":
         protocol = "minimax-h3"
-        base_url = normalize_minimax_h3_base_url(base_url)
         image_request_mode = "openai"
     if provider_id == "kling-cli":
         protocol = "kling-cli"

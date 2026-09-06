@@ -30,6 +30,28 @@ class MiniMaxH3VideoTests(unittest.TestCase):
         provider = next(item for item in providers if item["id"] == "minimax-h3")
         self.assertEqual(provider["base_url"], "http://115.231.35.105:7866")
 
+    def test_public_tunnel_address_without_scheme_gets_http_prefix(self):
+        self.assertEqual(
+            self.main.normalize_minimax_h3_base_url("115.231.35.105:7866/"),
+            "http://115.231.35.105:7866",
+        )
+
+        provider = self.main.normalize_provider({
+            "id": "minimax-h3",
+            "name": "MiniMax H3",
+            "base_url": "115.231.35.105:7866",
+            "protocol": "minimax-h3",
+            "enabled": True,
+            "video_models": ["MiniMax H3"],
+        })
+        self.assertEqual(provider["base_url"], "http://115.231.35.105:7866")
+
+    def test_protocol_relative_h3_address_gets_http_scheme(self):
+        self.assertEqual(
+            self.main.normalize_minimax_h3_base_url("//115.231.35.105:7866/"),
+            "http://115.231.35.105:7866",
+        )
+
     def test_custom_remote_h3_address_is_preserved(self):
         self.assertEqual(
             self.main.normalize_minimax_h3_base_url("https://h3.example.test/api/"),

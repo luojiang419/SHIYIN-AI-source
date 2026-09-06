@@ -63,7 +63,7 @@ class UnifiedThemeTests(unittest.TestCase):
         self.assertRegex(source, r'id="frame-canvas"[^>]+canvas-neutral-no-blue\.1')
         self.assertRegex(
             source,
-            r'id="frame-ecommerce"[^>]+batch-outfit\.3',
+            r'id="frame-ecommerce"[^>]+batch-outfit\.4',
             "frame-ecommerce",
         )
         self.assertNotIn('id="frame-free-creation"', source)

@@ -19,6 +19,7 @@
         pollers:new Map(),
         controlPromises:new Map(),
         gridRatio:'16:9',
+        workStageHovered:false,
         initialized:false,
     };
     const el = {};
@@ -288,6 +289,53 @@
         return group.works[state.selectedImageIndex];
     }
 
+    function previewIsOpen(){
+        return Boolean(el.preview?.open);
+    }
+
+    function renderWorkPreview(){
+        if(!el.preview) return;
+        const group = selectedGroup();
+        const work = currentWork(group);
+        if(!group || !work) {
+            if(el.preview.open) el.preview.close();
+            return;
+        }
+        el.previewTitle.textContent = group.styleName;
+        el.previewCount.textContent = `${state.selectedImageIndex + 1} / ${group.works.length}`;
+        el.previewImage.src = work.url;
+        el.previewImage.alt = `${group.styleName} 生成作品 ${state.selectedImageIndex + 1}`;
+        el.preview.querySelector('[data-batch-preview-step="-1"]').disabled = state.selectedImageIndex <= 0;
+        el.preview.querySelector('[data-batch-preview-step="1"]').disabled = state.selectedImageIndex >= group.works.length - 1;
+    }
+
+    function selectWorkIndex(index){
+        const group = selectedGroup();
+        if(!group?.works.length) return false;
+        const nextIndex = Math.max(0, Math.min(group.works.length - 1, Number(index || 0)));
+        state.selectedImageIndex = nextIndex;
+        persist();
+        if(previewIsOpen()) renderWorkPreview();
+        else renderWorks();
+        return true;
+    }
+
+    function stepWork(delta){
+        return selectWorkIndex(state.selectedImageIndex + Number(delta || 0));
+    }
+
+    function openWorkPreview(){
+        const group = selectedGroup();
+        if(!currentWork(group) || !el.preview) return;
+        renderWorkPreview();
+        if(!el.preview.open) el.preview.showModal();
+        requestAnimationFrame(() => el.previewStage?.focus());
+    }
+
+    function closeWorkPreview(){
+        if(el.preview?.open) el.preview.close();
+    }
+
     function renderWorks(){
         if(!el.works) return;
         const group = selectedGroup();
@@ -302,7 +350,11 @@
         }
         el.works.innerHTML = `<div class="ec-batch-works-shell">
             <header><div><span>SELECTED STYLE</span><h2>${escapeHtml(group.styleName)}</h2></div><strong>${state.selectedImageIndex + 1} / ${group.works.length}</strong></header>
-            <div class="ec-batch-work-stage"><img src="${escapeHtml(work.url)}" alt="${escapeHtml(group.styleName)} 生成作品"></div>
+            <div class="ec-batch-work-stage" data-batch-work-stage tabindex="0">
+                <button class="ec-batch-work-nav previous" type="button" data-batch-work-step="-1" aria-label="上一张作品" ${state.selectedImageIndex <= 0 ? 'disabled' : ''}>‹</button>
+                <button class="ec-batch-work-preview" type="button" data-batch-work-preview aria-label="全屏查看作品 ${state.selectedImageIndex + 1}"><img src="${escapeHtml(work.url)}" alt="${escapeHtml(group.styleName)} 生成作品" draggable="false"></button>
+                <button class="ec-batch-work-nav next" type="button" data-batch-work-step="1" aria-label="下一张作品" ${state.selectedImageIndex >= group.works.length - 1 ? 'disabled' : ''}>›</button>
+            </div>
             <div class="ec-batch-work-toolbar">
                 <button type="button" data-batch-download-selected>下载当前</button>
                 <button type="button" data-batch-download-all>下载本组</button>
@@ -776,11 +828,42 @@
             const group = selectedGroup();
             if(!group) return;
             const thumb = event.target.closest('[data-batch-work-index]');
-            if(thumb) { state.selectedImageIndex = Number(thumb.dataset.batchWorkIndex || 0); persist(); renderWorks(); return; }
+            if(thumb) { selectWorkIndex(Number(thumb.dataset.batchWorkIndex || 0)); return; }
+            const step = event.target.closest('[data-batch-work-step]');
+            if(step) { stepWork(Number(step.dataset.batchWorkStep || 0)); return; }
+            if(event.target.closest('[data-batch-work-preview]')) { openWorkPreview(); return; }
             if(event.target.closest('[data-batch-download-selected]')) { const work = currentWork(group); if(work) downloadWorks([work]); return; }
             if(event.target.closest('[data-batch-download-all]')) { downloadWorks(group.works); return; }
             if(event.target.closest('[data-batch-delete-selected]')) { deleteWorks(group, [state.selectedImageIndex]); return; }
             if(event.target.closest('[data-batch-delete-all]')) { deleteWorks(group, group.works.map((_,index) => index)); }
+        });
+        el.works?.addEventListener('pointerover', event => {
+            if(event.target.closest('[data-batch-work-stage]')) state.workStageHovered = true;
+        });
+        el.works?.addEventListener('pointerout', event => {
+            const stage = event.target.closest('[data-batch-work-stage]');
+            if(stage && !stage.contains(event.relatedTarget)) state.workStageHovered = false;
+        });
+        el.preview?.addEventListener('click', event => {
+            if(event.target === el.preview) { closeWorkPreview(); return; }
+            const step = event.target.closest('[data-batch-preview-step]');
+            if(step) stepWork(Number(step.dataset.batchPreviewStep || 0));
+        });
+        el.preview?.addEventListener('close', () => {
+            if(state.initialized && isActive()) renderWorks();
+        });
+        el.closePreview?.addEventListener('click', closeWorkPreview);
+        document.addEventListener('keydown', event => {
+            if(!isActive()) return;
+            if(event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+            if(!['ArrowLeft','ArrowRight'].includes(event.key)) return;
+            if(event.target?.matches?.('input,textarea,select,[contenteditable="true"]')) return;
+            const workStage = el.works?.querySelector('[data-batch-work-stage]');
+            if(!previewIsOpen() && !state.workStageHovered && !workStage?.matches?.(':hover') && document.activeElement !== workStage) return;
+            const group = selectedGroup();
+            if(!group?.works.length) return;
+            event.preventDefault();
+            stepWork(event.key === 'ArrowLeft' ? -1 : 1);
         });
         global.addEventListener('pose-replicate-templates-changed', renderPromptStatus);
     }
@@ -800,6 +883,12 @@
             dialogError:document.getElementById('batchOutfitDialogError'),
             fileInput:document.getElementById('batchOutfitFileInput'),
             gridRatio:document.getElementById('batchOutfitGridRatio'),
+            preview:document.getElementById('batchOutfitPreview'),
+            previewStage:document.getElementById('batchOutfitPreviewStage'),
+            previewImage:document.getElementById('batchOutfitPreviewImage'),
+            previewTitle:document.getElementById('batchOutfitPreviewTitle'),
+            previewCount:document.getElementById('batchOutfitPreviewCount'),
+            closePreview:document.getElementById('closeBatchOutfitPreview'),
         });
         state.initialized = true;
         bindEvents();

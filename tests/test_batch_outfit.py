@@ -22,6 +22,10 @@ APP_SETTINGS_JS = (ROOT / "static" / "js" / "app-settings.js").read_text(encodin
 def test_batch_outfit_tab_replaces_retired_ecommerce_pages():
     assert 'data-operation="batch_outfit"' in ECOMMERCE_HTML
     assert "batchOutfit:true" in ECOMMERCE_JS
+    tab_positions = [ECOMMERCE_HTML.index(f'data-operation="{operation}"') for operation in ("universal", "batch_outfit", "try_on", "pose_transfer")]
+    assert tab_positions == sorted(tab_positions)
+    assert 'data-operation="batch_outfit"><span>02</span>' in ECOMMERCE_HTML
+    assert 'data-operation="try_on"><span>03</span>' in ECOMMERCE_HTML
     for retired in ("prop_replace", "angle_change", "background_change"):
         assert retired not in ECOMMERCE_HTML
         assert retired not in ECOMMERCE_JS
@@ -46,6 +50,28 @@ def test_batch_outfit_layout_and_work_actions_are_explicit():
         assert action in BATCH_JS
     batch_control = ECOMMERCE_HTML.split('id="batchOutfitControl"', 1)[1].split('</section>', 1)[0]
     assert "<textarea" not in batch_control
+
+
+def test_batch_outfit_works_support_hover_and_fullscreen_navigation():
+    for element_id in (
+        "batchOutfitPreview", "batchOutfitPreviewStage", "batchOutfitPreviewImage",
+        "batchOutfitPreviewTitle", "batchOutfitPreviewCount", "closeBatchOutfitPreview",
+    ):
+        assert f'id="{element_id}"' in ECOMMERCE_HTML
+    assert 'data-batch-work-preview' in BATCH_JS
+    assert 'data-batch-work-step="-1"' in BATCH_JS
+    assert 'data-batch-work-step="1"' in BATCH_JS
+    assert 'data-batch-preview-step="-1"' in ECOMMERCE_HTML
+    assert 'data-batch-preview-step="1"' in ECOMMERCE_HTML
+    assert "function openWorkPreview()" in BATCH_JS
+    assert "function stepWork(delta)" in BATCH_JS
+    assert "['ArrowLeft','ArrowRight'].includes(event.key)" in BATCH_JS
+    assert "workStageHovered:false" in BATCH_JS
+    assert "workStage?.matches?.(':hover')" in BATCH_JS
+    assert ".ec-batch-work-stage:hover .ec-batch-work-nav:not(:disabled)" in BATCH_CSS
+    assert ".ec-batch-preview-stage .ec-batch-work-nav:not(:disabled)" in BATCH_CSS
+    assert "width:100vw" in BATCH_CSS
+    assert "height:100vh" in BATCH_CSS
 
 
 def test_model_settings_are_collapsed_by_default_and_remember_manual_expansion():

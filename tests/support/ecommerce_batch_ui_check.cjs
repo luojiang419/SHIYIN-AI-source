@@ -36,6 +36,8 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.goto(`${base}/static/ecommerce.html`);
         await page.waitForSelector('[data-operation="batch_outfit"]');
         assert.equal(await page.locator('#operationTabs [data-operation]').count(), 4);
+        assert.deepEqual(await page.locator('#operationTabs [data-operation]').evaluateAll(items => items.map(item => item.dataset.operation)), ['universal','batch_outfit','try_on','pose_transfer']);
+        assert.deepEqual(await page.locator('#operationTabs [data-operation] > span').allTextContents(), ['01','02','03','04']);
         for(const operation of ['prop_replace','angle_change','background_change']) {
             assert.equal(await page.locator(`[data-operation="${operation}"]`).count(), 0);
         }
@@ -111,6 +113,31 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.equal(await page.locator('.ec-batch-work-thumbs button').count(), 2);
         assert.equal(await page.locator('[data-batch-download-selected]').count(), 1);
         assert.equal(await page.locator('[data-batch-delete-all]').count(), 1);
+        const workStage = page.locator('[data-batch-work-stage]');
+        await workStage.hover();
+        await page.waitForTimeout(200);
+        assert.equal(await workStage.locator('[data-batch-work-step="-1"]').isDisabled(), true);
+        assert.ok(Number(await workStage.locator('[data-batch-work-step="1"]').evaluate(element => getComputedStyle(element).opacity)) > .5);
+        await page.keyboard.press('ArrowRight');
+        assert.equal((await page.locator('.ec-batch-works-shell > header > strong').textContent()).trim(), '2 / 2');
+        await page.keyboard.press('ArrowLeft');
+        assert.equal((await page.locator('.ec-batch-works-shell > header > strong').textContent()).trim(), '1 / 2');
+        await page.locator('[data-batch-work-preview]').click();
+        await page.locator('#batchOutfitPreview[open]').waitFor();
+        const previewBox = await page.locator('#batchOutfitPreview').boundingBox();
+        assert.ok(previewBox.width >= 1439 && previewBox.height >= 979);
+        assert.equal((await page.locator('#batchOutfitPreviewCount').textContent()).trim(), '1 / 2');
+        assert.equal(await page.locator('[data-batch-preview-step="-1"]').isDisabled(), true);
+        assert.equal(Number(await page.locator('[data-batch-preview-step="-1"]').evaluate(element => getComputedStyle(element).opacity)), 0);
+        if(screenshotPath) await page.screenshot({path:screenshotPath.replace(/(\.[^.]+)$/, '-fullscreen$1')});
+        await page.keyboard.press('ArrowRight');
+        assert.equal((await page.locator('#batchOutfitPreviewCount').textContent()).trim(), '2 / 2');
+        assert.equal(await page.locator('[data-batch-preview-step="1"]').isDisabled(), true);
+        await page.locator('[data-batch-preview-step="-1"]').click();
+        assert.equal((await page.locator('#batchOutfitPreviewCount').textContent()).trim(), '1 / 2');
+        await page.locator('#closeBatchOutfitPreview').click();
+        assert.equal(await page.locator('#batchOutfitPreview').getAttribute('open'), null);
+        assert.equal((await page.locator('.ec-batch-works-shell > header > strong').textContent()).trim(), '1 / 2');
         const garmentCard = page.locator('[data-batch-group]').first().locator('[data-batch-upload="target_image"]');
         assert.equal(await garmentCard.locator('.ec-batch-card-shadow').count(), 2);
         assert.equal((await garmentCard.locator('.ec-batch-stack-controls b').textContent()).trim(), '1/2');
@@ -134,6 +161,16 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
             document.documentElement.classList.remove('studio-theme-pure-white','theme-pure-white');
         });
         assert.notEqual(await page.locator('.ec-batch-group').first().evaluate(element => getComputedStyle(element).backgroundImage), 'none');
+        await page.locator('[data-batch-work-preview]').click();
+        const mobilePreviewBox = await page.locator('#batchOutfitPreview').boundingBox();
+        assert.ok(mobilePreviewBox.width >= 639 && mobilePreviewBox.height >= 899);
+        const [mobileTitleBox,mobileActionsBox] = await Promise.all([
+            page.locator('#batchOutfitPreviewTitle').boundingBox(),
+            page.locator('.ec-batch-preview-shell > header > div').boundingBox(),
+        ]);
+        assert.ok(mobileTitleBox.x + mobileTitleBox.width <= mobileActionsBox.x);
+        if(screenshotPath) await page.screenshot({path:screenshotPath.replace(/(\.[^.]+)$/, '-mobile-fullscreen$1')});
+        await page.locator('#closeBatchOutfitPreview').click();
         assert.deepEqual(errors, []);
         console.log('ecommerce batch outfit layout, grouping, works and responsive UI passed');
     } finally {

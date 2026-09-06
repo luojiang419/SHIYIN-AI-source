@@ -3431,6 +3431,7 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     font:800 9px "JetBrains Mono",monospace;
 }
 .ec-batch-work-stage {
+    position:relative;
     min-height:300px;
     display:grid;
     place-items:center;
@@ -3439,10 +3440,60 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     border-radius:18px;
     background:var(--ec-result-soft-bg);
 }
-.ec-batch-work-stage img {
+.ec-batch-work-preview {
+    width:100%;
+    height:100%;
+    min-width:0;
+    min-height:0;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    padding:0;
+    border:0;
+    background:transparent;
+    cursor:zoom-in;
+}
+.ec-batch-work-preview img {
     width:100%;
     height:100%;
     object-fit:contain;
+}
+.ec-batch-work-nav {
+    position:absolute;
+    z-index:2;
+    top:50%;
+    width:42px;
+    height:52px;
+    display:grid;
+    place-items:center;
+    padding:0;
+    border:1px solid rgba(255,255,255,.24);
+    border-radius:8px;
+    background:rgba(18,18,18,.72);
+    color:#fff;
+    box-shadow:0 8px 24px rgba(0,0,0,.18);
+    font-size:30px;
+    line-height:1;
+    opacity:0;
+    transform:translateY(-50%);
+    transition:opacity .16s ease,background-color .16s ease;
+    cursor:pointer;
+}
+.ec-batch-work-nav.previous { left:14px; }
+.ec-batch-work-nav.next { right:14px; }
+.ec-batch-work-stage:hover .ec-batch-work-nav:not(:disabled),
+.ec-batch-work-stage:focus-within .ec-batch-work-nav:not(:disabled) {
+    opacity:.88;
+}
+.ec-batch-work-nav:hover:not(:disabled),
+.ec-batch-work-nav:focus-visible:not(:disabled) {
+    opacity:1;
+    background:rgba(18,18,18,.9);
+}
+.ec-batch-work-nav:disabled {
+    opacity:0;
+    transition:none;
+    pointer-events:none;
 }
 .ec-batch-work-toolbar {
     display:grid;
@@ -3501,6 +3552,93 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     text-overflow:ellipsis;
     white-space:nowrap;
 }
+.ec-batch-preview {
+    width:100vw;
+    max-width:none;
+    height:100vh;
+    max-height:none;
+    margin:0;
+    padding:0;
+    border:0;
+    background:#0d0d0d;
+    color:#fff;
+}
+.ec-batch-preview::backdrop {
+    background:rgba(0,0,0,.9);
+}
+.ec-batch-preview-shell {
+    width:100%;
+    height:100%;
+    display:grid;
+    grid-template-rows:60px minmax(0,1fr);
+}
+.ec-batch-preview-shell > header {
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:18px;
+    padding:0 18px 0 22px;
+    border-bottom:1px solid rgba(255,255,255,.12);
+    background:#151515;
+}
+.ec-batch-preview-shell > header h2 {
+    flex:1;
+    min-width:0;
+    margin:0;
+    overflow:hidden;
+    font-size:15px;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.ec-batch-preview-shell > header > div {
+    display:flex;
+    align-items:center;
+    gap:14px;
+}
+.ec-batch-preview-shell > header strong {
+    color:rgba(255,255,255,.68);
+    font:700 11px "JetBrains Mono",monospace;
+}
+.ec-batch-preview-shell > header button {
+    width:38px;
+    height:38px;
+    display:grid;
+    place-items:center;
+    padding:0;
+    border:0;
+    border-radius:50%;
+    background:rgba(255,255,255,.1);
+    color:#fff;
+    font-size:24px;
+    cursor:pointer;
+}
+.ec-batch-preview-stage {
+    position:relative;
+    min-width:0;
+    min-height:0;
+    display:grid;
+    place-items:center;
+    overflow:hidden;
+    outline:0;
+    background:#080808;
+}
+.ec-batch-preview-stage img {
+    width:100%;
+    height:100%;
+    padding:18px 72px;
+    object-fit:contain;
+    user-select:none;
+}
+.ec-batch-preview-stage .ec-batch-work-nav:not(:disabled) {
+    opacity:.82;
+}
+.ec-batch-preview-stage .ec-batch-work-nav:hover:not(:disabled),
+.ec-batch-preview-stage .ec-batch-work-nav:focus-visible:not(:disabled) {
+    opacity:1;
+}
+.ec-batch-preview-stage .ec-batch-work-nav.previous { left:20px; }
+.ec-batch-preview-stage .ec-batch-work-nav.next { right:20px; }
 .ec-batch-outfit-dialog .ec-dialog-shell {
     width:min(520px,calc(100vw - 30px));
 }
@@ -3574,4 +3712,13 @@ html.studio-theme-dark .ec-batch-card-shadow {
         align-items:flex-start;
         flex-direction:column;
     }
+    .ec-batch-preview-shell > header {
+        gap:10px;
+        padding:0 10px 0 14px;
+    }
+    .ec-batch-preview-stage img {
+        padding:12px 52px;
+    }
+    .ec-batch-preview-stage .ec-batch-work-nav.previous { left:8px; }
+    .ec-batch-preview-stage .ec-batch-work-nav.next { right:8px; }
 }

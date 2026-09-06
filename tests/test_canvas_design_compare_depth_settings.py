@@ -49,6 +49,8 @@ def test_result_compare_node_has_two_ports_inline_compare_and_fullscreen():
         "function openCanvasResultCompare(beforeUrl, afterUrl",
         'id="canvasCompareOverlay"',
         ".result-compare-stage.is-portrait",
+        ".node.resultCompare-node > .port.result-compare-port",
+        "top:var(--result-compare-port-top)",
     ):
         assert marker in CANVAS_HTML + CANVAS_JS + CANVAS_CSS
 

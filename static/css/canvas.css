@@ -902,7 +902,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .result-compare-fullscreen svg { width:15px; height:15px; }
 .result-compare-empty { position:absolute; inset:0; z-index:6; display:flex; align-items:center; justify-content:center; padding:28px; background:var(--soft); color:var(--muted); text-align:center; font-size:11px; font-weight:800; line-height:1.55; }
 .result-compare-hint { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--faint); font-size:9px; font-weight:750; }
-.resultCompare-node .result-compare-port { left:-29px; top:var(--result-compare-port-top); }
+.node.resultCompare-node > .port.result-compare-port { left:-29px; top:var(--result-compare-port-top); }
 .resultCompare-node .result-compare-port::before { content:attr(data-role-label); position:absolute; left:calc(100% + 7px); top:50%; transform:translateY(-50%); min-width:54px; padding:3px 7px; border:1px solid var(--line); border-radius:7px; background:var(--card-solid); color:var(--text); box-shadow:0 5px 14px rgba(0,0,0,.12); font-size:9px; font-weight:850; line-height:1.1; white-space:nowrap; pointer-events:none; }
 .canvas-compare-overlay { position:fixed; inset:0; z-index:1100; display:none; padding:0; background:#0b0b0b; }
 .canvas-compare-overlay.open { display:block; }

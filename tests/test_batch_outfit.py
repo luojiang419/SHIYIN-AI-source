@@ -36,6 +36,10 @@ def test_batch_outfit_layout_and_work_actions_are_explicit():
     ):
         assert f'id="{element_id}"' in ECOMMERCE_HTML
     assert "grid-template-columns:repeat(5,minmax(0,1fr))" in BATCH_CSS
+    assert "aspect-ratio:var(--ec-batch-card-aspect)" in BATCH_CSS
+    assert "object-fit:contain" in BATCH_CSS
+    assert "--ec-batch-shadow-card" in BATCH_CSS
+    assert ".ec-batch-card-shadow.one" in BATCH_CSS
     assert ".ec-batch-outfit-groups.is-single" in BATCH_CSS
     assert "justify-content:center" in BATCH_CSS
     for action in ("data-batch-download-selected", "data-batch-download-all", "data-batch-delete-selected", "data-batch-delete-all"):
@@ -53,7 +57,11 @@ def test_model_settings_are_collapsed_by_default_and_remember_manual_expansion()
 
 
 def test_batch_page_reuses_pose_replicate_runtime_and_shared_prompts():
-    assert "/api/dwpose/detect" in BATCH_JS
+    assert "/api/person-depth/component/status" in BATCH_JS
+    assert "/api/person-depth/component/install" in BATCH_JS
+    assert "/api/person-depth/estimate" in BATCH_JS
+    assert "mode:'depth'" in BATCH_JS
+    assert "batch-outfit-depth" in BATCH_JS
     assert "/api/canvas/pose-replicate-tasks" in BATCH_JS
     assert "PoseReplicateSettings.sharedPromptPolicy" in BATCH_JS
     assert "user_instruction:''" in BATCH_JS
@@ -61,6 +69,19 @@ def test_batch_page_reuses_pose_replicate_runtime_and_shared_prompts():
     assert "BroadcastChannel(SHARED_CHANNEL_NAME)" in POSE_SETTINGS_JS
     assert "pose-replicate-templates-changed" in POSE_SETTINGS_JS
     assert "sharedOverridesForNode(node)" in POSE_SETTINGS_JS
+
+
+def test_batch_outfit_supports_multi_garment_stack_and_independent_grid_ratio():
+    assert 'id="batchOutfitFileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple' in ECOMMERCE_HTML
+    assert 'id="batchOutfitGridRatioField"' in ECOMMERCE_HTML
+    assert 'id="batchOutfitGridRatio"' in ECOMMERCE_HTML
+    assert "const TARGET_IMAGE_MAX = 20" in BATCH_JS
+    assert "group.inputs.target_image = [...currentTargets, ...images]" in BATCH_JS
+    assert "targetImages.map(async (targetImage, index)" in BATCH_JS
+    assert "Promise.allSettled(submissions)" in BATCH_JS
+    assert "data-batch-input-step" in BATCH_JS
+    assert "grid_ratio:state.gridRatio" in BATCH_JS
+    assert "'16:9'" in BATCH_JS
 
 
 def test_batch_outfit_settings_surface_has_dedicated_directory():

@@ -2,6 +2,9 @@
     'use strict';
 
     const ACTIVE_STATUSES = new Set(['queued','running','jimeng_pending','recovery_pending']);
+    const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
+    const TARGET_IMAGE_MAX = 20;
+    const GRID_RATIOS = ['16:9','4:5','1:1','3:4','9:16','4:3','3:2','2:3'];
     const INPUTS = [
         {role:'pose_reference', label:'目标图', required:true, hint:'人物、姿势与画幅基准'},
         {role:'target_image', label:'服装参考', required:true, hint:'当前款式或色号'},
@@ -14,6 +17,8 @@
         selectedImageIndex:0,
         uploadTarget:null,
         pollers:new Map(),
+        controlPromises:new Map(),
+        gridRatio:'16:9',
         initialized:false,
     };
     const el = {};
@@ -25,6 +30,11 @@
     const groupById = id => state.groups.find(group => group.id === id) || null;
     const selectedGroup = () => groupById(state.selectedGroupId) || state.groups[0] || null;
     const uniqueId = () => `outfit_${global.crypto?.randomUUID?.().replaceAll('-','') || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
+    const inputImages = (group, role) => {
+        const value = group?.inputs?.[role];
+        return (Array.isArray(value) ? value : value?.url ? [value] : []).filter(item => item?.url);
+    };
+    const hasRequiredInputs = group => Boolean(group?.inputs?.pose_reference?.url && inputImages(group, 'target_image').length);
 
     function cleanImage(value){
         if(!value || typeof value !== 'object' || !String(value.url || '').trim()) return null;
@@ -57,6 +67,12 @@
         if(!styleName) return null;
         const inputs = {};
         INPUTS.forEach(item => {
+            if(item.role === 'target_image') {
+                const images = (Array.isArray(value.inputs?.[item.role]) ? value.inputs[item.role] : [value.inputs?.[item.role]])
+                    .map(cleanImage).filter(Boolean).slice(0, TARGET_IMAGE_MAX);
+                if(images.length) inputs[item.role] = images;
+                return;
+            }
             const image = cleanImage(value.inputs?.[item.role]);
             if(image) inputs[item.role] = image;
         });
@@ -71,6 +87,13 @@
             controlSourceUrl:String(value.controlSourceUrl || value.control_source_url || ''),
             taskIds,
             currentTaskId:String(value.currentTaskId || value.current_task_id || taskIds[taskIds.length - 1] || ''),
+            runTaskIds:(Array.isArray(value.runTaskIds) ? value.runTaskIds : value.run_task_ids || []).map(item => String(item || '')).filter(Boolean).slice(-TARGET_IMAGE_MAX),
+            taskStatuses:(value.taskStatuses && typeof value.taskStatuses === 'object')
+                ? {...value.taskStatuses}
+                : (value.task_statuses && typeof value.task_statuses === 'object') ? {...value.task_statuses} : {},
+            targetImageIndex:Number.isFinite(Number(value.targetImageIndex ?? value.target_image_index))
+                ? Math.max(0, Number(value.targetImageIndex ?? value.target_image_index))
+                : 0,
             status:String(value.status || 'draft'),
             error:String(value.error || ''),
             works,
@@ -80,7 +103,8 @@
 
     function snapshot(){
         return {
-            schema_version:1,
+            schema_version:2,
+            grid_ratio:state.gridRatio,
             groups:state.groups.map(group => ({
                 id:group.id,
                 style_name:group.styleName,
@@ -89,6 +113,9 @@
                 control_source_url:group.controlSourceUrl,
                 task_ids:group.taskIds,
                 current_task_id:group.currentTaskId,
+                run_task_ids:group.runTaskIds,
+                task_statuses:group.taskStatuses,
+                target_image_index:group.targetImageIndex,
                 status:group.status,
                 error:group.error,
                 works:group.works,
@@ -101,12 +128,14 @@
 
     function hydrate(value){
         const groups = (Array.isArray(value?.groups) ? value.groups : []).map(cleanGroup).filter(Boolean);
+        state.gridRatio = GRID_RATIOS.includes(String(value?.grid_ratio || '')) ? String(value.grid_ratio) : '16:9';
         state.groups = groups;
         state.selectedGroupId = groups.some(group => group.id === value?.selected_group_id)
             ? String(value.selected_group_id)
             : (groups[0]?.id || '');
         state.selectedImageIndex = Math.max(0, Number(value?.selected_image_index || 0));
         if(api()?.state) api().state.batchOutfit = snapshot();
+        applyGridRatio();
         render();
         resumePendingTasks();
     }
@@ -177,27 +206,50 @@
 
     function statusText(group){
         if(group.status === 'uploading') return '正在上传';
-        if(group.status === 'preparing') return '正在提取骨架';
+        if(group.status === 'preparing') return '正在提取深度图';
         if(group.status === 'queued') return '已排队';
         if(group.status === 'running' || group.status === 'jimeng_pending' || group.status === 'recovery_pending') return '正在生成';
         if(group.status === 'succeeded') return group.works.length ? `已生成 ${group.works.length} 张` : '生成完成';
         if(group.status === 'failed' || group.status === 'interrupted') return '生成失败';
-        return group.inputs.pose_reference || group.inputs.target_image ? '待完善' : '待添加素材';
+        return group.inputs.pose_reference || inputImages(group, 'target_image').length ? '待完善' : '待添加素材';
+    }
+
+    function applyGridRatio(){
+        const ratio = GRID_RATIOS.includes(state.gridRatio) ? state.gridRatio : '16:9';
+        const [width,height] = ratio.split(':').map(Number);
+        el.control?.style.setProperty('--ec-batch-card-aspect', `${width} / ${height}`);
+        if(el.gridRatio) el.gridRatio.value = ratio;
     }
 
     function inputCardHtml(group, item){
-        const image = group.inputs[item.role];
-        return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}">
+        const images = inputImages(group, item.role);
+        if(item.role === 'target_image') group.targetImageIndex = Math.max(0, Math.min(images.length - 1, Number(group.targetImageIndex || 0)));
+        const selectedIndex = item.role === 'target_image' ? group.targetImageIndex : 0;
+        const image = images[selectedIndex] || null;
+        const hasStack = images.length > 1;
+        const stack = hasStack ? `<span class="ec-batch-card-shadow one" aria-hidden="true"></span><span class="ec-batch-card-shadow two" aria-hidden="true"></span>` : '';
+        const controls = hasStack ? `<span class="ec-batch-stack-controls">
+            <span data-batch-input-step="-1" data-batch-input-role="${item.role}" role="button" aria-label="上一张服装参考">‹</span>
+            <b>${selectedIndex + 1}/${images.length}</b>
+            <span data-batch-input-step="1" data-batch-input-role="${item.role}" role="button" aria-label="下一张服装参考">›</span>
+        </span>` : '';
+        const depthStatus = item.role === 'pose_reference' && image
+            ? group.controlMap?.url && group.controlSourceUrl === image.url
+                ? `<span class="ec-batch-depth-chip is-ready"><img src="${escapeHtml(group.controlMap.url)}" alt="">深度图 ✓</span>`
+                : `<span class="ec-batch-depth-chip ${group.status === 'preparing' ? 'is-loading' : ''}">${group.status === 'preparing' ? '深度提取中' : '等待深度图'}</span>`
+            : '';
+        const actionText = item.role === 'target_image' && image ? `继续添加 · ${images.length}/${TARGET_IMAGE_MAX}` : '点击替换';
+        return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''} ${hasStack ? 'has-stack' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}">
             <span class="ec-batch-input-label">${escapeHtml(item.label)}${item.required ? '<em>*</em>' : ''}</span>
-            ${image ? `<img src="${escapeHtml(image.url)}" alt="${escapeHtml(item.label)}"><small>${escapeHtml(image.name || item.hint)}</small><span class="ec-batch-input-replace">点击替换</span>` : `<span class="ec-batch-input-plus">+</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint)}</small>`}
-            ${image ? `<span class="ec-batch-input-remove" data-batch-remove-input="${item.role}" role="button" aria-label="移除${escapeHtml(item.label)}">×</span>` : ''}
+            ${image ? `<span class="ec-batch-card-stack">${stack}<img src="${escapeHtml(image.url)}" alt="${escapeHtml(item.label)}">${controls}</span><small title="${escapeHtml(image.name || item.hint)}">${escapeHtml(image.name || item.hint)}</small><span class="ec-batch-input-replace">${actionText}</span>${depthStatus}` : `<span class="ec-batch-input-plus">+</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint)}</small>`}
+            ${image ? `<span class="ec-batch-input-remove" data-batch-remove-input="${item.role}" data-batch-remove-index="${selectedIndex}" role="button" aria-label="移除${escapeHtml(item.label)}">×</span>` : ''}
         </button>`;
     }
 
     function groupHtml(group, index){
         const selected = group.id === state.selectedGroupId;
         const running = ACTIVE_STATUSES.has(group.status) || ['uploading','preparing'].includes(group.status);
-        const canGenerate = Boolean(group.inputs.pose_reference?.url && group.inputs.target_image?.url) && !running;
+        const canGenerate = hasRequiredInputs(group) && !running;
         const preview = group.works[group.works.length - 1];
         return `<article class="ec-batch-group ${selected ? 'is-selected' : ''}" data-batch-group="${escapeHtml(group.id)}" tabindex="0">
             <header class="ec-batch-group-head">
@@ -224,7 +276,7 @@
             ? state.groups.map(groupHtml).join('')
             : `<div class="ec-batch-empty"><span>＋</span><h3>添加第一个换款任务</h3><p>每组固定包含目标图、服装参考、模特主体、场景和查看。</p><button type="button" data-batch-empty-add>添加换款</button></div>`;
         if(el.runAll) {
-            const runnable = state.groups.filter(group => group.inputs.pose_reference?.url && group.inputs.target_image?.url && !ACTIVE_STATUSES.has(group.status));
+            const runnable = state.groups.filter(group => hasRequiredInputs(group) && !ACTIVE_STATUSES.has(group.status));
             el.runAll.disabled = !runnable.length;
             el.runAll.textContent = runnable.length > 1 ? `一键生成全部 · ${runnable.length}` : '一键生成全部';
         }
@@ -285,7 +337,7 @@
 
     function removeGroup(id){
         const group = groupById(id);
-        if(!group || ACTIVE_STATUSES.has(group.status)) return;
+        if(!group || ACTIVE_STATUSES.has(group.status) || ['uploading','preparing'].includes(group.status)) return;
         const copy = group.works.length ? `任务内仍有 ${group.works.length} 张作品，移除任务不会删除图片。` : '';
         if(!confirm(`确认移除款号“${group.styleName}”的任务卡？${copy}`)) return;
         state.groups = state.groups.filter(item => item.id !== id);
@@ -298,6 +350,7 @@
     function chooseUpload(groupId, role){
         if(!groupById(groupId) || !INPUTS.some(item => item.role === role)) return;
         state.uploadTarget = {groupId, role};
+        el.fileInput.multiple = role === 'target_image';
         el.fileInput.click();
     }
 
@@ -312,17 +365,30 @@
         return cleanImage({...uploaded, name:uploaded.name || file.name});
     }
 
-    async function handleFileSelection(file){
+    async function handleFileSelection(files){
         const target = state.uploadTarget;
         state.uploadTarget = null;
         const group = groupById(target?.groupId);
-        if(!group || !target?.role || !file) return;
+        const selected = Array.from(files || []).filter(Boolean);
+        if(!group || !target?.role || !selected.length) return;
+        const currentTargets = inputImages(group, 'target_image');
+        const accepted = target.role === 'target_image'
+            ? selected.slice(0, Math.max(0, TARGET_IMAGE_MAX - currentTargets.length))
+            : selected.slice(0, 1);
+        if(!accepted.length) {
+            showToast(`服装参考最多添加 ${TARGET_IMAGE_MAX} 张`, true);
+            return;
+        }
         group.status = 'uploading';
         group.error = '';
         render();
         try {
-            const image = await uploadFile(file);
-            group.inputs[target.role] = image;
+            const images = await Promise.all(accepted.map(uploadFile));
+            if(target.role === 'target_image') {
+                group.inputs.target_image = [...currentTargets, ...images].slice(0, TARGET_IMAGE_MAX);
+                group.targetImageIndex = currentTargets.length;
+                if(accepted.length < selected.length) showToast(`已达到 ${TARGET_IMAGE_MAX} 张服装参考上限`, true);
+            } else group.inputs[target.role] = images[0];
             if(target.role === 'pose_reference') {
                 group.controlMap = null;
                 group.controlSourceUrl = '';
@@ -331,6 +397,7 @@
             group.updatedAt = Date.now();
             persist();
             render();
+            if(target.role === 'pose_reference') await ensureControlMap(group);
         } catch(error) {
             group.status = 'failed';
             group.error = error.message || '图片上传失败';
@@ -339,10 +406,17 @@
         }
     }
 
-    function removeInput(groupId, role){
+    function removeInput(groupId, role, index=-1){
         const group = groupById(groupId);
         if(!group || !group.inputs[role]) return;
-        delete group.inputs[role];
+        if(role === 'target_image') {
+            const images = inputImages(group, role);
+            const removeIndex = Math.max(0, Math.min(images.length - 1, Number(index >= 0 ? index : group.targetImageIndex || 0)));
+            images.splice(removeIndex, 1);
+            if(images.length) group.inputs[role] = images;
+            else delete group.inputs[role];
+            group.targetImageIndex = Math.max(0, Math.min(removeIndex, images.length - 1));
+        } else delete group.inputs[role];
         if(role === 'pose_reference') {
             group.controlMap = null;
             group.controlSourceUrl = '';
@@ -353,15 +427,35 @@
         render();
     }
 
-    async function waitForDwpose(){
+    function stepInput(groupId, role, step){
+        const group = groupById(groupId);
+        const images = inputImages(group, role);
+        if(!group || images.length < 2 || role !== 'target_image') return;
+        group.targetImageIndex = (Number(group.targetImageIndex || 0) + Number(step || 0) + images.length) % images.length;
+        persist();
+        renderGroups();
+    }
+
+    async function waitForPersonDepth(){
         const deadline = Date.now() + 15 * 60 * 1000;
         while(Date.now() < deadline) {
-            const status = await fetchJson('/api/dwpose/status', {cache:'no-store'});
+            const status = await fetchJson('/api/person-depth/component/status', {cache:'no-store'});
             if(status.ready) return;
-            if(status.state === 'failed') throw new Error(status.message || 'DWPose 模型准备失败');
+            if(status.state === 'failed') throw new Error(status.message || '高精度人物深度组件准备失败');
             await sleep(1500);
         }
-        throw new Error('DWPose 模型准备超时');
+        throw new Error('高精度人物深度组件准备超时');
+    }
+
+    async function ensurePersonDepthReady(){
+        const status = await fetchJson('/api/person-depth/component/status', {cache:'no-store'});
+        if(status.ready) return;
+        if(['idle','missing'].includes(String(status.state || '')) && status.install_available) {
+            await fetchJson('/api/person-depth/component/install', {method:'POST'});
+        } else if(!PERSON_DEPTH_ACTIVE_STATES.has(String(status.state || ''))) {
+            throw new Error(status.message || '高精度人物深度组件尚未就绪');
+        }
+        await waitForPersonDepth();
     }
 
     async function uploadBlob(blob, name){
@@ -373,30 +467,47 @@
         const source = group.inputs.pose_reference;
         if(!source?.url) throw new Error('请先添加目标图');
         if(group.controlMap?.url && group.controlSourceUrl === source.url) return group.controlMap;
-        group.status = 'preparing';
-        group.error = '';
-        render();
-        const sourceResponse = await fetch(source.url);
-        if(!sourceResponse.ok) throw new Error('目标图读取失败');
-        const sourceBlob = await sourceResponse.blob();
-        const request = () => {
+        const existing = state.controlPromises.get(group.id);
+        if(existing?.sourceUrl === source.url) return existing.promise;
+        const promise = (async () => {
+            group.status = 'preparing';
+            group.error = '';
+            persist();
+            render();
+            await ensurePersonDepthReady();
+            const sourceResponse = await fetch(source.url);
+            if(!sourceResponse.ok) throw new Error('目标图读取失败');
             const form = new FormData();
-            form.append('file', sourceBlob, source.name || 'target.png');
-            return fetch('/api/dwpose/detect', {method:'POST', body:form});
-        };
-        let response = await request();
-        if(response.status === 503) {
-            await waitForDwpose();
-            response = await request();
-        }
-        if(!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.detail || '目标图骨架提取失败');
-        }
-        group.controlMap = await uploadBlob(await response.blob(), `batch-outfit-pose-${Date.now()}.png`);
-        group.controlSourceUrl = source.url;
-        persist();
-        return group.controlMap;
+            form.append('file', await sourceResponse.blob(), source.name || 'target.png');
+            form.append('bit_depth', '8');
+            const response = await fetch('/api/person-depth/estimate', {method:'POST', body:form});
+            if(!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || '高精度人物深度图生成失败');
+            }
+            const controlMap = await uploadBlob(await response.blob(), `batch-outfit-depth-${Date.now()}.png`);
+            if(group.inputs.pose_reference?.url !== source.url) return null;
+            group.controlMap = controlMap;
+            group.controlSourceUrl = source.url;
+            group.status = 'draft';
+            group.error = '';
+            group.updatedAt = Date.now();
+            persist();
+            render();
+            return controlMap;
+        })().catch(error => {
+            if(group.inputs.pose_reference?.url === source.url) {
+                group.status = 'failed';
+                group.error = error.message || '高精度人物深度图生成失败';
+                persist();
+                render();
+            }
+            throw error;
+        }).finally(() => {
+            if(state.controlPromises.get(group.id)?.promise === promise) state.controlPromises.delete(group.id);
+        });
+        state.controlPromises.set(group.id, {sourceUrl:source.url, promise});
+        return promise;
     }
 
     function resolveGenerationRoute(group){
@@ -439,17 +550,30 @@
         if(result.batch_outfit_save_error) group.error = `图片已生成，但按款号归档失败：${result.batch_outfit_save_error}`;
     }
 
+    function refreshRunStatus(group){
+        const ids = Array.isArray(group.runTaskIds) ? group.runTaskIds : [];
+        const statuses = ids.map(id => String(group.taskStatuses?.[id] || 'queued'));
+        if(!statuses.length) return;
+        if(statuses.some(status => ACTIVE_STATUSES.has(status))) group.status = 'running';
+        else if(statuses.some(status => status === 'succeeded')) group.status = 'succeeded';
+        else if(statuses.every(status => ['failed','interrupted','cancelled'].includes(status))) group.status = 'failed';
+        else group.status = statuses[statuses.length - 1] || group.status;
+    }
+
     async function pollTask(group, taskId){
         if(state.pollers.has(taskId)) return state.pollers.get(taskId);
         const promise = (async () => {
             try {
                 while(true) {
                     const task = await fetchJson(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
-                    group.status = String(task.status || 'running');
+                    const taskStatus = String(task.status || 'running');
+                    group.taskStatuses[taskId] = taskStatus;
+                    refreshRunStatus(group);
                     group.updatedAt = Date.now();
-                    if(!ACTIVE_STATUSES.has(group.status)) {
-                        if(group.status === 'succeeded') appendTaskResult(group, task);
-                        else group.error = String(task.error || '批量换款生成失败');
+                    if(!ACTIVE_STATUSES.has(taskStatus)) {
+                        if(taskStatus === 'succeeded') appendTaskResult(group, task);
+                        else group.error = [group.error, String(task.error || '批量换款生成失败')].filter(Boolean).join('；');
+                        refreshRunStatus(group);
                         persist();
                         render();
                         return task;
@@ -458,8 +582,9 @@
                     await sleep(1500);
                 }
             } catch(error) {
-                group.status = 'interrupted';
-                group.error = error.message || '任务状态读取失败';
+                group.taskStatuses[taskId] = 'interrupted';
+                group.error = [group.error, error.message || '任务状态读取失败'].filter(Boolean).join('；');
+                refreshRunStatus(group);
                 persist();
                 render();
                 throw error;
@@ -474,7 +599,8 @@
     async function runGroup(groupId){
         const group = groupById(groupId);
         if(!group || ACTIVE_STATUSES.has(group.status) || ['uploading','preparing'].includes(group.status)) return;
-        if(!group.inputs.pose_reference?.url || !group.inputs.target_image?.url) {
+        const targetImages = inputImages(group, 'target_image');
+        if(!group.inputs.pose_reference?.url || !targetImages.length) {
             group.error = '目标图和服装参考为必填项';
             render();
             return;
@@ -487,40 +613,60 @@
             const studioState = api().state;
             const ratio = ['source','1:1','16:9','9:16','4:3','3:4','4:5'].includes(studioState.aspectRatio) ? studioState.aspectRatio : 'source';
             const resolution = ['1k','2k','4k'].includes(studioState.resolution) ? studioState.resolution : '2k';
-            const policyInputs = {mode:'skeleton', modelSubject:group.inputs.model_subject || null, scene:group.inputs.scene || null};
-            const payload = {
-                mode:'skeleton',
-                inputs:{
-                    pose_reference:group.inputs.pose_reference,
-                    control_map:controlMap,
-                    target_image:group.inputs.target_image,
-                    model_subject:group.inputs.model_subject || null,
-                    scene:group.inputs.scene || null,
-                },
-                user_instruction:'',
-                generation:{provider_id:route.provider_id, model:route.model, resolution, aspect_ratio:ratio, quality:'high', count:1},
-                prompt_policy:global.PoseReplicateSettings.sharedPromptPolicy(policyInputs),
-                control_signature:`batch-outfit|${group.inputs.pose_reference.url}`,
-                batch_outfit:{group_id:group.id, style_name:group.styleName},
-            };
+            const quality = ['low','medium','high'].includes(studioState.quality) ? studioState.quality : 'high';
+            const policyInputs = {mode:'depth', modelSubject:group.inputs.model_subject || null, scene:group.inputs.scene || null};
             group.status = 'queued';
+            group.runTaskIds = [];
+            group.taskStatuses = {};
             group.updatedAt = Date.now();
             persist();
             render();
-            const task = await fetchJson('/api/canvas/pose-replicate-tasks', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify(payload),
+            const submissions = targetImages.map(async (targetImage, index) => {
+                const payload = {
+                    mode:'depth',
+                    inputs:{
+                        pose_reference:group.inputs.pose_reference,
+                        control_map:controlMap,
+                        target_image:targetImage,
+                        model_subject:group.inputs.model_subject || null,
+                        scene:group.inputs.scene || null,
+                    },
+                    user_instruction:'',
+                    generation:{provider_id:route.provider_id, model:route.model, resolution, aspect_ratio:ratio, quality, count:1},
+                    prompt_policy:global.PoseReplicateSettings.sharedPromptPolicy(policyInputs),
+                    control_signature:`batch-outfit-depth|${group.inputs.pose_reference.url}`,
+                    batch_outfit:{group_id:group.id, style_name:group.styleName},
+                };
+                try {
+                    const task = await fetchJson('/api/canvas/pose-replicate-tasks', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify(payload),
+                    });
+                    const taskId = String(task.task_id || '');
+                    if(!taskId) throw new Error('一键复刻任务没有返回任务 ID');
+                    group.currentTaskId = taskId;
+                    group.taskIds.push(taskId);
+                    group.taskIds = group.taskIds.slice(-40);
+                    group.runTaskIds.push(taskId);
+                    group.taskStatuses[taskId] = String(task.status || 'queued');
+                    refreshRunStatus(group);
+                    persist();
+                    render();
+                    return pollTask(group, taskId);
+                } catch(error) {
+                    group.error = [group.error, `服装参考 ${index + 1}：${error.message || '任务创建失败'}`].filter(Boolean).join('；');
+                    throw error;
+                }
             });
-            const taskId = String(task.task_id || '');
-            if(!taskId) throw new Error('一键复刻任务没有返回任务 ID');
-            group.currentTaskId = taskId;
-            group.taskIds.push(taskId);
-            group.taskIds = group.taskIds.slice(-40);
-            group.status = String(task.status || 'queued');
+            const results = await Promise.allSettled(submissions);
+            refreshRunStatus(group);
+            if(!group.runTaskIds.length) group.status = 'failed';
+            else if(results.some(result => result.status === 'rejected') && group.status === 'succeeded') {
+                group.error = group.error || '部分服装参考生成失败';
+            }
             persist();
             render();
-            await pollTask(group, taskId);
         } catch(error) {
             group.status = 'failed';
             group.error = error.message || '批量换款生成失败';
@@ -530,7 +676,7 @@
     }
 
     async function runAll(){
-        const runnable = state.groups.filter(group => group.inputs.pose_reference?.url && group.inputs.target_image?.url && !ACTIVE_STATUSES.has(group.status) && !['uploading','preparing'].includes(group.status));
+        const runnable = state.groups.filter(group => hasRequiredInputs(group) && !ACTIVE_STATUSES.has(group.status) && !['uploading','preparing'].includes(group.status));
         if(!runnable.length) {
             showError('请先为至少一组补齐目标图和服装参考');
             return;
@@ -541,8 +687,15 @@
 
     function resumePendingTasks(){
         state.groups.forEach(group => {
-            if(group.currentTaskId && ACTIVE_STATUSES.has(group.status)) pollTask(group, group.currentTaskId).catch(() => {});
+            const ids = group.runTaskIds?.length ? group.runTaskIds : [group.currentTaskId].filter(Boolean);
+            ids.filter(id => ACTIVE_STATUSES.has(String(group.taskStatuses?.[id] || group.status))).forEach(id => pollTask(group, id).catch(() => {}));
         });
+    }
+
+    function resumeDepthMaps(){
+        if(!isActive()) return;
+        state.groups.filter(group => group.inputs.pose_reference?.url && (!group.controlMap?.url || group.controlSourceUrl !== group.inputs.pose_reference.url))
+            .forEach(group => ensureControlMap(group).catch(() => {}));
     }
 
     async function downloadWorks(works){
@@ -586,9 +739,14 @@
         el.runAll?.addEventListener('click', runAll);
         el.form?.addEventListener('submit', submitAddDialog);
         el.fileInput?.addEventListener('change', event => {
-            const file = event.target.files?.[0];
+            const files = Array.from(event.target.files || []);
             event.target.value = '';
-            if(file) handleFileSelection(file);
+            if(files.length) handleFileSelection(files);
+        });
+        el.gridRatio?.addEventListener('change', () => {
+            state.gridRatio = GRID_RATIOS.includes(el.gridRatio.value) ? el.gridRatio.value : '16:9';
+            applyGridRatio();
+            persist();
         });
         el.groups?.addEventListener('click', event => {
             if(event.target.closest('[data-batch-empty-add]')) { openAddDialog(); return; }
@@ -596,7 +754,9 @@
             if(!article) return;
             const groupId = article.dataset.batchGroup;
             const removeInputButton = event.target.closest('[data-batch-remove-input]');
-            if(removeInputButton) { event.preventDefault(); event.stopPropagation(); removeInput(groupId, removeInputButton.dataset.batchRemoveInput); return; }
+            if(removeInputButton) { event.preventDefault(); event.stopPropagation(); removeInput(groupId, removeInputButton.dataset.batchRemoveInput, Number(removeInputButton.dataset.batchRemoveIndex || 0)); return; }
+            const stepButton = event.target.closest('[data-batch-input-step]');
+            if(stepButton) { event.preventDefault(); event.stopPropagation(); stepInput(groupId, stepButton.dataset.batchInputRole, Number(stepButton.dataset.batchInputStep || 0)); return; }
             const upload = event.target.closest('[data-batch-upload]');
             if(upload) { event.preventDefault(); event.stopPropagation(); chooseUpload(groupId, upload.dataset.batchUpload); return; }
             const run = event.target.closest('[data-batch-run]');
@@ -639,13 +799,21 @@
             styleName:document.getElementById('batchOutfitStyleName'),
             dialogError:document.getElementById('batchOutfitDialogError'),
             fileInput:document.getElementById('batchOutfitFileInput'),
+            gridRatio:document.getElementById('batchOutfitGridRatio'),
         });
         state.initialized = true;
         bindEvents();
         hydrate(api()?.state?.batchOutfit || {});
         render();
+        resumeDepthMaps();
     }
 
-    global.EcommerceBatchOutfit = {init, activate:render, render, hydrate, snapshot, runGroup};
+    function activate(){
+        applyGridRatio();
+        render();
+        resumeDepthMaps();
+    }
+
+    global.EcommerceBatchOutfit = {init, activate, render, hydrate, snapshot, runGroup};
     document.addEventListener('DOMContentLoaded', init, {once:true});
 })(window);

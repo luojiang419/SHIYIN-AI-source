@@ -568,8 +568,9 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for marker in (
             "function depthMapBodyHtml(node)",
             "function bindDepthMap(root, node, options={})",
-            "function estimatePersonDepthFile(source, options",
+            "function estimateConfiguredDepthFile(source, options",
             "'/api/person-depth/estimate'",
+            "'/api/depth/estimate'",
             "depthMapGeneratedSignature",
             "depthMapFailedSignature",
             "setOutputItem(node, file, options)",

@@ -2760,6 +2760,8 @@ class AppSettingsUpdateRequest(BaseModel):
     quick_save_mode: Optional[str] = None
     quick_save_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
+    depth_map_mode: Optional[str] = None
+    depth_map_controls: Optional[Dict[str, Any]] = None
     shortcut_bindings: Optional[Dict[str, str]] = None
 
 
@@ -3053,6 +3055,8 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "quick_save_mode": str(config.get("quick_save_mode") or "manual"),
         "quick_save_dir": str(config.get("quick_save_dir") or "").strip(),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
+        "depth_map_mode": str(config.get("depth_map_mode") or "person"),
+        "depth_map_controls": dict(config.get("depth_map_controls") or {}),
         "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
         "runtime_mode": RUNTIME_OPTIONS.mode,
     }
@@ -3108,6 +3112,8 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             quick_save_mode=payload.quick_save_mode,
             quick_save_dir=payload.quick_save_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
+            depth_map_mode=payload.depth_map_mode,
+            depth_map_controls=payload.depth_map_controls,
             shortcut_bindings=payload.shortcut_bindings,
         )
     except (OSError, ValueError) as exc:

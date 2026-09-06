@@ -18,6 +18,8 @@ class AppConfigTests(unittest.TestCase):
             self.assertEqual(settings["quick_save_mode"], "manual")
             self.assertEqual(settings["quick_save_dir"], "")
             self.assertEqual(settings["topaz_video_install_dir"], "")
+            self.assertEqual(settings["depth_map_mode"], "person")
+            self.assertEqual(settings["depth_map_controls"]["contrast"], 100)
             self.assertEqual(settings["shortcut_bindings"], {})
 
     def test_close_behavior_update_preserves_runtime_fields(self):
@@ -129,6 +131,30 @@ class AppConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 update_app_settings(Path(tmp), topaz_video_install_dir="relative/topaz")
+
+    def test_depth_map_mode_and_controls_are_validated_and_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            saved = update_app_settings(
+                data_root,
+                depth_map_mode="professional",
+                depth_map_controls={
+                    "farPoint": 12,
+                    "nearPoint": 88,
+                    "midtone": -14,
+                    "contrast": 185,
+                    "brightness": -4,
+                    "smooth": 12,
+                    "invert": True,
+                },
+            )
+            self.assertEqual(saved["depth_map_mode"], "professional")
+            self.assertEqual(saved["depth_map_controls"]["contrast"], 185)
+            self.assertTrue(read_app_config(data_root)["depth_map_controls"]["invert"])
+            with self.assertRaisesRegex(ValueError, "person 或 professional"):
+                update_app_settings(data_root, depth_map_mode="scene")
+            with self.assertRaisesRegex(ValueError, "必须是数字"):
+                update_app_settings(data_root, depth_map_controls={"contrast": "high"})
 
     def test_generated_files_use_persistent_sequence_and_date(self):
         with tempfile.TemporaryDirectory() as tmp:

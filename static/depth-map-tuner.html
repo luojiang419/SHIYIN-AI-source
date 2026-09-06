@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>深度图参数调整</title>
+    <script>
+        (function(){
+            try {
+                var theme=localStorage.getItem('studio_theme')||'light';
+                if(theme==='dark') document.documentElement.classList.add('studio-theme-dark');
+                if(theme==='pure-white') document.documentElement.classList.add('studio-theme-pure-white');
+            } catch(error) {}
+        })();
+    </script>
+    <link rel="stylesheet" href="/static/css/depth-map-tuner.css?v=2026.09.06.integrated.1">
+</head>
+<body>
+    <main class="depth-tuner-page">
+        <header class="depth-tuner-header">
+            <button id="depthTunerBack" class="depth-tuner-back" type="button">← 返回设置</button>
+            <div>
+                <span>DEPTH MAP CALIBRATION</span>
+                <h1>深度图参数调整</h1>
+                <p>共享软件设置，保存后立即应用到所有深度图功能。</p>
+            </div>
+            <div class="depth-tuner-mode"><small>当前处理模式</small><strong id="depthTunerMode">人物模式</strong></div>
+        </header>
+
+        <section class="depth-tuner-preview-grid" aria-label="输入与深度图预览">
+            <article class="depth-tuner-panel">
+                <header><div><span>SOURCE</span><h2>输入图片</h2></div><b id="depthInputMeta">等待图片</b></header>
+                <button id="depthInputStage" class="depth-tuner-stage input" type="button">
+                    <img id="depthInputImage" alt="输入图片" hidden>
+                    <span id="depthInputEmpty" class="depth-tuner-empty"><i>＋</i><strong>点击选择图片</strong><small>PNG · JPG · WEBP，最大 25MB</small></span>
+                </button>
+                <input id="depthInputFile" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden>
+            </article>
+            <article class="depth-tuner-panel">
+                <header><div><span>LIVE PREVIEW</span><h2>实时深度图</h2></div><b id="depthOutputMeta">8-BIT PNG</b></header>
+                <div class="depth-tuner-stage output">
+                    <canvas id="depthOutputCanvas" aria-label="调整后的深度图" hidden></canvas>
+                    <span id="depthOutputEmpty" class="depth-tuner-empty"><i class="rings"></i><strong>深度结果将在这里出现</strong><small>模型只推理一次，参数实时映射</small></span>
+                    <span id="depthProcessing" class="depth-tuner-processing" hidden><i></i><strong>正在提取深度图</strong><small>首次加载模型可能需要一些时间</small></span>
+                </div>
+            </article>
+        </section>
+
+        <section class="depth-tuner-controls">
+            <header><div><span>PARAMETERS</span><h2>深度映射参数</h2></div><div id="depthPresetStrip" class="depth-preset-strip"></div></header>
+            <div class="depth-control-grid">
+                <label data-depth-control="farPoint"><span><b>远景黑点</b><output></output></span><input type="range" data-depth-field="farPoint" min="0" max="99"></label>
+                <label data-depth-control="nearPoint"><span><b>近景白点</b><output></output></span><input type="range" data-depth-field="nearPoint" min="1" max="100"></label>
+                <label data-depth-control="midtone"><span><b>中间层次</b><output></output></span><input type="range" data-depth-field="midtone" min="-100" max="100"></label>
+                <label data-depth-control="contrast"><span><b>对比度</b><output></output></span><input type="range" data-depth-field="contrast" min="0" max="300"></label>
+                <label data-depth-control="brightness"><span><b>整体亮度</b><output></output></span><input type="range" data-depth-field="brightness" min="-100" max="100"></label>
+                <label data-depth-control="smooth"><span><b>平滑强度</b><output></output></span><input type="range" data-depth-field="smooth" min="0" max="50"></label>
+                <label class="depth-invert-control"><span><b>反转深度</b><small>交换近亮远暗关系</small></span><input type="checkbox" data-depth-field="invert"><i></i></label>
+            </div>
+            <footer>
+                <span id="depthTunerStatus" role="status">正在读取深度图设置…</span>
+                <div>
+                    <button id="depthResetControls" class="secondary" type="button">恢复原始参数</button>
+                    <button id="depthExportImage" class="secondary" type="button" disabled>导出深度图</button>
+                    <button id="depthSaveConfig" class="primary" type="button">保存配置</button>
+                </div>
+            </footer>
+        </section>
+    </main>
+    <div id="depthTunerToast" class="depth-tuner-toast" aria-live="polite"></div>
+    <script defer src="/static/js/depth-map-tuner.js?v=2026.09.06.integrated.1"></script>
+</body>
+</html>

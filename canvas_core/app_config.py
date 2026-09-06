@@ -15,8 +15,47 @@ DEFAULT_QUICK_SAVE_MODE = "manual"
 QUICK_SAVE_MODES = frozenset({DEFAULT_QUICK_SAVE_MODE, "silent"})
 DEFAULT_QUICK_SAVE_DIR = ""
 DEFAULT_TOPAZ_VIDEO_INSTALL_DIR = ""
+DEFAULT_DEPTH_MAP_MODE = "person"
+DEPTH_MAP_MODES = frozenset({DEFAULT_DEPTH_MAP_MODE, "professional"})
+DEFAULT_DEPTH_MAP_CONTROLS: dict[str, Any] = {
+    "farPoint": 0,
+    "nearPoint": 100,
+    "midtone": 0,
+    "contrast": 100,
+    "brightness": 0,
+    "smooth": 0,
+    "invert": False,
+}
 DEFAULT_SHORTCUT_BINDINGS: dict[str, str] = {}
 _CONFIG_LOCK = RLock()
+
+
+def _normalize_depth_map_controls(value: Any) -> dict[str, Any]:
+    source = value if isinstance(value, dict) else {}
+    ranges = {
+        "farPoint": (0, 99),
+        "nearPoint": (1, 100),
+        "midtone": (-100, 100),
+        "contrast": (0, 300),
+        "brightness": (-100, 100),
+        "smooth": (0, 50),
+    }
+    result: dict[str, Any] = {}
+    for key, (minimum, maximum) in ranges.items():
+        raw = source.get(key, DEFAULT_DEPTH_MAP_CONTROLS[key])
+        if isinstance(raw, bool):
+            raw = int(raw)
+        try:
+            number = int(round(float(raw)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"深度图参数 {key} 必须是数字") from exc
+        result[key] = max(minimum, min(maximum, number))
+    result["invert"] = bool(source.get("invert", DEFAULT_DEPTH_MAP_CONTROLS["invert"]))
+    if result["nearPoint"] <= result["farPoint"]:
+        result["nearPoint"] = min(100, result["farPoint"] + 1)
+    if result["nearPoint"] <= result["farPoint"]:
+        result["farPoint"] = max(0, result["nearPoint"] - 1)
+    return result
 
 
 def _normalize_shortcut_bindings(value: Any) -> dict[str, str]:
@@ -55,6 +94,8 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
                 "quick_save_mode": DEFAULT_QUICK_SAVE_MODE,
                 "quick_save_dir": DEFAULT_QUICK_SAVE_DIR,
                 "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
+                "depth_map_mode": DEFAULT_DEPTH_MAP_MODE,
+                "depth_map_controls": DEFAULT_DEPTH_MAP_CONTROLS.copy(),
                 "shortcut_bindings": DEFAULT_SHORTCUT_BINDINGS.copy(),
             }
         try:
@@ -73,6 +114,9 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         if value["quick_save_mode"] == "silent" and not value["quick_save_dir"]:
             value["quick_save_mode"] = DEFAULT_QUICK_SAVE_MODE
         value["topaz_video_install_dir"] = str(value.get("topaz_video_install_dir") or "").strip()
+        depth_map_mode = str(value.get("depth_map_mode") or DEFAULT_DEPTH_MAP_MODE).strip()
+        value["depth_map_mode"] = depth_map_mode if depth_map_mode in DEPTH_MAP_MODES else DEFAULT_DEPTH_MAP_MODE
+        value["depth_map_controls"] = _normalize_depth_map_controls(value.get("depth_map_controls"))
         value["shortcut_bindings"] = _normalize_shortcut_bindings(value.get("shortcut_bindings"))
         return value
 
@@ -86,9 +130,11 @@ def update_app_settings(
     quick_save_mode: str | None = None,
     quick_save_dir: str | None = None,
     topaz_video_install_dir: str | None = None,
+    depth_map_mode: str | None = None,
+    depth_map_controls: dict[str, Any] | None = None,
     shortcut_bindings: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
+    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and depth_map_mode is None and depth_map_controls is None and shortcut_bindings is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -125,6 +171,13 @@ def update_app_settings(
             if directory and not Path(directory).expanduser().is_absolute():
                 raise ValueError("Topaz Video AI 安装目录必须是绝对路径")
             value["topaz_video_install_dir"] = directory
+        if depth_map_mode is not None:
+            mode = str(depth_map_mode or "").strip()
+            if mode not in DEPTH_MAP_MODES:
+                raise ValueError("深度图处理模式必须是 person 或 professional")
+            value["depth_map_mode"] = mode
+        if depth_map_controls is not None:
+            value["depth_map_controls"] = _normalize_depth_map_controls(depth_map_controls)
         if shortcut_bindings is not None:
             value["shortcut_bindings"] = _normalize_shortcut_bindings(shortcut_bindings)
         path.parent.mkdir(parents=True, exist_ok=True)

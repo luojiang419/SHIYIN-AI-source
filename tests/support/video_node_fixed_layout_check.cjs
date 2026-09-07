@@ -87,9 +87,57 @@ const path = require('node:path');
         assert.deepEqual(created,{
             provider:'minimax-h3',model:'MiniMax H3',duration:5,aspectRatio:'16:9',resolution:'0.2MP 16:9 - 608x352',h:undefined,
         });
+        const promptLayouts=[];
+        const input=page.locator('.node[data-id="h3"] .generator-prompt-input');
+        const longPrompt='subject_definitions:\n'+'A woman approaches the court, turns and steps forward.\n'.repeat(100);
+        for(const scenario of [
+            {prompt:longPrompt}, {prompt:'短提示词'}, {prompt:''},
+            {prompt:longPrompt,w:200,h:320}, {prompt:longPrompt,w:520,h:700},
+            {prompt:longPrompt,w:440,h:1000}, {prompt:longPrompt,w:440,h:700},
+            {prompt:longPrompt,w:440,h:700,runStatus:'failed',_cascadeFailed:true,runError:'布局回归测试'},
+        ]){
+            const {prompt}=scenario;
+            if(scenario.w) await page.evaluate(scenario=>{
+                Object.assign(nodes.find(node=>node.id==='h3'),scenario);
+                render();
+            },scenario);
+            await input.fill(prompt);
+            await page.waitForTimeout(100);
+            const measured=await page.locator('.node[data-id="h3"]').evaluate(el=>{
+                const frame=el.getBoundingClientRect();
+                const button=el.querySelector('.gen-btn');
+                const rect=button.getBoundingClientRect();
+                const input=el.querySelector('.generator-prompt-input');
+                const editorRect=input.getBoundingClientRect();
+                const wrapRect=input.parentElement.getBoundingClientRect();
+                const retry=el.querySelector('.node-retry-bar');
+                return {height:el.offsetHeight,width:el.offsetWidth,buttonInside:rect.bottom<=frame.bottom,
+                    buttonHittable:button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)),
+                    promptInside:editorRect.bottom<=wrapRect.bottom+1,
+                    retryInside:!retry||retry.getBoundingClientRect().bottom<=frame.bottom,
+                    promptClientHeight:input.clientHeight,promptScrollHeight:input.scrollHeight,
+                    mediaHeight:el.querySelector('.generator-canvas-content').clientHeight};
+            });
+            promptLayouts.push(measured);
+            assert.equal(measured.height,Math.max(700,scenario.h||700),'editing prompts must preserve the fixed frame');
+            assert.equal(measured.width,Math.max(440,scenario.w||440));
+            assert.equal(measured.buttonInside,true,'long prompts must not push generate outside the frame');
+            assert.equal(measured.buttonHittable,true,'generate must remain reachable without scrolling the footer');
+            assert.equal(measured.promptInside,true,'editor must fit the available prompt area');
+            assert.equal(measured.retryInside,true,'retry controls must stay inside the frame');
+            assert.ok(measured.mediaHeight>=64,'media region must retain its minimum height');
+            if(prompt.length>1000) assert.ok(measured.promptScrollHeight>measured.promptClientHeight,'long prompts must scroll inside the editor');
+        }
         assert.deepEqual(errors,[]);
+        await page.evaluate(()=>{
+            const h3=nodes.find(node=>node.id==='h3');
+            h3.runStatus='';h3._cascadeFailed=false;
+            document.body.classList.add('theme-dark');
+            viewport.scale=1;viewport.x=500-h3.x;viewport.y=150-h3.y;
+            render();applyViewport();
+        });
         await page.screenshot({path:path.join(artifacts,'h3-fixed-footer.png'),fullPage:true});
-        const report={layout,created,errors};
+        const report={layout,created,promptLayouts,errors};
         fs.writeFileSync(path.join(artifacts,'report.json'),JSON.stringify(report,null,2));
         console.log(JSON.stringify(report));
     } finally {

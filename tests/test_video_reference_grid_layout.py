@@ -26,7 +26,7 @@ def test_video_node_keeps_six_thumbnails_readable_and_prevents_unbounded_width()
     assert "const minWidth = limits.minWidth;" in JS
     assert "const maxWidth = limits.maxWidth;" in JS
     assert "feature=video-reference-grid.2" in HTML
-    assert "feature=video-fixed-frame.1" in HTML
+    assert "feature=video-fixed-frame.2" in HTML
 
 
 def test_video_node_uses_fixed_minimum_frame_and_non_collapsing_footer():
@@ -36,7 +36,7 @@ def test_video_node_uses_fixed_minimum_frame_and_non_collapsing_footer():
     assert "normalizeClassicNodeLayout(node);" in JS
     assert ".node.sized.video-node .node-body { overflow:hidden; }" in CSS
     assert ".node.sized.video-node .generator-canvas-content { flex:1 1 auto; min-height:64px; overflow-x:hidden; overflow-y:auto;" in CSS
-    assert ".node.sized.video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; }" in CSS
+    assert ".node.sized.video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; max-height:calc(100% - 72px); }" in CSS
     assert "if(contentScroll) contentScroll.onwheel = event => event.stopPropagation();" in JS
     assert "feature=video-auto-height.1" in HTML
 

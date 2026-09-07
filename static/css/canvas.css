@@ -350,7 +350,12 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .node.sized.video-node .node-body { overflow:hidden; }
 .node.sized.video-node .generator-body { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; height:100%; overflow:hidden; }
 .node.sized.video-node .generator-canvas-content { flex:1 1 auto; min-height:64px; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; }
-.node.sized.video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; }
+.node.sized.video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; max-height:calc(100% - 72px); }
+.node.sized.video-node .node-bottom-controls > :not(.generator-inline-prompt) { flex-shrink:0; }
+.node.sized.video-node .generator-inline-prompt { flex:0 1 auto; min-height:0; }
+.node.sized.video-node .generator-inline-prompt > :not(.generator-prompt-editor-wrap) { flex-shrink:0; }
+.node.sized.video-node .generator-prompt-editor-wrap { flex:1 1 auto; min-height:76px; overflow:hidden; }
+.node.sized.video-node .generator-prompt-input { height:100%; min-height:76px; max-height:140px; }
 .video-input-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .video-input-head .tool-btn { height:28px; min-width:0; padding:0 10px; font-size:10px; white-space:nowrap; }
 .video-input-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }

@@ -13851,7 +13851,8 @@ function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
 function bindGeneratorInlinePrompt(wrap, node){
     const input = wrap?.querySelector?.('.generator-prompt-input');
     if(!input || !node) return;
-    const fitPrompt = () => fitAutoTextNode(node, wrap.closest('.node'), [input], {
+    // 视频节点由固定框架分配编辑区高度，长文本只在 textarea 内滚动。
+    const fitPrompt = () => node.type === 'video' ? false : fitAutoTextNode(node, wrap.closest('.node'), [input], {
         minLines:3,
         maxLines:12,
         allowShrink:true

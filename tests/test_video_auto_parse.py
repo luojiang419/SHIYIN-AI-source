@@ -134,10 +134,10 @@ def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():
     # 按钮的 data 属性来自上一次渲染，连接关系变化后可能短暂过期；
     # 点击时必须依据当前输入和参考图再次选择自动解析。
     assert "const currentPrompt = [String(original || node.prompt || '').trim(), connectedCanvasPromptText(node)]" in CANVAS
-    assert "const autoParseNow = !currentPrompt && imageRefs.length > 0" in CANVAS
+    assert "const autoParseNow = !currentPrompt && refs.some(item=>item?.url)" in CANVAS
     assert "const mode = autoParseNow ? 'auto-parse'" in CANVAS
     assert "const currentPrompt=[String(prompt.value || '').trim(), externalPromptText(node, options)]" in FILM
-    assert "const autoParseNow=!currentPrompt && currentImageRefs.length>0" in FILM
+    assert "const autoParseNow=!currentPrompt && currentRefs.length>0" in FILM
     assert "const mode=autoParseNow ? 'auto-parse'" in FILM
 
 

@@ -2179,6 +2179,7 @@ async function runSmartFilmNode(node){
             node.images=images; finalizePendingNode(output,images,meta,'image');
         } else {
             const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || '',videoSteps:node.steps || settingsForNodeRun.videoSteps || 12,videoMultimodal:node.multimodal !== undefined ? Boolean(node.multimodal) : Boolean(settingsForNodeRun.videoMultimodal),videoUseFrameRoles:node.useFrameRoles !== undefined ? Boolean(node.useFrameRoles) : Boolean(settingsForNodeRun.videoUseFrameRoles)};
+            if(node.apiProvider==='linkfox') Object.assign(videoSettings,{videoGenerateAudio:node.generateAudio,videoAspect:node.aspectRatio || '',linkfoxMode:node.linkfoxMode,linkfoxCamera:node.linkfoxCamera});
             const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings,node);
             const images=(urls || []).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'video'}:{url:item,kind:'video'}).filter(item=>item.url);
             if(!images.length) throw new Error('视频生成没有返回结果');
@@ -4232,7 +4233,7 @@ function smartKlingModelsForMode(mode){
     return Array.isArray(models) ? models : [];
 }
 function smartKlingModeForRefs(refs=[]){
-    return imageRefsOnly(refs).length ? 'image_to_video' : 'text_to_video';
+    return imageRefsOnly(refs).length || videoRefsOnly(refs).length ? 'image_to_video' : 'text_to_video';
 }
 function updateSmartKlingProviderModels(){
     const provider = (apiProviders || []).find(item => item.id === 'kling-cli');
@@ -4592,6 +4593,18 @@ function renderApiVideoParams(){
     if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'veo3-fast';
     const isH3 = isMiniMaxH3SmartSettings(settings);
     const isKling = isKlingSmartSettings(settings);
+    if(settings.videoProvider === 'linkfox'){
+        const view={model:settings.videoModel,duration:settings.videoDuration,resolution:settings.videoResolution,
+            aspectRatio:settings.videoAspect,generateAudio:settings.videoGenerateAudio,
+            linkfoxMode:settings.linkfoxMode,linkfoxCamera:settings.linkfoxCamera};
+        const sync=()=>Object.assign(settings,{videoModel:view.model,videoDuration:view.duration,
+            videoResolution:view.resolution,videoAspect:view.aspectRatio,videoGenerateAudio:view.generateAudio,
+            linkfoxMode:view.linkfoxMode,linkfoxCamera:view.linkfoxCamera,videoUseFrameRoles:false});
+        dynamicParams.innerHTML=`${renderVideoProviderControl(providers)}${renderVideoModelControl(models)}${window.CanvasLinkfoxVideo.unifiedSettingsHtml(view)}`;
+        sync();
+        window.CanvasLinkfoxVideo.bindUnified(dynamicParams,view,()=>{sync();persistActiveSmartSettings();renderDynamicParams();});
+        return;
+    }
     dynamicParams.innerHTML = `
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
@@ -19236,7 +19249,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             provider_id: runSettings.videoProvider || 'comfly',
             model: runSettings.videoModel || 'veo3-fast',
             duration: Math.max(1, Math.min(60, Number(runSettings.videoDuration) || 5)),
-            aspect_ratio: runSettings.videoAspect || '16:9',
+            aspect_ratio: runSettings.videoProvider === 'linkfox' ? (runSettings.videoAspect || '') : (runSettings.videoAspect || '16:9'),
             resolution: runSettings.videoResolution || '',
             images: refImages,
             videos: refVideos,
@@ -19250,15 +19263,22 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             trusted_asset: useAssetUris,
             steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))
         };
+        payload.linkfox_mode=runSettings.linkfoxMode || 'reference';
+        payload.linkfox_camera=runSettings.linkfoxCamera || 'single';
         Object.assign(payload,window.CanvasFilmNodes.videoPromptSubmission(sourceNode,payload));
         payload.node_id=sourceNode?.id || '';
-        if(isKling) return await runPersistentSmartKlingVideo(payload);
+        if(isKling){
+            const items=await runPersistentSmartKlingVideo(payload);
+            window.CanvasFilmNodes.rememberVideoPromptResult(sourceNode,items.find(item=>item?.generation_request)?.generation_request);
+            return items;
+        }
         const result = await fetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payload)
         }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
         if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
+        window.CanvasFilmNodes.rememberVideoPromptResult(sourceNode,result?.request);
         return window.CanvasFilmNodes.videoGenerationOutputs(resultMediaUrls(result),result?.request);
     } finally {
         transientSmartCloudLinks = [];

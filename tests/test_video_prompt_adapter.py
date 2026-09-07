@@ -148,7 +148,7 @@ def test_reference_roles_and_subject_numbers_do_not_get_reindexed():
         {'url': '/end.png', 'role': 'last_frame'},
     ], ['video'], ['audio'], {'duration': 10}))
     assert message['reference_manifest'][0] == {
-        'tag': '图片1', 'source': '<Picture 1>', 'role': 'first_frame', 'label': '演员'}
+        'tag': '图片1', 'source': '<Picture 1>', 'source_aliases': ['图片1', '<<<image_1>>>', '[Image1]'], 'role': 'first_frame', 'label': '演员'}
     assert message['reference_manifest'][1]['role'] == 'last_frame'
     assert message['reference_manifest'][-1]['tag'] == '音频1'
     assert '<Subject 3>' in message['original_prompt']

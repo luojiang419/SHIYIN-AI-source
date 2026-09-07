@@ -4,7 +4,7 @@
         reference:[
             {id:'seedance2.0',label:'Seedance 2.0',durations:[5,10,15],resolutions:['480p','720p','1080p'],ratios:['16:9','9:16','adaptive'],voice:'optional',maxImages:9},
             {id:'seedance2.0fast',label:'Seedance 2.0 Fast',durations:[5,10,15],resolutions:['480p','720p'],ratios:['16:9','9:16'],voice:'optional',maxImages:9},
-            {id:'可灵Omni',label:'可灵 Omni',durations:[5,10,15],resolutions:['720p','1080p'],ratios:['16:9','9:16','1:1'],voice:'fixed_false',maxImages:7},
+            {id:'可灵Omni',label:'可灵 Omni',durations:[5,10],resolutions:['720p','1080p'],ratios:['16:9','9:16','1:1'],voice:'fixed_false',maxImages:7},
             {id:'HappyHorse',label:'HappyHorse（百炼）',durations:[5,10,15],resolutions:['720p','1080p'],ratios:['16:9','9:16'],voice:'fixed_true',maxImages:9},
             {id:'海螺2.3',label:'海螺 2.3',durations:[6,10],resolutions:['768p','1080p'],ratios:[],voice:'fixed_false',maxImages:1},
             {id:'wan2.6',label:'Wan 2.6',durations:[5,10,15],resolutions:[],ratios:[],voice:'optional',maxImages:1},
@@ -104,5 +104,40 @@
         root.querySelector('[data-linkfox-action="run"]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();options.run?.(node);});
         const refs=options.refs?.(node)||[]; const summary=root.querySelector('[data-linkfox-input-summary]'); if(summary) summary.textContent=refs.length?`已连接 ${refs.length} 张图片（模型上限 ${modelFor(node).maxImages} 张）`:'等待连接图片…';
     }
-    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs};
+    function normalizeUnified(node){
+        if(node.model==='可灵2.6') node.linkfoxMode='first_last_frame';
+        else if(!MODELS[node.linkfoxMode || 'reference']?.some(model=>model.id===node.model)) node.linkfoxMode='reference';
+        const view={...node,mode:node.linkfoxMode || 'reference',voice:node.generateAudio};
+        const spec=modelFor(view);
+        if(!spec.durations.includes(Number(view.duration))) view.duration=spec.durations.reduce((best,value)=>Math.abs(value-Number(view.duration || 5))<Math.abs(best-Number(view.duration || 5))?value:best);
+        if(view.resolution && !spec.resolutions.includes(view.resolution)) view.resolution=spec.resolutions.at(-1) || '';
+        normalizeSettings(view);
+        if(view.model==='海螺2.3' && view.resolution==='1080p') view.duration=6;
+        if(view.model==='可灵2.6' && view.resolution==='720p') view.voice=false;
+        Object.assign(node,{model:view.model,duration:view.duration,resolution:view.resolution,
+            aspectRatio:view.aspectRatio,generateAudio:view.voice,useFrameRoles:false});
+        return view;
+    }
+    function unifiedSettingsHtml(node){
+        const view=normalizeUnified(node), spec=modelFor(view);
+        const labels={reference:'参考图',first_last_frame:'首尾帧',single:'单镜头',multi:'多镜头',adaptive:'自适应'};
+        const field=(key,label,values,value)=>`<label class="field"><div class="setting-title">${label}</div><select class="select-lite" data-linkfox-unified="${key}">${values.map(item=>`<option value="${esc(item)}" ${String(item)===String(value)?'selected':''}>${esc(labels[item] || item || '按模型')}</option>`).join('')}</select></label>`;
+        const modes=MODELS.first_last_frame.some(m=>m.id===node.model)?['reference','first_last_frame']:['reference'];
+        if(node.model==='可灵2.6') modes.splice(0,1);
+        return `<div class="linkfox-unified-settings"><div class="gen-settings-row">${field('linkfoxMode','模式',modes,view.mode)}${field('duration','秒',spec.durations,node.duration)}</div>
+            <div class="gen-settings-row">${field('resolution','分辨率',spec.resolutions.length?spec.resolutions:[''],node.resolution)}${field('aspectRatio','画幅',spec.ratios.length?spec.ratios:[''],node.aspectRatio)}</div>
+            <div class="gen-settings-row"><label class="field linkfox-audio-toggle"><input type="checkbox" data-linkfox-unified="generateAudio" ${node.generateAudio?'checked':''} ${spec.voice!=='optional' || (node.model==='可灵2.6' && node.resolution==='720p')?'disabled':''}>声音${spec.voice!=='optional'?'（模型固定）':''}</label>${field('linkfoxCamera','镜头', ['single','multi'],node.linkfoxCamera || 'single')}</div>
+            <div class="muted-note">LinkFox · ${view.mode==='first_last_frame'?'首帧＋可选尾帧':`最多 ${spec.maxImages} 张参考图`}。源视频会先解析动作与镜头；无图片时提取起始画面。${node.model==='可灵2.6'?'尾帧要求1080p并关闭声音。':''}</div></div>`;
+    }
+    function bindUnified(root,node,onChange){
+        root.querySelectorAll('[data-linkfox-unified]').forEach(control=>{
+            control.addEventListener('mousedown',event=>event.stopPropagation());
+            control.addEventListener('change',event=>{
+                event.stopPropagation();const key=control.dataset.linkfoxUnified;
+                node[key]=control.type==='checkbox'?control.checked:key==='duration'?Number(control.value):control.value;
+                normalizeUnified(node);onChange?.();
+            });
+        });
+    }
+    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified};
 })();

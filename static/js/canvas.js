@@ -1499,7 +1499,7 @@ function isKlingVideoNode(node){
 }
 function klingCapabilityModeForNode(node){
     const sources = orderedSources(node, generatorSources(node));
-    const hasImage = sources.some(source => (source.refs || []).some(ref => mediaKindForRef(ref) === 'image'));
+    const hasImage = sources.some(source => (source.refs || []).some(ref => ['image','video'].includes(mediaKindForRef(ref))));
     return hasImage ? 'image_to_video' : 'text_to_video';
 }
 function klingModelsForNode(node){
@@ -11012,7 +11012,7 @@ async function runFilmNode(nodeId, opts={}){
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptTextForSubmission(target)});
-    if(!built.prompt){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
+    if(!built.prompt && !built.refs.length){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
     const refs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `图${index+1}`}));
     const out=outputForNode(node,560,true);
     const run=runSnapshot(node,built.prompt,refs);
@@ -11040,10 +11040,11 @@ async function runFilmNode(nodeId, opts={}){
         } else {
             const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
             if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
-            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
+            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
             const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(api.videoPromptSubmission(node,payload))});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
             run.request=requestMetaFromResult(data);
+            api.rememberVideoPromptResult(node,data.request);
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));
             if(!outputs.length) throw new Error('视频生成没有返回结果');
             addGenerationLog({run,outputs,runMs:nowMs() - Number(pending.startedAt || nowMs())});
@@ -13880,7 +13881,7 @@ function syncVideoPromptActionButton(wrap, node){
     if(!button || node?.type !== 'video') return;
     const connectedMedia = generatorSources(node).flatMap(source => source.refs || []).map(ref => mediaKindForRef(ref));
     const promptInputs = generatorSources(node).filter(source => source.prompt && !source.refs?.length);
-    const autoParse = !String(node.prompt || '').trim() && !connectedCanvasPromptText(node) && !promptInputs.length && connectedMedia.includes('image') && connectedMedia.every(kind => kind === 'image');
+    const autoParse = !String(node.prompt || '').trim() && !connectedCanvasPromptText(node) && !promptInputs.length && connectedMedia.some(kind=>['image','video'].includes(kind)) && connectedMedia.every(kind=>['image','video'].includes(kind));
     button.dataset.videoPromptMode = autoParse ? 'auto-parse' : 'polish';
     button.classList.toggle('auto-parse', autoParse);
     button.title = autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词';
@@ -14356,11 +14357,11 @@ function renderVideoBody(node){
                 <select class="select-lite video-provider" style="flex:1">${videoProviderOptions(node.apiProvider)}</select>
                 <select class="select-lite video-model" style="flex:2">${videoModelOptionsForNode(node)}</select>
             </div>
-            ${isH3 ? h3VideoSettingsHtml(node) : isKling ? klingVideoSettingsHtml(node) : legacyVideoSettingsHtml(node)}
+            ${node.apiProvider === 'linkfox' ? window.CanvasLinkfoxVideo.unifiedSettingsHtml(node) : isH3 ? h3VideoSettingsHtml(node) : isKling ? klingVideoSettingsHtml(node) : legacyVideoSettingsHtml(node)}
         </div>
         ${generatorInlinePromptHtml(node, promptInputs.length)}
         <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}" title="H3 提示词切换模型后，生成时会自动适配所选模型；原文保留"><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? '再次生成视频' : tr('canvas.videoGenerate')}</button>
+            <button class="gen-btn ${node.running ? 'running' : ''}" title="生成前自动解析素材并适配所选模型；保留原始创意"><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? '再次生成视频' : tr('canvas.videoGenerate')}</button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -14368,6 +14369,7 @@ function renderVideoBody(node){
     `;
     const providerSelect = wrap.querySelector('.video-provider');
     const modelSelect = wrap.querySelector('.video-model');
+    if(node.apiProvider === 'linkfox') window.CanvasLinkfoxVideo.bindUnified(wrap,node,()=>{render();scheduleSave();});
     const durationSelect = wrap.querySelector('.video-duration');
     const aspectSelect = wrap.querySelector('.video-aspect');
     const resolutionSelect = wrap.querySelector('.video-resolution');
@@ -16330,21 +16332,10 @@ async function runVideoNode(nodeId, opts={}){
     const audioRefs = audioRefsOnly(mediaRefs);
     const persistentVideoTask = isH3 || isKling;
     let out = outputForNode(node, 460);
-    if(isKling && (videoRefs.length || manualVideoUrlForNode(node))){
-        const message = String(
-            klingCliState.capabilities?.video_reference_message
-            || '可灵视频参考已移除；视频截取片段仍可用于其他支持视频输入的平台。'
-        );
-        node.runStatus = 'failed';
-        node.runError = message;
-        refreshRunNodes(node, out);
-        if(opts.cascade) throw new Error(message);
-        showErrorModal(message, '可灵视频参考');
-        return;
-    }
+    // 可灵 CLI 的源视频由后端解析并提取起始画面，不直接提交视频引用。
     if(node.useFrameRoles && refs[0]) refs[0] = {...refs[0], role:'first_frame'};
     if(node.useFrameRoles && refs[1]) refs[1] = {...refs[1], role:'last_frame'};
-    if(!prompt){ alert(tr('canvas.videoNeedsPrompt')); return; }
+    if(!prompt && !refs.length && !videoRefs.length){ alert(tr('canvas.videoNeedsPrompt')); return; }
     const pendingId = uid('p');
     const canvasVideoTaskId = persistentVideoTask ? `canvas_video_${uid('task')}` : '';
     const run = runSnapshot(node, prompt, refs);
@@ -16371,7 +16362,7 @@ async function runVideoNode(nodeId, opts={}){
             provider_id:resolveVideoProviderId(node.apiProvider || 'comfly'),
             model:node.model || 'veo3-fast',
             duration:Number(node.duration || 5),
-            aspect_ratio:node.aspectRatio || '16:9',
+            aspect_ratio:node.apiProvider === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),
             resolution:node.resolution || '',
             images:refs,
             videos:isH3
@@ -16422,6 +16413,7 @@ async function runVideoNode(nodeId, opts={}){
         }).filter(item => item.url);
         if(!outputUrls.length) throw new Error(tr('canvas.videoFailed'));
         run.request = requestMetaFromResult(result);
+        window.CanvasFilmNodes.rememberVideoPromptResult(node,result.request);
         appendOutputImages(out, outputUrls, refs[0], [{...meta, kind:'video'}]);
         mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
         addGenerationLog({run, outputs:outputUrls, runMs:meta.runMs || 0});
@@ -18617,6 +18609,7 @@ function completeCanvasVideoTask(taskId, result){
     }
     const gen = nodes.find(node => node.id === meta.run?.node?.id);
     if(gen){
+        window.CanvasFilmNodes.rememberVideoPromptResult(gen,result?.request);
         mergeGeneratedOutputs(gen, videos, Boolean(pending.appendGenerated));
         gen.running = hasActiveVideoRuns(gen);
         gen.runStatus = gen.running ? 'running' : 'done';
@@ -21359,14 +21352,15 @@ async function submitCanvasPromptTask(endpoint, payload, label='提示词任务'
 }
 async function autoParseCanvasVideoPrompt(node, refs=[], onProgress=null, promptOverride=''){
     const images = (refs || []).filter(item => item.kind === 'image').map(item => item.url).filter(Boolean).slice(0,20);
-    if(!images.length) throw new Error('自动解析至少需要一张图片');
+    const videos=(refs || []).filter(item=>item.kind==='video').map(item=>item.url);
+    if(!images.length && !videos.length) throw new Error('自动解析至少需要图片或视频');
     const labels = (refs || []).filter(item => item.kind === 'image').slice(0,20).map((item,index) => `参考素材${index + 1}${item.label ? `：${item.label}` : ''}`);
     const prompt = String(promptOverride || [String(node?.prompt || '').trim(), connectedCanvasPromptText(node)].filter(Boolean).join('\n\n')).trim();
     const visionProvider = resolveVideoVisionProviderId(node?.visionProvider || '');
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const data = await submitCanvasPromptTask('/api/canvas-video-auto-parse-tasks', {
         provider:visionProvider, model:visionModel, ms_model:'', video_provider:node?.apiProvider || '', video_model:node?.model || '',
-        prompt, images, image_labels:labels, web_search:node?.promptWebSearch === true,
+        prompt, images, image_labels:labels, videos, web_search:node?.promptWebSearch === true,
         duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
     }, '自动解析', onProgress);
     const text = String(data.text || '').trim();
@@ -21394,8 +21388,8 @@ function bindVideoPromptPolish(wrap, node, refs=[]){
         // 需要非空文本的润色接口。
         const currentPrompt = [String(original || node.prompt || '').trim(), connectedCanvasPromptText(node)].filter(Boolean).join('\n\n');
         const imageRefs = (refs || []).filter(item => item?.kind === 'image' && item?.url);
-        const autoParseNow = !currentPrompt && imageRefs.length > 0
-            && (refs || []).filter(item => item?.url).every(item => item?.kind === 'image');
+        const autoParseNow = !currentPrompt && refs.some(item=>item?.url)
+            && (refs || []).filter(item => item?.url).every(item => ['image','video'].includes(item?.kind));
         const mode = autoParseNow ? 'auto-parse' : (button.dataset.videoPromptMode || 'polish');
         button.disabled = true; button.classList.add('is-loading');
         const label = button.querySelector('span'); if(label) label.textContent = mode === 'auto-parse' ? '解析中…' : '润色中…';
@@ -22460,6 +22454,7 @@ function canConnect(fromId, toId, inputRole=''){
     if(to.type === 'film-storyboard' || to.type === 'film-video' || to.type === 'film-line-art'){
         const valid = (window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole);
         if(!valid) return false;
+        if(to.type === 'film-video' && inputRole === 'storyboard' && ['video','film-video','linkfox-video'].includes(from.type)) return !wouldCreateGeneratorCycle(fromId,toId);
         if(to.type === 'film-video' && inputRole === 'prompt'){
             return ['prompt','promptGroup','loop','llm','group'].includes(from.type)
                 && !wouldCreateGeneratorCycle(fromId,toId);

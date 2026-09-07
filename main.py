@@ -93,6 +93,7 @@ from canvas_core.generated_output import export_generated_files
 from canvas_core.quick_save import safe_download_name, save_stream
 from canvas_core.image_upload import normalize_image_orientation
 from canvas_core.video_prompt_quality import compact_h3_prompt, parse_h3_prompt
+from canvas_core.video_prompt_registry import PROFILES as VIDEO_PROMPT_PROFILES, registered_profile, load_registered_skill
 from canvas_core.video_prompt_adapter import (
     needs_video_prompt_adaptation, target_profile, source_reference_error,
     build_adaptation_system, adaptation_message, clean_adapted_prompt, validate_adapted_prompt,
@@ -136,6 +137,7 @@ from canvas_core.kling_cli import (
     start_kling_login,
 )
 from canvas_core.linkfox_video import (
+    MODEL_SPECS as LINKFOX_MODEL_SPECS, unified_request as linkfox_unified_request,
     prepare_image_inputs as prepare_linkfox_image_inputs,
     LinkFoxVideoError,
     available_models as linkfox_video_models,
@@ -1038,6 +1040,11 @@ def video_prompt_limit(provider_id: str = "", model: str = "") -> int:
     """
     provider_key = str(provider_id or "").strip().lower()
     model_key = str(model or "").strip().lower()
+    profile = registered_profile(provider_key, model_key)
+    if provider_key == 'linkfox':
+        return min(2000, VIDEO_PROMPT_PROFILES.get(profile, {}).get('limit', 2000))
+    if profile in VIDEO_PROMPT_PROFILES:
+        return VIDEO_PROMPT_PROFILES[profile]['limit']
     if provider_key == "minimax-h3" or "minimax-h3" in model_key or model_key == "h3" or "h3" in model_key:
         return max(1, MINIMAX_H3_VIDEO_PROMPT_MAX_LENGTH)
     if provider_key == "kling-cli" or "kling" in provider_key or "kling" in model_key or "可灵" in model_key:
@@ -1406,7 +1413,9 @@ def api_provider_templates():
 
 
 def default_api_providers():
-    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"}]
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"}] + [
+        {"id": "linkfox", "name": "LinkFox", "protocol": "openai", "base_url": "", "enabled": True,
+         "primary": False, "image_models": [], "chat_models": [], "video_models": list(LINKFOX_MODEL_SPECS)}]
 
 
 def normalize_minimax_h3_base_url(value: Any = "") -> str:
@@ -1420,6 +1429,13 @@ def normalize_minimax_h3_base_url(value: Any = "") -> str:
 
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
+    linkfox_default = next(item for item in default_api_providers() if item['id'] == 'linkfox')
+    if not any(item.get('id') == 'linkfox' for item in merged):
+        merged.append(linkfox_default)
+    else:
+        for item in merged:
+            if item.get('id') == 'linkfox':
+                item.update(video_models=list(LINKFOX_MODEL_SPECS), image_models=[], chat_models=[])
     # 强制保留独立入口平台（不再强制 comfly）
     ms_default = next((d for d in default_api_providers() if d["id"] == "modelscope"), None)
     if ms_default:
@@ -4424,7 +4440,14 @@ def prune_current_account_tasks_locked(
 
 class CanvasVideoRequest(BaseModel):
     _prompt_adapted: bool = PrivateAttr(default=False)
-    prompt: str = Field(min_length=1, max_length=VIDEO_PROMPT_MAX_LENGTH)
+    prompt: str = Field(default="", max_length=VIDEO_PROMPT_MAX_LENGTH)
+    auto_adapt_prompt: bool = False
+    auto_parse_media: bool = False
+    prompt_source_provider: str = Field(default="", max_length=160)
+    prompt_origin_key: str = Field(default="", max_length=160)
+    linkfox_mode: str = "reference"
+    linkfox_is_pro: bool = False
+    linkfox_camera: str = "single"
     prompt_source_model: str = Field(default="", max_length=200)
     prompt_optimizer_provider: str = Field(default="", max_length=160)
     prompt_optimizer_model: str = Field(default="", max_length=200)
@@ -4693,6 +4716,7 @@ class CanvasVideoAutoParseRequest(BaseModel):
     video_model: str = ""
     prompt: str = Field(default="", max_length=LLM_MESSAGE_MAX_LENGTH)
     images: List[str] = []
+    videos: List[str] = Field(default_factory=list, max_length=3)
     image_labels: List[str] = []
     duration: Optional[float] = None
     aspect_ratio: str = ""
@@ -9927,11 +9951,24 @@ async def video_reference_to_frame_data_urls(value, max_frames=6, max_size=768):
         if not ffmpeg:
             return []
         pattern = os.path.join(frame_dir, "frame_%03d.jpg")
+        # 全片均匀采样，包含起点和结尾，避免只分析前六秒而漏掉主要动作。
+        frame_limit = max(1, min(20, int(max_frames)))
+        filters = f"scale='min({max_size},iw)':-2"
+        if frame_limit > 1:
+            try:
+                metadata = await asyncio.to_thread(probe_video_frames, path)
+                duration = float(metadata.get('duration') or 0)
+                fps = max(1.0, float(metadata.get('fps') or 25))
+                interval = max(0.01, (duration - max(0.05, 1 / fps)) / (frame_limit - 1) - 0.0001)
+                filters = f"select='gte(t,selected_n*{interval:.6f})'," + filters
+            except Exception:
+                # 无法确认完整时长时不以开头片段冒充全片分析。
+                return []
         cmd = [
             ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
             "-i", path,
-            "-vf", f"fps=1,scale='min({max_size},iw)':-2",
-            "-frames:v", str(max(1, max_frames)),
+            "-vf", filters, "-vsync", "vfr",
+            "-frames:v", str(frame_limit),
             pattern
         ]
         proc = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=90)
@@ -21373,6 +21410,7 @@ CANVAS_VIDEO_INTERRUPTED_ERROR = "服务在上游任务 ID 保存前退出；为
 def canvas_video_task_request_snapshot(payload: CanvasVideoRequest) -> Dict[str, Any]:
     return {
         "prompt": str(payload.prompt or ""),
+        "prompt_origin_key": payload.prompt_origin_key,
         "provider_id": str(payload.provider_id or ""),
         "model": str(payload.model or ""),
         "duration": int(payload.duration or 5),
@@ -21382,6 +21420,8 @@ def canvas_video_task_request_snapshot(payload: CanvasVideoRequest) -> Dict[str,
         "image_mapping": [
             {
                 "asset_index": int(ref.asset_index or index + 1),
+                "url": ref.url,
+                "frame_role": ref.role,
                 "input_role": str(ref.input_role or ""),
                 "role_label": str(ref.role_label or ref.label or ref.name or "参考资产"),
             }
@@ -21391,6 +21431,10 @@ def canvas_video_task_request_snapshot(payload: CanvasVideoRequest) -> Dict[str,
         "video_count": len(payload.videos or []),
         "audio_count": len(payload.audios or []),
         "model_parameters": dict(payload.model_parameters or {}),
+        "generate_audio": payload.generate_audio,
+        "multimodal": payload.multimodal,
+        "linkfox_mode": payload.linkfox_mode,
+        "linkfox_camera": payload.linkfox_camera,
     }
 
 
@@ -22425,18 +22469,52 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     return f"{text} {suffix_text}".strip() if text else suffix_text
 
 
+VIDEO_PROMPT_ADAPT_CACHE: Dict[str, Any] = {}
+
+
 async def prepare_video_generation_prompt(payload: CanvasVideoRequest, provider: Dict[str, Any]):
     """共享提交入口：保留编辑原文，仅将校验通过的模型适配结果送往视频上游。"""
     protocol = str(provider.get("protocol") or "")
-    if protocol == "minimax-h3" or not needs_video_prompt_adaptation(
+    original_prompt = payload.prompt
+    source_videos = []
+    parse_images = payload.auto_parse_media or not payload.prompt.strip()
+    if payload.provider_id == 'linkfox' or (is_kling_cli_provider(provider) and (payload.auto_adapt_prompt or payload.prompt_origin_key)):
+        if payload.audios:
+            raise HTTPException(status_code=422, detail='当前图转视频接口没有独立音频输入；请移除独立音频或改用支持音频参考的平台。')
+        source_videos = list(payload.videos)
+        if source_videos:
+            images = list(payload.images)
+            if not images:
+                frames = await video_reference_to_frame_data_urls(source_videos[0], max_frames=1, max_size=1536)
+                if not frames:
+                    raise HTTPException(status_code=422, detail='无法读取源视频起始画面；请确认文件可访问且FFmpeg可用。尚未提交视频。')
+                images = [AIReference(url=frames[0], role='first_frame', label='源视频起始画面')]
+                # 起始画面在参考图模式中使用，不能强制切到模型不支持的首尾帧模式。
+                images[0].role = ''
+            payload = payload.model_copy(update={'images': images, 'videos': []})
+    if payload.provider_id == 'linkfox':
+        if any(ref.role in {'first_frame', 'last_frame'} for ref in payload.images):
+            indexed = [ref.model_copy(update={'asset_index': i + 1}) for i, ref in enumerate(payload.images)]
+            indexed.sort(key=lambda ref: {'first_frame': 0, 'last_frame': 1}.get(ref.role, 2))
+            payload = payload.model_copy(update={'images': indexed})
+        try:
+            effective = linkfox_unified_request(payload.model_dump(), validate_prompt=False)
+        except LinkFoxVideoError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        payload = payload.model_copy(update={'generate_audio': effective['voice']})
+    if not parse_images and not needs_video_prompt_adaptation(
         payload.prompt, payload.provider_id, payload.model, payload.prompt_source_model,
+        payload.prompt_source_provider, payload.auto_adapt_prompt,
     ):
         validate_video_prompt_for_model(payload)
+        if payload.prompt_origin_key and payload.prompt_source_model == payload.model:
+            payload = payload.model_copy()
+            payload._prompt_adapted = True
         return payload, {}
     counts = {"image": len(payload.images), "video": len(payload.videos), "audio": len(payload.audios)}
     if is_kling_cli_provider(provider) and (payload.videos or payload.audios):
         raise HTTPException(status_code=422, detail="当前可灵 CLI 未接入视频/音频参考，无法保留 H3 参考关系；请改用支持这些素材的模型。尚未提交视频生成。")
-    source_error = source_reference_error(payload.prompt, counts)
+    source_error = source_reference_error(payload.prompt, {**counts, 'video': len(source_videos) or counts['video']})
     if source_error:
         raise HTTPException(status_code=422, detail=source_error + "；尚未提交视频生成。")
     if any(not ref.url.strip() for ref in payload.images) or any(
@@ -22446,24 +22524,47 @@ async def prepare_video_generation_prompt(payload: CanvasVideoRequest, provider:
     # 复用现有可用 AI 助手发现逻辑；节点显式选择优先。
     route = configured_image_prompt_optimizer_route(payload.prompt_optimizer_provider, payload.prompt_optimizer_model)
     if not route:
-        raise HTTPException(status_code=400, detail="H3 提示词自动适配需要可用的 AI 助手聊天模型，请先在 API 设置中配置；尚未提交视频生成。")
+        raise HTTPException(status_code=400, detail="提示词自动适配需要可用的 AI 助手聊天模型，请先在 API 设置中配置；尚未提交视频生成。")
     profile = target_profile(payload.provider_id, payload.model, protocol)
     skill, _ = _video_prompt_skill(payload.provider_id, payload.model)
     limit = video_prompt_limit(payload.provider_id, payload.model)
-    system = build_adaptation_system(profile, limit, skill if profile.startswith("kling") else "")
+    system = build_adaptation_system(profile, limit, skill)
+    # 已有解析词时只做文本迁移；切模型不触发任何视觉重解析。
+    analyze_video = parse_images and bool(source_videos or payload.videos)
+    if parse_images or analyze_video:
+        if not payload.images and not payload.videos and not source_videos:
+            raise HTTPException(status_code=422, detail='请提供创意提示词、参考图片或源视频。')
+        system += ('本次需要自动解析素材：提取实际可见的主体、动作因果、镜头顺序、运镜、风格和可确认的声音。'
+                   '用户原词优先于推测；不虚构台词或音轨。图片不是幻灯片，应规划有连续动作的镜头。')
+    if source_videos:
+        system += ('源视频不直接传给目标接口；已有提示词时以该词的动作、镜头和节奏为依据，只做文本转换。'
+                   '最终只能引用图片清单，不得保留Video/视频N等不存在的绑定。不能声称复制了原视频像素或音轨。')
     message = adaptation_message(
         payload.prompt, profile, [ref.model_dump() for ref in payload.images], payload.videos, payload.audios,
         {"model": payload.model, "duration": payload.duration, "aspect_ratio": payload.aspect_ratio,
          "resolution": payload.resolution, "generate_audio": payload.generate_audio,
          "multimodal": payload.multimodal, "model_parameters": payload.model_parameters},
     )
+    cache_key = hashlib.sha256(json.dumps({
+        'account': current_account_id(), 'message': message, 'system': system,
+        'images': [ref.model_dump() for ref in payload.images], 'videos': payload.videos,
+        'audios': payload.audios, 'source_videos': source_videos, 'route': route,
+    }, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    cached = VIDEO_PROMPT_ADAPT_CACHE.get(cache_key) if payload.auto_adapt_prompt else None
+    if cached and time.monotonic() - cached[0] < 3600:
+        prepared = payload.model_copy(update={'prompt': cached[1]})
+        prepared._prompt_adapted = True
+        info = copy.deepcopy(cached[2])
+        info['prompt_adaptation']['cache_hit'] = True
+        return prepared, info
     problem = ""
     try:
         for attempt in range(2):
             request = CanvasLLMRequest(
                 message=message + ("\n上次校验失败，本次修正：" + problem if problem else ""),
                 system_prompt=system, provider=route["provider_id"], model=route["model"],
-                images=[], videos=[], web_search=False,
+                images=[ref.url for ref in payload.images] if parse_images or analyze_video else [],
+                videos=(source_videos or payload.videos) if parse_images else [], web_search=False,
             )
             # 迁移既有创意与素材角色，不重新做视觉解析，避免重新解释参考图改变创意。
             result = await asyncio.wait_for(canvas_llm(request), timeout=180)
@@ -22473,19 +22574,29 @@ async def prepare_video_generation_prompt(payload: CanvasVideoRequest, provider:
                 prepared = payload.model_copy(update={"prompt": text})
                 prepared._prompt_adapted = True
                 validate_video_prompt_for_model(prepared)
-                return prepared, {
-                    "original_prompt": payload.prompt,
-                    "prompt_adaptation": {"source_model": payload.prompt_source_model or "MiniMax H3",
-                        "target_model": payload.model, "profile": profile, "version": 1,
+                info = {
+                    "original_prompt": original_prompt,
+                    "prompt_adaptation": {"source_model": payload.prompt_source_model or "unknown",
+                        "source_provider": payload.prompt_source_provider,
+                        "source_videos": source_videos,
+                        "visual_analysis": parse_images,
+                        "video_transfer": ('analysis-and-image' if parse_images else 'prompt-and-image') if source_videos else '',
+                        "target_model": payload.model, "profile": profile, "version": 2,
+                        "source": VIDEO_PROMPT_PROFILES.get(registered_profile(payload.provider_id, payload.model), {}).get('source', ''),
                         "optimizer_provider": route["provider_id"], "optimizer_model": route["model"],
                         "attempts": attempt + 1, "status": "adapted"},
                 }
+                if payload.auto_adapt_prompt:
+                    while len(VIDEO_PROMPT_ADAPT_CACHE) >= 128:
+                        VIDEO_PROMPT_ADAPT_CACHE.pop(next(iter(VIDEO_PROMPT_ADAPT_CACHE)))
+                    VIDEO_PROMPT_ADAPT_CACHE[cache_key] = (time.monotonic(), text, copy.deepcopy(info))
+                return prepared, info
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         detail = getattr(exc, "detail", None) or str(exc) or "适配服务超时"
-        raise HTTPException(status_code=502, detail=f"H3 提示词自动适配失败：{detail}；尚未提交视频生成，请重试。") from exc
-    raise HTTPException(status_code=422, detail=f"H3 提示词自动适配未通过校验：{problem}；尚未提交视频生成，请重试。")
+        raise HTTPException(status_code=502, detail=f"提示词自动适配失败：{detail}；尚未提交视频生成，请重试。") from exc
+    raise HTTPException(status_code=422, detail=f"提示词自动适配未通过校验：{problem}；尚未提交视频生成，请重试。")
 
 
 def validate_video_prompt_for_model(payload: CanvasVideoRequest) -> int:
@@ -22506,9 +22617,11 @@ def validate_video_prompt_for_model(payload: CanvasVideoRequest) -> int:
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest):
     provider = get_api_provider(payload.provider_id)
+    if payload.provider_id == 'linkfox' and not linkfox_configured_key():
+        raise HTTPException(status_code=400, detail='请先在 API 设置中配置 LinkFox API Key；尚未调用提示词或视频生成服务。')
     prepared, adaptation = await prepare_video_generation_prompt(payload, provider)
     result = await generate_canvas_video(prepared)
-    if adaptation and isinstance(result, dict):
+    if (adaptation or payload.prompt_origin_key) and isinstance(result, dict):
         result = {**result, "request": {
             **(result.get("request") or {}), **canvas_video_task_request_snapshot(prepared), **adaptation,
         }}
@@ -22518,6 +22631,12 @@ async def canvas_video(payload: CanvasVideoRequest):
 async def generate_canvas_video(payload: CanvasVideoRequest):
     validate_video_prompt_for_model(payload)
     provider = get_api_provider(payload.provider_id)
+    if payload.provider_id == 'linkfox':
+        try:
+            request_data = linkfox_unified_request(payload.model_dump())
+        except LinkFoxVideoError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return await linkfox_video(LinkFoxVideoRequest(**request_data, canvas_id=payload.canvas_id, node_id=payload.node_id))
     if is_kling_cli_provider(provider):
         return await generate_kling_cli_video(payload)
     if is_minimax_h3_provider(provider):
@@ -23092,9 +23211,12 @@ def _video_prompt_skill(provider: str, model: str) -> tuple[str, str]:
     """读取项目内置的视频提示词 skill 及其 references，完整注入润色器。"""
     provider_key = str(provider or "").strip().lower()
     model_key = str(model or "").strip().lower()
+    registered = load_registered_skill(BASE_DIR, provider_key, model_key)
+    if registered:
+        return registered
     if provider_key == "kling-cli" or "kling" in model_key or "可灵" in model_key:
         skill_id, relative = "kling-cli", os.path.join("skills", "video-prompt-polish", "kling-cli", "SKILL.md")
-    elif provider_key == "minimax-h3" or "minimax" in model_key or "h3" in model_key:
+    elif provider_key == "minimax-h3" or "h3" in model_key:
         skill_id, relative = "minimax-h3", os.path.join("skills", "video-prompt-polish", "minimax-h3", "SKILL.md")
     else:
         return "通用视频提示词规范：场景与主体 → 动作先后 → 景别/视角与镜头运动 → 必要光线、环境声或对白。保持简洁，不虚构用户未表达的事实。", "generic"
@@ -23118,6 +23240,9 @@ def _video_prompt_skill(provider: str, model: str) -> tuple[str, str]:
 def _video_prompt_reference_tag(skill_id: str, kind: str, index: int) -> str:
     """返回当前视频模型 skill 使用的官方资产/主体标签。"""
     number = max(1, int(index or 1))
+    if skill_id in VIDEO_PROMPT_PROFILES and kind in {'image', 'video', 'audio'}:
+        from canvas_core.video_prompt_adapter import reference_tag
+        return reference_tag(skill_id, kind, number)
     if skill_id == "kling-cli":
         tag_kind = {"image": "image", "video": "video", "subject": "element", "audio": "voice"}.get(kind, kind)
         return f"<<<{tag_kind}_{number}>>>"
@@ -23253,6 +23378,8 @@ def _video_prompt_stage(progress_callback, stage: str, label: str):
 
 
 def validate_generated_video_prompt(text: str, skill_id: str, limit: int):
+    if not text.strip():
+        raise HTTPException(status_code=422, detail='提示词为空，已停止交付。')
     if len(text) > limit:
         raise HTTPException(status_code=422, detail=f"最终提示词仍超过 {limit} 字符，已停止交付超限结果")
     if skill_id == "minimax-h3":
@@ -23297,6 +23424,23 @@ async def compact_video_prompt_if_needed(
         return compacted, len(cleaned) > limit, limit
     if len(cleaned) <= limit:
         return cleaned, False, limit
+
+    if skill_id in VIDEO_PROMPT_PROFILES:
+        skill, _ = _video_prompt_skill(video_provider, video_model)
+        problem = ''
+        for _ in range(2):
+            result = await canvas_llm(CanvasLLMRequest(
+                message=cleaned + ('\n需修正：' + problem if problem else ''),
+                system_prompt=build_adaptation_system(skill_id, limit, skill),
+                provider=llm_provider or 'comfly', model=llm_model, ms_model=ms_model,
+                web_search=False,
+            ))
+            candidate = clean_adapted_prompt(result.get('text') or '')
+            problem = validate_adapted_prompt(candidate, cleaned, skill_id,
+                {'image': len(images or []), 'video': len(videos or []), 'audio': 0}, limit)
+            if not problem:
+                return candidate, True, limit
+        raise HTTPException(status_code=422, detail='模型提示词压缩未通过校验，未截断交付：' + problem)
 
     _video_prompt_stage(progress_callback, "compact", "正在压缩超长提示词…")
     compact_system = (
@@ -23511,6 +23655,17 @@ def _video_auto_parse_system_prompt(
 @app.post("/api/canvas-video-auto-parse")
 async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress_callback=None):
     """将全部图片按顺序与用户提示词、模型 skill 合并到同一个多模态请求。"""
+    if payload.videos:
+        video_provider = payload.video_provider or 'comfly'
+        prepared, info = await prepare_video_generation_prompt(CanvasVideoRequest(
+            prompt=payload.prompt, auto_adapt_prompt=True, auto_parse_media=True,
+            provider_id=video_provider, model=payload.video_model,
+            prompt_optimizer_provider=payload.provider, prompt_optimizer_model=payload.model,
+            duration=int(payload.duration or 5), aspect_ratio=payload.aspect_ratio, resolution=payload.resolution,
+            images=[AIReference(url=url, label=payload.image_labels[i] if i < len(payload.image_labels) else '')
+                    for i, url in enumerate(payload.images)], videos=payload.videos,
+        ), get_api_provider(video_provider))
+        return {'text': prepared.prompt, **info, 'skill_id': _video_prompt_skill(video_provider, payload.video_model)[1]}
     images = [str(item or "").strip() for item in (payload.images or []) if str(item or "").strip()][:20]
     if not images:
         raise HTTPException(status_code=400, detail="自动解析至少需要一张图片")

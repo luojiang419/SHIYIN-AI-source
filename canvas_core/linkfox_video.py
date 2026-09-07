@@ -60,7 +60,7 @@ MODEL_SPECS: dict[str, dict[str, Any]] = {
         "ratios": ("16:9", "9:16"), "voice": "optional", "max_images": 9,
     },
     "可灵Omni": {
-        "durations": (5, 10, 15), "resolutions": ("720p", "1080p"),
+        "durations": (5, 10), "resolutions": ("720p", "1080p"),
         "ratios": ("16:9", "9:16", "1:1"), "voice": "fixed_false", "max_images": 7,
     },
     "HappyHorse": {
@@ -86,6 +86,41 @@ def available_models(mode: str = "reference") -> list[dict[str, Any]]:
     """返回前端可直接消费的模型和参数矩阵。"""
     selected = FIRST_LAST_MODELS if mode == "first_last_frame" else (REFERENCE_MULTI_MODELS | REFERENCE_SINGLE_MODELS)
     return [{"id": name, **MODEL_SPECS[name]} for name in MODEL_SPECS if name in selected]
+
+
+def unified_request(raw: Mapping[str, Any], *, validate_prompt: bool = True) -> dict[str, Any]:
+    """统一视频节点转 LinkFox；在上传和付费提交前严格核对参数/素材。"""
+    if raw.get('videos') or raw.get('audios'):
+        raise LinkFoxVideoError('LinkFox 图转视频不接收视频/音频引用，请先完成源视频解析')
+    refs = list(raw.get('images') or [])
+    mode = raw.get('linkfox_mode') or 'reference'
+    heads = [r for r in refs if r.get('role') == 'first_frame']
+    tails = [r for r in refs if r.get('role') == 'last_frame']
+    if heads or tails:
+        mode = 'first_last_frame'
+        if len(heads) != 1 or len(tails) > 1 or len(refs) != len(heads) + len(tails):
+            raise LinkFoxVideoError('首尾帧模式需要唯一首帧与可选尾帧，不能混入其他参考图')
+        refs = heads + tails
+    data = {'entry': 'img2video', 'mode': mode, 'videoType': raw.get('model'),
+            'imageList': [r.get('url', '') for r in refs], 'prompt': raw.get('prompt', ''),
+            'videoTime': raw.get('duration'), 'resolution': raw.get('resolution', ''),
+            'aspectRatio': raw.get('aspect_ratio', ''), 'voice': bool(raw.get('generate_audio')),
+            'isPro': bool(raw.get('linkfox_is_pro')), 'camera': raw.get('linkfox_camera') or 'single',
+            'promptOptimizer': False}
+    if mode == 'first_last_frame' and refs:
+        data.update(imageUrl=refs[0].get('url', ''), lastFrameImageUrl=refs[1].get('url', '') if len(refs) > 1 else '')
+    # 使用占位URL只做参数校验；原始本地素材交给既有上传器处理。
+    probe = {**data, 'imageList': [f'https://input.invalid/{i}.png' for i in range(len(refs))]}
+    if not validate_prompt:
+        probe['prompt'] = ''
+    if data.get('imageUrl'):
+        probe['imageUrl'] = probe['imageList'][0]
+    if data.get('lastFrameImageUrl'):
+        probe['lastFrameImageUrl'] = probe['imageList'][-1]
+    normalized, _ = normalize_request(probe)
+    # 使用实际有效声音值；原生不支持的声音不会在提示词中声称生成。
+    data['voice'] = normalized['voice']
+    return data
 
 
 def _canonical_model(value: Any) -> str:

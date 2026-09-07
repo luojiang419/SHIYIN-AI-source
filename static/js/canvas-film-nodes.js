@@ -152,6 +152,7 @@
                 : ({storyboard:'分镜图',prompt:'提示词'}[role] || role));
     }
     function modelRule(provider='', model=''){
+        if(provider === 'linkfox') return {...MODEL_RULES.default,name:'LinkFox'};
         const text = `${provider} ${model}`.toLowerCase();
         if(text.includes('minimax') || text.includes('h3')) return MODEL_RULES.minimax;
         if(text.includes('kling') || text.includes('可灵')) return MODEL_RULES.kling;
@@ -213,27 +214,65 @@
         else delete node._videoPromptExternalSnapshot;
     }
     function buildPrompt(node, assets=[], options={}){
-        const map = mapping(node, assets, options);
+        const media = assetList(node,assets);
+        const motionRefs = node.type === 'film-video' ? media.filter(ref => ref.kind === 'video' || ref.kind === 'audio') : [];
+        const map = mapping(node, motionRefs.length ? assets.filter(item => !['video','audio'].includes((item?.ref || item)?.kind)) : assets, options);
         const prompt = effectivePrompt(node, options);
         const hasProductDetail = map.refs.some(ref => ref.sourceRole === 'detail' || ref.isProductDetail === true);
         const prefix = map.text ? `资产映射：${map.text}。${hasProductDetail ? '产品主图与产品细节均为同一产品的证据，生成时必须优先保持产品结构、材质、颜色、Logo和文字真实一致。' : ''}` : '';
-        return {prompt:[prefix,prompt].filter(Boolean).join('\n'), refs:map.refs, map};
+        return {prompt:[prefix,prompt].filter(Boolean).join('\n'), refs:[...map.refs,...motionRefs], map};
+    }
+    function promptOriginKey(payload){
+        const original=String(payload.prompt || '').trim().replace(/^资产映射：[^\n]*(?:\n|$)/, '');
+        const value=JSON.stringify([original,(payload.images || []).map(ref=>[ref.url,ref.role || '',ref.input_role || '']),payload.videos || [],payload.audios || []]);
+        let hash=2166136261;
+        for(let i=0;i<value.length;i++) hash=Math.imul(hash ^ value.charCodeAt(i),16777619);
+        return `${value.length}:${hash >>> 0}`;
+    }
+    function promptSettingsKey(payload){
+        return JSON.stringify([payload.duration,payload.aspect_ratio || '',payload.resolution || '',Boolean(payload.generate_audio),payload.model_parameters || {},Boolean(payload.multimodal),payload.linkfox_mode || 'reference',payload.linkfox_camera || 'single']);
+    }
+    function rememberVideoPromptResult(node,request){
+        if(!node || !request?.prompt_origin_key || !request?.prompt) return;
+        node.videoPromptLastResult={originKey:request.prompt_origin_key,prompt:request.prompt,
+            provider:request.provider_id,model:request.model,settingsKey:promptSettingsKey(request),
+            imageSources:(request.image_mapping || []).map(item=>({url:item.url,role:item.frame_role || ''}))};
     }
     function videoPromptSubmission(node, payload){
-        // 保存原始来源，不把自动改写的结果回填编辑器；切换多个模型仍从原词适配。
-        const source = node?.videoPromptSource;
-        // 影视节点的资产映射前缀会随目标模型变化，创意正文才是来源匹配依据。
-        const original = String(payload.prompt || '').trim().replace(/^资产映射：[^\n]*\n/, '');
-        const sourceModel = source?.prompt === original ? source.model : '';
-        if(node && /h3/i.test(`${payload.provider_id} ${payload.model}`)){
-            node.videoPromptSource={prompt:original,model:/h3/i.test(payload.model || '') ? payload.model : 'MiniMax H3'};
+        // 直接使用上一模型真正采用的提示词，不经过H3中转，也不重新读取图片。
+        const original=String(payload.prompt || '').trim().replace(/^资产映射：[^\n]*(?:\n|$)/, '');
+        const originKey=promptOriginKey(payload);
+        const previous=node?.videoPromptLastResult;
+        const reuse=previous?.originKey===originKey;
+        const history=node?.videoPromptSources || (node?.videoPromptSource ? [node.videoPromptSource] : []);
+        const source=history.find(item=>item.prompt===original);
+        const sourceModel=reuse ? previous.model : (source?.model || '');
+        const sourceProvider=reuse ? previous.provider : (source?.provider || '');
+        if(node && !source){
+            node.videoPromptSource={prompt:original,model:payload.model || '',provider:payload.provider_id || ''};
+            node.videoPromptSources=[node.videoPromptSource,...history].slice(0,4);
         }
-        return {...payload, prompt_source_model:sourceModel,
-            prompt_optimizer_provider:node?.visionProvider || '',
-            prompt_optimizer_model:node?.visionModel || ''};
+        const sameTarget=reuse && previous.provider===payload.provider_id && previous.model===payload.model
+            && previous.settingsKey===promptSettingsKey(payload);
+        let images=payload.images;
+        if(reuse && previous.imageSources?.length===images?.length){
+            const remaining=[...images];
+            const ordered=previous.imageSources.map(source=>{
+                const index=remaining.findIndex(ref=>ref.url===source.url && (ref.role || '')===source.role);
+                return index>=0 ? remaining.splice(index,1)[0] : null;
+            });
+            if(ordered.every(Boolean)) images=ordered;
+        }
+        return {...payload,images,prompt:reuse ? previous.prompt : payload.prompt,
+            auto_adapt_prompt:!sameTarget,auto_parse_media:!original && !reuse,prompt_origin_key:originKey,
+            prompt_source_model:sourceModel,prompt_source_provider:sourceProvider,
+            linkfox_mode:node?.linkfoxMode || payload.linkfox_mode || 'reference',
+            linkfox_is_pro:Boolean(node?.linkfoxIsPro || payload.linkfox_is_pro),
+            linkfox_camera:node?.linkfoxCamera || payload.linkfox_camera || 'single',
+            prompt_optimizer_provider:node?.visionProvider || '',prompt_optimizer_model:node?.visionModel || ''};
     }
     function videoGenerationOutputs(items, request){
-        if(!request?.prompt_adaptation) return items;
+        if(!request?.prompt_adaptation && !request?.prompt_origin_key) return items;
         return items.map(item => ({...(typeof item === 'string' ? {url:item,kind:'video'} : item),
             generation_request:request}));
     }
@@ -254,7 +293,7 @@
         const refs = (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url);
         const kinds = refs.map(item => String((item?.ref || item)?.kind || 'image').toLowerCase());
         const hasPrompt = Boolean(effectivePrompt(node, options) || options.promptConnected?.(node));
-        const autoParse = node.type === 'film-video' && !hasPrompt && kinds.includes('image') && kinds.every(kind => kind === 'image');
+        const autoParse = node.type === 'film-video' && !hasPrompt && kinds.some(kind=>['image','video'].includes(kind)) && kinds.every(kind=>['image','video'].includes(kind));
         const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish${autoParse ? ' auto-parse' : ''}" data-film-action="polish" data-film-prompt-mode="${autoParse ? 'auto-parse' : 'polish'}" title="${autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词'}"><i data-lucide="${autoParse ? 'scan-eye' : 'wand-sparkles'}"></i><span>${autoParse ? '自动解析' : '润色'}</span></button>` : '';
         const searchToggle = node.type === 'film-video' ? `<label class="video-prompt-search-toggle"><input type="checkbox" data-video-prompt-search ${node.promptWebSearch === true ? 'checked' : ''}>联网案例增强（可选）</label>` : '';
         return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>${searchToggle}`;
@@ -309,7 +348,9 @@
             : options.modelOptions?.(node) || '';
         const videoIsH3 = node.type === 'film-video' && modelRule(node.apiProvider, node.model).id === 'minimax';
         const videoSettings = node.type === 'film-video'
-            ? (videoIsH3 ? h3VideoSettingsHtml(node, providerOptions, modelOptions) : genericVideoSettingsHtml(node, providerOptions, modelOptions))
+            ? (node.apiProvider === 'linkfox'
+                ? `<div class="film-video-settings"><div class="gen-settings-row"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select></div>${window.CanvasLinkfoxVideo.unifiedSettingsHtml(node)}</div>`
+                : videoIsH3 ? h3VideoSettingsHtml(node, providerOptions, modelOptions) : genericVideoSettingsHtml(node, providerOptions, modelOptions))
             : '';
         const lineArtAssets = isLineArt ? (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url) : [];
         const lineArtStatus = node.batchStatus === 'running'
@@ -329,7 +370,7 @@
                 ${node.type === 'film-video' ? videoSettings : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option><option value="4:5" ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option><option ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
                 ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
             </div>
-            <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run" title="${node.type === 'film-video' ? 'H3 提示词切换模型后，生成时会自动适配所选模型；原文保留' : action}"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
+            <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run" title="${node.type === 'film-video' ? '生成前自动解析素材并适配所选模型；保留原始创意' : action}"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
         </div>`;
     }
     function notify(options,node,render=false){ options.onChange?.(node,{render}); }
@@ -426,6 +467,10 @@
         return output;
     }
     async function parseScene(node, options={}){
+        if(node.type === 'film-video'){
+            node.prompt=await autoParseVideoPrompt(node,options.assets?.(node) || [],options);
+            return node.prompt;
+        }
         const assets=options.assets?.(node)||[];
         const map=mapping(node,assets,options);
         const mappedRefs=map.refs.filter(item=>item.url && (item.kind || 'image') === 'image').slice(0,20);
@@ -458,13 +503,14 @@
     }
     async function autoParseVideoPrompt(node, assets=[], options={}, onProgress=null){
         const refs = mapping(node, assets, options).refs.filter(item => item.url && (item.kind || 'image') === 'image').slice(0,20);
-        if(!refs.length) throw new Error('自动解析至少需要一张图片');
+        const videos=assetList(node,assets).filter(item=>item.kind==='video').map(item=>item.url);
+        if(!refs.length && !videos.length) throw new Error('自动解析至少需要图片或视频');
         const provider = options.visionProvider?.(node) || node.visionProvider || '';
         const model = options.visionModel?.(node) || node.visionModel || '';
         const data = await submitFilmPromptTask('/api/canvas-video-auto-parse-tasks', {
             provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
             prompt:effectivePrompt(node, options),
-            images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
+            videos, images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
             web_search:node.promptWebSearch === true,
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
         }, '自动解析', onProgress);
@@ -491,6 +537,7 @@
         throw new Error(`${label}等待超时（超过 30 分钟）`);
     }
     function bind(root,node,options={}){
+        if(node.apiProvider === 'linkfox') window.CanvasLinkfoxVideo.bindUnified(root,node,()=>notify(options,node,true));
         normalize(node);
         const searchToggle = root.querySelector('[data-video-prompt-search]');
         if(searchToggle){
@@ -520,7 +567,7 @@
                 const refs=(options.assets?.(node)||[]).filter(item=>(item?.ref||item)?.url);
                 const kinds=refs.map(item=>String((item?.ref||item)?.kind||'image').toLowerCase());
                 const hasPrompt=Boolean(effectivePrompt(node, options) || options.promptConnected?.(node));
-                const autoParse=!hasPrompt && kinds.includes('image') && kinds.every(kind=>kind==='image');
+                const autoParse=!hasPrompt && kinds.some(kind=>['image','video'].includes(kind)) && kinds.every(kind=>['image','video'].includes(kind));
                 polishButton.dataset.filmPromptMode=autoParse?'auto-parse':'polish';
                 polishButton.classList.toggle('auto-parse',autoParse);
                 polishButton.title=autoParse?'按图片顺序分析画面并生成视频提示词':'按当前视频模型规范润色提示词';
@@ -543,8 +590,8 @@
                     .map(item=>item?.ref||item)
                     .filter(item=>item?.url);
                 const currentImageRefs=currentRefs.filter(item=>String(item?.kind || 'image').toLowerCase()==='image');
-                const autoParseNow=!currentPrompt && currentImageRefs.length>0
-                    && currentRefs.every(item=>String(item?.kind || 'image').toLowerCase()==='image');
+                const autoParseNow=!currentPrompt && currentRefs.length>0
+                    && currentRefs.every(item=>['image','video'].includes(String(item?.kind || 'image').toLowerCase()));
                 const mode=autoParseNow ? 'auto-parse' : (polishButton.dataset.filmPromptMode || 'polish');
                 const label=polishButton.querySelector('span'); if(label) label.textContent=mode === 'auto-parse' ? '解析中…' : '润色中…';
                 try {
@@ -627,5 +674,5 @@
         const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
     }
 
-    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,videoPromptSubmission,videoGenerationOutputs,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
+    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,videoPromptSubmission,rememberVideoPromptResult,videoGenerationOutputs,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
 })();

@@ -771,14 +771,14 @@
         const downloaded = Number(status?.downloaded_bytes) || 0;
         const total = Number(status?.total_bytes) || 0;
         const source = String(status?.source_label || '');
-        const stage = state === 'verifying' ? '校验中' : state === 'installing' ? '安装中' : state === 'smoke' ? 'smoke 验证中' : state === 'downloading' ? '下载中' : state === 'checking' ? '检查中' : state === 'failed' ? '安装失败' : state === 'unavailable' ? '暂不可安装' : '等待下载';
+        const stage = state === 'connection_error' ? '等待重新连接' : state === 'verifying' ? '校验中' : state === 'installing' ? '安装中' : state === 'smoke' ? 'smoke 验证中' : state === 'downloading' ? '下载中' : state === 'checking' ? '检查中' : state === 'failed' ? '安装失败' : state === 'unavailable' ? '暂不可安装' : '等待下载';
         const details = [total ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : '', source, stage].filter(Boolean).join(' · ');
-        const canInstall = Boolean(status?.install_available) && !PERSON_DEPTH_ACTIVE_STATES.has(state);
-        const action = state === 'failed' ? 'retry-person-depth' : 'install-person-depth';
+        const canInstall = state === 'connection_error' || (Boolean(status?.install_available) && !PERSON_DEPTH_ACTIVE_STATES.has(state));
+        const action = state === 'connection_error' ? 'reconnect-person-depth' : state === 'failed' ? 'retry-person-depth' : 'install-person-depth';
         return `<div class="pose-replicate-component ${state}" data-person-depth-state="${esc(state)}">
             <div class="pose-replicate-component-head"><span>${esc(status?.message || '高精度人物深度组件尚未就绪')}</span><strong>${percent}%</strong></div>
             <div class="pose-replicate-progress" role="progressbar" aria-label="高精度人物深度组件进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><i style="width:${percent}%"></i></div>
-            <div class="pose-replicate-component-detail"><span>${esc(details || '深度模式需要先安装高精度组件')}</span>${canInstall ? `<button type="button" data-special-action="${action}">${state === 'failed' ? '重试' : '下载'}</button>` : ''}</div>
+            <div class="pose-replicate-component-detail"><span>${esc(details || '深度模式需要先安装高精度组件')}</span>${canInstall ? `<button type="button" data-special-action="${action}">${state === 'connection_error' ? '重新连接' : state === 'failed' ? '重试' : '下载'}</button>` : ''}</div>
         </div>`;
     }
     function poseReplicateProviderOptions(providers, selected){
@@ -1153,8 +1153,20 @@
     function schedulePersonDepthPoll(){
         clearTimeout(personDepthPollTimer);
         personDepthPollTimer = 0;
-        if(!PERSON_DEPTH_ACTIVE_STATES.has(String(personDepthStatus?.state || ''))) return;
-        personDepthPollTimer = setTimeout(() => refreshPersonDepthStatus(true).catch(() => {}), 1500);
+        const disconnected = personDepthStatus?.state === 'connection_error';
+        if(!disconnected && !PERSON_DEPTH_ACTIVE_STATES.has(String(personDepthStatus?.state || ''))) return;
+        personDepthPollTimer = setTimeout(() => refreshPersonDepthStatus(true).catch(() => {}), disconnected ? 5000 : 1500);
+    }
+    function markPersonDepthConnectionError(error){
+        personDepthStatus = {
+            ...personDepthStatus,
+            state:'connection_error',
+            ready:false,
+            message:error instanceof TypeError ? '无法连接本地深度服务，正在自动重连；请确认软件仍在运行' : (error.message || '深度服务状态读取失败，正在重试')
+        };
+        personDepthUpdatedAt = Date.now();
+        notifyPersonDepthBindings();
+        schedulePersonDepthPoll();
     }
     async function refreshPersonDepthStatus(force=false){
         if(!force && personDepthUpdatedAt && Date.now() - personDepthUpdatedAt < 5000) return personDepthStatus;
@@ -1170,9 +1182,7 @@
                 return personDepthStatus;
             })
             .catch(error => {
-                personDepthStatus = {state:'failed', ready:false, install_available:false, progress:0, message:error.message || '高精度人物深度组件状态读取失败'};
-                personDepthUpdatedAt = Date.now();
-                notifyPersonDepthBindings();
+                markPersonDepthConnectionError(error);
                 return personDepthStatus;
             })
             .finally(() => { personDepthStatusPromise = null; });
@@ -1196,14 +1206,8 @@
                 return personDepthStatus;
             })
             .catch(error => {
-                personDepthStatus = {
-                    ...personDepthStatus,
-                    state:'failed',
-                    ready:false,
-                    message:error.message || '高精度人物深度组件安装无法启动'
-                };
-                personDepthUpdatedAt = Date.now();
-                notifyPersonDepthBindings();
+                // POST 可能已被服务端接受；只恢复查询，不盲目重发安装。
+                markPersonDepthConnectionError(error);
                 throw error;
             })
             .finally(() => { personDepthInstallPromise = null; });
@@ -1977,6 +1981,9 @@
         root.querySelector('[data-special-action="install-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation(); openPersonDepthDialog(options, false);
         });
+        root.querySelector('[data-special-action="reconnect-person-depth"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); refreshPersonDepthStatus(true).catch(() => {});
+        });
         root.querySelector('[data-special-action="retry-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation(); openPersonDepthDialog(options, true);
         });
@@ -2090,6 +2097,9 @@
         root.querySelector('[data-special-action="install-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             openPersonDepthDialog(options, false);
+        });
+        root.querySelector('[data-special-action="reconnect-person-depth"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); refreshPersonDepthStatus(true).catch(() => {});
         });
         root.querySelector('[data-special-action="retry-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();

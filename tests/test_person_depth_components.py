@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import json
@@ -297,7 +298,11 @@ def test_backend_exposes_person_depth_contract_without_replacing_fast_depth():
     assert '@app.post("/api/person-depth/component/retry", status_code=202)' in main
     assert '@app.post("/api/person-depth/estimate")' in main
     assert '@app.post("/api/depth/estimate")' in main
-    assert 'datas=[("canvas_core/person_depth_manifest.json", "canvas_core")]' in spec
+    analysis = next(node for node in ast.walk(ast.parse(spec))
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "Analysis")
+    datas = ast.literal_eval(next(item.value for item in analysis.keywords if item.arg == "datas"))
+    assert ("canvas_core/person_depth_manifest.json", "canvas_core") in datas
     assert '"torch"' in spec and '"transformers"' in spec
     assert "person_depth_manifest.json" in installer
     assert "personDepthManifest.enabled" in installer

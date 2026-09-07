@@ -5,7 +5,7 @@ const path = require('node:path');
 
 (async()=>{
     const base = process.argv[2] || 'http://127.0.0.1:3014';
-    const artifacts = process.argv[3] || '.codex-artifacts/089-video-node-layout';
+    const artifacts = process.argv[3] || '.codex-artifacts/112-video-node-compact-layout';
     fs.mkdirSync(artifacts,{recursive:true});
     const browser = await chromium.launch({headless:true,channel:'chrome'});
     try {
@@ -14,55 +14,84 @@ const path = require('node:path');
         page.on('pageerror',error=>errors.push(error.message));
         await page.goto(`${base}/static/canvas.html?id=video-layout-${Date.now()}`);
         await page.waitForSelector('.node[data-id="h3"]');
-        await page.evaluate(()=>{
-            const h3=nodes.find(node=>node.id==='h3');
-            h3.h=320;
-            h3.duration=0;
-            h3.aspectRatio='';
-            h3.resolution='';
-            for(let index=0;index<12;index+=1){
-                const id=`video-ref-${index}`;
-                nodes.push({id,type:'image',x:0,y:1800+index*20,url:`/fixture.png?video-ref=${index}`,name:`ref-${index}.png`,width:512,height:512});
-                connections.push({id:`video-link-${index}`,from:id,to:h3.id});
-            }
-            syncGeneratorInputs();
-            render();
-            viewport.x=80-h3.x*viewport.scale;
-            viewport.y=70-h3.y*viewport.scale;
-            applyViewport();
-        });
-        await page.waitForTimeout(300);
-        const layout=await page.locator('.node[data-id="h3"]').evaluate(el=>{
-            const frame=el.getBoundingClientRect();
-            const shell=el.querySelector('.node-visual-shell').getBoundingClientRect();
-            const body=el.querySelector('.node-body');
-            const content=el.querySelector('.generator-canvas-content');
-            const controls=el.querySelector('.node-bottom-controls');
-            const button=el.querySelector('.gen-btn');
-            const controlsRect=controls.getBoundingClientRect();
-            const buttonRect=button.getBoundingClientRect();
-            const state=nodes.find(node=>node.id==='h3');
-            return {
-                nodeHeight:el.offsetHeight,
-                frameHeight:frame.height,
-                shellHeight:shell.height,
-                bodyClientHeight:body.clientHeight,
-                bodyScrollHeight:body.scrollHeight,
-                bodyOverflow:getComputedStyle(body).overflow,
-                contentClientHeight:content.clientHeight,
-                contentScrollHeight:content.scrollHeight,
-                contentOverflowY:getComputedStyle(content).overflowY,
-                contentWheelBound:typeof content.onwheel==='function',
-                footerFlexShrink:getComputedStyle(controls).flexShrink,
-                controlsInside:controlsRect.top>=frame.top && controlsRect.bottom<=frame.bottom+1,
-                buttonInside:buttonRect.top>=frame.top && buttonRect.bottom<=frame.bottom+1,
-                buttonVisible:getComputedStyle(button).display!=='none' && buttonRect.height>0,
-                duration:state.duration,
-                aspectRatio:state.aspectRatio,
-                resolution:state.resolution,
-                storedHeight:state.h,
-            };
-        });
+        const setReferences = async (count, storedHeight=null) => {
+            await page.evaluate(({count,storedHeight})=>{
+                nodes=nodes.filter(node=>!String(node.id).startsWith('video-ref-'));
+                connections=connections.filter(connection=>!String(connection.id).startsWith('video-link-'));
+                const h3=nodes.find(node=>node.id==='h3');
+                if(storedHeight == null) delete h3.h;
+                else h3.h=storedHeight;
+                for(let index=0;index<count;index+=1){
+                    const id=`video-ref-${index}`;
+                    nodes.push({id,type:'image',x:0,y:1800+index*20,url:`/fixture.png?video-ref=${index}`,name:`ref-${index}.png`,width:512,height:512});
+                    connections.push({id:`video-link-${index}`,from:id,to:h3.id});
+                }
+                syncGeneratorInputs();
+                render();
+                viewport.scale=1;
+                viewport.x=80-h3.x;
+                viewport.y=60-h3.y;
+                applyViewport();
+            },{count,storedHeight});
+            await page.waitForTimeout(120);
+            return page.locator('.node[data-id="h3"]').evaluate(el=>{
+                const frame=el.getBoundingClientRect();
+                const shell=el.querySelector('.node-visual-shell').getBoundingClientRect();
+                const body=el.querySelector('.node-body');
+                const content=el.querySelector('.generator-canvas-content');
+                const list=el.querySelector('.video-img-list');
+                const controls=el.querySelector('.node-bottom-controls');
+                const button=el.querySelector('.gen-btn');
+                const items=[...el.querySelectorAll('.video-input-item')];
+                const itemRects=items.map(item=>item.getBoundingClientRect());
+                const thumbRects=items.map(item=>item.querySelector('.video-input-thumb').getBoundingClientRect());
+                const rowTops=[];
+                itemRects.forEach(rect=>{
+                    if(!rowTops.some(top=>Math.abs(top-rect.top)<1)) rowTops.push(rect.top);
+                });
+                const controlsRect=controls.getBoundingClientRect();
+                const buttonRect=button.getBoundingClientRect();
+                const contentRect=content.getBoundingClientRect();
+                const listRect=list.getBoundingClientRect();
+                const listStyle=getComputedStyle(list);
+                const contentStyle=getComputedStyle(content);
+                const state=nodes.find(node=>node.id==='h3');
+                return {
+                    count:items.length,
+                    nodeHeight:el.offsetHeight,
+                    frameHeight:frame.height,
+                    shellHeight:shell.height,
+                    storedHeight:state.h,
+                    autoHeight:el.classList.contains('auto-height-node'),
+                    sized:el.classList.contains('sized'),
+                    rowCount:rowTops.length,
+                    firstRowCount:itemRects.filter(rect=>Math.abs(rect.top-rowTops[0])<1).length,
+                    columnGap:parseFloat(listStyle.columnGap),
+                    rowGap:parseFloat(listStyle.rowGap),
+                    listFlexShrink:listStyle.flexShrink,
+                    contentFlexShrink:contentStyle.flexShrink,
+                    contentOverflow:contentStyle.overflow,
+                    bodyOverflow:getComputedStyle(body).overflow,
+                    thumbWidths:thumbRects.map(rect=>rect.width),
+                    thumbHeights:thumbRects.map(rect=>rect.height),
+                    mediaBeforeControls:listRect.bottom<=controlsRect.top+1 && contentRect.bottom<=controlsRect.top+1,
+                    controlsInside:controlsRect.top>=frame.top && controlsRect.bottom<=frame.bottom+1,
+                    buttonInside:buttonRect.top>=frame.top && buttonRect.bottom<=frame.bottom+1,
+                    buttonHittable:button.contains(document.elementFromPoint(buttonRect.x+buttonRect.width/2,buttonRect.y+buttonRect.height/2)),
+                    duration:state.duration,
+                    aspectRatio:state.aspectRatio,
+                    resolution:state.resolution,
+                };
+            });
+        };
+
+        const layouts={};
+        layouts.three=await setReferences(3,1000);
+        await page.evaluate(()=>document.body.classList.add('theme-dark'));
+        await page.screenshot({path:path.join(artifacts,'h3-compact-three-inputs.png'),fullPage:true});
+        layouts.six=await setReferences(6,700);
+        layouts.seven=await setReferences(7,320);
+        layouts.twelve=await setReferences(12,1000);
         const created=await page.evaluate(()=>{
             const index=apiProviders.findIndex(provider=>provider.id==='minimax-h3');
             if(index>0) apiProviders.unshift(...apiProviders.splice(index,1));
@@ -70,74 +99,72 @@ const path = require('node:path');
             return {provider:node.apiProvider,model:node.model,duration:node.duration,aspectRatio:node.aspectRatio,resolution:node.resolution,h:node.h};
         });
 
-        assert.equal(layout.nodeHeight,700,'legacy short video node must normalize to 700px');
-        assert.ok(Math.abs(layout.frameHeight-layout.shellHeight)<1,'video shell must fill the frame');
-        assert.equal(layout.bodyOverflow,'hidden','video node body must not scroll the fixed footer');
-        assert.equal(layout.contentOverflowY,'auto','only the media content region should scroll');
-        assert.equal(layout.contentWheelBound,true,'media scrolling must not bubble into canvas zoom');
-        assert.ok(layout.contentScrollHeight>layout.contentClientHeight,'many references must scroll inside content region');
-        assert.equal(layout.footerFlexShrink,'0','video controls must not collapse');
-        assert.equal(layout.controlsInside,true,'video controls must stay inside the node frame');
-        assert.equal(layout.buttonInside,true,'generate button must stay inside the node frame');
-        assert.equal(layout.buttonVisible,true,'generate button must remain visible');
+        for(const layout of Object.values(layouts)){
+            assert.ok(Math.abs(layout.frameHeight-layout.shellHeight)<1,'video shell must follow its content-driven frame');
+            assert.equal(layout.storedHeight,undefined,'legacy stored heights must be removed');
+            assert.equal(layout.autoHeight,true,'video node must use auto-height layout');
+            assert.equal(layout.sized,false,'video node must not retain the fixed-size layout');
+            assert.equal(layout.columnGap,8,'thumbnail columns must keep an 8px gap');
+            assert.equal(layout.rowGap,12,'thumbnail rows must keep a 12px gap');
+            assert.equal(layout.listFlexShrink,'0','thumbnail grid must never collapse');
+            assert.equal(layout.contentFlexShrink,'0','media region must never compete for height with controls');
+            assert.equal(layout.contentOverflow,'visible','all thumbnail rows must remain visible without internal scrolling');
+            assert.ok(layout.thumbWidths.every(width=>width>50),'six thumbnails must remain readable at minimum node width');
+            assert.ok(layout.thumbWidths.every((width,index)=>Math.abs(width-layout.thumbHeights[index])<1),'all thumbnails must stay square');
+            assert.equal(layout.mediaBeforeControls,true,'media rows must finish before settings begin');
+            assert.equal(layout.controlsInside,true,'settings must stay inside the natural node frame');
+            assert.equal(layout.buttonInside,true,'generate button must stay inside the natural node frame');
+            assert.equal(layout.buttonHittable,true,'generate button must remain reachable');
+        }
+        assert.ok(layouts.three.nodeHeight<700,'three references must not leave a meaningless 700px frame');
+        assert.equal(layouts.three.rowCount,1);
+        assert.equal(layouts.six.rowCount,1);
+        assert.equal(layouts.six.firstRowCount,6);
+        assert.equal(layouts.seven.rowCount,2);
+        assert.equal(layouts.seven.firstRowCount,6);
+        assert.equal(layouts.twelve.rowCount,2);
+        assert.equal(layouts.twelve.firstRowCount,6);
+        assert.ok(layouts.seven.nodeHeight>layouts.six.nodeHeight,'the seventh reference must add a natural second row');
+        assert.ok(Math.abs(layouts.seven.nodeHeight-layouts.twelve.nodeHeight)<2,'seven and twelve references must occupy the same two-row height');
+        assert.ok(Math.abs(layouts.three.thumbWidths[0]-layouts.twelve.thumbWidths[0])<1,'thumbnail size must not change with row count');
         assert.deepEqual(
-            {duration:layout.duration,aspectRatio:layout.aspectRatio,resolution:layout.resolution,storedHeight:layout.storedHeight},
-            {duration:5,aspectRatio:'16:9',resolution:'0.2MP 16:9 - 608x352',storedHeight:700},
+            {duration:layouts.twelve.duration,aspectRatio:layouts.twelve.aspectRatio,resolution:layouts.twelve.resolution},
+            {duration:5,aspectRatio:'16:9',resolution:'0.2MP 16:9 - 608x352'},
         );
         assert.deepEqual(created,{
             provider:'minimax-h3',model:'MiniMax H3',duration:5,aspectRatio:'16:9',resolution:'0.2MP 16:9 - 608x352',h:undefined,
         });
-        const promptLayouts=[];
+
         const input=page.locator('.node[data-id="h3"] .generator-prompt-input');
         const longPrompt='subject_definitions:\n'+'A woman approaches the court, turns and steps forward.\n'.repeat(100);
-        for(const scenario of [
-            {prompt:longPrompt}, {prompt:'短提示词'}, {prompt:''},
-            {prompt:longPrompt,w:200,h:320}, {prompt:longPrompt,w:520,h:700},
-            {prompt:longPrompt,w:440,h:1000}, {prompt:longPrompt,w:440,h:700},
-            {prompt:longPrompt,w:440,h:700,runStatus:'failed',_cascadeFailed:true,runError:'布局回归测试'},
-        ]){
-            const {prompt}=scenario;
-            if(scenario.w) await page.evaluate(scenario=>{
-                Object.assign(nodes.find(node=>node.id==='h3'),scenario);
-                render();
-            },scenario);
-            await input.fill(prompt);
-            await page.waitForTimeout(100);
-            const measured=await page.locator('.node[data-id="h3"]').evaluate(el=>{
-                const frame=el.getBoundingClientRect();
-                const button=el.querySelector('.gen-btn');
-                const rect=button.getBoundingClientRect();
-                const input=el.querySelector('.generator-prompt-input');
-                const editorRect=input.getBoundingClientRect();
-                const wrapRect=input.parentElement.getBoundingClientRect();
-                const retry=el.querySelector('.node-retry-bar');
-                return {height:el.offsetHeight,width:el.offsetWidth,buttonInside:rect.bottom<=frame.bottom,
-                    buttonHittable:button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)),
-                    promptInside:editorRect.bottom<=wrapRect.bottom+1,
-                    retryInside:!retry||retry.getBoundingClientRect().bottom<=frame.bottom,
-                    promptClientHeight:input.clientHeight,promptScrollHeight:input.scrollHeight,
-                    mediaHeight:el.querySelector('.generator-canvas-content').clientHeight};
-            });
-            promptLayouts.push(measured);
-            assert.equal(measured.height,Math.max(700,scenario.h||700),'editing prompts must preserve the fixed frame');
-            assert.equal(measured.width,Math.max(440,scenario.w||440));
-            assert.equal(measured.buttonInside,true,'long prompts must not push generate outside the frame');
-            assert.equal(measured.buttonHittable,true,'generate must remain reachable without scrolling the footer');
-            assert.equal(measured.promptInside,true,'editor must fit the available prompt area');
-            assert.equal(measured.retryInside,true,'retry controls must stay inside the frame');
-            assert.ok(measured.mediaHeight>=64,'media region must retain its minimum height');
-            if(prompt.length>1000) assert.ok(measured.promptScrollHeight>measured.promptClientHeight,'long prompts must scroll inside the editor');
-        }
+        await input.fill(longPrompt);
+        await page.waitForTimeout(100);
+        const promptLayout=await page.locator('.node[data-id="h3"]').evaluate(el=>{
+            const frame=el.getBoundingClientRect();
+            const button=el.querySelector('.gen-btn');
+            const buttonRect=button.getBoundingClientRect();
+            const input=el.querySelector('.generator-prompt-input');
+            return {
+                height:el.offsetHeight,
+                buttonInside:buttonRect.bottom<=frame.bottom+1,
+                buttonHittable:button.contains(document.elementFromPoint(buttonRect.x+buttonRect.width/2,buttonRect.y+buttonRect.height/2)),
+                promptClientHeight:input.clientHeight,
+                promptScrollHeight:input.scrollHeight,
+            };
+        });
+        assert.ok(Math.abs(promptLayout.height-layouts.twelve.nodeHeight)<2,'long prompts must not stretch the compact node');
+        assert.equal(promptLayout.buttonInside,true,'long prompts must not push generate outside the frame');
+        assert.equal(promptLayout.buttonHittable,true,'generate must remain reachable with a long prompt');
+        assert.ok(promptLayout.promptScrollHeight>promptLayout.promptClientHeight,'long prompts must scroll inside the editor');
         assert.deepEqual(errors,[]);
         await page.evaluate(()=>{
             const h3=nodes.find(node=>node.id==='h3');
-            h3.runStatus='';h3._cascadeFailed=false;
             document.body.classList.add('theme-dark');
             viewport.scale=1;viewport.x=500-h3.x;viewport.y=150-h3.y;
             render();applyViewport();
         });
-        await page.screenshot({path:path.join(artifacts,'h3-fixed-footer.png'),fullPage:true});
-        const report={layout,created,promptLayouts,errors};
+        await page.screenshot({path:path.join(artifacts,'h3-compact-two-row-grid.png'),fullPage:true});
+        const report={layouts,created,promptLayout,errors};
         fs.writeFileSync(path.join(artifacts,'report.json'),JSON.stringify(report,null,2));
         console.log(JSON.stringify(report));
     } finally {

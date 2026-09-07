@@ -11073,7 +11073,6 @@ async function runFilmNode(nodeId, opts={}){
 }
 const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
 const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
-const CLASSIC_VIDEO_NODE_MIN_HEIGHT = 700;
 const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = 520;
 const classicPortraitMediaNodeIds = new Set();
 const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
@@ -11084,10 +11083,9 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     promptGroup:180,
     output:260,
     storyboardMerge:260,
-    video:CLASSIC_VIDEO_NODE_MIN_HEIGHT,
 });
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
-const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','batchGenerator','video','ecom-video','msgen']);
+const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','batchGenerator','ecom-video','msgen']);
 function classicMediaNodeIsPortrait(node){
     if(!node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || 0);
@@ -11764,7 +11762,7 @@ function defaultNodeSize(type){
     if(type === 'llm') return {w:420, h:590};
     if(type === 'generator' || type === 'batchGenerator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
-    if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:CLASSIC_VIDEO_NODE_MIN_HEIGHT};
+    if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:0};
     if(type === 'linkfox-video') return {w:480, h:0};
     if(type === 'topazVideo') return {w:400, h:0};
     if(type === 'blenderDirector') return {w:440, h:0};
@@ -13859,7 +13857,7 @@ function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
 function bindGeneratorInlinePrompt(wrap, node){
     const input = wrap?.querySelector?.('.generator-prompt-input');
     if(!input || !node) return;
-    // 视频节点由固定框架分配编辑区高度，长文本只在 textarea 内滚动。
+    // 视频节点保持紧凑自适应高度，长文本只在 textarea 内滚动，避免提示词再次拉长整个节点。
     const fitPrompt = () => node.type === 'video' ? false : fitAutoTextNode(node, wrap.closest('.node'), [input], {
         minLines:3,
         maxLines:12,
@@ -14498,8 +14496,6 @@ function renderVideoBody(node){
         };
     });
     const list = wrap.querySelector('.video-img-list');
-    const contentScroll = wrap.querySelector('.generator-canvas-content');
-    if(contentScroll) contentScroll.onwheel = event => event.stopPropagation();
     renderVideoImageInputs(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
     bindGeneratorInlinePrompt(wrap, node);

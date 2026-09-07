@@ -40,7 +40,7 @@ const path = require('node:path');
         assert.equal(await poseNode.locator('[data-pose-replicate-input-role="target-image"] strong').textContent(),'服装参考');
         assert.equal(await poseNode.locator('.pose-replicate-target-thumb').count(),2);
         assert.equal(await poseNode.locator('input[data-pose-replicate-file="target-image"]').getAttribute('multiple'),'');
-        // 同一通用框架覆盖普通图片、批量图片和视频生成节点。
+        // 图片生成节点保留二维缩放；视频生成节点只允许横向调整，高度始终由内容决定。
         await page.evaluate(()=>{
             const original=nodes.find(n=>n.id==='generator');
             nodes.push({...original,id:'batch',type:'batchGenerator',x:0,y:1300});render();
@@ -59,9 +59,16 @@ const path = require('node:path');
                 const body=el.querySelector('.node-body');
                 const run=el.querySelector('.gen-run-row').getBoundingClientRect();
                 const controls=el.querySelector('.node-bottom-controls').getBoundingClientRect();
-                return {height:rect.height,width:rect.width,shellHeight:shell.height,bottomGap:rect.bottom-controls.bottom,buttonBottom:run.bottom,frameBottom:rect.bottom,scrollWidth:body.scrollWidth,clientWidth:body.clientWidth};
+                return {height:rect.height,width:rect.width,shellHeight:shell.height,bottomGap:rect.bottom-controls.bottom,buttonBottom:run.bottom,frameBottom:rect.bottom,scrollWidth:body.scrollWidth,clientWidth:body.clientWidth,autoHeight:el.classList.contains('auto-height-node'),sized:el.classList.contains('sized')};
             });
-            assert.ok(result.height>before.height+90,`${id} must retain manually increased height`);
+            if(id==='video'){
+                assert.ok(Math.abs(result.height-before.height)<2,'video height must ignore manual vertical stretching');
+                assert.ok(result.width>before.width+30,'video width remains horizontally adjustable');
+                assert.equal(result.autoHeight,true,'video keeps the auto-height layout');
+                assert.equal(result.sized,false,'video must not enter the fixed-size layout');
+            } else {
+                assert.ok(result.height>before.height+90,`${id} must retain manually increased height`);
+            }
             assert.ok(Math.abs(result.height-result.shellHeight)<1,`${id} shell fills the frame`);
             assert.ok(result.bottomGap>=0 && result.bottomGap<16,`${id} bottom controls remain inside frame and at bottom`);
             assert.ok(result.buttonBottom<result.frameBottom,`${id} button fits`);

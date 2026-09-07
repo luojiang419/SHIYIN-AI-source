@@ -11,11 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import requests
 
 from canvas_core.person_depth_client import PersonDepthWorkerClient
 from canvas_core.person_depth_components import (
     PersonDepthComponentManager,
     PersonDepthComponentUnavailable,
+    windows_system_proxies,
 )
 
 
@@ -169,6 +171,133 @@ def test_domestic_failure_falls_back_to_official_source():
             assert manager.ensure_now() is True
         assert calls == ["domestic://bundle", "official://bundle"]
         assert manager.public_status()["source_label"] == "官方源直连"
+
+
+def test_official_download_prefers_detected_system_proxy():
+    archive = make_archive()
+    manifest = make_manifest(archive)
+    manifest["packages"][0]["domestic_url"] = ""
+    calls = []
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root),
+            manifest=manifest,
+            proxy_provider=lambda: {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+            smoke_runner=lambda _command, _root: None,
+            sleep=lambda _delay: None,
+        )
+
+        def fake_download(_url, target, _spec, proxies, *_args):
+            calls.append(dict(proxies or {}))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive)
+
+        with patch.object(manager, "_download_url", side_effect=fake_download):
+            assert manager.ensure_now() is True
+        assert calls == [{"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}]
+        assert manager.public_status()["source_label"] == "官方源（系统代理）"
+
+
+def test_windows_system_proxy_discovery_keeps_http_and_https_only():
+    with patch(
+        "canvas_core.person_depth_components.urllib.request.getproxies",
+        return_value={"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890", "no": "localhost"},
+    ):
+        assert windows_system_proxies() == {
+            "http": "http://127.0.0.1:7890",
+            "https": "http://127.0.0.1:7890",
+        }
+
+
+def test_transient_failure_retries_same_package_without_deleting_partial_file():
+    archive = make_archive()
+    calls = []
+    delays = []
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root),
+            manifest=make_manifest(archive),
+            proxy_provider=lambda: {},
+            smoke_runner=lambda _command, _root: None,
+            sleep=delays.append,
+        )
+
+        def flaky_download(_url, target, _spec, *_args):
+            partial = target.with_name(f"{target.name}.part")
+            partial.parent.mkdir(parents=True, exist_ok=True)
+            calls.append(partial.stat().st_size if partial.exists() else 0)
+            if len(calls) == 1:
+                partial.write_bytes(archive[:17])
+                raise requests.ConnectionError("proxy connection interrupted")
+            assert partial.read_bytes() == archive[:17]
+            partial.write_bytes(archive)
+            partial.replace(target)
+
+        with patch.object(manager, "_download_url", side_effect=flaky_download):
+            assert manager.ensure_now() is True
+        assert calls == [0, 17]
+        assert delays == [2.0]
+
+
+def test_non_retryable_http_error_falls_back_without_repeating_route():
+    archive = make_archive()
+    calls = []
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root), manifest=make_manifest(archive), proxy_provider=lambda: {},
+            smoke_runner=lambda _command, _root: None, sleep=lambda _delay: None,
+        )
+
+        def fake_download(url, target, *_args):
+            calls.append(url)
+            if url.startswith("domestic:"):
+                response = requests.Response()
+                response.status_code = 404
+                raise requests.HTTPError("not found", response=response)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive)
+
+        with patch.object(manager, "_download_url", side_effect=fake_download):
+            assert manager.ensure_now() is True
+        assert calls == ["domestic://bundle", "official://bundle"]
+
+
+def test_invalid_content_range_is_rejected_and_partial_is_removed():
+    archive = make_archive()
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(Path(temp_root), manifest=make_manifest(archive))
+        spec = manager.specs[0]
+        target = Path(temp_root) / "bundle.zip"
+        partial = target.with_name("bundle.zip.part")
+        partial.write_bytes(archive[:10])
+
+        class FakeResponse:
+            status_code = 206
+            headers = {"Content-Range": "bytes 0-9/100"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def raise_for_status(self):
+                return None
+
+        class FakeSession:
+            def get(self, *_args, **_kwargs):
+                return FakeResponse()
+
+            def close(self):
+                return None
+
+        with patch.object(manager, "_new_session", return_value=FakeSession()):
+            with pytest.raises(PersonDepthComponentUnavailable, match="无效断点范围"):
+                manager._download_url(
+                    "https://example.test/bundle.zip", target, spec, None,
+                    "测试源", 0, spec.size,
+                )
+        assert not partial.exists()
 
 
 def test_split_packages_are_downloaded_and_merged_before_activation():

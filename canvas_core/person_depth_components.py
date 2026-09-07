@@ -22,6 +22,7 @@ from .data_layout import atomic_write_json
 PERSON_DEPTH_COMPONENT = "person-depth"
 PERSON_DEPTH_MANIFEST_ENV = "CANVAS_PERSON_DEPTH_MANIFEST_PATH"
 PERSON_DEPTH_BUILTIN_MANIFEST = Path(__file__).with_name("person_depth_manifest.json")
+PERSON_DEPTH_DOWNLOAD_RETRY_DELAYS = (0.0, 2.0, 5.0)
 
 
 def sha256_file(path: Path, chunk_size: int = 4 * 1024 * 1024) -> str:
@@ -83,6 +84,7 @@ class PersonDepthComponentManager:
         manifest: Optional[Mapping[str, object]] = None,
         proxy_provider: Callable[[], Mapping[str, str]] = windows_system_proxies,
         smoke_runner: Optional[Callable[[Sequence[str], Path], None]] = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.component_root = Path(component_root).expanduser().resolve()
         self.download_root = self.component_root / "downloads"
@@ -98,6 +100,7 @@ class PersonDepthComponentManager:
         ).expanduser().resolve()
         self.proxy_provider = proxy_provider
         self.smoke_runner = smoke_runner or self._run_smoke
+        self.sleep = sleep
         self._state_lock = threading.RLock()
         self._ensure_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
@@ -410,14 +413,9 @@ class PersonDepthComponentManager:
         for spec in self.specs:
             target = version_download_root / f"{source}-{spec.package_id}.zip"
             if not self._valid_archive(target, spec):
-                self._download_url(
-                    self._url_for(spec, source),
-                    target,
-                    spec,
-                    proxies,
-                    source_label,
-                    progress_base,
-                    total,
+                self._download_package_with_retries(
+                    self._url_for(spec, source), target, spec, proxies,
+                    source_label, progress_base, total,
                 )
             if not self._valid_archive(target, spec):
                 raise PersonDepthComponentUnavailable(f"{spec.package_id} 下载包校验失败")
@@ -425,6 +423,45 @@ class PersonDepthComponentManager:
             self._update_state(downloaded_bytes=progress_base, total_bytes=total)
             archives.append((spec, target))
         return archives
+
+    def _download_package_with_retries(
+        self,
+        url: str,
+        target: Path,
+        spec: PersonDepthPackageSpec,
+        proxies: Optional[Mapping[str, str]],
+        source_label: str,
+        progress_base: int,
+        progress_total: int,
+    ) -> None:
+        last_error: Optional[Exception] = None
+        for attempt, delay in enumerate(PERSON_DEPTH_DOWNLOAD_RETRY_DELAYS, start=1):
+            if delay:
+                self._update_state(
+                    message=f"{source_label}连接中断，{int(delay)} 秒后断点续传（{attempt}/{len(PERSON_DEPTH_DOWNLOAD_RETRY_DELAYS)}）"
+                )
+                self.sleep(delay)
+            try:
+                self._download_url(
+                    url, target, spec, proxies, source_label, progress_base, progress_total
+                )
+                if self._valid_archive(target, spec):
+                    return
+                target.unlink(missing_ok=True)
+                last_error = PersonDepthComponentUnavailable(f"{spec.package_id} 下载包校验失败")
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if not self._retryable_download_error(exc):
+                    raise
+        assert last_error is not None
+        raise last_error
+
+    @staticmethod
+    def _retryable_download_error(error: Exception) -> bool:
+        if isinstance(error, requests.HTTPError):
+            status = error.response.status_code if error.response is not None else 0
+            return status in (408, 429) or status >= 500
+        return isinstance(error, (requests.RequestException, PersonDepthComponentUnavailable))
 
     def _new_session(self, proxies: Optional[Mapping[str, str]]) -> requests.Session:
         session = requests.Session()
@@ -459,6 +496,13 @@ class PersonDepthComponentManager:
                     return
                 response.raise_for_status()
                 append = bool(existing and response.status_code == 206)
+                if append:
+                    content_range = str(response.headers.get("Content-Range") or "")
+                    if not content_range.startswith(f"bytes {existing}-"):
+                        partial.unlink(missing_ok=True)
+                        raise PersonDepthComponentUnavailable(
+                            f"{spec.package_id} 服务端返回了无效断点范围"
+                        )
                 if not append:
                     existing = 0
                 downloaded = existing

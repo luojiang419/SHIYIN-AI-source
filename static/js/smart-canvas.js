@@ -1937,6 +1937,9 @@ const EMPTY_UPLOAD_NODE_WIDTH = 316;
 const EMPTY_UPLOAD_NODE_HEIGHT = 194;
 const SMART_FILM_VIDEO_NODE_MIN_WIDTH = 520;
 const SMART_FILM_VIDEO_NODE_MAX_WIDTH = 620;
+const SMART_MEDIA_GROUP_MIN_WIDTH = 160;
+const SMART_MEDIA_GROUP_MIN_HEIGHT = 120;
+const SMART_LOOP_MIN_WIDTH = 304;
 const SMART_GROUP_DEFAULT_WIDTH = 340;
 const SMART_GROUP_DEFAULT_HEIGHT = 286;
 const SMART_GROUP_LEGACY_HEIGHT = 220;
@@ -1951,6 +1954,33 @@ function mediaNodeDefaultScale(node){
 }
 function smartNodeUsesContentHeight(node){
     return node?.specialType === 'film-video';
+}
+function smartNodeResizeLimits(node){
+    node=node || {};
+    const depthMapMinWidth=node.specialType === 'depth-map' ? 520 : 0;
+    const depthMapMinHeight=node.specialType === 'depth-map' ? 560 : 0;
+    const multiViewMinHeight=node.specialType === 'multi-view' ? 780 : 0;
+    const specialLimits={
+        'film-storyboard':[420,400],
+        'film-line-art':[420,400],
+        'film-video':[SMART_FILM_VIDEO_NODE_MIN_WIDTH,0],
+        'linkfox-video':[420,430],
+        panorama:[420,430],
+        dwpose:[330,350],
+        'depth-map':[depthMapMinWidth || 520,depthMapMinHeight || 560],
+        director3d:[400,380],
+        'pose-replicate':[640,760],
+        angle:[400,600],
+        'batch-generator':[400,470],
+        'multi-view':[620,multiViewMinHeight || 780],
+    };
+    const special=specialLimits[node?.specialType];
+    if(special) return {minWidth:special[0],minHeight:special[1]};
+    if(node?.type === 'smart-prompt') return {minWidth:260,minHeight:170};
+    if(node?.type === 'smart-loop') return {minWidth:SMART_LOOP_MIN_WIDTH,minHeight:132};
+    if(node?.type === 'smart-group') return {minWidth:SMART_GROUP_MIN_WIDTH,minHeight:SMART_GROUP_MIN_HEIGHT};
+    if((node?.images || []).filter(item=>item?.url).length > 1) return {minWidth:SMART_MEDIA_GROUP_MIN_WIDTH,minHeight:SMART_MEDIA_GROUP_MIN_HEIGHT};
+    return {minWidth:48,minHeight:48};
 }
 function smartFilmVideoNodeWidth(node){
     const stored = Number(node?.w);
@@ -20475,8 +20505,7 @@ window.onmousemove = e => {
         if(!node) return;
         const dx = (e.clientX - resizeState.startX) / viewport.scale;
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
-        const minW = node.specialType === 'multi-view' ? 620 : node.specialType === 'depth-map' ? 520 : node.specialType === 'batch-generator' ? 400 : node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
-        const minH = node.specialType === 'multi-view' ? 780 : node.specialType === 'depth-map' ? 560 : node.specialType === 'batch-generator' ? 470 : node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+        const {minWidth:minW,minHeight:minH}=smartNodeResizeLimits(node);
         if(smartNodeUsesContentHeight(node)){
             node.w = Math.max(SMART_FILM_VIDEO_NODE_MIN_WIDTH, Math.min(SMART_FILM_VIDEO_NODE_MAX_WIDTH, Math.round(resizeState.startW + dx)));
             delete node.h;

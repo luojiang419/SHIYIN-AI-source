@@ -155,7 +155,9 @@
 }
 
 .smart-linkfox-video-node .node-body {
-    overflow:visible;
+    height:100%;
+    min-height:0;
+    overflow:auto;
 }
 
 @media (max-width:720px) {

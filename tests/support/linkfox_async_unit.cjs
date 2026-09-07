@@ -29,6 +29,7 @@ const payload={provider_id:'linkfox',model:'seedance2.0',duration:5};
     await uncertain.api.generate({id:'lost'},payload);
     assert.equal(uncertain.calls.filter(c=>c[1]?.method==='POST').length,1);
     const mapped=env.api.taskPayload({entry:'img2video',mode:'first_last_frame',imageUrl:'first',lastFrameImageUrl:'last',videoType:'seedance2.0',videoTime:5,promptOptimizer:true});
-    assert.equal(mapped.images[1].role,'last_frame');assert.equal(mapped.linkfox_prompt_optimizer,true);
+    assert.equal(mapped.images[1].role,'last_frame');assert.equal(mapped.linkfox_prompt_optimizer,false);
+    assert.equal(mapped.auto_adapt_prompt,true);assert(mapped.prompt_origin_key);
     console.log('LinkFox async UI: success, progress, resume, failure, lost response, first/last frame passed');
 })().catch(error=>{console.error(error);process.exit(1);});

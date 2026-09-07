@@ -84,6 +84,28 @@ def test_dedicated_node_keeps_optional_prompt_without_requiring_llm(task_state, 
     main.prepare_video_generation_prompt.assert_not_awaited()
 
 
+def test_dedicated_node_uses_shared_adapter_when_frontend_requests_it(task_state, monkeypatch):
+    submit = AsyncMock(return_value={
+        'upstream_task_id': 'adapted-1', 'base_url': 'https://gateway.invalid'})
+    monkeypatch.setattr(main, 'submit_canvas_video_upstream', submit)
+    async def adapt(payload, provider):
+        return payload.model_copy(update={'prompt': 'Seedance 2.0 实际提交词'}), {
+            'original_prompt': payload.prompt,
+            'prompt_adaptation': {'profile': 'seedance', 'status': 'adapted'},
+        }
+    main.prepare_video_generation_prompt.side_effect = adapt
+    payload = main.CanvasVideoTaskRequest(
+        task_id='canvas_video_direct_adapt', provider_id='linkfox', model='seedance2.0',
+        linkfox_direct=True, prompt='原始创意', auto_adapt_prompt=True,
+        prompt_origin_key='direct-origin', images=[main.AIReference(url='/ref.png')],
+    )
+    task = asyncio.run(main.create_canvas_video_task(payload))
+    main.prepare_video_generation_prompt.assert_awaited_once()
+    assert submit.await_args.args[0].prompt == 'Seedance 2.0 实际提交词'
+    assert task['request']['original_prompt'] == '原始创意'
+    assert task['request']['prompt_adaptation']['profile'] == 'seedance'
+
+
 @pytest.mark.parametrize('status', ['succeeded', 'failed', 'protocol_error', 'timeout'])
 def test_runner_preserves_result_or_clear_failure(task_state, monkeypatch, status):
     task_state['canvas_video_test'] = {'id': 'canvas_video_test', 'provider_id': 'linkfox', 'status': 'running',

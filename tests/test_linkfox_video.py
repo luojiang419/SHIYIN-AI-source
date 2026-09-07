@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -71,6 +72,38 @@ def test_both_canvas_runtimes_expose_linkfox_node_and_run_endpoint():
     assert 'CanvasLinkfoxVideo.generate(' in smart
     assert "taskJson('/api/canvas-video-tasks'" in module
     assert "entry:'img2video'" in module
+
+
+def test_dedicated_linkfox_node_adapts_then_reuses_and_converts_between_models():
+    script = r'''
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const context={window:{},setTimeout,clearTimeout,AbortController};
+vm.runInNewContext(fs.readFileSync('static/js/canvas-linkfox-video.js','utf8'),context);
+const api=context.window.CanvasLinkfoxVideo;
+const node={};
+const raw={entry:'img2video',mode:'reference',imageList:['/ref.png'],videoType:'seedance2.0',
+    videoTime:5,prompt:'女子缓慢向左走',resolution:'720p',aspectRatio:'16:9',voice:false,camera:'single',promptOptimizer:true};
+const first=api.taskPayload(raw,node);
+assert.equal(first.auto_adapt_prompt,true);
+assert.equal(first.auto_parse_media,false);
+assert.equal(first.linkfox_prompt_optimizer,false);
+assert(first.prompt_origin_key);
+api.rememberVideoPromptResult(node,{...first,prompt:'Seedance 2.0 实际提交词'});
+const same=api.taskPayload(raw,node);
+assert.equal(same.prompt,'Seedance 2.0 实际提交词');
+assert.equal(same.auto_adapt_prompt,false);
+const switched=api.taskPayload({...raw,videoType:'wan2.6'},node);
+assert.equal(switched.prompt,'Seedance 2.0 实际提交词');
+assert.equal(switched.prompt_source_model,'seedance2.0');
+assert.equal(switched.prompt_source_provider,'linkfox');
+assert.equal(switched.auto_adapt_prompt,true);
+const empty=api.taskPayload({...raw,prompt:''},{});
+assert.equal(empty.auto_parse_media,true);
+const built=api.buildRequest({mode:'reference',model:'seedance2.0',duration:5,resolution:'720p',
+    aspectRatio:'16:9',voice:false,prompt:'测试',promptOptimizer:true},[{url:'/ref.png'}]);
+assert.equal(built.promptOptimizer,false);
+'''
+    subprocess.run(['node', '-e', script], check=True, capture_output=True, text=True)
 
 
 def test_api_settings_exposes_linkfox_configuration_controls():

@@ -7,14 +7,46 @@
         document.querySelectorAll('[data-linkfox-task-status]').forEach(el=>{if(el.dataset.linkfoxTaskStatus===String(node.id || '')) el.textContent=message;});
         return onChange?.();
     }
-    function taskPayload(raw){
+    function promptOriginKey(raw){
+        const urls=raw.mode==='first_last_frame'?[raw.imageUrl,raw.lastFrameImageUrl].filter(Boolean):(raw.imageList || []);
+        const value=JSON.stringify([String(raw.prompt || '').trim(),urls,raw.mode || 'reference']);
+        let hash=2166136261;
+        for(let i=0;i<value.length;i++) hash=Math.imul(hash ^ value.charCodeAt(i),16777619);
+        return `${value.length}:${hash >>> 0}`;
+    }
+    function promptSettingsKey(request){
+        return JSON.stringify([
+            request.duration ?? request.videoTime,
+            request.aspect_ratio ?? request.aspectRatio ?? '',
+            request.resolution || '',
+            Boolean(request.generate_audio ?? request.voice),
+            request.linkfox_mode ?? request.mode ?? 'reference',
+            request.linkfox_camera ?? request.camera ?? 'single'
+        ]);
+    }
+    function rememberVideoPromptResult(node,request){
+        if(!node || !request?.prompt_origin_key || !request?.prompt) return;
+        node.videoPromptLastResult={originKey:request.prompt_origin_key,prompt:request.prompt,
+            provider:request.provider_id || 'linkfox',model:request.model,
+            settingsKey:promptSettingsKey(request)};
+    }
+    function taskPayload(raw,node){
         if(raw.entry!=='img2video') return raw;
         const urls=raw.mode==='first_last_frame'?[raw.imageUrl,raw.lastFrameImageUrl].filter(Boolean):raw.imageList;
-        return {provider_id:'linkfox',linkfox_direct:true,model:raw.videoType,duration:raw.videoTime,prompt:raw.prompt,
+        const originKey=promptOriginKey(raw);
+        const previous=node?.videoPromptLastResult;
+        const reuse=previous?.originKey===originKey;
+        const base={provider_id:'linkfox',linkfox_direct:true,model:raw.videoType,duration:raw.videoTime,
+            prompt:reuse ? previous.prompt : raw.prompt,
             images:(urls || []).map((url,i)=>({url,...(raw.mode==='first_last_frame'?{role:i?'last_frame':'first_frame'}:{})})),
             resolution:raw.resolution,aspect_ratio:raw.aspectRatio,generate_audio:raw.voice,
             linkfox_mode:raw.mode,linkfox_camera:raw.camera,linkfox_is_pro:raw.isPro,
-            linkfox_prompt_optimizer:Boolean(raw.promptOptimizer),canvas_id:raw.canvas_id,node_id:raw.node_id};
+            linkfox_prompt_optimizer:false,canvas_id:raw.canvas_id,node_id:raw.node_id};
+        const sameTarget=reuse && previous.provider==='linkfox' && previous.model===base.model
+            && previous.settingsKey===promptSettingsKey(base);
+        return {...base,auto_adapt_prompt:!sameTarget,
+            auto_parse_media:!String(raw.prompt || '').trim() && !reuse,prompt_origin_key:originKey,
+            prompt_source_model:reuse ? previous.model : '',prompt_source_provider:reuse ? previous.provider : ''};
     }
     async function taskJson(url,options={}){
         const controller=new AbortController();
@@ -36,7 +68,7 @@
             let task;
             try {
                 task=existing?await taskJson(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`):await taskJson('/api/canvas-video-tasks',{
-                    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...taskPayload(raw),task_id:taskId})});
+                method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...taskPayload(raw,node),task_id:taskId})});
             } catch(error){
                 // 提交响应丢失时只查询相同 ID，绝不自动重新 POST。
                 try { task=await taskJson(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`); }
@@ -53,6 +85,7 @@
                 await reportTask(node,(task.error || task.message || (task.status==='succeeded'?'视频已完成':'正在查询视频'))+suffix,options.onChange);
                 if(task.status==='succeeded'){
                     if(!task.result?.videos?.length) throw new Error('LinkFox 任务完成但没有返回视频');
+                    rememberVideoPromptResult(node,task.result.request);
                     node.linkfoxTaskId=''; await options.onChange?.(); return task.result;
                 }
                 if(['failed','interrupted','canceled','cancelled'].includes(task.status)){
@@ -132,7 +165,6 @@
             <label class="field"><div class="setting-title">动态效果提示词</div><textarea class="setting-textarea linkfox-video-prompt" data-linkfox-field="prompt" rows="3" placeholder="描述图片如何运动">${esc(node.prompt||'')}</textarea></label>
             <div class="linkfox-video-grid linkfox-video-toggles">
                 <button type="button" class="setting-check ${node.voice?'active':''}" data-linkfox-toggle="voice" ${voiceFixed?'disabled':''}><span class="check-dot"></span>声音${voiceFixed?'（模型固定）':''}</button>
-                <button type="button" class="setting-check ${node.promptOptimizer?'active':''}" data-linkfox-toggle="promptOptimizer"><span class="check-dot"></span>提示词优化</button>
                 <button type="button" class="setting-check ${node.isPro?'active':''}" data-linkfox-toggle="isPro"><span class="check-dot"></span>Pro 模式</button>
                 <button type="button" class="setting-check ${node.camera==='multi'?'active':''}" data-linkfox-toggle="camera"><span class="check-dot"></span>多段运镜</button>
             </div>
@@ -150,7 +182,7 @@
         if(!urls.length) throw new Error('请至少连接一张图片');
         const limit=node.mode==='first_last_frame'?2:modelFor(node).maxImages;
         if(urls.length>limit) throw new Error(`当前模式最多支持 ${limit} 张图片，请减少连接图片`);
-        const payload={entry:'img2video',mode:node.mode||'reference',imageList:urls,videoType:node.model,videoTime:Number(node.duration||5),prompt:node.prompt||'',promptOptimizer:Boolean(node.promptOptimizer),isPro:Boolean(node.isPro),voice:Boolean(node.voice),camera:node.camera||'single',aspectRatio:node.aspectRatio||'',resolution:node.resolution||''};
+        const payload={entry:'img2video',mode:node.mode||'reference',imageList:urls,videoType:node.model,videoTime:Number(node.duration||5),prompt:node.prompt||'',promptOptimizer:false,isPro:Boolean(node.isPro),voice:Boolean(node.voice),camera:node.camera||'single',aspectRatio:node.aspectRatio||'',resolution:node.resolution||''};
         if(payload.mode==='first_last_frame'){
             const heads=images.filter(ref=>ref.inputRole!=='last-frame');
             const tails=images.filter(ref=>ref.inputRole==='last-frame');
@@ -208,5 +240,5 @@
             });
         });
     }
-    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified,generate,taskPayload};
+    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified,generate,taskPayload,rememberVideoPromptResult};
 })();

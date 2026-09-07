@@ -33,8 +33,11 @@ def service(monkeypatch):
 @pytest.mark.parametrize('provider,model,expected', [
     ('kling-cli', 'kling-v3-omni', 'kling-omni'),
     ('gateway', 'Kling VIDEO 3.0', 'kling'),
-    ('jimeng', 'video-3.0', 'seedance'),
+    ('jimeng', 'video-3.0', 'generic'),
+    ('jimeng', 'seedance2.0_vip', 'seedance'),
     ('gateway', 'doubao-seedance-2-0', 'seedance'),
+    ('gateway', 'doubao-seedance-2-0-260128', 'seedance'),
+    ('gateway', 'seedance-1.0-pro', 'generic'),
     ('gateway', 'veo3', 'generic'),
 ])
 def test_target_model_profiles(provider, model, expected):
@@ -63,7 +66,7 @@ def test_unchanged_requests_do_not_call_optimizer(service, provider, model, prom
 
 @pytest.mark.parametrize('provider,model,profile', [
     ('kling-cli', 'kling-v3-omni', 'kling-omni'),
-    ('jimeng', 'video-3.0', 'seedance'),
+    ('jimeng', 'seedance2.0_vip', 'seedance'),
     ('gateway', 'veo3', 'generic'),
 ])
 def test_sync_endpoint_sends_adapted_prompt_and_keeps_original(service, monkeypatch, provider, model, profile):
@@ -152,6 +155,24 @@ def test_reference_roles_and_subject_numbers_do_not_get_reindexed():
     assert message['reference_manifest'][1]['role'] == 'last_frame'
     assert message['reference_manifest'][-1]['tag'] == '音频1'
     assert '<Subject 3>' in message['original_prompt']
+
+
+def test_seedance_2_skill_contains_official_task_and_prompt_rules():
+    skill, profile = main._video_prompt_skill('linkfox', 'seedance2.0')
+    assert profile == 'seedance'
+    assert len(skill) > 4000
+    for required in ('全模态参考', '编辑视频', '延长或补全视频', '主体定义与素材绑定',
+                     '分镜与时间层', '一个镜头尽量只指定一种主要运镜', '声音、台词和文字',
+                     '不要强制写 `0–3秒`', 'LinkFox 当前图转视频接口只提交图片'):
+        assert required in skill
+    system = main.video_prompt_polish_system_prompt('linkfox', 'seedance2.0')
+    assert skill in system
+    assert '复杂内容使用镜头1、镜头2等相对时序' in system
+    assert '整体保持简洁，通常 1-4 句即可' not in system
+    reference_context, _, _ = main.video_prompt_reference_manifest('seedance', 2, 0)
+    auto_parse = main._video_auto_parse_system_prompt('linkfox', 'seedance2.0', reference_context)
+    assert '官方规范引用就是图片1、图片2、视频1、音频1' in auto_parse
+    assert '禁止残留‘图1’‘图片2’‘视频1’' not in auto_parse
 
 
 @pytest.mark.parametrize('text,profile,error', [

@@ -22266,8 +22266,9 @@ async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
         CANVAS_VIDEO_TASKS[task_id] = task
         write_canvas_video_tasks_locked(task)
     try:
-        if payload.provider_id == 'linkfox' and payload.linkfox_direct:
-            # 专用 LinkFox 节点保持原生可选提示词，不强制依赖本地 AI 助手。
+        if (payload.provider_id == 'linkfox' and payload.linkfox_direct
+                and not payload.auto_adapt_prompt and not payload.auto_parse_media):
+            # API 显式直传继续兼容；画布节点设置适配标记后进入共享模型规则。
             adaptation = {}
         else:
             payload, adaptation = await prepare_video_generation_prompt(payload, provider)
@@ -23672,8 +23673,22 @@ def video_prompt_reference_manifest(
             "必须按首次出现顺序分配 <<<element_N>>>，并在首次出现处用简短可见特征说明它来自哪个 <<<image_N>>>。"
             "只有有充分视觉证据是同一主体时才合并；不同主体不得共用 element 标签。"
         )
+    elif skill_id == "seedance":
+        subject_rule = (
+            "按官方规则用 2-3 个稳定可见特征定义主体；同一主体来自多图时分别说明面部、服装、动作或场景职责，"
+            "多主体使用稳定名称并在后文持续复用。简单场景也要用主体名称@图片N或等价表达保持绑定。"
+        )
     else:
         subject_rule = "结合参考画面识别用户提到的主体，保持编号和身份一致，不得臆造画面外主体。"
+    if skill_id == "seedance":
+        reference_format_rule = (
+            "\nSeedance 2.0 的官方规范引用就是图片1、图片2、视频1、音频1等自然语言编号；"
+            "必须保留这些编号并与当前上传顺序一致，不得转换为 H3 或 Kling 私有标签。"
+        )
+    else:
+        reference_format_rule = (
+            "\n最终输出中禁止残留‘图1’‘图片2’‘视频1’等自然引用；必须全部使用当前 skill 的规范标签。"
+        )
     context = (
         "\n参考资产强制映射（编号严格按本次传入顺序，禁止重排）：\n"
         + "\n".join(mapping_lines)
@@ -23682,7 +23697,7 @@ def video_prompt_reference_manifest(
         "不能只使用第一张和最后一张，也不能因为多张图片看起来属于同一主体而静默丢弃中间图片。"
         "若多张图片共同定义同一主体，必须在主体定义中列出全部来源图片标签，并在镜头描述中说明每张图片提供的外观、动作、构图或细节证据；"
         "每个图片标签至少在最终输出中出现一次，且不得凭空添加未收到的图片。"
-        + "\n最终输出中禁止残留‘图1’‘图片2’‘视频1’等自然引用；必须全部使用当前 skill 的规范标签。"
+        + reference_format_rule
     )
     return context, entries, canonical_image_labels
 
@@ -23709,6 +23724,12 @@ def video_prompt_polish_system_prompt(
         output_constraint = (
             "严格执行上述官方 H3 skill：根据收到的文本及参考素材选择 T2VA、I2VA、FL2VA、L2VA 或 Ref2VA，"
             "保留字段名、章节顺序、时间标记和引用标签；使用 skill 规定的英文结构，仅保留用户原意及素材可证实的事实。"
+        )
+    elif skill_id == "seedance":
+        output_constraint = (
+            "严格执行上述官方 Seedance 2.0 skill：先判断参考生成、编辑、延长/补全或组合任务，"
+            "明确主体与素材职责；简单单镜头可使用紧凑段落，复杂内容使用镜头1、镜头2等相对时序充分表达，"
+            "不得为了简短丢失动作过程、素材关系、声音或结尾。"
         )
     else:
         output_constraint = "整体保持简洁，通常 1-4 句即可。"

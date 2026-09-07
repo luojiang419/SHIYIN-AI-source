@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from .video_prompt_registry import registered_profile
+from .video_prompt_registry import is_seedance_2_model, registered_profile
 
 H3_FIELDS = re.compile(
     r'\b(?:integrated_multimodal_description|subject_definitions|retention_analysis|'
@@ -34,7 +34,7 @@ def target_profile(provider: str, model: str, protocol: str = '') -> str:
     if 'kling' in name or '可灵' in name:
         # 普通 Kling 不接收凭空创建的 Omni element/voice 标签。
         return 'kling-omni' if ('omni' in name or 'o1' in model.lower()) else 'kling'
-    if any(token in name for token in ('jimeng', '即梦', 'seedance', 'doubao', 'volcengine')):
+    if is_seedance_2_model(provider, model):
         return 'seedance'
     return 'generic'
 
@@ -73,7 +73,9 @@ def build_adaptation_system(profile: str, limit: int, skill: str = '') -> str:
         'kling-linkfox': 'LinkFox可灵：参考素材使用图片1等自然语言。网关不注册Omni element/voice，不得伪造三角括号主体绑定。',
         'kling-omni': '可灵 Omni：先交代参考图中的人物/物体身份及来源，再按镜头描述动作、景别、主运镜和声音。图片/视频使用清单中提供的 <<<image_N>>> / <<<video_N>>>；没有注册的 element/voice ID，不得创建这些标签，用有来源的主体名称表达。',
         'kling': '可灵普通视频：使用场景与主体、可见动作过程、景别与摄影机运动、光线和声音的自然语言。首帧决定初始构图，首尾帧描述连续过渡；不得输出 Omni 标签或假设可以绑定 element/voice。',
-        'seedance': '即梦/Seedance：先明确素材各自用于角色、服装、场景、首尾帧或动作，再写可执行的镜头与动作时间线、运镜、光照及音画配合。使用图片1、视频1、音频1等自然语言指向当前请求的素材顺序；不能沿用 H3 或可灵标签，也不能编造 @角色 绑定。',
+        'seedance': ('Doubao Seedance 2.0：先判断全模态参考、编辑视频、延长/补全视频或组合任务。'
+                     '精确定义素材职责和主体绑定，再按镜头顺序写动作、空间变化、单一主运镜、光影与同步声音；'
+                     '优先相对节拍，不强塞精确秒段。使用图片1、视频1、音频1等自然语言编号，不能沿用 H3/Kling 标签。'),
         'generic': '目标视频模型：用清楚的自然语言交代主体和场景、动作先后、摄影机、光线和声音；不使用专有 XML、主体绑定或其他平台标签。',
     }
     return (

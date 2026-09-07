@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -94,6 +95,7 @@ async def run(args):
               "stages": []}
     write_json(out / "input.json", snapshot)
     current = {}
+    phase_context = ContextVar("lookbook_benchmark_phase", default="unknown")
     original_llm = app.canvas_llm
     original_build = app.build_llm_request_body
     original_stream = app.request_responses_stream_json
@@ -106,17 +108,17 @@ async def run(args):
 
     def build(*a, **kw):
         body = original_build(*a, **kw)
-        record = {"model": body.get("model"), "tools": body.get("tools", []), "reasoning": body.get("reasoning"),
+        record = {"phase": phase_context.get(), "model": body.get("model"), "tools": body.get("tools", []), "reasoning": body.get("reasoning"),
                   "input_chars": len(json.dumps(body.get("input"), ensure_ascii=False)),
                   "instructions_chars": len(body.get("instructions", ""))}
         current["requests"].append(record)
-        if current["stage"] != "search" and body.get("tools"):
+        if (phase_context.get() != "search" or current["case"].startswith("off")) and body.get("tools"):
             raise AssertionError("非搜索阶段意外携带工具")
         emit("request", case=current["case"], stage=current["stage"], **record)
         return body
 
     async def stream(*a, **kw):
-        attempt = {"index": len(current["attempts"]) + 1}
+        attempt = {"index": len(current["attempts"]) + 1, "phase": phase_context.get()}
         current["attempts"].append(attempt)
         started = time.perf_counter()
         try:
@@ -130,12 +132,18 @@ async def run(args):
             attempt["elapsed_s"] = round(time.perf_counter() - started, 3)
 
     async def llm(payload, *a, **kw):
-        result = await original_llm(payload, *a, **kw)
+        system = payload.system_prompt or ""
+        phase = "search" if payload.web_search else "brief" if "智能制作总监" in system else "reference" if "连续性分析师" in system else "storyboard" if "连续时装广告" in system else "plan"
+        token = phase_context.set(phase)
+        try:
+            result = await original_llm(payload, *a, **kw)
+        finally:
+            phase_context.reset(token)
         index = len(current["outputs"]) + 1
         file = f"{current['case']}-{current['stage']}-{index}.json"
         write_json(out / file, result)
         evidence = result.get("web_search") or {}
-        current["outputs"].append({"file": file, "text_chars": len(result.get("text", "")),
+        current["outputs"].append({"file": file, "phase": phase, "text_chars": len(result.get("text", "")),
                                    "search_used": evidence.get("used", False),
                                    "queries": evidence.get("queries", []),
                                    "source_count": len(evidence.get("sources", []))})
@@ -166,6 +174,29 @@ async def run(args):
         write_json(out / "results.json", report)
         emit("finish", case=case, stage=name, status=current["status"], seconds=current["elapsed_s"])
         return result, current["status"]
+
+    if args.pipeline:
+        report["method"] = "直接执行正式 prepare_lookbook_creation，清空派生结果，每组完整执行真实并行前置与分镜；模型与输入不变，不生成图片。"
+        variants = args.variants.split(",")
+        if not variants or any(value not in {"on", "off"} for value in variants):
+            raise ValueError("variants 仅允许 off,on")
+
+        async def pipeline(value):
+            value, meta = await app.prepare_lookbook_creation(value)
+            return value, {**meta, "status": "failed" if meta.get("failed_stage") else "succeeded", "timings": value.get("lookbook_stage_timings", {})}
+
+        for repetition in range(1, args.repetitions + 1):
+            for variant in variants:
+                case = f"{variant}-r{repetition}"
+                value = copy.deepcopy(snapshot)
+                value["options"]["lookbook_search"] = variant == "on"
+                value, status = await stage(case, "prepare", pipeline, value)
+                if status == "succeeded":
+                    write_json(out / f"{case}-compiled.json", {"count": value["count"], "options": value["options"], "prompts": app.lookbook_generation_prompts(value)})
+        report["status"] = "completed"
+        report["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        write_json(out / "results.json", report)
+        return
 
     snapshot, status = await stage("common", "brief", app.enrich_lookbook_brief_settings, snapshot)
     if status != "succeeded":
@@ -202,4 +233,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True)
     parser.add_argument("--timeout", type=float, default=240)
     parser.add_argument("--repetitions", type=int, default=2)
+    parser.add_argument("--pipeline", action="store_true", help="验收正式完整前置链路（含并行与合并策划）")
+    parser.add_argument("--variants", default="off,on")
     asyncio.run(run(parser.parse_args()))

@@ -506,7 +506,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertIn("PRIMARY SELECTED STYLE LOCK", prompts[0])
         self.assertIn("selected style token", prompts[0])
 
-    def test_image_search_parameter_error_falls_back_to_plain_web_search(self):
+    def test_search_parameter_error_falls_back_within_the_same_budget(self):
         calls = []
 
         async def fake_canvas_llm(request):
@@ -527,7 +527,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
             enriched, meta = asyncio.run(main.enrich_lookbook_search(snapshot))
 
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0].web_search_content_types, ["image", "text"])
+        self.assertEqual(calls[0].web_search_content_types, ["text"])
         self.assertEqual(calls[1].web_search_content_types, [])
         self.assertEqual(meta["search_mode"], "text_fallback")
         self.assertEqual(enriched["options"]["lookbook_visual_system"]["lighting"], "侧光")
@@ -576,7 +576,7 @@ class LookbookPremiumResearchTests(unittest.TestCase):
         self.assertEqual(research_meta["evidence_status"], "verified")
         self.assertEqual(researched["options"]["lookbook_visual_system"]["palette"]["ratios"], "70/20/10")
         self.assertEqual(researched["options"]["lookbook_research_queries"], ["Dazed street fashion movement"])
-        self.assertEqual(researched["options"]["lookbook_research_images"][0]["caption"], "Low-angle walking frame")
+        self.assertEqual(researched["options"]["lookbook_research_images"], [])
         self.assertEqual(researched["options"]["lookbook_research_shots"][0]["camera"], "低机位跟拍")
 
 

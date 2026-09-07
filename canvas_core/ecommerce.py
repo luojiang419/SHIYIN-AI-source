@@ -887,6 +887,7 @@ def resolve_generation_settings(
     resolution: str = "auto",
     quality: str = "auto",
     count: int = 0,
+    max_count: int = 4,
 ) -> dict[str, Any]:
     mode = validate_mode(mode)
     aspect_ratio = str(aspect_ratio or "source").strip().lower()
@@ -901,9 +902,9 @@ def resolve_generation_settings(
     try:
         selected_count = int(count or 0)
     except (TypeError, ValueError) as exc:
-        raise ValueError("生成数量必须是 1 到 4") from exc
-    if selected_count < 0 or selected_count > 4:
-        raise ValueError("生成数量必须是 1 到 4，或使用自动")
+        raise ValueError(f"生成数量必须是 1 到 {max_count}") from exc
+    if selected_count < 0 or selected_count > max_count:
+        raise ValueError(f"生成数量必须是 1 到 {max_count}，或使用自动")
     resolved_resolution = "2k" if resolution == "auto" else resolution
     resolved_quality = "high" if quality == "auto" else quality
     resolved_count = 1 if selected_count == 0 else selected_count
@@ -1466,7 +1467,9 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             visual_system_text = json.dumps(visual_system, ensure_ascii=False, separators=(",", ":"))[:12000]
         else:
             visual_system_text = str(visual_system or "").strip()[:12000]
-        count = max(1, min(4, int(options.get("lookbook_count") or 1)))
+        story_mode = str(options.get("lookbook_mode") or "").strip().lower() == "story-campaign"
+        count_limit = 20 if story_mode else 4
+        count = max(1, min(count_limit, int(options.get("lookbook_count") or 1)))
         auto_mode = not instruction
         reference_lines = []
         for index, item in enumerate(normalized, 1):

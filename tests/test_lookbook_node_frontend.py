@@ -125,8 +125,8 @@ if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLa
         self.assertIn("联网研究杂志与品牌时尚大片", self.lookbook)
         self.assertNotIn("研究深度", self.lookbook)
         self.assertNotIn("lookbook_timeout_minutes:", self.canvas)
-        self.assertNotIn("lookbook_quality_gate:", self.canvas)
-        self.assertNotIn("data-lookbook-field=\"lookbookQualityGate\"", self.lookbook)
+        self.assertIn("lookbook_quality_gate:node.lookbookQualityGate === true", self.canvas)
+        self.assertIn("data-lookbook-field=\"lookbookQualityGate\"", self.lookbook)
         self.assertIn("Lookbook 智能体等待超时", self.canvas)
         self.assertIn("taskNode.lookbookAgentStage = String(task.progress_status)", self.canvas)
         self.assertIn("node.lookbookResearchStatus = String(task.lookbook_research.status)", self.canvas)
@@ -146,11 +146,14 @@ if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLa
         self.assertIn("id:'levis-high-key-color'", self.lookbook)
         self.assertIn("id:'levis-black-white'", self.lookbook)
 
-    def test_status_is_rendered_after_run_button_and_quality_gate_is_removed(self):
+    def test_status_is_rendered_after_run_button_and_quality_controls_are_optional(self):
         body = self.lookbook[self.lookbook.index("function bodyHtml"):self.lookbook.index("function bindGenerationChoices")]
         self.assertLess(body.index("data-lookbook-run"), body.index("lookbook-research-status"))
         self.assertNotIn("lookbookQualityScore", body)
-        self.assertNotIn("lookbookQualityGate", body)
+        self.assertIn("lookbookQualityGate", body)
+        self.assertIn("lookbookAutoRepair", body)
+        self.assertIn("lookbookQualityGate:false", self.lookbook)
+        self.assertIn("lookbookAutoRepair:false", self.lookbook)
 
     def test_lookbook_uses_image_generation_secondary_choice_menus(self):
         self.assertIn("data-lookbook-generation-settings", self.lookbook)
@@ -177,7 +180,7 @@ if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLa
         self.assertIn("lookbookSearch:false", self.lookbook)
         self.assertIn("node.lookbookSearch=node.lookbookSearch===true", self.lookbook)
         self.assertIn('data-lookbook-field="lookbookSearch" ${node.lookbookSearch?\'checked\':\'\'}', self.lookbook)
-        self.assertIn("可选，优先执行已选风格", self.lookbook)
+        self.assertIn("可选，最多30秒，优先执行已选风格", self.lookbook)
         self.assertIn("lookbook_search:node.lookbookSearch === true", self.canvas)
         self.assertNotIn("lookbook_search:storyMode ? true", self.canvas)
         self.assertIn(".lookbook-generation-settings .image-quick-choice:not(.open):hover .image-quick-choice-panel", self.css)
@@ -292,7 +295,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.04.lookbook.36", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.07.lookbook.37", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertRegex(self.html, r"canvas\.css\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")
         self.assertRegex(self.html, r"canvas\.js\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")

@@ -5,6 +5,8 @@ from pathlib import Path
 PROFILES = {
     'seedance': {'title': 'Doubao Seedance 2.0 / Fast', 'limit': 2000,
         'source': 'https://www.volcengine.com/docs/82379/2222480?lang=zh', 'kind': 'official-document-derived'},
+    'seedance-2.5': {'title': 'Doubao Seedance 2.5', 'limit': 2000,
+        'source': 'https://arkdocs.tos-cn-beijing.volces.com/skills/', 'kind': 'official-document-derived'},
     'hailuo': {'title': 'MiniMax Hailuo 2.3', 'limit': 2000,
         'source': 'https://github.com/MiniMax-AI/skills/blob/main/skills/frontend-dev/references/minimax-video-guide.md', 'kind': 'official-skill-adapter'},
     'wan': {'title': 'Wan 2.6', 'limit': 1500,
@@ -24,6 +26,14 @@ def is_seedance_2_model(provider: str, model: str) -> bool:
     return bool(re.fullmatch(r'seedance20(?:fast|pro)?(?:vip)?(?:\d{6})?', compact))
 
 
+def is_seedance_25_model(provider: str, model: str) -> bool:
+    """只识别 Seedance 2.5 系列，避免覆盖 2.0、1.x 与普通即梦型号。"""
+    compact = re.sub(r'[^a-z0-9]+', '', str(model or '').lower())
+    if compact.startswith('doubao'):
+        compact = compact[6:]
+    return bool(re.fullmatch(r'seedance25(?:fast|pro)?(?:vip)?(?:\d{6})?', compact))
+
+
 def registered_profile(provider: str, model: str) -> str:
     name = f'{provider} {model}'.lower()
     if 'h3' in name:
@@ -36,6 +46,8 @@ def registered_profile(provider: str, model: str) -> str:
         return 'happyhorse'
     if 'wan' in name or '万相' in name:
         return 'wan'
+    if is_seedance_25_model(provider, model):
+        return 'seedance-2.5'
     if is_seedance_2_model(provider, model):
         return 'seedance'
     return 'generic'

@@ -23673,16 +23673,16 @@ def video_prompt_reference_manifest(
             "必须按首次出现顺序分配 <<<element_N>>>，并在首次出现处用简短可见特征说明它来自哪个 <<<image_N>>>。"
             "只有有充分视觉证据是同一主体时才合并；不同主体不得共用 element 标签。"
         )
-    elif skill_id == "seedance":
+    elif skill_id in {"seedance", "seedance-2.5"}:
         subject_rule = (
             "按官方规则用 2-3 个稳定可见特征定义主体；同一主体来自多图时分别说明面部、服装、动作或场景职责，"
             "多主体使用稳定名称并在后文持续复用。简单场景也要用主体名称@图片N或等价表达保持绑定。"
         )
     else:
         subject_rule = "结合参考画面识别用户提到的主体，保持编号和身份一致，不得臆造画面外主体。"
-    if skill_id == "seedance":
+    if skill_id in {"seedance", "seedance-2.5"}:
         reference_format_rule = (
-            "\nSeedance 2.0 的官方规范引用就是图片1、图片2、视频1、音频1等自然语言编号；"
+            f"\n{('Seedance 2.5' if skill_id == 'seedance-2.5' else 'Seedance 2.0')} 的官方规范引用就是图片1、图片2、视频1、音频1等自然语言编号；"
             "必须保留这些编号并与当前上传顺序一致，不得转换为 H3 或 Kling 私有标签。"
         )
     else:
@@ -23730,6 +23730,13 @@ def video_prompt_polish_system_prompt(
             "严格执行上述官方 Seedance 2.0 skill：先判断参考生成、编辑、延长/补全或组合任务，"
             "明确主体与素材职责；简单单镜头可使用紧凑段落，复杂内容使用镜头1、镜头2等相对时序充分表达，"
             "不得为了简短丢失动作过程、素材关系、声音或结尾。"
+        )
+    elif skill_id == "seedance-2.5":
+        output_constraint = (
+            "严格执行上述官方 Seedance 2.5 skill：先判断有锁定的编辑/严格首尾帧/延长任务，"
+            "或无锁定的参考/故事板/独立关键帧任务，再明确主体与每份素材职责；"
+            "长叙事可使用连续整数秒时间戳，关键帧首句声明图片顺序，编辑必须写清范围与保持不变项，"
+            "不得为了简短丢失动作过程、声音、编辑边界或结尾。"
         )
     else:
         output_constraint = "整体保持简洁，通常 1-4 句即可。"

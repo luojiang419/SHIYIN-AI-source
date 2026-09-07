@@ -37,7 +37,11 @@ def service(monkeypatch):
     ('jimeng', 'seedance2.0_vip', 'seedance'),
     ('gateway', 'doubao-seedance-2-0', 'seedance'),
     ('gateway', 'doubao-seedance-2-0-260128', 'seedance'),
+    ('gateway', 'seedance2.5', 'seedance-2.5'),
+    ('gateway', 'seedance2.5_vip', 'seedance-2.5'),
+    ('gateway', 'doubao-seedance-2-5-pro-260901', 'seedance-2.5'),
     ('gateway', 'seedance-1.0-pro', 'generic'),
+    ('gateway', 'seedance-2.50-pro', 'generic'),
     ('gateway', 'veo3', 'generic'),
 ])
 def test_target_model_profiles(provider, model, expected):
@@ -175,9 +179,30 @@ def test_seedance_2_skill_contains_official_task_and_prompt_rules():
     assert '禁止残留‘图1’‘图片2’‘视频1’' not in auto_parse
 
 
+def test_seedance_25_skill_contains_official_task_and_prompt_rules():
+    skill, profile = main._video_prompt_skill('gateway', 'doubao-seedance-2-5-pro-260901')
+    assert profile == 'seedance-2.5'
+    assert len(skill) > 5000
+    for required in ('有锁定任务', '无锁定任务', '`ratio=adaptive`', '`duration=-1`',
+                     '最多接收 50 个参考素材', '多视图', '白模参考与渲染', '多宫格故事板',
+                     '以图片N至图片M的顺序作为关键帧', '整数秒时间轴', '视频与音频编辑',
+                     '一键成片与无缝转场', 'LinkFox 当前图转视频接口没有 Seedance 2.5 型号'):
+        assert required in skill
+    system = main.video_prompt_polish_system_prompt('gateway', 'seedance2.5')
+    assert skill in system
+    assert '长叙事可使用连续整数秒时间戳' in system
+    assert '复杂内容使用镜头1、镜头2等相对时序' not in system
+    reference_context, _, _ = main.video_prompt_reference_manifest('seedance-2.5', 2, 1)
+    assert '图片1' in reference_context and '视频1' in reference_context
+    auto_parse = main._video_auto_parse_system_prompt('gateway', 'seedance2.5', reference_context)
+    assert 'Seedance 2.5 的官方规范引用就是图片1、图片2、视频1、音频1' in auto_parse
+    assert '禁止残留‘图1’‘图片2’‘视频1’' not in auto_parse
+
+
 @pytest.mark.parametrize('text,profile,error', [
     ('<<<image_1>>> 中的女人说“你好”，无配乐', 'kling-omni', ''),
     ('图片1中的女人说“你好”，无配乐', 'seedance', ''),
+    ('图片1中的女人说“你好”，无配乐', 'seedance-2.5', ''),
     ('图片10中的女人说“你好”，无配乐', 'seedance', '遗漏'),
     ('图片1和图片2中的女人说“你好”，无配乐', 'seedance', '不存在'),
     ('<<<image_1>>> <<<element_1>>> 说“你好”，无配乐', 'kling-omni', '不支持'),

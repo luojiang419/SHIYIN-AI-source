@@ -323,7 +323,7 @@ def test_model_specific_timing_rules_do_not_override_each_other():
     h3 = _video_auto_parse_system_prompt("minimax-h3", "MiniMax H3", "mapping", duration=8)
     assert "精确到毫秒的镜头切点" in h3
     seedance_25 = _video_auto_parse_system_prompt("gateway", "seedance2.5", "mapping", duration=30)
-    assert "连续整数秒时间戳" in seedance_25
+    assert "不得反向生成数字时间段" in seedance_25
     seedance_20 = _video_auto_parse_system_prompt("gateway", "seedance2.0", "mapping", duration=15)
     assert "开场、随后、最后等相对节拍" in seedance_20
     kling = _video_auto_parse_system_prompt("kling-cli", "kling-v3-omni", "mapping", duration=10)

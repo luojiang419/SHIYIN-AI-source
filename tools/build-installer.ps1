@@ -27,6 +27,10 @@ $backendDist = Join-Path $buildRoot 'backend-dist'
 $backendWork = Join-Path $buildRoot 'backend-work'
 $stageRoot = Join-Path $projectRoot 'dist\installer-stage'
 $installerPath = Join-Path $projectRoot "dist\installer\SHIYIN-AI-Setup-$version.exe"
+$officialSeedance25Skill = Join-Path $projectRoot '.agents\skills\sd25-pe\SKILL.md'
+if (-not (Test-Path -LiteralPath $officialSeedance25Skill -PathType Leaf)) {
+    throw "Official sd25-pe skill is missing: $officialSeedance25Skill"
+}
 
 function Remove-BuildPath([string]$Path, [string]$AllowedRoot) {
     $fullPath = [IO.Path]::GetFullPath($Path)
@@ -68,12 +72,18 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
             throw "Staged prompt skill is empty: $requiredSkillPath"
         }
     }
-    foreach ($profile in @('kling-cli', 'seedance', 'hailuo', 'wan', 'happyhorse', 'kling-linkfox')) {
+    foreach ($profile in @('kling-cli', 'seedance', 'seedance-2.5', 'hailuo', 'wan', 'happyhorse', 'kling-linkfox')) {
         $profilePath = Join-Path $Root "app\skills\video-prompt-polish\$profile\SKILL.md"
         if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
             throw "Staged video prompt profile is missing: $profilePath"
         }
         if ((Get-Item -LiteralPath $profilePath).Length -le 0) { throw "Staged video prompt profile is empty: $profilePath" }
+    }
+    $seedance25SkillPath = Join-Path $Root 'app\skills\video-prompt-polish\seedance-2.5\SKILL.md'
+    $seedance25Skill = [IO.File]::ReadAllText($seedance25SkillPath)
+    if (-not $seedance25Skill.Contains('name: sd25-pe') -or
+        -not $seedance25Skill.Contains('# Seedance 2.5 Prompt Optimizer')) {
+        throw 'Staged Seedance 2.5 skill is not the official sd25-pe optimizer.'
     }
     if (-not $canvasHtml.Contains("canvas-topaz-node.js?v=$ExpectedVersion")) {
         throw "Staged canvas Topaz script cache version is not $ExpectedVersion."
@@ -125,6 +135,8 @@ Get-ChildItem -LiteralPath (Join-Path $projectRoot 'skills\video-prompt-polish')
     $profileDestination = Join-Path (Join-Path $stageRoot 'app\skills\video-prompt-polish') $_.Name
     Copy-Item -LiteralPath $_.FullName -Destination $profileDestination -Recurse -Force
 }
+# 始终以官方安装产物覆盖 staging 副本，避免项目镜像与 skills-lock.json 对应版本漂移。
+Copy-Item -LiteralPath $officialSeedance25Skill -Destination (Join-Path $stageRoot 'app\skills\video-prompt-polish\seedance-2.5\SKILL.md') -Force
 # 图片提示词 profile 同样由后端按 app_root/skills 读取，必须随安装包一起发布。
 New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills\image-prompt-polish') | Out-Null
 $imageSkillSource = Join-Path $projectRoot 'skills\image-prompt-polish'

@@ -24,6 +24,25 @@ def test_selected_video_model_is_reflected_in_polish_system_prompt():
     assert "严格执行上述官方 H3 skill" in prompt
 
 
+def test_seedance_25_uses_packaged_official_sd25_skill():
+    installed = Path(".agents/skills/sd25-pe/SKILL.md").read_bytes()
+    packaged = Path("skills/video-prompt-polish/seedance-2.5/SKILL.md").read_bytes()
+    assert installed == packaged
+
+    text, skill_id = _video_prompt_skill("gateway", "doubao-seedance-2-5-pro-260901")
+    assert skill_id == "seedance-2.5"
+    assert "name: sd25-pe" in text
+    assert "# Seedance 2.5 Prompt Optimizer" in text
+    assert "## 触发前的自升级" not in text
+    assert "## 目的" in text
+    assert len(text) > 25_000
+
+    installer = Path("tools/build-installer.ps1").read_text(encoding="utf-8")
+    assert "'seedance-2.5'" in installer
+    assert ".agents\\skills\\sd25-pe\\SKILL.md" in installer
+    assert "Staged Seedance 2.5 skill is not the official sd25-pe optimizer." in installer
+
+
 def test_kling_skill_has_source_note():
     source = Path("skills/video-prompt-polish/kling-cli/SOURCE.md")
     assert source.exists()

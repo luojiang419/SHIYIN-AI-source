@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "sd25-pe": {
+      "source": "arkdocs.tos-cn-beijing.volces.com",
+      "sourceUrl": "https://arkdocs.tos-cn-beijing.volces.com/skills/",
+      "sourceType": "well-known",
+      "computedHash": "5754d8172aaf1e4c9f4ca5a27182fc6293db1dddd5b868b791dca5c93b2623ef",
+      "wellKnownDigest": "sha256:de823de6dc053ad463a3a5ccd2b1a59bf65f06515ebd5badc12a351d59269f85"
+    }
+  }
+}

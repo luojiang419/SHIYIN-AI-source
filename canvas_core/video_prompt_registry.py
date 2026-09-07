@@ -12,7 +12,7 @@ PROFILES = {
     'seedance': {'title': 'Doubao Seedance 2.0 / Fast', 'limit': 2000,
         'source': 'https://www.volcengine.com/docs/82379/2222480?lang=zh', 'kind': 'official-document-derived'},
     'seedance-2.5': {'title': 'Doubao Seedance 2.5', 'limit': 2000,
-        'source': 'https://arkdocs.tos-cn-beijing.volces.com/skills/', 'kind': 'official-document-derived'},
+        'source': 'https://arkdocs.tos-cn-beijing.volces.com/skills/', 'kind': 'official-skill'},
 }
 
 
@@ -52,6 +52,11 @@ def load_registered_skill(root: str, provider: str, model: str) -> tuple[str, st
     path = Path(root) / 'skills' / 'video-prompt-polish' / profile / 'SKILL.md'
     # 缺失规则不能静默降级为通用提示词；安装包检查会覆盖此目录。
     content = path.read_text(encoding='utf-8').strip()
+    if profile == 'seedance-2.5':
+        # 官方 skill 的自升级段是 Agent 安装维护指令；应用内 LLM 没有 shell，运行时只注入 PE 正文。
+        content = re.sub(
+            r'\n## 触发前的自升级\s*.*?(?=\n## 目的)', '', content, count=1, flags=re.S,
+        )
     references_dir = path.parent / 'references'
     if references_dir.is_dir():
         for reference_path in sorted(references_dir.glob('*.txt')):

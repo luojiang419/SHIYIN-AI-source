@@ -76,7 +76,7 @@ def test_only_core_model_families_have_specialized_skills():
     ('kling', '不得输出 Omni 标签'),
     ('kling-linkfox', '不得伪造三角括号主体绑定'),
     ('seedance', '优先相对节拍'),
-    ('seedance-2.5', '连续整数秒时间戳'),
+    ('seedance-2.5', '只在用户原文已有数字时间段'),
     ('generic', '不得输出 H3 字段/XML'),
 ])
 def test_all_targets_share_semantic_equivalence_and_keep_their_own_format(profile, required):
@@ -218,14 +218,13 @@ def test_seedance_25_skill_contains_official_task_and_prompt_rules():
     skill, profile = main._video_prompt_skill('gateway', 'doubao-seedance-2-5-pro-260901')
     assert profile == 'seedance-2.5'
     assert len(skill) > 5000
-    for required in ('有锁定任务', '无锁定任务', '`ratio=adaptive`', '`duration=-1`',
-                     '最多接收 50 个参考素材', '多视图', '白模参考与渲染', '多宫格故事板',
-                     '以图片N至图片M的顺序作为关键帧', '整数秒时间轴', '视频与音频编辑',
-                     '一键成片与无缝转场', 'LinkFox 当前图转视频接口没有 Seedance 2.5 型号'):
+    for required in ('name: sd25-pe', '参数分离', '最多 50 份参考素材', '多素材生成',
+                     '白模参考与渲染', '宫格分镜与故事板', '以@图片1至@图片N的顺序作为关键帧',
+                     '长视频与时间段', '视频编辑', '声音编辑', '视频延长'):
         assert required in skill
     system = main.video_prompt_polish_system_prompt('gateway', 'seedance2.5')
     assert skill in system
-    assert '长叙事可使用连续整数秒时间戳' in system
+    assert '仅有节点时长时使用无数字阶段组织' in system
     assert '复杂内容使用镜头1、镜头2等相对时序' not in system
     reference_context, _, _ = main.video_prompt_reference_manifest('seedance-2.5', 2, 1)
     assert '图片1' in reference_context and '视频1' in reference_context

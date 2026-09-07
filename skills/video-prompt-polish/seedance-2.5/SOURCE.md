@@ -1,13 +1,15 @@
 # 规则来源
 
 核对日期：2026-09-07
-类型：official-document-derived，本项目从官方指南提炼的运行时适配技能，不冒充上游原始文件。
+类型：official-skill
 
-- 官方 Skill 分发地址：<https://arkdocs.tos-cn-beijing.volces.com/skills/>，Skill ID：`sd25-pe`。
-- 官方文档媒体与示例路径：<https://arkdocs.tos-cn-beijing.volces.com/videos/video-generation/sd25-pe/>。
-- 用户提供原文：`Doubao Seedance 2.5 模型提示词使用方法和相关技巧`，2026-09-07，共 1,095 行。
-- 对照规范：Doubao Seedance 2.0 官方指南与项目内 `seedance` 运行时 Skill。
+- 官方 Skill 分发地址：<https://arkdocs.tos-cn-beijing.volces.com/skills/>
+- 官方 Skill ID：`sd25-pe`
+- 安装命令：`npx --yes skills@latest add "https://arkdocs.tos-cn-beijing.volces.com/skills/" --skill sd25-pe --yes`
+- 当前版本：`0.1.1`
+- 官方安装产物：`.agents/skills/sd25-pe/SKILL.md`
+- 安装来源锁定：`skills-lock.json`
 
-运行时版本保留官方文档中的锁定/非锁定任务决策、素材上限与稳定范围、多素材映射、整数秒时间戳、多视图、白模、故事板、独立关键帧、视频和音频编辑、延长、一键成片、无缝转场、多语言声音与 2.0 差异。网页 HTML、远程媒体、重复版式和仅用于展示结果的长案例已移除。
+`skills/video-prompt-polish/seedance-2.5/SKILL.md` 是官方安装产物的逐字镜像。开发环境由视频提示词注册表加载该镜像；构建安装包时，`tools/build-installer.ps1` 会再次使用 `.agents` 中的官方安装产物覆盖 staging 副本，并校验 `name: sd25-pe` 与官方标题，保证其他用户无需本机安装 skill 即可使用。
 
-模型原生能力与当前网关能力分开处理：Seedance 2.5 原生支持图片、视频和音频联合输入；当前 LinkFox 模型表仅有 Seedance 2.0 / Fast 且接口只开放图片，因此不得借提示词虚构 LinkFox 2.5、视频编辑、延长或音频字段。
+官方文件开头的“触发前的自升级”只适用于具备 shell 的 Agent。应用内提示词优化 LLM 不具备 shell，因此注册表在运行时仅过滤这一段维护指令，完整保留其后的 Prompt Optimizer 规则。模型精确路由、自然语言素材编号、上游字段能力和提交前校验仍由项目适配器负责，不改写官方 skill 文件。

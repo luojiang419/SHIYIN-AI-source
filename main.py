@@ -23741,7 +23741,8 @@ def video_prompt_polish_system_prompt(
         output_constraint = (
             "严格执行上述官方 Seedance 2.5 skill：先判断有锁定的编辑/严格首尾帧/延长任务，"
             "或无锁定的参考/故事板/独立关键帧任务，再明确主体与每份素材职责；"
-            "长叙事可使用连续整数秒时间戳，关键帧首句声明图片顺序，编辑必须写清范围与保持不变项，"
+            "仅当用户原文已有数字时间段或明确要求时间段控制时才使用连续整数秒时间段；仅有节点时长时使用无数字阶段组织。"
+            "关键帧首句声明图片顺序，编辑必须写清范围与保持不变项，"
             "不得为了简短丢失动作过程、声音、编辑边界或结尾。"
         )
     elif skill_id == "kling-cli":
@@ -23790,7 +23791,7 @@ def _video_auto_parse_system_prompt(
     if prompt_profile == "minimax-h3":
         timing_rule = "按 H3 规范使用精确到毫秒的镜头切点和首尾帧对齐时间，所有时间必须落在目标总时长内。"
     elif prompt_profile == "seedance-2.5":
-        timing_rule = "可按 Seedance 2.5 规范使用连续整数秒时间戳，时间段必须覆盖目标总时长且没有无意空档。"
+        timing_rule = "按 Seedance 2.5 官方规范：仅有节点目标时长时使用无数字阶段规划事件密度，不得反向生成数字时间段；保留用户已有的时间段硬约束。"
     elif prompt_profile in {"kling", "kling-omni", "kling-linkfox"}:
         timing_rule = "可按可灵规范在多镜头中标明每镜时长或时间段，所有镜头合计必须匹配目标总时长。"
     else:
@@ -24146,7 +24147,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
         if prompt_profile == "minimax-h3":
             timing_rule = "按 H3 规范保留毫秒级切镜和首尾帧对齐时间，全部时间落在节点总时长内。"
         elif prompt_profile == "seedance-2.5":
-            timing_rule = "按 Seedance 2.5 规范使用连续整数秒时间戳，时间段覆盖节点总时长。"
+            timing_rule = "按 Seedance 2.5 官方规范，仅用无数字阶段规划节点时长；不得仅根据该参数反向生成数字时间段，并保留用户已有的时间段硬约束。"
         elif prompt_profile in {"kling", "kling-omni", "kling-linkfox"}:
             timing_rule = "需要多镜头时可按可灵规范写每镜时长或时间段，镜头总时长与节点一致。"
         else:

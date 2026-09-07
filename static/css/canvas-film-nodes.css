@@ -215,6 +215,8 @@
 .film-prompt-editor-wrap { position:relative; min-width:0; }
 .film-prompt-editor-wrap textarea { padding-right:68px; }
 .film-prompt-editor-wrap .prompt-polish-btn { right:7px; bottom:7px; }
+.video-prompt-search-toggle { display:inline-flex; align-items:center; gap:5px; margin-top:5px; color:var(--muted); font-size:11px; cursor:pointer; }
+.video-prompt-search-toggle input { width:auto; margin:0; accent-color:var(--strong); }
 .film-prompt-field textarea:focus,
 .film-image-settings select:focus,
 .film-video-settings select:focus,

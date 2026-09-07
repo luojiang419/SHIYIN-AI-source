@@ -12253,6 +12253,7 @@ async function polishSmartVideoPrompt(node, prompt, refs=[], onProgress=null){
     const data = await submitSmartCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || node?.runSettings?.videoProvider || '', video_model:node?.model || node?.runSettings?.videoModel || '',
         text_to_video:!images.length && !videos.length, images, image_labels:labels, videos,
+        web_search:node?.promptWebSearch === true,
         duration:Number(node?.duration || node?.runSettings?.videoDuration || 0) || null,
         aspect_ratio:node?.aspectRatio || node?.runSettings?.videoAspect || '',
         resolution:node?.resolution || node?.runSettings?.videoResolution || ''

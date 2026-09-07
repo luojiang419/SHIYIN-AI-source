@@ -93,8 +93,7 @@ async def run(args):
 
     def auto_system(*a, **kw):
         text = original_auto_system(*a, **kw)
-        if state["job"]["variant"] != "C":
-            assert search_instruction in text
+        if state["job"]["variant"] not in {"C", "P"} and search_instruction in text:
             text = text.replace(search_instruction, "本次只依据已提供素材和下方规范直接生成，不执行联网检索。")
         return text
 
@@ -111,7 +110,7 @@ async def run(args):
                             "request_utf8_bytes": len(json.dumps(body, ensure_ascii=False).encode()),
                             "image_parts": sum(p.get("type") == "input_image" for m in body.get("input", []) for p in m.get("content", [])),
                             "mandatory_search_instruction": search_instruction in instructions}
-        if job["variant"] in {"A", "B"}:
+        if job["variant"] in {"A", "B", "P"}:
             assert not body.get("tools")
             assert search_instruction not in instructions
         write_json(out / f"{job['id']}-{phase['index']}-request-text.json", {"instructions": instructions, "input_text": input_texts, **phase["request"]})
@@ -279,7 +278,7 @@ def main():
     parser.add_argument("--canvas", default="7cb95071d8874f1f864a769e72068b32")
     parser.add_argument("--node", default="vid_c9ed1b4b267d78_1788496316553")
     parser.add_argument("--cases", default="single-auto,multi-auto,multi-polish")
-    parser.add_argument("--variants", default="C,A,B")
+    parser.add_argument("--variants", default="C,A,B", help="C/A/B 历史对照；P 不改请求和提示词，验证当前正式实现")
     parser.add_argument("--repetitions", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=480)
     args = parser.parse_args()

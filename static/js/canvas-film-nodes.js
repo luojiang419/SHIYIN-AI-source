@@ -60,6 +60,7 @@
         node.generatedOutputs = Array.isArray(node.generatedOutputs) ? node.generatedOutputs : [];
         node.visionProvider = String(node.visionProvider || '');
         node.visionModel = String(node.visionModel || '');
+        node.promptWebSearch = node.promptWebSearch === true;
         if(node.type === 'film-storyboard'){
             node.aspectRatio = node.aspectRatio || '16:9';
             node.resolution = node.resolution || '2k';
@@ -237,7 +238,8 @@
         const hasPrompt = Boolean(effectivePrompt(node, options) || options.promptConnected?.(node));
         const autoParse = node.type === 'film-video' && !hasPrompt && kinds.includes('image') && kinds.every(kind => kind === 'image');
         const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish${autoParse ? ' auto-parse' : ''}" data-film-action="polish" data-film-prompt-mode="${autoParse ? 'auto-parse' : 'polish'}" title="${autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词'}"><i data-lucide="${autoParse ? 'scan-eye' : 'wand-sparkles'}"></i><span>${autoParse ? '自动解析' : '润色'}</span></button>` : '';
-        return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>`;
+        const searchToggle = node.type === 'film-video' ? `<label class="video-prompt-search-toggle"><input type="checkbox" data-video-prompt-search ${node.promptWebSearch === true ? 'checked' : ''}>联网案例增强（可选）</label>` : '';
+        return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>${searchToggle}`;
     }
     function inputSlotHtml(node, port, options={}){
         const assets = options.assets?.(node) || [];
@@ -445,6 +447,7 @@
             provider, model, video_provider:node.apiProvider || '', video_model:node.model || '',
             prompt:effectivePrompt(node, options),
             images:refs.map(item=>item.url), image_labels:refs.map((item,index)=>`参考素材${index + 1}：${item.roleLabel || '参考资产'}`),
+            web_search:node.promptWebSearch === true,
             duration:Number(node.duration || 0) || null, aspect_ratio:node.aspectRatio || '', resolution:node.resolution || ''
         }, '自动解析', onProgress);
         const text=String(data.text || '').trim();
@@ -471,6 +474,11 @@
     }
     function bind(root,node,options={}){
         normalize(node);
+        const searchToggle = root.querySelector('[data-video-prompt-search]');
+        if(searchToggle){
+            searchToggle.addEventListener('mousedown', event => event.stopPropagation());
+            searchToggle.addEventListener('change', () => { node.promptWebSearch = searchToggle.checked; notify(options,node); });
+        }
         const prompt=root.querySelector('[data-film-field="prompt"]');
         if(prompt){
             bindMentionMenu(root,prompt,node,options);

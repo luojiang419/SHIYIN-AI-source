@@ -92,6 +92,7 @@ from canvas_core.app_config import read_app_config, update_app_settings
 from canvas_core.generated_output import export_generated_files
 from canvas_core.quick_save import safe_download_name, save_stream
 from canvas_core.image_upload import normalize_image_orientation
+from canvas_core.video_prompt_quality import compact_h3_prompt, parse_h3_prompt
 from canvas_core.canvas_placeholder_migration import migrate_orphan_output_pending_once
 from canvas_core.grid_crop import detect_grid
 from canvas_core.video_clip import (
@@ -1000,6 +1001,7 @@ IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-2")
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "30"))
 AI_REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "1800"))
+CANVAS_PROMPT_SEARCH_TIMEOUT = 30.0
 IMAGE_POLL_INTERVAL = float(os.getenv("IMAGE_POLL_INTERVAL", "2"))
 IMAGE_TASK_TIMEOUT = float(os.getenv("IMAGE_TASK_TIMEOUT", str(AI_REQUEST_TIMEOUT)))
 APIMART_IMAGE_TASK_TIMEOUT = float(os.getenv("APIMART_IMAGE_TASK_TIMEOUT", "1800"))
@@ -4671,7 +4673,7 @@ class CanvasPromptPolishRequest(BaseModel):
     duration: Optional[float] = None
     aspect_ratio: str = ""
     resolution: str = ""
-    web_search: bool = True
+    web_search: bool = False
     search_context: str = Field(default="", max_length=12000)
 
 class CanvasVideoAutoParseRequest(BaseModel):
@@ -4687,7 +4689,7 @@ class CanvasVideoAutoParseRequest(BaseModel):
     duration: Optional[float] = None
     aspect_ratio: str = ""
     resolution: str = ""
-    web_search: bool = True
+    web_search: bool = False
     search_context: str = Field(default="", max_length=12000)
 
 class BuildingMultiViewReference(BaseModel):
@@ -23154,6 +23156,22 @@ def _hard_limit_video_prompt(text: str, limit: int) -> str:
     return candidate
 
 
+def _video_prompt_stage(progress_callback, stage: str, label: str):
+    publish = getattr(progress_callback, "set_stage", None)
+    if callable(publish):
+        publish(stage, label)
+
+
+def validate_generated_video_prompt(text: str, skill_id: str, limit: int):
+    if len(text) > limit:
+        raise HTTPException(status_code=422, detail=f"最终提示词仍超过 {limit} 字符，已停止交付超限结果")
+    if skill_id == "minimax-h3":
+        try:
+            parse_h3_prompt(text)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 async def compact_video_prompt_if_needed(
     text: str,
     *,
@@ -23169,9 +23187,28 @@ async def compact_video_prompt_if_needed(
     """将自动解析/润色结果压缩到当前视频模型的真实上限内。"""
     limit = video_prompt_limit(video_provider, video_model)
     cleaned = clean_video_prompt_output(text)
+    _, skill_id = _video_prompt_skill(video_provider, video_model)
+    if skill_id == "minimax-h3":
+        async def complete_h3(system, message):
+            request = CanvasLLMRequest(
+                message=message, system_prompt=system, provider=llm_provider or "comfly",
+                model=llm_model, ms_model=ms_model, images=list(images or []),
+                videos=list(videos or []), web_search=False, retry_524=1,
+            )
+            _video_prompt_stage(progress_callback, "compact", "正在压缩描述段并校验 H3 字段与语言…")
+            result = await canvas_llm(request) if progress_callback is None else await canvas_llm(
+                request, progress_callback=progress_callback
+            )
+            return clean_video_prompt_output(str(result.get("text") or ""))
+        try:
+            compacted = await compact_h3_prompt(cleaned, limit, complete_h3)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return compacted, len(cleaned) > limit, limit
     if len(cleaned) <= limit:
         return cleaned, False, limit
 
+    _video_prompt_stage(progress_callback, "compact", "正在压缩超长提示词…")
     compact_system = (
         "你是视频提示词压缩器。只输出压缩后的最终视频提示词，不要解释、标题或 Markdown。"
         f"必须严格控制在 {limit} 个字符以内（空格、标点和换行均计入）。"
@@ -23372,7 +23409,7 @@ def _video_auto_parse_system_prompt(
         f"{'H3 Ref2VA 生成任务的 detailed_description 通常写 350-500 个英文词；在不牺牲时间节拍和动作因果的前提下，按镜头信息量充分展开，禁止压缩成每镜头一两句静态摘要。' if skill_id == 'minimax-h3' else ''}"
         f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
         f"{('内部规划约束（仅供导演思考，不得原样输出）：' + settings_hint + '。请用这些参数控制镜头节奏和构图比例，但最终提示词不得出现视频模型名称、时长数值、画幅、分辨率或‘目标时长/节点参数’等设置说明；用开场、随后、最后等相对节拍表达时间推进。') if settings_hint else ''}"
-        "请先使用模型可用的联网搜索工具检索优秀的视频提示词、分镜和运镜案例，吸收可迁移的方法后再写结果；不要输出检索过程或来源列表。"
+        "直接依据本次素材和下方完整规范生成提示词；本视觉请求不执行联网检索。若已提供案例摘要，仅作为可选方法参考，不得等待额外搜索。"
         "案例仅用于提取镜头组织、节奏和可执行动作的方法，严禁复制案例中的主体、场景、道具、故事或措辞；最终内容必须完全围绕本次图片和用户输入。"
         "禁止输出或追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed 等），也不要以这类短语单独成句收尾。"
         "输出前在内部逐项检查：内容是否全部来自本次素材、是否有明确可执行的时间推进和镜头运动、引用编号是否正确、格式是否严格匹配当前模型；只输出通过检查后的最终提示词。最终输出不得泄露视频模型名称、画幅、分辨率或节点参数字段。"
@@ -23509,6 +23546,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
             web_search=False,
             retry_524=1,
         )
+        _video_prompt_stage(progress_callback, "reference-repair", "正在校验并修复参考图引用…")
         repaired_result = await llm_call(repair_request)
         repaired_text = clean_video_prompt_output(str(repaired_result.get("text") or "").strip())
         repaired_text = normalize_video_prompt_references(
@@ -23523,6 +23561,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
                 status_code=422,
                 detail=f"最终提示词未覆盖全部参考图，缺少：{missing}。请重试自动解析，系统不会静默交付不完整引用。",
             )
+    validate_generated_video_prompt(text, skill_id, prompt_limit)
     return {
         **result,
         "text": text,
@@ -23739,6 +23778,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
             status_code=422,
             detail=f"润色后的提示词未覆盖全部参考图，缺少：{missing}。请重试，系统不会静默交付不完整引用。",
         )
+    validate_generated_video_prompt(text, skill_id, prompt_limit)
     return {
         **result,
         "text": text,
@@ -23764,8 +23804,11 @@ async def _canvas_prompt_web_search(payload: Any) -> str:
     """用请求中指定的同一 provider/model 做文本联网检索，结果供后续视觉请求参考。"""
     provider = str(getattr(payload, "provider", "") or "").strip()
     model = str(getattr(payload, "model", "") or "").strip()
-    if not provider or not model or not bool(getattr(payload, "web_search", True)):
+    if not provider or not model or not bool(getattr(payload, "web_search", False)):
         return ""
+    transport = resolve_chat_transport(provider, model, str(getattr(payload, "ms_model", "") or ""))
+    if transport["protocol"] != "responses" or not provider_supports_builtin_web_search(transport.get("provider")):
+        raise HTTPException(status_code=400, detail="当前平台不支持内置联网增强")
     user_prompt = str(getattr(payload, "prompt", "") or "").strip()
     query = user_prompt or "视频提示词中的连续动作、镜头运镜、节拍和多图参考素材编排"
     search_request = CanvasLLMRequest(
@@ -23781,9 +23824,11 @@ async def _canvas_prompt_web_search(payload: Any) -> str:
         images=[],
         videos=[],
         web_search=True,
-        retry_524=1,
+        retry_524=0,
     )
     result = await canvas_llm(search_request)
+    if not (result.get("web_search") or {}).get("used"):
+        raise HTTPException(status_code=502, detail="联网增强未返回实际检索记录")
     text = str(result.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=502, detail="联网搜索未返回有效摘要")
@@ -23791,6 +23836,23 @@ async def _canvas_prompt_web_search(payload: Any) -> str:
 
 
 async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
+    started = time.perf_counter()
+    stage_started, stage_name = started, "queued"
+    timings = []
+    search_warning = ""
+
+    def set_stage(name, label):
+        nonlocal stage_started, stage_name
+        now = time.perf_counter()
+        timings.append({"stage": stage_name, "elapsed_ms": round((now - stage_started) * 1000)})
+        stage_started, stage_name = now, name
+        with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if task:
+                task.update(status="running", stage=name, progress_status=label,
+                            progress_text="", progress_chars=0, updated_at=time.time(),
+                            stage_timings=list(timings))
+
     async def publish_delta(delta: str):
         if not delta:
             return
@@ -23803,6 +23865,7 @@ async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
             task["progress_chars"] = len(current) + len(delta)
             task["updated_at"] = time.time()
 
+    publish_delta.set_stage = set_stage
     with CANVAS_PROMPT_TASK_LOCK:
         task = CANVAS_PROMPT_TASKS.get(task_id)
         if not task:
@@ -23814,36 +23877,24 @@ async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
             "updated_at": time.time(),
         })
     try:
-        if bool(getattr(payload, "web_search", True)):
-            with CANVAS_PROMPT_TASK_LOCK:
-                task = CANVAS_PROMPT_TASKS.get(task_id)
-                if task:
-                    task.update({
-                        "status": "running",
-                        "stage": "web-search",
-                        "progress_status": "正在联网检索可迁移的镜头、动作和节拍方法…",
-                        "progress_text": "",
-                        "progress_chars": 0,
-                        "updated_at": time.time(),
-                    })
-            search_context = await _canvas_prompt_web_search(payload)
-            payload = payload.model_copy(update={"search_context": search_context})
-        with CANVAS_PROMPT_TASK_LOCK:
-            task = CANVAS_PROMPT_TASKS.get(task_id)
-            if task:
-                task.update({
-                    "status": "running",
-                    "stage": "visual-parse",
-                    "progress_status": "视觉模型正在分析参考图并生成提示词…",
-                    "progress_text": "",
-                    "progress_chars": 0,
-                    "updated_at": time.time(),
-                })
+        if bool(getattr(payload, "web_search", False)):
+            set_stage("web-search", "正在进行可选联网增强，最长等待 30 秒…")
+            try:
+                search_context = await asyncio.wait_for(
+                    _canvas_prompt_web_search(payload), timeout=CANVAS_PROMPT_SEARCH_TIMEOUT,
+                )
+                payload = payload.model_copy(update={"search_context": search_context})
+            except (HTTPException, asyncio.TimeoutError) as exc:
+                search_warning = "联网增强未完成，已直接使用素材和完整规范解析。"
+                print(f"[canvas-prompt-search] task={task_id} skipped={type(exc).__name__}", flush=True)
+                payload = payload.model_copy(update={"search_context": ""})
+        set_stage("visual-parse", search_warning + "视觉模型正在分析参考图并生成提示词…")
         result = (
             await canvas_video_auto_parse(payload, progress_callback=publish_delta)
             if kind == "auto-parse"
             else await canvas_prompt_polish(payload, progress_callback=publish_delta)
         )
+        result["search_warning"] = search_warning
         with CANVAS_PROMPT_TASK_LOCK:
             task = CANVAS_PROMPT_TASKS.get(task_id)
             if task:
@@ -23881,6 +23932,15 @@ async def _run_canvas_prompt_task(task_id: str, kind: str, payload: Any):
                 })
     finally:
         with CANVAS_PROMPT_TASK_LOCK:
+            task = CANVAS_PROMPT_TASKS.get(task_id)
+            if task:
+                now = time.perf_counter()
+                timings.append({"stage": stage_name, "elapsed_ms": round((now - stage_started) * 1000)})
+                task["stage_timings"] = timings
+                task["elapsed_ms"] = round((now - started) * 1000)
+                task["search_warning"] = search_warning
+                print(f"[canvas-prompt-task] task={task_id} status={task['status']} "
+                      f"elapsed_ms={task['elapsed_ms']} stages={json.dumps(timings)}", flush=True)
             prune_current_account_tasks_locked(
                 CANVAS_PROMPT_TASKS,
                 {"queued", "running"},

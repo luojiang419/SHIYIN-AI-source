@@ -13842,6 +13842,7 @@ function generatorInlinePromptHtml(node, connectedPromptCount=0, options={}){
             <span class="generator-inline-prompt-meta" data-generator-prompt-meta>${count ? trf('canvas.connectedPromptCount', {n:count}) : tr('canvas.generatorPromptHint')}</span>
         </div>
         <div class="generator-prompt-editor-wrap"> <textarea class="generator-prompt-input" rows="4" placeholder="${escapeAttr(tr('canvas.generatorPromptPlaceholder'))}">${escapeHtml(node?.prompt || '')}</textarea>${polishButton}</div>
+        ${polishButton ? `<label class="video-prompt-search-toggle"><input type="checkbox" data-video-prompt-search ${node?.promptWebSearch === true ? 'checked' : ''}>联网案例增强（可选）</label>` : ''}
     </div>`;
 }
 function bindGeneratorInlinePrompt(wrap, node){
@@ -21310,6 +21311,7 @@ async function polishCanvasVideoPrompt(node, prompt, refs=[], onProgress=null){
     const data = await submitCanvasPromptTask('/api/canvas-prompt-polish-tasks', {
         prompt:text, provider:visionProvider, model:visionModel, video_provider:node?.apiProvider || '', video_model:node?.model || '',
         text_to_video:!images.length && !videos.length, images, image_labels:labels, videos,
+        web_search:node?.promptWebSearch === true,
         duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
     }, '提示词润色', onProgress);
     const polished = String(data.text || '').trim();
@@ -21356,13 +21358,19 @@ async function autoParseCanvasVideoPrompt(node, refs=[], onProgress=null, prompt
     const visionModel = resolveChatModel(node?.visionModel || '', visionProvider);
     const data = await submitCanvasPromptTask('/api/canvas-video-auto-parse-tasks', {
         provider:visionProvider, model:visionModel, ms_model:'', video_provider:node?.apiProvider || '', video_model:node?.model || '',
-        prompt, images, image_labels:labels, duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
+        prompt, images, image_labels:labels, web_search:node?.promptWebSearch === true,
+        duration:Number(node?.duration || 0) || null, aspect_ratio:node?.aspectRatio || '', resolution:node?.resolution || ''
     }, '自动解析', onProgress);
     const text = String(data.text || '').trim();
     if(!text) throw new Error('自动解析未返回视频提示词');
     return text;
 }
 function bindVideoPromptPolish(wrap, node, refs=[]){
+    const searchToggle = wrap?.querySelector?.('[data-video-prompt-search]');
+    if(searchToggle){
+        searchToggle.onmousedown = event => event.stopPropagation();
+        searchToggle.onchange = () => { node.promptWebSearch = searchToggle.checked; scheduleSave(); };
+    }
     const input = wrap?.querySelector?.('.generator-prompt-input');
     const button = wrap?.querySelector?.('[data-video-prompt-polish]');
     if(!input || !button || !node) return;

@@ -2,6 +2,7 @@ from pathlib import Path
 import asyncio
 
 import main
+from tests.test_video_prompt_quality import reference_prompt
 from main import (
     _video_auto_parse_system_prompt,
     clean_video_prompt_output,
@@ -33,7 +34,7 @@ def test_backend_auto_parse_uses_ordered_multimodal_request_and_never_compacts_r
     assert "message=user_message" in endpoint
     assert "严格遵循下方当前模型 skill" in MAIN
     assert "全部图片已经按用户输入顺序一次性上传" in MAIN
-    assert "请先使用模型可用的联网搜索工具检索优秀的视频提示词" in MAIN
+    assert "本视觉请求不执行联网检索" in MAIN
     assert 'body["tools"] = [{"type": "web_search"}]' in MAIN
     assert "用户没有提供文字提示词。请启动自主导演模式" in endpoint
     assert "raw_user_prompt = str(payload.prompt or \"\").strip()" in endpoint
@@ -157,7 +158,7 @@ def test_auto_parse_endpoint_keeps_four_images_and_story_prompt_together(monkeyp
 
     async def fake_canvas_llm(request):
         captured["request"] = request
-        return {"text": "<Picture 1> <Picture 2> <Picture 3> <Picture 4>"}
+        return {"text": reference_prompt("<Picture 1> <Picture 2> <Picture 3> <Picture 4>")}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
     payload = main.CanvasVideoAutoParseRequest(
@@ -191,7 +192,7 @@ def test_reference_coverage_uses_current_model_tags():
 
 def test_auto_parse_rejects_missing_reference_tags(monkeypatch):
     async def fake_canvas_llm(_request):
-        return {"text": "<Picture 1> and <Picture 3> are used in a moving camera shot."}
+        return {"text": reference_prompt("<Picture 1> and <Picture 3> are used in a moving camera shot.")}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
     payload = main.CanvasVideoAutoParseRequest(
@@ -217,7 +218,7 @@ def test_no_prompt_auto_parse_requests_continuous_action_acting_and_moving_camer
 
     async def fake_canvas_llm(request):
         captured["request"] = request
-        return {"text": "<Picture 1> becomes <Subject 1>; the camera tracks its grounded movement."}
+        return {"text": reference_prompt("<Picture 1> becomes <Subject 1>; the camera tracks its grounded movement.")}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
     payload = main.CanvasVideoAutoParseRequest(
@@ -253,7 +254,7 @@ def test_no_prompt_message_explicitly_requests_three_action_beats(monkeypatch):
 
     async def fake_canvas_llm(request):
         captured["request"] = request
-        return {"text": "<Picture 1> <Subject 1> moves with preparation, interaction, and settle beats."}
+        return {"text": reference_prompt("<Picture 1> <Subject 1> moves with preparation, interaction, and settle beats.")}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
     payload = main.CanvasVideoAutoParseRequest(
@@ -272,7 +273,7 @@ def test_no_prompt_message_preserves_image_order_as_story_timeline(monkeypatch):
 
     async def fake_canvas_llm(request):
         captured["request"] = request
-        return {"text": "<Picture 1> then <Picture 2> then <Picture 3> in a continuous sequence."}
+        return {"text": reference_prompt("<Picture 1> then <Picture 2> then <Picture 3> in a continuous sequence.")}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
     payload = main.CanvasVideoAutoParseRequest(
@@ -295,8 +296,8 @@ def test_auto_parse_repairs_missing_reference_tags_once(monkeypatch):
     async def fake_canvas_llm(request):
         calls.append(request)
         if len(calls) == 1:
-            return {"text": "<Picture 1> A continuous moving shot."}
-        return {"text": "<Picture 1> and <Picture 2> A continuous moving shot."}
+            return {"text": reference_prompt("<Picture 1> A continuous moving shot.")}
+        return {"text": reference_prompt("<Picture 1> and <Picture 2> A continuous moving shot.")}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)
     payload = main.CanvasVideoAutoParseRequest(
@@ -366,7 +367,7 @@ def test_overlong_auto_parse_is_compacted_to_h3_limit(monkeypatch):
     async def fake_canvas_llm(request, progress_callback=None):
         calls.append(request)
         if len(calls) == 1:
-            return {"text": "<Picture 1> " + ("重复细节 " * 1400)}
+            return {"text": reference_prompt("<Picture 1> " + ("Repeated detail. " * 600))}
         return {"text": "<Picture 1> A concise moving shot with a clear action beat."}
 
     monkeypatch.setattr(main, "canvas_llm", fake_canvas_llm)

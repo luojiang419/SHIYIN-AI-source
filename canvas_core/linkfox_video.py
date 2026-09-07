@@ -369,11 +369,20 @@ def run_skill(raw: Mapping[str, Any], *, project_root: str | Path, output_dir: s
     if result.returncode != 0 or not paths:
         detail = (stdout + "\n" + stderr).strip()
         # 技能失败时可能把完整响应落盘；只提取错误字段，不把 traceback 透传到前端。
-        saved_json = re.search(r"Saved full response:\s*([^\s(]+\.json)", detail)
+        saved_json = re.search(r"^Saved full response:\s*(.+?\.json)(?:\s+\(\d+ bytes\))?\s*$", detail, re.MULTILINE)
         if saved_json:
             try:
-                body = json.loads(Path(saved_json.group(1)).read_text(encoding="utf-8"))
-                detail = str(body.get("errorMsg") or body.get("errmsg") or body.get("error") or body.get("msg") or body.get("status") or detail)
+                content = Path(saved_json.group(1)).read_bytes()
+                try:
+                    body = json.loads(content.decode("utf-8-sig"))
+                except UnicodeDecodeError:
+                    # 兼容旧安装版由 Windows 默认编码写出的中文响应。
+                    body = json.loads(content.decode("gb18030"))
+                detail = str(body.get("errorMsg") or body.get("error") or body.get("msg")
+                             or (body.get("errmsg") if body.get("errmsg") != "ok" else "")
+                             or body.get("status") or detail)
+                if body.get("taskId"):
+                    detail += f"（LinkFox taskId: {body['taskId']}）"
             except Exception:
                 pass
         raise LinkFoxVideoError(detail[-800:] or "LinkFox 视频生成失败")

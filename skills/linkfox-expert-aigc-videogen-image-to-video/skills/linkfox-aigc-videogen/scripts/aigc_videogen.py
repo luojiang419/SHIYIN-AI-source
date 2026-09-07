@@ -342,6 +342,18 @@ def _resolve_output_path(ts):
     return resolve_data_path(SLUG, ts)
 
 
+def save_response(result):
+    """立即保存上游响应，便于凭 taskId 核查；不保存请求或认证头。"""
+    try:
+        out_path = _resolve_output_path(time.time())
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        return out_path
+    except OSError as exc:
+        print(f"Failed to save response: {exc}", file=sys.stderr)
+        return ""
+
+
 def _download_results(result):
     try:
         if not isinstance(result, dict):
@@ -400,6 +412,9 @@ def main():
     member_id = params.get("memberId", "")
 
     create_result = create_task(params)
+    saved_create = save_response(create_result)
+    if saved_create:
+        print(f"Saved task response: {saved_create}", file=sys.stderr)
     if create_result.get("error"):
         print(json.dumps(create_result, ensure_ascii=False))
         sys.exit(1)
@@ -419,13 +434,14 @@ def main():
     media_paths = _download_results(result)
 
     if media_paths:
+        save_response(result)
         print(f"Saved full response: {json.dumps(media_paths, ensure_ascii=False)}")
     else:
         serialized = json.dumps(result, ensure_ascii=False, indent=2)
         ts = int(time.time())
         out_path = _resolve_output_path(ts)
         try:
-            with open(out_path, "w") as f:
+            with open(out_path, "w", encoding="utf-8") as f:
                 f.write(serialized)
             print(f"Saved full response: {out_path} ({len(serialized)} bytes)")
         except OSError as e:

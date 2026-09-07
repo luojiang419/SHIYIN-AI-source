@@ -2179,7 +2179,7 @@ async function runSmartFilmNode(node){
             node.images=images; finalizePendingNode(output,images,meta,'image');
         } else {
             const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || '',videoSteps:node.steps || settingsForNodeRun.videoSteps || 12,videoMultimodal:node.multimodal !== undefined ? Boolean(node.multimodal) : Boolean(settingsForNodeRun.videoMultimodal),videoUseFrameRoles:node.useFrameRoles !== undefined ? Boolean(node.useFrameRoles) : Boolean(settingsForNodeRun.videoUseFrameRoles)};
-            const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings);
+            const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings,node);
             const images=(urls || []).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'video'}:{url:item,kind:'video'}).filter(item=>item.url);
             if(!images.length) throw new Error('视频生成没有返回结果');
             node.images=images; finalizePendingNode(output,images,meta,'video');
@@ -9094,7 +9094,8 @@ function addSmartGenerationLog({run, outputs=[], runMs=0, error=''}) {
         nodeId:run?.nodeId || '',
         nodeType:run?.nodeType || 'smart-image',
         model:smartRunTaskLabel(run),
-        request:smartRunRequestMeta(run),
+        request:{...smartRunRequestMeta(run),
+            ...(outputs.find(item => item?.generation_request)?.generation_request || {})},
         prompt:run?.prompt || '',
         outputs:outputItems,
         refs:run?.refs || [],
@@ -18341,7 +18342,7 @@ async function generateUrlsForCurrentSettings(node, prompt, refs, runSettings=se
     const activeSettings = runSettings || settings;
     if(activeSettings.engine === 'comfy') throw new Error('本地生成功能已移除，请改用在线 API 生成。');
     if(isApiLikeEngine(activeSettings.engine) && activeSettings.apiKind === 'video'){
-        return {urls:await runApiVideoGeneration(prompt, refs, activeSettings), kind:'video'};
+        return {urls:await runApiVideoGeneration(prompt, refs, activeSettings,node), kind:'video'};
     }
     if(isApiLikeEngine(activeSettings.engine)){
         const taskResult = await runApiGeneration(prompt, refs, activeSettings);
@@ -18950,7 +18951,7 @@ async function runGeneration(){
     render();
     try {
         if(isApiLikeEngine(settings.engine) && settings.apiKind === 'video'){
-            const outVideos = await runApiVideoGeneration(prompt, refs);
+            const outVideos = await runApiVideoGeneration(prompt, refs,settings,node);
             if(!outVideos.length) throw new Error(tr('smart.errNoOutVideos'));
             finalizePendingNode(pendingNode, outVideos, pendingMeta, 'video');
             if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
@@ -19151,7 +19152,7 @@ async function runPersistentSmartKlingVideo(payload){
             ...payload,
             task_id:taskId,
             canvas_id:String(canvas?.id || ''),
-            node_id:String(selectedNode()?.id || '')
+            node_id:String(payload.node_id || '')
         })
     }).then(async response => {
         if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.errRunFailed')));
@@ -19163,7 +19164,7 @@ async function runPersistentSmartKlingVideo(payload){
         if(status === 'succeeded'){
             const urls = resultMediaUrls(task.result || task);
             if(!urls.length) throw new Error(tr('smart.errNoOutVideos'));
-            return urls;
+            return window.CanvasFilmNodes.videoGenerationOutputs(urls,task.result?.request || task.request);
         }
         if(['failed','interrupted','canceled','cancelled'].includes(status)){
             throw new Error(String(task?.error || task?.message || tr('smart.errRunFailed')));
@@ -19176,7 +19177,7 @@ async function runPersistentSmartKlingVideo(payload){
     }
     throw new Error('可灵视频仍在生成中，请稍后刷新画布查看任务结果。');
 }
-async function runApiVideoGeneration(prompt, refs, runSettings=settings){
+async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNode=null){
     if(!runSettings.videoModel) throw new Error(tr('smart.errNoVideoModel'));
     try {
         const isKling = isKlingSmartSettings(runSettings);
@@ -19249,6 +19250,8 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             trusted_asset: useAssetUris,
             steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))
         };
+        Object.assign(payload,window.CanvasFilmNodes.videoPromptSubmission(sourceNode,payload));
+        payload.node_id=sourceNode?.id || '';
         if(isKling) return await runPersistentSmartKlingVideo(payload);
         const result = await fetch('/api/canvas-video', {
             method:'POST',
@@ -19256,7 +19259,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             body:JSON.stringify(payload)
         }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
         if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
-        return resultMediaUrls(result);
+        return window.CanvasFilmNodes.videoGenerationOutputs(resultMediaUrls(result),result?.request);
     } finally {
         transientSmartCloudLinks = [];
     }

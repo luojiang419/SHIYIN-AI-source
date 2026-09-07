@@ -219,6 +219,24 @@
         const prefix = map.text ? `资产映射：${map.text}。${hasProductDetail ? '产品主图与产品细节均为同一产品的证据，生成时必须优先保持产品结构、材质、颜色、Logo和文字真实一致。' : ''}` : '';
         return {prompt:[prefix,prompt].filter(Boolean).join('\n'), refs:map.refs, map};
     }
+    function videoPromptSubmission(node, payload){
+        // 保存原始来源，不把自动改写的结果回填编辑器；切换多个模型仍从原词适配。
+        const source = node?.videoPromptSource;
+        // 影视节点的资产映射前缀会随目标模型变化，创意正文才是来源匹配依据。
+        const original = String(payload.prompt || '').trim().replace(/^资产映射：[^\n]*\n/, '');
+        const sourceModel = source?.prompt === original ? source.model : '';
+        if(node && /h3/i.test(`${payload.provider_id} ${payload.model}`)){
+            node.videoPromptSource={prompt:original,model:/h3/i.test(payload.model || '') ? payload.model : 'MiniMax H3'};
+        }
+        return {...payload, prompt_source_model:sourceModel,
+            prompt_optimizer_provider:node?.visionProvider || '',
+            prompt_optimizer_model:node?.visionModel || ''};
+    }
+    function videoGenerationOutputs(items, request){
+        if(!request?.prompt_adaptation) return items;
+        return items.map(item => ({...(typeof item === 'string' ? {url:item,kind:'video'} : item),
+            generation_request:request}));
+    }
     function lineArtPrompt(node){
         return [LINE_ART_PROMPT,String(node?.prompt || '').trim()].filter(Boolean).join('\n');
     }
@@ -311,7 +329,7 @@
                 ${node.type === 'film-video' ? videoSettings : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option><option value="4:5" ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option><option ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
                 ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
             </div>
-            <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
+            <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run" title="${node.type === 'film-video' ? 'H3 提示词切换模型后，生成时会自动适配所选模型；原文保留' : action}"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
         </div>`;
     }
     function notify(options,node,render=false){ options.onChange?.(node,{render}); }
@@ -609,5 +627,5 @@
         const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
     }
 
-    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
+    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,videoPromptSubmission,videoGenerationOutputs,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
 })();

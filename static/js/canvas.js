@@ -11041,10 +11041,12 @@ async function runFilmNode(nodeId, opts={}){
             const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
             if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
             const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:node.aspectRatio || '16:9',resolution:node.resolution || '1080p',images:refs,videos:[],audios:[],enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:false,multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
-            const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+            const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(api.videoPromptSubmission(node,payload))});
             const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
+            run.request=requestMetaFromResult(data);
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));
             if(!outputs.length) throw new Error('视频生成没有返回结果');
+            addGenerationLog({run,outputs,runMs:nowMs() - Number(pending.startedAt || nowMs())});
             mergeGeneratedOutputs(node,outputs,false); out._pending=(out._pending || []).filter(item => !pendingIds.includes(item.id)); appendOutputImagesWithoutDuplicates(out,outputs); node.runStatus='done'; setStatus(`视频生成完成，共 ${outputs.length} 个结果`);
         }
         node.runError='';
@@ -14358,7 +14360,7 @@ function renderVideoBody(node){
         </div>
         ${generatorInlinePromptHtml(node, promptInputs.length)}
         <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}"><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? '再次生成视频' : tr('canvas.videoGenerate')}</button>
+            <button class="gen-btn ${node.running ? 'running' : ''}" title="H3 提示词切换模型后，生成时会自动适配所选模型；原文保留"><i data-lucide="clapperboard" class="w-4 h-4"></i>${node.running ? '再次生成视频' : tr('canvas.videoGenerate')}</button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -16389,6 +16391,7 @@ async function runVideoNode(nodeId, opts={}){
             canvas_id:canvas?.id || '',
             node_id:node.id || ''
         };
+        Object.assign(requestPayload, window.CanvasFilmNodes.videoPromptSubmission(node,requestPayload));
         if(persistentVideoTask){
             scheduleSave();
             await saveCanvas();
@@ -17994,6 +17997,11 @@ function requestMetaFromResult(result={}){
         prompt_original: result.prompt_original || result.params?.prompt_original || '',
         prompt_optimized: result.prompt || '',
         prompt_optimization: result.prompt_optimization || result.params?.prompt_optimization || {},
+        ...(result.request?.prompt_adaptation ? {
+            prompt_original:result.request.original_prompt,
+            prompt_optimized:result.request.prompt,
+            prompt_optimization:result.request.prompt_adaptation,
+        } : {}),
         backend: result.backend || '',
         prompt_id: result.prompt_id || '',
         workflow_json: result.workflow_json || '',

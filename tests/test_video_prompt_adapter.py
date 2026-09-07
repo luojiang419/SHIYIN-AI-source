@@ -8,9 +8,10 @@ from fastapi import HTTPException
 
 import main
 from canvas_core.video_prompt_adapter import (
-    adaptation_message, needs_video_prompt_adaptation, target_profile,
-    validate_adapted_prompt,
+    SEMANTIC_EQUIVALENCE_CONTRACT, adaptation_message, build_adaptation_system,
+    needs_video_prompt_adaptation, target_profile, validate_adapted_prompt,
 )
+from canvas_core.video_prompt_registry import PROFILES, registered_profile
 
 
 H3 = 'integrated_multimodal_description:\nA woman walks left and says <d>[Chinese]你好</d>.\noverall_soundscape:\nFootsteps.\nnon_diegetic_music:\nN/A'
@@ -42,6 +43,9 @@ def service(monkeypatch):
     ('gateway', 'doubao-seedance-2-5-pro-260901', 'seedance-2.5'),
     ('gateway', 'seedance-1.0-pro', 'generic'),
     ('gateway', 'seedance-2.50-pro', 'generic'),
+    ('linkfox', '海螺2.3', 'generic'),
+    ('linkfox', 'wan2.6', 'generic'),
+    ('linkfox', 'HappyHorse', 'generic'),
     ('gateway', 'veo3', 'generic'),
 ])
 def test_target_model_profiles(provider, model, expected):
@@ -54,6 +58,33 @@ def test_detection_includes_old_six_section_prompts_and_source_metadata():
     assert needs_video_prompt_adaptation('A woman walks.', 'jimeng', '', 'MiniMax H3')
     assert not needs_video_prompt_adaptation(H3, 'gateway', 'MiniMax H3')
     assert not needs_video_prompt_adaptation('A woman walks.', 'jimeng', '')
+
+
+def test_only_core_model_families_have_specialized_skills():
+    assert set(PROFILES) == {'minimax-h3', 'kling-cli', 'kling-linkfox', 'seedance', 'seedance-2.5'}
+    for model in ('海螺2.3', 'wan2.6', 'HappyHorse', 'veo3-fast', 'unknown-video'):
+        assert registered_profile('linkfox', model) == 'generic'
+        skill, profile = main._video_prompt_skill('linkfox', model)
+        assert profile == 'generic'
+        assert '通用视频提示词规范' in skill
+        assert '通用视频模型' in build_adaptation_system(model, 2000)
+
+
+@pytest.mark.parametrize('profile,required', [
+    ('minimax-h3', '三字段或六字段模式'),
+    ('kling-omni', '<<<image_N>>> / <<<video_N>>>'),
+    ('kling', '不得输出 Omni 标签'),
+    ('kling-linkfox', '不得伪造三角括号主体绑定'),
+    ('seedance', '优先相对节拍'),
+    ('seedance-2.5', '连续整数秒时间戳'),
+    ('generic', '不得输出 H3 字段/XML'),
+])
+def test_all_targets_share_semantic_equivalence_and_keep_their_own_format(profile, required):
+    system = build_adaptation_system(profile, 7000)
+    assert SEMANTIC_EQUIVALENCE_CONTRACT in system
+    assert required in system
+    for invariant in ('素材与身份', '首尾状态与空间', '动作与物理', '摄影与光影', '声音与文字', '叙事与约束'):
+        assert invariant in system
 
 
 @pytest.mark.parametrize('provider,model,prompt', [
@@ -90,6 +121,7 @@ def test_sync_endpoint_sends_adapted_prompt_and_keeps_original(service, monkeypa
     assert not request.web_search
     assert request.images == []
     assert json.loads(request.message)['generation_settings']['duration'] == 8
+    assert json.loads(request.message)['generation_settings']['source_model'] == ''
 
 
 def test_h3_longer_than_kling_limit_is_converted_before_limit_check(service):
@@ -158,7 +190,10 @@ def test_reference_roles_and_subject_numbers_do_not_get_reindexed():
         'tag': '图片1', 'source': '<Picture 1>', 'source_aliases': ['图片1', '<<<image_1>>>', '[Image1]'], 'role': 'first_frame', 'label': '演员'}
     assert message['reference_manifest'][1]['role'] == 'last_frame'
     assert message['reference_manifest'][-1]['tag'] == '音频1'
+    assert message['target_profile'] == 'seedance'
     assert '<Subject 3>' in message['original_prompt']
+    assert SEMANTIC_EQUIVALENCE_CONTRACT in main.video_prompt_polish_system_prompt('gateway', 'seedance2.5')
+    assert SEMANTIC_EQUIVALENCE_CONTRACT in main._video_auto_parse_system_prompt('gateway', 'seedance2.5', '')
 
 
 def test_seedance_2_skill_contains_official_task_and_prompt_rules():
@@ -207,10 +242,21 @@ def test_seedance_25_skill_contains_official_task_and_prompt_rules():
     ('图片1和图片2中的女人说“你好”，无配乐', 'seedance', '不存在'),
     ('<<<image_1>>> <<<element_1>>> 说“你好”，无配乐', 'kling-omni', '不支持'),
     ('<<<image_1>>> 中的女人说“你好”', 'kling-omni', '无配乐'),
+    ('图片1中的女人说“你好”，无配乐', 'generic', ''),
+    ('[Image1]中的女人说“你好”，无配乐', 'generic', 'HappyHorse'),
 ])
 def test_reference_and_audio_validation(text, profile, error):
     result = validate_adapted_prompt(text, H3, profile, {'image': 1, 'video': 0, 'audio': 0}, 2500)
     assert error in result if error else result == ''
+
+
+def test_no_subtitle_intent_must_survive_cross_model_translation():
+    original = '图片1中的女人说“你好”，无配乐，不要字幕。'
+    counts = {'image': 1, 'video': 0, 'audio': 0}
+    missing = '图片1中的女人说“你好”，无配乐。'
+    assert '无字幕' in validate_adapted_prompt(missing, original, 'seedance-2.5', counts, 2000)
+    kept = '图片1中的女人说“你好”，无配乐，不要字幕。'
+    assert validate_adapted_prompt(kept, original, 'seedance-2.5', counts, 2000) == ''
 
 
 @pytest.fixture

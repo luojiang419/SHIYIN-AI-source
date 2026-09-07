@@ -36,11 +36,22 @@ def test_kling_skill_has_source_note():
 
 
 def test_natural_reference_mentions_follow_selected_skill_tags():
-    kling = normalize_video_prompt_references("图1里的主体看向图2，参考视频1的动作", "kling-cli", 2, 1)
-    assert kling == "<<<image_1>>>里的主体看向<<<image_2>>>，<<<video_1>>>的动作"
+    kling_omni = normalize_video_prompt_references("图1里的主体看向图2，参考视频1的动作", "kling-omni", 2, 1)
+    assert kling_omni == "<<<image_1>>>里的主体看向<<<image_2>>>，<<<video_1>>>的动作"
+
+    kling = normalize_video_prompt_references("图1里的主体看向图2，参考视频1的动作", "kling", 2, 1)
+    assert kling == "图片1里的主体看向图片2，视频1的动作"
+
+    generic = normalize_video_prompt_references(
+        "<Picture 1>里的<Subject 1>看向[Image2]，参考<Video 1>的动作", "generic", 2, 1
+    )
+    assert generic == "图片1里的主体1看向图片2，视频1的动作"
 
     h3 = normalize_video_prompt_references("图片1作为首帧，主体1走向图片2", "minimax-h3", 2, 0)
     assert h3 == "<Picture 1>作为首帧，<Subject 1>走向<Picture 2>"
+
+    h3_from_legacy = normalize_video_prompt_references("[Image1]中的主体", "minimax-h3", 1, 0)
+    assert h3_from_legacy == "<Picture 1>中的主体"
 
 
 def test_reference_manifest_requires_vision_model_to_bind_subjects():
@@ -49,3 +60,9 @@ def test_reference_manifest_requires_vision_model_to_bind_subjects():
     assert labels[0].startswith("<Picture 1>")
     assert "<Subject N>" in context
     assert "同一主体时才合并" in context
+
+
+def test_kling_omni_manifest_uses_only_registered_asset_tags():
+    context, manifest, _ = video_prompt_reference_manifest("kling-omni", 2, 1)
+    assert [item["tag"] for item in manifest] == ["<<<image_1>>>", "<<<image_2>>>", "<<<video_1>>>"]
+    assert "不得根据画面内容凭空创建 <<<element_N>>> 或 <<<voice_N>>>" in context

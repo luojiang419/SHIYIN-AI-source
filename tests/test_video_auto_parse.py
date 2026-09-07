@@ -49,6 +49,7 @@ def test_auto_parse_system_prompt_injects_selected_video_skill_content():
     assert "当前视频模型必须执行的 skill（kling-cli）" in kling
     assert "Latest official Omni reference syntax" in kling
     assert "<<<element_1>>>" in kling
+    assert "不得根据画面内容凭空创建 <<<element_N>>> 或 <<<voice_N>>>" in kling
     assert "自主导演模式" in kling
     assert "禁止输出或追加与镜头无关的泛化质量标签" in kling
     assert "多主体不要同步机械重复同一动作" in kling
@@ -127,7 +128,7 @@ def test_auto_parse_forwards_node_prompt_and_requires_all_reference_images():
     assert "class CanvasPromptPolishRequest" in MAIN
     assert "duration: Optional[float] = None" in MAIN
     assert "本次视频节点控制参数（仅供内部规划，不得原样输出）" in MAIN
-    assert "最终提示词不得出现视频模型名称、时长数值、画幅、分辨率" in MAIN
+    assert "最终提示词不得复述视频模型名称、画幅、分辨率" in MAIN
 
 
 def test_empty_prompt_rechecks_auto_parse_mode_at_click_time():
@@ -185,7 +186,7 @@ def test_reference_coverage_uses_current_model_tags():
     assert h3["complete"] is False
 
     kling = video_prompt_reference_coverage(
-        "<<<image_1>>> and <<<image_2>>>", "kling-cli", 2
+        "<<<image_1>>> and <<<image_2>>>", "kling-omni", 2
     )
     assert kling["complete"] is True
 
@@ -316,6 +317,17 @@ def test_director_rules_are_content_driven_not_case_template_driven():
     assert "先识别当前参考图与用户描述的真实语境" in system
     assert "没有充分视觉或叙事依据时，宁可保持克制" in system
     assert "不得预设牛仔裤、牧场、动物或任何示例主体" in system
+
+
+def test_model_specific_timing_rules_do_not_override_each_other():
+    h3 = _video_auto_parse_system_prompt("minimax-h3", "MiniMax H3", "mapping", duration=8)
+    assert "精确到毫秒的镜头切点" in h3
+    seedance_25 = _video_auto_parse_system_prompt("gateway", "seedance2.5", "mapping", duration=30)
+    assert "连续整数秒时间戳" in seedance_25
+    seedance_20 = _video_auto_parse_system_prompt("gateway", "seedance2.0", "mapping", duration=15)
+    assert "开场、随后、最后等相对节拍" in seedance_20
+    kling = _video_auto_parse_system_prompt("kling-cli", "kling-v3-omni", "mapping", duration=10)
+    assert "每镜时长或时间段" in kling
 
 
 def test_video_prompt_output_removes_generic_quality_suffix_without_touching_scene_text():

@@ -95,7 +95,7 @@ from canvas_core.image_upload import normalize_image_orientation
 from canvas_core.video_prompt_quality import compact_h3_prompt, parse_h3_prompt
 from canvas_core.video_prompt_registry import PROFILES as VIDEO_PROMPT_PROFILES, registered_profile, load_registered_skill
 from canvas_core.video_prompt_adapter import (
-    needs_video_prompt_adaptation, target_profile, source_reference_error,
+    SEMANTIC_EQUIVALENCE_CONTRACT, needs_video_prompt_adaptation, target_profile, source_reference_error,
     build_adaptation_system, adaptation_message, clean_adapted_prompt, validate_adapted_prompt,
 )
 from canvas_core.canvas_placeholder_migration import migrate_orphan_output_pending_once
@@ -21377,7 +21377,7 @@ async def invoke_kling_cli_video(payload: CanvasVideoRequest, *, submit_only: bo
                 "model": model,
                 "prompt": normalize_video_prompt_references(
                     str(payload.prompt or "").strip(),
-                    "kling-cli",
+                    target_profile("kling-cli", requested_model or actual_model_name),
                     image_count=len(images),
                     video_count=0,
                 ) if not payload._prompt_adapted else payload.prompt.strip(),
@@ -22651,7 +22651,9 @@ async def prepare_video_generation_prompt(payload: CanvasVideoRequest, provider:
         payload.prompt, profile, [ref.model_dump() for ref in payload.images], payload.videos, payload.audios,
         {"model": payload.model, "duration": payload.duration, "aspect_ratio": payload.aspect_ratio,
          "resolution": payload.resolution, "generate_audio": payload.generate_audio,
-         "multimodal": payload.multimodal, "model_parameters": payload.model_parameters},
+         "multimodal": payload.multimodal, "model_parameters": payload.model_parameters,
+         "source_provider": (payload.prompt_source_provider if str(payload.prompt_source_model or "").lower() != str(payload.model or "").lower() else ""),
+         "source_model": (payload.prompt_source_model if str(payload.prompt_source_model or "").lower() != str(payload.model or "").lower() else "")},
     )
     cache_key = hashlib.sha256(json.dumps({
         'account': current_account_id(), 'message': message, 'system': system,
@@ -23345,19 +23347,17 @@ def _video_prompt_skill(provider: str, model: str) -> tuple[str, str]:
     return content or "请按当前视频模型官方提示词格式进行简洁结构化，保持用户原意。", skill_id
 
 
-def _video_prompt_reference_tag(skill_id: str, kind: str, index: int) -> str:
-    """返回当前视频模型 skill 使用的官方资产/主体标签。"""
+def _video_prompt_reference_tag(profile: str, kind: str, index: int) -> str:
+    """返回目标格式使用的资产或主体标签。"""
     number = max(1, int(index or 1))
-    if skill_id in VIDEO_PROMPT_PROFILES and kind in {'image', 'video', 'audio'}:
+    if kind == "subject":
+        if profile == "minimax-h3":
+            return f"<Subject {number}>"
+        return f"主体{number}"
+    if kind in {'image', 'video', 'audio'}:
         from canvas_core.video_prompt_adapter import reference_tag
-        return reference_tag(skill_id, kind, number)
-    if skill_id == "kling-cli":
-        tag_kind = {"image": "image", "video": "video", "subject": "element", "audio": "voice"}.get(kind, kind)
-        return f"<<<{tag_kind}_{number}>>>"
-    if skill_id == "minimax-h3":
-        tag_kind = {"image": "Picture", "video": "Video", "subject": "Subject", "audio": "Audio"}.get(kind, kind.title())
-        return f"<{tag_kind} {number}>"
-    return f"{kind.title()} {number}"
+        return reference_tag(profile, kind, number)
+    return f"{kind}{number}"
 
 
 def _replace_numbered_prompt_mentions(text: str, patterns: List[str], replacement, maximum: int = 0) -> str:
@@ -23374,17 +23374,18 @@ def _replace_numbered_prompt_mentions(text: str, patterns: List[str], replacemen
 
 def normalize_video_prompt_references(
     prompt: str,
-    skill_id: str,
+    profile: str,
     image_count: int = 0,
     video_count: int = 0,
 ) -> str:
-    """将图1/图片1/视频1等自然引用确定性转换为所选 skill 的标签。"""
+    """将图1/图片1/视频1等自然引用确定性转换为目标格式标签。"""
     output = str(prompt or "")
-    image_patterns = [r"<<<\s*image_(\d+)\s*>>>"]
-    video_patterns = [r"<<<\s*video_(\d+)\s*>>>"]
-    if skill_id == "kling-cli":
-        image_patterns.append(r"<\s*Picture\s+(\d+)\s*>")
-        video_patterns.append(r"<\s*Video\s+(\d+)\s*>")
+    image_patterns = [
+        r"<<<\s*image_(\d+)\s*>>>",
+        r"<\s*Picture\s+(\d+)\s*>",
+        r"\[\s*Image\s*(\d+)\s*\]",
+    ]
+    video_patterns = [r"<<<\s*video_(\d+)\s*>>>", r"<\s*Video\s+(\d+)\s*>"]
     image_patterns.extend([
         r"第\s*(\d+)\s*张\s*(?:参考)?(?:图片|图)",
         r"@?(?:参考)?(?:图片|图)\s*(\d+)",
@@ -23397,21 +23398,19 @@ def normalize_video_prompt_references(
     ])
     if image_count > 0:
         output = _replace_numbered_prompt_mentions(
-            output, image_patterns, lambda index: _video_prompt_reference_tag(skill_id, "image", index), image_count
+            output, image_patterns, lambda index: _video_prompt_reference_tag(profile, "image", index), image_count
         )
     if video_count > 0:
         output = _replace_numbered_prompt_mentions(
-            output, video_patterns, lambda index: _video_prompt_reference_tag(skill_id, "video", index), video_count
+            output, video_patterns, lambda index: _video_prompt_reference_tag(profile, "video", index), video_count
         )
-    if skill_id == "kling-cli":
-        subject_patterns = [r"<\s*Subject\s+(\d+)\s*>", r"@?(?:主体|人物)\s*(\d+)", r"(?<!<)\bsubject\s*#?\s*(\d+)\b"]
-    elif skill_id == "minimax-h3":
+    if profile == "minimax-h3":
         subject_patterns = [r"<<<\s*element_(\d+)\s*>>>", r"(?:主体|人物)\s*(\d+)", r"(?<!<)\belement\s*#?\s*(\d+)\b"]
     else:
-        subject_patterns = []
+        subject_patterns = [r"<\s*Subject\s+(\d+)\s*>", r"<<<\s*element_(\d+)\s*>>>"]
     if subject_patterns:
         output = _replace_numbered_prompt_mentions(
-            output, subject_patterns, lambda index: _video_prompt_reference_tag(skill_id, "subject", index)
+            output, subject_patterns, lambda index: _video_prompt_reference_tag(profile, "subject", index)
         )
     return output
 
@@ -23513,6 +23512,7 @@ async def compact_video_prompt_if_needed(
     limit = video_prompt_limit(video_provider, video_model)
     cleaned = clean_video_prompt_output(text)
     _, skill_id = _video_prompt_skill(video_provider, video_model)
+    prompt_profile = target_profile(video_provider, video_model)
     if skill_id == "minimax-h3":
         async def complete_h3(system, message):
             request = CanvasLLMRequest(
@@ -23539,12 +23539,12 @@ async def compact_video_prompt_if_needed(
         for _ in range(2):
             result = await canvas_llm(CanvasLLMRequest(
                 message=cleaned + ('\n需修正：' + problem if problem else ''),
-                system_prompt=build_adaptation_system(skill_id, limit, skill),
+                system_prompt=build_adaptation_system(prompt_profile, limit, skill),
                 provider=llm_provider or 'comfly', model=llm_model, ms_model=ms_model,
                 web_search=False,
             ))
             candidate = clean_adapted_prompt(result.get('text') or '')
-            problem = validate_adapted_prompt(candidate, cleaned, skill_id,
+            problem = validate_adapted_prompt(candidate, cleaned, prompt_profile,
                 {'image': len(images or []), 'video': len(videos or []), 'audio': 0}, limit)
             if not problem:
                 return candidate, True, limit
@@ -23619,11 +23619,11 @@ _VIDEO_ACTION_CHOREOGRAPHY_REQUIREMENTS = (
 )
 
 
-def video_prompt_reference_coverage(text: str, skill_id: str, image_count: int) -> Dict[str, Any]:
+def video_prompt_reference_coverage(text: str, profile: str, image_count: int) -> Dict[str, Any]:
     """确定性检查最终提示词是否覆盖全部规范图片标签。"""
     output = str(text or "")
     expected = [
-        _video_prompt_reference_tag(skill_id, "image", index)
+        _video_prompt_reference_tag(profile, "image", index)
         for index in range(1, max(0, int(image_count or 0)) + 1)
     ]
     found = [tag for tag in expected if tag in output]
@@ -23632,7 +23632,7 @@ def video_prompt_reference_coverage(text: str, skill_id: str, image_count: int) 
 
 
 def video_prompt_reference_manifest(
-    skill_id: str,
+    profile: str,
     image_count: int,
     video_count: int,
     image_labels: Optional[List[str]] = None,
@@ -23642,7 +23642,7 @@ def video_prompt_reference_manifest(
     canonical_image_labels: List[str] = []
     labels = image_labels or []
     for index in range(1, max(0, image_count) + 1):
-        tag = _video_prompt_reference_tag(skill_id, "image", index)
+        tag = _video_prompt_reference_tag(profile, "image", index)
         label = str(labels[index - 1] or "").strip() if index <= len(labels) else ""
         entries.append({"kind": "image", "index": index, "tag": tag, "label": label})
         canonical_image_labels.append(f"{tag}；用户口语图{index}/图片{index}" + (f"；{label}" if label else ""))
@@ -23650,7 +23650,7 @@ def video_prompt_reference_manifest(
         entries.append({
             "kind": "video",
             "index": index,
-            "tag": _video_prompt_reference_tag(skill_id, "video", index),
+            "tag": _video_prompt_reference_tag(profile, "video", index),
             "label": "",
         })
     if not entries:
@@ -23660,30 +23660,35 @@ def video_prompt_reference_manifest(
         + (f" 资产说明：{item['label']}。" if item.get("label") else "")
         for item in entries
     ]
-    if skill_id == "minimax-h3":
+    if profile == "minimax-h3":
         subject_rule = (
             "逐张检查画面：当用户提到图片中的人物、动物、产品、道具、场景或其他可复用可见主体时，"
             "必须按首次出现顺序分配 <Subject N>，并在 subject_definitions 中写明其来自哪个 <Picture N> 及可见识别特征。"
             "只有有充分视觉证据是同一主体时才合并多张图片来源；不同主体不得共用标签。"
             "如果启用了 <Subject N>，按 Ref2VA 六段结构输出；单纯作为首尾帧锚点且未抽取主体时才保持 I2VA/FL2VA/L2VA。"
         )
-    elif skill_id == "kling-cli":
+    elif profile == "kling-omni":
         subject_rule = (
             "逐张检查画面：当用户提到图片中的人物、动物、产品、道具、场景或其他可复用主体时，"
-            "必须按首次出现顺序分配 <<<element_N>>>，并在首次出现处用简短可见特征说明它来自哪个 <<<image_N>>>。"
-            "只有有充分视觉证据是同一主体时才合并；不同主体不得共用 element 标签。"
+            "必须直接使用对应的 <<<image_N>>> 说明身份来源和可见特征；当前请求只注册图片/视频引用，"
+            "不得根据画面内容凭空创建 <<<element_N>>> 或 <<<voice_N>>>。"
         )
-    elif skill_id in {"seedance", "seedance-2.5"}:
+    elif profile in {"seedance", "seedance-2.5"}:
         subject_rule = (
             "按官方规则用 2-3 个稳定可见特征定义主体；同一主体来自多图时分别说明面部、服装、动作或场景职责，"
             "多主体使用稳定名称并在后文持续复用。简单场景也要用主体名称@图片N或等价表达保持绑定。"
         )
     else:
         subject_rule = "结合参考画面识别用户提到的主体，保持编号和身份一致，不得臆造画面外主体。"
-    if skill_id in {"seedance", "seedance-2.5"}:
+    if profile in {"seedance", "seedance-2.5"}:
         reference_format_rule = (
-            f"\n{('Seedance 2.5' if skill_id == 'seedance-2.5' else 'Seedance 2.0')} 的官方规范引用就是图片1、图片2、视频1、音频1等自然语言编号；"
+            f"\n{('Seedance 2.5' if profile == 'seedance-2.5' else 'Seedance 2.0')} 的官方规范引用就是图片1、图片2、视频1、音频1等自然语言编号；"
             "必须保留这些编号并与当前上传顺序一致，不得转换为 H3 或 Kling 私有标签。"
+        )
+    elif profile in {"generic", "kling", "kling-linkfox"}:
+        reference_format_rule = (
+            "\n当前目标使用图片1、图片2、视频1、音频1等自然语言编号；必须保留编号并与上传顺序一致，"
+            "不得输出 H3 字段/XML、Kling Omni 三角标签、海螺方括号运镜或 HappyHorse [ImageN]。"
         )
     else:
         reference_format_rule = (
@@ -23712,6 +23717,7 @@ def video_prompt_polish_system_prompt(
     provider = str(video_provider or "").strip().lower()
     model = str(video_model or "").strip()
     skill_text, skill_id = _video_prompt_skill(provider, model)
+    prompt_profile = target_profile(provider, model)
     model_hint = f"当前视频模型：{model}。" if model else ""
     expansion = (
         "这是纯文本生成视频，可在不改变原意的前提下补足最少量的镜头上下文，使单句运镜指令可执行。"
@@ -23738,6 +23744,19 @@ def video_prompt_polish_system_prompt(
             "长叙事可使用连续整数秒时间戳，关键帧首句声明图片顺序，编辑必须写清范围与保持不变项，"
             "不得为了简短丢失动作过程、声音、编辑边界或结尾。"
         )
+    elif skill_id == "kling-cli":
+        output_constraint = (
+            "严格执行上述可灵 skill："
+            + ("本次是 Omni 引用格式，只能使用清单中真实存在的 <<<image_N>>> / <<<video_N>>>，不得虚构 element/voice 标签；"
+               if prompt_profile == "kling-omni" else
+               "本次是普通可灵格式，使用图片N/视频N/音频N自然语言编号，不得输出任何 Omni 三角标签；")
+            + "按 Shot 顺序保留景别、主体动作和一个主运镜，需要时可写每镜时长，完整保留对白和原生声音意图。"
+        )
+    elif skill_id == "kling-linkfox":
+        output_constraint = (
+            "严格执行上述 LinkFox 可灵 skill，使用图片N等自然语言编号，不得输出未注册的 Omni element/voice 标签；"
+            "按镜头保留主体、动作、构图、一个主运镜、光影、对白和声音意图。"
+        )
     else:
         output_constraint = "整体保持简洁，通常 1-4 句即可。"
     return (
@@ -23745,6 +23764,7 @@ def video_prompt_polish_system_prompt(
         "用户原意优先：不得改变主体、动作、镜头方向、时长意图、情绪或否定要求；不确定的信息保持不变或省略。"
         "禁止追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed），案例经验只能迁移方法，不能复制案例内容。"
         f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
+        f"{SEMANTIC_EQUIVALENCE_CONTRACT}"
         f"当前选用的内置提示词 skill（{skill_id}）如下：\n{skill_text}\n"
         f"{expansion}{_VIDEO_DIRECTOR_EXPANSION_RULES}{output_constraint}{reference_context}"
     )
@@ -23760,12 +23780,27 @@ def _video_auto_parse_system_prompt(
 ) -> str:
     """自动解析单次多模态请求的导演提示词约束。"""
     skill_text, skill_id = _video_prompt_skill(video_provider, video_model)
+    prompt_profile = target_profile(video_provider, video_model)
     model_hint = f"当前视频模型：{video_model}（skill={skill_id}）。"
     settings_hint = "；".join(filter(None, [
         f"目标时长 {duration:g} 秒" if duration else "",
         f"画幅 {aspect_ratio}" if aspect_ratio else "",
         f"分辨率 {resolution}" if resolution else "",
     ]))
+    if prompt_profile == "minimax-h3":
+        timing_rule = "按 H3 规范使用精确到毫秒的镜头切点和首尾帧对齐时间，所有时间必须落在目标总时长内。"
+    elif prompt_profile == "seedance-2.5":
+        timing_rule = "可按 Seedance 2.5 规范使用连续整数秒时间戳，时间段必须覆盖目标总时长且没有无意空档。"
+    elif prompt_profile in {"kling", "kling-omni", "kling-linkfox"}:
+        timing_rule = "可按可灵规范在多镜头中标明每镜时长或时间段，所有镜头合计必须匹配目标总时长。"
+    else:
+        timing_rule = "使用开场、随后、最后等相对节拍表达时间推进，不在正文复述节点时长数值。"
+    if prompt_profile == "kling-omni":
+        format_rule = "只使用素材清单真实注册的 <<<image_N>>> / <<<video_N>>>；不得根据画面内容凭空创建 <<<element_N>>> 或 <<<voice_N>>>。"
+    elif prompt_profile in {"kling", "kling-linkfox"}:
+        format_rule = "使用图片N/视频N/音频N自然语言编号，不得输出任何 Kling Omni 三角标签。"
+    else:
+        format_rule = ""
     return (
         "你是资深影视分镜导演和视频模型提示词工程师。只输出最终可直接提交给视频模型的一段提示词，不要解释分析过程、不要输出案例摘要。"
         "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须把用户提示词中的故事情节、角色关系、动作和情绪作为叙事主线，同时结合全部图片和本 skill 生成结果；不得只参考提示词或只参考首尾图片。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
@@ -23777,14 +23812,19 @@ def _video_auto_parse_system_prompt(
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
         f"{'H3 Ref2VA 生成任务的 detailed_description 通常写 350-500 个英文词；在不牺牲时间节拍和动作因果的前提下，按镜头信息量充分展开，禁止压缩成每镜头一两句静态摘要。' if skill_id == 'minimax-h3' else ''}"
         f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
-        f"{('内部规划约束（仅供导演思考，不得原样输出）：' + settings_hint + '。请用这些参数控制镜头节奏和构图比例，但最终提示词不得出现视频模型名称、时长数值、画幅、分辨率或‘目标时长/节点参数’等设置说明；用开场、随后、最后等相对节拍表达时间推进。') if settings_hint else ''}"
+        f"{SEMANTIC_EQUIVALENCE_CONTRACT}"
+        f"{format_rule}"
+        f"{('内部规划约束（仅供导演思考，不得原样输出）：' + settings_hint + '。请用这些参数控制镜头节奏和构图比例；最终不得复述视频模型名称、画幅、分辨率或节点参数字段。' + timing_rule) if settings_hint else ''}"
         "直接依据本次素材和下方完整规范生成提示词；本视觉请求不执行联网检索。若已提供案例摘要，仅作为可选方法参考，不得等待额外搜索。"
         "案例仅用于提取镜头组织、节奏和可执行动作的方法，严禁复制案例中的主体、场景、道具、故事或措辞；最终内容必须完全围绕本次图片和用户输入。"
         "禁止输出或追加与镜头无关的泛化质量标签/参数（例如 Photorealistic、8k resolution、masterpiece、best quality、highly detailed 等），也不要以这类短语单独成句收尾。"
         "输出前在内部逐项检查：内容是否全部来自本次素材、是否有明确可执行的时间推进和镜头运动、引用编号是否正确、格式是否严格匹配当前模型；只输出通过检查后的最终提示词。最终输出不得泄露视频模型名称、画幅、分辨率或节点参数字段。"
-        "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；最终不得残留‘图1/图片2’等自然编号。"
-        f"\n{reference_context}"
-        f"\n\n===== 当前视频模型必须执行的 skill（{skill_id}）=====\n{skill_text}"
+        "严格遵循下方当前模型 skill 的字段、引用标签、时间格式和章节顺序；"
+        + ("最终必须使用对应的 H3 或 Kling Omni 规范标签，不得残留图N/图片N等自然编号。"
+           if prompt_profile in {"minimax-h3", "kling-omni"} else
+           "最终必须使用图片N/视频N/音频N等自然语言编号，不得转换为任何平台私有标签。")
+        + f"\n{reference_context}"
+        + f"\n\n===== 当前视频模型必须执行的 skill（{skill_id}）=====\n{skill_text}"
     )
 
 @app.post("/api/canvas-video-auto-parse")
@@ -23800,19 +23840,25 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
             images=[AIReference(url=url, label=payload.image_labels[i] if i < len(payload.image_labels) else '')
                     for i, url in enumerate(payload.images)], videos=payload.videos,
         ), get_api_provider(video_provider))
-        return {'text': prepared.prompt, **info, 'skill_id': _video_prompt_skill(video_provider, payload.video_model)[1]}
+        return {
+            'text': prepared.prompt,
+            **info,
+            'skill_id': _video_prompt_skill(video_provider, payload.video_model)[1],
+            'prompt_profile': target_profile(video_provider, payload.video_model),
+        }
     images = [str(item or "").strip() for item in (payload.images or []) if str(item or "").strip()][:20]
     if not images:
         raise HTTPException(status_code=400, detail="自动解析至少需要一张图片")
     _, skill_id = _video_prompt_skill(payload.video_provider, payload.video_model)
+    prompt_profile = target_profile(payload.video_provider, payload.video_model)
     labels = [str(item or "").strip() for item in (payload.image_labels or [])]
     reference_context, manifest, canonical_labels = video_prompt_reference_manifest(
-        skill_id, image_count=len(images), video_count=0, image_labels=labels
+        prompt_profile, image_count=len(images), video_count=0, image_labels=labels
     )
     raw_user_prompt = str(payload.prompt or "").strip()
     user_prompt = normalize_video_prompt_references(
         raw_user_prompt,
-        skill_id,
+        prompt_profile,
         image_count=len(images),
         video_count=0,
     )
@@ -23881,7 +23927,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
     )
     text = normalize_video_prompt_references(
         text,
-        skill_id,
+        prompt_profile,
         image_count=len(images),
         video_count=0,
     )
@@ -23898,10 +23944,10 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
         videos=[],
         progress_callback=progress_callback,
     )
-    text = normalize_video_prompt_references(text, skill_id, image_count=len(images), video_count=0)
+    text = normalize_video_prompt_references(text, prompt_profile, image_count=len(images), video_count=0)
     if len(text) > prompt_limit:
         text = _hard_limit_video_prompt(text, prompt_limit)
-    coverage = video_prompt_reference_coverage(text, skill_id, len(images))
+    coverage = video_prompt_reference_coverage(text, prompt_profile, len(images))
     if not coverage["complete"]:
         # 模型偶尔会完成故事却漏写一个规范图片标签；用同一 provider/model 做一次
         # 轻量格式修复，保留原故事和图片顺序，避免用户因一次格式疏漏反复点击。
@@ -23930,11 +23976,11 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
         repaired_result = await llm_call(repair_request)
         repaired_text = clean_video_prompt_output(str(repaired_result.get("text") or "").strip())
         repaired_text = normalize_video_prompt_references(
-            repaired_text, skill_id, image_count=len(images), video_count=0
+            repaired_text, prompt_profile, image_count=len(images), video_count=0
         )
         if repaired_text:
             text = repaired_text
-            coverage = video_prompt_reference_coverage(text, skill_id, len(images))
+            coverage = video_prompt_reference_coverage(text, prompt_profile, len(images))
         if not coverage["complete"]:
             missing = "、".join(coverage["missing"])
             raise HTTPException(
@@ -23948,6 +23994,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
         "video_provider": payload.video_provider,
         "video_model": payload.video_model,
         "skill_id": skill_id,
+        "prompt_profile": prompt_profile,
         "input_prompt": raw_user_prompt,
         "image_count": len(images),
         "reference_manifest": manifest,
@@ -24074,14 +24121,15 @@ async def canvas_llm(payload: CanvasLLMRequest, progress_callback=None):
 async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_callback=None):
     """根据所选视频模型规范，调用多模态视觉模型轻量润色提示词。"""
     _, skill_id = _video_prompt_skill(payload.video_provider, payload.video_model)
+    prompt_profile = target_profile(payload.video_provider, payload.video_model)
     normalized_prompt = normalize_video_prompt_references(
         payload.prompt,
-        skill_id,
+        prompt_profile,
         image_count=len(payload.images or []),
         video_count=len(payload.videos or []),
     )
     reference_context, reference_manifest, canonical_image_labels = video_prompt_reference_manifest(
-        skill_id,
+        prompt_profile,
         image_count=len(payload.images or []),
         video_count=len(payload.videos or []),
         image_labels=payload.image_labels,
@@ -24095,10 +24143,18 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
         f"分辨率 {payload.resolution}" if payload.resolution else "",
     ]))
     if settings_hint:
+        if prompt_profile == "minimax-h3":
+            timing_rule = "按 H3 规范保留毫秒级切镜和首尾帧对齐时间，全部时间落在节点总时长内。"
+        elif prompt_profile == "seedance-2.5":
+            timing_rule = "按 Seedance 2.5 规范使用连续整数秒时间戳，时间段覆盖节点总时长。"
+        elif prompt_profile in {"kling", "kling-omni", "kling-linkfox"}:
+            timing_rule = "需要多镜头时可按可灵规范写每镜时长或时间段，镜头总时长与节点一致。"
+        else:
+            timing_rule = "使用开场、随后、最后等相对节拍，不在正文复述节点时长数值。"
         system_prompt += (
             f"本次视频节点控制参数（仅供内部规划，不得原样输出）：{settings_hint}。"
-            "请据此调整镜头数量、动作节拍、收束点和构图比例；最终提示词不得出现视频模型名称、时长数值、画幅、分辨率或‘目标时长/节点参数’等设置说明，"
-            "请用开场、随后、最后等相对节拍表达时间推进。"
+            "请据此调整镜头数量、动作节拍、收束点和构图比例；最终提示词不得复述视频模型名称、画幅、分辨率或‘目标时长/节点参数’等设置字段。"
+            + timing_rule
         )
     if payload.search_context.strip():
         normalized_prompt += (
@@ -24128,7 +24184,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
     text = clean_video_prompt_output(text)
     text = normalize_video_prompt_references(
         text,
-        skill_id,
+        prompt_profile,
         image_count=len(payload.images or []),
         video_count=len(payload.videos or []),
     )
@@ -24145,13 +24201,13 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
     )
     text = normalize_video_prompt_references(
         text,
-        skill_id,
+        prompt_profile,
         image_count=len(payload.images or []),
         video_count=len(payload.videos or []),
     )
     if len(text) > prompt_limit:
         text = _hard_limit_video_prompt(text, prompt_limit)
-    coverage = video_prompt_reference_coverage(text, skill_id, len(payload.images or []))
+    coverage = video_prompt_reference_coverage(text, prompt_profile, len(payload.images or []))
     if not coverage["complete"]:
         missing = "、".join(coverage["missing"])
         raise HTTPException(
@@ -24165,6 +24221,7 @@ async def canvas_prompt_polish(payload: CanvasPromptPolishRequest, progress_call
         "video_provider": payload.video_provider,
         "video_model": payload.video_model,
         "skill_id": skill_id,
+        "prompt_profile": prompt_profile,
         "normalized_input": normalized_prompt,
         "reference_manifest": reference_manifest,
         "reference_coverage": coverage,

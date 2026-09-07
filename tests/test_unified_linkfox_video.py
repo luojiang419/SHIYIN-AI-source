@@ -13,7 +13,7 @@ from PIL import Image
 
 import main
 from canvas_core.linkfox_video import MODEL_SPECS, LinkFoxVideoError, unified_request
-from canvas_core.video_prompt_registry import PROFILES
+from canvas_core.video_prompt_registry import PROFILES, registered_profile
 from canvas_core.video_prompt_adapter import validate_adapted_prompt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,10 +67,10 @@ def test_same_model_uses_last_successful_prompt_without_text_or_visual_calls(ser
 
 
 @pytest.mark.parametrize('model', MODEL_SPECS)
-def test_every_linkfox_model_uses_unified_video_endpoint_and_its_own_rules(services, model):
+def test_every_linkfox_model_uses_unified_endpoint_and_core_only_specialized_rules(services, model):
     llm, video = services
     payload = request(model)
-    expected = TEXT.replace('图片1', '[Image1]') if model == 'HappyHorse' else TEXT
+    expected = TEXT
     llm.return_value = {'text': expected}
     result = asyncio.run(main.canvas_video(payload))
     sent = video.await_args.args[0]
@@ -82,7 +82,9 @@ def test_every_linkfox_model_uses_unified_video_endpoint_and_its_own_rules(servi
     assert result['request']['prompt'] == expected
     assert result['request']['prompt_adaptation']['version'] == 2
     skill, profile = main._video_prompt_skill('linkfox', model)
-    assert profile in PROFILES
+    expected_profile = registered_profile('linkfox', model)
+    assert profile == expected_profile
+    assert (profile in PROFILES) == (profile != 'generic')
     assert skill in llm.await_args.args[0].system_prompt
     assert main.video_prompt_limit('linkfox', model) <= 2000
 
@@ -224,7 +226,7 @@ def test_registered_skills_have_traceable_sources_and_share_parse_polish_rules()
 def test_hailuo_camera_syntax_must_be_translated_when_switching_model():
     text = '图片1中的女子向左走，无配乐。[Tracking shot]'
     counts = {'image': 1, 'video': 0, 'audio': 0}
-    assert not validate_adapted_prompt(text, text, 'hailuo', counts, 2000)
+    assert '海螺方括号运镜' in validate_adapted_prompt(text, text, 'generic', counts, 2000)
     assert '海螺方括号运镜' in validate_adapted_prompt(text, text, 'seedance', counts, 2000)
 
 

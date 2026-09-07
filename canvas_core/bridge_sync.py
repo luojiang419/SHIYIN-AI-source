@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import uuid
+from .bridge_workflow import ensure_workflow
 from typing import Any, Callable, Iterable, Mapping
 
 
@@ -68,6 +69,7 @@ def _frame_metadata(frame: Mapping[str, Any], bridge_id: str, checksum: str, ind
         "bridgeSlotIndex": _integer(frame.get("slot_index"), index),
         "bridgeShotNumber": _integer(frame.get("shot_number")),
         "bridgeCaption": _text(frame.get("caption")),
+        "bridgeSourceAssetId": _text((frame.get("metadata") or {}).get("source_storyboard_asset_id")),
         "bridgeSha256": checksum,
     }
 
@@ -342,6 +344,7 @@ def sync_film_bridge_canvas(
     })
     canvas["nodes"] = nodes
     canvas["connections"] = connections
+    workflow_node_ids = ensure_workflow(canvas, group, manifest, make_id)
     change_total = sum(value for key, value in stats.items() if key not in {"unchanged", "prompt_unchanged"})
     sync_mode = "created" if is_new_group else "updated" if change_total else "unchanged"
     return {
@@ -351,6 +354,7 @@ def sync_film_bridge_canvas(
         "prompt_nodes": prompt_nodes,
         "sync_mode": sync_mode,
         "stats": stats,
+        "workflow_node_ids": workflow_node_ids,
     }
 
 

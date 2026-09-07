@@ -13564,6 +13564,27 @@ def require_film_bridge_loopback(request: Request) -> None:
         raise HTTPException(status_code=403, detail="filmstoryboard 自动桥接仅允许本机访问。")
 
 
+@app.post("/api/canvas-film-workflow")
+async def canvas_film_workflow(request: Request):
+    require_film_bridge_loopback(request)
+    from canvas_core.film_workflow import FilmWorkflowProxy
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="工作流请求必须是对象")
+    source = load_canvas(str(payload.get("canvas_id") or ""))
+    # 使用同一账号编辑器的当前图，防止异步画布保存尚未完成时连线丢失。
+    graph = payload.get("graph") or source
+    if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list) or not isinstance(graph.get("connections"), list):
+        raise HTTPException(status_code=400, detail="工作流连线数据无效")
+    proxy = FilmWorkflowProxy(resolve_media=output_file_from_url, media_url=media_url_from_path,
+        media_root=os.fspath(OUTPUT_INPUT_DIR), allowed_roots=[os.fspath(root) for root in
+            (OUTPUT_INPUT_DIR, OUTPUT_OUTPUT_DIR, ASSET_LIBRARY_DIR, LOCAL_UPLOAD_DIR)])
+    try:
+        return await asyncio.to_thread(proxy.execute, payload, graph, source["id"])
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/canvas-bridges/film/capabilities")
 async def film_bridge_capabilities(request: Request):
     global ACTIVE_CANVAS_ID
@@ -13586,6 +13607,7 @@ async def film_bridge_capabilities(request: Request):
         "incremental_sync": True,
         "file_fallback": True,
         "direct_receive": True,
+        "workflow_receive": True,
         "active_canvas_id": active_canvas.get("id") if active_canvas else "",
         "active_canvas_title": active_canvas.get("title") if active_canvas else "",
     }

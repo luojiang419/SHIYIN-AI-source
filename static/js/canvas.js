@@ -1105,6 +1105,8 @@ const MEDIA_TOOLBAR_ITEMS_KEY = 'canvas_media_toolbar_items_v1';
 const QUICK_TOOLBAR_MAX_ITEMS = 18;
 const MEDIA_TOOLBAR_MAX_ITEMS = 8;
 const CLASSIC_QUICK_TOOLBAR_DEFS = [
+    {id:'film-prepare-assets', label:'准备资产', icon:'boxes', action:() => createNodeByType('film-prepare-assets')},
+    {id:'film-confirm-shots', label:'确认镜头', icon:'list-checks', action:() => createNodeByType('film-confirm-shots')},
     {id:'image', label:'图片', icon:'image-plus', action:() => addImageNode()},
     {id:'prompt', label:'提示词', icon:'text-cursor-input', action:() => addPromptNode()},
     {id:'llm', label:'AI助手', icon:'message-square-text', action:() => addLLMNode()},
@@ -2834,6 +2836,8 @@ function serializableCanvasNode(node){
     delete copy.running;
     delete copy.runStatus;
     delete copy.runError;
+    delete copy.workflowBusy;
+    delete copy.workflowAttempt;
     delete copy._cascadeIdx;
     delete copy._cascadeFailed;
     delete copy._quickGenerateActive;
@@ -4492,6 +4496,7 @@ function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
     return nodes.find(item => item.id === nodeId)?.type === 'multiView' && CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole);
 }
 function classicFilmInputAllowsMultiple(nodeId, inputRole){
+    if(inputRole === 'workflow') return false;
     const target=nodes.find(item => item.id === nodeId);
     return Boolean(target && (target.type === 'film-storyboard' || target.type === 'film-video' || target.type === 'film-line-art') && inputRole);
 }
@@ -5316,6 +5321,8 @@ function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
     if(!node) return [];
     if(state.originKind === 'out'){
+        if(node.type === 'film-prepare-assets') return [{type:'film-confirm-shots',label:'确认镜头',icon:'list-checks'}];
+        if(node.type === 'film-confirm-shots') return [{type:'film-video',label:'视频生成',icon:'clapperboard'}];
         if(node.type === 'poseReplicate'){
             return [{type:'output', label:'Output', icon:'circle-dot'}];
         }
@@ -5324,6 +5331,7 @@ function linkCreateOptions(state){
         }
         if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
             return [
+                ...(node.type === 'group' ? [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}] : []),
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
             {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
@@ -5336,6 +5344,9 @@ function linkCreateOptions(state){
         }
         return [];
     }
+    if(node.type === 'film-prepare-assets') return [{type:'group',label:'图片组',icon:'group'}];
+    if(node.type === 'film-confirm-shots') return [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}];
+    if(node.type === 'film-video' && state.inputRole === 'workflow') return [{type:'film-confirm-shots',label:'确认镜头',icon:'list-checks'}];
     if(node.type === 'poseReplicate'){
         return [{type:'image', label:tr('canvas.imageCard'), icon:'image-plus'}];
     }
@@ -5948,6 +5959,7 @@ function createLinkedNode(type){
     }
 }
 function createNodeByType(type, point){
+    if(window.CanvasFilmWorkflow?.isStep(type)) return addNode({id:uid('film'),type,...(point || defaultPoint()),w:960});
     if(window.CanvasLookbookNode?.isType?.(type)) return addLookbookNode(point);
     if(window.CanvasLinkfoxVideo?.isType?.(type)) return addLinkfoxVideoNode(point);
     if(window.CanvasEcommerceNodes?.isType?.(type)) return addEcommerceNode(type, point);
@@ -5984,6 +5996,7 @@ function menuAdd(type){
         if(window.CanvasLookbookNode?.isType?.(type)) created = addLookbookNode(point);
         else if(window.CanvasLinkfoxVideo?.isType?.(type)) created = addLinkfoxVideoNode(point);
         else if(window.CanvasEcommerceNodes?.isType?.(type)) created = addEcommerceNode(type, point);
+        else if(window.CanvasFilmWorkflow?.isStep(type)) created = addNode({id:uid('film'),type,...(point || defaultPoint()),w:960});
         else if(window.CanvasFilmNodes?.isType?.(type)) created = addFilmNode(type, point);
         else if(type === 'image') created = addImageNode(point);
         else if(type === 'prompt') created = addPromptNode(point);
@@ -8865,7 +8878,16 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
     else classicIdleMediaMeasureHandle = window.setTimeout(run, 0);
 }
 
+function syncClassicFilmWorkflow(){
+    window.CanvasFilmWorkflow?.sync({nodes,connections,canvasId:canvas?.id,
+        connectionsChanged:()=>markClassicConnectionStructureDirty(),
+        invalidate:ids=>{if(classicRenderMutation) queueClassicRenderMutation({replaceIds:ids});},
+        changed:ids=>{queueClassicRenderMutation({replaceIds:ids});scheduleClassicRender();scheduleSave();},
+        upload:async file=>{const uploaded=await uploadCroppedBlob(file,file.name);if(!uploaded?.url)throw new Error('资产上传失败');return uploaded.url;}
+    });
+}
 function render(){
+    syncClassicFilmWorkflow();
     if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(nodesEl)) {
         window.StudioFocusGuard.deferDomUpdate('canvas-render', render);
         return;
@@ -10985,6 +11007,7 @@ async function runStoryboardMergeNode(nodeId){
 async function runFilmNode(nodeId, opts={}){
     const node=nodes.find(item => item.id === nodeId && window.CanvasFilmNodes?.isType?.(item.type));
     if(!node) return;
+    if(window.CanvasFilmWorkflow?.isList(node)) return window.CanvasFilmWorkflow.request(node,'generate');
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptTextForSubmission(target)});
@@ -11134,13 +11157,15 @@ function renderNode(node){
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
         && !window.CanvasLookbookNode?.isType?.(node.type)
-        && !window.CanvasFilmNodes?.isType?.(node.type);
+        && !window.CanvasFilmNodes?.isType?.(node.type)
+        && !window.CanvasFilmWorkflow?.handles(node);
     const nodeTypeClass = node.type === 'batchGenerator'
         ? 'batchGenerator-node batch-generator-node generator-node'
         : node.type === 'prompt'
             ? 'prompt-node prompt-text-node'
             : `${node.type}-node`;
     el.className = `node ${nodeTypeClass} ${layoutLimits.autoHeight ? 'auto-height-node' : ''} ${portraitMedia ? 'portrait-media-node' : ''} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.classList.toggle('workflow-function-group', Boolean(node.workflowFunctionGroup));
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
     el.style.setProperty('--node-min-width', `${layoutLimits.minWidth}px`);
@@ -11164,7 +11189,7 @@ function renderNode(node){
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
-    const filmTitle = window.CanvasFilmNodes?.title?.(node.type);
+    const filmTitle = window.CanvasFilmWorkflow?.title(node.type) || window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
     const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
@@ -11324,7 +11349,7 @@ function renderNode(node){
         const parts = [];
         if(imgCount) parts.push(`${imgCount} ${tr('canvas.imageCount')}`);
         if(promptCount) parts.push(`${promptCount} ${tr('canvas.promptCount')}`);
-        const text = parts.length ? `${parts.join(' · ')} ${tr('canvas.grouped')}` : tr('canvas.groupEmpty');
+        const text = node.workflowFunctionGroup ? '影视制作功能组' : parts.length ? `${parts.join(' · ')} ${tr('canvas.grouped')}` : tr('canvas.groupEmpty');
         body.innerHTML = `<div class="text-[11px] text-gray-400">${text}</div>`;
         const previewItems = groupImageItems(node);
         if(previewItems.length){
@@ -11364,6 +11389,7 @@ function renderNode(node){
         imageModelOptions:filmNodeImageModelOptions,
         assets:classicFilmAssets
     });
+    if(window.CanvasFilmWorkflow?.handles(node)) body.innerHTML = window.CanvasFilmWorkflow.bodyHtml(node);
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
@@ -11426,12 +11452,12 @@ function renderNode(node){
     };
     const ecommercePorts = window.CanvasEcommerceNodes?.inputPorts?.(node.type) || [];
     const lookbookPorts = window.CanvasLookbookNode?.inputPorts?.(node.type) || [];
-    const filmPorts = window.CanvasFilmNodes?.inputPorts?.(node) || [];
+    const filmPorts = window.CanvasFilmWorkflow?.ports(node) || window.CanvasFilmNodes?.inputPorts?.(node) || [];
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const inputPorts = filmPorts.length ? filmPorts : (lookbookPorts.length ? lookbookPorts : ecommercePorts);
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
     const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','depthMap','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
+    const canOutput = window.CanvasFilmWorkflow?.isStep(node.type) || window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
     if(filmPorts.length || inputPorts.length > 1){
         el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;${node.type === 'lookbook' ? `--lookbook-port-top:${72 + index * 46}px;` : ''}" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length || lookbookPorts.length){
@@ -11526,7 +11552,8 @@ function renderNode(node){
     if(['panorama','dwpose','depthMap','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
-    if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
+    if(window.CanvasFilmWorkflow?.handles(node)) window.CanvasFilmWorkflow.bind(el,node);
+    else if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
     if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
     if(node.type === 'image' && selected.size === 1 && selected.has(node.id)) materializeClassicImageNodeChrome(el, node);
     return el;
@@ -11714,7 +11741,7 @@ function defaultNodeSize(type){
     if(lookbookSize) return lookbookSize;
     const ecommerceSize = window.CanvasEcommerceNodes?.size?.(type);
     if(ecommerceSize) return ecommerceSize;
-    const filmSize = window.CanvasFilmNodes?.size?.(type);
+    const filmSize = window.CanvasFilmWorkflow?.size(type) || window.CanvasFilmNodes?.size?.(type);
     if(filmSize) return filmSize;
     if(type === 'image') return {w:260, h:336};
     if(type === 'prompt') return {w:310, h:0};
@@ -15976,6 +16003,7 @@ function reorderInput(gen, movedId, targetId){
     scheduleSave();
 }
 function syncGeneratorInputs(targetIds=null){
+    syncClassicFilmWorkflow();
     const targets = targetIds ? (targetIds instanceof Set ? targetIds : new Set(targetIds)) : null;
     if(targets && [...targets].some(id => !canvasNodeIndex.has(id))) canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
     const generators = targets
@@ -22384,6 +22412,8 @@ function canConnect(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    const workflowConnection = window.CanvasFilmWorkflow?.canConnect(from,to,inputRole,nodes,connections);
+    if(workflowConnection != null) return workflowConnection && !wouldCreateGeneratorCycle(fromId,toId);
     // 图片节点底部的快速生成会直接创建 image -> output；保存前的连接清理必须保留它。
     if(from.type === 'image' && to.type === 'output') return true;
     if(to.type === 'multiView'){

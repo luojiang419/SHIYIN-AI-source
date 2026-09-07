@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", type=Path, required=True)
     parser.add_argument("--unified", action="store_true", help="验证统一节点与纯文本跨模型适配")
+    parser.add_argument('--async-tasks', action='store_true', help='验证持久化异步提交、查询与去重')
     args = parser.parse_args()
     stage = args.stage.resolve()
     backend = stage / "app/backend/canvas-backend/canvas-backend.exe"
@@ -113,6 +114,28 @@ def main():
                         capabilities = client.get("/api/linkfox-video/capabilities").json()
                         assert capabilities["installed"] and capabilities["configured"], capabilities
                         references = ["data:image/png;base64," + base64.b64encode(image).decode()] * 3
+                        if args.async_tasks:
+                            payload = {'task_id': 'canvas_video_packaged_linkfox', 'provider_id': 'linkfox',
+                                'model': 'seedance2.0', 'duration': 5, 'prompt': '', 'linkfox_direct': True,
+                                'images': [{'url': url} for url in references]}
+                            response = client.post('/api/canvas-video-tasks', json=payload)
+                            assert response.status_code == 200, response.text
+                            task = response.json()
+                            assert task['upstream_task_id'] == 'local-fixture'
+                            assert task['submission_response']['taskId'] == 'local-fixture'
+                            duplicate = client.post('/api/canvas-video-tasks', json=payload)
+                            assert duplicate.status_code == 200
+                            for _ in range(60):
+                                task = client.get('/api/canvas-video-tasks/' + payload['task_id']).json()
+                                if task['status'] in {'succeeded', 'failed', 'interrupted'}: break
+                                time.sleep(1)
+                            assert task['status'] == 'succeeded', task
+                            assert task['result']['task_id'] == 'local-fixture'
+                            assert client.get(task['result']['videos'][0]).content == video
+                            assert sum(path == '/aigc/multiImageVideoGenAsync' for path, _ in calls) == 1
+                            print(json.dumps({'result': 'pass', 'async_tasks': True, 'duplicate_submissions': 0,
+                                'upstream_task_id': task['upstream_task_id'], 'real_paid_api_called': False}), flush=True)
+                            return
                         if args.unified:
                             configured = client.put('/api/providers', json=[{'id': 'ecommerce-vision', 'name': 'Fixture AI助手',
                                 'base_url': gateway_url + '/v1', 'protocol': 'openai', 'enabled': True,

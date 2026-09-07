@@ -10774,9 +10774,7 @@ async function runSmartLinkfoxVideoNode(node, options={}){
     node.running=true; node.runError=''; node.runStatus='running'; render(); scheduleSave();
     try {
         const payload=window.CanvasLinkfoxVideo.buildRequest(node,refs);
-        const response=await fetch('/api/linkfox-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,canvas_id:canvas?.id||'',node_id:node.id})});
-        const data=await response.json().catch(()=>({}));
-        if(!response.ok) throw new Error(data.detail || 'LinkFox 视频生成失败');
+        const data=await window.CanvasLinkfoxVideo.generate(node,{...payload,canvas_id:canvas?.id||'',node_id:node.id},{onChange:scheduleSave});
         const images=(data.videos||[]).map(url=>typeof url==='object'?{...url,url:url.url||url.path||'',kind:'video'}:{url,kind:'video'}).filter(item=>item.url);
         if(!images.length) throw new Error('LinkFox 没有返回视频结果');
         node.images=images; node.generatedOutputs=images; node.runStatus='done'; node.runError='';
@@ -19272,7 +19270,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             window.CanvasFilmNodes.rememberVideoPromptResult(sourceNode,items.find(item=>item?.generation_request)?.generation_request);
             return items;
         }
-        const result = await fetch('/api/canvas-video', {
+        const result = payload.provider_id==='linkfox' ? await window.CanvasLinkfoxVideo.generate(sourceNode || runSettings,{...payload,canvas_id:canvas?.id||''},{onChange:scheduleSave}) : await fetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payload)

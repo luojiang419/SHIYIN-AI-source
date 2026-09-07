@@ -67,8 +67,9 @@ def test_both_canvas_runtimes_expose_linkfox_node_and_run_endpoint():
     assert 'data-create-type="linkfox-video"' in (root / "static" / "smart-canvas.html").read_text(encoding="utf-8")
     assert "runLinkfoxVideoNode" in classic
     assert "runSmartLinkfoxVideoNode" in smart
-    assert "fetch('/api/linkfox-video'" in classic
-    assert "fetch('/api/linkfox-video'" in smart
+    assert 'CanvasLinkfoxVideo.generate(' in classic
+    assert 'CanvasLinkfoxVideo.generate(' in smart
+    assert "taskJson('/api/canvas-video-tasks'" in module
     assert "entry:'img2video'" in module
 
 

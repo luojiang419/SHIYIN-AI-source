@@ -106,7 +106,7 @@ def unified_request(raw: Mapping[str, Any], *, validate_prompt: bool = True) -> 
             'videoTime': raw.get('duration'), 'resolution': raw.get('resolution', ''),
             'aspectRatio': raw.get('aspect_ratio', ''), 'voice': bool(raw.get('generate_audio')),
             'isPro': bool(raw.get('linkfox_is_pro')), 'camera': raw.get('linkfox_camera') or 'single',
-            'promptOptimizer': False}
+            'promptOptimizer': bool(raw.get('linkfox_prompt_optimizer'))}
     if mode == 'first_last_frame' and refs:
         data.update(imageUrl=refs[0].get('url', ''), lastFrameImageUrl=refs[1].get('url', '') if len(refs) > 1 else '')
     # 使用占位URL只做参数校验；原始本地素材交给既有上传器处理。
@@ -318,6 +318,54 @@ def _skill_path(project_root: Path, kind: str) -> Path:
     if not path.is_file():
         raise LinkFoxVideoError(f"未找到已安装的 LinkFox 底层技能脚本：{path}")
     return path
+
+
+async def _gateway_post(client, gateway: str, api_key: str, path: str, payload: dict) -> dict:
+    if not api_key:
+        raise LinkFoxVideoError('请先在 API 设置中配置 LinkFox API Key')
+    response = await client.post(gateway.rstrip('/') + path,
+        headers={'Authorization': api_key, 'User-Agent': 'LinkFox-Skill/2.0'}, json=payload, timeout=150)
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise LinkFoxVideoError(f'LinkFox 返回无效 JSON（HTTP {response.status_code}）') from exc
+    if not isinstance(body, dict):
+        raise LinkFoxVideoError('LinkFox 返回数据格式错误')
+    code = body.get('errcode', body.get('errorCode', body.get('code', 200)))
+    if response.status_code >= 400 or code not in (200, '200', 0, '0', None) or body.get('error'):
+        reason = body.get('errorMsg') or body.get('errmsg') or body.get('error') or body.get('msg')
+        raise LinkFoxVideoError(f'LinkFox：{reason or "请求失败"}（HTTP {response.status_code}，code={code}）')
+    return body
+
+
+async def submit_task(raw, *, client, api_key: str, gateway: str) -> dict:
+    """只提交一次；网络结果不明时由调用方保留本地记录，禁止自动重提。"""
+    payload, kind = normalize_request(raw)
+    api_payload = {k: v for k, v in payload.items() if k not in {'entry', 'mode'}}
+    api_payload['videoType'] = API_MODEL_TYPES[payload['videoType']]
+    path = '/aigc/multiImageVideoGenAsync' if kind == 'multi' else '/aigc/videoGenAsync'
+    body = await _gateway_post(client, gateway, api_key, path, api_payload)
+    task_id = str(body.get('taskId') or '').strip()
+    if not task_id:
+        raise LinkFoxVideoError('LinkFox 未返回 taskId，提交结果无法确认；请核对平台记录后再试')
+    return {'upstream_task_id': task_id, 'base_url': gateway, 'status': 'PROCESSING',
+            'credits_consumed': body.get('costToken'), 'request': payload, 'raw': body}
+
+
+async def query_task(task_id: str, *, client, api_key: str, gateway: str) -> dict:
+    body = await _gateway_post(client, gateway, api_key, '/aigc/taskQuery', {'taskId': task_id})
+    if body.get('taskId') and str(body['taskId']) != task_id:
+        raise LinkFoxVideoError('LinkFox 返回的 taskId 与查询任务不一致')
+    status = str(body.get('status') or '').upper()
+    if status not in {'PROCESSING', 'SUCCESS', 'FAILED'}:
+        raise LinkFoxVideoError(f'LinkFox 返回未知任务状态：{status or "空"}')
+    urls = [str(item.get('url') or '') for item in body.get('resultList') or [] if isinstance(item, dict)]
+    url = next((url for url in urls if url.startswith(('http://', 'https://'))), '')
+    error = str(body.get('errorMsg') or '视频生成失败') if status == 'FAILED' else ''
+    if status == 'SUCCESS' and not url:
+        error = 'LinkFox 任务成功但没有返回视频地址'
+    return {'status': 'failed' if error else 'succeeded' if status == 'SUCCESS' else 'running',
+            'upstream_status': status, 'url': url, 'error': error, 'raw': body}
 
 
 def _parse_saved_paths(stdout: str) -> list[str]:

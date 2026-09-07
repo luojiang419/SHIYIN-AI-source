@@ -9,9 +9,15 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
     const page=await browser.newPage({viewport:{width:1600,height:1100}});
     const captured=[],errors=[];
     page.on('pageerror',error=>errors.push(error.message));
-    await page.route('**/api/canvas-video',async route=>{
+    const tasks=new Map();
+    await page.route('**/api/canvas-video-tasks',async route=>{
         const payload=route.request().postDataJSON();captured.push(payload);
-        await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({videos:['/fixture.mp4'],request:{...payload,prompt:`${payload.model}已解析的实际提示词`,original_prompt:payload.prompt,prompt_adaptation:{status:'adapted'}}})});
+        tasks.set(payload.task_id,{status:'succeeded',upstream_task_id:'linkfox-browser-task',result:{videos:['/fixture.mp4'],request:{...payload,prompt:`${payload.model}已解析的实际提示词`,original_prompt:payload.prompt,prompt_adaptation:{status:'adapted'}}}});
+        await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({id:payload.task_id,status:'running',upstream_task_id:'linkfox-browser-task',message:'视频正在生成中'})});
+    });
+    await page.route('**/api/canvas-video-tasks/*',async route=>{
+        const id=route.request().url().split('/').at(-1);
+        await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(tasks.get(id))});
     });
     try{
         await page.goto(base+'/static/canvas.html?id=linkfox-unified');
@@ -27,6 +33,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
         assert.equal(await film.locator('[data-film-field="model"] option').count(),7);
         await page.screenshot({path:path.join(output,'two-nodes.png'),fullPage:true});
         await classic.locator('.gen-btn').click();
+        await page.waitForFunction(()=>document.querySelector('[data-linkfox-task-status="video"]').textContent.includes('linkfox-browser-task'));
         await page.waitForFunction(()=>nodes.find(node=>node.id==='video').runStatus==='done');
         await classic.locator('.video-model').selectOption('seedance2.0fast');
         await classic.locator('.gen-btn').click();

@@ -11045,8 +11045,12 @@ async function runFilmNode(nodeId, opts={}){
             const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
             if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
             const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
-            const response=await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(api.videoPromptSubmission(node,payload))});
-            const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '视频生成失败');
+            const submittedPayload={...api.videoPromptSubmission(node,payload),canvas_id:canvas?.id||'',node_id:node.id};
+            const data=providerId==='linkfox'
+                ? await window.CanvasLinkfoxVideo.generate(node,submittedPayload,{onChange:scheduleSave})
+                : await fetch('/api/canvas-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(submittedPayload)}).then(async response=>{
+                    const body=await response.json(); if(!response.ok) throw new Error(body.detail || '视频生成失败'); return body;
+                });
             run.request=requestMetaFromResult(data);
             api.rememberVideoPromptResult(node,data.request);
             const outputs=resultMediaUrls(data).map(item=>typeof item==='object'?item:{url:item,kind:'video'}).filter(item=>outputUrlValue(item));
@@ -16405,7 +16409,7 @@ async function runVideoNode(nodeId, opts={}){
             if(status === 'aborted') throw cascadeAbortError(cascadeStopMessage());
             return;
         }
-        const result = await cascadeFetch('/api/canvas-video', {
+        const result = requestPayload.provider_id==='linkfox' ? await window.CanvasLinkfoxVideo.generate(node,requestPayload,{onChange:scheduleSave}) : await cascadeFetch('/api/canvas-video', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(requestPayload)
@@ -17393,9 +17397,7 @@ async function runLinkfoxVideoNode(nodeId, opts={}){
     try {
         const payload=window.CanvasLinkfoxVideo.buildRequest(node,refs);
         const out=outputForNode(node,460);
-        const response=await fetch('/api/linkfox-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,canvas_id:canvas?.id||'',node_id:node.id})});
-        const data=await response.json().catch(()=>({}));
-        if(!response.ok) throw new Error(data.detail || 'LinkFox 视频生成失败');
+        const data=await window.CanvasLinkfoxVideo.generate(node,{...payload,canvas_id:canvas?.id||'',node_id:node.id},{onChange:scheduleSave});
         const urls=(data.videos||[]).map(url=>typeof url==='object'?{...url,url:url.url||url.path||'',kind:'video'}:{url,kind:'video'}).filter(item=>item.url);
         if(!urls.length) throw new Error('LinkFox 没有返回视频结果');
         node.generatedOutputs=urls; node.runStatus='done'; node.runError='';

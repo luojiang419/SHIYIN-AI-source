@@ -1,5 +1,74 @@
 (function(){
     const TYPE='linkfox-video';
+    const activeTasks=new Map();
+    function progressHtml(node){ return `<div class="muted-note" role="status" data-linkfox-task-status="${esc(node.id || '')}">${esc(node.linkfoxTaskStatus || '')}</div>`; }
+    function reportTask(node,message,onChange){
+        node.linkfoxTaskStatus=message;
+        document.querySelectorAll('[data-linkfox-task-status]').forEach(el=>{if(el.dataset.linkfoxTaskStatus===String(node.id || '')) el.textContent=message;});
+        return onChange?.();
+    }
+    function taskPayload(raw){
+        if(raw.entry!=='img2video') return raw;
+        const urls=raw.mode==='first_last_frame'?[raw.imageUrl,raw.lastFrameImageUrl].filter(Boolean):raw.imageList;
+        return {provider_id:'linkfox',linkfox_direct:true,model:raw.videoType,duration:raw.videoTime,prompt:raw.prompt,
+            images:(urls || []).map((url,i)=>({url,...(raw.mode==='first_last_frame'?{role:i?'last_frame':'first_frame'}:{})})),
+            resolution:raw.resolution,aspect_ratio:raw.aspectRatio,generate_audio:raw.voice,
+            linkfox_mode:raw.mode,linkfox_camera:raw.camera,linkfox_is_pro:raw.isPro,
+            linkfox_prompt_optimizer:Boolean(raw.promptOptimizer),canvas_id:raw.canvas_id,node_id:raw.node_id};
+    }
+    async function taskJson(url,options={}){
+        const controller=new AbortController();
+        const timer=setTimeout(()=>controller.abort(),options.method==='POST'?180000:30000);
+        try {
+            const response=await fetch(url,{...options,signal:controller.signal});
+            const body=await response.json();
+            if(!response.ok){ const error=new Error(body.detail || `LinkFox 请求失败（HTTP ${response.status}）`); error.httpStatus=response.status; throw error; }
+            return body;
+        } finally { clearTimeout(timer); }
+    }
+    function generate(node,raw,options={}){
+        if(activeTasks.has(node)) return activeTasks.get(node);
+        const work=(async()=>{
+            const existing=node.linkfoxTaskId;
+            const taskId=existing || `canvas_video_linkfox_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+            node.linkfoxTaskId=taskId;
+            await reportTask(node,existing?'正在恢复已保存的 LinkFox 任务':'正在准备并提交 LinkFox 任务',options.onChange);
+            let task;
+            try {
+                task=existing?await taskJson(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`):await taskJson('/api/canvas-video-tasks',{
+                    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...taskPayload(raw),task_id:taskId})});
+            } catch(error){
+                // 提交响应丢失时只查询相同 ID，绝不自动重新 POST。
+                try { task=await taskJson(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`); }
+                catch(queryError){
+                    if(queryError.httpStatus===404 && error.httpStatus>=400 && error.httpStatus<500){
+                        node.linkfoxTaskId=''; await reportTask(node,error.message,options.onChange);
+                    } else await reportTask(node,`${error.message}；任务记录 ${taskId} 已保留，再次运行仅续查。`,options.onChange);
+                    throw error;
+                }
+            }
+            for(let attempt=0;attempt<720;attempt++){
+                const upstream=task.upstream_task_id || '';
+                const suffix=upstream?` · taskId: ${upstream}`:'';
+                await reportTask(node,(task.error || task.message || (task.status==='succeeded'?'视频已完成':'正在查询视频'))+suffix,options.onChange);
+                if(task.status==='succeeded'){
+                    if(!task.result?.videos?.length) throw new Error('LinkFox 任务完成但没有返回视频');
+                    node.linkfoxTaskId=''; await options.onChange?.(); return task.result;
+                }
+                if(['failed','interrupted','canceled','cancelled'].includes(task.status)){
+                    // 已知上游任务的超时记录继续保留，避免用户误点造成重复付费。
+                    if(task.status!=='interrupted') node.linkfoxTaskId='';
+                    await options.onChange?.(); throw new Error(task.error || 'LinkFox 任务未完成');
+                }
+                await new Promise(resolve=>setTimeout(resolve,2500));
+                try { task=await taskJson(`/api/canvas-video-tasks/${encodeURIComponent(taskId)}`); }
+                catch(error){ await reportTask(node,`查询连接中断，正在恢复${suffix}：${error.message}`,options.onChange); }
+            }
+            throw new Error(`LinkFox 等待超时，已保留任务 ${taskId}，再次运行仅续查。`);
+        })();
+        activeTasks.set(node,work);
+        return work.finally(()=>activeTasks.delete(node));
+    }
     const MODELS={
         reference:[
             {id:'seedance2.0',label:'Seedance 2.0',durations:[5,10,15],resolutions:['480p','720p','1080p'],ratios:['16:9','9:16','adaptive'],voice:'optional',maxImages:9},
@@ -51,7 +120,7 @@
         const selectedModel=modelFor(node);
         const durations=selectedModel.durations; const resolutions=selectedModel.resolutions.length?selectedModel.resolutions:['']; const ratios=selectedModel.ratios.length?selectedModel.ratios:[''];
         const voiceFixed=selectedModel.voice!=='optional';
-        return `<div class="linkfox-video-body">
+        return `<div class="linkfox-video-body">${progressHtml(node)}
             <div class="linkfox-video-badge">LinkFox · 图转视频</div>
             <label class="field"><div class="setting-title">生成模式</div><select class="select-lite" data-linkfox-field="mode"><option value="reference" ${mode==='reference'?'selected':''}>参考图</option><option value="first_last_frame" ${mode==='first_last_frame'?'selected':''}>首尾帧</option></select></label>
             <label class="field"><div class="setting-title">视频模型</div><select class="select-lite" data-linkfox-field="model">${models.map(item=>`<option value="${esc(item.id)}" ${item.id===node.model?'selected':''}>${esc(item.label)}</option>`).join('')}</select></label>
@@ -124,7 +193,7 @@
         const field=(key,label,values,value)=>`<label class="field"><div class="setting-title">${label}</div><select class="select-lite" data-linkfox-unified="${key}">${values.map(item=>`<option value="${esc(item)}" ${String(item)===String(value)?'selected':''}>${esc(labels[item] || item || '按模型')}</option>`).join('')}</select></label>`;
         const modes=MODELS.first_last_frame.some(m=>m.id===node.model)?['reference','first_last_frame']:['reference'];
         if(node.model==='可灵2.6') modes.splice(0,1);
-        return `<div class="linkfox-unified-settings"><div class="gen-settings-row">${field('linkfoxMode','模式',modes,view.mode)}${field('duration','秒',spec.durations,node.duration)}</div>
+        return `<div class="linkfox-unified-settings">${progressHtml(node)}<div class="gen-settings-row">${field('linkfoxMode','模式',modes,view.mode)}${field('duration','秒',spec.durations,node.duration)}</div>
             <div class="gen-settings-row">${field('resolution','分辨率',spec.resolutions.length?spec.resolutions:[''],node.resolution)}${field('aspectRatio','画幅',spec.ratios.length?spec.ratios:[''],node.aspectRatio)}</div>
             <div class="gen-settings-row"><label class="field linkfox-audio-toggle"><input type="checkbox" data-linkfox-unified="generateAudio" ${node.generateAudio?'checked':''} ${spec.voice!=='optional' || (node.model==='可灵2.6' && node.resolution==='720p')?'disabled':''}>声音${spec.voice!=='optional'?'（模型固定）':''}</label>${field('linkfoxCamera','镜头', ['single','multi'],node.linkfoxCamera || 'single')}</div>
             <div class="muted-note">LinkFox · ${view.mode==='first_last_frame'?'首帧＋可选尾帧':`最多 ${spec.maxImages} 张参考图`}。源视频会先解析动作与镜头；无图片时提取起始画面。${node.model==='可灵2.6'?'尾帧要求1080p并关闭声音。':''}</div></div>`;
@@ -139,5 +208,5 @@
             });
         });
     }
-    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified};
+    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs,normalizeUnified,unifiedSettingsHtml,bindUnified,generate,taskPayload};
 })();

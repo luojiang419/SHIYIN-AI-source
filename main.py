@@ -142,6 +142,7 @@ from canvas_core.linkfox_video import (
     LinkFoxVideoError,
     available_models as linkfox_video_models,
     run_skill as run_linkfox_video_skill,
+    submit_task as submit_linkfox_task, query_task as query_linkfox_task,
 )
 from canvas_core.blender_bridge import (
     DEFAULT_PORT as BLENDER_DEFAULT_PORT,
@@ -474,7 +475,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "1.0.417"
+APP_VERSION = "1.0.418"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -4447,6 +4448,8 @@ class CanvasVideoRequest(BaseModel):
     prompt_origin_key: str = Field(default="", max_length=160)
     linkfox_mode: str = "reference"
     linkfox_is_pro: bool = False
+    linkfox_prompt_optimizer: bool = False
+    linkfox_direct: bool = False
     linkfox_camera: str = "single"
     prompt_source_model: str = Field(default="", max_length=200)
     prompt_optimizer_provider: str = Field(default="", max_length=160)
@@ -22005,7 +22008,7 @@ def load_canvas_video_tasks_from_disk():
         task["_account_id"] = account_id
         # 失败/中断/已取消任务只用于运行期反馈，不应在重启后继续占据任务列表。
         # 画布端再次查询时会收到 404，并自动移除对应的残留占位。
-        if str(task.get("status") or "").lower() in {"failed", "interrupted", "canceled", "cancelled"}:
+        if task.get('provider_id') != 'linkfox' and str(task.get("status") or "").lower() in {"failed", "interrupted", "canceled", "cancelled"}:
             changed = True
             continue
         if str(task.get("status") or "") in CANVAS_VIDEO_ACTIVE_STATUSES:
@@ -22014,6 +22017,11 @@ def load_canvas_video_tasks_from_disk():
                 task["message"] = CANVAS_VIDEO_RESTART_MESSAGE
                 task["error"] = ""
             else:
+                if task.get('provider_id') == 'linkfox':
+                    task.update(status='interrupted', message='', error='LinkFox 提交结果未知，请核对平台记录；系统不会自动重复提交。')
+                    restored[task_id] = task
+                    changed = True
+                    continue
                 # 没有上游任务 ID 时无法安全续查或取消，直接从持久化列表清除。
                 changed = True
                 continue
@@ -22060,6 +22068,18 @@ def update_canvas_video_task(task_id: str, changes: Dict[str, Any]) -> Dict[str,
 
 
 async def submit_canvas_video_upstream(payload: CanvasVideoRequest, provider: Dict[str, Any]):
+    if payload.provider_id == 'linkfox':
+        key, gateway = linkfox_configured_key(), linkfox_tool_gateway()
+        try:
+            raw = linkfox_unified_request(payload.model_dump())
+            async with httpx.AsyncClient() as client:
+                raw = await prepare_linkfox_image_inputs(raw, client=client, api_key=key,
+                    gateway=gateway, resolve_path=output_file_from_url, public_url=local_asset_public_url)
+                return await submit_linkfox_task(raw, client=client, api_key=key, gateway=gateway)
+        except LinkFoxVideoError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail='LinkFox 提交连接中断，结果尚不明确。请核对平台任务后再试，系统不会自动重复提交。') from exc
     if is_kling_cli_provider(provider):
         return await submit_kling_cli_video(payload)
     if is_minimax_h3_provider(provider):
@@ -22072,6 +22092,10 @@ async def submit_canvas_video_upstream(payload: CanvasVideoRequest, provider: Di
 async def query_canvas_video_upstream(task: Dict[str, Any], *, kling_service: Optional[KlingCliService] = None):
     provider_id = str(task.get("provider_id") or "")
     upstream_task_id = str(task.get("upstream_task_id") or "")
+    if provider_id == 'linkfox':
+        async with httpx.AsyncClient() as client:
+            return await query_linkfox_task(upstream_task_id, client=client, api_key=linkfox_configured_key(),
+                gateway=str(task.get('upstream_base_url') or linkfox_tool_gateway()))
     if provider_id == "kling-cli":
         if int((task.get("request") or {}).get("video_count") or 0) > 0:
             return {
@@ -22125,6 +22149,10 @@ async def run_canvas_video_task(task_id: str):
         if not upstream_task_id:
             update_canvas_video_task(task_id, {"status": "interrupted", "error": CANVAS_VIDEO_INTERRUPTED_ERROR})
             return
+        if task.get('provider_id') == 'linkfox' and time.time() - float(task.get('created_at') or time.time()) > VIDEO_POLL_TIMEOUT:
+            update_canvas_video_task(task_id, {'status': 'interrupted', 'message': '',
+                'error': f'LinkFox 查询超时，请凭 taskId {upstream_task_id} 核对平台结果；不要重复提交。'})
+            return
         try:
             queried = await query_canvas_video_upstream(task, kling_service=kling_service)
             kling_service = queried.pop("_kling_service", kling_service)
@@ -22135,8 +22163,10 @@ async def run_canvas_video_task(task_id: str):
                     update_canvas_video_task(task_id, {"status": "failed", "error": "视频任务完成但没有返回视频地址", "raw": queried.get("raw")})
                     return
                 update_canvas_video_task(task_id, {"status": "finalizing", "remote_url": remote_url, "message": "视频已生成，正在保存到本地", "error": ""})
-                prefix = "kling_" if str(task.get("provider_id") or "") == "kling-cli" else "minimax_h3_"
+                prefix = 'linkfox_' if task.get('provider_id') == 'linkfox' else "kling_" if str(task.get("provider_id") or "") == "kling-cli" else "minimax_h3_"
                 local_url = await save_remote_video_to_output(remote_url, prefix=prefix)
+                if task.get('provider_id') == 'linkfox' and (not local_url or local_url.startswith(('http://', 'https://'))):
+                    raise RuntimeError('LinkFox 视频已生成但本地下载失败，将继续尝试保存')
                 result = {
                     "videos": [local_url],
                     "task_id": upstream_task_id,
@@ -22147,12 +22177,19 @@ async def run_canvas_video_task(task_id: str):
                 update_canvas_video_task(task_id, {"status": "succeeded", "result": result, "message": "", "error": "", "raw": queried.get("raw")})
                 return
             if status == "failed":
-                update_canvas_video_task(task_id, {"status": "failed", "error": str(queried.get("error") or "视频生成失败"), "message": "", "raw": queried.get("raw")})
+                error = str(queried.get('error') or '视频生成失败')
+                if task.get('provider_id') == 'linkfox':
+                    error += f'（LinkFox taskId: {upstream_task_id}）'
+                update_canvas_video_task(task_id, {"status": "failed", "error": error, "message": "", "raw": queried.get("raw")})
                 return
             update_canvas_video_task(task_id, {"status": "running", "upstream_status": queried.get("upstream_status") or "", "message": "视频正在生成中", "error": "", "raw": queried.get("raw")})
             retry_delay = min(max(2.0, retry_delay * 1.25), 10.0)
         except asyncio.CancelledError:
             raise
+        except LinkFoxVideoError as exc:
+            update_canvas_video_task(task_id, {'status': 'failed', 'message': '',
+                'error': f'{exc}（LinkFox taskId: {upstream_task_id}）'})
+            return
         except Exception as exc:
             update_canvas_video_task(task_id, {"status": "recovery_pending", "message": "查询暂时失败，稍后自动重试", "last_query_error": str(exc), "error": ""})
             retry_delay = min(max(3.0, retry_delay * 1.5), 30.0)
@@ -22200,8 +22237,10 @@ async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
             start_canvas_video_task_runner(task_id)
         return existing
     provider = get_api_provider(payload.provider_id)
-    if not (is_kling_cli_provider(provider) or is_minimax_h3_provider(provider)):
-        raise HTTPException(status_code=400, detail="只有 H3 和可灵视频任务支持重启后自动续查")
+    if not (payload.provider_id == 'linkfox' or is_kling_cli_provider(provider) or is_minimax_h3_provider(provider)):
+        raise HTTPException(status_code=400, detail="只有 LinkFox、H3 和可灵视频任务支持重启后自动续查")
+    if payload.provider_id == 'linkfox' and not linkfox_configured_key():
+        raise HTTPException(status_code=400, detail='请先在 API 设置中配置 LinkFox API Key')
     now = time.time()
     request_snapshot = canvas_video_task_request_snapshot(payload)
     task = {
@@ -22227,7 +22266,11 @@ async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
         CANVAS_VIDEO_TASKS[task_id] = task
         write_canvas_video_tasks_locked(task)
     try:
-        payload, adaptation = await prepare_video_generation_prompt(payload, provider)
+        if payload.provider_id == 'linkfox' and payload.linkfox_direct:
+            # 专用 LinkFox 节点保持原生可选提示词，不强制依赖本地 AI 助手。
+            adaptation = {}
+        else:
+            payload, adaptation = await prepare_video_generation_prompt(payload, provider)
         with CANVAS_VIDEO_TASK_LOCK:
             current = current_account_task(CANVAS_VIDEO_TASKS, task_id)
             if current.get("cancel_requested") or str(current.get("status") or "") in {"canceled", "cancelled"}:
@@ -22250,6 +22293,9 @@ async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
             "upstream_base_url": str(submitted.get("base_url") or provider.get("base_url") or ""),
             "upstream_status": str(submitted.get("status") or ""),
             "credits_consumed": submitted.get("credits_consumed"),
+            "submission_response": submitted.get('raw'),
+            "request": {**canvas_video_task_request_snapshot(payload), **adaptation,
+                        **((submitted.get('request') or {}) if payload.provider_id == 'linkfox' else {})},
             "message": "视频任务已提交，正在生成中",
             "error": "",
         })

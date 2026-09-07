@@ -2,7 +2,7 @@
 
 状态：已完成
 当前阶段：4/4
-最后更新：2026-09-07 20:05
+最后更新：2026-09-07 20:50
 
 ## 当前状态
 
@@ -10,10 +10,11 @@
 安装包运行时镜像与官方源副本字节一致；后端 Seedance 2.5 精确路由会加载完整 PE 正文，仅过滤不适用于应用内 LLM 的 shell 自升级段。
 安装包构建会用官方源副本覆盖 staging 运行时文件，并校验官方标识。SD2.5 模型切换自动适配、自动解析和润色链契约已通过。
 Windows 安装包 `1.0.420` 已完成完整构建、桌面运行时冒烟和安装器契约验证；官方源、运行时镜像与 staging skill 的 SHA-256 完全一致。
+GitHub Release `v1.0.420` 已正式发布为 Latest，安装包和 checksum 均已上传并通过远端大小、digest、manifest、tag 与 main 指向校验。
 
 ## 下一步
 
-本任务已完成。后续如发布 GitHub Release，使用已验证的 `dist/installer/SHIYIN-AI-Setup-1.0.420.exe`；真实 SD2.5 成片效果需等待可用 provider 后付费 A/B 验证。
+本任务已完成。真实 SD2.5 成片效果需等待可用 provider 后付费 A/B 验证。
 
 ## 当前 TODO
 
@@ -25,6 +26,7 @@ Windows 安装包 `1.0.420` 已完成完整构建、桌面运行时冒烟和安�
 - [x] 构建并验证新版本安装包
 - [x] 完成文档更新与功能 Git 提交
 - [x] 推送版本构建记录
+- [x] 发布 GitHub Release `v1.0.420` 并核验公开下载
 
 ## 最近验证状态
 
@@ -35,6 +37,9 @@ Windows 安装包 `1.0.420` 已完成完整构建、桌面运行时冒烟和安�
 - 全量测试：1,452 项通过；3 个任务前既有失败仍为 `test_canvas_video_clip_editor`、`test_ecommerce`、`test_kling_remote_web_access`，无新增失败
 - 打包资源：官方源、运行时镜像、staging skill SHA-256 均为 `ee04557ba9a1c9f5517b574e24fc73d0022b22254373074db4c11f3d0635ea57`
 - 最近 Git commit：`d0c9670`（安装包 1.0.420 构建记录，已推送）
+- GitHub Release：<https://github.com/luojiang419/SHIYIN-AI/releases/tag/v1.0.420>
+- 公开安装包：<https://github.com/luojiang419/SHIYIN-AI/releases/download/v1.0.420/SHIYIN-AI-Setup-1.0.420.exe>，HEAD `200`，远端大小 92,616,494 字节，digest 与本地 SHA-256 一致
+- 发布 manifest/tag/main：`29656439182927fedf8767e2c839adeffb5e3c4a`
 
 ## 任务目标
 

@@ -10159,7 +10159,7 @@ function smartNodeHtml(node){
         ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
         <div class="node-hint">${hint}</div>
         ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-        ${node.specialType === 'linkfox-video' ? '<div class="node-port port-in" data-port="in" data-input-role="reference-image" data-role-label="参考图" title="连接参考图"></div><div class="node-port port-in" data-port="in" data-input-role="last-frame" data-role-label="尾帧" title="连接尾帧图片"></div>' : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+        ${node.specialType === 'linkfox-video' ? window.CanvasLinkfoxVideo.inputPorts(node).map((port,index,ports)=>`<div class="node-port port-in" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="top:${(index+1)*100/(ports.length+1)}%;" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
         <div class="node-port port-out" data-port="out" title="output"></div>
     </div>`;
 }
@@ -10747,12 +10747,19 @@ function bindPromptNodeControls(el, node){
     if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
     requestAnimationFrame(fitPromptNode);
 }
+function smartLinkfoxInputRefs(node){
+    const links=canvasUsesConnections ? (canvas?.connections||[]) : [
+        ...(canvas?.connections||[]),
+        ...(node.inputNodeIds||[]).filter(id=>!(canvas?.connections||[]).some(c=>c.to===node.id && c.from===id)).map(from=>({from,to:node.id}))
+    ];
+    return window.CanvasLinkfoxVideo.inputRefs(node,nodes,links,source=>outputImagesForNode(source));
+}
 async function runSmartLinkfoxVideoNode(node, options={}){
     if(!node || node.specialType !== 'linkfox-video' || node.running) return;
-    const refs=activeInputImagesFor(node).filter(item=>item?.url).map(item=>({url:item.url,name:item.name||'reference.png',kind:'image'}));
-    const payload=window.CanvasLinkfoxVideo?.buildRequest?.(node,refs) || {};
+    const refs=smartLinkfoxInputRefs(node);
     node.running=true; node.runError=''; node.runStatus='running'; render(); scheduleSave();
     try {
+        const payload=window.CanvasLinkfoxVideo.buildRequest(node,refs);
         const response=await fetch('/api/linkfox-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,canvas_id:canvas?.id||'',node_id:node.id})});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.detail || 'LinkFox 视频生成失败');
@@ -12275,7 +12282,7 @@ async function submitSmartCanvasPromptTask(endpoint, payload, label='提示词�
 function bindSmartSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
     if(node?.specialType === 'linkfox-video'){
-        window.CanvasLinkfoxVideo?.bind(el,node,{refs:activeInputImagesFor,run:runSmartLinkfoxVideoNode,onChange:(_changed,meta={})=>{scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item=>item.id===node.id)) render();},0);}});
+        window.CanvasLinkfoxVideo?.bind(el,node,{refs:smartLinkfoxInputRefs,run:runSmartLinkfoxVideoNode,onChange:(_changed,meta={})=>{scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item=>item.id===node.id)) render();},0);}});
         return;
     }
     if(node?.specialType === 'film-storyboard' || node?.specialType === 'film-video' || node?.specialType === 'film-line-art'){
@@ -16703,8 +16710,8 @@ function connectInputNode(fromId, toId, inputRole=''){
     const to = nodes.find(n => n.id === toId);
     if(!from || !to || from.id === to.id) return false;
     if(to.specialType === 'linkfox-video'){
-        if(!['reference-image','last-frame'].includes(inputRole)) return false;
-        return imagesForNode(from).some(item=>item?.url && mediaKindForItem(item)==='image');
+        if(!['','reference-image','last-frame'].includes(inputRole)) return false;
+        if(!imagesForNode(from).some(item=>item?.url && mediaKindForItem(item)==='image')) return false;
     }
     if(to.specialType === 'film-storyboard' || to.specialType === 'film-video' || to.specialType === 'film-line-art'){
         if(!(window.CanvasFilmNodes?.inputPorts?.(to) || []).some(port => port.role === inputRole)) return false;

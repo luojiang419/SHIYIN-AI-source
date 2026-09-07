@@ -131,6 +131,7 @@ from canvas_core.kling_cli import (
     start_kling_login,
 )
 from canvas_core.linkfox_video import (
+    prepare_image_inputs as prepare_linkfox_image_inputs,
     LinkFoxVideoError,
     available_models as linkfox_video_models,
     run_skill as run_linkfox_video_skill,
@@ -22362,17 +22363,22 @@ async def linkfox_video(payload: LinkFoxVideoRequest):
     """调用已安装的 LinkFox 编排技能并返回画布可用的本地视频 URL。"""
     try:
         request_data = payload.model_dump()
-        # 画布内部素材通常是 /assets/...；若已配置公网媒体基址，先转换成
-        # LinkFox 可抓取的 HTTPS 地址。没有公网基址时保留原值，由适配器给出明确提示。
-        request_data["imageList"] = [local_asset_public_url(item) or item for item in request_data.get("imageList") or []]
-        for key in ("imageUrl", "lastFrameImageUrl"):
-            request_data[key] = local_asset_public_url(request_data.get(key) or "") or request_data.get(key) or ""
+        api_key = linkfox_configured_key()
+        gateway = linkfox_tool_gateway()
+        async with httpx.AsyncClient() as client:
+            request_data = await prepare_linkfox_image_inputs(
+                request_data, client=client, api_key=api_key,
+                gateway=gateway, resolve_path=output_file_from_url,
+                public_url=local_asset_public_url,
+            )
         result = await asyncio.to_thread(
             run_linkfox_video_skill,
             request_data,
             project_root=PROJECT_MODULE_DIR,
             output_dir=OUTPUT_OUTPUT_DIR,
             timeout=VIDEO_POLL_TIMEOUT,
+            api_key=api_key,
+            gateway=gateway,
         )
     except LinkFoxVideoError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

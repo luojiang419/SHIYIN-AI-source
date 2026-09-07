@@ -4498,6 +4498,7 @@ function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
 function classicFilmInputAllowsMultiple(nodeId, inputRole){
     if(inputRole === 'workflow') return false;
     const target=nodes.find(item => item.id === nodeId);
+    if(target?.type === 'linkfox-video') return inputRole === 'reference-image';
     return Boolean(target && (target.type === 'film-storyboard' || target.type === 'film-video' || target.type === 'film-line-art') && inputRole);
 }
 function addMultiViewNode(point){
@@ -11458,7 +11459,10 @@ function renderNode(node){
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
     const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','depthMap','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
     const canOutput = window.CanvasFilmWorkflow?.isStep(node.type) || window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
-    if(filmPorts.length || inputPorts.length > 1){
+    if(node.type === 'linkfox-video'){
+        const ports=window.CanvasLinkfoxVideo.inputPorts(node);
+        el.insertAdjacentHTML('beforeend',ports.map((port,index)=>`<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="top:${(index+1)*100/(ports.length+1)}%;" title="${escapeAttr(port.title)}"></div>`).join(''));
+    } else if(filmPorts.length || inputPorts.length > 1){
         el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;${node.type === 'lookbook' ? `--lookbook-port-top:${72 + index * 46}px;` : ''}" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
     } else if(ecommercePorts.length || lookbookPorts.length){
         el.insertAdjacentHTML('beforeend', inputPorts.map((port,index) => `<div class="port in ${rolePortClass}" data-input-role="${escapeAttr(port.id || port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};--canvas-port-index:${index};--canvas-port-count:${inputPorts.length};--canvas-port-top:${(((index + 1) / (inputPorts.length + 1)) * 100).toFixed(3)}%;${node.type === 'lookbook' ? `--lookbook-port-top:${72 + index * 46}px;` : ''}" aria-label="${escapeAttr(`输入端口：${port.label}`)}" title="${escapeAttr(port.title)}"></div>`).join(''));
@@ -11554,7 +11558,7 @@ function renderNode(node){
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmWorkflow?.handles(node)) window.CanvasFilmWorkflow.bind(el,node);
     else if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);
-    if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:mediaRefsFromNode,run:runLinkfoxVideoNode,onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
+    if(window.CanvasLinkfoxVideo?.isType?.(node.type)) window.CanvasLinkfoxVideo.bind(el,node,{refs:classicLinkfoxInputRefs,run:changed=>runLinkfoxVideoNode(changed.id),onChange:(_node,meta={})=>{scheduleSave();if(meta.render)render();}});
     if(node.type === 'image' && selected.size === 1 && selected.has(node.id)) materializeClassicImageNodeChrome(el, node);
     return el;
 }
@@ -17377,14 +17381,17 @@ function bindCascadeButtons(wrap, nodeId){
         b.onclick = e => { e.stopPropagation(); cancelCascade(nodeId); };
     });
 }
+function classicLinkfoxInputRefs(node){
+    return window.CanvasLinkfoxVideo.inputRefs(node,nodes,connections,mediaRefsFromNode);
+}
 async function runLinkfoxVideoNode(nodeId, opts={}){
     const node=nodes.find(item=>item.id===nodeId);
     if(!node || (node.running && !opts.cascade)) return;
-    const refs=mediaRefsFromNode(node).filter(ref=>ref.kind==='image' || !ref.kind);
-    const payload=window.CanvasLinkfoxVideo?.buildRequest?.(node,refs) || {};
-    const out=outputForNode(node,460);
+    const refs=classicLinkfoxInputRefs(node);
     node.running=true; node.runStatus='running'; node.runError=''; render(); scheduleSave();
     try {
+        const payload=window.CanvasLinkfoxVideo.buildRequest(node,refs);
+        const out=outputForNode(node,460);
         const response=await fetch('/api/linkfox-video',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,canvas_id:canvas?.id||'',node_id:node.id})});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.detail || 'LinkFox 视频生成失败');
@@ -22412,6 +22419,11 @@ function canConnect(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    if(to.type === 'linkfox-video'){
+        return ['', 'reference-image', 'last-frame'].includes(inputRole)
+            && mediaRefsFromNode(from).some(ref=>ref?.url && mediaKindForRef(ref)==='image')
+            && !wouldCreateGeneratorCycle(fromId,toId);
+    }
     const workflowConnection = window.CanvasFilmWorkflow?.canConnect(from,to,inputRole,nodes,connections);
     if(workflowConnection != null) return workflowConnection && !wouldCreateGeneratorCycle(fromId,toId);
     // 图片节点底部的快速生成会直接创建 image -> output；保存前的连接清理必须保留它。

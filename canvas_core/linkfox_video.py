@@ -6,15 +6,20 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Mapping
+
+import httpx
 
 
 class LinkFoxVideoError(ValueError):
@@ -40,6 +45,10 @@ MODEL_ALIASES = {
 REFERENCE_MULTI_MODELS = {"seedance2.0", "seedance2.0fast", "可灵Omni", "HappyHorse"}
 REFERENCE_SINGLE_MODELS = {"海螺2.3", "wan2.6"}
 FIRST_LAST_MODELS = {"seedance2.0", "seedance2.0fast", "可灵2.6"}
+API_MODEL_TYPES = {
+    "seedance2.0": "SEED", "seedance2.0fast": "SEED_FAST", "可灵Omni": "KLING",
+    "可灵2.6": "KLING", "HappyHorse": "HAPPY_HORSE", "海螺2.3": "HAILUO", "wan2.6": "WAN",
+}
 
 MODEL_SPECS: dict[str, dict[str, Any]] = {
     "seedance2.0": {
@@ -123,8 +132,9 @@ def normalize_request(raw: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
         raise LinkFoxVideoError("请至少连接一张图片或填写图片 URL")
 
     spec = MODEL_SPECS[model]
-    if len(image_list) > int(spec["max_images"]):
-        raise LinkFoxVideoError(f"模型“{model}”最多支持 {spec['max_images']} 张图片")
+    max_images = 2 if mode == "first_last_frame" else int(spec["max_images"])
+    if len(image_list) > max_images:
+        raise LinkFoxVideoError(f"当前模式最多支持 {max_images} 张图片")
     if mode == "reference" and model in REFERENCE_SINGLE_MODELS and len(image_list) != 1:
         raise LinkFoxVideoError(f"模型“{model}”的参考图模式只支持 1 张图片")
 
@@ -148,8 +158,12 @@ def normalize_request(raw: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
     elif spec["voice"] == "fixed_true":
         voice = True
     last_frame = str(data.get("lastFrameImageUrl") or "").strip()
+    if mode == "first_last_frame" and not last_frame and len(image_list) == 2:
+        last_frame = image_list[1]
     if last_frame:
         last_frame = _http_url(last_frame, "尾帧图片")
+    if mode == "first_last_frame" and len(image_list) == 2 and last_frame != image_list[1]:
+        raise LinkFoxVideoError("首尾帧模式最多支持首帧和尾帧两张图片")
     if mode == "first_last_frame" and model == "可灵2.6" and last_frame and not (resolution == "1080p" and not voice):
         raise LinkFoxVideoError("可灵2.6 只有 1080p 且关闭声音时才允许传尾帧")
 
@@ -180,6 +194,87 @@ def normalize_request(raw: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
     return payload, "multi" if mode == "reference" and model in REFERENCE_MULTI_MODELS else "single"
 
 
+async def prepare_image_inputs(raw: Mapping[str, Any], *, client, api_key: str,
+                               gateway: str, resolve_path, public_url) -> dict[str, Any]:
+    """按官方 OSS 预签名协议上传画布素材；同一请求只上传一次相同图片。"""
+    data = dict(raw)
+    # 参数校验先于上传，不对无效请求产生外部副作用。
+    probe = dict(data)
+    probe_ids = {}
+    def probe_url(value):
+        value = str(value or "").strip()
+        if not value:
+            return ""
+        return probe_ids.setdefault(value, f"https://linkfox-input.invalid/{len(probe_ids)}.png")
+    probe["imageList"] = [probe_url(value) for value in data.get("imageList") or []]
+    for field in ("imageUrl", "lastFrameImageUrl"):
+        probe[field] = probe_url(data.get(field))
+    normalize_request(probe)
+    if not api_key:
+        raise LinkFoxVideoError("未配置 LinkFox API Key，请先在 API 设置中填写")
+    uploaded = {}
+
+    async def convert(value):
+        value = str(value or "").strip()
+        if not value:
+            return ""
+        if value in uploaded:
+            return uploaded[value]
+        path = resolve_path(value)
+        if path:
+            published = public_url(value)
+            if published:
+                uploaded[value] = _http_url(published, "公网素材地址")
+                return uploaded[value]
+            file = Path(path)
+            content_type = mimetypes.guess_type(file.name)[0] or ""
+            content = file.read_bytes()
+            extension = file.suffix.lstrip(".").lower()
+        elif value.startswith("data:image/"):
+            try:
+                header, encoded = value.split(";base64,", 1)
+                content_type = header[5:]
+                content = base64.b64decode(encoded, validate=True)
+                extension = (mimetypes.guess_extension(content_type) or "").lstrip(".")
+            except (ValueError, TypeError) as exc:
+                raise LinkFoxVideoError("图片 Base64 数据无效，请重新导入图片") from exc
+        elif value.startswith(("/assets/", "/output/", "/static/assets/")):
+            raise LinkFoxVideoError("连接的本地图片文件不存在，请重新导入图片")
+        else:
+            return _http_url(value, "参考图")
+        if not content or not content_type.startswith("image/") or not extension:
+            raise LinkFoxVideoError("连接的素材不是有效图片，请重新导入图片")
+        try:
+            response = await client.post(
+                f"{gateway.rstrip('/')}/oss/file/presignedPut",
+                headers={"Authorization": api_key},
+                json={"contentType": content_type, "fileExtension": extension}, timeout=150,
+            )
+            if response.status_code != 200:
+                raise LinkFoxVideoError(f"LinkFox 图片上传授权失败（HTTP {response.status_code}），请检查 API Key 和网络")
+            result = response.json()
+            if result.get("errcode") != 200:
+                raise LinkFoxVideoError("LinkFox 图片上传授权失败，请检查 API Key 和账号状态")
+            signed_url = _http_url(result.get("url"), "LinkFox 上传地址")
+            response = await client.put(signed_url, content=content,
+                headers={"Content-Type": content_type, "x-oss-object-acl": "public-read"}, timeout=120)
+            if response.status_code not in (200, 201):
+                raise LinkFoxVideoError(f"LinkFox 图片上传失败（HTTP {response.status_code}），请重试")
+        except httpx.HTTPError as exc:
+            raise LinkFoxVideoError("LinkFox 图片上传网络异常，请检查网络后重试") from exc
+        except (ValueError, TypeError, AttributeError) as exc:
+            if isinstance(exc, LinkFoxVideoError):
+                raise
+            raise LinkFoxVideoError("LinkFox 图片上传响应无效，请重试") from exc
+        uploaded[value] = signed_url.split("?", 1)[0]
+        return uploaded[value]
+
+    data["imageList"] = [await convert(value) for value in data.get("imageList") or []]
+    for field in ("imageUrl", "lastFrameImageUrl"):
+        data[field] = await convert(data.get(field))
+    return data
+
+
 def _skill_path(project_root: Path, kind: str) -> Path:
     base = project_root / "skills" / "linkfox-expert-aigc-videogen-image-to-video" / "skills"
     folder = "linkfox-aigc-videogen-multi" if kind == "multi" else "linkfox-aigc-videogen"
@@ -201,17 +296,36 @@ def _parse_saved_paths(stdout: str) -> list[str]:
     return [str(value) for value in values if isinstance(value, str) and value]
 
 
-def run_skill(raw: Mapping[str, Any], *, project_root: str | Path, output_dir: str | Path, timeout: int = 1300) -> dict[str, Any]:
+def run_skill(raw: Mapping[str, Any], *, project_root: str | Path, output_dir: str | Path,
+              timeout: int = 1300, api_key: str = "", gateway: str = "") -> dict[str, Any]:
     """调用已安装的 LinkFox 底层 skill，并将视频转存为画布输出 URL所需的文件。"""
-    if not (os.environ.get("LINKFOX_AGENT_API_KEY") or os.environ.get("LINKFOXAGENT_API_KEY")):
+    key = api_key or os.environ.get("LINKFOX_AGENT_API_KEY") or os.environ.get("LINKFOXAGENT_API_KEY")
+    if not key:
         raise LinkFoxVideoError("未配置 LINKFOX_AGENT_API_KEY，请先在环境中设置 LinkFox API Key")
     payload, kind = normalize_request(raw)
     root = Path(project_root).resolve()
     script = _skill_path(root, kind)
     environment = os.environ.copy()
-    command = [sys.executable, str(script), json.dumps(payload, ensure_ascii=False)]
+    environment["LINKFOX_AGENT_API_KEY"] = key
+    environment["PYTHONIOENCODING"] = "utf-8"
+    if gateway:
+        environment["LINKFOX_TOOL_GATEWAY"] = gateway
+    # 底层脚本直接 POST，不执行编排 skill 中的业务模型名转换。
+    api_payload = {field: value for field, value in payload.items() if field not in {"entry", "mode"}}
+    api_payload["videoType"] = API_MODEL_TYPES[payload["videoType"]]
+    command = [sys.executable, str(script), json.dumps(api_payload, ensure_ascii=False)]
+    if getattr(sys, "frozen", False):
+        command = [sys.executable, "--linkfox-video-skill", kind, json.dumps(api_payload, ensure_ascii=False)]
     try:
-        result = subprocess.run(command, cwd=str(root), env=environment, capture_output=True, text=True, timeout=max(30, int(timeout)))
+        with tempfile.TemporaryDirectory(prefix="linkfox-skill-") as temp_dir:
+            result_file = Path(temp_dir) / "result.json"
+            if getattr(sys, "frozen", False):
+                environment["LINKFOX_SKILL_RESULT_FILE"] = str(result_file)
+            result = subprocess.run(command, cwd=str(root), env=environment, capture_output=True, text=True, encoding="utf-8", timeout=max(30, int(timeout)))
+            if result_file.is_file():
+                captured = json.loads(result_file.read_text(encoding="utf-8"))
+                result.stdout = captured.get("stdout", "")
+                result.stderr = captured.get("stderr", "")
     except subprocess.TimeoutExpired as exc:
         raise LinkFoxVideoError(f"LinkFox 视频生成超时（已等待 {timeout} 秒）") from exc
     stdout = result.stdout or ""

@@ -18,6 +18,25 @@
     const esc=value => (typeof window.escapeHtml==='function' ? window.escapeHtml(String(value??'')) : String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
     const modelFor=(node)=> (MODELS[node?.mode==='first_last_frame'?'first_last_frame':'reference'].find(item=>item.id===node?.model) || MODELS[node?.mode==='first_last_frame'?'first_last_frame':'reference'][0]);
     function modelsFor(node){ return MODELS[node?.mode==='first_last_frame'?'first_last_frame':'reference']; }
+    function inputPorts(node){
+        return [{role:'reference-image',label:node.mode==='first_last_frame'?'首帧':'参考图',title:'连接参考图片'},
+            ...(node.mode==='first_last_frame'?[{role:'last-frame',label:'尾帧',title:'连接尾帧图片'}]:[])];
+    }
+    function inputRefs(node, nodes, connections, refsForNode){
+        return (connections||[]).filter(connection=>connection.to===node.id).flatMap(connection=>{
+            const source=nodes.find(item=>item.id===connection.from);
+            return (source?refsForNode(source):[]).filter(ref=>ref?.url && (!ref.kind || ref.kind==='image'))
+                .map(ref=>({...ref,inputRole:connection.inputRole||''}));
+        });
+    }
+    function normalizeSettings(node){
+        const model=modelFor(node);
+        node.model=model.id;
+        if(!model.durations.includes(Number(node.duration))) node.duration=model.durations[0];
+        if(!model.resolutions.includes(node.resolution)) node.resolution=model.resolutions[0]||'';
+        if(!model.ratios.includes(node.aspectRatio)) node.aspectRatio=model.ratios[0]||'';
+        if(model.voice!=='optional') node.voice=model.voice==='fixed_true';
+    }
     function createNode(point, extra={}){
         const mode=extra.mode || 'reference';
         const model=extra.model || MODELS[mode][0].id;
@@ -25,6 +44,7 @@
     }
     function options(list, selected, emptyLabel){ return (list||[]).map(value=>{ const empty=!value && emptyLabel; const valueText=empty?'':value; const label=empty?emptyLabel:value; return `<option value="${esc(valueText)}" ${String(valueText)===String(selected)?'selected':''}>${esc(label)}</option>`; }).join(''); }
     function bodyHtml(node){
+        normalizeSettings(node);
         const mode=node.mode==='first_last_frame'?'first_last_frame':'reference';
         const model=modelFor(node); const models=modelsFor(node);
         if(!models.some(item=>item.id===node.model)) node.model=models[0].id;
@@ -55,9 +75,22 @@
         </div>`;
     }
     function buildRequest(node, refs){
-        const urls=(refs||[]).map(ref=>typeof ref==='string'?ref:ref?.url).filter(Boolean);
+        normalizeSettings(node);
+        const images=(refs||[]).map(ref=>typeof ref==='string'?{url:ref}:ref).filter(ref=>ref?.url && (!ref.kind || ref.kind==='image'));
+        const urls=images.map(ref=>ref.url);
+        if(!urls.length) throw new Error('请至少连接一张图片');
+        const limit=node.mode==='first_last_frame'?2:modelFor(node).maxImages;
+        if(urls.length>limit) throw new Error(`当前模式最多支持 ${limit} 张图片，请减少连接图片`);
         const payload={entry:'img2video',mode:node.mode||'reference',imageList:urls,videoType:node.model,videoTime:Number(node.duration||5),prompt:node.prompt||'',promptOptimizer:Boolean(node.promptOptimizer),isPro:Boolean(node.isPro),voice:Boolean(node.voice),camera:node.camera||'single',aspectRatio:node.aspectRatio||'',resolution:node.resolution||''};
-        if(payload.mode==='first_last_frame'){ payload.imageUrl=urls[0]||''; payload.lastFrameImageUrl=urls[1]||node.lastFrameImageUrl||''; }
+        if(payload.mode==='first_last_frame'){
+            const heads=images.filter(ref=>ref.inputRole!=='last-frame');
+            const tails=images.filter(ref=>ref.inputRole==='last-frame');
+            if(!heads.length) throw new Error('请连接首帧图片');
+            if(tails.length>1 || (tails.length && heads.length>1)) throw new Error('首帧和尾帧端口各支持一张图片');
+            payload.imageUrl=heads[0].url;
+            payload.lastFrameImageUrl=tails[0]?.url||heads[1]?.url||node.lastFrameImageUrl||'';
+            payload.imageList=[payload.imageUrl,...(payload.lastFrameImageUrl?[payload.lastFrameImageUrl]:[])];
+        }
         return payload;
     }
     function bind(root,node,options={}){
@@ -71,5 +104,5 @@
         root.querySelector('[data-linkfox-action="run"]')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();options.run?.(node);});
         const refs=options.refs?.(node)||[]; const summary=root.querySelector('[data-linkfox-input-summary]'); if(summary) summary.textContent=refs.length?`已连接 ${refs.length} 张图片（模型上限 ${modelFor(node).maxImages} 张）`:'等待连接图片…';
     }
-    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor};
+    window.CanvasLinkfoxVideo={TYPE,isType:type=>type===TYPE,createNode,bodyHtml,bind,buildRequest,modelsFor,modelFor,inputPorts,inputRefs};
 })();

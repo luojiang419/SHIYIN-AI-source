@@ -15,7 +15,10 @@ a = Analysis(
     ["backend_entry.py"],
     pathex=["."],
     binaries=[],
-    datas=[("canvas_core/person_depth_manifest.json", "canvas_core")],
+    datas=[
+        ("canvas_core/person_depth_manifest.json", "canvas_core"),
+        ("skills/linkfox-expert-aigc-videogen-image-to-video", "skills/linkfox-expert-aigc-videogen-image-to-video"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

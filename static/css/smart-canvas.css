@@ -507,6 +507,7 @@ video.node-img { object-fit:cover; background:#1a1a1a; }
 .image-node.dragging:not(.smart-group-node) { z-index:12; }
 .image-node.smart-group-node.dragging { z-index:3; }
 .node-resize-handle { position:absolute; right:7px; bottom:7px; width:18px; height:18px; border-radius:8px; cursor:nwse-resize; background:rgba(255,255,255,.86); border:1px solid #eceae6; display:flex; align-items:center; justify-content:center; color:#9b9288; opacity:0; transition:all .18s ease; z-index:5; }
+.smart-auto-height-node .node-resize-handle { cursor:ew-resize; }
 .node-resize-handle::before { content:""; width:8px; height:8px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; }
 .node-resize-handle:hover { color:#292928; border-color:#d2d0cb; background:#fff; }
 .theme-dark .node-resize-handle { background:rgba(0,0,0,.86); border-color:rgba(155,146,136,.28); color:#9b9288; }

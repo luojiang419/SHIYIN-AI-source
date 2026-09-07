@@ -276,14 +276,41 @@ def test_film_video_h3_settings_reuse_a_self_contained_parameter_grid():
 
 
 def test_generic_and_h3_film_video_panels_share_the_same_control_language():
-    assert FILM.count('class="gen-settings-row film-video-provider-grid"') == 2
+    assert FILM.count('class="gen-settings-row film-video-provider-grid"') == 3
     assert FILM.count('class="gen-settings-row film-video-primary-grid"') == 2
-    assert FILM.count('class="select-lite" data-film-field="apiProvider"') == 2
-    assert FILM.count('class="select-lite" data-film-field="model"') == 2
+    assert FILM.count('class="select-lite" data-film-field="apiProvider"') == 3
+    assert FILM.count('class="select-lite" data-film-field="model"') == 3
     assert ".film-video-settings .select-lite" in FILM_CSS
     assert ".film-video-settings .setting-input" in FILM_CSS
     assert "2026.09.04.film-video-layout.1" in CLASSIC_HTML
     assert "2026.09.04.film-video-layout.1" in SMART_HTML
+
+
+def test_film_video_model_switching_uses_content_height_and_stable_width_limits():
+    assert "const fitPrompt = () => node.type === 'film-video' ? false" in FILM
+    assert "film-video-settings-linkfox" in FILM
+    assert 'class="gen-settings-row film-video-provider-grid"' in FILM
+    assert "const CLASSIC_FILM_VIDEO_NODE_MIN_WIDTH = 520;" in CLASSIC
+    assert "const CLASSIC_FILM_VIDEO_NODE_MAX_WIDTH = 620;" in CLASSIC
+    assert "type === 'film-video' ? CLASSIC_FILM_VIDEO_NODE_MAX_WIDTH" in CLASSIC
+    assert ".node.auto-height-node.film-video-node .film-prompt-field textarea" in FILM_CSS
+    assert "height:96px" in FILM_CSS
+    assert ".node.auto-height-node.film-video-node .film-mapping-list" in FILM_CSS
+    assert "feature=film-video-model-fit.1" in CLASSIC_HTML
+
+
+def test_smart_film_video_ignores_legacy_height_and_only_resizes_horizontally():
+    assert "const SMART_FILM_VIDEO_NODE_MIN_WIDTH = 520;" in SMART
+    assert "const SMART_FILM_VIDEO_NODE_MAX_WIDTH = 620;" in SMART
+    assert "function smartNodeUsesContentHeight(node)" in SMART
+    assert "smart-auto-height-node" in SMART
+    assert "delete node.h;" in SMART
+    assert "if(smartNodeUsesContentHeight(node))" in SMART
+    assert "el.style.height = 'auto';" in SMART
+    assert ".smart-auto-height-node .node-resize-handle { cursor:ew-resize; }" in SMART_CSS
+    assert ".smart-special-node.smart-film-video-node.smart-auto-height-node .film-node-scroll" in FILM_CSS
+    assert "overflow-y:visible" in FILM_CSS
+    assert "feature=film-video-model-fit.1" in SMART_HTML
 
 
 def test_film_video_h3_settings_are_normalized_and_submitted_on_both_canvases():

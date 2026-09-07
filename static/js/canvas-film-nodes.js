@@ -349,7 +349,7 @@
         const videoIsH3 = node.type === 'film-video' && modelRule(node.apiProvider, node.model).id === 'minimax';
         const videoSettings = node.type === 'film-video'
             ? (node.apiProvider === 'linkfox'
-                ? `<div class="film-video-settings"><div class="gen-settings-row"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select></div>${window.CanvasLinkfoxVideo.unifiedSettingsHtml(node)}</div>`
+                ? `<div class="film-video-settings film-video-settings-linkfox"><div class="gen-settings-row film-video-provider-grid"><select class="select-lite" data-film-field="apiProvider">${providerOptions}</select><select class="select-lite" data-film-field="model">${modelOptions}</select></div>${window.CanvasLinkfoxVideo.unifiedSettingsHtml(node)}</div>`
                 : videoIsH3 ? h3VideoSettingsHtml(node, providerOptions, modelOptions) : genericVideoSettingsHtml(node, providerOptions, modelOptions))
             : '';
         const lineArtAssets = isLineArt ? (options.assets?.(node) || []).filter(item => (item?.ref || item)?.url) : [];
@@ -550,7 +550,9 @@
             // 影视提示词编辑区必须截断滚轮事件，避免触发无限画布缩放。
             if(typeof options.bindScrollableText === 'function') options.bindScrollableText(prompt);
             else prompt.addEventListener('wheel', event => event.stopPropagation(), {passive:true});
-            const fitPrompt = () => options.fitPrompt?.(prompt,node,root);
+            // 视频模型面板高度差异很大，提示词只在自身编辑器内滚动，不能再把
+            // 节点写成固定高度，否则切换到较短模型时会保留上一面板的空白。
+            const fitPrompt = () => node.type === 'film-video' ? false : options.fitPrompt?.(prompt,node,root);
             prompt.addEventListener('input', fitPrompt);
             requestAnimationFrame(fitPrompt);
             prompt.addEventListener('keydown', event => {

@@ -1935,6 +1935,8 @@ const MEDIA_GROUP_MAX_VISIBLE_ROWS = 3;
 const SMART_GROUP_MAX_VISIBLE_ROWS = 4;
 const EMPTY_UPLOAD_NODE_WIDTH = 316;
 const EMPTY_UPLOAD_NODE_HEIGHT = 194;
+const SMART_FILM_VIDEO_NODE_MIN_WIDTH = 520;
+const SMART_FILM_VIDEO_NODE_MAX_WIDTH = 620;
 const SMART_GROUP_DEFAULT_WIDTH = 340;
 const SMART_GROUP_DEFAULT_HEIGHT = 286;
 const SMART_GROUP_LEGACY_HEIGHT = 220;
@@ -1946,6 +1948,14 @@ const SMART_GROUP_MAX_MEMBER_ZOOM = 4;
 function mediaNodeDefaultScale(node){
     if((node?.images || []).length > 1 && !Number.isFinite(Number(node?.scale))) return MEDIA_GROUP_DEFAULT_SCALE;
     return Number.isFinite(Number(node?.scale)) && Number(node.scale) > 0 ? Number(node.scale) : MEDIA_NODE_DEFAULT_SCALE;
+}
+function smartNodeUsesContentHeight(node){
+    return node?.specialType === 'film-video';
+}
+function smartFilmVideoNodeWidth(node){
+    const stored = Number(node?.w);
+    const width = Number.isFinite(stored) ? stored : SMART_FILM_VIDEO_NODE_MIN_WIDTH;
+    return Math.max(SMART_FILM_VIDEO_NODE_MIN_WIDTH, Math.min(SMART_FILM_VIDEO_NODE_MAX_WIDTH, Math.round(width)));
 }
 function createImageNodeAt(point, images=[], options={}){
     const layout = imageLayout(images || [], mediaNodeDefaultScale({type:'smart-image', images:images || []}), {type:'smart-image', images:images || []});
@@ -3045,7 +3055,7 @@ function smartGroupImageGridLayout(node){
 function imageLayout(images, scale=1, node=null){
     if(node?.specialType === 'film-storyboard') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(400, Math.round(Number(node.h) || 430)), thumb:96, single:true};
     if(node?.specialType === 'film-line-art') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(400, Math.round(Number(node.h) || 430)), thumb:96, single:true};
-    if(node?.specialType === 'film-video') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(400, Math.round(Number(node.h) || 430)), thumb:96, single:true};
+    if(node?.specialType === 'film-video') return {cols:1, rows:1, width:smartFilmVideoNodeWidth(node), height:430, thumb:96, single:true, autoHeight:true};
     if(node?.specialType === 'linkfox-video') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 480)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'panorama') return {cols:1, rows:1, width:Math.max(420, Math.round(Number(node.w) || 520)), height:Math.max(430, Math.round(Number(node.h) || 520)), thumb:96, single:true};
     if(node?.specialType === 'dwpose') return {cols:1, rows:1, width:Math.max(330, Math.round(Number(node.w) || 380)), height:Math.max(350, Math.round(Number(node.h) || 390)), thumb:96, single:true};
@@ -3144,7 +3154,8 @@ function fitSmartLoopNode(node){
 }
 function nodeRect(node){
     const layout = imageLayout(node.images || [], nodeScale(node), node);
-    return {x:node.x || 0, y:node.y || 0, width:layout.width, height:layout.height};
+    const contentHeightEl = smartNodeUsesContentHeight(node) ? smartNodeDomIndex.get(node.id) : null;
+    return {x:node.x || 0, y:node.y || 0, width:layout.width, height:contentHeightEl?.offsetHeight || layout.height};
 }
 function smartPortIndexKey(nodeId, kind, role=''){
     return `${nodeId}:${kind}:${role || ''}`;
@@ -8538,7 +8549,8 @@ function updateNodeElementDuringResize(node){
     const imgs = isSmartGroupNode(node) ? smartGroupImageRefs(node).map(ref => ref.item) : (node.images || []);
     const layout = imageLayout(imgs, nodeScale(node), node);
     el.style.width = `${layout.width}px`;
-    el.style.height = `${layout.height}px`;
+    if(smartNodeUsesContentHeight(node)) el.style.height = 'auto';
+    else el.style.height = `${layout.height}px`;
     const body = el.querySelector('.node-body');
     if(body){
         const loadingSingle = body.querySelector('.loading-cell.single');
@@ -10125,6 +10137,8 @@ function rememberInlineVideoActivations(nodeIndex=new Map(nodes.map(node => [nod
 }
 function smartNodeHtml(node){
     if(node.specialType === 'multi-view') normalizeSmartMultiViewNode(node);
+    const usesContentHeight = smartNodeUsesContentHeight(node);
+    if(usesContentHeight) delete node.h;
     const imgs = node.images || [];
     const generationSlots = smartGenerationSlots(node);
     const displayCount = generationSlots.length || imgs.length;
@@ -10164,7 +10178,7 @@ function smartNodeHtml(node){
     const deleteBtn = isGroup ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
     const multiViewModeHtml = node.specialType === 'multi-view' ? `<div class="multi-view-mode-switch" role="group" aria-label="三视图模式"><button type="button" data-multi-view-mode="person" class="${smartMultiViewMode(node) === 'person' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'person'}">人物三视图</button><button type="button" data-multi-view-mode="building" class="${smartMultiViewMode(node) === 'building' ? 'active' : ''}" aria-pressed="${smartMultiViewMode(node) === 'building'}">建筑三视图</button></div>` : '';
     const hint = isSpecial ? '' : isSmartGroup ? '双击添加 · 拖入归组 · 选中后生成' : slotFailed ? escapeHtml(tr('smart.slotFailedHint')) : isPending ? escapeHtml(tr('smart.hintPending')) : (displayCount > 1 ? escapeHtml(tr('smart.hintMulti')) : displayCount ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')));
-    return `<div class="image-node ${isFunctional ? 'functional-node' : ''} ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
+    return `<div class="image-node ${isFunctional ? 'functional-node' : ''} ${smartLodSafe ? 'smart-lod-safe' : ''} ${isSpecial ? `smart-special-node smart-${escapeAttr(node.specialType)}-node` : ''} ${usesContentHeight ? 'smart-auto-height-node' : ''} ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isHistory ? 'history-group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isSmartGroup ? 'smart-group-node' : ''} ${isCompactMember ? 'smart-group-member-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${usesContentHeight ? 'auto' : `${layout.height}px`}">
         <div class="node-head"><div class="node-title-wrap"><div class="node-title">${title}</div>${smartGroupCountHtml}</div><div class="node-actions">${multiViewModeHtml}${deleteBtn}</div></div>
         ${!isEmpty && !isGroup ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
         ${smartNodeToolbarHtmlForRender(node)}
@@ -20463,6 +20477,12 @@ window.onmousemove = e => {
         const dy = (e.clientY - resizeState.startY) / viewport.scale;
         const minW = node.specialType === 'multi-view' ? 620 : node.specialType === 'depth-map' ? 520 : node.specialType === 'batch-generator' ? 400 : node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
         const minH = node.specialType === 'multi-view' ? 780 : node.specialType === 'depth-map' ? 560 : node.specialType === 'batch-generator' ? 470 : node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+        if(smartNodeUsesContentHeight(node)){
+            node.w = Math.max(SMART_FILM_VIDEO_NODE_MIN_WIDTH, Math.min(SMART_FILM_VIDEO_NODE_MAX_WIDTH, Math.round(resizeState.startW + dx)));
+            delete node.h;
+            updateNodeElementDuringResize(node);
+            return;
+        }
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。

@@ -11073,6 +11073,8 @@ async function runFilmNode(nodeId, opts={}){
 }
 const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
 const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
+const CLASSIC_FILM_VIDEO_NODE_MIN_WIDTH = 520;
+const CLASSIC_FILM_VIDEO_NODE_MAX_WIDTH = 620;
 const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = 520;
 const classicPortraitMediaNodeIds = new Set();
 const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
@@ -11100,9 +11102,9 @@ function classicNodeLayoutLimits(nodeOrType){
     const isControlNode = !CLASSIC_COMPACT_NODE_TYPES.has(type);
     const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0) && !CLASSIC_FLEX_GENERATOR_NODE_TYPES.has(type));
     return {
-        minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0, portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0),
+        minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0, type === 'film-video' ? CLASSIC_FILM_VIDEO_NODE_MIN_WIDTH : 0, portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0),
         minHeight:Math.max(96, Number(size.h) || 0, Number(CLASSIC_NODE_MIN_HEIGHTS[type]) || 0, isControlNode ? 320 : 0),
-        maxWidth:type === 'video' ? CLASSIC_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY,
+        maxWidth:type === 'video' ? CLASSIC_VIDEO_NODE_MAX_WIDTH : type === 'film-video' ? CLASSIC_FILM_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY,
         autoHeight,
     };
 }

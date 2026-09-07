@@ -42,6 +42,7 @@ def test_video_node_height_is_content_driven_and_controls_do_not_compete_with_me
     assert "if(contentScroll) contentScroll.onwheel" not in JS
     assert "CLASSIC_VIDEO_NODE_MIN_HEIGHT" not in JS
     assert "feature=video-auto-height.2" in HTML
+    assert "feature=video-model-fit.1" in HTML
 
 
 def test_video_output_port_dot_stays_outside_the_node_frame():

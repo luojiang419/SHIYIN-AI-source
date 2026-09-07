@@ -68,6 +68,13 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
             throw "Staged prompt skill is empty: $requiredSkillPath"
         }
     }
+    foreach ($profile in @('kling-cli', 'seedance', 'hailuo', 'wan', 'happyhorse', 'kling-linkfox')) {
+        $profilePath = Join-Path $Root "app\skills\video-prompt-polish\$profile\SKILL.md"
+        if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
+            throw "Staged video prompt profile is missing: $profilePath"
+        }
+        if ((Get-Item -LiteralPath $profilePath).Length -le 0) { throw "Staged video prompt profile is empty: $profilePath" }
+    }
     if (-not $canvasHtml.Contains("canvas-topaz-node.js?v=$ExpectedVersion")) {
         throw "Staged canvas Topaz script cache version is not $ExpectedVersion."
     }
@@ -115,7 +122,8 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path
 # 视频提示词 skill 由后端按 app_root/skills 读取，必须随安装包一起发布。
 New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills\video-prompt-polish') | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'skills\video-prompt-polish') -Force | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stageRoot 'app\skills\video-prompt-polish') -Recurse -Force
+    $profileDestination = Join-Path (Join-Path $stageRoot 'app\skills\video-prompt-polish') $_.Name
+    Copy-Item -LiteralPath $_.FullName -Destination $profileDestination -Recurse -Force
 }
 # 图片提示词 profile 同样由后端按 app_root/skills 读取，必须随安装包一起发布。
 New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills\image-prompt-polish') | Out-Null

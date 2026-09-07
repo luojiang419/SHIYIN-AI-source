@@ -17,6 +17,7 @@ import httpx
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", type=Path, required=True)
+    parser.add_argument("--unified", action="store_true", help="验证统一节点与纯文本跨模型适配")
     args = parser.parse_args()
     stage = args.stage.resolve()
     backend = stage / "app/backend/canvas-backend/canvas-backend.exe"
@@ -27,6 +28,7 @@ def main():
     image = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jEOsAAAAASUVORK5CYII=")
     video = b"\x00\x00\x00\x18ftypmp42" + b"local-transport-fixture"
     calls = []
+    adapted_prompt = "图片1、图片2、图片3保持同一演员外观，演员向左行走，镜头平稳跟随，无配乐。"
 
     class Gateway(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -41,9 +43,14 @@ def main():
             self.wfile.write(body)
 
         def do_POST(self):
-            assert self.headers["Authorization"] == "linkfox-packaged-fixture"
             data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             calls.append((self.path, data))
+            if self.path == '/v1/chat/completions':
+                assert self.headers['Authorization'] == 'Bearer linkfox-packaged-fixture'
+                assert 'image_url' not in json.dumps(data['messages'])
+                assert 'video_url' not in json.dumps(data['messages'])
+                return self.reply({'choices': [{'message': {'role': 'assistant', 'content': adapted_prompt}}]})
+            assert self.headers['Authorization'] == 'linkfox-packaged-fixture'
             if self.path == "/oss/file/presignedPut":
                 assert data == {"contentType": "image/png", "fileExtension": "png"}
                 self.reply({"errcode": 200, "url": gateway_url + "/image.png?signature=fixture"})
@@ -51,6 +58,7 @@ def main():
                 assert data["videoType"] == "SEED"
                 assert data["imageList"] == [gateway_url + "/image.png"] * 3
                 assert "entry" not in data and "mode" not in data
+                if args.unified: assert data["prompt"] == adapted_prompt
                 print("Packaged upload and SEED submission passed; waiting for the bundled skill poll.", flush=True)
                 self.reply({"taskId": "local-fixture", "costToken": 0})
             elif self.path == "/aigc/taskQuery":
@@ -104,17 +112,33 @@ def main():
                         assert login.status_code == 200, login.text
                         capabilities = client.get("/api/linkfox-video/capabilities").json()
                         assert capabilities["installed"] and capabilities["configured"], capabilities
-                        response = client.post("/api/linkfox-video", json={"entry": "img2video", "mode": "reference",
-                            "videoType": "seedance2.0", "videoTime": 5,
-                            "imageList": ["data:image/png;base64," + base64.b64encode(image).decode()] * 3})
+                        references = ["data:image/png;base64," + base64.b64encode(image).decode()] * 3
+                        if args.unified:
+                            configured = client.put('/api/providers', json=[{'id': 'ecommerce-vision', 'name': 'Fixture AI助手',
+                                'base_url': gateway_url + '/v1', 'protocol': 'openai', 'enabled': True,
+                                'chat_models': ['fixture-vision'], 'api_key': 'linkfox-packaged-fixture'}])
+                            assert configured.status_code == 200, configured.text
+                            response = client.post('/api/canvas-video', json={'provider_id': 'linkfox', 'model': 'seedance2.0',
+                                'duration': 5, 'images': [{'url': url} for url in references],
+                                'prompt': '已有模型解析词：演员向左行走，无配乐。', 'prompt_source_model': 'wan2.6',
+                                'prompt_source_provider': 'local', 'auto_adapt_prompt': True,
+                                'prompt_optimizer_provider': 'ecommerce-vision', 'prompt_optimizer_model': 'fixture-vision'})
+                        else:
+                            response = client.post('/api/linkfox-video', json={'entry': 'img2video', 'mode': 'reference',
+                                'videoType': 'seedance2.0', 'videoTime': 5, 'imageList': references})
                         assert response.status_code == 200, response.text
                         result = response.json()
+                        if args.unified:
+                            assert result['request']['prompt'] == adapted_prompt
+                            assert result['request']['prompt_adaptation']['profile'] == 'seedance'
+                            assert result['request']['prompt_adaptation']['visual_analysis'] is False
+                            assert sum(path == '/v1/chat/completions' for path, _ in calls) == 1
                         assert len(result["videos"]) == 1, result
                         assert client.get(result["videos"][0]).content == video
                         assert sum(path == "/oss/file/presignedPut" for path, _ in calls) == 1
                         print(json.dumps({"result": "pass", "installed": True, "reference_count": 3,
                             "upload_count": 1, "model": "SEED", "skill": result["skill"],
-                            "result_bytes": len(video), "real_paid_api_called": False}), flush=True)
+                            "result_bytes": len(video), "unified_prompt_adaptation": args.unified, "real_paid_api_called": False}), flush=True)
                 finally:
                     process.terminate()
                     try:

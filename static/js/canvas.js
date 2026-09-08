@@ -6684,60 +6684,6 @@ async function importFilmBridgePackage(){
     };
     input.click();
 }
-async function trySendShiyinBridgeToFilm(data, canvasTitle){
-    const ports = [3210];
-    let lastError = null;
-    for(const port of ports){
-        const base = `http://127.0.0.1:${port}`;
-        try {
-            const capability = await fetch(`${base}/api/canvas-bridges/shiyin/capabilities`, {mode:'cors'});
-            if(!capability.ok) continue;
-            const info = await capability.json();
-            if(info?.app !== 'filmstoryboard' || info?.automatic_receive !== true) continue;
-            const packageResponse = await fetch(data.url);
-            if(!packageResponse.ok) throw new Error('无法读取桥接包');
-            const body = await packageResponse.arrayBuffer();
-            const response = await fetch(`${base}/api/canvas-bridges/shiyin/receive?canvas_title=${encodeURIComponent(canvasTitle || '')}`, {
-                method:'POST', mode:'cors', headers:{'Content-Type':'application/zip'}, body
-            });
-            const payload = await response.json().catch(() => ({}));
-            if(!response.ok || payload?.ok !== true){
-                throw new Error(payload?.detail || `filmstoryboard 接收失败（HTTP ${response.status}）`);
-            }
-            return payload;
-        } catch(error) {
-            lastError = error;
-        }
-    }
-    throw lastError || new Error('未发现正在运行的 filmstoryboard');
-}
-async function exportFilmBridgeGroup(groupId){
-    if(!canvas?.id || !groupId) return;
-    setStatus(langIsEn() ? 'Preparing film bridge package...' : '正在生成 filmstoryboard 回传包...');
-    try {
-        if(localCanvasDirty) await saveCanvas();
-        const form = new FormData();
-        form.append('canvas_id', canvas.id);
-        form.append('group_id', groupId);
-        form.append('include_derived', 'true');
-        const response = await fetch('/api/canvas-bridges/film/export', {method:'POST', body:form});
-        if(!response.ok) throw new Error(await responseErrorMessage(response, langIsEn() ? 'Bridge export failed' : '回传包导出失败'));
-        const data = await response.json();
-        try {
-            const result = await trySendShiyinBridgeToFilm(data, canvas.title || 'SHIYIN 故事板');
-            setStatus(langIsEn()
-                ? `Sent ${result.frame_count || data.file_count || 0} frames to filmstoryboard`
-                : `已自动发送 ${result.frame_count || data.file_count || 0} 张分镜到 filmstoryboard`);
-        } catch(_) {
-            await downloadUrl(data.url, data.filename || 'shiyin-film-bridge.filmbridge.zip');
-            setStatus(langIsEn() ? `Exported ${data.file_count || 0} frames` : `已导出 ${data.file_count || 0} 张分镜帧，film 未运行，已保存桥接包`);
-        }
-    } catch(error) {
-        console.error(error);
-        setStatus(langIsEn() ? 'Ready' : '就绪');
-        alert(error.message || (langIsEn() ? 'Bridge export failed' : '回传包导出失败'));
-    }
-}
 function createImageCardFromUrl(url, point, name='image'){
     if(!ensureCanvas() || !url) return;
     const p = point || defaultPoint(0, 0);
@@ -20921,8 +20867,7 @@ function renderSelectionHub(options={}){
         {id:'arrange-group', label:'整理组内节点', icon:'layout-grid'},
         {id:'batchGenerator', label:'批量处理', icon:'layers-3'},
         {id:'expand-canvas', label:langIsEn() ? 'Expand canvas' : '扩展画幅', icon:'expand'},
-        {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'},
-        {id:'send-to-film', label:langIsEn() ? 'Send to filmstoryboard' : '发送到 filmstoryboard', icon:'send'}
+        {id:'line-art', label:langIsEn() ? 'Generate storyboard line art' : '生成线稿分镜', icon:'pencil-ruler'}
     ] : target.mediaKind === 'video' ? [
         {id:'extract-video', label:langIsEn() ? 'Extract frames' : '视频抽帧', icon:'images'},
         {id:'trim-video', label:langIsEn() ? 'Trim video' : '视频截取', icon:'scissors'},
@@ -21573,10 +21518,6 @@ function runMediaQuickAction(action, target){
     if(action === 'batchGenerator' && target?.kind === 'group'){
         if(!sourceNode) return;
         addQuickActionNode(sourceNode, action);
-        return;
-    }
-    if(action === 'send-to-film'){
-        exportFilmBridgeGroup(target?.nodeId);
         return;
     }
     if(action === 'expand-canvas' || action === 'line-art'){

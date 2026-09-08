@@ -28,8 +28,9 @@ def _integer(value: Any, default: int = 0) -> int:
 def find_bridge_target(
     canvases: Iterable[Mapping[str, Any]],
     bridge_id: str,
+    *, dedicated_only: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """按传入顺序返回同一 film bridge 的未删除画布与源 GROUP。"""
+    """自动导出只复用专属工程，不能仅凭混合画布中的历史来源组匹配。"""
     wanted = _text(bridge_id)
     if not wanted:
         return None, None
@@ -37,6 +38,12 @@ def find_bridge_target(
         if not isinstance(raw_canvas, Mapping) or raw_canvas.get("deleted_at"):
             continue
         canvas = raw_canvas if isinstance(raw_canvas, dict) else dict(raw_canvas)
+        owner = canvas.get("filmBridgeOwner")
+        if dedicated_only and isinstance(owner, Mapping):
+            if owner.get("bridgeId") != wanted or owner.get("canvasId") != canvas.get("id"):
+                continue
+            group = next((n for n in canvas.get("nodes", []) if n.get("type") == "group" and n.get("bridgeId") == wanted), None)
+            return canvas, group
         for node in canvas.get("nodes") or []:
             if (
                 isinstance(node, dict)
@@ -44,6 +51,17 @@ def find_bridge_target(
                 and _text(node.get("bridgeId")) == wanted
                 and _text(node.get("bridgeDirection")) == "film-to-shiyin"
             ):
+                if dedicated_only:
+                    # 兼容尚无专属标记的旧导出：同名且全部节点归属此画板，才可认领。
+                    board_name = _text(node.get("bridgeBoardName"))[:80]
+                    if not board_name or _text(canvas.get("title")) != board_name:
+                        continue
+                    steps = set(node.get("workflowNodeIds") or [])
+                    owned = {node["id"], *(node.get("items") or []), *(node.get("bridgePromptNodeIds") or []), *steps}
+                    owned.update(n.get("id") for n in canvas.get("nodes", [])
+                                 if n.get("workflowFunctionGroup") and n.get("workflowOwnerId") in steps)
+                    if any(n.get("id") not in owned for n in canvas.get("nodes", [])):
+                        continue
                 return canvas, node
     return None, None
 

@@ -54,9 +54,22 @@ try:
             "shot_number": 1, "frame_index": 0, "relative_path": "images/a.png", "upload_name": "a.png", "width": 16, "height": 9,
             "sha256": digest, "metadata": {"source_storyboard_asset_id": "film-asset"}}]}}
     with TestClient(main.app, client=("127.0.0.1", 50000)) as client:
+        # 实装复现：GP01 含同一个来源组和用户自建节点，不能被自动导出再次认领。
+        legacy = main.new_canvas(title="GP01")
+        legacy["nodes"] = [
+            {"id": "old-group", "type": "group", "bridgeId": manifest["bridge_id"], "bridgeDirection": "film-to-shiyin",
+             "bridgeBoardName": "工作流往返", "items": ["old-frame"]},
+            {"id": "old-frame", "type": "image", "url": "/input/old-frame.png"},
+            {"id": "user-prompt", "type": "prompt", "text": "用户的已有工作"}]
+        main.save_canvas(legacy)
+        legacy_before = json.dumps(main.load_canvas(legacy["id"]), sort_keys=True)
         receive = client.post("/api/canvas-bridges/film/receive-direct", data={"manifest": json.dumps(manifest)}, files={"frames": ("a.png", content, "image/png")})
         assert receive.status_code == 200, receive.text
         canvas = main.load_canvas(receive.json()["canvas_id"])
+        assert canvas["id"] != legacy["id"]
+        assert canvas["title"] == "工作流往返"
+        assert canvas["filmBridgeOwner"] == {"bridgeId": manifest["bridge_id"], "canvasId": canvas["id"]}
+        assert json.dumps(main.load_canvas(legacy["id"]), sort_keys=True) == legacy_before
         receipt_ids = receive.json()["workflow_node_ids"]
         assert len(receipt_ids) == 3
         assert set(receipt_ids) == {n["id"] for n in canvas["nodes"] if n.get("workflowKey")}

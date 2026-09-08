@@ -155,6 +155,21 @@ class BridgeSyncTests(unittest.TestCase):
         self.assertEqual(canvas["id"], "active")
         self.assertEqual(group["id"], "g2")
 
+    def test_dedicated_target_does_not_hijack_mixed_gp01_or_cloned_canvas(self):
+        group = {"id": "g", "type": "group", "bridgeId": "film:p:b", "bridgeDirection": "film-to-shiyin",
+                 "bridgeBoardName": "原始故事板", "items": ["i"]}
+        mixed = {"id": "GP01", "title": "GP01", "nodes": [group, {"id": "i", "type": "image"}, {"id": "manual", "type": "prompt"}]}
+        self.assertEqual(find_bridge_target([mixed], "film:p:b", dedicated_only=True), (None, None))
+        dedicated = {"id": "export", "title": "用户重命名", "nodes": [group],
+                     "filmBridgeOwner": {"bridgeId": "film:p:b", "canvasId": "export"}}
+        clone = {**dedicated, "id": "clone"}
+        self.assertEqual(find_bridge_target([mixed, clone, dedicated], "film:p:b", dedicated_only=True)[0]["id"], "export")
+        self.assertEqual(find_bridge_target([clone], "film:p:b", dedicated_only=True), (None, None))
+        legacy = {"id": "legacy", "title": "原始故事板", "nodes": [group, {"id": "i", "type": "image"}]}
+        self.assertEqual(find_bridge_target([legacy], "film:p:b", dedicated_only=True)[0]["id"], "legacy")
+        legacy["nodes"].append({"id": "manual", "type": "prompt"})
+        self.assertEqual(find_bridge_target([legacy], "film:p:b", dedicated_only=True), (None, None))
+
 
 if __name__ == "__main__":
     unittest.main()

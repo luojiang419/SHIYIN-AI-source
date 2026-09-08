@@ -479,7 +479,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "1.0.422"
+APP_VERSION = "1.0.423"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -13721,6 +13721,7 @@ async def film_bridge_capabilities(request: Request):
         "file_fallback": True,
         "direct_receive": True,
         "workflow_receive": True,
+        "dedicated_board_projects": True,
         "active_canvas_id": active_canvas.get("id") if active_canvas else "",
         "active_canvas_title": active_canvas.get("title") if active_canvas else "",
     }
@@ -13779,10 +13780,11 @@ async def receive_film_bridge_direct(
         canvas = load_canvas(requested_id)
     else:
         # 自动联动按来源画板匹配，不能把不同画板注入当前打开的无关工程。
-        canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id)
+        canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id, dedicated_only=True)
         if canvas is None:
             title = (canvas_title.strip() or str(storyboard.get("board_name") or "film 故事板").strip() or "film 故事板")[:80]
             canvas = new_canvas(title=title, icon="clapperboard", kind="classic", project=DEFAULT_PROJECT_ID)
+        canvas["filmBridgeOwner"] = {"bridgeId": bridge_id, "canvasId": canvas["id"]}
     try:
         frame_records = await asyncio.to_thread(
             materialize_direct_bridge_frames,
@@ -13820,6 +13822,9 @@ async def receive_film_bridge_direct(
     ACTIVE_CANVAS_BY_ACCOUNT[current_account_id()] = canvas["id"]
     workflow_node_ids = sync_result.get("workflow_node_ids", [])
     workflow_ready, workflow_warning = await initialize_film_canvas_workflow(canvas, workflow_node_ids)
+    print("[film-bridge] " + json.dumps({"bridge_id": bridge_id, "canvas_id": canvas["id"],
+        "canvas_title": canvas.get("title"), "group_id": sync_result["group"]["id"],
+        "workflow_ready": workflow_ready, "frame_count": len(sync_result["image_nodes"])}, ensure_ascii=False), flush=True)
     return {
         "ok": True,
         "transport": "direct-multipart",
@@ -13884,10 +13889,11 @@ async def receive_film_bridge_package(
         if canvas_id.strip():
             canvas = load_canvas(canvas_id)
         else:
-            canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id)
+            canvas, _ = find_bridge_target(DATABASE.list_canvases(include_deleted=False), bridge_id, dedicated_only=True)
             if canvas is None:
                 title = (canvas_title.strip() or str(storyboard.get("board_name") or "film 故事板").strip() or "film 故事板")[:80]
                 canvas = new_canvas(title=title, icon="clapperboard", kind="classic", project=DEFAULT_PROJECT_ID)
+            canvas["filmBridgeOwner"] = {"bridgeId": bridge_id, "canvasId": canvas["id"]}
         try:
             frame_records = await asyncio.to_thread(
                 materialize_bridge_frames,

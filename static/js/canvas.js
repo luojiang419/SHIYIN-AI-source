@@ -19870,6 +19870,7 @@ const CANVAS_GROUP_ARRANGE_HEADER = 58;
 // 将普通组内节点按网格重新排列，并让组背景板精确包住整理后的内容。
 // 保留节点当前的阅读顺序（先按原始行、再按原始列），避免整理后内容顺序突变。
 function arrangeCanvasGroupContents(groupId, options={}){
+    const gap = globalThis.CanvasArrangeSpacing?.groupGap() ?? CANVAS_GROUP_ARRANGE_GAP;
     const group = nodes.find(node => node.id === groupId && node.type === 'group');
     if(!group) return false;
     const members = (group.items || [])
@@ -19901,15 +19902,15 @@ function arrangeCanvasGroupContents(groupId, options={}){
     const contentY = originY + CANVAS_GROUP_ARRANGE_HEADER;
     const colX = [];
     let cursorX = contentX;
-    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + CANVAS_GROUP_ARRANGE_GAP; });
+    colWidths.forEach(width => { colX.push(cursorX); cursorX += width + gap; });
     const rowY = [];
     let cursorY = contentY;
-    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + CANVAS_GROUP_ARRANGE_GAP; });
+    rowHeights.forEach(height => { rowY.push(cursorY); cursorY += height + gap; });
     ordered.forEach((node, index) => {
         moveCanvasNodeAtom(node, colX[index % columns], rowY[Math.floor(index / columns)]);
     });
-    const contentWidth = colWidths.reduce((sum, width) => sum + width, 0) + CANVAS_GROUP_ARRANGE_GAP * Math.max(0, columns - 1);
-    const contentHeight = rowHeights.reduce((sum, height) => sum + height, 0) + CANVAS_GROUP_ARRANGE_GAP * Math.max(0, rows - 1);
+    const contentWidth = colWidths.reduce((sum, width) => sum + width, 0) + gap * Math.max(0, columns - 1);
+    const contentHeight = rowHeights.reduce((sum, height) => sum + height, 0) + gap * Math.max(0, rows - 1);
     group.w = Math.max(300, Math.round(contentWidth + CANVAS_GROUP_ARRANGE_PADDING * 2));
     group.h = Math.max(180, Math.round(CANVAS_GROUP_ARRANGE_HEADER + contentHeight + CANVAS_GROUP_ARRANGE_PADDING));
     return true;
@@ -22782,6 +22783,7 @@ function canvasArrangeGridShape(count){
 }
 
 function arrangeCanvasLayerItems(items, rectById, startX, startY){
+    const rowGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;
     const ordered = (items || []).filter(Boolean);
     if(!ordered.length) return {width:0, height:0};
     // 少量节点保持原有单列排版；只有输入节点明显增多时才切换网格。
@@ -22792,9 +22794,9 @@ function arrangeCanvasLayerItems(items, rectById, startX, startY){
             const rect = rectById.get(item.id) || nodeRect(item);
             moveCanvasNodeAtom(item, startX, layerY);
             layerWidth = Math.max(layerWidth, Math.max(220, rect.w || 0));
-            layerY += Math.max(120, rect.h || 0) + 56;
+            layerY += Math.max(120, rect.h || 0) + rowGap;
         });
-        return {width:layerWidth, height:Math.max(0, layerY - startY - 56)};
+        return {width:layerWidth, height:Math.max(0, layerY - startY - rowGap)};
     }
     const shape = canvasArrangeGridShape(ordered.length);
     const columns = Math.max(1, shape.columns);
@@ -22808,8 +22810,7 @@ function arrangeCanvasLayerItems(items, rectById, startX, startY){
         colWidths[col] = Math.max(colWidths[col], Math.max(220, rect.w || 0));
         rowHeights[row] = Math.max(rowHeights[row], Math.max(120, rect.h || 0));
     });
-    const colGap = 180;
-    const rowGap = 56;
+    const colGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;
     const colX = [];
     let cursorX = startX;
     colWidths.forEach(width => { colX.push(cursorX); cursorX += width + colGap; });
@@ -22882,8 +22883,7 @@ function arrangeIdsByConnections(ids){
         if(!layers.has(level)) layers.set(level, []);
         layers.get(level).push(node);
     });
-    const columnGap = 180;
-    const rowGap = 56;
+    const columnGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;
     let layerX = startX;
     [...layers.keys()].sort((a, b) => a - b).forEach(level => {
         const items = layers.get(level).sort((a, b) => compareIds(a.id, b.id));
@@ -22956,7 +22956,7 @@ function arrangeSelectedCanvasNodes(){
             arranged = true;
         }
         const bounds = canvasArrangeBounds(component);
-        if(bounds) nextY = bounds.bottom + 120;
+        if(bounds) nextY = bounds.bottom + (globalThis.CanvasArrangeSpacing?.gap() ?? 56);
     });
     if(!arranged && batches.length < 2) return;
     render();

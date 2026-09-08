@@ -78,8 +78,7 @@ def test_shared_arrange_layout_accounts_for_real_node_dimensions():
     assert "const rectById = new Map" in arrange_body
     assert "const layerWidth = Math.max" in arrange_body
     assert "let layerY = startY" in arrange_body
-    assert "const columnGap = 180;" in arrange_body
-    assert "const rowGap = 56;" in arrange_body
+    assert "const columnGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;" in arrange_body
 
 
 def test_bulk_import_is_uncapped_and_local_path_import_uses_same_grid_and_group():

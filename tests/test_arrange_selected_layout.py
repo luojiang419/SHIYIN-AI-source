@@ -14,7 +14,7 @@ def test_normal_canvas_arrange_uses_connection_topology_and_real_node_dimensions
     assert "const layers = new Map();" in CANVAS_JS
     assert "const canonicalId = id => scopeById.get(id) || id;" in CANVAS_JS
     assert "const unresolved = selectedNodes.map(node => node.id).filter(id => !processed.has(id)).sort(compareIds);" in CANVAS_JS
-    assert "const columnGap = 180;" in CANVAS_JS
+    assert "const columnGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;" in CANVAS_JS
 
 
 def test_smart_canvas_arrange_uses_connection_topology_and_real_node_dimensions():
@@ -25,7 +25,7 @@ def test_smart_canvas_arrange_uses_connection_topology_and_real_node_dimensions(
     assert "const layers = new Map();" in SMART_JS
     assert "const canonicalId = id => scopeById.get(id) || id;" in SMART_JS
     assert "const unresolved = selectedNodes.map(node => node.id).filter(id => !processed.has(id)).sort(compareIds);" in SMART_JS
-    assert "const columnGap = 160;" in SMART_JS
+    assert "const columnGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;" in SMART_JS
 
 
 def test_context_menu_can_be_opened_from_a_selected_node_in_both_canvases():

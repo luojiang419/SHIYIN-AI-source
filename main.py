@@ -2782,6 +2782,8 @@ class AppSettingsUpdateRequest(BaseModel):
     quick_save_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
     shortcut_bindings: Optional[Dict[str, str]] = None
+    canvas_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
+    canvas_group_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
 
 
 @app.get("/pair")
@@ -3075,6 +3077,8 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "quick_save_dir": str(config.get("quick_save_dir") or "").strip(),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
         "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
+        "canvas_arrange_spacing": config.get("canvas_arrange_spacing", 56),
+        "canvas_group_arrange_spacing": config.get("canvas_group_arrange_spacing", 28),
         "runtime_mode": RUNTIME_OPTIONS.mode,
     }
 
@@ -3130,6 +3134,8 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             quick_save_dir=payload.quick_save_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
             shortcut_bindings=payload.shortcut_bindings,
+            canvas_arrange_spacing=payload.canvas_arrange_spacing,
+            canvas_group_arrange_spacing=payload.canvas_group_arrange_spacing,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

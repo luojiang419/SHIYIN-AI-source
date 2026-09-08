@@ -2723,7 +2723,7 @@ function smartGroupThumbLayout(node){
             innerH:single.height
         };
     }
-    const gap = 8;
+    const gap = node.arrangeGap == null ? 8 : Math.max(0, Math.min(240, Number(node.arrangeGap) || 0));
     const maxVisibleRows = compactMembers.length ? count : SMART_GROUP_MAX_VISIBLE_ROWS;
     if(hasExplicit){
         const fitted = groupImageGridLayout(count, Math.max(72, explicitW - outerPad), Math.max(56, explicitH - outerPad - summarySpace), 100000, 0, gap, maxVisibleRows);
@@ -2758,11 +2758,12 @@ function arrangeSmartGroupMembers(group, options={}){
     if(hasThumbImages){
         const compactMembers = smartGroupCompactMembers(group);
         if(!options.skipUndo) pushUndo();
-        const layout = smartGroupThumbLayout(group);
+        group.arrangeGap = globalThis.CanvasArrangeSpacing?.groupGap() ?? 28;
+        const layout = smartGroupThumbLayout({...group, w:undefined, h:undefined});
         if(!layout) return true;
         const refs = layout.refs || [];
         const thumb = Math.max(28, Math.round(Number(layout.thumb) || 96));
-        const gap = 8;
+        const gap = group.arrangeGap;
         const cols = Math.max(1, Number(layout.cols) || 1);
         const gridW = cols * thumb + Math.max(0, cols - 1) * gap;
         const contentW = Math.max(0, Math.round(Number(layout.width) || SMART_GROUP_DEFAULT_WIDTH) - 32);
@@ -2813,7 +2814,7 @@ function arrangeSmartGroupMembers(group, options={}){
     });
     const count = sizes.length;
     const pad = SMART_GROUP_ARRANGE_PADDING;
-    const gap = SMART_GROUP_ARRANGE_GAP;
+    const gap = globalThis.CanvasArrangeSpacing?.groupGap() ?? 28;
     const headerH = SMART_GROUP_ARRANGE_HEADER;
     const cols = Math.max(1, Math.min(count, Math.round(Math.sqrt(count)) || 1));
     const rows = Math.ceil(count / cols);
@@ -3419,6 +3420,7 @@ function smartArrangeGridShape(count){
 }
 
 function arrangeSmartLayerItems(items, rectById, startX, startY){
+    const rowGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;
     const ordered = (items || []).filter(Boolean);
     if(!ordered.length) return {width:0, height:0};
     // 少量节点保持原有单列排版；只有输入节点明显增多时才切换网格。
@@ -3429,9 +3431,9 @@ function arrangeSmartLayerItems(items, rectById, startX, startY){
             const rect = rectById.get(item.id) || nodeRect(item);
             moveSmartNodeAtom(item, startX, layerY);
             layerWidth = Math.max(layerWidth, Math.max(180, rect.width || 0));
-            layerY += Math.max(110, rect.height || 0) + 52;
+            layerY += Math.max(110, rect.height || 0) + rowGap;
         });
-        return {width:layerWidth, height:Math.max(0, layerY - startY - 52)};
+        return {width:layerWidth, height:Math.max(0, layerY - startY - rowGap)};
     }
     const shape = smartArrangeGridShape(ordered.length);
     const columns = Math.max(1, shape.columns);
@@ -3445,8 +3447,7 @@ function arrangeSmartLayerItems(items, rectById, startX, startY){
         colWidths[col] = Math.max(colWidths[col], Math.max(180, rect.width || 0));
         rowHeights[row] = Math.max(rowHeights[row], Math.max(110, rect.height || 0));
     });
-    const colGap = 160;
-    const rowGap = 52;
+    const colGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;
     const colX = [];
     let cursorX = startX;
     colWidths.forEach(width => { colX.push(cursorX); cursorX += width + colGap; });
@@ -3518,8 +3519,7 @@ function arrangeSmartIdsByConnections(ids){
         if(!layers.has(level)) layers.set(level, []);
         layers.get(level).push(node);
     });
-    const columnGap = 160;
-    const rowGap = 52;
+    const columnGap = globalThis.CanvasArrangeSpacing?.gap() ?? 56;
     let layerX = startX;
     [...layers.keys()].sort((a, b) => a - b).forEach(level => {
         const items = layers.get(level).sort((a, b) => compareIds(a.id, b.id));
@@ -9817,10 +9817,11 @@ function smartGroupBodyHtml(node){
         }
         const groupMaxVisibleRows = (groupThumbLayout.compactMembers || []).length ? Number(groupThumbLayout.rows || 1) : SMART_GROUP_MAX_VISIBLE_ROWS;
         const visibleRows = Math.max(1, Math.min(groupMaxVisibleRows, Number(groupThumbLayout.visibleRows || groupThumbLayout.rows || 1)));
-        const maxHeight = Math.max(44, visibleRows * Number(groupThumbLayout.thumb || 96) + Math.max(0, visibleRows - 1) * 8);
+        const gap = node.arrangeGap == null ? 8 : Math.max(0, Math.min(240, Number(node.arrangeGap) || 0));
+        const maxHeight = Math.max(44, visibleRows * Number(groupThumbLayout.thumb || 96) + Math.max(0, visibleRows - 1) * gap);
         return `<div class="smart-group-card has-thumbs">
             <div class="smart-group-summary"><i data-lucide="group"></i><span>${escapeHtml(summary)}</span></div>
-            <div class="thumb-grid smart-group-thumb-grid" data-thumb-scroll="1" style="--thumb-cols:${groupThumbLayout.cols}; --thumb-size:${groupThumbLayout.thumb}px; --thumb-max-height:${maxHeight}px">${refThumbs.map(ref => {
+            <div class="thumb-grid smart-group-thumb-grid" data-thumb-scroll="1" style="gap:${gap}px;--thumb-cols:${groupThumbLayout.cols}; --thumb-size:${groupThumbLayout.thumb}px; --thumb-max-height:${maxHeight}px">${refThumbs.map(ref => {
                 const canDelete = ref.nodeId === node.id;
                 return `<div class="thumb-item ${selectedImage.nodeId === ref.nodeId && Number(selectedImage.index) === Number(ref.index) ? 'image-selected' : ''}" data-ref-node-id="${escapeAttr(ref.nodeId)}" data-ref-image-index="${ref.index}" data-image-index="${ref.index}" data-media-signature="${escapeAttr(`${mediaKindForItem(ref.item)}:${ref.item?.url || ''}`)}">${thumbMediaHtml(ref.item)}${imageNameBadgeHtml(ref.item)}${imageResolutionBadgeHtml(ref.item)}${canDelete ? `<button class="mini-x image-delete" type="button" data-image-index="${ref.index}" title="${escapeHtml(tr('smart.deleteImage'))}"><i data-lucide="trash-2"></i></button>` : ''}</div>`;
             }).join('')}</div>

@@ -19,6 +19,12 @@ DEFAULT_SHORTCUT_BINDINGS: dict[str, str] = {}
 _CONFIG_LOCK = RLock()
 
 
+def _normalize_canvas_arrange_spacing(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 240 or int(value) != value:
+        raise ValueError("自动整理间距必须是 0～240 之间的整数")
+    return int(value)
+
+
 def _normalize_shortcut_bindings(value: Any) -> dict[str, str]:
     if value is None:
         return {}
@@ -56,6 +62,8 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
                 "quick_save_dir": DEFAULT_QUICK_SAVE_DIR,
                 "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
                 "shortcut_bindings": DEFAULT_SHORTCUT_BINDINGS.copy(),
+                "canvas_arrange_spacing": 56,
+                "canvas_group_arrange_spacing": 28,
             }
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -74,6 +82,11 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
             value["quick_save_mode"] = DEFAULT_QUICK_SAVE_MODE
         value["topaz_video_install_dir"] = str(value.get("topaz_video_install_dir") or "").strip()
         value["shortcut_bindings"] = _normalize_shortcut_bindings(value.get("shortcut_bindings"))
+        for key, default in (("canvas_arrange_spacing", 56), ("canvas_group_arrange_spacing", 28)):
+            try:
+                value[key] = _normalize_canvas_arrange_spacing(value.get(key, default))
+            except ValueError:
+                value[key] = default
         return value
 
 
@@ -87,12 +100,18 @@ def update_app_settings(
     quick_save_dir: str | None = None,
     topaz_video_install_dir: str | None = None,
     shortcut_bindings: dict[str, str] | None = None,
+    canvas_arrange_spacing: int | None = None,
+    canvas_group_arrange_spacing: int | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and shortcut_bindings is None:
+    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and shortcut_bindings is None and canvas_arrange_spacing is None and canvas_group_arrange_spacing is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
         value = read_app_config(data_root)
+        if canvas_group_arrange_spacing is not None:
+            value["canvas_group_arrange_spacing"] = _normalize_canvas_arrange_spacing(canvas_group_arrange_spacing)
+        if canvas_arrange_spacing is not None:
+            value["canvas_arrange_spacing"] = _normalize_canvas_arrange_spacing(canvas_arrange_spacing)
         if close_behavior is not None:
             behavior = str(close_behavior or "").strip()
             if behavior not in CLOSE_BEHAVIORS:

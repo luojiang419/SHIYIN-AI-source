@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <script defer src="/static/js/canvas-arrange-spacing.js?v=2026.09.08.1"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>软件设置</title>
     <script defer src="/static/js/quick-save.js?v=2026.09.02.1"></script>
@@ -22,7 +23,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.06.batch-outfit.1">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.08.arrange-spacing.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -60,6 +61,57 @@
                 </label>
             </fieldset>
             <p id="closeBehaviorNote" class="app-settings-note" data-i18n="appSettings.appliesImmediately">修改后立即生效，并会在下次启动时保留。</p>
+        </section>
+
+        <section class="app-settings-card" aria-labelledby="arrangeSpacingTitle">
+            <div class="app-settings-card-heading">
+                <div>
+                    <span>CANVAS LAYOUT</span>
+                    <h2 id="arrangeSpacingTitle">自动整理间距</h2>
+                </div>
+                <strong id="arrangeSpacingStatus" role="status"></strong>
+            </div>
+            <div class="app-settings-arrange-layout">
+                <div class="app-settings-arrange-control">
+                    <div class="app-settings-arrange-label">
+                        <label for="arrangeSpacing">选中节点整理间距</label>
+                        <output id="arrangeSpacingValue" for="arrangeSpacing">56 px</output>
+                    </div>
+                    <input id="arrangeSpacing" type="range" min="0" max="240" step="1" value="56" disabled aria-describedby="arrangeSpacingHint">
+                    <div class="app-settings-arrange-scale"><span>紧凑 · 0 px</span><span>宽松 · 240 px</span></div>
+                    <button id="arrangeSpacingReset" type="button" disabled>恢复默认</button>
+                </div>
+                <figure class="app-settings-arrange-example">
+                    <div class="app-settings-arrange-stage">
+                        <div id="arrangeSpacingPreview" class="app-settings-arrange-grid" aria-hidden="true">
+                            <span>01</span><span>02</span><span>03</span><span>04</span>
+                        </div>
+                    </div>
+                    <figcaption>四宫格间距示例</figcaption>
+                </figure>
+            </div>
+            <p id="arrangeSpacingHint" class="app-settings-note">横向和纵向使用相同间距。松开滑块后自动保存，下次“选中整理”时生效，适用于普通和智能无限画布。</p>
+            <div class="app-settings-arrange-label app-settings-arrange-subheading"><span>组内节点整理</span><strong id="groupArrangeSpacingStatus" role="status"></strong></div>
+            <div class="app-settings-arrange-layout">
+                <div class="app-settings-arrange-control">
+                    <div class="app-settings-arrange-label">
+                        <label for="groupArrangeSpacing">组内节点整理间距</label>
+                        <output id="groupArrangeSpacingValue" for="groupArrangeSpacing">28 px</output>
+                    </div>
+                    <input id="groupArrangeSpacing" type="range" min="0" max="240" step="1" value="28" disabled aria-describedby="groupArrangeSpacingHint">
+                    <div class="app-settings-arrange-scale"><span>紧凑 · 0 px</span><span>宽松 · 240 px</span></div>
+                    <button id="groupArrangeSpacingReset" type="button" disabled>恢复默认</button>
+                </div>
+                <figure class="app-settings-arrange-example">
+                    <div class="app-settings-arrange-stage">
+                        <div id="groupArrangeSpacingPreview" class="app-settings-arrange-grid" aria-hidden="true">
+                            <span>01</span><span>02</span><span>03</span><span>04</span>
+                        </div>
+                    </div>
+                    <figcaption>四宫格间距示例</figcaption>
+                </figure>
+            </div>
+            <p id="groupArrangeSpacingHint" class="app-settings-note">横向和纵向使用相同间距。松开滑块后自动保存，下次“整理组内节点”时生效，适用于普通和智能无限画布。</p>
         </section>
 
         <section class="app-settings-card" aria-labelledby="generatedOutputTitle">

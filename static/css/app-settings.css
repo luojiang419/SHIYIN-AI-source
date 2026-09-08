@@ -22,6 +22,23 @@ button, input, select { font:inherit; }
 .app-settings-option-copy small { color:var(--as-soft); font-size:11px; line-height:1.55; }
 .app-settings-option i { width:9px; height:9px; border-top:2px solid var(--as-muted); border-right:2px solid var(--as-muted); transform:rotate(45deg); }
 .app-settings-note { margin:16px 2px 0; color:var(--as-muted); font-size:10px; }
+.app-settings-arrange-layout { display:grid; grid-template-columns:minmax(0,1fr) 260px; align-items:center; gap:36px; margin-top:18px; }
+.app-settings-arrange-label, .app-settings-arrange-scale { display:flex; justify-content:space-between; gap:12px; }
+.app-settings-arrange-label { align-items:center; color:var(--as-soft); font-size:12px; font-weight:750; }
+.app-settings-arrange-label output { color:var(--as-accent); font-size:20px; font-variant-numeric:tabular-nums; }
+:is(#arrangeSpacing, #groupArrangeSpacing) { width:100%; height:28px; margin:14px 0 4px; accent-color:var(--as-accent); cursor:pointer; }
+.app-settings-arrange-scale { color:var(--as-muted); font-size:10px; }
+:is(#arrangeSpacingReset, #groupArrangeSpacingReset) { margin-top:20px; padding:8px 12px; border:1px solid var(--as-line); border-radius:9px; color:var(--as-text); background:var(--as-control); cursor:pointer; font-size:11px; }
+:is(#arrangeSpacing, #groupArrangeSpacing):disabled, :is(#arrangeSpacingReset, #groupArrangeSpacingReset):disabled { opacity:.55; cursor:wait; }
+:is(#arrangeSpacing, #groupArrangeSpacing):focus-visible, :is(#arrangeSpacingReset, #groupArrangeSpacingReset):focus-visible { outline:2px solid var(--as-accent); outline-offset:4px; }
+.app-settings-arrange-example { margin:0; text-align:center; }
+.app-settings-arrange-stage { display:grid; place-items:center; height:172px; border:1px solid var(--as-line); border-radius:14px; background:radial-gradient(circle,var(--as-line) 1px,transparent 1px) 0 0 / 12px 12px,var(--as-control); }
+.app-settings-arrange-grid { display:grid; grid-template-columns:repeat(2,64px); gap:11.2px; }
+.app-settings-arrange-grid > span { display:grid; place-items:center; height:44px; border:1px solid color-mix(in srgb,var(--as-accent) 40%,var(--as-line)); border-radius:8px; background:var(--as-panel); color:var(--as-accent); font-size:11px; font-weight:800; box-shadow:0 2px 5px rgba(30,36,28,.06); }
+.app-settings-arrange-example figcaption { margin-top:8px; color:var(--as-muted); font-size:10px; }
+:is(#arrangeSpacingStatus, #groupArrangeSpacingStatus) { min-height:20px; color:var(--as-success); font-size:11px; }
+:is(#arrangeSpacingStatus, #groupArrangeSpacingStatus).error { color:var(--as-danger); }
+@media (max-width:620px) { .app-settings-arrange-layout { grid-template-columns:minmax(0,1fr); gap:20px; } }
 .app-settings-output-control { display:grid; gap:9px; margin-top:18px; }
 .app-settings-output-control[hidden] { display:none !important; }
 .app-settings-output-control > label { color:var(--as-soft); font-size:11px; font-weight:750; }
@@ -102,3 +119,18 @@ button, input, select { font:inherit; }
 fieldset:disabled .app-settings-option { cursor:wait; opacity:.58; transform:none; }
 html.studio-theme-dark { color-scheme:dark; --as-bg:#1a1a1a; --as-panel:#1e1e1e; --as-text:#f0eee9; --as-soft:#d2d0cb; --as-muted:#a7a6a2; --as-line:rgba(255,255,255,.08); --as-control:#292928; --as-accent:#3a3a39; --as-success:#72d6a0; --as-danger:#ff8d86; }
 @media (max-width:640px) { .app-settings-page { width:calc(100% - 24px); padding:28px 0 50px; } .app-settings-card { padding:16px; border-radius:18px; } .app-settings-option { grid-template-columns:20px minmax(0,1fr); padding:14px; } .app-settings-option i { display:none; } .app-settings-output-row,.topaz-directory-row { grid-template-columns:1fr 1fr; } .app-settings-output-row input,.topaz-directory-row input { grid-column:1 / -1; } .quick-save-directory-row { grid-template-columns:1fr; } .quick-save-directory-row input { grid-column:1; } .app-settings-storage-grid,.app-settings-topaz-grid { grid-template-columns:1fr; } .app-settings-shortcut-toolbar { grid-template-columns:1fr; } .app-settings-shortcut-toolbar > button { justify-self:stretch; } .app-settings-shortcut-summary { flex-direction:column; gap:5px; } .app-settings-shortcut-list { max-height:none; } .app-settings-shortcut-row { grid-template-columns:minmax(0,1fr) 34px 34px; } .app-settings-shortcut-copy { grid-column:1 / -1; } .app-settings-shortcut-binding { grid-column:1; grid-row:2; } .app-settings-shortcut-icon-btn { grid-row:2; } }
+
+.app-settings-arrange-subheading { margin-top:24px; padding-top:22px; border-top:1px solid var(--as-line); }
+html.studio-theme-dark .app-settings-arrange-label output,
+html.studio-theme-dark .app-settings-arrange-grid > span { color:var(--as-text); }
+:is(#arrangeSpacing, #groupArrangeSpacing) { appearance:none; background:transparent; }
+:is(#arrangeSpacing, #groupArrangeSpacing)::-webkit-slider-runnable-track { height:6px; border-radius:6px; background:var(--as-line); }
+:is(#arrangeSpacing, #groupArrangeSpacing)::-webkit-slider-thumb { appearance:none; width:16px; height:16px; margin-top:-5px; border:0; border-radius:50%; background:var(--as-accent); }
+/* 覆盖全局主题为原生 range 注入的蓝灰底色，整个设置区域仅使用暖棕和中性色。 */
+section[aria-labelledby="arrangeSpacingTitle"] { --arrange-focus:#9a6636; }
+html.studio-theme-dark section[aria-labelledby="arrangeSpacingTitle"] { --arrange-focus:#d8c6ae; }
+html body section[aria-labelledby="arrangeSpacingTitle"] :is(h2,label) { color:var(--as-text) !important; }
+:is(#arrangeSpacing, #groupArrangeSpacing) { background:transparent !important; border:0 !important; box-shadow:none !important; accent-color:var(--arrange-focus) !important; }
+:is(#arrangeSpacing, #groupArrangeSpacing)::-webkit-slider-runnable-track { background:var(--as-line) !important; }
+:is(#arrangeSpacing, #groupArrangeSpacing)::-webkit-slider-thumb { background:var(--arrange-focus) !important; border-color:transparent !important; }
+:is(#arrangeSpacing, #groupArrangeSpacing, #arrangeSpacingReset, #groupArrangeSpacingReset):focus-visible { outline:2px solid var(--arrange-focus) !important; outline-offset:4px; box-shadow:none !important; }

@@ -141,8 +141,8 @@ def test_nine_classic_canvas_nodes_are_positioned_as_three_by_three_grid():
     assert actual["columns"] == 3
     assert actual["rows"] == 3
     assert actual["positions"] == [
-        [100, 200], [600, 200], [1100, 200],
-        [100, 436], [600, 436], [1100, 436],
-        [100, 672], [600, 672], [1100, 672],
+        [100, 200], [476, 200], [852, 200],
+        [100, 436], [476, 436], [852, 436],
+        [100, 672], [476, 672], [852, 672],
     ]
-    assert actual["bounds"] == {"width": 1320, "height": 652}
+    assert actual["bounds"] == {"width": 1072, "height": 652}

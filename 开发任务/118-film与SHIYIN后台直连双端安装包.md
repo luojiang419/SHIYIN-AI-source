@@ -1,23 +1,22 @@
 # film 与 SHIYIN 后台直连双端安装包
 
-状态：构建中
+状态：已完成
 当前阶段：3/3
-最后更新：2026-09-08
+最后更新：2026-09-08 09:39
 
 ## 当前状态
-SHIYIN 1.0.422 安装器已生成、校验通过，完整 runtime smoke 与打包态无页面工作流初始化通过。film 1.1.0.375 Windows Release（44.6 秒）和配套 Web（22.8 秒）编译通过，Inno Setup 正在压缩深度组件运行库。两端构建日志位于 C:/Users/jiang/AppData/Local/Temp/film-dual-installers-20260908。
+两端安装器及 SHA-256 已生成、校验通过。SHIYIN 1.0.422 完整 runtime smoke 与冻结后端无页面工作流初始化通过；film 1.1.0.375 Windows Release（44.6 秒）、配套 Web（22.8 秒）、Inno Setup（661.922 秒）全部成功，版本和依赖完整性检查通过。两端构建日志位于 C:/Users/jiang/AppData/Local/Temp/film-dual-installers-20260908。
 
 工作树有其他功能的既有未提交改动，沿用之前安装包构建规则，按当前工作树打包、只提交本次版本与构建记录差异。不安装覆盖用户程序，不发布 GitHub Release。
 
 ## 下一步
-1. 等待 film Inno Setup 完成，运行 scripts/verify_release_artifact.ps1 -Version 1.1.0.375。
-2. 更新记录，精准提交并推送两端版本文件，交付两个安装器。
+当前任务已完成。交付两个安装器及各自同名 .sha256；安装更新两端后，启动两端程序并在 film 打开源项目即可使用后台直连。不要求打开画布网页；本次未安装覆盖本机，未发布 GitHub Release。
 
 ## 当前 TODO
 - [x] 检查源码、版本、构建入口、运行进程
-- [ ] 两端正式版本同步与完整构建
-- [ ] 安装器及后台直连回归验证
-- [ ] 文档、提交推送及交付
+- [x] 两端正式版本同步与完整构建
+- [x] 安装器及后台直连回归验证
+- [x] 文档、提交推送及交付
 
 ## 最近验证状态
 - 上轮源码回归：65 Python、14 Dart、9 JavaScript 与 9 Chromium 通过。
@@ -25,7 +24,7 @@ SHIYIN 1.0.422 安装器已生成、校验通过，完整 runtime smoke 与打�
 - SHIYIN：安装器 92,627,907 bytes；SHA-256 96f6c5f650ad20923f0ae777f90d1ca66cecb7bc2221b68885d015390b80ce5c；NotSigned。
 - 冻结后端：health 1.0.422、首次导出即初始化三步快照、媒体字节、重复导出幂等与工程包往返全部通过，结果保存在 Temp/film-dual-installers-20260908/packaged-smoke-v2.json。
 - 首轮专项脚本把 stdout/stderr 日志放在待迁移的数据根目录，触发 WinError 32；已按避坑指南 006 修正到 logs 子目录，并在新隔离目录重跑成功。没有修改或关闭产品迁移逻辑。
-- film 安装器：压缩中，Windows/Web 构建版本均为 1.1.0+375。
+- film 安装器：1,703,002,610 bytes；SHA-256 b371f19e125a111717109506fba9527a2b5196242a756898485e613ed2ac4585；NotSigned。Windows/Web 版本均为 1.1.0+375，安装器 1.1.0.375；FFmpeg、深度运行器、调参组件及模型配置检查通过，未打包模型权重。
 - Git branch：SHIYIN feat/film-workflow-canvas；film feat/infinite-canvas-workflow。
 
 ## 任务目标与技术方案
@@ -45,7 +44,10 @@ SHIYIN 由 tools/increment-version.ps1 与 tools/build-installer.ps1 统一同�
 - 既有用户改动、安装目录和用户数据不被覆盖。
 
 ## 已知问题
-当前无阻塞。沿用未签名安装器交付方式。
+无构建或校验遗留失败。沿用未签名安装器交付方式；没有覆盖现有安装或发布远程 Release。
+
+## Git 状态
+SHIYIN 版本与打包验证提交 890dc27 已推送；film 版本提交 4a81064 已推送至 feat/infinite-canvas-workflow。只提交本轮版本变化，工作区原有未提交改动保留。
 
 ## 接力信息
 [CODEX_LONG_TASK_CONTINUE_V3]

@@ -68,6 +68,49 @@ class MiniMaxH3VideoTests(unittest.TestCase):
             "0.4MP 9:16 - 480x864",
         )
 
+    def test_aspect_ratio_replaces_stale_resolution_but_keeps_mp_tier_when_available(self):
+        cases = {
+            "21:9": "0.2MP 21:9 - 672x288",
+            "16:9": "0.2MP 16:9 - 608x352",
+            "4:3": "0.2MP 4:3 - 512x384",
+            "1:1": "Square 512x512",
+            "3:4": "0.2MP 3:4 - 384x512",
+            "9:16": "0.2MP 9:16 - 352x608",
+        }
+        for ratio, expected in cases.items():
+            with self.subTest(ratio=ratio):
+                self.assertEqual(
+                    self.main.minimax_h3_resolution(ratio, "0.2MP 16:9 - 608x352"),
+                    expected,
+                )
+        self.assertEqual(
+            self.main.minimax_h3_resolution("9:16", "0.3MP 16:9 - 736x416"),
+            "0.3MP 9:16 - 416x736",
+        )
+
+    def test_resolution_is_preserved_when_aspect_ratio_is_missing(self):
+        self.assertEqual(
+            self.main.minimax_h3_resolution("", "0.4MP 9:16 - 480x864"),
+            "0.4MP 9:16 - 480x864",
+        )
+
+    def test_h3_request_repairs_stale_resolution_before_submission(self):
+        payload = self.main.CanvasVideoRequest(
+            prompt="A slow camera move.",
+            provider_id="minimax-h3",
+            model="MiniMax H3",
+            aspect_ratio="3:4",
+            resolution="0.2MP 16:9 - 608x352",
+            duration=3,
+            steps=8,
+        )
+
+        body = asyncio.run(self.main.minimax_h3_video_request(object(), payload))
+
+        self.assertEqual(body["resolution"], "0.2MP 3:4 - 384x512")
+        self.assertEqual(body["duration"], 3)
+        self.assertEqual(body["steps"], 8)
+
     def test_keyframes_request_keeps_first_and_last_frame_roles(self):
         class FakeResponse:
             def __init__(self, payload):

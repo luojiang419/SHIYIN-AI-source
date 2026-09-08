@@ -19,6 +19,13 @@ class MiniMaxH3SmartCanvasFrontendTests(unittest.TestCase):
         self.assertIn("videoSteps:12", self.javascript)
         self.assertIn("function renderH3VideoResolutionControl()", self.javascript)
         self.assertIn("0.4MP 9:16 - 480x864", self.javascript)
+        self.assertIn("function renderH3VideoAspectControl()", self.javascript)
+        self.assertIn("function syncH3SmartVideoDimensions", self.javascript)
+
+    def test_h3_aspect_and_resolution_controls_are_bidirectionally_synchronized(self):
+        self.assertIn("['videoAspect','videoResolution'].includes(key)", self.javascript)
+        self.assertIn("syncH3SmartVideoDimensions(settings,key)", self.javascript)
+        self.assertIn("h3SmartResolutionForAspect", self.javascript)
 
     def test_smart_h3_request_sends_local_reference_videos_and_steps(self):
         self.assertIn("const isH3 = isMiniMaxH3SmartSettings(runSettings);", self.javascript)

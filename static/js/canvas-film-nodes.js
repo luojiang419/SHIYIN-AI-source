@@ -34,6 +34,26 @@
         '0.2MP 3:4 - 384x512','0.3MP 3:4 - 480x640','0.4MP 3:4 - 576x768',
         '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
     ];
+    function h3AspectForResolution(resolution=''){
+        const value=String(resolution || '').trim();
+        if(value === 'Square 512x512') return '1:1';
+        return value.match(/\b(21:9|16:9|4:3|3:4|9:16)\b/)?.[1] || '';
+    }
+    function h3ResolutionForAspect(aspectRatio='', resolution=''){
+        const target=['21:9','16:9','4:3','1:1','3:4','9:16'].includes(aspectRatio) ? aspectRatio : '16:9';
+        const candidates=H3_RESOLUTION_PRESETS.filter(value=>h3AspectForResolution(value) === target);
+        const megapixels=String(resolution || '').match(/^(\d+(?:\.\d+)?)MP\b/i)?.[1] || '';
+        return candidates.find(value=>megapixels && value.startsWith(`${megapixels}MP `)) || candidates[0] || H3_DEFAULT_RESOLUTION;
+    }
+    function syncH3Dimensions(node, changedField='aspectRatio'){
+        if(!node) return node;
+        if(changedField === 'resolution') node.aspectRatio=h3AspectForResolution(node.resolution) || node.aspectRatio || '16:9';
+        else {
+            node.aspectRatio=['21:9','16:9','4:3','1:1','3:4','9:16'].includes(node.aspectRatio) ? node.aspectRatio : '16:9';
+            node.resolution=h3ResolutionForAspect(node.aspectRatio,node.resolution);
+        }
+        return node;
+    }
     const LINE_ART_PROMPT = '这是导演审阅用的专业黑白线稿分镜转换任务。请把参考视频帧重绘为标准电影分镜线稿，不是照片滤镜，也不是简单边缘检测。必须保留景别、机位、透视、主体位置与大小、人物数量、人物距离与朝向、肢体动作、视线方向、必要道具和场景空间关系。人物统一替换为无身份、无外貌、无服装特征的中性分镜人偶：光滑空白椭圆头部、完全留白的脸、简洁几何体块和圆柱四肢，只用外轮廓、关节转折和少量结构线表达动作；禁止脸部、发型、肤色、服装、配饰和写实人体细节。背景只保留机位、景别、主体位置、前中后景、主要灯架、摄影机和遮挡关系所必需的长轮廓与几何形状，使用白底细黑线和少量排线，移除颜色、照片纹理、品牌、水印、字幕和无关杂物。禁止添加分镜编号、镜头参数、对白框、箭头、边框、表格或任何文字，只输出单张纯黑白分镜画面。';
 
     function esc(value){
@@ -82,6 +102,7 @@
             // H3 使用 MP/像素预设；其他影视模型保留原有 1080P 默认值。
             node.resolution = String(node.resolution || (h3 ? H3_DEFAULT_RESOLUTION : '1080p'));
             if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;
+            if(h3) syncH3Dimensions(node,'aspectRatio');
             node.steps = clamp(node.steps || 12, 4, 30);
             node.apiProvider = String(node.apiProvider || '');
             node.model = String(node.model || '');
@@ -633,6 +654,8 @@
                     node.duration=clamp(node.duration,1,15);
                     node.steps=clamp(node.steps || 12,4,30);
                     if(!H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution=H3_DEFAULT_RESOLUTION;
+                    if(key==='resolution') syncH3Dimensions(node,'resolution');
+                    else syncH3Dimensions(node,'aspectRatio');
                     if(previousRule.id !== 'minimax'){
                         node.multimodal=true;
                         node.useFrameRoles=false;
@@ -643,7 +666,7 @@
                     node.multimodal=false;
                     node.useFrameRoles=false;
                 }
-                notify(options,node,key==='apiProvider' || key==='model');
+                notify(options,node,key==='apiProvider' || key==='model' || (nextRule.id === 'minimax' && ['aspectRatio','resolution'].includes(key)));
                 event.stopPropagation();
             });
         });
@@ -676,5 +699,5 @@
         const ruleEl=root.querySelector('[data-film-model-rule]'); if(ruleEl) ruleEl.textContent=`当前规则：${rule.name}`;
     }
 
-    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,videoPromptSubmission,rememberVideoPromptResult,videoGenerationOutputs,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
+    window.CanvasFilmNodes={TYPES,LINE_ART_TYPE,LINE_ART_PROMPT,MODEL_RULES,H3_RESOLUTION_PRESETS,h3AspectForResolution,h3ResolutionForAspect,syncH3Dimensions,isType,isGenerator,canOutput,title,size,normalize,createNode,effectiveActorCount,inputPorts,roleLabel,modelRule,assetList,mapping,buildPrompt,videoPromptSubmission,rememberVideoPromptResult,videoGenerationOutputs,lineArtPrompt,h3VideoSettingsHtml,bodyHtml,bind,parseScene,autoParseVideoPrompt};
 })();

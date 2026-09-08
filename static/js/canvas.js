@@ -1615,15 +1615,36 @@ async function startKlingCliLogin(){
     }
     render();
 }
-function h3VideoResolutionOptions(selected=''){
-    const options = [
+const MINIMAX_H3_VIDEO_RESOLUTIONS = Object.freeze([
         '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
         '0.2MP 16:9 - 608x352','0.3MP 16:9 - 736x416','0.4MP 16:9 - 864x480','0.5MP 16:9 - 960x544','0.6MP 16:9 - 1056x608',
         '0.2MP 4:3 - 512x384','0.3MP 4:3 - 640x480','0.4MP 4:3 - 768x576','Square 512x512',
         '0.2MP 3:4 - 384x512','0.3MP 3:4 - 480x640','0.4MP 3:4 - 576x768',
         '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
-    ];
-    return options.map(value => `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('');
+]);
+function h3VideoAspectForResolution(resolution=''){
+    const value = String(resolution || '').trim();
+    if(value === 'Square 512x512') return '1:1';
+    return value.match(/\b(21:9|16:9|4:3|3:4|9:16)\b/)?.[1] || '';
+}
+function h3VideoResolutionForAspect(aspectRatio='', resolution=''){
+    const target = ['21:9','16:9','4:3','1:1','3:4','9:16'].includes(aspectRatio) ? aspectRatio : '16:9';
+    const candidates = MINIMAX_H3_VIDEO_RESOLUTIONS.filter(value => h3VideoAspectForResolution(value) === target);
+    const megapixels = String(resolution || '').match(/^(\d+(?:\.\d+)?)MP\b/i)?.[1] || '';
+    return candidates.find(value => megapixels && value.startsWith(`${megapixels}MP `)) || candidates[0] || MINIMAX_H3_VIDEO_DEFAULTS.resolution;
+}
+function syncMiniMaxH3VideoDimensions(node, changedField='aspectRatio'){
+    if(!node) return node;
+    if(changedField === 'resolution'){
+        node.aspectRatio = h3VideoAspectForResolution(node.resolution) || node.aspectRatio || MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio;
+    } else {
+        node.aspectRatio = ['21:9','16:9','4:3','1:1','3:4','9:16'].includes(node.aspectRatio) ? node.aspectRatio : MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio;
+        node.resolution = h3VideoResolutionForAspect(node.aspectRatio, node.resolution);
+    }
+    return node;
+}
+function h3VideoResolutionOptions(selected=''){
+    return MINIMAX_H3_VIDEO_RESOLUTIONS.map(value => `<option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('');
 }
 const MINIMAX_H3_VIDEO_DEFAULTS = Object.freeze({
     duration:5,
@@ -1636,7 +1657,7 @@ function applyMiniMaxH3VideoDefaults(node, {force=false}={}){
     if(force || !String(node.aspectRatio || '').trim()) node.aspectRatio = MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio;
     if(force || !String(node.resolution || '').trim()) node.resolution = MINIMAX_H3_VIDEO_DEFAULTS.resolution;
     if(!(Number(node.steps) > 0)) node.steps = 12;
-    return node;
+    return syncMiniMaxH3VideoDimensions(node, 'aspectRatio');
 }
 function videoModelOptions(selectedModel, providerId){
     const models = providerVideoModels(providerId);
@@ -14423,8 +14444,24 @@ function renderVideoBody(node){
         durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(isH3 ? 15 : 60, Number(e.target.value || 5))); scheduleSave(); };
         durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(isH3 ? 15 : 60, Number(node.duration || 5)))); };
     }
-    if(aspectSelect) aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
-    if(resolutionSelect) resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
+    if(aspectSelect) aspectSelect.onchange = e => {
+        e.stopPropagation();
+        node.aspectRatio = e.target.value;
+        if(isH3){
+            syncMiniMaxH3VideoDimensions(node, 'aspectRatio');
+            if(resolutionSelect) resolutionSelect.value = node.resolution;
+        }
+        scheduleSave();
+    };
+    if(resolutionSelect) resolutionSelect.onchange = e => {
+        e.stopPropagation();
+        node.resolution = e.target.value;
+        if(isH3){
+            syncMiniMaxH3VideoDimensions(node, 'resolution');
+            if(aspectSelect) aspectSelect.value = node.aspectRatio;
+        }
+        scheduleSave();
+    };
     if(stepsInput){
         stepsInput.onmousedown = e => e.stopPropagation();
         stepsInput.onclick = e => e.stopPropagation();

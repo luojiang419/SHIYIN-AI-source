@@ -320,6 +320,11 @@ def test_film_video_h3_settings_are_normalized_and_submitted_on_both_canvases():
     assert "steps:Math.max(4,Math.min(30,Number(node.steps || 12)))" in CLASSIC
     assert "videoSteps:node.steps || settingsForNodeRun.videoSteps || 12" in SMART
     assert "videoMultimodal:node.multimodal !== undefined" in SMART
+    assert "function syncH3Dimensions(node" in FILM
+    assert "if(key==='resolution') syncH3Dimensions(node,'resolution');" in FILM
+    assert "syncMiniMaxH3VideoDimensions(node, 'aspectRatio')" in CLASSIC
+    assert "syncMiniMaxH3VideoDimensions(node, 'resolution')" in CLASSIC
+    assert "if(isH3){\n            syncMiniMaxH3VideoDimensions(node, 'aspectRatio');" in CLASSIC
 
 
 def test_classic_film_render_passes_image_model_sources_for_storyboard_node():

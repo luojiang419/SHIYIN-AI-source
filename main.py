@@ -21161,9 +21161,39 @@ async def generate_yuli_openai_video(client, payload, provider, base_url, reques
 
 def minimax_h3_resolution(aspect_ratio: str = "", resolution: str = "") -> str:
     requested = str(resolution or "").strip()
-    if requested in MINIMAX_H3_RESOLUTION_PRESETS:
+    target_aspect = str(aspect_ratio or "").strip()
+    if target_aspect not in MINIMAX_H3_RESOLUTIONS:
+        target_aspect = ""
+
+    def preset_aspect(value: str) -> str:
+        if value == "Square 512x512":
+            return "1:1"
+        return next(
+            (ratio for ratio in MINIMAX_H3_RESOLUTIONS if f" {ratio} " in f" {value} "),
+            "",
+        )
+
+    if requested in MINIMAX_H3_RESOLUTION_PRESETS and (
+        not target_aspect or preset_aspect(requested) == target_aspect
+    ):
         return requested
-    return MINIMAX_H3_RESOLUTIONS.get(str(aspect_ratio or "16:9").strip(), MINIMAX_H3_DEFAULT_RESOLUTION)
+
+    if target_aspect and requested:
+        megapixels = re.match(r"^(\d+(?:\.\d+)?)MP\b", requested, flags=re.IGNORECASE)
+        if megapixels:
+            prefix = f"{megapixels.group(1)}MP "
+            matching_preset = next(
+                (
+                    preset
+                    for preset in MINIMAX_H3_RESOLUTION_PRESETS
+                    if preset.startswith(prefix) and preset_aspect(preset) == target_aspect
+                ),
+                "",
+            )
+            if matching_preset:
+                return matching_preset
+
+    return MINIMAX_H3_RESOLUTIONS.get(target_aspect or "16:9", MINIMAX_H3_DEFAULT_RESOLUTION)
 
 async def minimax_h3_reference_value(client, url: str, kind: str) -> str:
     value = str(url or "").strip()

@@ -4412,6 +4412,16 @@ function renderVideoAspectControl(){
         </div>
     </div>`;
 }
+function renderH3VideoAspectControl(){
+    const options = ['21:9','16:9','4:3','1:1','3:4','9:16'];
+    const value = options.includes(settings.videoAspect) ? settings.videoAspect : '16:9';
+    return `<div class="smart-control aspect-control">
+        <button class="smart-pill" type="button"><i data-lucide="scan"></i><span>${escapeHtml(value)}</span></button>
+        <div class="smart-popover"><div class="smart-popover-title">${escapeHtml(tr('smart.videoAspect'))}</div><div class="ratio-grid">
+            ${options.map(item => `<button type="button" class="ratio-option ${item === value ? 'active' : ''}" data-smart-param="videoAspect" data-smart-value="${escapeHtml(item)}"><span class="ratio-icon ${videoAspectIconClass(item)}"></span><span>${escapeHtml(item)}</span></button>`).join('')}
+        </div></div>
+    </div>`;
+}
 function renderVideoResolutionControl(){
     const options = [['', tr('smart.videoResAuto')], ['480p','480P'], ['720p','720P'], ['1080p','1080P']];
     const value = settings.videoResolution || '';
@@ -4437,6 +4447,26 @@ function h3SmartVideoResolutions(){
         '0.2MP 3:4 - 384x512','0.3MP 3:4 - 480x640','0.4MP 3:4 - 576x768',
         '0.2MP 9:16 - 352x608','0.3MP 9:16 - 416x736','0.4MP 9:16 - 480x864'
     ];
+}
+function h3SmartAspectForResolution(resolution=''){
+    const value=String(resolution || '').trim();
+    if(value === 'Square 512x512') return '1:1';
+    return value.match(/\b(21:9|16:9|4:3|3:4|9:16)\b/)?.[1] || '';
+}
+function h3SmartResolutionForAspect(aspectRatio='', resolution=''){
+    const target=['21:9','16:9','4:3','1:1','3:4','9:16'].includes(aspectRatio) ? aspectRatio : '16:9';
+    const candidates=h3SmartVideoResolutions().filter(value=>h3SmartAspectForResolution(value) === target);
+    const megapixels=String(resolution || '').match(/^(\d+(?:\.\d+)?)MP\b/i)?.[1] || '';
+    return candidates.find(value=>megapixels && value.startsWith(`${megapixels}MP `)) || candidates[0] || '0.2MP 16:9 - 608x352';
+}
+function syncH3SmartVideoDimensions(target=settings, changedField='videoAspect'){
+    if(!target || !isMiniMaxH3SmartSettings(target)) return target;
+    if(changedField === 'videoResolution') target.videoAspect=h3SmartAspectForResolution(target.videoResolution) || target.videoAspect || '16:9';
+    else {
+        target.videoAspect=['21:9','16:9','4:3','1:1','3:4','9:16'].includes(target.videoAspect) ? target.videoAspect : '16:9';
+        target.videoResolution=h3SmartResolutionForAspect(target.videoAspect,target.videoResolution);
+    }
+    return target;
 }
 function renderH3VideoResolutionControl(){
     const options = h3SmartVideoResolutions();
@@ -4633,6 +4663,7 @@ function renderApiVideoParams(){
     const models = filterJimengVideoModels(providerVideoModels(settings.videoProvider));
     if(!settings.videoModel || !models.includes(settings.videoModel)) settings.videoModel = models[0] || 'veo3-fast';
     const isH3 = isMiniMaxH3SmartSettings(settings);
+    if(isH3) syncH3SmartVideoDimensions(settings,'videoAspect');
     const isKling = isKlingSmartSettings(settings);
     if(settings.videoProvider === 'linkfox'){
         const view={model:settings.videoModel,duration:settings.videoDuration,resolution:settings.videoResolution,
@@ -4652,7 +4683,7 @@ function renderApiVideoParams(){
         ${isKling ? `<div class="muted-note">${escapeHtml(smartKlingConnectionNote())}</div>` : ''}
         ${isH3 ? `<div class="muted-note">${escapeHtml(smartMiniMaxH3ConnectionNote())}</div>` : ''}
         ${isH3 ? renderH3VideoResolutionControl() : renderVideoResolutionControl()}
-        ${renderVideoAspectControl()}
+        ${isH3 ? renderH3VideoAspectControl() : renderVideoAspectControl()}
         ${renderVideoDurationControl()}
         ${isH3 ? renderH3VideoStepsControl() : renderVideoToggleControl('videoEnhancePrompt', tr('smart.videoEnhancePrompt'))}
         ${isH3 ? '' : renderVideoToggleControl('videoEnableUpsample', tr('smart.videoUpsample'))}
@@ -5716,6 +5747,7 @@ function setDynamicSetting(key, value){
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     if(key === 'provider_id') settings.model = '';
     if(key === 'videoProvider') settings.videoModel = '';
+    if(isMiniMaxH3SmartSettings(settings) && ['videoAspect','videoResolution'].includes(key)) syncH3SmartVideoDimensions(settings,key);
     if(key === 'videoMultimodal') settings._videoMultimodalUserSet = true;
     if(key === 'videoMultimodal' && settings.videoMultimodal) settings.videoUseFrameRoles = false;
     normalizeSmartVideoModeSettings(settings, key === 'videoUseFrameRoles');

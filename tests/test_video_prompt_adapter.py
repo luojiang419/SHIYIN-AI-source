@@ -142,8 +142,8 @@ def test_invalid_result_is_repaired_once(service):
     assert '上次校验失败' in service.await_args.args[0].message
 
 
-@pytest.mark.parametrize('bad', ['', H3, '女子走开。', ADAPTED * 1000, '女子说“再见”，无配乐。'],
-                         ids=['empty', 'h3', 'missing-dialogue', 'too-long', 'changed-dialogue'])
+@pytest.mark.parametrize('bad', ['', H3, '女子走开。', ADAPTED * 1000],
+                         ids=['empty', 'h3', 'missing-no-music', 'too-long'])
 def test_invalid_conversion_never_calls_video_upstream(service, monkeypatch, bad):
     service.return_value = {'text': bad}
     upstream = AsyncMock()
@@ -154,6 +154,25 @@ def test_invalid_conversion_never_calls_video_upstream(service, monkeypatch, bad
     assert '尚未提交' in error.value.detail
     assert service.await_count == 2
     upstream.assert_not_awaited()
+
+
+@pytest.mark.parametrize('original,adapted', [
+    ('Sign reading "FRESH LOCAL ORANGES,".', 'Sign reading "FRESH LOCAL ORANGES".'),
+    ('Sign reading "FRESH LOCAL ORANGES.".', 'Sign reading "Fresh Local Oranges".'),
+    (H3, '女子说“再见”，无配乐。'),
+    (H3, '女子走开，无配乐。'),
+])
+def test_literal_differences_do_not_block_video_submission(service, monkeypatch, original, adapted):
+    monkeypatch.setattr(main, 'VIDEO_PROMPT_ADAPT_CACHE', {})
+    service.return_value = {'text': adapted}
+    upstream = AsyncMock(return_value={'videos': ['/output/test.mp4']})
+    monkeypatch.setattr(main, 'generate_canvas_video', upstream)
+    payload = main.CanvasVideoRequest(prompt=original, provider_id='jimeng', auto_adapt_prompt=True)
+    asyncio.run(main.canvas_video(payload))
+    service.assert_awaited_once()
+    upstream.assert_awaited_once()
+    assert upstream.await_args.args[0].prompt == adapted
+    assert payload.prompt == original
 
 
 def test_service_failure_never_calls_video_upstream(service, monkeypatch):

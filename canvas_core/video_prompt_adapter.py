@@ -10,7 +10,6 @@ H3_FIELDS = re.compile(
     r'detailed_description|overall_soundscape|non_diegetic_music)\b', re.I)
 H3_TAGS = re.compile(r'<(Picture|Video|Audio|Subject)\s+(\d+)>', re.I)
 HAILUO_CAMERA_TAGS = re.compile(r'\[(?:Truck (?:left|right)|Push in|Pull out|Pan (?:left|right)|Tilt (?:up|down)|Pedestal (?:up|down)|Zoom (?:in|out)|Static shot|Tracking shot|Shake)\]', re.I)
-QUOTED = re.compile(r'"([^"\n]+)"|“([^”]+)”|「([^」]+)」|『([^』]+)』')
 
 SEMANTIC_EQUIVALENCE_CONTRACT = (
     '等义转译硬性合同（仅在内部执行，不输出合同或中间格式）：'
@@ -168,12 +167,6 @@ def validate_adapted_prompt(text: str, original: str, profile: str,
     for kind, number in re.findall(r'(图片|视频|音频)\s*(\d+)', text):
         if not 1 <= int(number) <= counts[{'图片': 'image', '视频': 'video', '音频': 'audio'}[kind]]:
             return '适配生成了不存在的素材引用'
-    literals = [next(value for value in match if value) for match in QUOTED.findall(original)]
-    literals += [re.sub(r'^\[[^\]]+\]\s*', '', value).strip()
-                 for value in re.findall(r'<d>(.*?)</d>', original, re.S)]
-    for value in literals:
-        if value and value not in text:
-            return f'适配未逐字保留对白/歌词/画面文字：{value[:60]}'
     no_music = r'non_diegetic_music\s*[:：]\s*N/A\b|无(?:背景音乐|配乐|音乐)|不(?:要|加|使用|添加)(?:背景音乐|配乐|音乐)|(?:no|without)\s+(?:background\s+music|music|score)'
     if re.search(no_music, original, re.I):
         if not re.search(no_music, text, re.I):

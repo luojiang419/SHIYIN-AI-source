@@ -73,6 +73,10 @@ from canvas_core.accounts import (
     is_loopback_address,
 )
 from canvas_core.account_storage import ScopedPath, current_account_id, reset_current_account, set_current_account
+from canvas_core.lookbook_styles import (
+    FASHION_EDITORIAL_STYLE, FASHION_EDITORIAL_STYLE_ID,
+    load_styles as load_lookbook_styles, save_styles as save_lookbook_styles, shiying_cover_route,
+)
 from canvas_core.account_resources import AccountResourceService
 from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
 from canvas_core.depth_inference import DepthInference, DepthUnavailableError
@@ -4668,6 +4672,21 @@ class LookbookSkillCoverRequest(BaseModel):
     aspect_ratio: str = "3:4"
     resolution: str = "2k"
     quality: str = "high"
+
+
+class LookbookStyleRecord(BaseModel):
+    id: str = Field(min_length=1, max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
+    name: str = Field(default="", max_length=120)
+    description: str = Field(default="", max_length=1000)
+    prompt: str = Field(default="", max_length=12000)
+    cover: str = Field(default="", max_length=2000)
+    source: str = Field(default="builtin", pattern=r"^(builtin|github)$")
+    source_url: str = Field(default="", max_length=1000)
+
+
+class LookbookStylesSaveRequest(BaseModel):
+    styles: List[LookbookStyleRecord] = Field(max_length=100)
+    only_missing: bool = False
 
 
 def chat_system_prompt(payload):
@@ -17928,6 +17947,9 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
+    selected_style = options.get("lookbook_style")
+    if prompt_policy == "lookbook" and isinstance(selected_style, dict) and selected_style.get("id") == FASHION_EDITORIAL_STYLE_ID:
+        options["lookbook_style"] = {**selected_style, **FASHION_EDITORIAL_STYLE}
     story_mode = (
         prompt_policy == "lookbook"
         and str(options.get("lookbook_mode") or "").strip().lower() == LOOKBOOK_STORY_MODE
@@ -20112,11 +20134,34 @@ async def install_lookbook_skills(payload: LookbookSkillInstallRequest):
         raise HTTPException(status_code=400, detail=f"GitHub Skill 解析失败：{str(exc)[:240]}") from exc
     return {"skills": skills, "count": len(skills)}
 
+@app.get("/api/lookbook/styles")
+def get_lookbook_styles():
+    try:
+        return {"styles": load_lookbook_styles(Path(DATA_DIR)), "builtin_styles": [FASHION_EDITORIAL_STYLE]}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="读取 Lookbook 风格失败，请检查数据目录") from exc
+
+
+@app.put("/api/lookbook/styles")
+def put_lookbook_styles(payload: LookbookStylesSaveRequest):
+    records = [item.model_dump(exclude_unset=True) for item in payload.styles]
+    for item in records:
+        cover = item.get("cover", "")
+        # 封面必须是应用持久媒体或随软件分发的默认图，拒绝临时 blob/data URL。
+        if cover and (not cover.startswith(("/assets/", "/output/", "/static/img/lookbook-covers/")) or ".." in cover or "\\" in cover):
+            raise HTTPException(status_code=400, detail="请先上传封面，使用已保存的本地图片地址")
+    try:
+        return {"styles": save_lookbook_styles(Path(DATA_DIR), records, only_missing=payload.only_missing)}
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Lookbook 风格保存失败，请检查数据目录权限或磁盘空间") from exc
+
+
 @app.post("/api/lookbook/skills/cover")
 async def generate_lookbook_skill_cover(payload: LookbookSkillCoverRequest):
-    route = configured_ecommerce_vision_route()
-    if not route:
-        raise HTTPException(status_code=400, detail="未配置可用的 AI助手视觉图片模型")
+    try:
+        route = shiying_cover_route(configured_ecommerce_providers())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         generation = resolve_ecommerce_generation_settings(1024, 1365, "standard", payload.aspect_ratio, payload.resolution, payload.quality, 1)
         result = await execute_ai_image_batch(

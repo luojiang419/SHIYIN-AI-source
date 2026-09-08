@@ -6,6 +6,8 @@ import json
 import re
 from typing import Any, Iterable
 
+from .lookbook_styles import FASHION_EDITORIAL_STYLE_ID, FASHION_EDITORIAL_PROMPT
+
 
 OPERATIONS = (
     "try_on",
@@ -1459,6 +1461,8 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         effective_style_id = str(auto_decision.get("selected_style_id") or "").strip().lower() if style_id == "auto" else style_id
         style_name = str(style.get("name") or "").strip()
         style_prompt = str(style.get("prompt") or style.get("description") or "").strip()
+        if effective_style_id == FASHION_EDITORIAL_STYLE_ID:
+            style_prompt = FASHION_EDITORIAL_PROMPT
         research = str(options.get("search_context") or "").strip()
         plan = str(options.get("lookbook_plan") or "").strip()
         reference_analysis = str(options.get("lookbook_reference_analysis") or "").strip()
@@ -1630,6 +1634,14 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
         if plan:
             parts.append("CREATIVE DIRECTOR PLAN (follow as the execution authority; it overrides generic defaults): " + plan[:14000])
         parts.append("ANTI-ORDINARY CHECK: before finalizing, verify that the image has a specific place, time/light, palette relationship, styling intention, physical gesture and editorial camera choice. If any are missing, redesign the frame; do not fall back to white-background studio photography.")
+        if effective_style_id == FASHION_EDITORIAL_STYLE_ID:
+            # 仅此风格使用 v1.2 的镜头与外观方法，移除与它冲突的纪实默认。
+            parts = [part for part in parts if not part.startswith((
+                "CAMERA BEHAVIOR:", "NATURAL SUNLIGHT AND SOFT-FILM LOCK:",
+                "MATERIAL PORTRAIT LIGHT LOCK:", "PERSON-SCENE LIFESTYLE LOCK:",
+                "AUTO LOOKBOOK MODE",
+            ))]
+            parts.append("FASHION ADVERTISING OVERRIDE: execute the selected v1.2 director rules above. User-specified appearance overrides generic skin-tone locks; environment-derived light overrides sunny defaults; deliberate editorial lenses override generic camera-height restrictions. Preserve the requested count, layout and delivery ratio.")
         return " ".join(parts)
     reference_map = build_ordered_reference_map(normalized)
     if instruction and operation != "universal":

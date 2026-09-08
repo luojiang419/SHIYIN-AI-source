@@ -52,13 +52,52 @@
         {id:'standard-advertising',name:'标准广告·均衡电影质感',description:'已验证的中性电影对比、讨喜色调与均衡高光暗部，适合通用广告组图',prompt:STANDARD_AD_PROMPT},
         {id:'levis-high-key-color',name:'李维斯广告·高调亮色主题',description:'明亮开放的高调曝光、干净饱和色彩与自信洒脱的场景化动作',prompt:LEVIS_HIGH_KEY_PROMPT + LEVIS_HUMAN_PERFORMANCE_PROMPT},
         {id:'levis-black-white',name:'李维斯广告·黑白纪实',description:'去色但保留织物与皮肤纹理，深黑可读、白位有层次的黑白广告影像',prompt:LEVIS_BLACK_WHITE_PROMPT + LEVIS_HUMAN_PERFORMANCE_PROMPT},
+        {id:'fashion-advertising',name:'时尚广告',description:'真实肤质与环境光、鲜明镜头观点、事件驱动的连续时尚大片',prompt:'Fashion Editorial Sequence Director v1.2 / EDITORIAL_B: route references by role; separate identity from source exposure and retouching; derive physical light and skin response from the environment; choose intentional varied lenses, perspective and composition; track wardrobe, props, event progression and screen axis; include campaign hero frames. User brief, count, aspect ratio and layout take priority. Plan the series jointly; render a contact sheet only when requested. Avoid catalog posing, CG skin, forced sunny filters and repeated camera positions.'},
     ];
     const esc = value => String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     const clamp = (value,min,max) => Math.max(min,Math.min(max,Number(value)||min));
     const outputUrl = item => typeof item === 'string' ? item : String(item?.url || item?.path || item?.src || '');
-    const stored = () => { try { const value = JSON.parse(localStorage.getItem('lookbook_styles') || '[]'); return Array.isArray(value) ? value : []; } catch(_) { return []; } };
-    const saveStored = value => { try { localStorage.setItem('lookbook_styles', JSON.stringify(value)); } catch(_) {} };
-    const styles = () => [...STYLES,...stored()].filter((item,index,list) => item?.id && list.findIndex(other => other.id === item.id) === index);
+    let serverStyles = null, builtinMetadata = [], stylesLoading = null, coverSaving = false;
+    const legacyStyles = () => { try { const value = JSON.parse(localStorage.getItem('lookbook_styles') || '[]'); return Array.isArray(value) ? value.filter(item=>item?.id) : []; } catch(_) { return []; } };
+    const stored = () => serverStyles === null ? legacyStyles() : serverStyles;
+    const defaultCover = id => `/static/img/lookbook-covers/${id}.webp`;
+    const styles = () => {
+        const saved = stored();
+        return [...STYLES.map(base=>{
+            const metadata=builtinMetadata.find(item=>item.id===base.id)||{};
+            const override=saved.find(item=>item.id===base.id);
+            // 内置提示词随版本更新，用户封面始终优先。
+            return {...base,...metadata,source:'builtin',cover:override?.cover||defaultCover(base.id)};
+        }),...saved.filter(item=>!STYLES.some(base=>base.id===item.id))];
+    };
+    async function saveStored(value,onlyMissing=false){
+        const response=await fetch('/api/lookbook/styles',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({styles:value,only_missing:onlyMissing})});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(data.detail||'风格保存失败，请重试');
+        serverStyles=data.styles||[];
+    }
+    async function loadStyles(refresh=false){
+        if(stylesLoading)return stylesLoading;
+        if(serverStyles!==null&&!refresh)return;
+        stylesLoading=(async()=>{
+            const response=await fetch('/api/lookbook/styles');
+            const data=await response.json().catch(()=>({}));
+            if(!response.ok)throw new Error(data.detail||'风格读取失败，请重试');
+            builtinMetadata=data.builtin_styles||[];
+            const legacy=legacyStyles();
+            // 使用服务端的 only_missing 合并，旧浏览器缓存不能覆盖新封面。
+            if(legacy.length)await saveStored(legacy,true);
+            else serverStyles=data.styles||[];
+            try{localStorage.removeItem('lookbook_styles');}catch(_){}
+        })();
+        try{await stylesLoading;}finally{stylesLoading=null;}
+    }
+    function syncPickerCover(style){
+        if(pickerNode?.lookbookStyleId===style.id){
+            pickerNode.lookbookStyleCover=style.cover;
+            pickerOptions?.onChange?.(pickerNode,{render:true});
+        }
+    }
     function imageProviders(){ return typeof window.imageApiProviders === 'function' ? window.imageApiProviders() : []; }
     function imageModels(providerId){ return typeof window.allImageModels === 'function' ? window.allImageModels(providerId) : []; }
     function syncGenerationSelection(node){
@@ -105,7 +144,7 @@
         actionDelegationInstalled = true;
         document.addEventListener('click', activateAction, true);
     }
-    async function uploadCover(file){ const form = new FormData(); form.append('files',file); const response = await fetch('/api/ai/upload',{method:'POST',body:form}); const data = await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '封面上传失败'); return data.files?.[0]?.url || ''; }
+    async function uploadCover(file){ const form = new FormData(); form.append('files',file); const response = await fetch('/api/ai/upload',{method:'POST',body:form}); const data = await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail || '封面上传失败'); const url=data.files?.[0]?.url;if(!url)throw new Error('上传未返回有效封面地址');return url; }
     function ensureModal(){
         let modal = document.getElementById('lookbookStyleModal'); if(modal) return modal;
         modal = document.createElement('dialog'); modal.id='lookbookStyleModal'; modal.className='lookbook-style-modal'; modal.setAttribute('aria-hidden','true');
@@ -113,19 +152,66 @@
         document.body.appendChild(modal);
         modal.addEventListener('click',event => { if(event.target===modal || event.target.closest('[data-lookbook-close]')) closePicker(); });
         modal.addEventListener('cancel',event => { event.preventDefault(); closePicker(); });
-        modal.querySelector('[data-lookbook-install]').addEventListener('click',async()=>{ const input=modal.querySelector('[data-lookbook-github-url]'),status=modal.querySelector('[data-lookbook-status]'); const url=String(input.value||'').trim(); if(!url){status.textContent='请先输入 GitHub 地址';return;} status.textContent='正在解析 Skill…'; try{const response=await fetch('/api/lookbook/skills/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}); const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail||'Skill 安装失败'); saveStored([...stored(),...(data.skills||[])]); status.textContent=(data.skills||[]).length>1?'已发现多个 Skill，请勾选所需风格':'Skill 已安装'; renderModal();}catch(error){status.textContent=error.message||'Skill 安装失败';} });
+        modal.querySelector('[data-lookbook-install]').addEventListener('click',async()=>{ const input=modal.querySelector('[data-lookbook-github-url]'),status=modal.querySelector('[data-lookbook-status]'); const url=String(input.value||'').trim(); if(!url){status.textContent='请先输入 GitHub 地址';return;} status.textContent='正在解析 Skill…'; try{const response=await fetch('/api/lookbook/skills/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}); const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail||'Skill 安装失败'); await loadStyles(); await saveStored(data.skills||[],true); status.textContent=(data.skills||[]).length>1?'已发现多个 Skill，请勾选所需风格':'Skill 已安装'; renderModal();}catch(error){status.textContent=error.message||'Skill 安装失败';} });
         return modal;
     }
     function closePicker(){ const modal=document.getElementById('lookbookStyleModal'); if(modal?.open && typeof modal.close === 'function') modal.close(); modal?.classList.remove('open'); if(modal) modal.style.display='none'; modal?.setAttribute('aria-hidden','true'); pickerNode=null; pickerOptions=null; }
     function resetDerivedResearch(node){ Object.assign(node,{lookbookPlan:'',lookbookResearch:'',lookbookReferenceAnalysis:'',lookbookVisualSystem:{},lookbookAutoDecision:{},lookbookBible:{},lookbookShotCards:[],lookbookStorySummary:'',lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookResearchEvidenceStatus:'',lookbookResearchStatus:'idle',lookbookAgentStage:''}); }
-    async function choose(style){ if(!pickerNode||!style) return; const status=document.querySelector('[data-lookbook-status]'); if(!style.cover && style.source==='github'){ status.textContent='正在根据 Skill 生成封面…'; try{const response=await fetch('/api/lookbook/skills/cover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:style.prompt||style.description||style.name,aspect_ratio:pickerNode.aspectRatio||'3:4',resolution:pickerNode.resolution||'2k',quality:pickerNode.quality||'high'})}); const data=await response.json().catch(()=>({})); if(!response.ok) throw new Error(data.detail||'封面生成失败'); style.cover=data.image?.url||data.image?.path||''; const list=stored(),index=list.findIndex(item=>item.id===style.id); if(index>=0) list[index]=style; else list.push(style); saveStored(list);}catch(error){status.textContent=error.message||'封面生成失败';} } resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id,lookbookStyleName:style.name,lookbookStylePrompt:style.prompt||style.description||'',lookbookStyleCover:style.cover||'',lookbookStyleSource:style.source||'builtin'}); pickerOptions?.onChange?.(pickerNode,{render:true}); closePicker(); }
-    function renderModal(){ const modal=ensureModal(), grid=modal.querySelector('[data-lookbook-grid]'), list=styles(); modal.querySelector('.lookbook-style-batch-actions')?.remove(); grid.innerHTML=list.map(style=>`<article class="lookbook-style-card"><div class="lookbook-card-cover">${style.cover?`<img src="${esc(style.cover)}" alt="${esc(style.name)}">`:'<i data-lucide="image"></i>'}<label title="上传封面"><i data-lucide="upload"></i><input type="file" accept="image/*" data-lookbook-cover="${esc(style.id)}"></label></div><div class="lookbook-card-body"><div class="lookbook-card-title"><strong>${esc(style.name)}</strong>${style.source==='github'?`<label class="lookbook-skill-check"><input type="checkbox" data-lookbook-check="${esc(style.id)}">勾选</label>`:''}</div><p>${esc(style.description||'')}</p><small>${style.source==='github'?'GitHub Skill':'内置 Skill'}</small><div class="lookbook-card-actions"><button type="button" data-lookbook-select="${esc(style.id)}">使用此风格</button></div></div></article>`).join('');
+    async function choose(style){
+        if(!pickerNode||!style)return;
+        resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id,lookbookStyleName:style.name,lookbookStylePrompt:style.prompt||style.description||'',lookbookStyleCover:style.cover||'',lookbookStyleSource:style.source||'builtin'});
+        pickerOptions?.onChange?.(pickerNode,{render:true});closePicker();
+    }
+    async function changeCover(style,file){
+        if(coverSaving||!style)return;
+        coverSaving=true;
+        const modal=ensureModal(),status=modal.querySelector('[data-lookbook-status]');
+        const controls=modal.querySelectorAll('[data-lookbook-cover],[data-lookbook-generate-cover]');
+        controls.forEach(control=>control.disabled=true);
+        status.textContent=file?'正在上传并保存封面…':'正在使用拾影生成封面…';
+        try{
+            await loadStyles();
+            let cover;
+            if(file)cover=await uploadCover(file);
+            else{
+                const response=await fetch('/api/lookbook/skills/cover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:style.prompt||style.description||style.name,aspect_ratio:'3:4',resolution:'1k',quality:'high'})});
+                const data=await response.json().catch(()=>({}));
+                if(!response.ok)throw new Error(data.detail||'封面生成失败');
+                cover=data.image?.url;
+                if(!cover)throw new Error('封面生成没有返回图片');
+            }
+            // 成功写盘后才更新 UI；失败时保留此前封面。
+            const record=style.source==='github'?{...style,cover}:{id:style.id,cover};
+            await saveStored([record]);
+            syncPickerCover({...style,cover});renderModal();
+            status.textContent='封面已自动保存';
+        }catch(error){status.textContent=error.message||'封面保存失败，请重试';}
+        finally{coverSaving=false;controls.forEach(control=>control.disabled=false);}
+    }
+    function renderModal(){ const modal=ensureModal(), grid=modal.querySelector('[data-lookbook-grid]'), list=styles(); modal.querySelector('.lookbook-style-batch-actions')?.remove(); grid.innerHTML=list.map(style=>`<article class="lookbook-style-card"><div class="lookbook-card-cover">${style.cover?`<img src="${esc(style.cover)}" alt="${esc(style.name)}">`:'<i data-lucide="image"></i>'}<label title="上传封面"><i data-lucide="upload"></i><input type="file" accept="image/*" data-lookbook-cover="${esc(style.id)}"></label></div><div class="lookbook-card-body"><div class="lookbook-card-title"><strong>${esc(style.name)}</strong>${style.source==='github'?`<label class="lookbook-skill-check"><input type="checkbox" data-lookbook-check="${esc(style.id)}">勾选</label>`:''}</div><p>${esc(style.description||'')}</p><small>${style.source==='github'?'GitHub Skill':'内置 Skill'}</small><div class="lookbook-card-actions"><button type="button" data-lookbook-select="${esc(style.id)}">使用此风格</button><button type="button" data-lookbook-generate-cover="${esc(style.id)}" title="使用拾影平台生成并保存封面">生成封面</button></div></div></article>`).join('');
         if(list.some(item=>item.source==='github')){ const footer=document.createElement('div'); footer.className='lookbook-style-batch-actions'; footer.innerHTML='<span>安装多个 Skill 后可勾选所需风格</span><button type="button" data-lookbook-apply>应用所选</button>'; modal.querySelector('.lookbook-style-dialog').appendChild(footer); footer.querySelector('[data-lookbook-apply]').onclick=()=>{const checked=modal.querySelector('[data-lookbook-check]:checked'); if(checked) choose(list.find(item=>item.id===checked.dataset.lookbookCheck));}; }
         grid.querySelectorAll('[data-lookbook-select]').forEach(button=>button.onclick=event=>{event.preventDefault();event.stopPropagation();choose(list.find(item=>item.id===button.dataset.lookbookSelect));});
-        grid.querySelectorAll('[data-lookbook-cover]').forEach(input=>input.onchange=async event=>{const style=list.find(item=>item.id===event.target.dataset.lookbookCover); if(!style||!event.target.files?.[0]) return; try{style.cover=await uploadCover(event.target.files[0]); const custom=stored(),index=custom.findIndex(item=>item.id===style.id); if(index>=0) custom[index]=style; else custom.push({...style,source:style.source||'builtin'}); saveStored(custom); renderModal();}catch(error){modal.querySelector('[data-lookbook-status]').textContent=error.message||'封面上传失败';} event.target.value='';});
+        grid.querySelectorAll('[data-lookbook-cover]').forEach(input=>input.onchange=async event=>{
+            const style=list.find(item=>item.id===event.target.dataset.lookbookCover),file=event.target.files?.[0];
+            if(style&&file)await changeCover(style,file);
+            event.target.value='';
+        });
+        grid.querySelectorAll('[data-lookbook-generate-cover]').forEach(button=>button.onclick=()=>changeCover(list.find(item=>item.id===button.dataset.lookbookGenerateCover)));
         window.lucide?.createIcons?.();
     }
-    function openPicker(node,options){ pickerNode=node; pickerOptions=options||{}; renderModal(); const modal=ensureModal(); modal.classList.add('open'); modal.style.display='flex'; modal.style.pointerEvents='auto'; modal.setAttribute('aria-hidden','false'); if(typeof modal.showModal === 'function' && !modal.open){ try{ modal.showModal(); }catch(_){ modal.setAttribute('open',''); } } else modal.setAttribute('open',''); }
+    async function openPicker(node,options){
+        pickerNode=node;pickerOptions=options||{};renderModal();
+        const modal=ensureModal();modal.classList.add('open');modal.style.display='flex';modal.style.pointerEvents='auto';modal.setAttribute('aria-hidden','false');
+        if(typeof modal.showModal==='function'&&!modal.open){try{modal.showModal();}catch(_){modal.setAttribute('open','');}}else modal.setAttribute('open','');
+        const status=modal.querySelector('[data-lookbook-status]');status.textContent='正在读取已保存风格…';
+        try{
+            await loadStyles(true);
+            if(pickerNode!==node)return;
+            const selected=styles().find(item=>item.id===node.lookbookStyleId);
+            if(selected)syncPickerCover(selected);
+            renderModal();status.textContent='封面自动保存，可上传替换或使用拾影重新生成';
+        }catch(error){status.textContent=error.message||'风格读取失败，请重新打开';}
+    }
     function layoutCells(rows,columns){ return Array.from({length:Math.min(20,Math.max(1,rows*columns))},(_,index)=>`<span>${index+1}</span>`).join(''); }
     function layoutThumbnail(rows,columns){ return `<span class="lookbook-layout-thumb" style="--layout-rows:${rows};--layout-columns:${columns}">${layoutCells(rows,columns)}</span>`; }
     function ensureLayoutModal(){
@@ -222,7 +308,8 @@
             node.lookbookStyleName=String(node.lookbookStyleName||selectedStyle.name);
             node.lookbookStylePrompt=String(node.lookbookStylePrompt||selectedStyle.prompt);
         }
-        node.lookbookStyleCover=String(node.lookbookStyleCover||'');
+        const savedStyle=styles().find(item=>item.id===node.lookbookStyleId);
+        node.lookbookStyleCover=String((serverStyles!==null?savedStyle?.cover:'')||node.lookbookStyleCover||savedStyle?.cover||'');
         // 联网研究是可选增强项；缺省值必须关闭，但保留用户显式勾选的 true。
         node.lookbookSearch=node.lookbookSearch===true;
         node.lookbookQualityGate=node.lookbookQualityGate===true;
@@ -297,6 +384,10 @@
         if(layoutMeta)layoutMeta.textContent=`子图 ${node.aspectRatio} · 输出 ${layoutOutputAspectRatio(node)}`;
     }
     function bind(root,node,options={}){
+        loadStyles().then(()=>{
+            const cover=styles().find(item=>item.id===node.lookbookStyleId)?.cover||'';
+            if(cover&&cover!==node.lookbookStyleCover){node.lookbookStyleCover=cover;options.onChange?.(node,{render:true});}
+        }).catch(error=>{root.querySelector('[data-lookbook-choose]')?.setAttribute('title',error.message||'风格读取失败');});
         normalize(node);
         installActionDelegation();
         const composingControls=new WeakSet();

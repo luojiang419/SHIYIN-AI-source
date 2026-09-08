@@ -19,7 +19,7 @@ class LookbookNodeFrontendTests(unittest.TestCase):
 
     def test_validated_builtin_presets_are_available(self):
         styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
-        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white"])
+        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white", "fashion-advertising"])
         self.assertIn("name:'2026 FW 奶油青蓝胶片抓拍'", styles)
         self.assertIn("name:'李维斯广告·环境自适应纪实'", styles)
         self.assertIn("LEVIS_ADAPTIVE_PROMPT", self.lookbook)
@@ -141,7 +141,7 @@ if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLa
         self.assertIn("if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node)", self.lookbook)
         self.assertIn("resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id", self.lookbook)
         styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
-        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white"])
+        self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white", "fashion-advertising"])
         self.assertIn("id:'standard-advertising'", self.lookbook)
         self.assertIn("id:'levis-high-key-color'", self.lookbook)
         self.assertIn("id:'levis-black-white'", self.lookbook)

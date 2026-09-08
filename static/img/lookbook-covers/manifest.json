@@ -1,0 +1,74 @@
+{
+  "provider_id": "shiying",
+  "credential_source": "installed_application",
+  "aspect_ratio": "3:4",
+  "resolution": "1k",
+  "images": [
+    {
+      "id": "standard-advertising",
+      "name": "标准广告·均衡电影质感",
+      "status": "succeeded",
+      "file": "standard-advertising.webp",
+      "size": [
+        896,
+        1200
+      ],
+      "model": "gemini-3-pro-image-preview"
+    },
+    {
+      "id": "fw-cream-cyan-film",
+      "name": "2026 FW 奶油青蓝胶片抓拍",
+      "status": "succeeded",
+      "file": "fw-cream-cyan-film.webp",
+      "size": [
+        896,
+        1200
+      ],
+      "model": "gemini-3-pro-image-preview"
+    },
+    {
+      "id": "levis-adaptive-campaign",
+      "name": "李维斯广告·环境自适应纪实",
+      "status": "succeeded",
+      "file": "levis-adaptive-campaign.webp",
+      "size": [
+        896,
+        1200
+      ],
+      "model": "gemini-3-pro-image-preview"
+    },
+    {
+      "id": "levis-high-key-color",
+      "name": "李维斯广告·高调亮色主题",
+      "status": "succeeded",
+      "file": "levis-high-key-color.webp",
+      "size": [
+        896,
+        1200
+      ],
+      "model": "gemini-3-pro-image-preview"
+    },
+    {
+      "id": "levis-black-white",
+      "name": "李维斯广告·黑白纪实",
+      "status": "succeeded",
+      "file": "levis-black-white.webp",
+      "size": [
+        896,
+        1200
+      ],
+      "model": "gemini-3-pro-image-preview"
+    },
+    {
+      "id": "fashion-advertising",
+      "name": "时尚广告",
+      "status": "succeeded",
+      "file": "fashion-advertising.webp",
+      "size": [
+        896,
+        1200
+      ],
+      "model": "gemini-3-pro-image-preview"
+    }
+  ]
+}

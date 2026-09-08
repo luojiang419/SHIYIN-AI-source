@@ -57,8 +57,11 @@ def run(stage: Path, data_root: Path, port: int, version: str) -> dict:
     base = f"http://127.0.0.1:{port}"
     process = None
     # 与 Tauri 启动器一致，为 windowed Sidecar 提供日志句柄，避免无控制台启动时日志初始化失败。
-    stdout_log = (data_root / "backend.stdout.log").open("ab")
-    stderr_log = (data_root / "backend.stderr.log").open("ab")
+    # 根目录日志会被旧数据迁移器移动，Windows 正在写入的日志不能移动。
+    log_root = data_root / "logs"
+    log_root.mkdir(parents=True, exist_ok=True)
+    stdout_log = (log_root / "backend.stdout.log").open("ab")
+    stderr_log = (log_root / "backend.stderr.log").open("ab")
     try:
         process = subprocess.Popen([str(stage / "app/backend/canvas-backend/canvas-backend.exe"),
             "--host", "127.0.0.1", "--port", str(port), "--app-root", str(stage / "app"),
@@ -95,8 +98,14 @@ def run(stage: Path, data_root: Path, port: int, version: str) -> dict:
             "upload_name": "a.png", "width": 24, "height": 16, "sha256": digest}]}}
         imported = post("/api/canvas-bridges/film/receive-direct", data={"manifest": json.dumps(manifest)},
                         files={"frames": ("a.png", content, "image/png")})
+        assert imported["workflow_ready"] is True, imported
+        assert len(imported["workflow_node_ids"]) == 3
+        assert calls and calls[0]["action"] == "sync", "导出后端必须直接初始化，不依赖打开网页"
         canvas = client.get(base + f"/api/canvases/{imported['canvas_id']}", timeout=10).json()["canvas"]
         assert len([n for n in canvas["nodes"] if n["type"] == "group"]) == 4
+        steps = [n for n in canvas["nodes"] if n["id"] in imported["workflow_node_ids"]]
+        assert len(steps) == 3
+        assert all(n["workflowScriptId"] == "packaged-script" and n["workflowSnapshot"]["scriptId"] == "packaged-script" for n in steps)
         prepare = next(n for n in canvas["nodes"] if n["type"] == "film-prepare-assets")
         result = post("/api/canvas-film-workflow", json={"canvas_id": canvas["id"], "node_id": prepare["id"],
                       "action": "sync", "graph": canvas})
@@ -109,13 +118,14 @@ def run(stage: Path, data_root: Path, port: int, version: str) -> dict:
         repeated = post("/api/canvas-bridges/film/receive-direct", data={"manifest": json.dumps(manifest)},
                         files={"frames": ("a.png", content, "image/png")})
         assert repeated["canvas_id"] == canvas["id"] and repeated["group_id"] == imported["group_id"]
+        assert repeated["workflow_ready"] is True
         archive = client.get(base + f"/api/canvases/{canvas['id']}/export-package", timeout=30)
         assert archive.ok and archive.content.startswith(b"PK")
         restored = post("/api/canvas-packages/import", files={"file": ("workflow.zip", archive.content, "application/zip")})["canvas"]
         assert len(restored["connections"]) == 3
         assert (stage / "app/VERSION").read_text().strip() == version
         return {"version": version, "health": health.json(), "workflow_receive": True,
-                "function_groups": 3, "direct_receive": True, "script_sync": True,
+                "function_groups": 3, "direct_receive": True, "script_sync": True, "backend_initializes_without_page": True,
                 "media_bytes_match": True, "repeat_is_idempotent": True, "package_roundtrip": True}
     finally:
         client.close()

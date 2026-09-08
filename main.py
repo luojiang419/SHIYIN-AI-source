@@ -309,6 +309,7 @@ ADMIN_ONLY_HTTP_PATHS = {
     "/api/kling-cli/login",
     "/api/kling-cli/login-status",
     "/api/kling-cli/login-open",
+    "/api/kling-cli/account",
     "/static/api-settings.html",
     "/static/app-settings.html",
     "/static/admin.html",
@@ -22565,16 +22566,34 @@ async def kling_cli_capabilities(request: Request):
             "capabilities": {"text_to_video": [], "image_to_video": [], "video_elements": [], "video_reference_supported": False},
             "error": str(exc),
         }
+    generation_enabled = bool(capabilities.get("text_to_video") or capabilities.get("image_to_video"))
     return {
         "installed": True,
         "authenticated": True,
         "region": region,
-        "generation_enabled": True,
+        "generation_enabled": generation_enabled,
         "can_manage": can_manage,
         "version": environment.version,
         "capabilities": capabilities,
-        "error": "",
+        "error": "" if generation_enabled else "账号已授权，但可灵暂未返回可用视频模型，请稍后刷新模型或切换授权。",
     }
+
+@app.get("/api/kling-cli/account")
+async def kling_cli_account(request: Request):
+    require_admin(request)
+    from canvas_core.kling_login import LOGIN_MANAGER
+    async with KLING_CLI_MANAGEMENT_LOCK:
+        if LOGIN_MANAGER.snapshot()["status"] in {"starting", "waiting"}:
+            raise HTTPException(status_code=409, detail="授权正在进行，完成后会自动刷新账号信息。")
+        environment = await asyncio.to_thread(resolve_kling_cli)
+        if not environment.is_ready:
+            raise HTTPException(status_code=400, detail="请先登录授权可灵账号。")
+        try:
+            account = await asyncio.to_thread(KlingCliService(environment).account)
+        except KlingCliError as exc:
+            # 原始 CLI 错误可能含账户信息或凭据，详情接口只返回固定提示。
+            raise HTTPException(status_code=502, detail="读取可灵账号详情失败，请刷新重试或重新登录授权。") from exc
+    return {"account": account}
 
 @app.post("/api/kling-cli/install")
 async def kling_cli_install(payload: KlingCliInstallRequest, request: Request):

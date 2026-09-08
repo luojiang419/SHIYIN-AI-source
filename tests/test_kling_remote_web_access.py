@@ -92,8 +92,8 @@ class KlingRemoteWebAccessTests(unittest.TestCase):
         self.assertIn("canManage:false", self.canvas)
         self.assertIn("generationEnabled:Boolean(data.generation_enabled)", self.canvas)
         self.assertIn("canManage:Boolean(data.can_manage)", self.canvas)
-        self.assertIn("state.canManage && !state.authenticated", self.canvas)
-        self.assertIn("state.canManage && state.installed && !state.authenticated", self.canvas)
+        self.assertIn("if(!klingCliState.canManage || !klingCliState.authenticated) return", self.canvas)
+        self.assertIn("state.canManage ? `<button", self.canvas)
 
     def test_smart_canvas_loads_real_kling_models_and_rejects_placeholder_submission(self):
         self.assertIn("let smartKlingCliState =", self.smart)

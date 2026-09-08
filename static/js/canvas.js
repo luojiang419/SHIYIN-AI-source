@@ -910,8 +910,9 @@ let klingCliState = {
 };
 let klingLoginState = {busy:false, status:'idle', authorization_url:'', error:''};
 let klingLoginTimer = null;
-let klingAutoLoginAttempted = false;
 let klingSelectedRegion = 'china';
+let klingAccountState = {loading:false, account:null, error:''};
+let klingAccountSequence = 0;
 let minimaxH3StatusTask = null;
 let minimaxH3State = {
     loaded:false,
@@ -1552,14 +1553,17 @@ async function loadKlingCapabilities({renderAfter=true}={}){
             loaded:true,
             loading:false,
             authenticated:false,
+            generationEnabled:false,
             error:err.message || '读取可灵能力失败'
         };
     }
     if(renderAfter) render();
-    if(klingCliState.canManage && klingCliState.installed && klingCliState.loginRequired
-        && !klingAutoLoginAttempted && nodes.some(isKlingVideoNode)){
-        klingAutoLoginAttempted = true;
-        void startKlingCliLogin();
+    if(klingCliState.canManage && klingCliState.authenticated && !klingLoginState.busy){
+        void loadKlingAccount();
+    } else {
+        klingAccountSequence++;
+        klingAccountState = {loading:false, account:null, error:''};
+        renderKlingAccountDialog();
     }
     return klingCliState;
 }
@@ -1602,7 +1606,6 @@ function ensureKlingCapabilities(){
 async function installKlingCli(region='china'){
     if(klingCliState.loading || klingLoginState.busy) return;
     klingSelectedRegion = region;
-    klingAutoLoginAttempted = true;
     klingLoginState = {busy:false, status:'idle', authorization_url:'', error:''};
     klingCliState = {...klingCliState, loading:true, error:'正在准备可灵连接组件，首次下载可能需要几分钟…'};
     render();
@@ -1622,8 +1625,11 @@ async function installKlingCli(region='china'){
     }
 }
 async function startKlingCliLogin(){
-    if(klingLoginState.busy) return;
-    klingAutoLoginAttempted = true;
+    if(klingLoginState.busy || klingCliState.loading || !klingCliState.canManage) return;
+    klingAccountSequence++;
+    klingAccountState = {loading:false, account:null, error:''};
+    klingCliState = {...klingCliState, authenticated:false, generationEnabled:false};
+    document.getElementById('kling-account-dialog')?.close();
     klingLoginState = {busy:true, status:'starting', authorization_url:'', error:''};
     render();
     try {
@@ -1664,6 +1670,99 @@ async function openKlingAuthorizationPage(){
         klingLoginState.error = err.message || '打开系统浏览器失败，可复制授权链接到浏览器。';
     }
     render();
+}
+async function loadKlingAccount(){
+    if(!klingCliState.canManage || !klingCliState.authenticated || klingLoginState.busy) return;
+    const sequence = ++klingAccountSequence;
+    klingAccountState = {loading:true, account:null, error:''};
+    renderKlingAccountDialog();
+    try {
+        const response = await fetch('/api/kling-cli/account', {cache:'no-store'});
+        if(!response.ok) throw new Error(await responseErrorMessage(response, '读取可灵账号详情失败'));
+        const data = await response.json();
+        if(sequence !== klingAccountSequence) return;
+        klingAccountState = {loading:false, account:data.account || {}, error:''};
+    } catch(err) {
+        if(sequence !== klingAccountSequence) return;
+        klingAccountState = {loading:false, account:null, error:err.message || '读取可灵账号详情失败'};
+    }
+    renderKlingAccountDialog();
+}
+function klingDialog(){
+    let dialog = document.getElementById('kling-account-dialog');
+    if(!dialog){
+        dialog = document.createElement('dialog');
+        dialog.id = 'kling-account-dialog';
+        dialog.className = 'kling-account-dialog';
+        dialog.setAttribute('aria-labelledby', 'kling-account-title');
+        document.body.appendChild(dialog);
+        dialog.addEventListener('click', event => { if(event.target === dialog) dialog.close(); });
+    }
+    return dialog;
+}
+function renderKlingAccountDialog(){
+    const dialog = document.getElementById('kling-account-dialog');
+    if(!dialog?.open || dialog.dataset.mode !== 'account') return;
+    const state = klingAccountState;
+    const account = state.account || {};
+    const fields = [['用户名', account.username], ['账号 ID', account.user_id], ['可用积分', account.credits], ['会员类型', account.membership], ['账号区域', klingSelectedRegion === 'global' ? '海外区' : '中国区']];
+    dialog.innerHTML = `<div class="kling-account-content"><div class="kling-account-heading"><h3 id="kling-account-title">可灵账号详情</h3><button type="button" class="tool-btn" data-close aria-label="关闭账号详情">关闭</button></div>
+        <p class="muted-note" role="status">${escapeHtml(!klingCliState.canManage ? '仅本机管理员可查看账号详情。' : !klingCliState.authenticated ? '当前未登录，请先登录授权。' : state.loading ? '正在读取账号信息…' : state.error || '已授权 · 积分以可灵实时返回为准')}</p>
+        ${klingCliState.canManage && klingCliState.authenticated && !state.loading && !state.error ? `<dl>${fields.map(([label,value]) => `<div><dt>${label}</dt><dd>${escapeHtml(value == null || value === '' ? '官方未提供' : String(value))}</dd></div>`).join('')}</dl>` : ''}
+        <div class="kling-account-actions"><button type="button" class="tool-btn" data-account-refresh ${state.loading || !klingCliState.authenticated ? 'disabled' : ''}>刷新账号与积分</button></div></div>`;
+    dialog.querySelector('[data-close]').onclick = () => dialog.close();
+    dialog.querySelector('[data-account-refresh]').onclick = () => void loadKlingAccount();
+}
+function openKlingAccountDialog(){
+    if(!klingCliState.canManage || !klingCliState.authenticated) return;
+    const dialog = klingDialog();
+    dialog.dataset.mode = 'account';
+    if(!dialog.open) dialog.showModal();
+    renderKlingAccountDialog();
+    void loadKlingAccount();
+}
+function requestKlingAuthorization(){
+    if(klingLoginState.busy || klingCliState.loading || !klingCliState.canManage) return;
+    if(klingCliState.installed){
+        void startKlingCliLogin();
+        return;
+    }
+    const dialog = klingDialog();
+    dialog.dataset.mode = 'login';
+    dialog.innerHTML = `<div class="kling-account-content"><div class="kling-account-heading"><h3 id="kling-account-title">登录授权可灵</h3><button type="button" class="tool-btn" data-close>关闭</button></div>
+        <p class="muted-note">选择账号所在区域，继续后将在浏览器打开可灵授权页面。</p>
+        <label>账号区域 <select class="select-lite kling-install-region"><option value="china">中国区</option><option value="global">海外区</option></select></label>
+        <div class="kling-account-actions"><button type="button" class="tool-btn" data-kling-install>登录授权</button></div></div>`;
+    const region = dialog.querySelector('select');
+    region.value = klingSelectedRegion;
+    dialog.querySelector('[data-close]').onclick = () => dialog.close();
+    dialog.querySelector('[data-kling-install]').onclick = () => { dialog.close(); void installKlingCli(region.value); };
+    if(!dialog.open) dialog.showModal();
+}
+function bindKlingConnectionControls(wrap){
+    wrap.querySelectorAll('.kling-connection-actions button, .kling-connection-actions a').forEach(button => {
+        button.onmousedown = event => event.stopPropagation();
+    });
+    const loginButton = wrap.querySelector('[data-kling-login]');
+    const openKlingLink = wrap.querySelector('[data-kling-open]');
+    if(openKlingLink) openKlingLink.onclick = e => { e.preventDefault(); e.stopPropagation(); void openKlingAuthorizationPage(); };
+    if(loginButton) loginButton.onclick = e => { e.stopPropagation(); requestKlingAuthorization(); };
+    const accountButton = wrap.querySelector('[data-kling-account]');
+    if(accountButton) accountButton.onclick = e => { e.stopPropagation(); openKlingAccountDialog(); };
+    const refreshKlingButton = wrap.querySelector('[data-kling-refresh]');
+    if(refreshKlingButton) refreshKlingButton.onclick = e => {
+        e.stopPropagation();
+        klingCliState = {...klingCliState, loaded:false};
+        loadKlingCapabilities();
+    };
+}
+async function ensureKlingGenerationAvailable(opts={}){
+    if(!klingCliState.loaded && !klingCliState.loading) await loadKlingCapabilities();
+    if(!klingLoginState.busy && !klingCliState.loading && klingCliState.authenticated && klingCliState.generationEnabled) return true;
+    const message = klingLoginState.busy ? '请先在浏览器完成可灵授权。' : klingCliState.loading ? '正在读取可灵授权状态，请稍后生成。' : klingCliState.error || '请先点击视频节点中的“登录授权”。';
+    if(opts.cascade) throw new Error(message);
+    showErrorModal(message, tr('canvas.apiFailed'));
+    return false;
 }
 const MINIMAX_H3_VIDEO_RESOLUTIONS = Object.freeze([
         '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
@@ -10877,6 +10976,7 @@ function filmNodeImageModelOptions(node){
 function bindClassicFilmNode(el,node){
     const api=window.CanvasFilmNodes;
     if(!api) return;
+    if(isKlingVideoNode(node)) bindKlingConnectionControls(el);
     api.bind(el,node,{
         assets:classicFilmAssets,
         connected:(target, role) => connections.some(connection => connection.to === target.id && connection.inputRole === role),
@@ -11086,6 +11186,7 @@ async function runFilmNode(nodeId, opts={}){
     if(!node) return;
     if(window.CanvasFilmWorkflow?.isList(node)) return window.CanvasFilmWorkflow.request(node,'generate');
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
+    if(node.type === 'film-video' && isKlingVideoNode(node) && !await ensureKlingGenerationAvailable(opts)) return;
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptTextForSubmission(target)});
     if(!built.prompt && !built.refs.length){ showErrorModal('请先输入生成需求或连接影视参考资产','影视制作'); return; }
@@ -11473,6 +11574,10 @@ function renderNode(node){
         imageModelOptions:filmNodeImageModelOptions,
         assets:classicFilmAssets
     });
+    if(node.type === 'film-video' && isKlingVideoNode(node)){
+        ensureKlingCapabilities();
+        body.querySelector('.film-video-settings')?.insertAdjacentHTML('beforeend', klingConnectionPanelHtml());
+    }
     if(window.CanvasFilmWorkflow?.handles(node)) body.innerHTML = window.CanvasFilmWorkflow.bodyHtml(node);
     if(node.type === 'blenderDirector') body.appendChild(renderBlenderDirectorBody(node));
     if(node.type === 'rh') body.appendChild(renderRhBody(node));
@@ -14346,17 +14451,17 @@ function h3VideoSettingsHtml(node){
 function klingConnectionPanelHtml(){
     const state = klingCliState;
     const login = klingLoginState;
-    const modeText = state.authenticated ? '已连接' : login.busy ? '授权中' : state.installed ? '等待登录' : '等待连接';
+    const modeText = login.busy ? '授权中' : state.authenticated ? '已授权' : '未登录';
     const statusClass = state.authenticated ? 'ready' : state.error ? 'error' : '';
     const remoteHint = !state.canManage && !state.authenticated ? '请联系安装软件的本机管理员连接可灵账号。' : '';
     const loginHint = login.error || (login.status === 'starting' ? '正在请求可灵授权…' : login.busy ? '请在浏览器完成授权；未自动打开时可点击授权链接。' : '');
     return `<div class="kling-connection-panel ${statusClass}">
-        <div class="kling-connection-copy"><strong>可灵 CLI · ${modeText}</strong><span>${escapeHtml(loginHint || state.error || remoteHint || state.version || '选择账号区域即可连接，无需安装 Node.js 或 npm')}</span></div>
+        <div class="kling-connection-copy"><strong>可灵 CLI · ${modeText}</strong><span role="status">${escapeHtml(loginHint || state.error || remoteHint || (state.authenticated ? '点击授权状态查看账号与积分' : '登录授权后即可加载视频模型'))}</span></div>
         <div class="kling-connection-actions">
-            ${state.canManage && !state.authenticated ? `<select class="select-lite kling-install-region" ${state.loading || login.busy ? 'disabled' : ''}><option value="china" ${klingSelectedRegion === 'china' ? 'selected' : ''}>中国区</option><option value="global" ${klingSelectedRegion === 'global' ? 'selected' : ''}>海外区</option></select><button type="button" class="tool-btn" data-kling-install ${state.loading || login.busy ? 'disabled' : ''}>${state.loading ? '准备中…' : state.installed ? '切换区域并连接' : '连接并授权'}</button>` : ''}
-            ${state.canManage && state.installed && !state.authenticated ? `<button type="button" class="tool-btn" data-kling-login ${login.busy || state.loading ? 'disabled' : ''}>${login.busy ? '授权中…' : '登录'}</button>` : ''}
+            ${state.authenticated ? `<button type="button" class="tool-btn kling-auth-status" data-kling-account ${!state.canManage ? 'disabled' : ''} title="${state.canManage ? '查看账号详情' : '账号详情仅本机管理员可查看'}"><span aria-hidden="true">●</span> 已授权</button>` : ''}
+            ${state.canManage ? `<button type="button" class="tool-btn" data-kling-login ${login.busy || state.loading ? 'disabled' : ''}>${login.busy ? '授权中…' : state.loading ? '读取中…' : state.authenticated ? '切换授权' : '登录授权'}</button>` : ''}
             ${state.canManage && login.authorization_url ? `<a class="tool-btn" data-kling-open href="${escapeAttr(login.authorization_url)}" target="_blank" rel="noopener noreferrer">打开授权页面</a>` : ''}
-            <button type="button" class="tool-btn" data-kling-refresh ${state.loading || login.busy ? 'disabled' : ''}>${state.loading ? '读取中…' : '刷新模型'}</button>
+            ${state.authenticated ? `<button type="button" class="tool-btn" data-kling-refresh ${state.loading || login.busy ? 'disabled' : ''}>${state.loading ? '读取中…' : '刷新模型'}</button>` : ''}
         </div>
     </div>`;
 }
@@ -14539,24 +14644,7 @@ function renderVideoBody(node){
         input.onchange = syncValue;
         if(input.tagName === 'INPUT') input.oninput = syncValue;
     });
-    const installRegion = wrap.querySelector('.kling-install-region');
-    if(installRegion){
-        installRegion.onmousedown = e => e.stopPropagation();
-        installRegion.onclick = e => e.stopPropagation();
-    }
-    const installButton = wrap.querySelector('[data-kling-install]');
-    if(installRegion) installRegion.onchange = () => { klingSelectedRegion = installRegion.value; };
-    if(installButton) installButton.onclick = e => { e.stopPropagation(); installKlingCli(installRegion?.value || 'china'); };
-    const loginButton = wrap.querySelector('[data-kling-login]');
-    const openKlingLink = wrap.querySelector('[data-kling-open]');
-    if(openKlingLink) openKlingLink.onclick = e => { e.preventDefault(); e.stopPropagation(); void openKlingAuthorizationPage(); };
-    if(loginButton) loginButton.onclick = e => { e.stopPropagation(); startKlingCliLogin(); };
-    const refreshKlingButton = wrap.querySelector('[data-kling-refresh]');
-    if(refreshKlingButton) refreshKlingButton.onclick = e => {
-        e.stopPropagation();
-        klingCliState = {...klingCliState, loaded:false};
-        loadKlingCapabilities();
-    };
+    bindKlingConnectionControls(wrap);
     wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
         btn.onmousedown = e => e.stopPropagation();
         btn.onclick = e => {
@@ -16413,6 +16501,7 @@ async function runVideoNode(nodeId, opts={}){
     if(!node || (node.running && !opts.cascade && !['video','ecom-video'].includes(node.type))) return;
     const isH3 = isMiniMaxH3VideoNode(node);
     const isKling = isKlingVideoNode(node);
+    if(isKling && !await ensureKlingGenerationAvailable(opts)) return;
     if(isH3){
         await loadMiniMaxH3Status();
         if(!minimaxH3State.generationEnabled){

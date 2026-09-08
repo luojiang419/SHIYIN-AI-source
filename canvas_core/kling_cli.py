@@ -108,7 +108,7 @@ class KlingCliService:
         return parse_kling_capabilities(self._invoke_json(["who_am_i", "--quiet"], timeout=45))
 
     def account(self) -> dict[str, Any]:
-        return _body(self._invoke_json(["account", "--quiet"], timeout=45))
+        return parse_kling_account(self._invoke_json(["account", "--quiet"], timeout=45))
 
     def generate(
         self,
@@ -383,6 +383,26 @@ def start_kling_login(environment: KlingCliEnvironment) -> dict[str, Any]:
         return LOGIN_MANAGER.start([environment.executable, *environment.argument_prefix, "login"])
     except OSError as exc:
         raise KlingCliError(f"无法启动可灵授权：{exc}") from exc
+
+
+def parse_kling_account(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """仅返回展示字段；不透传原始响应、凭据或未知嵌套字段。"""
+    body = _body(payload)
+    user = _map(body.get("user"))
+    def scalar(keys):
+        for source in (body, user):
+            for key in keys:
+                value = source.get(key)
+                if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                    if str(value).strip():
+                        return str(value).strip()[:256]
+        return None
+    return {
+        "user_id": scalar(("userId", "user_id")),
+        "username": scalar(("userName", "username", "user_name", "nickname", "nickName")),
+        "credits": scalar(("availableRemainCredits", "available_remain_credits")),
+        "membership": scalar(("membershipTypeDescription", "membership_type_description", "membershipType", "membership_type")),
+    }
 
 
 def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, Any]:

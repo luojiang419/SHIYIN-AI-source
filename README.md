@@ -9,7 +9,7 @@
 
 历史 ZIP 版本仍可通过 v1.0.101 桥接版本升级到后续 EXE 安装器。
 
-可灵 CLI：Windows x64 安装版自带独立运行组件，无需安装 Node.js、npm 或全局 CLI。在视频节点选择可灵后，首次选择中国区或海外区，点击“连接并授权”；软件会自动发起官方浏览器授权，完成后自动刷新模型。浏览器未自动打开时可点击“打开授权页面”。源码版缺少组件时会按需下载并校验，保存到 `data/system/components/kling-cli`；已有全局 CLI 和登录状态仍可复用。局域网用户由本机管理员完成账号连接后使用。
+可灵 CLI：Windows x64 安装版自带独立运行组件，无需安装 Node.js、npm 或全局 CLI。在普通视频或影视视频节点选择可灵后，点击“登录授权”；首次准备组件时选择中国区或海外区，继续后打开官方浏览器授权，完成后自动刷新账号与模型。已登录时点击“已授权”可查看账号 ID、会员和实时积分，用户名以官方返回为准；点击“切换授权”重新登录其他账号。浏览器未自动打开时可点击“打开授权页面”。源码版缺少组件时会按需下载并校验，保存到 `data/system/components/kling-cli`；已有全局 CLI 和登录状态仍可复用。局域网用户由本机管理员完成账号连接后使用。
 
 配套的chrome采集插件已经上线：https://chromewebstore.google.com/detail/infinite-canvas-%E5%9B%BE%E5%83%8F%E8%A7%86%E9%A2%91%E6%96%87%E5%AD%97%E6%8A%93%E5%8F%96%E5%B7%A5/ajfhnbklbmpfaaookhfakohabnpmlcic?authuser=0&hl=en
 

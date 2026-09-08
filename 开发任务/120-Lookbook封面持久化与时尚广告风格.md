@@ -1,6 +1,6 @@
 # Lookbook 封面持久化与时尚广告风格
 
-状态：验证完成，待提交与 push
+状态：已完成
 当前阶段：3/3
 最后更新：2026-09-08
 
@@ -16,8 +16,7 @@
 
 ## 下一步
 
-1. 审阅仅本任务的 staged diff 并提交。
-2. 正常 push 到 origin/feat/film-workflow-canvas，记录交付状态。
+当前源码任务已完成。若需要在已安装软件中使用，下一步按现有发布流程编译安装包；本任务不自动替换运行中的安装程序。
 
 ## 当前 TODO
 
@@ -25,7 +24,7 @@
 - [x] 时尚广告技能及生成链路集成
 - [x] 六款预设封面实生成与默认展示
 - [x] 回归验证、浏览器与后端重启实测、文档
-- [ ] Git 提交与 push
+- [x] Git 提交与 push（功能提交 3777275 已正常推送 origin/feat/film-workflow-canvas）
 
 ## 最近验证状态
 
@@ -37,8 +36,9 @@
 - 实图：六款封面全部成功，896×1200，合计约 0.92MB；manifest 记录平台与模型，不含密钥。
 - 安装打包：现有构建脚本递归复制 static，运行时导演规则位于 Python 模块；本任务未产生新安装包。
 - 验证截图与运行报告：.codex-artifacts/lookbook-styles-ui/。
-- Git diff --check：通过。
-- 最近 Git commit：待记录。
+- Git diff --check：通过；仅暂存本任务 18 个文件，main.py 与 canvas.css 仅暂存本任务增量，其他任务未提交修改保留。
+- 避坑记录：避坑指南/Lookbook内置风格封面覆盖与持久化.md（该目录被项目 .gitignore 忽略，按现有规则本地保留）。
+- 功能 Git commit：3777275（feat: persist Lookbook covers and add fashion advertising style），已 push。本文档完成状态随后独立提交。
 
 ## 任务目标与验收标准
 

@@ -355,14 +355,14 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .video-input-head .tool-btn { height:28px; min-width:0; padding:0 10px; font-size:10px; white-space:nowrap; }
 .video-input-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
 .video-input-actions[hidden] { display:none; }
-.kling-connection-panel { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border:1px solid var(--line-2); border-radius:12px; background:var(--card-solid); }
+.kling-connection-panel { display:flex; flex-direction:column; align-items:stretch; gap:8px; padding:9px 10px; border:1px solid var(--line-2); border-radius:12px; background:var(--card-solid); }
 .kling-connection-panel.ready { border-color:rgba(16,185,129,.35); background:rgba(16,185,129,.07); }
 .kling-connection-panel.error { border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.06); }
 .kling-connection-copy { display:flex; flex:1; min-width:0; flex-direction:column; gap:2px; }
 .kling-connection-copy strong { font-size:11px; color:var(--text); }
-.kling-connection-copy span { overflow:hidden; color:var(--muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
-.kling-connection-actions { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
-.kling-connection-actions .tool-btn { height:28px; min-width:0; padding:0 8px; font-size:9px; }
+.kling-connection-copy span { color:var(--muted); font-size:10px; overflow-wrap:anywhere; }
+.kling-connection-actions { display:flex; flex-wrap:wrap; align-items:center; gap:5px; }
+.kling-connection-actions .tool-btn { display:inline-flex; align-items:center; justify-content:center; height:28px; min-width:0; padding:0 8px; font-size:9px; }
 .kling-connection-actions .select-lite { width:70px; height:28px; padding:0 6px; font-size:9px; }
 .kling-mode-note { padding:5px 8px; border-radius:9px; background:var(--soft); color:var(--muted); font-size:10px; font-weight:800; }
 .kling-parameter-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:7px; }

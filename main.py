@@ -307,6 +307,8 @@ ADMIN_ONLY_HTTP_PATHS = {
     "/api/update-rollback",
     "/api/kling-cli/install",
     "/api/kling-cli/login",
+    "/api/kling-cli/login-status",
+    "/api/kling-cli/login-open",
     "/static/api-settings.html",
     "/static/app-settings.html",
     "/static/admin.html",
@@ -22529,13 +22531,19 @@ def can_manage_kling_cli(request: Request) -> bool:
     return bool(identity.is_admin and is_loopback_address(request_remote_address(request)))
 
 
+KLING_CLI_MANAGEMENT_LOCK = asyncio.Lock()
+
+
 @app.get("/api/kling-cli/capabilities")
 async def kling_cli_capabilities(request: Request):
     can_manage = can_manage_kling_cli(request)
     environment = await asyncio.to_thread(resolve_kling_cli)
+    from canvas_core.kling_runtime import selected_region
+    region = selected_region()
     if not environment.is_ready:
         return {
             "installed": False,
+            "region": region,
             "authenticated": False,
             "generation_enabled": False,
             "can_manage": can_manage,
@@ -22549,6 +22557,8 @@ async def kling_cli_capabilities(request: Request):
         return {
             "installed": True,
             "authenticated": False,
+            "login_required": "kling login" in str(exc).lower(),
+            "region": region,
             "generation_enabled": False,
             "can_manage": can_manage,
             "version": environment.version,
@@ -22558,6 +22568,7 @@ async def kling_cli_capabilities(request: Request):
     return {
         "installed": True,
         "authenticated": True,
+        "region": region,
         "generation_enabled": True,
         "can_manage": can_manage,
         "version": environment.version,
@@ -22568,23 +22579,46 @@ async def kling_cli_capabilities(request: Request):
 @app.post("/api/kling-cli/install")
 async def kling_cli_install(payload: KlingCliInstallRequest, request: Request):
     require_admin(request)
-    try:
-        environment = await asyncio.to_thread(install_kling_cli, payload.region)
-    except KlingCliError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    from canvas_core.kling_login import LOGIN_MANAGER
+    async with KLING_CLI_MANAGEMENT_LOCK:
+        if LOGIN_MANAGER.snapshot()["status"] in {"starting", "waiting"}:
+            raise HTTPException(status_code=409, detail="可灵授权正在进行，请完成后再切换账号区域。")
+        try:
+            environment = await asyncio.to_thread(install_kling_cli, payload.region)
+        except KlingCliError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"ok": True, "installed": True, "version": environment.version}
 
 @app.post("/api/kling-cli/login")
 async def kling_cli_login(request: Request):
     require_admin(request)
-    environment = await asyncio.to_thread(resolve_kling_cli)
-    if not environment.is_ready:
-        raise HTTPException(status_code=400, detail=environment.error_message or "可灵 CLI 尚未安装")
+    async with KLING_CLI_MANAGEMENT_LOCK:
+        environment = await asyncio.to_thread(resolve_kling_cli)
+        if not environment.is_ready:
+            raise HTTPException(status_code=400, detail=environment.error_message or "可灵连接组件尚未就绪")
+        try:
+            state = await asyncio.to_thread(start_kling_login, environment)
+        except KlingCliError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "started": True, **state}
+
+
+@app.get("/api/kling-cli/login-status")
+async def kling_cli_login_status(request: Request):
+    require_admin(request)
+    from canvas_core.kling_login import LOGIN_MANAGER
+    return LOGIN_MANAGER.snapshot()
+
+
+@app.post("/api/kling-cli/login-open")
+async def kling_cli_login_open(request: Request):
+    require_admin(request)
+    from canvas_core.kling_login import LOGIN_MANAGER
     try:
-        pid = await asyncio.to_thread(start_kling_login, environment)
-    except KlingCliError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"ok": True, "started": True, "pid": pid}
+        await asyncio.to_thread(LOGIN_MANAGER.open_browser)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 @app.get("/api/linkfox-video/capabilities")

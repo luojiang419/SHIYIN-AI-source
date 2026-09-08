@@ -129,6 +129,12 @@ New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\backend') | Out-N
 Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $stageRoot 'SHIYIN AI.exe')
 Copy-Item -LiteralPath $backendSource -Destination (Join-Path $stageRoot 'app\backend\canvas-backend') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path $stageRoot 'app\web') -Recurse
+# 独立 Node + 官方自包含 CLI，安装用户无需预装 npm；构建门禁验证空 PATH 执行。
+$klingRuntime = Join-Path $buildRoot 'kling-runtime'
+& python (Join-Path $PSScriptRoot 'prepare-kling-runtime.py') --output $klingRuntime | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Kling standalone runtime preparation failed.' }
+New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\runtime') | Out-Null
+Copy-Item -LiteralPath $klingRuntime -Destination (Join-Path $stageRoot 'app\runtime\kling') -Recurse
 # 视频提示词 skill 由后端按 app_root/skills 读取，必须随安装包一起发布。
 New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\skills\video-prompt-polish') | Out-Null
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'skills\video-prompt-polish') -Force | ForEach-Object {

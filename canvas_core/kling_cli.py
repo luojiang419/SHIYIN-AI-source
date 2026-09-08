@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from canvas_core import kling_runtime
+
 
 KLING_PACKAGES = {
     "china": "@klingai/cli-cn",
@@ -76,7 +78,7 @@ class KlingCliEnvironment:
 
     @property
     def executable(self) -> str:
-        if os.name == "nt" and self.entrypoint_path:
+        if self.entrypoint_path and self.node_path:
             return self.node_path
         return self.kling_path
 
@@ -259,14 +261,19 @@ class KlingCliService:
         if not self.environment.is_ready:
             raise KlingCliError(self.environment.error_message or "可灵 CLI 尚未就绪。")
         command_arguments = [*self.environment.argument_prefix, *arguments]
-        result = self.runner(
-            self.environment.executable,
-            command_arguments,
-            capture_output=True,
-            check=False,
-            shell=self.environment.use_shell,
-            timeout=timeout,
-        )
+        try:
+            result = self.runner(
+                self.environment.executable,
+                command_arguments,
+                capture_output=True,
+                check=False,
+                shell=self.environment.use_shell,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise KlingCliError("可灵服务响应超时，请检查网络或代理后重试。") from exc
+        except OSError as exc:
+            raise KlingCliError(f"可灵运行组件启动失败：{exc}") from exc
         stdout = _decode_output(result.stdout).strip()
         stderr = _decode_output(result.stderr).strip()
         if result.returncode != 0:
@@ -284,9 +291,14 @@ class KlingCliService:
 
 
 def resolve_kling_cli() -> KlingCliEnvironment:
+    region = kling_runtime.selected_region()
+    if region:
+        node, entry = kling_runtime.find_runtime(region)
+        node = node or shutil.which("node") or _windows_program_file("node.exe")
+        return _managed_environment(node, entry)
     node_path = shutil.which("node") or _windows_program_file("node.exe")
     if not node_path:
-        return KlingCliEnvironment(error_message="未检测到 Node.js，需要安装 Node.js 18 或更高版本。")
+        return KlingCliEnvironment(error_message="请选择可灵账号区域并连接，软件会自动准备组件，无需安装 Node.js 或 npm。")
     node_version = _run_version(node_path)
     if _node_major(node_version) < 18:
         return KlingCliEnvironment(
@@ -294,16 +306,14 @@ def resolve_kling_cli() -> KlingCliEnvironment:
             error_message=f"Node.js 版本过低，需要 18 或更高版本；当前为 {node_version or '未知'}。",
         )
     npm_path = shutil.which("npm.cmd" if os.name == "nt" else "npm") or _windows_program_file("npm.cmd")
-    if not npm_path:
-        return KlingCliEnvironment(node_path=node_path, error_message="未检测到 npm，无法安装或更新可灵 CLI。")
     kling_path = shutil.which("kling.cmd" if os.name == "nt" else "kling") or ""
-    if not kling_path:
+    if not kling_path and npm_path:
         kling_path = _npm_global_kling_candidate(npm_path)
     if not kling_path or not Path(kling_path).is_file():
         return KlingCliEnvironment(
             node_path=node_path,
             npm_path=npm_path,
-            error_message="未检测到可灵 CLI，可选择账号区域后安装。",
+            error_message="请选择可灵账号区域并连接，软件会自动准备组件，无需安装 Node.js 或 npm。",
         )
     entrypoint = _find_kling_entrypoint(kling_path) if os.name == "nt" else ""
     environment = KlingCliEnvironment(
@@ -337,42 +347,42 @@ def resolve_kling_cli() -> KlingCliEnvironment:
     )
 
 
+def _managed_environment(node: str, entry: str) -> KlingCliEnvironment:
+    if not node or not entry:
+        return KlingCliEnvironment(error_message="可灵连接组件缺失，请重新连接以自动准备，无需安装 npm。")
+    environment = KlingCliEnvironment(node_path=node, entrypoint_path=entry)
+    if _node_major(_run_version(node)) < 18:
+        return KlingCliEnvironment(error_message="可灵运行组件无法执行或版本过低，请重新准备组件。")
+    version = _run_command_version(environment)
+    if not version:
+        return KlingCliEnvironment(error_message="可灵运行组件无法执行，请重新准备组件。")
+    return KlingCliEnvironment(node_path=node, entrypoint_path=entry, version=version)
+
+
 def install_kling_cli(region: str, npm_path: str = "") -> KlingCliEnvironment:
-    package = KLING_PACKAGES.get(region)
-    if not package:
-        raise KlingCliError("可灵 CLI 区域必须是 china 或 global。")
-    executable = npm_path or shutil.which("npm.cmd" if os.name == "nt" else "npm") or ""
-    if not executable:
-        raise KlingCliError("未检测到 npm，请先安装 Node.js 18 或更高版本。")
-    result = default_kling_process_runner(
-        executable,
-        ["install", "--global", package, f"--registry={KLING_NPM_REGISTRY}"],
-        capture_output=True,
-        check=False,
-        shell=False,
-        timeout=600,
-    )
-    if result.returncode != 0:
-        detail = _decode_output(result.stderr).strip() or _decode_output(result.stdout).strip()
-        raise KlingCliError(f"安装可灵 CLI 失败：{detail or result.returncode}", exit_code=result.returncode)
-    environment = resolve_kling_cli()
-    if not environment.is_ready:
-        raise KlingCliError(environment.error_message)
-    return environment
+    # 保留调用接口；不再安装全局 npm 包，也不修改系统 Node/npm/PATH。
+    try:
+        node, entry = kling_runtime.ensure_runtime(region)
+        environment = _managed_environment(node, entry)
+        if not environment.is_ready:
+            node, entry = kling_runtime.ensure_runtime(region, repair=True)
+            environment = _managed_environment(node, entry)
+            if not environment.is_ready:
+                raise KlingCliError(environment.error_message)
+        kling_runtime.select_region(region)
+        return environment
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise KlingCliError(f"准备可灵连接组件失败：{exc}") from exc
 
 
-def start_kling_login(environment: KlingCliEnvironment) -> int:
+def start_kling_login(environment: KlingCliEnvironment) -> dict[str, Any]:
     if not environment.is_ready:
         raise KlingCliError(environment.error_message or "可灵 CLI 尚未就绪。")
-    process = subprocess.Popen(
-        [environment.executable, *environment.argument_prefix, "login"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        shell=False,
-        creationflags=_WINDOWS_CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    return process.pid
+    from canvas_core.kling_login import LOGIN_MANAGER
+    try:
+        return LOGIN_MANAGER.start([environment.executable, *environment.argument_prefix, "login"])
+    except OSError as exc:
+        raise KlingCliError(f"无法启动可灵授权：{exc}") from exc
 
 
 def parse_kling_capabilities(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -9,6 +9,10 @@
     const resumedJobs=new Set();
     const jobActions=new Set(['analyze','depth','match','replicate','build-prompts','generate','import-asset','bind-asset','export-timeline','export-video']);
     let context=null;
+    let fullscreen=null, fullscreenRefreshPending=false;
+    const scrollPositions=new WeakMap();
+    const actionQueues=new WeakMap();
+    const controlKey=el=>JSON.stringify([el.tagName,el.type,Object.entries(el.dataset).filter(([key])=>key!=='wfDirty').sort()]);
     const esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     function incoming(node,nodes,edges,type){ return edges.filter(e=>e.to===node.id).map(e=>nodes.find(n=>n.id===e.from)).filter(n=>n && (!type || n.type===type)); }
     function isStep(type){ return type===PREPARE || type===CONFIRM; }
@@ -50,9 +54,61 @@
         const keys=['id','type','items','url','mediaKind','name','title','bridgeFrameStableId','bridgeSourceAssetId','bridgeCaption','bridgeBoardId','bridgeBoardName','bridgeProjectId','workflowFunctionGroup','workflowProjectId','workflowScriptId','workflowSourceKey'];
         return {nodes:ctx.nodes.map(n=>Object.fromEntries(keys.filter(k=>n[k]!==undefined).map(k=>[k,n[k]]))),connections:ctx.connections};
     }
-    function notify(ids=[]){ context?.changed?.(ids); }
+    function notify(ids=[]){ context?.changed?.(ids); scheduleFullscreenRefresh(); }
+    function scheduleFullscreenRefresh(){
+        if(!fullscreen || fullscreenRefreshPending) return;
+        fullscreenRefreshPending=true;
+        queueMicrotask(()=>{fullscreenRefreshPending=false;refreshFullscreen();});
+    }
+    function closeFullscreen(){
+        if(!fullscreen) return;
+        const {dialog,node}=fullscreen;
+        // 退出前提交仍在输入中的字段，沿用原有 change 保存路径。
+        dialog.querySelectorAll('[data-wf-dirty]').forEach(el=>el.dispatchEvent(new Event('change',{bubbles:true})));
+        fullscreen=null;
+        dialog.close(); dialog.remove();
+        context?.changed?.([node.id]);
+        document.querySelector(`.node[data-id="${CSS.escape(node.id)}"] [data-wf-fullscreen]`)?.focus({preventScroll:true});
+    }
+    function refreshFullscreen(){
+        if(!fullscreen) return;
+        const {dialog,node,canvasId}=fullscreen;
+        if(context?.canvasId!==canvasId || !context.nodes.includes(node)) {closeFullscreen();return;}
+        const host=dialog.querySelector('.wf-fullscreen-body');
+        const old=host.querySelector('.film-workflow-panel');
+        const controls=old ? [...old.querySelectorAll('input,select,textarea')] : [];
+        const drafts=controls.map(el=>({key:controlKey(el),value:el.value,checked:el.checked,dirty:el.hasAttribute('data-wf-dirty'),local:el.matches('[data-wf-asset-type],[data-wf-format]'),focused:el===document.activeElement,start:el.selectionStart,end:el.selectionEnd})).filter(state=>state.dirty || state.focused || state.local);
+        old?.querySelectorAll('.wf-shot-scroll,.wf-parameters').forEach(el=>scrollPositions.set(node,{...(scrollPositions.get(node) || {}),[el.className]:el.scrollTop}));
+        const opened=old ? [...old.querySelectorAll('details')].map(el=>el.open) : [];
+        host.innerHTML=bodyHtml(node);
+        bind(host,node);
+        const next=new Map([...host.querySelectorAll('input,select,textarea')].map(el=>[controlKey(el),el]));
+        for(const state of drafts){
+            const el=next.get(state.key); if(!el || el.type==='file') continue;
+            if(state.dirty || state.local){el.value=state.value;el.checked=state.checked;}
+            if(state.dirty)el.dataset.wfDirty='true';
+            if(state.focused && !el.disabled){el.focus({preventScroll:true});if(state.start!=null)el.setSelectionRange(state.start,state.end);}
+        }
+        host.querySelectorAll('details').forEach((el,index)=>{el.open=opened[index] || false;});
+    }
+    function openFullscreen(node){
+        if(!isStep(node.type)) return;
+        closeFullscreen();
+        const dialog=document.createElement('dialog');
+        dialog.className='wf-fullscreen';
+        dialog.setAttribute('aria-label',`${TITLES[node.type]} · 全屏编辑`);
+        dialog.innerHTML=`<header class="wf-fullscreen-head"><h2>${TITLES[node.type]} <small>全屏编辑</small></h2><button type="button" data-wf-close>退出全屏 <small>Esc</small></button></header><div class="wf-fullscreen-body"></div>`;
+        document.body.append(dialog);
+        fullscreen={dialog,node,canvasId:context?.canvasId};
+        dialog.querySelector('[data-wf-close]').addEventListener('click',closeFullscreen);
+        dialog.addEventListener('cancel',event=>{event.preventDefault();closeFullscreen();});
+        ['keydown','keyup','wheel','pointerdown','mousedown','click','dblclick','drop','dragover'].forEach(type=>dialog.addEventListener(type,event=>event.stopPropagation()));
+        refreshFullscreen();dialog.showModal();
+        dialog.querySelector('[data-wf-close]').focus();
+    }
     function sync(ctx){
         context=ctx;
+        scheduleFullscreenRefresh();
         for(const [node,retry] of reconnects){
             if(retry.canvasId!==ctx.canvasId || !ctx.nodes.includes(node) || sourceFor(node,ctx.nodes,ctx.connections)?.fingerprint!==retry.fingerprint){
                 clearTimeout(retry.timer); reconnects.delete(node);
@@ -265,13 +321,51 @@
     }
     function bind(root,node){
         const panel=root.querySelector('.film-workflow-panel'); if(!panel) return;
-        const run=(action,extra={})=>request(node,action,extra).catch(error=>{ node.workflowError=error.message; notify([node.id]); });
+        if(isStep(node.type) && root.classList.contains('node')){
+            const expand=document.createElement('button');
+            expand.type='button';expand.dataset.wfFullscreen='';expand.className='wf-fullscreen-button';
+            expand.textContent='全屏编辑';expand.setAttribute('aria-label',`${TITLES[node.type]}全屏编辑`);
+            ['pointerdown','mousedown'].forEach(type=>expand.addEventListener(type,event=>event.stopPropagation()));
+            expand.addEventListener('click',event=>{event.stopPropagation();openFullscreen(node);});
+            root.querySelector('.node-head-actions')?.prepend(expand);
+        }
+        const inFullscreen=!!root.closest('.wf-fullscreen');
+        const saved=scrollPositions.get(node) || {};
+        panel.querySelectorAll('.wf-shot-scroll,.wf-parameters').forEach(el=>{
+            const key=el.className;
+            el.scrollTop=saved[key] || 0;
+            el.addEventListener('scroll',()=>{
+                if(fullscreen?.node===node && !inFullscreen) return;
+                scrollPositions.set(node,{...(scrollPositions.get(node) || {}),[key]:el.scrollTop});
+            },{passive:true});
+        });
+        panel.addEventListener('input',event=>{if(event.target.matches('input:not([type=file]),textarea,select'))event.target.dataset.wfDirty='true';});
+        panel.addEventListener('change',event=>{delete event.target.dataset.wfDirty;},true);
+        const run=(action,extra={})=>{
+            // 生成类动作不能因连点排队重复消费；仅连续编辑需要串行保存。
+            if(jobActions.has(action) && (active.has(node.id) || actionQueues.has(node))) return Promise.resolve();
+            const canvasId=context?.canvasId;
+            const execute=async()=>{
+                while(action!=='cancel-task' && active.has(node.id)) await new Promise(resolve=>setTimeout(resolve,30));
+                if(context?.canvasId!==canvasId || !context.nodes.includes(node)) return;
+                return request(node,action,extra);
+            };
+            const pending=(action==='cancel-task'?execute():(actionQueues.get(node) || Promise.resolve()).then(execute))
+                .catch(error=>{node.workflowError=error.message;notify([node.id]);});
+            if(action!=='cancel-task'){
+                actionQueues.set(node,pending);
+                pending.finally(()=>{if(actionQueues.get(node)===pending)actionQueues.delete(node);});
+            }
+            return pending;
+        };
         ['pointerdown','mousedown','dblclick','wheel'].forEach(type=>panel.addEventListener(type,event=>event.stopPropagation(),{passive:type==='wheel'}));
         panel.querySelectorAll('[data-wf-action]').forEach(control=>control.addEventListener('click',()=>{
             const action=control.dataset.wfAction;
             if(action==='previous' || action==='next'){
                 const max=Math.max(0,Math.ceil((node.workflowSnapshot?.shots?.length || 0)/12)-1);
-                node.workflowPage=Math.max(0,Math.min(max,(node.workflowPage || 0)+(action==='next'?1:-1))); notify([node.id]); return;
+                node.workflowPage=Math.max(0,Math.min(max,(node.workflowPage || 0)+(action==='next'?1:-1)));
+                scrollPositions.set(node,{...(scrollPositions.get(node) || {}),'wf-shot-scroll':0});
+                panel.querySelector('.wf-shot-scroll').scrollTop=0; notify([node.id]); return;
             }
             const extra={shot_id:control.dataset.shot || ''};
             if(control.dataset.asset) extra.asset_id=control.dataset.asset;

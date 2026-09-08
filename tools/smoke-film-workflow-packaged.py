@@ -102,7 +102,7 @@ def run(stage: Path, data_root: Path, port: int, version: str) -> dict:
         assert len(imported["workflow_node_ids"]) == 3
         assert calls and calls[0]["action"] == "sync", "导出后端必须直接初始化，不依赖打开网页"
         canvas = client.get(base + f"/api/canvases/{imported['canvas_id']}", timeout=10).json()["canvas"]
-        assert len([n for n in canvas["nodes"] if n["type"] == "group"]) == 4
+        assert len([n for n in canvas["nodes"] if n["type"] == "group"]) == 2
         steps = [n for n in canvas["nodes"] if n["id"] in imported["workflow_node_ids"]]
         assert len(steps) == 3
         assert all(n["workflowScriptId"] == "packaged-script" and n["workflowSnapshot"]["scriptId"] == "packaged-script" for n in steps)
@@ -125,7 +125,7 @@ def run(stage: Path, data_root: Path, port: int, version: str) -> dict:
         assert len(restored["connections"]) == 3
         assert (stage / "app/VERSION").read_text().strip() == version
         return {"version": version, "health": health.json(), "workflow_receive": True,
-                "function_groups": 3, "direct_receive": True, "script_sync": True, "backend_initializes_without_page": True,
+                "function_groups": 1, "standalone_steps": 2, "direct_receive": True, "script_sync": True, "backend_initializes_without_page": True,
                 "media_bytes_match": True, "repeat_is_idempotent": True, "package_roundtrip": True}
     finally:
         client.close()

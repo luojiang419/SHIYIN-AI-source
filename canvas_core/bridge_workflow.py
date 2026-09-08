@@ -27,11 +27,18 @@ def ensure_workflow(canvas: dict[str, Any], group: dict[str, Any], manifest: Map
                     "workflowKey": key, "workflowSourceGroupId": group["id"], "workflowProjectId": group["bridgeProjectId"],
                     "workflowBoardId": group.get("bridgeBoardId", ""), "workflowParameters": {}}
             nodes.append(node)
-            nodes.append({"id": make_id("fg"), "type": "group", "title": label, "x": x, "y": y,
-                          "w": 1008, "h": 790, "items": [node["id"]], "workflowFunctionGroup": True,
-                          "workflowOwnerId": node["id"]})
+            if kind == "film-video":
+                nodes.append({"id": make_id("fg"), "type": "group", "title": label, "x": x, "y": y,
+                              "w": 1008, "h": 790, "items": [node["id"]], "workflowFunctionGroup": True,
+                              "workflowOwnerId": node["id"]})
             edges.append({"id": make_id("c"), "from": previous, "to": node["id"], "inputRole": "workflow"})
         ids.append(node["id"])
         previous = node["id"]
     group["workflowNodeIds"] = ids
+    # 只拆除旧版自动创建的单节点背景；保留用户分组、额外成员与外部连线。
+    removable = {n["id"] for n in nodes if n.get("type") == "group" and n.get("workflowFunctionGroup")
+                 and n.get("workflowOwnerId") in ids[:2] and n.get("items") == [n.get("workflowOwnerId")]
+                 and not any(e.get("from") == n["id"] or e.get("to") == n["id"] for e in edges)
+                 and not any(n["id"] in (parent.get("items") or []) for parent in nodes if parent.get("type") == "group")}
+    nodes[:] = [n for n in nodes if n.get("id") not in removable]
     return ids

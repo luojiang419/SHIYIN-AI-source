@@ -60,16 +60,52 @@ def fixture():
     return canvas, manifest, frame, result
 
 
-def test_export_creates_named_board_three_function_groups_and_chain():
+def test_export_creates_named_board_standalone_steps_and_video_group():
     graph, _, _, result = fixture()
     groups = [n for n in graph["nodes"] if n["type"] == "group"]
-    assert [n["title"] for n in groups] == ["测试画板", "准备资产", "确认镜头", "视频生成"]
+    assert [n["title"] for n in groups] == ["测试画板", "视频生成"]
     assert len(result["workflow_node_ids"]) == 3
     assert len(graph["connections"]) == 3
     prepare, group, frames = workflow_context(graph, result["workflow_node_ids"][-1])
     assert prepare["type"] == "film-prepare-assets"
     assert group["bridgeProjectId"] == "project"
     assert frames[0]["bridgeSourceAssetId"] == "asset-a"
+
+
+def test_import_grid_41_frames_and_repeat_preserves_manual_layout():
+    graph, manifest, frame, _ = fixture()
+    frames = [{**frame, "stable_id": f"frame:{i}"} for i in range(41)]
+    result = sync_film_bridge_canvas(graph, manifest, frames)
+    images, group = result["image_nodes"], result["group"]
+    assert len({n["x"] for n in images}) == 7
+    assert group["bridgeLayoutPending"] is True
+    for i, a in enumerate(images):
+        assert a["h"] >= 336
+        assert a["x"] >= group["x"] and a["y"] >= group["y"] + 58
+        assert a["x"] + a["w"] <= group["x"] + group["w"]
+        assert a["y"] + a["h"] <= group["y"] + group["h"]
+        for b in images[i+1:]:
+            assert a["x"] + a["w"] <= b["x"] or b["x"] + b["w"] <= a["x"] or a["y"] + a["h"] <= b["y"] or b["y"] + b["h"] <= a["y"]
+    images[0]["x"] = 9000
+    group.pop("bridgeLayoutPending")
+    group["bridgeLayoutVersion"] = 1
+    expected = copy.deepcopy(graph)
+    sync_film_bridge_canvas(graph, manifest, frames)
+    assert graph == expected
+
+
+def test_repeat_removes_only_legacy_automatic_step_wrappers():
+    graph, manifest, frame, result = fixture()
+    prepare, confirm = result["workflow_node_ids"][:2]
+    graph["nodes"].extend([
+        {"id": "old-prepare", "type": "group", "workflowFunctionGroup": True, "workflowOwnerId": prepare, "items": [prepare]},
+        {"id": "custom-confirm", "type": "group", "workflowFunctionGroup": True, "workflowOwnerId": confirm, "items": [confirm, "custom"]},
+        {"id": "user-group", "type": "group", "items": [prepare]},
+    ])
+    sync_film_bridge_canvas(graph, manifest, [frame])
+    ids = {n["id"] for n in graph["nodes"]}
+    assert "old-prepare" not in ids
+    assert {"custom-confirm", "user-group", prepare, confirm} <= ids
 
 
 def test_repeat_preserves_parameters_positions_disconnections_and_old_exports():

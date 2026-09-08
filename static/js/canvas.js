@@ -8846,7 +8846,62 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
     else classicIdleMediaMeasureHandle = window.setTimeout(run, 0);
 }
 
+const classicFilmLayoutPending = new WeakSet();
+function normalizeClassicFilmImport(){
+    const byId = new Map(nodes.map(node => [node.id,node]));
+    const removeIds = nodes.filter(group => group.type === 'group' && group.workflowFunctionGroup
+        && window.CanvasFilmWorkflow?.isStep(byId.get(group.workflowOwnerId)?.type)
+        && group.items?.length === 1 && group.items[0] === group.workflowOwnerId
+        && !connections.some(edge => edge.from === group.id || edge.to === group.id)
+        && !nodes.some(parent => parent.type === 'group' && parent.items?.includes(group.id))).map(group => group.id);
+    if(removeIds.length){
+        nodes = nodes.filter(node => !removeIds.includes(node.id));
+        removeIds.forEach(id => selected.delete(id));
+        queueClassicRenderMutation({removeIds});
+        scheduleSave();
+    }
+    for(const group of nodes.filter(node => node.type === 'group' && node.bridgeSource === 'filmstoryboard'
+        && node.bridgeDirection === 'film-to-shiyin' && node.items?.length
+        && (node.bridgeLayoutPending || !node.bridgeLayoutVersion))){
+        if(classicFilmLayoutPending.has(group)) continue;
+        classicFilmLayoutPending.add(group);
+        const canvasId = canvas?.id;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            if(canvas?.id !== canvasId || !nodes.includes(group)) return;
+            const oldRight = Number(group.x) + Number(group.w);
+            // 导入顺序即镜头顺序；不要用旧重叠坐标重新推断排序。
+            arrangeCanvasGroupContents(group.id, {skipUndo:true, preserveOrder:true});
+            const prompts = (group.bridgePromptNodeIds || []).map(id => nodes.find(node => node.id === id)).filter(Boolean);
+            if(prompts.length){
+                let y = group.y + CANVAS_GROUP_ARRANGE_HEADER;
+                const x = group.x + group.w + CANVAS_GROUP_ARRANGE_GAP;
+                let width = 0;
+                prompts.forEach(prompt => {
+                    const rect = nodeRect(prompt);
+                    prompt.x = x; prompt.y = y; y += rect.h + CANVAS_GROUP_ARRANGE_GAP;
+                    width = Math.max(width,rect.w);
+                });
+                group.w += width + CANVAS_GROUP_ARRANGE_GAP + CANVAS_GROUP_ARRANGE_PADDING;
+                group.h = Math.max(group.h,y - group.y);
+            }
+            const delta = Number(group.x) + Number(group.w) - oldRight;
+            (group.workflowNodeIds || []).forEach((id,index) => {
+                const node = nodes.find(item => item.id === id);
+                if(!node || Math.abs(node.x - (oldRight + 184 + index * 1060)) > 2) return;
+                node.x += delta;
+                const wrapper = nodes.find(item => item.workflowFunctionGroup && item.workflowOwnerId === id);
+                if(wrapper) wrapper.x += delta;
+            });
+            group.bridgeLayoutVersion = 1;
+            delete group.bridgeLayoutPending;
+            classicFilmLayoutPending.delete(group);
+            render();
+            scheduleSave();
+        }));
+    }
+}
 function syncClassicFilmWorkflow(){
+    normalizeClassicFilmImport();
     window.CanvasFilmWorkflow?.sync({nodes,connections,canvasId:canvas?.id,
         connectionsChanged:()=>markClassicConnectionStructureDirty(),
         invalidate:ids=>{if(classicRenderMutation) queueClassicRenderMutation({replaceIds:ids});},
@@ -19826,7 +19881,7 @@ function arrangeCanvasGroupContents(groupId, options={}){
         return false;
     }
     if(!options.skipUndo) pushUndo();
-    const ordered = members.slice().sort((a, b) => {
+    const ordered = options.preserveOrder ? members.slice() : members.slice().sort((a, b) => {
         const ra = nodeRect(a), rb = nodeRect(b);
         const dy = ra.y - rb.y;
         return Math.abs(dy) > 24 ? dy : (ra.x - rb.x || String(a.id).localeCompare(String(b.id)));

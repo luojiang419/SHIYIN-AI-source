@@ -203,11 +203,12 @@ def sync_film_bridge_canvas(
         else:
             existing_frames[stable_id] = node
 
-    cols = min(3, max(1, math.ceil(math.sqrt(len(frames)))))
-    gap_x, gap_y = 290, 250
+    cols = max(1, math.ceil(math.sqrt(len(frames))))
+    gap_x, gap_y = 288, 364
     image_nodes: list[dict[str, Any]] = []
     incoming_ids: set[str] = set()
     changed_frame_ids: set[str] = set()
+    frame_size_changed = False
     stats = {
         "created": 0,
         "updated": 0,
@@ -238,14 +239,15 @@ def sync_film_bridge_canvas(
                 "type": "image",
                 "x": base_x + 28 + (index % cols) * gap_x,
                 "y": base_y + 66 + (index // cols) * gap_y,
-                "w": 260,
-                "h": 220,
+                "w": 520 if metadata["natural_h"] > metadata["natural_w"] > 0 else 260,
+                "h": 336,
                 "url": url,
                 **metadata,
             }
             nodes.append(node)
             stats["created"] += 1
         else:
+            frame_size_changed |= any(node.get(key) != metadata[key] for key in ("natural_w", "natural_h"))
             old_checksum = _text(node.get("bridgeSha256")).lower()
             content_changed = not old_checksum or not checksum or old_checksum != checksum
             metadata_changed = _metadata_changed(node, metadata)
@@ -343,9 +345,34 @@ def sync_film_bridge_canvas(
         prompt_by_id = {_text(node.get("id")): node for node in nodes if node.get("type") == "prompt"}
         prompt_nodes = [prompt_by_id[item] for item in (group.get("bridgePromptNodeIds") or []) if _text(item) in prompt_by_id]
 
+    needs_layout = is_new_group or stats["created"] or stats["removed"] or frame_size_changed
+    if needs_layout:
+        # 与画布图片卡片的最小尺寸一致；首次渲染再按真实 DOM 尺寸整理。
+        row_heights = [0.0] * max(1, math.ceil(len(image_nodes) / cols))
+        col_widths = [0.0] * cols
+        for index, node in enumerate(image_nodes):
+            col_widths[index % cols] = max(col_widths[index % cols], _number(node.get("w"), 260), 260)
+            row_heights[index // cols] = max(row_heights[index // cols], _number(node.get("h"), 336), 336)
+        for index, node in enumerate(image_nodes):
+            node["x"] = base_x + 24 + sum(col_widths[:index % cols]) + 28 * (index % cols)
+            node["y"] = base_y + 58 + sum(row_heights[:index // cols]) + 28 * (index // cols)
+        group["bridgeLayoutPending"] = True
     rows = max(1, math.ceil(len(image_nodes) / cols))
     computed_w = 28 + cols * gap_x + (340 if prompt_nodes else 0)
     computed_h = rows * gap_y + 100
+    if needs_layout:
+        computed_w = 48 + sum(col_widths) + 28 * max(0, cols - 1) + (340 if prompt_nodes else 0)
+        computed_h = 82 + sum(row_heights) + 28 * max(0, len(row_heights) - 1)
+    old_right = base_x + _number(group.get("w"), computed_w)
+    if needs_layout:
+        for index, step_id in enumerate(group.get("workflowNodeIds") or []):
+            step = next((n for n in nodes if n.get("id") == step_id), None)
+            if step and abs(_number(step.get("x")) - (old_right + 184 + index * 1060)) < 2:
+                delta = base_x + computed_w - old_right
+                step["x"] += delta
+                for wrapper in nodes:
+                    if wrapper.get("workflowFunctionGroup") and wrapper.get("workflowOwnerId") == step_id:
+                        wrapper["x"] += delta
     group.update({
         "items": [_text(node.get("id")) for node in image_nodes],
         "bridgeSource": "filmstoryboard",
@@ -358,8 +385,8 @@ def sync_film_bridge_canvas(
         "bridgeFrameCount": len(image_nodes),
         "bridgePromptNodeIds": [_text(node.get("id")) for node in prompt_nodes],
         "bridgeExportedAt": _text(manifest.get("exported_at")),
-        "w": computed_w if is_new_group else max(_number(group.get("w")), computed_w),
-        "h": computed_h if is_new_group else max(_number(group.get("h")), computed_h),
+        "w": computed_w if needs_layout else _number(group.get("w"), computed_w),
+        "h": computed_h if needs_layout else _number(group.get("h"), computed_h),
     })
     canvas["nodes"] = nodes
     canvas["connections"] = connections

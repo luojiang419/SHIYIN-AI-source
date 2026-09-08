@@ -73,7 +73,7 @@ try:
         receipt_ids = receive.json()["workflow_node_ids"]
         assert len(receipt_ids) == 3
         assert set(receipt_ids) == {n["id"] for n in canvas["nodes"] if n.get("workflowKey")}
-        assert len([n for n in canvas["nodes"] if n.get("type") == "group"]) == 4
+        assert len([n for n in canvas["nodes"] if n.get("type") == "group"]) == 2
         assert len(canvas["connections"]) == 3
         assert receive.json()["workflow_ready"] is True
         assert all(n.get("workflowScriptId") == "script-p" for n in canvas["nodes"] if n.get("workflowKey"))
@@ -114,7 +114,7 @@ try:
         assert failed.json()['workflow_ready'] is False
         assert 'temporarily offline' in failed.json()['workflow_warning']
         failed_canvas = main.load_canvas(failed.json()['canvas_id'])
-        assert len([n for n in failed_canvas['nodes'] if n['type'] == 'group']) == 4
+        assert len([n for n in failed_canvas['nodes'] if n['type'] == 'group']) == 2
         unavailable = client.post('/api/canvas-film-workflow', json={
             'canvas_id': failed_canvas['id'], 'node_id': failed.json()['workflow_node_ids'][0], 'action': 'sync'})
         assert unavailable.status_code == 503 and unavailable.json()['retryable'] is True

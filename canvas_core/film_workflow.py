@@ -8,10 +8,16 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 PREPARE = "film-prepare-assets"
 CONFIRM = "film-confirm-shots"
+WORKFLOW_PORTS = tuple(range(3211, 3220))
+
+
+class FilmWorkflowUnavailable(ValueError):
+    """仅连接发现可重试，不能据此重放生成请求。"""
 
 
 def workflow_context(graph: dict, node_id: str) -> tuple[dict, dict, list[dict]]:
@@ -51,13 +57,44 @@ def workflow_context(graph: dict, node_id: str) -> tuple[dict, dict, list[dict]]
 
 
 class FilmWorkflowProxy:
-    def __init__(self, *, resolve_media: Callable, media_url: Callable, media_root: str, allowed_roots: list[str], port: int = 3211):
+    def __init__(self, *, resolve_media: Callable, media_url: Callable, media_root: str, allowed_roots: list[str], port: int | None = None):
         self.resolve_media, self.media_url = resolve_media, media_url
         self.media_root = Path(media_root)
         self.allowed_roots = [Path(root).resolve() for root in allowed_roots]
-        self.base = f"http://127.0.0.1:{port}"
+        self.ports = (port,) if port is not None else WORKFLOW_PORTS
+        self.base = f"http://127.0.0.1:{self.ports[0]}"
         self.token = ""
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def _discover(self, project_id: str | None) -> dict:
+        def probe(port):
+            base = f"http://127.0.0.1:{port}"
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open(base + "/capabilities", timeout=1) as response:
+                    data = json.loads(response.read(64 * 1024))
+                if isinstance(data, dict) and data.get("app") == "filmstoryboard":
+                    return base, data
+            except (OSError, ValueError):
+                pass
+            return None
+
+        with ThreadPoolExecutor(max_workers=len(self.ports)) as pool:
+            found = [value for value in pool.map(probe, self.ports) if value]
+        supported = [(base, data) for base, data in found
+                     if data.get("workflow_version") == 1 and data.get("project_id") and data.get("token")]
+        matching = [(base, data) for base, data in supported if not project_id or data["project_id"] == project_id]
+        if not matching:
+            if supported:
+                raise ValueError("请在 film 中打开此画布对应的源项目，然后点击同步 / 刷新")
+            if found:
+                raise ValueError("film 版本不支持三步工作流，请更新 film")
+            raise FilmWorkflowUnavailable("尚未连接到 film 影视工作流。请运行新版 film 并打开源项目，画布将自动重连；也可点击同步 / 刷新。")
+        if not project_id and len({data["project_id"] for _, data in matching}) > 1:
+            raise ValueError("检测到多个 film 项目，请仅保留目标项目，或从 film 导出画板以指定源项目")
+        self.base, capabilities = matching[0]
+        self.token = str(capabilities["token"])
+        return capabilities
 
     def _request(self, path: str, body: dict | None = None):
         request = urllib.request.Request(self.base + path,
@@ -72,7 +109,7 @@ class FilmWorkflowProxy:
                 detail = str(exc)
             raise ValueError(detail) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise ValueError("无法连接 film 影视工作流服务，请启动新版 film 并打开源项目") from exc
+            raise FilmWorkflowUnavailable("film 工作流连接中断，请确认 film 源项目仍打开后点击同步 / 刷新") from exc
 
     def _image(self, url: str) -> str:
         path = self.resolve_media(url)
@@ -88,11 +125,7 @@ class FilmWorkflowProxy:
     def execute(self, payload: dict, graph: dict, canvas_id: str) -> dict:
         node_id = str(payload.get("node_id", ""))
         prepare, group, frames = workflow_context(graph, node_id)
-        with self._request("/capabilities") as response:
-            capabilities = json.load(response)
-        if capabilities.get("app") != "filmstoryboard" or capabilities.get("workflow_version") != 1:
-            raise ValueError("film 版本不支持三步工作流，请更新 film")
-        self.token = str(capabilities.get("token", ""))
+        capabilities = self._discover(group.get("bridgeProjectId") or prepare.get("workflowProjectId"))
         project_id = group.get("bridgeProjectId") or prepare.get("workflowProjectId") or capabilities.get("project_id")
         if project_id != capabilities.get("project_id"):
             raise ValueError("请在 film 中打开此画布对应的源项目")

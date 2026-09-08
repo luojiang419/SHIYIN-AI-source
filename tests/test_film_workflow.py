@@ -8,6 +8,46 @@ import pytest
 
 from canvas_core.bridge_sync import sync_film_bridge_canvas
 from canvas_core.film_workflow import FilmWorkflowProxy, workflow_context
+from canvas_core.film_workflow import FilmWorkflowUnavailable
+from contextlib import contextmanager
+
+
+@contextmanager
+def discovery_server(project_id=None):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_): pass
+        def do_GET(self):
+            data = {"app": "filmstoryboard", "workflow_version": 1,
+                    "project_id": project_id, "token": "test-token"} if project_id else {"app": "other-app"}
+            self.send_response(200); self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown(); server.server_close(); thread.join()
+
+
+def test_discovery_skips_occupied_port_and_selects_matching_project(tmp_path):
+    with discovery_server() as occupied, discovery_server("other") as other, discovery_server("target") as target:
+        proxy = FilmWorkflowProxy(resolve_media=lambda _: None, media_url=lambda p: p,
+            media_root=str(tmp_path), allowed_roots=[str(tmp_path)])
+        proxy.ports = (occupied, other, target)
+        assert proxy._discover("target")["project_id"] == "target"
+        assert proxy.base == f"http://127.0.0.1:{target}"
+        with pytest.raises(ValueError, match="多个 film"):
+            proxy._discover(None)
+        with pytest.raises(ValueError, match="源项目"):
+            proxy._discover("missing")
+
+
+def test_discovery_offline_is_retryable_and_does_not_accept_unrelated_service(tmp_path):
+    with discovery_server() as occupied:
+        proxy = FilmWorkflowProxy(resolve_media=lambda _: None, media_url=lambda p: p,
+            media_root=str(tmp_path), allowed_roots=[str(tmp_path)], port=occupied)
+        with pytest.raises(FilmWorkflowUnavailable, match="自动重连"):
+            proxy._discover(None)
 
 
 def fixture():
@@ -44,6 +84,7 @@ def test_repeat_preserves_parameters_positions_disconnections_and_old_exports():
     manifest.pop("canvas")
     sync_film_bridge_canvas(old, manifest, [frame])
     assert len(old["nodes"]) == 2
+    assert next(n for n in old["nodes"] if n["type"] == "group")["bridgeProjectId"] == "project"
 
 
 def test_list_requires_direct_confirm_and_unique_root():

@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
 function fixture(){
     const requests=[];
-    const sandbox={window:{},queueMicrotask:()=>{},setTimeout,crypto:require('node:crypto').webcrypto,
+    const sandbox={window:{},queueMicrotask:()=>{},setTimeout,clearTimeout,crypto:require('node:crypto').webcrypto,
         fetch:async(_,opts)=>{requests.push(JSON.parse(opts.body));return {ok:true,json:async()=>({ok:true,project_id:'p',snapshot:{scriptId:'s',shots:[{id:'shot-1',number:1}],parameters:{},tasks:[]}})};}};
     vm.runInNewContext(fs.readFileSync('static/js/canvas-film-workflow.js','utf8'),sandbox);
     const api=sandbox.window.CanvasFilmWorkflow;
@@ -50,4 +50,46 @@ test('late response from a replaced input cannot overwrite the new group script'
     await pending;
     assert.notEqual(f.nodes[2].workflowScriptId,'stale-script');assert.equal(f.nodes[2].workflowBusy,false);
     assert.equal(f.nodes[2].workflowGroupId,'other-group');
+});
+
+test('film starting later automatically recovers sync and propagates the script',async()=>{
+    const f=fixture();let timer,delay;
+    f.sandbox.setTimeout=(callback,ms)=>{timer=callback;delay=ms;return 1;};
+    const healthy=f.sandbox.fetch;
+    f.sandbox.fetch=async()=>({ok:false,json:async()=>({detail:'offline',retryable:true})});
+    await assert.rejects(f.api.request(f.nodes[2],'sync'),/offline/);
+    assert.equal(delay,3000);assert.equal(f.nodes[2].workflowBusy,false);
+    f.sandbox.fetch=healthy;timer();await new Promise(setImmediate);
+    assert.equal(f.nodes[4].workflowScriptId,'s');assert.equal(f.nodes[2].workflowError,'');
+    assert.equal(f.requests[0].action,'sync');
+});
+
+test('disconnect cancels reconnect and failed generation is never automatically replayed',async()=>{
+    const f=fixture();let timer,timers=0,cancelled=0;
+    f.sandbox.setTimeout=callback=>{timer=callback;timers++;return 1;};
+    f.sandbox.clearTimeout=()=>cancelled++;
+    const healthy=f.sandbox.fetch;
+    f.sandbox.fetch=async()=>({ok:false,json:async()=>({detail:'offline',retryable:true})});
+    await assert.rejects(f.api.request(f.nodes[2],'sync'));
+    f.connections.shift();f.api.sync(f.ctx);timer();await new Promise(setImmediate);
+    assert.equal(cancelled,1);assert.equal(timers,1);
+    f.connections.unshift({from:'g',to:'p'});f.api.sync(f.ctx);
+    f.sandbox.fetch=healthy;await f.api.request(f.nodes[2],'sync');
+    f.sandbox.fetch=async()=>({ok:false,json:async()=>({detail:'offline',retryable:true})});
+    await assert.rejects(f.api.request(f.nodes[4],'generate'));
+    assert.equal(timers,1);assert.ok(f.nodes[4].workflowJob);
+});
+
+test('reopening a failed saved canvas retries and input groups keep their own project',async()=>{
+    const f=fixture(),queued=[];
+    const saved=JSON.parse(JSON.stringify(f.nodes));
+    f.sandbox.queueMicrotask=callback=>queued.push(callback);
+    f.api.sync({...f.ctx,nodes:saved});assert.ok(queued.length>0);
+    f.api.sync(f.ctx);await f.api.request(f.nodes[2],'sync');
+    assert.equal(f.nodes[2].workflowProjectId,'p');
+    f.nodes.push({id:'group-b',type:'group',items:['i'],bridgeProjectId:'project-b'});
+    f.connections[0].from='group-b';f.api.sync(f.ctx);
+    assert.equal(f.nodes[2].workflowProjectId,'project-b');
+    f.connections[0].from='g';f.api.sync(f.ctx);
+    assert.equal(f.nodes[2].workflowProjectId,'p');assert.equal(f.nodes[2].workflowScriptId,'s');
 });

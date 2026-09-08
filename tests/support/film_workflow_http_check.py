@@ -57,8 +57,14 @@ try:
         receive = client.post("/api/canvas-bridges/film/receive-direct", data={"manifest": json.dumps(manifest)}, files={"frames": ("a.png", content, "image/png")})
         assert receive.status_code == 200, receive.text
         canvas = main.load_canvas(receive.json()["canvas_id"])
+        receipt_ids = receive.json()["workflow_node_ids"]
+        assert len(receipt_ids) == 3
+        assert set(receipt_ids) == {n["id"] for n in canvas["nodes"] if n.get("workflowKey")}
         assert len([n for n in canvas["nodes"] if n.get("type") == "group"]) == 4
         assert len(canvas["connections"]) == 3
+        assert receive.json()["workflow_ready"] is True
+        assert all(n.get("workflowScriptId") == "script-p" for n in canvas["nodes"] if n.get("workflowKey"))
+        assert calls[0]["action"] == "sync", "backend initializes without opening any canvas page"
         assert client.post('/api/account/login', json={'account': 'jiang', 'password': 'jiang'}).status_code == 200
         prepare = next(n for n in canvas["nodes"] if n["type"] == "film-prepare-assets")
         response = client.post("/api/canvas-film-workflow", json={"canvas_id": canvas["id"], "node_id": prepare["id"], "action": "sync", "graph": canvas})
@@ -83,6 +89,44 @@ try:
         canvas["connections"] = [e for e in canvas["connections"] if e["to"] != video["id"]]
         invalid = client.post("/api/canvas-film-workflow", json={"canvas_id": canvas["id"], "node_id": video["id"], "action": "generate", "graph": canvas})
         assert invalid.status_code == 400, invalid.text
+        # film 暂时离线：保留已经落盘的工程，明确失败；恢复后原工程补齐脚本。
+        class OfflineProxy(IsolatedProxy):
+            def execute(self, *args):
+                raise film_workflow.FilmWorkflowUnavailable("film temporarily offline")
+        film_workflow.FilmWorkflowProxy = OfflineProxy
+        manifest['bridge_id'] = 'film:p:offline'
+        failed = client.post('/api/canvas-bridges/film/receive-direct',
+            data={'manifest': json.dumps(manifest)}, files={'frames': ('a.png', content, 'image/png')})
+        assert failed.status_code == 200, failed.text
+        assert failed.json()['workflow_ready'] is False
+        assert 'temporarily offline' in failed.json()['workflow_warning']
+        failed_canvas = main.load_canvas(failed.json()['canvas_id'])
+        assert len([n for n in failed_canvas['nodes'] if n['type'] == 'group']) == 4
+        unavailable = client.post('/api/canvas-film-workflow', json={
+            'canvas_id': failed_canvas['id'], 'node_id': failed.json()['workflow_node_ids'][0], 'action': 'sync'})
+        assert unavailable.status_code == 503 and unavailable.json()['retryable'] is True
+        film_workflow.FilmWorkflowProxy = IsolatedProxy
+        recovered = client.post('/api/canvas-bridges/film/receive-direct',
+            data={'manifest': json.dumps(manifest)}, files={'frames': ('a.png', content, 'image/png')})
+        assert recovered.json()['canvas_id'] == failed_canvas['id']
+        assert recovered.json()['workflow_ready'] is True
+        assert recovered.json()['workflow_node_ids'] == failed.json()['workflow_node_ids']
+        class EditedDuringInitProxy(IsolatedProxy):
+            def execute(self, payload, graph, canvas_id):
+                result = super().execute(payload, graph, canvas_id)
+                edited = main.load_canvas(canvas_id)
+                edited['title'] = '初始化期间用户编辑的标题'
+                next(n for n in edited['nodes'] if n['type'] == 'image')['bridgeCaption'] = '新的分镜内容'
+                main.save_canvas(edited)
+                return result
+        film_workflow.FilmWorkflowProxy = EditedDuringInitProxy
+        manifest['bridge_id'] = 'film:p:concurrent'
+        concurrent = client.post('/api/canvas-bridges/film/receive-direct',
+            data={'manifest': json.dumps(manifest)}, files={'frames': ('a.png', content, 'image/png')})
+        assert concurrent.json()['workflow_ready'] is False
+        edited = main.load_canvas(concurrent.json()['canvas_id'])
+        assert edited['title'] == '初始化期间用户编辑的标题'
+        assert next(n for n in edited['nodes'] if n['type'] == 'image')['bridgeCaption'] == '新的分镜内容'
     print("film workflow HTTP, owned media and package roundtrip passed")
 finally:
     server.shutdown(); server.server_close(); thread.join()

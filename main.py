@@ -13615,10 +13615,17 @@ def require_film_bridge_loopback(request: Request) -> None:
         raise HTTPException(status_code=403, detail="filmstoryboard 自动桥接仅允许本机访问。")
 
 
+def create_film_workflow_proxy():
+    from canvas_core.film_workflow import FilmWorkflowProxy
+    return FilmWorkflowProxy(resolve_media=output_file_from_url, media_url=media_url_from_path,
+        media_root=os.fspath(OUTPUT_INPUT_DIR), allowed_roots=[os.fspath(root) for root in
+            (OUTPUT_INPUT_DIR, OUTPUT_OUTPUT_DIR, ASSET_LIBRARY_DIR, LOCAL_UPLOAD_DIR)])
+
+
 @app.post("/api/canvas-film-workflow")
 async def canvas_film_workflow(request: Request):
     require_film_bridge_loopback(request)
-    from canvas_core.film_workflow import FilmWorkflowProxy
+    from canvas_core.film_workflow import FilmWorkflowUnavailable
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="工作流请求必须是对象")
@@ -13627,13 +13634,49 @@ async def canvas_film_workflow(request: Request):
     graph = payload.get("graph") or source
     if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list) or not isinstance(graph.get("connections"), list):
         raise HTTPException(status_code=400, detail="工作流连线数据无效")
-    proxy = FilmWorkflowProxy(resolve_media=output_file_from_url, media_url=media_url_from_path,
-        media_root=os.fspath(OUTPUT_INPUT_DIR), allowed_roots=[os.fspath(root) for root in
-            (OUTPUT_INPUT_DIR, OUTPUT_OUTPUT_DIR, ASSET_LIBRARY_DIR, LOCAL_UPLOAD_DIR)])
+    proxy = create_film_workflow_proxy()
     try:
         return await asyncio.to_thread(proxy.execute, payload, graph, source["id"])
+    except FilmWorkflowUnavailable as exc:
+        return JSONResponse(status_code=503, content={"ok": False, "detail": str(exc), "retryable": True})
     except (ValueError, OSError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def initialize_film_canvas_workflow(canvas: dict, node_ids: list[str]) -> tuple[bool, str]:
+    """导出请求内完成数据初始化，不依赖浏览器打开/渲染，也不触发生成。"""
+    if not node_ids:
+        return False, ""
+    from canvas_core.film_workflow import workflow_context
+    try:
+        prepare, group, frames = workflow_context(canvas, node_ids[0])
+        result = await asyncio.to_thread(create_film_workflow_proxy().execute,
+            {"node_id": prepare["id"], "action": "sync"}, canvas, canvas["id"])
+        snapshot = result.get("snapshot")
+        if not isinstance(snapshot, dict) or not snapshot.get("scriptId"):
+            raise ValueError("film 未返回已建立的拍摄脚本")
+        # 初始化期间用户仍可编辑画布，只合并同一输入链的工作流数据。
+        latest = load_canvas(canvas["id"])
+        latest_prepare, latest_group, latest_frames = workflow_context(latest, prepare["id"])
+        def frame_identity(items):
+            return [(item.get("id"), item.get("url"), item.get("bridgeCaption")) for item in items]
+        if latest_group["id"] != group["id"] or frame_identity(latest_frames) != frame_identity(frames):
+            raise ValueError("画布输入已更改，请在准备资产节点同步新的图片组")
+        for node in latest["nodes"]:
+            if node.get("id") not in node_ids:
+                continue
+            try:
+                parent, root, _ = workflow_context(latest, node["id"])
+            except ValueError:
+                continue
+            if parent["id"] != latest_prepare["id"] or root["id"] != group["id"]:
+                continue
+            node.update(workflowScriptId=snapshot["scriptId"], workflowProjectId=result["project_id"],
+                        workflowSnapshot=snapshot, workflowError="", workflowBusy=False)
+        save_canvas(latest)
+        return True, ""
+    except (ValueError, OSError, KeyError, TypeError, HTTPException) as exc:
+        return False, str(exc)
 
 
 @app.get("/api/canvas-bridges/film/capabilities")
@@ -13756,6 +13799,8 @@ async def receive_film_bridge_direct(
     save_canvas(canvas)
     ACTIVE_CANVAS_ID = canvas["id"]
     ACTIVE_CANVAS_BY_ACCOUNT[current_account_id()] = canvas["id"]
+    workflow_node_ids = sync_result.get("workflow_node_ids", [])
+    workflow_ready, workflow_warning = await initialize_film_canvas_workflow(canvas, workflow_node_ids)
     return {
         "ok": True,
         "transport": "direct-multipart",
@@ -13766,6 +13811,9 @@ async def receive_film_bridge_direct(
         "prompt_count": len(sync_result["prompt_nodes"]),
         "sync_mode": sync_result["sync_mode"],
         "sync_stats": sync_result["stats"],
+        "workflow_node_ids": workflow_node_ids,
+        "workflow_ready": workflow_ready,
+        "workflow_warning": workflow_warning,
         "editor_url": f"/static/canvas.html?id={urllib.parse.quote(canvas['id'])}",
     }
 

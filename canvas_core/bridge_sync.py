@@ -333,6 +333,7 @@ def sync_film_bridge_canvas(
         "bridgeSource": "filmstoryboard",
         "bridgeId": bridge_id,
         "bridgeDirection": "film-to-shiyin",
+        "bridgeProjectId": _text(source.get("project_id")),
         "bridgeBoardId": _text(source.get("board_id")),
         "bridgeBoardName": _text(storyboard.get("board_name")),
         "bridgeSelectedVariant": _text(storyboard.get("selected_variant")) or "original",

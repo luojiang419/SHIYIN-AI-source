@@ -4,6 +4,8 @@
     const TITLES={[PREPARE]:'准备资产',[CONFIRM]:'确认镜头'};
     const active=new Map();
     const hydrated=new WeakSet();
+    const initialized=new WeakSet();
+    const reconnects=new Map();
     const resumedJobs=new Set();
     const jobActions=new Set(['analyze','depth','match','replicate','build-prompts','generate','import-asset','bind-asset','export-timeline','export-video']);
     let context=null;
@@ -51,6 +53,11 @@
     function notify(ids=[]){ context?.changed?.(ids); }
     function sync(ctx){
         context=ctx;
+        for(const [node,retry] of reconnects){
+            if(retry.canvasId!==ctx.canvasId || !ctx.nodes.includes(node) || sourceFor(node,ctx.nodes,ctx.connections)?.fingerprint!==retry.fingerprint){
+                clearTimeout(retry.timer); reconnects.delete(node);
+            }
+        }
         if(!ctx.nodes.some(n=>isStep(n.type) || n.workflowList)) return;
         const changed=[];
         const byId=new Map(ctx.nodes.map(n=>[n.id,n]));
@@ -61,14 +68,16 @@
             }
         }
         for(const node of ctx.nodes.filter(n=>n.type===PREPARE)){
+            if(!initialized.has(node)){ initialized.add(node); delete node.workflowAttempt; }
             if(!active.has(node.id)) node.workflowBusy=false;
             const source=sourceFor(node,ctx.nodes,ctx.connections);
             if(!source?.frames.length) continue;
             if(node.workflowGroupId && node.workflowGroupId!==source.group.id){
                 node.workflowSessions ||= {};
-                node.workflowSessions[node.workflowGroupId]={scriptId:node.workflowScriptId,snapshot:node.workflowSnapshot,fingerprint:node.workflowFingerprint};
+                node.workflowSessions[node.workflowGroupId]={scriptId:node.workflowScriptId,projectId:node.workflowProjectId,snapshot:node.workflowSnapshot,fingerprint:node.workflowFingerprint};
                 const saved=node.workflowSessions[source.group.id] || {};
                 node.workflowScriptId=saved.scriptId || ''; node.workflowSnapshot=saved.snapshot || null; node.workflowFingerprint=saved.fingerprint || '';
+                node.workflowProjectId=saved.projectId || source.group.bridgeProjectId || ''; delete node.workflowAttempt;
             }
             node.workflowGroupId=source.group.id;
             node.workflowSourceKeys ||= {};
@@ -116,6 +125,8 @@
         const source=sourceFor(node,ctx.nodes,ctx.connections);
         if(!source?.frames.length) throw new Error('请先连接图片组 → 准备资产 → 确认镜头');
         if(action!=='sync' && !source.prepare.workflowScriptId) throw new Error('脚本正在建立，请稍后再操作');
+        const previousRetry=reconnects.get(node);
+        if(previousRetry){ clearTimeout(previousRetry.timer); reconnects.delete(node); }
         const sourceFingerprint=source.fingerprint, requestId=globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
         const payload={canvas_id:ctx.canvasId,node_id:node.id,action,request_id:requestId,graph:graph(ctx),...extra};
         const activeKey=action==='cancel-task'?`${node.id}:cancel`:node.id;
@@ -126,7 +137,7 @@
         const send=async body=>{
             const response=await fetch('/api/canvas-film-workflow',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             const result=await response.json();
-            if(!response.ok || !result.ok){ const error=new Error(result.detail || 'film 工作流请求失败');error.workflowRejected=true;throw error; }
+            if(!response.ok || !result.ok){ const error=new Error(result.detail || 'film 工作流请求失败');error.workflowRejected=true;error.retryable=result.retryable===true;throw error; }
             return result;
         };
         const apply=result=>{
@@ -160,7 +171,23 @@
                 if(result.job.status==='failed') throw new Error(result.job.error || '任务失败');
             }
             return result;
-        } catch(error){ if(current()){node.workflowError=error.message;if(error.workflowRejected && (jobActions.has(action) || error.message.includes('任务已失效')))delete node.workflowJob;} throw error; }
+        } catch(error){
+            if(current()){
+                node.workflowError=error.message;
+                if(error.workflowRejected && !error.retryable && (jobActions.has(action) || error.message.includes('任务已失效'))) delete node.workflowJob;
+                if((action==='sync' || action==='snapshot') && (error.retryable || !error.workflowRejected)){
+                    const delay=Math.min(30000,(previousRetry?.delay || 1500)*2);
+                    const retry={canvasId:ctx.canvasId,fingerprint:sourceFingerprint,delay};
+                    retry.timer=setTimeout(()=>{
+                        if(reconnects.get(node)!==retry) return;
+                        if(current()) request(node,action).catch(()=>{});
+                        else reconnects.delete(node);
+                    },delay);
+                    reconnects.set(node,retry);
+                }
+            }
+            throw error;
+        }
         finally {
             active.delete(activeKey); node.workflowBusy=active.has(node.id);
             if(context?.canvasId===ctx.canvasId && context.nodes.includes(node)){sync(context);notify([node.id]);}

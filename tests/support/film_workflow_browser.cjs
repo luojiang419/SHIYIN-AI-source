@@ -26,8 +26,10 @@ const assert=require('node:assert/strict'), fs=require('node:fs');
         const snapshot={scriptId:'fixture-script',name:'画板拍摄脚本',parameters:{generationMode:'quick',model:'fixture',aspectRatio:'16:9',imageSize:'2K',quality:'high',sourceFrameMode:'colorReference',videoSteps:12},
             options:{models:[{id:'fixture',label:'测试模型'}],aspectRatios:['16:9','9:16'],imageSizes:['2K','4K'],qualities:['high'],videoBackend:'fixture'},
             shots:[1,2].map(n=>({id:`shot-${n}`,number:n,frame:'/static/assets/camera-reference/angle-eye-front.png',content:`镜头 ${n} 描述`,prompt:`镜头 ${n} 提示词`,confirmed:true,durationSeconds:5})),assets:[],tasks:[]};
+        let offlineOnce=true;
         await page.route('**/api/canvas-film-workflow',async route=>{
             const body=route.request().postDataJSON();calls.push(body);
+            if(offlineOnce){offlineOnce=false;return route.fulfill({status:503,json:{ok:false,detail:'film 测试服务尚未启动',retryable:true}});}
             if(body.action==='parameters') Object.assign(snapshot.parameters,body.parameters);
             if(body.action==='edit-shot') Object.assign(snapshot.shots.find(s=>s.id===body.shot_id),body.parameters);
             await route.fulfill({json:{ok:true,project_id:'fixture-project',snapshot}});
@@ -36,7 +38,7 @@ const assert=require('node:assert/strict'), fs=require('node:fs');
         await page.goto(`${base}/static/canvas.html?id=film-workflow-ui`);
         await page.waitForFunction(()=>document.querySelectorAll('.film-workflow-panel').length===3);
         await page.waitForFunction(()=>document.querySelector('[data-id="confirm"] .wf-shot'));
-        assert.equal(calls.filter(c=>c.action==='sync').length,1,'connection creates only one script');
+        assert.equal(calls.filter(c=>c.action==='sync').length,2,'failed discovery retries once when film becomes available');
         assert.equal(calls.filter(c=>c.action==='generate').length,0,'connection never generates');
         assert.equal(await page.locator('[data-id="ordinary"] .film-node-panel').count(),1);
         const focus=async id=>{await page.evaluate(id=>{const n=nodes.find(n=>n.id===id);viewport={x:120-n.x,y:120-n.y,scale:1};applyViewport();},id);};
@@ -69,7 +71,7 @@ const assert=require('node:assert/strict'), fs=require('node:fs');
         assert.equal(await page.locator('.workflow-function-group').count(),3);
         assert.ok(await page.evaluate(()=>linkCreateOptions({originId:'group',originKind:'out'}).some(o=>o.type==='film-prepare-assets')));
         assert.deepEqual(errors,[]);
-        fs.writeFileSync(`${dir}/result.json`,JSON.stringify({passed:true,checks:['自动建脚本','普通节点不变','参数保存','镜头编辑','单个/全部生成范围','断线恢复','重连列表','保存重开','无脚本异常'],calls:calls.map(c=>({action:c.action,shot_id:c.shot_id}))},null,2));
+        fs.writeFileSync(`${dir}/result.json`,JSON.stringify({passed:true,checks:['film 延迟启动后自动建脚本','普通节点不变','参数保存','镜头编辑','单个/全部生成范围','断线恢复','重连列表','保存重开','无脚本异常'],calls:calls.map(c=>({action:c.action,shot_id:c.shot_id}))},null,2));
         console.log('film workflow browser: 9 checks passed');
     } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1);});

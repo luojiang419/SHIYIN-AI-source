@@ -27,7 +27,8 @@ def test_macos_build_packages_same_web_skills_and_backend():
     assert "/api/runtime/info" in smoke
     assert "/api/version" not in smoke
     assert 'cookie.name == "canvas_account_session"' in smoke
-    assert '"CANVAS_DATA_DIR": str(data_root)' in smoke
+    assert '["open", "-n", "-W", str(app)]' in smoke
+    assert '"Application Support" / "SHIYIN AI"' in smoke
     assert '"desktop": "ok"' in smoke
     assert "Desktop backend did not stop after its parent exited" in smoke
 

@@ -113,59 +113,59 @@ def main() -> None:
     if app_executable is None:
         raise SystemExit("Missing macOS desktop executable in app bundle")
     app_port = free_port()
-    with tempfile.TemporaryDirectory(prefix="shiyin-macos-app-smoke-") as temporary:
-        data_root = Path(temporary) / "data"
-        config_dir = data_root / "config"
-        config_dir.mkdir(parents=True)
-        (config_dir / "app.json").write_text(json.dumps({
-            "host": "127.0.0.1",
-            "port": app_port,
-            "lan_enabled": False,
-            "cache_max_bytes": 1024 * 1024 * 1024,
-            "close_behavior": "exit",
-        }), encoding="utf-8")
-        environment = {**os.environ, "CANVAS_DATA_DIR": str(data_root)}
-        desktop = subprocess.Popen(
-            [str(app_executable)], env=environment,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    data_root = Path.home() / "Library" / "Application Support" / "SHIYIN AI"
+    config_dir = data_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "app.json").write_text(json.dumps({
+        "host": "127.0.0.1",
+        "port": app_port,
+        "lan_enabled": False,
+        "cache_max_bytes": 1024 * 1024 * 1024,
+        "close_behavior": "exit",
+    }), encoding="utf-8")
+    desktop = subprocess.Popen(
+        ["open", "-n", "-W", str(app)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    backend_pid = 0
+    try:
+        wait_for_health(desktop, app_port)
+        info = authenticated_runtime_info(app_port)
+        actual = str(info.get("version") or "").strip()
+        expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
+        if actual != expected:
+            raise SystemExit(f"Desktop version mismatch: expected {expected}, got {actual}")
+        paths = info.get("paths") or {}
+        if Path(paths.get("app_root") or "").resolve() != app_root.resolve():
+            raise SystemExit(f"Desktop app_root mismatch: {paths.get('app_root')}")
+        if Path(paths.get("data_root") or "").resolve() != data_root.resolve():
+            raise SystemExit(f"Desktop data_root mismatch: {paths.get('data_root')}")
+        backend_pid = int(info.get("pid") or 0)
+        print(json.dumps({
+            "desktop": "ok", "health": "ok", "version": actual,
+            "app_root": str(app_root), "data_root": str(data_root),
+        }))
+    finally:
+        subprocess.run(
+            ["pkill", "-TERM", "-f", str(app_executable)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
-        backend_pid = 0
         try:
-            wait_for_health(desktop, app_port)
-            info = authenticated_runtime_info(app_port)
-            actual = str(info.get("version") or "").strip()
-            expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
-            if actual != expected:
-                raise SystemExit(f"Desktop version mismatch: expected {expected}, got {actual}")
-            paths = info.get("paths") or {}
-            if Path(paths.get("app_root") or "").resolve() != app_root.resolve():
-                raise SystemExit(f"Desktop app_root mismatch: {paths.get('app_root')}")
-            if Path(paths.get("data_root") or "").resolve() != data_root.resolve():
-                raise SystemExit(f"Desktop data_root mismatch: {paths.get('data_root')}")
-            backend_pid = int(info.get("pid") or 0)
-            print(json.dumps({
-                "desktop": "ok", "health": "ok", "version": actual,
-                "app_root": str(app_root), "data_root": str(data_root),
-            }))
-        finally:
-            if desktop.poll() is None:
-                desktop.terminate()
+            desktop.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            desktop.terminate()
+            desktop.wait(timeout=5)
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
             try:
-                desktop.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                desktop.kill()
-                desktop.wait(timeout=5)
-            deadline = time.monotonic() + 12
-            while time.monotonic() < deadline:
-                try:
-                    request_json(f"http://127.0.0.1:{app_port}/api/health")
-                except Exception:
-                    break
-                time.sleep(0.2)
-            else:
-                if backend_pid > 0:
-                    os.kill(backend_pid, signal.SIGTERM)
-                raise SystemExit("Desktop backend did not stop after its parent exited")
+                request_json(f"http://127.0.0.1:{app_port}/api/health")
+            except Exception:
+                break
+            time.sleep(0.2)
+        else:
+            if backend_pid > 0:
+                os.kill(backend_pid, signal.SIGTERM)
+            raise SystemExit("Desktop backend did not stop after its parent exited")
 
 
 if __name__ == "__main__":

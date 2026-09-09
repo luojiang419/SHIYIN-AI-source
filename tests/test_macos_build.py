@@ -27,13 +27,16 @@ def test_macos_build_packages_same_web_skills_and_backend():
     assert "/api/runtime/info" in smoke
     assert "/api/version" not in smoke
     assert 'cookie.name == "canvas_account_session"' in smoke
+    assert '"CANVAS_DATA_DIR": str(data_root)' in smoke
+    assert '"desktop": "ok"' in smoke
+    assert "Desktop backend did not stop after its parent exited" in smoke
 
 
 def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
     workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")
     assert "macos-15-intel" in workflow and "macos-15" in workflow
     assert "Apple-Silicon" in workflow and "Intel" in workflow
-    assert "actions/upload-artifact@v4" in workflow
+    assert "actions/upload-artifact@v7" in workflow
     assert "actions/checkout@v5" in workflow
     assert "actions/setup-python@v6" in workflow
     assert "actions/setup-node@v5" in workflow

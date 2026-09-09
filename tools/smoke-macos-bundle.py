@@ -5,6 +5,7 @@ import argparse
 import http.cookiejar
 import json
 import os
+import signal
 import socket
 import subprocess
 import tempfile
@@ -33,6 +34,31 @@ def request_json(
         return json.loads(response.read().decode("utf-8"))
 
 
+def wait_for_health(process: subprocess.Popen, port: int, timeout: float = 60) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            detail = (process.stderr.read() if process.stderr else b"").decode("utf-8", "replace")
+            raise SystemExit(f"Process exited early ({process.returncode}): {detail[-2000:]}")
+        try:
+            health = request_json(f"http://127.0.0.1:{port}/api/health")
+            if health.get("status") == "ok":
+                return health
+        except Exception:
+            time.sleep(0.2)
+    raise SystemExit("Backend did not become healthy")
+
+
+def authenticated_runtime_info(port: int) -> dict:
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    with opener.open(f"http://127.0.0.1:{port}/api/auth/bootstrap", timeout=3) as response:
+        response.read()
+    if not any(cookie.name == "canvas_account_session" for cookie in cookie_jar):
+        raise SystemExit("Desktop bootstrap did not create an authenticated session cookie")
+    return request_json(f"http://127.0.0.1:{port}/api/runtime/info", opener=opener)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", type=Path, required=True)
@@ -59,27 +85,8 @@ def main() -> None:
         ]
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
-            deadline = time.monotonic() + 45
-            health = None
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    detail = (process.stderr.read() if process.stderr else b"").decode("utf-8", "replace")
-                    raise SystemExit(f"Bundled backend exited early ({process.returncode}): {detail[-2000:]}")
-                try:
-                    health = request_json(f"http://127.0.0.1:{port}/api/health")
-                    if health.get("status") == "ok":
-                        break
-                except Exception:
-                    time.sleep(0.2)
-            if not health or health.get("status") != "ok":
-                raise SystemExit("Bundled backend did not become healthy")
-            cookie_jar = http.cookiejar.CookieJar()
-            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
-            with opener.open(f"http://127.0.0.1:{port}/api/auth/bootstrap", timeout=3) as response:
-                response.read()
-            if not any(cookie.name == "canvas_account_session" for cookie in cookie_jar):
-                raise SystemExit("Desktop bootstrap did not create an authenticated session cookie")
-            version = request_json(f"http://127.0.0.1:{port}/api/runtime/info", opener=opener)
+            wait_for_health(process, port, 45)
+            version = authenticated_runtime_info(port)
             expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
             actual = str(version.get("version") or version.get("current_version") or "").strip()
             if actual != expected:
@@ -95,6 +102,70 @@ def main() -> None:
             except subprocess.TimeoutExpired:
                 process.terminate()
                 process.wait(timeout=5)
+
+    app_executable = next(
+        (candidate for candidate in (
+            app / "Contents" / "MacOS" / "SHIYIN-AI",
+            app / "Contents" / "MacOS" / "SHIYIN AI",
+        ) if candidate.is_file()),
+        None,
+    )
+    if app_executable is None:
+        raise SystemExit("Missing macOS desktop executable in app bundle")
+    app_port = free_port()
+    with tempfile.TemporaryDirectory(prefix="shiyin-macos-app-smoke-") as temporary:
+        data_root = Path(temporary) / "data"
+        config_dir = data_root / "config"
+        config_dir.mkdir(parents=True)
+        (config_dir / "app.json").write_text(json.dumps({
+            "host": "127.0.0.1",
+            "port": app_port,
+            "lan_enabled": False,
+            "cache_max_bytes": 1024 * 1024 * 1024,
+            "close_behavior": "exit",
+        }), encoding="utf-8")
+        environment = {**os.environ, "CANVAS_DATA_DIR": str(data_root)}
+        desktop = subprocess.Popen(
+            [str(app_executable)], env=environment,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        backend_pid = 0
+        try:
+            wait_for_health(desktop, app_port)
+            info = authenticated_runtime_info(app_port)
+            actual = str(info.get("version") or "").strip()
+            expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
+            if actual != expected:
+                raise SystemExit(f"Desktop version mismatch: expected {expected}, got {actual}")
+            paths = info.get("paths") or {}
+            if Path(paths.get("app_root") or "").resolve() != app_root.resolve():
+                raise SystemExit(f"Desktop app_root mismatch: {paths.get('app_root')}")
+            if Path(paths.get("data_root") or "").resolve() != data_root.resolve():
+                raise SystemExit(f"Desktop data_root mismatch: {paths.get('data_root')}")
+            backend_pid = int(info.get("pid") or 0)
+            print(json.dumps({
+                "desktop": "ok", "health": "ok", "version": actual,
+                "app_root": str(app_root), "data_root": str(data_root),
+            }))
+        finally:
+            if desktop.poll() is None:
+                desktop.terminate()
+            try:
+                desktop.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                desktop.kill()
+                desktop.wait(timeout=5)
+            deadline = time.monotonic() + 12
+            while time.monotonic() < deadline:
+                try:
+                    request_json(f"http://127.0.0.1:{app_port}/api/health")
+                except Exception:
+                    break
+                time.sleep(0.2)
+            else:
+                if backend_pid > 0:
+                    os.kill(backend_pid, signal.SIGTERM)
+                raise SystemExit("Desktop backend did not stop after its parent exited")
 
 
 if __name__ == "__main__":

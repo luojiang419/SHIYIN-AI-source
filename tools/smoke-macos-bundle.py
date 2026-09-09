@@ -79,7 +79,7 @@ def main() -> None:
                 response.read()
             if not any(cookie.name == "canvas_account_session" for cookie in cookie_jar):
                 raise SystemExit("Desktop bootstrap did not create an authenticated session cookie")
-            version = request_json(f"http://127.0.0.1:{port}/api/version", opener=opener)
+            version = request_json(f"http://127.0.0.1:{port}/api/runtime/info", opener=opener)
             expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
             actual = str(version.get("version") or version.get("current_version") or "").strip()
             if actual != expected:

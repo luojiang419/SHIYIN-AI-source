@@ -24,6 +24,8 @@ def test_macos_build_packages_same_web_skills_and_backend():
     smoke = (ROOT / "tools/smoke-macos-bundle.py").read_text(encoding="utf-8")
     assert "HTTPCookieProcessor" in smoke
     assert "/api/auth/bootstrap" in smoke
+    assert "/api/runtime/info" in smoke
+    assert "/api/version" not in smoke
     assert 'cookie.name == "canvas_account_session"' in smoke
 
 

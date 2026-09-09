@@ -128,6 +128,7 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 第三轮 Actions `34374900714`：两架构通过依赖、contracts、PyInstaller、内置 Node、Tauri app bundle 和 ad-hoc codesign；bundle smoke 的 `/api/version` 请求未带桌面 token，被后端正确返回 401。已修复 smoke 鉴权并增加 Cargo 缓存。
 - 第四轮 Actions `34376080064`：Apple Silicon 再次推进到已签名 `.app`，确认业务接口不接受桌面 token header 直接鉴权；真实桌面流程应先访问 bootstrap 获取 HttpOnly session cookie。已改为 CookieJar 完成 bootstrap 后访问版本接口。旧同源排队 run `34376718395` 已取消，避免运行已知失败代码。
 - 同源 Run `34377231339`：Apple Silicon 完成同源 `.app`、签名与 bootstrap，但 smoke 错把真实 cookie `canvas_account_session` 写成 `canvas_session`。已修正断言并取消仍在运行旧断言的 Intel job；Cargo cache action升级为官方 v6。
+- 同源 Run `34378430153`：bootstrap 和 session cookie 已通过；随后请求了项目不存在的 `/api/version` 而返回 404。已切换到真实管理员版本接口 `/api/runtime/info`，并取消仍运行旧路径的 Intel job。
 - 当前 Windows 版自动更新只识别 EXE，Mac 更新安装需要独立机制。
 - macOS 云端产物没有 Apple Developer ID 时只能 ad-hoc/未公证，首次打开会受 Gatekeeper 提示影响。
 - Topaz、DWPose GPU、本地 FFmpeg/Kling CLI 等能力需要逐项确认 macOS 依赖，不应以“能编译”冒充完全可用。
@@ -150,6 +151,7 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 2026-09-10：整理 Windows 1.0.431 实际产品源码，相关 Python 258 项与 JavaScript 语法通过，准备进入同源 Mac 构建。
 - 2026-09-10：根据第四轮 Apple 原始日志，将 smoke 修正为真实 desktop bootstrap + session cookie 鉴权；取消含旧 smoke 的排队 run。
 - 2026-09-10：同源 run 已完成到 bootstrap；修正 smoke 的真实 cookie 名，并升级 actions/cache v6 后重新构建。
+- 2026-09-10：同源 run 已验证 bootstrap cookie，修正 smoke 中不存在的 `/api/version` 为真实 `/api/runtime/info`。
 
 ## 接力信息
 

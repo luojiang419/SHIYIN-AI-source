@@ -68,6 +68,16 @@
         };
     }
 
+    function cleanPendingWork(value, index=0){
+        if(!value || typeof value !== 'object') return null;
+        return {
+            id:String(value.id || `pending_${Date.now()}_${index}`),
+            taskId:String(value.taskId || value.task_id || ''),
+            targetIndex:Math.max(0, Number(value.targetIndex ?? value.target_index ?? index) || 0),
+            status:String(value.status || 'queued'),
+        };
+    }
+
     function cleanGroup(value){
         if(!value || typeof value !== 'object') return null;
         const id = /^[A-Za-z0-9_-]{1,96}$/.test(String(value.id || '')) ? String(value.id) : uniqueId();
@@ -87,6 +97,18 @@
         const controlMap = cleanImage(value.controlMap || value.control_map);
         const works = (Array.isArray(value.works) ? value.works : []).map(cleanWork).filter(Boolean);
         const taskIds = (Array.isArray(value.taskIds) ? value.taskIds : value.task_ids || []).map(item => String(item || '')).filter(Boolean).slice(-40);
+        const runTaskIds = (Array.isArray(value.runTaskIds) ? value.runTaskIds : value.run_task_ids || []).map(item => String(item || '')).filter(Boolean).slice(-TARGET_IMAGE_MAX);
+        const taskStatuses = (value.taskStatuses && typeof value.taskStatuses === 'object')
+            ? {...value.taskStatuses}
+            : (value.task_statuses && typeof value.task_statuses === 'object') ? {...value.task_statuses} : {};
+        const pendingWorks = (Array.isArray(value.pendingWorks) ? value.pendingWorks : value.pending_works || [])
+            .map(cleanPendingWork).filter(Boolean).slice(0, TARGET_IMAGE_MAX);
+        runTaskIds.forEach((taskId, index) => {
+            const taskStatus = String(taskStatuses[taskId] || value.status || 'queued');
+            if(ACTIVE_STATUSES.has(taskStatus) && !pendingWorks.some(item => item.taskId === taskId)) {
+                pendingWorks.push(cleanPendingWork({id:`pending_${taskId}`, taskId, targetIndex:index, status:taskStatus}, index));
+            }
+        });
         return {
             id,
             styleName,
@@ -95,10 +117,9 @@
             controlSourceUrl:String(value.controlSourceUrl || value.control_source_url || ''),
             taskIds,
             currentTaskId:String(value.currentTaskId || value.current_task_id || taskIds[taskIds.length - 1] || ''),
-            runTaskIds:(Array.isArray(value.runTaskIds) ? value.runTaskIds : value.run_task_ids || []).map(item => String(item || '')).filter(Boolean).slice(-TARGET_IMAGE_MAX),
-            taskStatuses:(value.taskStatuses && typeof value.taskStatuses === 'object')
-                ? {...value.taskStatuses}
-                : (value.task_statuses && typeof value.task_statuses === 'object') ? {...value.task_statuses} : {},
+            runTaskIds,
+            taskStatuses,
+            pendingWorks,
             targetImageIndex:Number.isFinite(Number(value.targetImageIndex ?? value.target_image_index))
                 ? Math.max(0, Number(value.targetImageIndex ?? value.target_image_index))
                 : 0,
@@ -123,6 +144,7 @@
                 current_task_id:group.currentTaskId,
                 run_task_ids:group.runTaskIds,
                 task_statuses:group.taskStatuses,
+                pending_works:group.pendingWorks,
                 target_image_index:group.targetImageIndex,
                 status:group.status,
                 error:group.error,
@@ -290,10 +312,21 @@
         }
     }
 
+    function displayWorkCount(group){
+        return (group?.works?.length || 0) + (group?.pendingWorks?.length || 0);
+    }
+
+    function currentWorkItem(group){
+        const count = displayWorkCount(group);
+        if(!count) return null;
+        state.selectedImageIndex = Math.max(0, Math.min(count - 1, state.selectedImageIndex));
+        if(state.selectedImageIndex < group.works.length) return {type:'work', work:group.works[state.selectedImageIndex]};
+        return {type:'pending', pending:group.pendingWorks[state.selectedImageIndex - group.works.length]};
+    }
+
     function currentWork(group){
-        if(!group?.works.length) return null;
-        state.selectedImageIndex = Math.max(0, Math.min(group.works.length - 1, state.selectedImageIndex));
-        return group.works[state.selectedImageIndex];
+        const item = currentWorkItem(group);
+        return item?.type === 'work' ? item.work : null;
     }
 
     function previewIsOpen(){
@@ -421,8 +454,9 @@
 
     function selectWorkIndex(index){
         const group = selectedGroup();
-        if(!group?.works.length) return false;
-        const nextIndex = Math.max(0, Math.min(group.works.length - 1, Number(index || 0)));
+        const count = previewIsOpen() ? (group?.works?.length || 0) : displayWorkCount(group);
+        if(!count) return false;
+        const nextIndex = Math.max(0, Math.min(count - 1, Number(index || 0)));
         const changed = nextIndex !== state.selectedImageIndex;
         state.selectedImageIndex = nextIndex;
         if(changed) resetPreviewView();
@@ -456,26 +490,45 @@
             el.works.innerHTML = `<div class="ec-batch-works-empty"><span>WORKS</span><h3>查看作品</h3><p>选择或新建换款任务后，生成图片会按款号集中显示。</p></div>`;
             return;
         }
-        const work = currentWork(group);
-        if(!work) {
+        const item = currentWorkItem(group);
+        if(!item) {
             el.works.innerHTML = `<div class="ec-batch-works-shell"><header><div><span>SELECTED STYLE</span><h2>${escapeHtml(group.styleName)}</h2></div><strong>${escapeHtml(statusText(group))}</strong></header><div class="ec-batch-works-empty"><span>${ACTIVE_STATUSES.has(group.status) ? 'GENERATING' : 'NO WORKS'}</span><h3>${ACTIVE_STATUSES.has(group.status) ? '正在生成作品' : '本组尚无作品'}</h3><p>${escapeHtml(group.error || '补齐目标图与服装参考后即可开始生成。')}</p></div></div>`;
             return;
         }
-        el.works.innerHTML = `<div class="ec-batch-works-shell">
-            <header><div><span>SELECTED STYLE</span><h2>${escapeHtml(group.styleName)}</h2></div><strong>${state.selectedImageIndex + 1} / ${group.works.length}</strong></header>
-            <div class="ec-batch-work-stage" data-batch-work-stage tabindex="0">
-                <button class="ec-batch-work-nav previous" type="button" data-batch-work-step="-1" aria-label="上一张作品" ${state.selectedImageIndex <= 0 ? 'disabled' : ''}>‹</button>
+        const work = item.type === 'work' ? item.work : null;
+        const total = displayWorkCount(group);
+        const pendingCount = group.pendingWorks.length;
+        const previousDisabled = state.selectedImageIndex <= 0;
+        const nextDisabled = state.selectedImageIndex >= total - 1;
+        const stage = work
+            ? `<button class="ec-batch-work-nav previous" type="button" data-batch-work-step="-1" aria-label="上一张作品" ${previousDisabled ? 'disabled' : ''}>‹</button>
                 <button class="ec-batch-work-preview" type="button" data-batch-work-preview aria-label="全屏查看作品 ${state.selectedImageIndex + 1}"><img src="${escapeHtml(work.url)}" alt="${escapeHtml(group.styleName)} 生成作品" draggable="false"></button>
-                <button class="ec-batch-work-nav next" type="button" data-batch-work-step="1" aria-label="下一张作品" ${state.selectedImageIndex >= group.works.length - 1 ? 'disabled' : ''}>›</button>
+                <button class="ec-batch-work-nav next" type="button" data-batch-work-step="1" aria-label="下一张作品" ${nextDisabled ? 'disabled' : ''}>›</button>`
+            : `<button class="ec-batch-work-nav previous" type="button" data-batch-work-step="-1" aria-label="上一张作品" ${previousDisabled ? 'disabled' : ''}>‹</button>
+                <div class="ec-batch-work-pending" role="status" aria-live="polite">
+                    <div class="ec-batch-work-pending-card"><span class="ec-spinner" aria-hidden="true"></span><strong>正在生成作品</strong><small>第 ${item.pending.targetIndex + 1} 张 · 完成后将自动回填</small></div>
+                </div>
+                <button class="ec-batch-work-nav next" type="button" data-batch-work-step="1" aria-label="下一张作品" ${nextDisabled ? 'disabled' : ''}>›</button>`;
+        const thumbs = [
+            ...group.works.map((entry,index) => `<button type="button" class="${index === state.selectedImageIndex ? 'active' : ''}" data-batch-work-index="${index}" aria-label="查看作品 ${index + 1}"><img src="${escapeHtml(entry.url)}" alt="作品 ${index + 1}"><span>${index + 1}</span></button>`),
+            ...group.pendingWorks.map((pending,index) => {
+                const displayIndex = group.works.length + index;
+                return `<button type="button" class="ec-batch-work-thumb-pending ${displayIndex === state.selectedImageIndex ? 'active' : ''}" data-batch-work-index="${displayIndex}" aria-label="作品 ${pending.targetIndex + 1} 生成中"><span class="ec-spinner" aria-hidden="true"></span><small>生成中</small></button>`;
+            }),
+        ].join('');
+        el.works.innerHTML = `<div class="ec-batch-works-shell">
+            <header><div><span>SELECTED STYLE</span><h2>${escapeHtml(group.styleName)}</h2></div><strong>${pendingCount ? `生成中 ${pendingCount} · ` : ''}${state.selectedImageIndex + 1} / ${total}</strong></header>
+            <div class="ec-batch-work-stage" data-batch-work-stage tabindex="0">
+                ${stage}
             </div>
             <div class="ec-batch-work-toolbar">
-                <button type="button" data-batch-download-selected>下载当前</button>
-                <button type="button" data-batch-download-all>下载本组</button>
-                <button type="button" class="danger" data-batch-delete-selected>删除当前</button>
-                <button type="button" class="danger" data-batch-delete-all>删除本组全部</button>
+                <button type="button" data-batch-download-selected ${work ? '' : 'disabled'}>下载当前</button>
+                <button type="button" data-batch-download-all ${group.works.length ? '' : 'disabled'}>下载本组</button>
+                <button type="button" class="danger" data-batch-delete-selected ${work ? '' : 'disabled'}>删除当前</button>
+                <button type="button" class="danger" data-batch-delete-all ${group.works.length ? '' : 'disabled'}>删除本组全部</button>
             </div>
-            <div class="ec-batch-work-thumbs">${group.works.map((item,index) => `<button type="button" class="${index === state.selectedImageIndex ? 'active' : ''}" data-batch-work-index="${index}"><img src="${escapeHtml(item.url)}" alt="作品 ${index + 1}"><span>${index + 1}</span></button>`).join('')}</div>
-            ${work.archivedPath ? `<p class="ec-batch-archive-path" title="${escapeHtml(work.archivedPath)}">已归档：${escapeHtml(work.archivedPath)}</p>` : ''}
+            <div class="ec-batch-work-thumbs">${thumbs}</div>
+            ${work?.archivedPath ? `<p class="ec-batch-archive-path" title="${escapeHtml(work.archivedPath)}">已归档：${escapeHtml(work.archivedPath)}</p>` : ''}
         </div>`;
     }
 
@@ -725,7 +778,15 @@
         else group.status = statuses[statuses.length - 1] || group.status;
     }
 
-    async function pollTask(group, taskId){
+    function removePendingWork(group, pendingId){
+        group.pendingWorks = group.pendingWorks.filter(item => item.id !== pendingId);
+        if(group.id === state.selectedGroupId) {
+            const count = displayWorkCount(group);
+            state.selectedImageIndex = count ? Math.min(state.selectedImageIndex, count - 1) : 0;
+        }
+    }
+
+    async function pollTask(group, taskId, pendingId=''){
         if(state.pollers.has(taskId)) return state.pollers.get(taskId);
         const promise = (async () => {
             try {
@@ -735,9 +796,12 @@
                     group.taskStatuses[taskId] = taskStatus;
                     refreshRunStatus(group);
                     group.updatedAt = Date.now();
+                    const pending = group.pendingWorks.find(item => item.id === pendingId || item.taskId === taskId);
+                    if(pending) pending.status = taskStatus;
                     if(!ACTIVE_STATUSES.has(taskStatus)) {
                         if(taskStatus === 'succeeded') appendTaskResult(group, task);
                         else group.error = [group.error, String(task.error || '批量换款生成失败')].filter(Boolean).join('；');
+                        if(pending) removePendingWork(group, pending.id);
                         refreshRunStatus(group);
                         persist();
                         render();
@@ -749,6 +813,8 @@
             } catch(error) {
                 group.taskStatuses[taskId] = 'interrupted';
                 group.error = [group.error, error.message || '任务状态读取失败'].filter(Boolean).join('；');
+                const pending = group.pendingWorks.find(item => item.id === pendingId || item.taskId === taskId);
+                if(pending) removePendingWork(group, pending.id);
                 refreshRunStatus(group);
                 persist();
                 render();
@@ -772,6 +838,16 @@
         }
         showError('');
         group.error = '';
+        group.pendingWorks = targetImages.map((_, index) => cleanPendingWork({
+            id:`pending_${Date.now()}_${index}_${Math.random().toString(36).slice(2,8)}`,
+            targetIndex:index,
+            status:'queued',
+        }, index));
+        if(group.id === state.selectedGroupId) state.selectedImageIndex = group.works.length;
+        group.status = 'queued';
+        group.updatedAt = Date.now();
+        persist();
+        render();
         try {
             const controlMap = await ensureControlMap(group);
             const route = resolveGenerationRoute(group);
@@ -780,13 +856,13 @@
             const resolution = ['1k','2k','4k'].includes(studioState.resolution) ? studioState.resolution : '2k';
             const quality = ['low','medium','high'].includes(studioState.quality) ? studioState.quality : 'high';
             const policyInputs = {mode:'depth', modelSubject:group.inputs.model_subject || null, scene:group.inputs.scene || null};
-            group.status = 'queued';
             group.runTaskIds = [];
             group.taskStatuses = {};
             group.updatedAt = Date.now();
             persist();
             render();
             const submissions = targetImages.map(async (targetImage, index) => {
+                const pending = group.pendingWorks.find(item => item.targetIndex === index && !item.taskId);
                 const payload = {
                     mode:'depth',
                     inputs:{
@@ -815,16 +891,24 @@
                     group.taskIds = group.taskIds.slice(-40);
                     group.runTaskIds.push(taskId);
                     group.taskStatuses[taskId] = String(task.status || 'queued');
+                    if(pending) {
+                        pending.taskId = taskId;
+                        pending.status = group.taskStatuses[taskId];
+                    }
                     refreshRunStatus(group);
                     persist();
                     render();
-                    return pollTask(group, taskId);
+                    return pollTask(group, taskId, pending?.id || '');
                 } catch(error) {
                     group.error = [group.error, `服装参考 ${index + 1}：${error.message || '任务创建失败'}`].filter(Boolean).join('；');
+                    if(pending) removePendingWork(group, pending.id);
+                    persist();
+                    render();
                     throw error;
                 }
             });
             const results = await Promise.allSettled(submissions);
+            group.pendingWorks = group.pendingWorks.filter(item => item.taskId && ACTIVE_STATUSES.has(String(group.taskStatuses[item.taskId] || item.status)));
             refreshRunStatus(group);
             if(!group.runTaskIds.length) group.status = 'failed';
             else if(results.some(result => result.status === 'rejected') && group.status === 'succeeded') {
@@ -835,6 +919,7 @@
         } catch(error) {
             group.status = 'failed';
             group.error = error.message || '批量换款生成失败';
+            group.pendingWorks = [];
             persist();
             render();
         }

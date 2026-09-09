@@ -3458,6 +3458,41 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     height:100%;
     object-fit:contain;
 }
+.ec-batch-work-pending {
+    width:100%;
+    height:100%;
+    display:grid;
+    place-items:center;
+    padding:24px;
+    box-sizing:border-box;
+}
+.ec-batch-work-pending-card {
+    width:min(78%,440px);
+    height:min(78%,520px);
+    min-height:220px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:10px;
+    border:1px dashed color-mix(in srgb,var(--ec-accent) 46%,var(--ec-border));
+    border-radius:12px;
+    background:color-mix(in srgb,var(--ec-control) 84%,transparent);
+    box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ec-panel) 60%,transparent);
+    color:var(--ec-text);
+    text-align:center;
+}
+.ec-batch-work-pending-card .ec-spinner {
+    width:38px;
+    height:38px;
+}
+.ec-batch-work-pending-card strong {
+    font-size:13px;
+}
+.ec-batch-work-pending-card small {
+    color:var(--ec-muted);
+    font-size:9px;
+}
 .ec-batch-work-nav {
     position:absolute;
     z-index:2;
@@ -3525,6 +3560,27 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
 }
 .ec-batch-work-thumbs button.active {
     border-color:var(--ec-accent);
+}
+.ec-batch-work-thumbs button.ec-batch-work-thumb-pending {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    border-style:dashed;
+    color:var(--ec-muted);
+}
+.ec-batch-work-thumbs .ec-batch-work-thumb-pending .ec-spinner {
+    position:static;
+    width:22px;
+    height:22px;
+    min-width:0;
+    padding:0;
+    border-radius:50%;
+    background:transparent;
+}
+.ec-batch-work-thumbs .ec-batch-work-thumb-pending small {
+    font-size:7px;
 }
 .ec-batch-work-thumbs img {
     width:100%;

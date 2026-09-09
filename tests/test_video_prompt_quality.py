@@ -25,6 +25,14 @@ def test_h3_rejects_missing_reordered_and_empty_fields():
         parse_h3_prompt(render_h3_prompt({**sections, "summary": ""}))
 
 
+def test_h3_allows_explanatory_text_before_required_fields():
+    text = "以下是适配后的 H3 提示词：\n\n" + reference_prompt()
+
+    sections = parse_h3_prompt(text)
+
+    assert sections["subject_definitions"] == "<Subject 1> is the woman in <Picture 1>."
+
+
 def test_h3_keeps_quoted_foreign_dialogue_but_rejects_translated_narrative():
     text = reference_prompt('The woman says “这是必须保留的中文对白，不允许把它翻译成其他语言。” and keeps walking.')
     assert parse_h3_prompt(text)

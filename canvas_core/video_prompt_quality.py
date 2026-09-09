@@ -32,8 +32,6 @@ def parse_h3_prompt(text: str) -> dict[str, str]:
         raise ValueError("H3 提示词缺少必需字段：" + "、".join(missing))
     if names != list(required):
         raise ValueError("H3 提示词字段重复、顺序错误或混用了不同模式")
-    if text[:matches[0].start()].strip():
-        raise ValueError("H3 提示词必需字段前包含额外正文")
     sections = {}
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)

@@ -126,6 +126,7 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 首轮 Actions `34372587813`：Intel 因 `onnxruntime 1.27.0` 无 x64 Mac wheel 在依赖安装失败；Apple Silicon 完成 Python 与 Rust 编译，但一个下载文件名测试使用 Windows 路径导致断言失败。两项根因均已修正，等待下一轮验证。
 - 第二轮 Actions `34373137772`：两架构依赖、Python、Rust 和 PyInstaller 均通过；Node 官方 tar 中 `bin/node` 为 112,937,728 bytes，超过原 100MB 单文件解包上限。归档 SHA-256 与固定 member 路径均正确，已将仅 Node 可执行文件的上限调整为 160MB。
 - 第三轮 Actions `34374900714`：两架构通过依赖、contracts、PyInstaller、内置 Node、Tauri app bundle 和 ad-hoc codesign；bundle smoke 的 `/api/version` 请求未带桌面 token，被后端正确返回 401。已修复 smoke 鉴权并增加 Cargo 缓存。
+- 第四轮 Actions `34376080064`：Apple Silicon 再次推进到已签名 `.app`，确认业务接口不接受桌面 token header 直接鉴权；真实桌面流程应先访问 bootstrap 获取 HttpOnly session cookie。已改为 CookieJar 完成 bootstrap 后访问版本接口。旧同源排队 run `34376718395` 已取消，避免运行已知失败代码。
 - 当前 Windows 版自动更新只识别 EXE，Mac 更新安装需要独立机制。
 - macOS 云端产物没有 Apple Developer ID 时只能 ad-hoc/未公证，首次打开会受 Gatekeeper 提示影响。
 - Topaz、DWPose GPU、本地 FFmpeg/Kling CLI 等能力需要逐项确认 macOS 依赖，不应以“能编译”冒充完全可用。
@@ -146,6 +147,7 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 2026-09-10：Actions 第二轮 `34373137772` 两架构均通过到 PyInstaller，确认 Node 可执行文件真实大小后修正安全解包上限。
 - 2026-09-10：Actions 第三轮 `34374900714` 两架构完成 `.app` 和签名，仅 bundle smoke 的版本接口因漏传 token 失败；保持后端鉴权并修正测试请求。
 - 2026-09-10：整理 Windows 1.0.431 实际产品源码，相关 Python 258 项与 JavaScript 语法通过，准备进入同源 Mac 构建。
+- 2026-09-10：根据第四轮 Apple 原始日志，将 smoke 修正为真实 desktop bootstrap + session cookie 鉴权；取消含旧 smoke 的排队 run。
 
 ## 接力信息
 

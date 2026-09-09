@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import os
 import socket
@@ -18,11 +19,17 @@ def free_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def request_json(url: str, token: str = "", method: str = "GET") -> dict:
+def request_json(
+    url: str,
+    token: str = "",
+    method: str = "GET",
+    opener: urllib.request.OpenerDirector | None = None,
+) -> dict:
     headers = {"X-Desktop-Token": token} if token else {}
     data = b"" if method == "POST" else None
     request = urllib.request.Request(url, headers=headers, data=data, method=method)
-    with urllib.request.urlopen(request, timeout=2) as response:
+    open_request = opener.open if opener else urllib.request.urlopen
+    with open_request(request, timeout=2) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -66,7 +73,13 @@ def main() -> None:
                     time.sleep(0.2)
             if not health or health.get("status") != "ok":
                 raise SystemExit("Bundled backend did not become healthy")
-            version = request_json(f"http://127.0.0.1:{port}/api/version", token)
+            cookie_jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+            with opener.open(f"http://127.0.0.1:{port}/api/auth/bootstrap", timeout=3) as response:
+                response.read()
+            if not any(cookie.name == "canvas_session" for cookie in cookie_jar):
+                raise SystemExit("Desktop bootstrap did not create an authenticated session cookie")
+            version = request_json(f"http://127.0.0.1:{port}/api/version", opener=opener)
             expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
             actual = str(version.get("version") or version.get("current_version") or "").strip()
             if actual != expected:

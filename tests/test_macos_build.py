@@ -21,6 +21,11 @@ def test_macos_build_packages_same_web_skills_and_backend():
     ):
         assert contract in script
 
+    smoke = (ROOT / "tools/smoke-macos-bundle.py").read_text(encoding="utf-8")
+    assert "HTTPCookieProcessor" in smoke
+    assert "/api/auth/bootstrap" in smoke
+    assert 'cookie.name == "canvas_session"' in smoke
+
 
 def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
     workflow = (ROOT / ".github/workflows/build-macos.yml").read_text(encoding="utf-8")

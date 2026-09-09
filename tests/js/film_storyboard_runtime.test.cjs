@@ -102,6 +102,47 @@ test('深度队列按唯一参考图上报真实进度，并把结果映射回�
     assert.match(html,/photo-1-depth/);assert.match(html,/photo-2-depth/);
     assert.equal((html.match(/film-depth-preview is-ready/g) || []).length,2);
 });
+test('参考图连接同步会自动提取、跨重绘去重，并供生成预处理直接复用',async()=>{
+    const {api}=harness(),n=node({storyboardMode:'batch'}),events=[]; let calls=0;
+    const assets=[ref('reference','photo-1'),ref('reference','photo-2'),ref('reference','photo-1')];
+    const options={
+        onDepthState:event=>{ events.push(plain(event)); api.applyDepthState(n,event); },
+        depth:async source=>{ calls++; return {url:`${source.url}-depth`,name:'depth.png'}; },
+    };
+    const first=api.syncReferenceDepths(n,assets,options);
+    const redraw=api.syncReferenceDepths(n,assets,options);
+    assert.equal(first,redraw,'相同连接签名必须共用正在运行的队列');
+    await first;
+    assert.equal(calls,2,'重复 URL 只提取一次');
+    await api.syncReferenceDepths(n,assets,options);
+    assert.equal(calls,2,'完成后的节点重绘不能重复提取');
+    assert.deepEqual(plain(n.storyboardDepthPreviews.map(item=>[item.sourceUrl,item.status,item.url])),[
+        ['photo-1','ready','photo-1-depth'],['photo-2','ready','photo-2-depth']
+    ]);
+    const plans=api.plans(n,assets);
+    const prepare=api.createPreparer(n,{plans,depth:async()=>{ calls++; return {url:'unexpected-depth'}; }});
+    const built=await prepare(plans[0]);
+    assert.equal(calls,2,'生成预处理应复用已自动提取的深度图');
+    assert.equal(built.refs.find(item=>item.inputRole==='depth').url,'photo-1-depth');
+    assert.equal(events.filter(event=>event.status==='ready').length,2);
+});
+test('参考输入变化会清理旧状态并忽略迟到结果，显式控制图会停止自动提取',async()=>{
+    const {api}=harness(),n=node({storyboardMode:'batch'}); let release;
+    const delayed=new Promise(resolve=>{ release=resolve; });
+    const apply=event=>api.applyDepthState(n,event);
+    const running=api.syncReferenceDepths(n,[ref('reference','old')],{
+        onDepthState:apply,depth:async()=>{ await delayed; return {url:'old-depth'}; }
+    });
+    await Promise.resolve();
+    assert.equal(n.storyboardDepthPreviews[0].status,'running');
+    await api.syncReferenceDepths(n,[ref('depth','explicit'),ref('reference','old')],{
+        onDepthState:apply,depth:async()=>{ throw new Error('不应调用'); }
+    });
+    assert.deepEqual(plain(n.storyboardDepthPreviews),[],'显式控制图接入后清理自动深度状态');
+    release();
+    await running;
+    assert.deepEqual(plain(n.storyboardDepthPreviews),[],'被替换队列的迟到结果不能写回节点');
+});
 test('深度失败隔离，后续镜头仍可完成；不截断超限共享资产',async()=>{
     const {api}=harness(),n=node({storyboardMode:'batch'});
     const prepare=api.createPreparer(n,{depth:async r=>{if(r.url==='bad') throw Error('坏图'); return {url:'depth'};}});

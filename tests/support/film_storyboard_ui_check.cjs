@@ -119,12 +119,14 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 edges.push({id:'photos',from:'shots',to:'film',inputRole:'reference'});
                 render();
             },smart);
-            await page.evaluate(smart=>{ if(smart) void runSmartFilmNode(nodes.find(n=>n.id==='film')); else void runFilmNode('film'); },smart);
             await page.waitForFunction(()=>nodes.find(n=>n.id==='film')?.storyboardDepthPreviews?.some(item=>item.status==='running'));
             assert.match(await panel.locator('.film-storyboard-summary').textContent(),/正在提取参考图深度 1\/2 · 已完成 0\/2/);
             await panel.screenshot({path:`${artifacts}/${smart ? 'smart' : 'classic'}-depth-progress.png`});
+            await page.waitForFunction(()=>nodes.find(n=>n.id==='film')?.storyboardDepthPreviews?.every(item=>item.status==='ready'));
+            assert.equal(depths,2,'连接参考图后应在点击生成前自动提取');
+            await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
             await page.waitForFunction(()=>nodes.find(n=>n.id==='film')?.running===false);
-            assert.equal(depths,2); assert.equal(requests.length-before,2);
+            assert.equal(depths,2,'生成时应复用连接阶段的深度图'); assert.equal(requests.length-before,2);
             for(const request of requests.slice(before)){
                 assert.equal(request.reference_images.length,4);
                 assert.equal(request.reference_images.filter(r=>r.role==='control_map').length,1);

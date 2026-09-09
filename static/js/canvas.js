@@ -11076,6 +11076,21 @@ function classicFilmAssets(node){
     const inherited = allInherited.filter(item => !connectedFilmRoles.has(item.role));
     return [...direct, ...inherited];
 }
+function syncClassicStoryboardReferenceDepth(node){
+    const api=window.CanvasFilmStoryboard;
+    if(!api?.syncReferenceDepths || node?.type!=='film-storyboard') return Promise.resolve([]);
+    return api.syncReferenceDepths(node,classicFilmAssets(node),{
+        depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{
+            resolveUrl:url=>canvasDisplayMediaUrl(url),onProgress
+        }),
+        onDepthState:event=>{
+            if(!nodes.includes(node)) return;
+            api.applyDepthState(node,event);
+            refreshNodes([node.id]);
+            scheduleSave();
+        },
+    });
+}
 function filmNodeProviderOptions(node){
     return videoProviderOptions(node.apiProvider || videoApiProviders()[0]?.id || 'comfly');
 }
@@ -11126,6 +11141,7 @@ function bindClassicFilmNode(el,node){
         toast:message => setStatus(String(message || '').slice(0,180)),
         onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },
     });
+    syncClassicStoryboardReferenceDepth(node);
 }
 function classicFilmHasActiveRun(node, out){
     if(!node || !out) return false;
@@ -11303,6 +11319,7 @@ async function runStoryboardMergeNode(nodeId){
 
 async function runFilmStoryboardNode(node, opts={}){
     const api=window.CanvasFilmStoryboard;
+    await syncClassicStoryboardReferenceDepth(node);
     const snapshot={...node,prompt:[node.prompt,connectedCanvasPromptTextForSubmission(node)].filter(Boolean).join('\n')};
     snapshot.apiProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
     snapshot.model=resolveImageModel(node.model || providerImageModels(snapshot.apiProvider)[0]);

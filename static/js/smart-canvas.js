@@ -2037,6 +2037,19 @@ function filmSmartAssets(node){
     const connectedFilmRoles = new Set(direct.filter(item => /^(actor|outfit|prop)-\d+$/.test(item.role || '') && item.ref?.url).map(item => item.role));
     return [...direct, ...inherited.filter(item => !connectedFilmRoles.has(item.role))];
 }
+function syncSmartStoryboardReferenceDepth(node){
+    const api=window.CanvasFilmStoryboard;
+    if(!api?.syncReferenceDepths || node?.specialType!=='film-storyboard') return Promise.resolve([]);
+    return api.syncReferenceDepths(node,filmSmartAssets(node),{
+        depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{onProgress}),
+        onDepthState:event=>{
+            if(!nodes.includes(node)) return;
+            api.applyDepthState(node,event);
+            render();
+            scheduleSave();
+        },
+    });
+}
 function smartFilmConnectedPromptText(node){
     if(!node) return '';
     return (canvas?.connections || []).filter(connection => connection.to === node.id).map(connection => {
@@ -2191,6 +2204,7 @@ async function runSmartFilmLineArtNode(node){
     return runSmartBatchGenerator(node,{prompt:window.CanvasFilmNodes.lineArtPrompt(node),runSettings:smartFilmLineArtRunSettings(node),lineArt:true});
 }
 async function runSmartFilmStoryboardNode(node){
+    await syncSmartStoryboardReferenceDepth(node);
     const base=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
     const provider=filmSmartImageProviderId(node) || base.provider_id || imageProviders()[0]?.id || '';
     const snapshot={...node,type:'film-storyboard',apiProvider:provider,model:node.model || base.model || providerImageModels(provider)[0] || '',prompt:[node.prompt,smartFilmConnectedPromptTextForSubmission(node)].filter(Boolean).join('\n')};
@@ -12470,6 +12484,7 @@ function bindSmartSpecialNode(el, node){
             toast:message => toast(String(message || '').slice(0,180)),
             onChange:(_changed,meta={}) => { scheduleSave(); if(meta.render) setTimeout(() => { if(nodes.some(item => item.id === node.id)) render(); },0); },
         });
+        syncSmartStoryboardReferenceDepth(node);
         return;
     }
     if(node?.specialType === 'batch-generator'){

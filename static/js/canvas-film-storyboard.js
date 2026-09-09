@@ -1,6 +1,7 @@
 (function(){
     'use strict';
     const SHOT_ROLES = new Set(['sketch','depth','reference']);
+    const automaticDepthRuns = new WeakMap();
     const REALISM = '生成一张独立的实景摄影画面。严格保持当前镜头的景别、机位、透视、人物数量、位置比例、身体朝向、视线、肢体动作和遮挡关系；线稿约束空间与模特姿势，深度图还辅助核对有依据的衣片起伏，控制图不得出现在成片中。演员图只定义对应演员身份和外貌，服装、道具按演员编号绑定，禁止借用原始参考图中人物的脸和服装覆盖已指定资产。没有指定替换资产时，保留参考画面中可辨认的主体特征。';
     const REBUILD = '原始参考图只提供构图、环境语义、色彩与光线氛围证据：逐一还原对应画面的主色、色温、明暗分布、曝光、光源方向、软硬程度、阴影和空气感，禁止擅自改成统一滤镜。背景必须依据这些证据从零重新生成高清真实材质、空间结构和自然细节。禁止以原图为底板扩图、超分辨率放大、修补或直接沿用原背景像素；不得复制低清模糊、压缩噪点、涂抹纹理。保留合理的光学景深，不能把背景重建理解为所有平面都锐化。';
     const USER_SCENE='用户场景图是唯一的背景身份与空间依据：固定建筑结构、门窗/柱体位置、墙地材质、家具与地标必须保持一致，不得融合其他候选背景，也不能换回原始参考照片的背景。根据线稿/深度图背景特征，在所选用户场景内使用匹配位置拍摄，保持对应机位、景别、透视、人物落点和遮挡。原始参考照片只提供该镜头的色彩与光线氛围：将其主色、色温、曝光、光源方向、明暗分布、阴影软硬和空气感应用到用户场景中，允许重新布光但不得因此改变场景几何与材质身份。高清重建指在此固定场景和位置重新渲染真实细节，不是重新设计环境；禁止使用模糊原图底板扩图、放大或涂抹背景。无彩色参考时沿用用户场景的合理色光，不从灰度控制图推断颜色。';
@@ -74,10 +75,24 @@
         });
         return refs;
     }
+    function automaticDepthReferences(node, assets=[]){
+        const refs=window.CanvasFilmNodes.assetList(node,assets).filter(ref=>ref.url && (!ref.kind || ref.kind==='image'));
+        if(refs.some(ref=>['sketch','depth'].includes(ref.inputRole))) return [];
+        const seen=new Set();
+        return refs.filter(ref=>ref.inputRole==='reference' && !seen.has(ref.url) && seen.add(ref.url));
+    }
     function applyDepthState(node,event){
         if(!node || !event) return;
         if(event.status==='queue'){
-            node.storyboardDepthPreviews=(event.references || []).map(ref=>({sourceUrl:ref.url,sourceName:ref.name || '',status:'queued'}));
+            const previous=new Map((node.storyboardDepthPreviews || []).map(item=>[item.sourceUrl,item]));
+            node.storyboardDepthPreviews=(event.references || []).map(ref=>{
+                const ready=previous.get(ref.url);
+                return ready?.status==='ready' && ready.url
+                    ? {...ready,sourceName:ref.name || ready.sourceName || ''}
+                    : {sourceUrl:ref.url,sourceName:ref.name || '',status:'queued'};
+            });
+            if(!event.total) node.storyboardProgress='';
+            else if(event.completed===event.total) node.storyboardProgress=`参考图深度已全部提取 ${event.completed}/${event.total}`;
             return;
         }
         const sourceUrl=event.reference?.url;
@@ -107,15 +122,76 @@
             node.storyboardProgress=`参考图深度提取失败 ${position} · ${done}`;
         }
     }
+    function syncReferenceDepths(node, assets=[], options={}){
+        if(!node) return Promise.resolve([]);
+        const references=automaticDepthReferences(node,assets);
+        const signature=references.map(ref=>ref.url).join('\n');
+        const current=automaticDepthRuns.get(node);
+        if(current?.signature===signature) return current.promise;
+        const token={};
+        const existing=new Map((node.storyboardDepthPreviews || [])
+            .filter(item=>item?.sourceUrl && item.status==='ready' && item.url)
+            .map(item=>[item.sourceUrl,item]));
+        const states=new Map(references.map(ref=>[ref.url,existing.has(ref.url) ? 'ready' : 'queued']));
+        const emit=(event)=>{
+            if(automaticDepthRuns.get(node)?.token!==token) return;
+            options.onDepthState?.(event);
+        };
+        const promise=Promise.resolve().then(async()=>{
+            emit({status:'queue',references,total:references.length,
+                completed:[...states.values()].filter(value=>value==='ready').length,processed:0});
+            const results=[];
+            for(let index=0;index<references.length;index++){
+                const ref=references[index];
+                if(automaticDepthRuns.get(node)?.token!==token) break;
+                if(existing.has(ref.url)){
+                    results.push({status:'fulfilled',value:existing.get(ref.url)});
+                    continue;
+                }
+                const progress=message=>emit({
+                    status:'running',reference:ref,index:index+1,total:references.length,
+                    completed:[...states.values()].filter(value=>value==='ready').length,
+                    processed:[...states.values()].filter(value=>value==='ready' || value==='error').length,
+                    message,
+                });
+                states.set(ref.url,'running');
+                progress('正在提取参考图深度');
+                try {
+                    if(typeof options.depth!=='function') throw new Error('深度图生成能力尚未加载');
+                    const depth=await options.depth(ref,progress);
+                    if(!depth?.url) throw new Error('参考图未返回深度图，请检查深度组件后重试');
+                    states.set(ref.url,'ready');
+                    emit({status:'ready',reference:ref,index:index+1,total:references.length,
+                        completed:[...states.values()].filter(value=>value==='ready').length,
+                        processed:[...states.values()].filter(value=>value==='ready' || value==='error').length,depth});
+                    results.push({status:'fulfilled',value:depth});
+                } catch(error){
+                    states.set(ref.url,'error');
+                    emit({status:'error',reference:ref,index:index+1,total:references.length,
+                        completed:[...states.values()].filter(value=>value==='ready').length,
+                        processed:[...states.values()].filter(value=>value==='ready' || value==='error').length,
+                        error:error?.message || String(error)});
+                    results.push({status:'rejected',reason:error});
+                }
+            }
+            return results;
+        });
+        automaticDepthRuns.set(node,{signature,promise,token});
+        return promise;
+    }
     function createPreparer(node, options={}){
-        // 每次点击独立快照与缓存，输入或全局参数变化不会复用上一批控制图。
+        // 同一组已自动完成的参考图直接复用；本次点击中新出现的输入仍使用独立队列与缓存。
         const snapshot={...node};
-        const cache=new Map();
+        const readyDepths=new Map((snapshot.storyboardDepthPreviews || [])
+            .filter(item=>item?.sourceUrl && item.status==='ready' && item.url)
+            .map(item=>[item.sourceUrl,{url:item.url,name:item.name || 'depth.png',natural_w:item.natural_w || 0,natural_h:item.natural_h || 0}]));
+        const cache=new Map([...readyDepths].map(([url,file])=>[url,Promise.resolve(file)]));
         let depthQueue=Promise.resolve();
         let sceneMatching=null;
         const queuedDepthRefs=depthReferences(options.plans || []);
-        const depthStates=new Map(queuedDepthRefs.map(ref=>[ref.url,'queued']));
-        options.onDepthState?.({status:'queue',references:queuedDepthRefs,total:queuedDepthRefs.length,completed:0,processed:0});
+        const depthStates=new Map(queuedDepthRefs.map(ref=>[ref.url,readyDepths.has(ref.url) ? 'ready' : 'queued']));
+        options.onDepthState?.({status:'queue',references:queuedDepthRefs,total:queuedDepthRefs.length,
+            completed:[...depthStates.values()].filter(value=>value==='ready').length,processed:0});
         const emitDepthState=(ref,status,details={},plan=null)=>{
             depthStates.set(ref.url,status);
             const event={
@@ -194,5 +270,5 @@
             });
         });
     }
-    window.CanvasFilmStoryboard={plans,summary,depthReferences,applyDepthState,createPreparer,alignPorts};
+    window.CanvasFilmStoryboard={plans,summary,depthReferences,automaticDepthReferences,applyDepthState,syncReferenceDepths,createPreparer,alignPorts};
 })();

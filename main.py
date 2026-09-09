@@ -17979,6 +17979,8 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
     selected_style = options.get("lookbook_style")
     if prompt_policy == "lookbook" and isinstance(selected_style, dict) and selected_style.get("id") == FASHION_EDITORIAL_STYLE_ID:
         options["lookbook_style"] = {**selected_style, **FASHION_EDITORIAL_STYLE}
+        # 旧节点可能保留快速模式；选中完整导演风格时统一进入联合规划链路。
+        options["lookbook_mode"] = LOOKBOOK_STORY_MODE
     story_mode = (
         prompt_policy == "lookbook"
         and str(options.get("lookbook_mode") or "").strip().lower() == LOOKBOOK_STORY_MODE
@@ -18361,10 +18363,58 @@ def lookbook_references_for_card(
     return packaged
 
 
+def fashion_product_detail_references(snapshot: Dict[str, Any], references: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    """按导演标注补充原图商品局部；不替代原始参考，不推测遮挡部位。"""
+    options = snapshot.get("options") or {}
+    if not is_fashion_director(options):
+        return references
+    product = (options.get("lookbook_bible") or {}).get("product_direction") or {}
+    result = list(references)
+    originals = snapshot.get("inputs") or references
+    regions = product.get("detail_regions") or []
+    if not isinstance(regions, list):
+        return result
+    for region in regions[:2]:
+        if len(result) >= limit:
+            break
+        try:
+            source_index = int(region["reference_index"])
+            source = originals[source_index - 1] if 1 <= source_index <= len(originals) else None
+            mapped_index = next((i for i, ref in enumerate(references, 1) if source and ref.get("url") == source.get("url")), None)
+            box = [float(value) for value in region["box"]]
+            if not source or not mapped_index or len(box) != 4 or not all(0 <= value <= 1 for value in box) or box[0] >= box[2] or box[1] >= box[3]:
+                continue
+            path = output_file_from_url(source["url"])
+            if not path:
+                continue
+            signature = hashlib.sha256((str(path) + str(os.stat(path).st_mtime_ns) + json.dumps(box)).encode()).hexdigest()[:20]
+            name = f"fashion_product_detail_{signature}.jpg"
+            target = os.path.join(OUTPUT_OUTPUT_DIR, name)
+            if not os.path.isfile(target):
+                from PIL import ImageOps
+                with Image.open(path) as original:
+                    original = ImageOps.exif_transpose(original)
+                    width, height = original.size
+                    bounds = tuple(round(value * (width if i % 2 == 0 else height)) for i, value in enumerate(box))
+                    if bounds[2] - bounds[0] < 16 or bounds[3] - bounds[1] < 16:
+                        continue
+                    original.convert("RGB").crop(bounds).save(target, quality=95)
+            result.append({"url": "/assets/output/" + name, "role": "detail", "reference_type": "detail",
+                           "lookbook_role": "商品细节", "fashion_product_source_index": mapped_index,
+                           "label": f"原始图{mapped_index}的商品结构局部放大",
+                           "instruction": str(region.get("purpose") or "只提供商品结构与材质，不提供新人物、姿态或场景")})
+        except (ValueError, TypeError, KeyError, OSError):
+            continue
+    return result
+
+
 def lookbook_scene_reference_package_prompt(references: List[Dict[str, Any]]) -> str:
     masters = []
     derived = []
+    product_lines = []
     for index, reference in enumerate(references, 1):
+        if reference.get("fashion_product_source_index"):
+            product_lines.append(f"Image {index} is an enlarged PRODUCT DETAIL from original image {reference['fashion_product_source_index']}; preserve its exact visible construction, not a generic seam or invented rip. It owns product detail only, not identity, pose or camera. {reference.get('instruction') or ''}")
         if not is_lookbook_scene_reference(reference):
             continue
         if reference.get("lookbook_scene_derived"):
@@ -18372,12 +18422,14 @@ def lookbook_scene_reference_package_prompt(references: List[Dict[str, Any]]) ->
             derived.append(f"Image {index} is a derived region navigation crop from scene master Image {source_index}")
         else:
             masters.append(f"Image {index} is an immutable full scene master")
+    product_prompt = "\nPRODUCT EVIDENCE PACKAGE: " + " ".join(product_lines) if product_lines else ""
     if not masters:
-        return ""
+        return product_prompt
     return (
         "\nSCENE EVIDENCE PACKAGE: "
         + "; ".join([*masters, *derived])
         + ". Keep every master as the location source of truth. Select the story-appropriate visible region, and extend a new viewpoint only from evidence in that same master; never synthesize a merely similar replacement location."
+        + product_prompt
     )
 
 
@@ -18398,6 +18450,7 @@ async def execute_lookbook_story_batch(
         max_reference_images = max(len(refs), int(route.get("max_reference_images") or ONLINE_IMAGE_REFERENCE_MAX))
     except (TypeError, ValueError):
         max_reference_images = max(len(refs), ONLINE_IMAGE_REFERENCE_MAX)
+    refs = fashion_product_detail_references(snapshot, refs, max_reference_images - 1)
     semaphore = asyncio.Semaphore(LOOKBOOK_STORY_GENERATION_CONCURRENCY)
     started_at = time.time()
 
@@ -18486,7 +18539,8 @@ async def execute_lookbook_story_batch(
         rows = math.ceil(count / columns)
         cell_ratio = str(options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "16:9")
         master_layout = resolve_lookbook_layout_intent("", {"rows": rows, "columns": columns, "gap": 1}, cell_ratio)
-        master_card = {**cards[0], "panel_cards": panels}
+        master_card = {**cards[0], "panel_cards": panels,
+                       "render_prompt": "Treat the following standalone shot briefs as the individual cells of ONE internal contact sheet.\n" + "\n".join(f"CAMPAIGN CELL {i}: {card['render_prompt']}" for i, card in enumerate(cards, 1))}
         master_prompt = build_lookbook_shot_prompt(
             str(options.get("instruction") or ""), options.get("lookbook_bible") or {}, master_card,
             [f"参考 {i} [{ref.get('lookbook_role') or ref.get('reference_type') or '参考素材'}]" for i, ref in enumerate(refs, 1)],
@@ -19518,9 +19572,19 @@ async def enrich_fashion_director_storyboard(snapshot: Dict[str, Any]) -> Tuple[
         web_search=False, retry_524=1,
     )
     try:
-        result = await canvas_llm(request)
-        data = _parse_lookbook_json(str(result.get("text") or ""))
-        bible, cards = normalize_fashion_plan(data, count, layout)
+        for attempt in range(2):
+            result = await canvas_llm(request)
+            raw_text = str(result.get("text") or "")
+            try:
+                data = _parse_lookbook_json(raw_text)
+                bible, cards = normalize_fashion_plan(data, count, layout)
+                break
+            except (ValueError, TypeError) as exc:
+                if attempt:
+                    raise
+                # 仅针对明确的结构问题纠正一次，不重试网络错误或退回旧模板。
+                request.messages = [{"role": "assistant", "content": raw_text}]
+                request.message = f"方案校验失败：{str(exc)[:600]}。修正缺失字段、PANEL 编号或长度预算，保留正确参考事实和导演设计，重新输出完整 JSON。"
         options.update(lookbook_bible=bible, lookbook_shot_cards=cards,
                        lookbook_plan=json.dumps(bible, ensure_ascii=False),
                        lookbook_story_summary=str(data.get("logline") or ""),
@@ -19533,7 +19597,7 @@ async def enrich_fashion_director_storyboard(snapshot: Dict[str, Any]) -> Tuple[
         return snapshot, {"status": "failed", "reason": f"时尚广告导演规划失败：{str(exc)[:300]}"}
 
 
-def parse_lookbook_quality_result(text: str, image_count: int) -> Dict[str, Any]:
+def parse_lookbook_quality_result(text: str, image_count: int, correction_limit: int = 1200) -> Dict[str, Any]:
     value = str(text or "").strip()
     value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s*```$", "", value)
@@ -19557,7 +19621,12 @@ def parse_lookbook_quality_result(text: str, image_count: int) -> Dict[str, Any]
         if 0 <= index < image_count and index not in weak_indices:
             weak_indices.append(index)
     corrections = data.get("corrections") if isinstance(data.get("corrections"), dict) else {}
-    normalized_corrections = {str(index): str(corrections.get(str(index)) or corrections.get(index) or "修复视觉瑕疵并严格遵守原始 Lookbook 方案")[:1200] for index in weak_indices}
+    normalized_corrections = {}
+    for index in weak_indices:
+        correction = corrections.get(str(index)) or corrections.get(index) or "修复视觉瑕疵并严格遵守原始 Lookbook 方案"
+        if isinstance(correction, list):
+            correction = "\n".join(str(item) for item in correction)
+        normalized_corrections[str(index)] = str(correction)[:correction_limit]
     passed = bool(data.get("passed")) and score >= 82 and not weak_indices
     return {
         "status": "succeeded",
@@ -19576,6 +19645,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
     if not route:
         return {"status": "skipped", "reason": "未配置可用的 AI助手视觉模型"}
     quality_reference_items = prioritize_lookbook_scene_references(snapshot.get("inputs") or [], 10)
+    quality_reference_items = fashion_product_detail_references(snapshot, quality_reference_items, 12)
     references = [str(item.get("url") or "") for item in quality_reference_items]
     options = snapshot.get("options") if isinstance(snapshot.get("options"), dict) else {}
     brief = str(options.get("instruction") or "")
@@ -19623,8 +19693,21 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         provider=route["provider_id"], model=route["model"], images=[*references, *images], image_labels=[*reference_labels, *output_labels], web_search=False, retry_524=0,
     )
     if is_fashion_director(options):
+        geometry = []
+        for index, url in enumerate(images):
+            path = output_file_from_url(url)
+            if path:
+                try:
+                    with Image.open(path) as output_image:
+                        width, height = output_image.size
+                    geometry.append({"output_index": index, "width": width, "height": height,
+                                     "actual_ratio": round(width / height, 4), "requested_ratio": snapshot.get("aspect_ratio")})
+                except (OSError, ValueError):
+                    pass
         request.system_prompt = (
             FASHION_QA + "\n完整用户需求：" + brief
+            + "\n实际像素元数据（画幅以数值为准，不根据视觉缩略图猜测16:9等比例；上游像素对齐导致的1%以内比例偏差不判为版式失败）："
+            + json.dumps(geometry, ensure_ascii=False)
             + "\n联合导演方案：" + json.dumps(options.get("lookbook_bible") or {}, ensure_ascii=False)
             + "\n每个输出的镜头计划：" + json.dumps(options.get("lookbook_shot_cards") or [], ensure_ascii=False)
             + '\n输出严格 JSON：{"passed":true,"score":0,"weak_indices":[],"issues":[],"corrections":{},"summary":""}。'
@@ -19633,7 +19716,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         request.message = "请对照参考图逐格验收待检查的输出，只返回要求的 JSON。"
     try:
         result = await asyncio.wait_for(canvas_llm(request), timeout=LOOKBOOK_QUALITY_TIMEOUT_SECONDS)
-        return parse_lookbook_quality_result(str(result.get("text") or ""), len(images))
+        return parse_lookbook_quality_result(str(result.get("text") or ""), len(images), correction_limit=8000 if is_fashion_director(options) else 1200)
     except asyncio.TimeoutError:
         return {"status": "skipped", "reason": f"质检超过 {LOOKBOOK_QUALITY_TIMEOUT_SECONDS} 秒，已保留生成图片"}
     except Exception as exc:
@@ -19645,6 +19728,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
         return batch, None
     images = list(batch.get("images") or [])
     image_items = list(batch.get("image_items") or [])
+    original_images, original_image_items = list(images), list(image_items)
     initial = await analyze_lookbook_outputs(snapshot, images)
     try:
         max_retries = max(0, min(1, int(options.get("lookbook_max_retries", 1)))) if options.get("lookbook_auto_repair") is True else 0
@@ -19669,9 +19753,17 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
         for index in weak_indices:
             correction = str((initial.get("corrections") or {}).get(str(index)) or "修复该画面的全部明显质量问题")
             repair_references = [dict(item) for item in (snapshot.get("inputs") or []) if isinstance(item, dict) and item.get("url")]
+            repair_references = fashion_product_detail_references(snapshot, repair_references, repair_reference_limit - 1)
             if index < len(repair_cards):
                 repair_references = lookbook_references_for_card(repair_references, repair_cards[index], max_references=repair_reference_limit)
             scene_package_prompt = lookbook_scene_reference_package_prompt(repair_references)
+            repair_target_added = is_fashion_director(options) and len(repair_references) < repair_reference_limit
+            if repair_target_added:
+                repair_references.append({
+                    "url": images[index], "role": "style", "reference_type": "style",
+                    "label": "待修复的当前完整输出，保留正确部分；原始参考仍拥有身份和商品事实",
+                    "instruction": "只修改质检指出的分格与失败层，不能继承原图错误，不能改变正确的分格和摄影风格",
+                })
             if progress_callback:
                 progress_callback(f"正在修复第 {index + 1}/{len(images)} 张图片（额外生图）…")
             repair_instruction = (
@@ -19679,6 +19771,8 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
                 if is_fashion_director(options) else
                 f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style, scene-master geography and series-continuity attributes. Apply the same publication-grade series quality anchor and shot-scale lock; output one full-bleed image only."
             )
+            if repair_target_added:
+                repair_instruction += " The LAST reference image is the repair target. Preserve its successful panels, grid, photographic surface and correct content. Edit the named weak panels/layers while returning the COMPLETE original layout. The earlier original references remain authoritative for identity, exact product geometry and scene facts; never preserve an error merely because it exists in the repair target."
             try:
                 refined = await execute_ai_image_batch(
                     prompt=((repair_prompts[index] if index < len(repair_prompts) else snapshot["prompt"]) + scene_package_prompt + repair_instruction),
@@ -19704,6 +19798,14 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
         final = await analyze_lookbook_outputs(snapshot, images)
     else:
         final = initial
+    repair_candidate_quality = None
+    if is_fashion_director(options) and any(item.get("replaced") for item in retry_details):
+        if final.get("status") != "succeeded" or int(final.get("score") or 0) < int(initial.get("score") or 0):
+            repair_candidate_quality = final
+            images, image_items, final = original_images, original_image_items, initial
+            for item in retry_details:
+                if item.get("replaced"):
+                    item.update(replaced=False, reverted=True, reason="修复未通过复检或评分下降，保留原图")
     return {
         **batch,
         "images": images,
@@ -19711,6 +19813,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
     }, {
         "status": final.get("status", "failed"),
         "initial": initial,
+        "repair_candidate_quality": repair_candidate_quality,
         "retries": retry_details,
         "final": final,
         "passed": bool(final.get("passed")),

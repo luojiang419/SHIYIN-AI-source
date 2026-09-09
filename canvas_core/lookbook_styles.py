@@ -10,7 +10,7 @@ from pathlib import Path
 
 FASHION_EDITORIAL_STYLE_ID = "fashion-advertising"
 # 风格卡片/兼容旧客户端使用的简介；不再作为完整导演的运行时替代。
-# 实际规划和生图由 fashion_director 加载随包分发的原始技能全文。
+# fashion_director 完整加载随包分发的原始技能规划，再向生图模型发送编译后的摄影指令。
 FASHION_EDITORIAL_PROMPT = " ".join([
     "FASHION EDITORIAL SEQUENCE DIRECTOR v1.2 / EDITORIAL_B: create photographed, alive, opinionated high-fashion campaign imagery. User intent and explicit appearance, wardrobe, weather, lighting, camera and delivery choices override preset defaults. EDITORIAL_B is a photographic method, not a sunny filter.",
     "REFERENCE ROUTER: assign SUBJECT_IDENTITY, WARDROBE, LOCATION, STYLE_ANCHOR, SKIN_REFERENCE, LIGHT_ONLY, COLOR_ONLY, COMPOSITION_ONLY, MAKEUP_HAIR, TEXTURE_ONLY, POSE, PROP or GENERAL_MOOD. Transfer only the assigned attributes. Never borrow identity from a style, lighting or clothing reference. Preserve facial geometry, recognizable relationships, body proportions and hair identity; preserve who the person is, not source exposure, white balance or beauty retouching.",

@@ -32,7 +32,8 @@ def plan(outputs=1, panels=9):
                 "micro_expression", "weight_and_contact")}
             shot.update(index=number, camera={"shot_size": "24mm ground-level full-body denim hero", "angle": "20 degree Dutch tilt"})
             shots.append(shot)
-        cards.append({"index": index, "panel_cards": shots})
+        cards.append({"index": index, "panel_cards": shots,
+                      "render_prompt": "A denim fashion campaign, preserve exact reference trousers and physical daylight. " + " ".join(f"PANEL {i}: 24mm ground-level full-body denim hero, 20 degree Dutch tilt, visible wide legs and knee seams." for i in range(1, panels + 1))})
     return {"campaign_bible": bible, "shot_cards": cards}
 
 
@@ -58,10 +59,10 @@ def test_grid_compiles_all_nine_distinct_panels_without_single_beat_lock():
     prompts = main.lookbook_generation_prompts(value)
     assert len(prompts) == 1
     prompt = prompts[0]
-    assert full_skill() in prompt
+    assert full_skill() not in prompt
     assert "exactly 9 distinct photographs" in prompt
     assert "3 rows x 3 columns" in prompt
-    assert '"index":9' in prompt
+    assert "PANEL 9" in prompt
     assert "MANDATORY SHOT-SCALE LOCK" not in prompt
     assert "Every panel must advance the same narrative beat" not in prompt
     assert "execute only its assigned narrative beat" not in prompt
@@ -84,6 +85,7 @@ def test_director_cameras_survive_both_generic_contracts():
     lambda data: data["shot_cards"][0]["panel_cards"][0].pop("camera"),
     lambda data: data["campaign_bible"].pop("product_direction"),
     lambda data: data["shot_cards"].append(data["shot_cards"][0]),
+    lambda data: data["shot_cards"][0].update(render_prompt=data["shot_cards"][0]["render_prompt"].replace("PANEL 9", "LAST PANEL")),
 ])
 def test_invalid_plans_fail_instead_of_silent_generic_fallback(mutate):
     data = plan()
@@ -123,7 +125,8 @@ def test_generation_count_and_internal_master_anchor(outputs, grid, calls):
         result = asyncio.run(main.execute_lookbook_story_batch(value, {"provider_id": "images", "model": "image-model"}))
     assert len(requests) == calls
     assert len(result["images"]) == outputs
-    assert all(full_skill() in request["prompt"] for request in requests)
+    assert all("COMPILED PHOTOGRAPHIC DIRECTION" in request["prompt"] for request in requests)
+    assert all(full_skill() not in request["prompt"] for request in requests)
     if not grid:
         assert result["director_master"]["images"] == ["/assets/output/1.png"]
         assert "/assets/output/1.png" not in result["images"]
@@ -194,6 +197,8 @@ def test_grid_repair_retains_all_panels_and_daring_camera():
     assert "exactly 9 distinct photographs" in prompt
     assert "24mm ground-level full-body denim hero" in prompt
     assert "do not reduce it to a single panel" in prompt
+    assert "LAST reference image is the repair target" in prompt
+    assert generate.call_args.kwargs["references"][-1]["url"] == "/assets/output/original.png"
     assert "shot-scale lock; output one full-bleed image only" not in prompt
     assert batch["images"] == ["/assets/output/repaired.png"]
     assert quality["passed"]
@@ -221,3 +226,86 @@ def test_complete_cached_plan_can_be_resubmitted_without_20kb_rejection():
     result = main.prepare_ecommerce_request(request)
     assert result["count"] == 1
     assert len(result["options"]["lookbook_shot_cards"][0]["panel_cards"]) == 9
+
+
+def test_legacy_node_selecting_fashion_enters_complete_director():
+    request = main.EcommerceTaskRequest(operation="universal", count=1, aspect_ratio="3:2", resolution="2k", quality="high",
+                                       options={"prompt_policy": "lookbook", "lookbook_mode": "quick",
+                                                "lookbook_style": {"id": "fashion-advertising"}})
+    result = main.prepare_ecommerce_request(request)
+    assert result["options"]["lookbook_mode"] == "story-campaign"
+
+
+def test_panel_repair_notes_do_not_drop_later_panels():
+    notes = [f"第 {i} 格：" + "修复产品与机位。" * 25 for i in range(1, 10)]
+    result = main.parse_lookbook_quality_result(json.dumps({"score": 70, "weak_indices": [0], "corrections": {"0": notes}}), 1, correction_limit=8000)
+    assert "第 9 格" in result["corrections"]["0"]
+
+
+def test_quality_receives_measured_aspect_ratio(tmp_path):
+    from PIL import Image
+    path = tmp_path / "result.png"
+    Image.new("RGB", (150, 100)).save(path)
+    llm = AsyncMock(return_value={"text": '{"passed":true,"score":90,"weak_indices":[]}'})
+    with patch.object(main, "configured_ecommerce_vision_route", return_value={"provider_id": "vision", "model": "vlm"}), patch.object(main, "canvas_llm", llm), patch.object(main, "output_file_from_url", return_value=str(path)):
+        asyncio.run(main.analyze_lookbook_outputs(snapshot(), ["/assets/output/result.png"]))
+    assert '"actual_ratio": 1.5' in llm.call_args.args[0].system_prompt
+    assert '"width": 150' in llm.call_args.args[0].system_prompt
+
+
+def test_incomplete_render_prompt_gets_one_targeted_plan_correction():
+    value = snapshot()
+    value["options"].pop("lookbook_bible")
+    broken = plan()
+    broken["shot_cards"][0].pop("render_prompt")
+    llm = AsyncMock(side_effect=[{"text": json.dumps(broken)}, {"text": json.dumps(plan())}])
+    with patch.object(main, "configured_ecommerce_vision_route", return_value={"provider_id": "vision", "model": "vlm"}), patch.object(main, "canvas_llm", llm):
+        enriched, result = asyncio.run(main.enrich_lookbook_storyboard(value))
+    assert result["status"] == "succeeded"
+    assert llm.await_count == 2
+    assert "方案校验失败" in llm.call_args.args[0].message
+    assert "PANEL 9" in enriched["options"]["lookbook_shot_cards"][0]["render_prompt"]
+
+
+def test_bold_execution_is_visual_and_restrained_campaign_is_unchanged():
+    value = snapshot()
+    assert "in at least 3" in main.lookbook_generation_prompts(value)[0]
+    assert "Diagonal parking lines" in main.lookbook_generation_prompts(value)[0]
+    value["options"]["lookbook_bible"]["camera_intensity"] = 2
+    assert "BOLD CAMERA EXECUTION" not in main.lookbook_generation_prompts(value)[0]
+
+
+def test_regressing_repair_preserves_original_image():
+    value = snapshot()
+    value["options"].update(lookbook_quality_gate=True, lookbook_auto_repair=True)
+    initial = {"status": "succeeded", "passed": False, "score": 78, "weak_indices": [0], "corrections": {"0": "修复膝部车线"}}
+    candidate = {"status": "succeeded", "passed": False, "score": 76, "weak_indices": [0]}
+    with patch.object(main, "analyze_lookbook_outputs", AsyncMock(side_effect=[initial, candidate])), patch.object(main, "execute_ai_image_batch", AsyncMock(return_value={"images": ["/assets/output/worse.png"]})):
+        batch, meta = asyncio.run(main.improve_lookbook_batch({"images": ["/assets/output/original.png"]}, value, {"provider_id": "images", "model": "image-model"}))
+    assert batch["images"] == ["/assets/output/original.png"]
+    assert meta["score"] == 78
+    assert meta["repair_candidate_quality"]["score"] == 76
+    assert meta["retries"][0]["reverted"]
+
+
+def test_product_detail_crop_preserves_source_and_reference_ownership(tmp_path):
+    from PIL import Image
+    original = tmp_path / "product.png"
+    im = Image.new("RGB", (200, 100), "red")
+    im.paste("blue", (100, 0, 200, 100))
+    im.save(original)
+    before = original.read_bytes()
+    value = snapshot()
+    refs = [{"url": "/assets/input/product.png"}, {"url": "/assets/input/scene.png"}]
+    value["inputs"] = refs
+    value["options"]["lookbook_bible"]["product_direction"]["detail_regions"] = [
+        {"reference_index": 1, "box": [0.5, 0, 1, 1], "purpose": "蓝色区域的工艺结构"}]
+    with patch.object(main, "output_file_from_url", return_value=str(original)), patch.object(main, "OUTPUT_OUTPUT_DIR", str(tmp_path)):
+        packaged = main.fashion_product_detail_references(value, list(reversed(refs)), 3)
+    assert len(packaged) == 3
+    assert packaged[-1]["fashion_product_source_index"] == 2
+    with Image.open(tmp_path / Path(packaged[-1]["url"]).name) as detail:
+        assert detail.size == (100, 100)
+        assert detail.getpixel((50, 50))[2] > 250
+    assert original.read_bytes() == before
+    assert "PRODUCT EVIDENCE PACKAGE" in main.lookbook_scene_reference_package_prompt(packaged)

@@ -144,16 +144,37 @@ def test_invalid_result_is_repaired_once(service):
 
 @pytest.mark.parametrize('bad', ['', H3, '女子走开。', ADAPTED * 1000],
                          ids=['empty', 'h3', 'missing-no-music', 'too-long'])
-def test_invalid_conversion_never_calls_video_upstream(service, monkeypatch, bad):
+def test_invalid_conversion_retries_then_submits_best_effort(service, monkeypatch, bad):
     service.return_value = {'text': bad}
-    upstream = AsyncMock()
+    upstream = AsyncMock(return_value={'videos': ['/output/test.mp4'], 'request': {}})
     monkeypatch.setattr(main, 'generate_canvas_video', upstream)
-    with pytest.raises(HTTPException) as error:
-        asyncio.run(main.canvas_video(main.CanvasVideoRequest(prompt=H3, provider_id='kling-cli')))
-    assert error.value.status_code == 422
-    assert '尚未提交' in error.value.detail
-    assert service.await_count == 2
-    upstream.assert_not_awaited()
+    result = asyncio.run(main.canvas_video(main.CanvasVideoRequest(prompt=H3, provider_id='kling-cli')))
+    submitted = upstream.await_args.args[0]
+    assert service.await_count == 3
+    assert upstream.await_count == 1
+    assert submitted.prompt
+    assert len(submitted.prompt) <= main.video_prompt_limit('kling-cli', '')
+    assert result['request']['prompt_adaptation']['status'] == 'adapted_with_warnings'
+    assert result['request']['prompt_adaptation']['validation_warning']
+
+
+def test_invalid_h3_structure_retries_then_submits_best_effort(service, monkeypatch):
+    invalid_h3 = 'integrated_multimodal_description:\nA woman walks left.'
+    service.return_value = {'text': invalid_h3}
+    upstream = AsyncMock(return_value={'videos': ['/output/h3.mp4'], 'request': {}})
+    monkeypatch.setattr(main, 'generate_canvas_video', upstream)
+    payload = main.CanvasVideoRequest(
+        prompt='A woman walks left.', provider_id='minimax-h3', model='MiniMax H3',
+        auto_adapt_prompt=True,
+    )
+
+    result = asyncio.run(main.canvas_video(payload))
+
+    submitted = upstream.await_args.args[0]
+    assert service.await_count == 3
+    assert submitted.prompt == invalid_h3
+    assert result['request']['prompt_adaptation']['status'] == 'adapted_with_warnings'
+    assert '缺少必需字段' in result['request']['prompt_adaptation']['validation_warning']
 
 
 @pytest.mark.parametrize('original,adapted', [
@@ -367,15 +388,19 @@ def test_kling_cli_preserves_validated_prompt_verbatim(service, monkeypatch, mod
     assert '<<<element_1>>>' not in captured['prompt']
 
 
-def test_persistent_adaptation_failure_is_visible_without_paid_submit(service, task_store, monkeypatch):
+def test_persistent_adaptation_validation_failure_still_submits_video(service, task_store, monkeypatch):
     service.return_value = {'text': ''}
-    upstream = AsyncMock()
+    upstream = AsyncMock(return_value={'upstream_task_id': 'upstream-best-effort', 'status': 'queued'})
     monkeypatch.setattr(main, 'submit_canvas_video_upstream', upstream)
-    with pytest.raises(HTTPException):
-        asyncio.run(main.create_canvas_video_task(main.CanvasVideoTaskRequest(
-            prompt=H3, provider_id='kling-cli', task_id='canvas_video_failed_adapt')))
-    assert main.CANVAS_VIDEO_TASKS['canvas_video_failed_adapt']['status'] == 'failed'
-    upstream.assert_not_awaited()
+    result = asyncio.run(main.create_canvas_video_task(main.CanvasVideoTaskRequest(
+        prompt=H3, provider_id='kling-cli', task_id='canvas_video_best_effort_adapt')))
+    submitted = upstream.await_args.args[0]
+    assert result['status'] == 'running'
+    assert result['upstream_task_id'] == 'upstream-best-effort'
+    assert result['request']['prompt_adaptation']['status'] == 'adapted_with_warnings'
+    assert submitted.prompt == H3
+    assert service.await_count == 3
+    upstream.assert_awaited_once()
 
 
 def test_frontend_shared_submission_contract_runs_in_node():

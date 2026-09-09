@@ -23103,8 +23103,9 @@ async def prepare_video_generation_prompt(payload: CanvasVideoRequest, provider:
         info['prompt_adaptation']['cache_hit'] = True
         return prepared, info
     problem = ""
+    text = ""
     try:
-        for attempt in range(2):
+        for attempt in range(3):
             request = CanvasLLMRequest(
                 message=message + ("\n上次校验失败，本次修正：" + problem if problem else ""),
                 system_prompt=system, provider=route["provider_id"], model=route["model"],
@@ -23141,7 +23142,24 @@ async def prepare_video_generation_prompt(payload: CanvasVideoRequest, provider:
     except Exception as exc:
         detail = getattr(exc, "detail", None) or str(exc) or "适配服务超时"
         raise HTTPException(status_code=502, detail=f"提示词自动适配失败：{detail}；尚未提交视频生成，请重试。") from exc
-    raise HTTPException(status_code=422, detail=f"提示词自动适配未通过校验：{problem}；尚未提交视频生成，请重试。")
+    # 格式校验只用于驱动 AI 自修复，不能让 AI 连续输出不规范内容后把责任转给用户。
+    # 三次仍未通过时采用最后一次非空结果，必要时回退原词并限制长度，继续提交视频上游。
+    fallback_text = _hard_limit_video_prompt(text or original_prompt, limit)
+    prepared = payload.model_copy(update={"prompt": fallback_text})
+    prepared._prompt_adapted = True
+    info = {
+        "original_prompt": original_prompt,
+        "prompt_adaptation": {"source_model": payload.prompt_source_model or "unknown",
+            "source_provider": payload.prompt_source_provider,
+            "source_videos": source_videos,
+            "visual_analysis": parse_images,
+            "video_transfer": ('analysis-and-image' if parse_images else 'prompt-and-image') if source_videos else '',
+            "target_model": payload.model, "profile": profile, "version": 2,
+            "source": VIDEO_PROMPT_PROFILES.get(registered_profile(payload.provider_id, payload.model), {}).get('source', ''),
+            "optimizer_provider": route["provider_id"], "optimizer_model": route["model"],
+            "attempts": 3, "status": "adapted_with_warnings", "validation_warning": problem},
+    }
+    return prepared, info
 
 
 def validate_video_prompt_for_model(payload: CanvasVideoRequest) -> int:

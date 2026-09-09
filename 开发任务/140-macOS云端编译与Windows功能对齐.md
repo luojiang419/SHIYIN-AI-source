@@ -119,6 +119,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 
 - GitHub 不允许从默认分支尚不存在的新 workflow 执行 `workflow_dispatch`；当前先使用仅 feature branch 的 paths 限定 push 触发，进入默认分支后可直接手动调度。
 - 首轮 Actions `34372587813`：Intel 因 `onnxruntime 1.27.0` 无 x64 Mac wheel 在依赖安装失败；Apple Silicon 完成 Python 与 Rust 编译，但一个下载文件名测试使用 Windows 路径导致断言失败。两项根因均已修正，等待下一轮验证。
+- 第二轮 Actions `34373137772`：两架构依赖、Python、Rust 和 PyInstaller 均通过；Node 官方 tar 中 `bin/node` 为 112,937,728 bytes，超过原 100MB 单文件解包上限。归档 SHA-256 与固定 member 路径均正确，已将仅 Node 可执行文件的上限调整为 160MB。
 - 当前 Windows 版自动更新只识别 EXE，Mac 更新安装需要独立机制。
 - macOS 云端产物没有 Apple Developer ID 时只能 ad-hoc/未公证，首次打开会受 Gatekeeper 提示影响。
 - Topaz、DWPose GPU、本地 FFmpeg/Kling CLI 等能力需要逐项确认 macOS 依赖，不应以“能编译”冒充完全可用。
@@ -136,6 +137,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 - 2026-09-10：完成第一版 macOS 运行时与打包链，本地 Python/Rust/静态契约通过，准备触发真实云端构建。
 - 2026-09-10：首次 `workflow_dispatch` 因 workflow 尚未进入默认分支被 GitHub 返回 404；改用当前 feature branch 限定 push 触发。
 - 2026-09-10：Actions 首轮 `34372587813` 两架构均失败；根据完整日志增加 Intel onnxruntime marker，并修正 Rust 测试的跨平台路径假设。
+- 2026-09-10：Actions 第二轮 `34373137772` 两架构均通过到 PyInstaller，确认 Node 可执行文件真实大小后修正安全解包上限。
 
 ## 接力信息
 

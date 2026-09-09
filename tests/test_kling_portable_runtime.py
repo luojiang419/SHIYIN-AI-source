@@ -46,6 +46,7 @@ def test_node_distributions_cover_windows_and_both_macos_architectures():
     assert apple["key"] == "darwin-arm64" and apple["executable"] == "bin/node"
     assert intel["key"] == "darwin-x64" and intel["archive"].endswith(".tar.gz")
     assert runtime.node_distribution("Linux", "x86_64") is None
+    assert runtime.NODE_EXECUTABLE_MAX_BYTES > 112_937_728
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows x64 bundled Node")

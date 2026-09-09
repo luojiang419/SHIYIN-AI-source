@@ -24,6 +24,7 @@ NODE_SHA256 = {
     "darwin-arm64": "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6",
     "darwin-x64": "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026",
 }
+NODE_EXECUTABLE_MAX_BYTES = 160 * 1024 * 1024
 CLI_INTEGRITY = {
     "china": ("cli-cn", "schksAOdI/Vafbe6rTxHERJ76nqqIByE2gLg7mYnV9lqtd6jzooEhUKnh29UfimWNouM26PEtc34c/f2+VJtyQ=="),
     "global": ("cli-global", "RAfuf0aNsiXjw+67i568fYzt44qtwoTvAl8Ulh40eCE2CEQHxWWqpM3t7fvSAklsqXGnUVigzd0ahmWzpjpI3g=="),
@@ -167,7 +168,8 @@ def _unpack_node(archive: Path, target: Path, distribution: dict[str, str]) -> N
             for relative in required:
                 name = f"{root}/{relative}"
                 member = members.get(name)
-                if member is None or member.size > 100 * 1024 * 1024:
+                max_size = NODE_EXECUTABLE_MAX_BYTES if relative == distribution["executable"] else 1024 * 1024
+                if member is None or member.size > max_size:
                     raise RuntimeError(f"Node 运行时缺少或拒绝解包文件：{relative}")
                 source = package.extractfile(member)
                 if source is None:

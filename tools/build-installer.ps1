@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$IncrementVersion,
     [switch]$SkipBackend,
     [switch]$SkipDesktop,

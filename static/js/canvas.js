@@ -4667,7 +4667,7 @@ function classicMultiViewRoleAllowsMultiple(nodeId, inputRole){
     return nodes.find(item => item.id === nodeId)?.type === 'multiView' && CLASSIC_MULTI_VIEW_MULTI_INPUT_ROLES.has(inputRole);
 }
 function classicFilmInputAllowsMultiple(nodeId, inputRole){
-    if(inputRole === 'workflow') return false;
+    if(inputRole === 'workflow') return nodes.find(item => item.id === nodeId)?.type === 'film-prepare-assets';
     const target=nodes.find(item => item.id === nodeId);
     if(target?.type === 'linkfox-video') return inputRole === 'reference-image';
     return Boolean(target && (target.type === 'film-storyboard' || target.type === 'film-video' || target.type === 'film-line-art') && inputRole);
@@ -5503,7 +5503,7 @@ function linkCreateOptions(state){
         }
         if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
             return [
-                ...(node.type === 'group' ? [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}] : []),
+                ...(['group','image'].includes(node.type) ? [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}] : []),
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
             {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
@@ -5516,7 +5516,7 @@ function linkCreateOptions(state){
         }
         return [];
     }
-    if(node.type === 'film-prepare-assets') return [{type:'group',label:'图片组',icon:'group'}];
+    if(node.type === 'film-prepare-assets') return [{type:'image',label:'图片',icon:'image'},{type:'group',label:'图片组',icon:'group'}];
     if(node.type === 'film-confirm-shots') return [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}];
     if(node.type === 'film-video' && state.inputRole === 'workflow') return [{type:'film-confirm-shots',label:'确认镜头',icon:'list-checks'}];
     if(node.type === 'poseReplicate'){
@@ -9131,11 +9131,52 @@ function normalizeClassicFilmImport(){
 function syncClassicFilmWorkflow(){
     normalizeClassicFilmImport();
     window.CanvasFilmWorkflow?.sync({nodes,connections,canvasId:canvas?.id,
+        vision:()=>{const provider=resolveVideoVisionProviderId('');return {provider,model:resolveChatModel('',provider)};},
+        imageProviders:()=>imageApiProviders().map(provider=>({id:provider.id,name:provider.name || provider.id,models:allImageModels(provider.id)})),
+        videoProviders:()=>videoApiProviders().map(provider=>({id:provider.id,name:provider.name || provider.id,models:providerVideoModels(provider.id)})),
+        depth:ref=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{resolveUrl:url=>canvasDisplayMediaUrl(url)}),
+        generate:runClassicLocalWorkflowShot,
         connectionsChanged:()=>markClassicConnectionStructureDirty(),
         invalidate:ids=>{if(classicRenderMutation) queueClassicRenderMutation({replaceIds:ids});},
         changed:ids=>{queueClassicRenderMutation({replaceIds:ids});scheduleClassicRender();scheduleSave();},
         upload:async file=>{const uploaded=await uploadCroppedBlob(file,file.name);if(!uploaded?.url)throw new Error('资产上传失败');return uploaded.url;}
     });
+}
+async function runClassicLocalWorkflowShot({node,shot,assets,parameters,depth,video}){
+    const ownerCanvasId=canvas?.id;
+    const type=video?'film-video':'film-storyboard';
+    const rightEdge=Math.max(Number(node.x || 0)+Number(node.w || 960),...nodes.map(item=>Number(item.x || 0)+Number(item.w || 300)));
+    const point={x:rightEdge+540,y:Number(node.y || 0)};
+    const target=addFilmNode(type,point);
+    const provider=video?parameters.videoProvider:parameters.imageProvider;
+    const model=video?parameters.videoModel:parameters.imageModel;
+    const catalog=video?videoApiProviders():imageApiProviders();
+    target.apiProvider=provider || catalog[0]?.id || target.apiProvider;
+    target.model=model || (video?providerVideoModels(target.apiProvider):allImageModels(target.apiProvider))[0] || target.model;
+    target.prompt=video ? shot.draft || shot.prompt || shot.visual || shot.content : [shot.content,parameters.replicationInstructions].filter(Boolean).join('\n');
+    target.aspectRatio=parameters.aspectRatio || '16:9';
+    target.resolution=video?parameters.videoResolution || '1080p':parameters.imageSize || '2k';
+    target.duration=shot.durationSeconds || 5;
+    if(video && window.CanvasFilmNodes.modelRule(target.apiProvider,target.model).id==='minimax') window.CanvasFilmNodes.normalize(target);
+    target.count=1;
+    target.workflowOrigin={nodeId:node.id,shotId:shot.id};
+    let actorIndex=0;
+    const refs=[{url:video?shot.replica || shot.frame:shot.frame,name:`镜头 ${shot.number}`,role:video?'storyboard':'reference'},
+        ...(!video && depth?[{url:depth,name:'镜头深度',role:'depth'}]:[]),
+        ...assets.map(asset=>({...asset,role:asset.type==='character'?`actor-${actorIndex++}`:({product:'outfit',scene:'scene',prop:'prop',reference:'reference'})[asset.type] || 'reference'}))];
+    target.actorCount=Math.max(1,actorIndex);
+    refs.forEach((ref,index)=>{
+        const input=addNode({id:uid('img'),type:'image',url:ref.url,name:ref.name,mediaKind:'image',x:point.x-360,y:point.y+index*370,w:300});
+        const role=video && !['storyboard','outfit','prop'].includes(ref.role) && !ref.role.startsWith('actor-')?'prop':ref.role;
+        connections.push({id:uid('c'),from:input.id,to:target.id,inputRole:role});
+    });
+    markClassicConnectionStructureDirty();scheduleSave();render();
+    const before=new Set((target.generatedOutputs || []).map(outputUrlValue));
+    await runFilmNode(target.id,{cascade:true});
+    if(canvas?.id!==ownerCanvasId || !nodes.includes(target)) throw new Error('画布已切换，请在原画布查看生成结果');
+    if(target.runError) throw new Error(target.runError);
+    const result=(target.generatedOutputs || []).find(output=>outputUrlValue(output) && !before.has(outputUrlValue(output)));
+    return typeof result==='string'?{url:result}:result;
 }
 function render(){
     syncClassicFilmWorkflow();

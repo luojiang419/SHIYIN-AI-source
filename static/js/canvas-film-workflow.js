@@ -26,21 +26,23 @@
     function framesFor(group,nodes,seen=new Set()){
         if(!group || seen.has(group.id)) return [];
         seen.add(group.id);
+        if(group.type==='image') return group.url && (!group.mediaKind || group.mediaKind==='image') ? [group] : [];
         return (group.items || []).flatMap(id=>{
             const n=nodes.find(item=>item.id===id);
-            return n?.type==='group' ? framesFor(n,nodes,seen) : n?.type==='image' && n.url && (!n.mediaKind || n.mediaKind==='image') ? [n] : [];
+            return n && ['group','image'].includes(n.type) && !n.workflowFunctionGroup ? framesFor(n,nodes,seen) : [];
         });
     }
     function sourceFor(node,nodes,edges){
         const prepare=prepareFor(node,nodes,edges);
         if(!prepare) return null;
-        const sources=incoming(prepare,nodes,edges,'group').filter(n=>!n.workflowFunctionGroup);
-        if(sources.length!==1) return null;
-        const group=sources[0], frames=framesFor(group,nodes);
+        const sources=incoming(prepare,nodes,edges).filter(n=>['image','group'].includes(n.type) && !n.workflowFunctionGroup);
+        if(!sources.length) return null;
+        const seen=new Set(), frames=sources.flatMap(source=>framesFor(source,nodes,seen));
+        const group=sources.length===1 && sources[0].type==='group' ? sources[0] : {id:`inputs:${prepare.id}`,title:'画布图片镜头'};
         return {prepare,group,frames,fingerprint:JSON.stringify([group.id,frames.map(n=>[n.id,n.url,n.bridgeCaption || ''])])};
     }
     function canConnect(from,to,role,nodes,edges){
-        if(to.type===PREPARE) return from.type==='group' && !from.workflowFunctionGroup && (!role || role==='workflow');
+        if(to.type===PREPARE) return (from.type==='group' && !from.workflowFunctionGroup || from.type==='image' && (!from.mediaKind || from.mediaKind==='image')) && (!role || role==='workflow');
         if(to.type===CONFIRM) return from.type===PREPARE && (!role || role==='workflow');
         if(from.type===CONFIRM && to.type==='film-video') return !role || role==='workflow' || role==='storyboard';
         if(isStep(from.type)) return false;
@@ -48,7 +50,7 @@
         return null;
     }
     function ports(node){
-        return handles(node) ? [{id:'workflow',role:'workflow',label:node.type===PREPARE?'图片组':node.type===CONFIRM?'准备资产':'确认镜头',title:'工作流数据输入'}] : null;
+        return handles(node) ? [{id:'workflow',role:'workflow',label:node.type===PREPARE?'图片 / 图片组（可多连）':node.type===CONFIRM?'准备资产':'确认镜头',title:'按连接顺序接收图片，图片组按组内顺序展开'}] : null;
     }
     function graph(ctx){
         const keys=['id','type','items','url','mediaKind','name','title','bridgeFrameStableId','bridgeSourceAssetId','bridgeCaption','bridgeBoardId','bridgeBoardName','bridgeProjectId','workflowFunctionGroup','workflowProjectId','workflowScriptId','workflowSourceKey'];
@@ -119,7 +121,7 @@
         const byId=new Map(ctx.nodes.map(n=>[n.id,n]));
         for(const edge of ctx.connections){
             const from=byId.get(edge.from)?.type,to=byId.get(edge.to)?.type;
-            if(((from==='group' && to===PREPARE) || (from===PREPARE && to===CONFIRM) || (from===CONFIRM && to==='film-video')) && edge.inputRole!=='workflow'){
+            if(((['group','image'].includes(from) && to===PREPARE) || (from===PREPARE && to===CONFIRM) || (from===CONFIRM && to==='film-video')) && edge.inputRole!=='workflow'){
                 edge.inputRole='workflow'; ctx.connectionsChanged?.();
             }
         }
@@ -128,7 +130,7 @@
             if(!active.has(node.id)) node.workflowBusy=false;
             const source=sourceFor(node,ctx.nodes,ctx.connections);
             if(!source?.frames.length) continue;
-            if(node.workflowGroupId && node.workflowGroupId!==source.group.id){
+            if(!window.CanvasLocalWorkflow && node.workflowGroupId && node.workflowGroupId!==source.group.id){
                 node.workflowSessions ||= {};
                 node.workflowSessions[node.workflowGroupId]={scriptId:node.workflowScriptId,projectId:node.workflowProjectId,snapshot:node.workflowSnapshot,fingerprint:node.workflowFingerprint};
                 const saved=node.workflowSessions[source.group.id] || {};
@@ -167,6 +169,7 @@
         }
         if(changed.length) ctx.invalidate?.(changed);
         for(const node of ctx.nodes){
+            if(window.CanvasLocalWorkflow){delete node.workflowJob;continue;}
             if(!handles(node) || !node.workflowJob || active.has(node.id)) continue;
             const key=`${ctx.canvasId}:${node.id}:${node.workflowJob.id}`;
             const source=sourceFor(node,ctx.nodes,ctx.connections);
@@ -179,7 +182,7 @@
         const ctx=context;
         if(!ctx?.canvasId || (active.has(node.id) && action!=='cancel-task')) return;
         const source=sourceFor(node,ctx.nodes,ctx.connections);
-        if(!source?.frames.length) throw new Error('请先连接图片组 → 准备资产 → 确认镜头');
+        if(!source?.frames.length) throw new Error('请将图片或图片组连接到准备资产，再连接确认镜头');
         if(action!=='sync' && !source.prepare.workflowScriptId) throw new Error('脚本正在建立，请稍后再操作');
         const previousRetry=reconnects.get(node);
         if(previousRetry){ clearTimeout(previousRetry.timer); reconnects.delete(node); }
@@ -191,6 +194,7 @@
         active.set(activeKey,requestId); node.workflowError=''; node.workflowBusy=true; notify([node.id]);
         const current=()=>context?.canvasId===ctx.canvasId && context.nodes.includes(node) && sourceFor(node,context.nodes,context.connections)?.fingerprint===sourceFingerprint;
         const send=async body=>{
+            if(window.CanvasLocalWorkflow) return window.CanvasLocalWorkflow.execute(node,body,source,ctx,{current,notify:()=>notify([node.id,source.prepare.id])});
             const response=await fetch('/api/canvas-film-workflow',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
             const result=await response.json();
             if(!response.ok || !result.ok){ const error=new Error(result.detail || 'film 工作流请求失败');error.workflowRejected=true;error.retryable=result.retryable===true;throw error; }
@@ -201,7 +205,7 @@
             if(result.snapshot){
                 source.prepare.workflowScriptId=result.snapshot.scriptId;
                 source.prepare.workflowSnapshot=result.snapshot;
-                source.prepare.workflowProjectId=result.project_id || source.prepare.workflowProjectId;
+                source.prepare.workflowProjectId=window.CanvasLocalWorkflow ? '' : result.project_id || source.prepare.workflowProjectId;
                 source.prepare.workflowFingerprint=sourceFingerprint;
                 payload.graph=graph(context);
                 // 视频输出落盘到 SHIYIN 媒体目录，可保存工程、回传和离线预览。
@@ -259,6 +263,7 @@
     const button=(action,label,shotId='',attrs='')=>`<button type="button" data-wf-action="${action}" ${shotId?`data-shot="${esc(shotId)}"`:''} ${attrs}>${esc(label)}</button>`;
     function paramsHtml(node,s){
         const p=s.parameters || {}, o=s.options || {};
+        if(window.CanvasLocalWorkflow) return window.CanvasLocalWorkflow.paramsHtml(node,s,{esc,select,text,check,button},context);
         const settings=o.settings || {};
         const modelSelection=(label,key,options,current)=>options?.length?select(label,key,options.map(v=>({id:v.id,label:v.name})),current).replace('data-wf-param','data-wf-setting'):'';
         const visionSelection=modelSelection('解析模型','visionModelId',settings.visionModels,settings.selectedVisionModelId);
@@ -290,7 +295,7 @@
     function shotsHtml(node,s){
         const all=node.type==='film-video' && s.groups?.length ? (s.shots || []).filter(shot=>s.groups.some(group=>group.id===shot.id)) : s.shots || [];
         const start=Math.max(0,Number(node.workflowPage)||0)*12, shots=all.slice(start,start+12);
-        if(!all.length) return '<div class="wf-empty">连接图片组后自动建立拍摄脚本。<br>film 需运行并打开源项目。</div>';
+        if(!all.length) return '<div class="wf-empty">将多张图片或图片组连接到准备资产，自动建立镜头列表。<br>可混合连接，重复图片节点自动去重，无需打开 film。</div>';
         return `<div class="wf-page">${button('previous','上一页')}<span>${Math.floor(start/12)+1} / ${Math.max(1,Math.ceil(all.length/12))} · ${all.length} 个镜头</span>${button('next','下一页')}</div>`+shots.map(shot=>{
             const id=esc(shot.id), guide=(s.guides || []).find(g=>g.shotId===shot.id);
             const tasks=(s.tasks || []).filter(t=>t.shotId===shot.id), task=tasks[0];
@@ -301,23 +306,24 @@
                 ${node.type===PREPARE?`<p>${esc(shot.content)}</p><div class="wf-mini-actions">${button('analyze','解析原帧',shot.id)}${button('depth','提取深度',shot.id)}${button('replicate','生成分镜',shot.id)}</div>
                     ${guide?.depth?`<img class="wf-depth" loading="lazy" src="${esc(guide.depth)}" alt="深度图">`:''}
                     ${guide?.error?`<p class="wf-error">${esc(guide.error)}</p>`:''}
-                    ${(guide?.elements || []).map(element=>`<label class="wf-check"><input type="checkbox" data-wf-element="${esc(element.id)}" data-shot="${id}" ${element.selected?'checked':''}>${esc(element.label || element.name || element.description)}</label>`).join('')}
-                    ${(guide?.subjects || []).map(subject=>`<label>${esc(subject.name || subject.label || subject.id)}<select data-wf-subject="${esc(subject.id)}" data-shot="${id}">${['undecided','keep','replace','remove'].map((v,i)=>`<option value="${v}" ${subject.decision===v?'selected':''}>${['待定','保留','替换','移除'][i]}</option>`).join('')}</select></label>`).join('')}
+                    ${(window.CanvasLocalWorkflow ? [] : guide?.elements || []).map(element=>`<label class="wf-check"><input type="checkbox" data-wf-element="${esc(element.id)}" data-shot="${id}" ${element.selected?'checked':''}>${esc(element.label || element.name || element.description)}</label>`).join('')}
+                    ${(window.CanvasLocalWorkflow ? [] : guide?.subjects || []).map(subject=>`<label>${esc(subject.name || subject.label || subject.id)}<select data-wf-subject="${esc(subject.id)}" data-shot="${id}">${['undecided','keep','replace','remove'].map((v,i)=>`<option value="${v}" ${subject.decision===v?'selected':''}>${['待定','保留','替换','移除'][i]}</option>`).join('')}</select></label>`).join('')}
                     <div class="wf-bound">${bound.map(a=>`<span>${esc(a.name)}${button('unbind-asset','移除',shot.id,`data-asset="${esc(a.id)}"`)}</span>`).join('')}</div>
                     <select data-wf-binding="${id}"><option value="">选择资产绑定到镜头…</option>${(s.assets || []).map(a=>`<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select><small>也可将右侧资产拖入此镜头</small>`:
-                node.type===CONFIRM?`${field('镜头描述','content',shot.content)}${field('画面 / 动作','visual',shot.visual)}${field('提示词','prompt',shot.prompt)}<label>时长（秒）<input type="number" min="1" max="120" step="0.1" data-wf-shot-field="durationSeconds" data-shot="${id}" value="${esc(shot.durationSeconds)}"></label><div class="wf-mini-actions">${button('group-start','分组起点',shot.id)}${button('group-end','分组终点',shot.id)}${button('group-clear','取消分组',shot.id)}</div>`:
+                node.type===CONFIRM?`${field('镜头描述','content',shot.content)}${field('画面 / 动作','visual',shot.visual)}${field('提示词','prompt',shot.prompt)}<label>时长（秒）<input type="number" min="1" max="120" step="0.1" data-wf-shot-field="durationSeconds" data-shot="${id}" value="${esc(shot.durationSeconds)}"></label>${window.CanvasLocalWorkflow ? '' : `<div class="wf-mini-actions">${button('group-start','分组起点',shot.id)}${button('group-end','分组终点',shot.id)}${button('group-clear','取消分组',shot.id)}</div>`}`:
                 `${field('视频提示词','videoPrompt',shot.draft || shot.prompt)}<span class="wf-task-status">${esc(task?.status || '待生成')}</span>${button('generate','生成此镜头',shot.id,shot.confirmed?'':'disabled')}${task?.url?`<video controls preload="none" src="${esc(task.url)}"></video>`:''}${task?.error?`<p class="wf-error">${esc(task.error)}</p>`:''}`}
                 ${shot.replicaError?`<p class="wf-error">${esc(shot.replicaError)}</p>`:''}</div></div></article>`;
         }).join('');
     }
     function bodyHtml(node){
-        const s=node.workflowSnapshot || {}, source=sourceFor(node,context?.nodes || [],context?.connections || []);
+        const source=sourceFor(node,context?.nodes || [],context?.connections || []);
+        const s=source?.frames.length ? node.workflowSnapshot || {} : {};
         return `<section class="film-workflow-panel" data-workflow-node="${esc(node.id)}"><div class="wf-status"><span>${esc(s.name || '影视制作工作流')}</span><span>${node.workflowBusy?'执行中…':source?.frames.length?'已连接':'等待连接'}</span></div>
             ${node.workflowError?`<div class="wf-error" role="alert">${esc(node.workflowError)}</div>`:''}
             <div class="wf-layout"><div class="wf-operations"><div class="wf-actions">${button('refresh','同步 / 刷新')}
             ${node.type===PREPARE?`${button('analyze','解析全部原帧')}${button('depth','提取全部深度')}${button('match','匹配资产')}${button('replicate','生成全部分镜')}`:node.type===CONFIRM?`${button('confirm','确认全部镜头')}${button('build-prompts','构建全部提示词')}`:button('generate','一键生成全部','','class="wf-primary"')}
             </div><div class="wf-shot-scroll">${shotsHtml(node,s)}</div></div><aside class="wf-parameters"><h4>参数与${node.type===PREPARE?'资产':node.type===CONFIRM?'故事':'作品'}</h4>${paramsHtml(node,s)}</aside></div>
-            <footer>${esc(node.workflowBusy?'film 正在执行任务，结果将自动更新':s.message || '连接传递数据，点击按钮执行生成')}</footer></section>`;
+            <footer>${esc(node.workflowBusy?'正在执行任务，结果将自动更新':s.message || '支持多图片 / 图片组；连线只同步素材，点击按钮才执行解析或生成')}</footer></section>`;
     }
     function bind(root,node){
         const panel=root.querySelector('.film-workflow-panel'); if(!panel) return;
@@ -370,7 +376,7 @@
             const extra={shot_id:control.dataset.shot || ''};
             if(control.dataset.asset) extra.asset_id=control.dataset.asset;
             if(control.dataset.task) extra.task_id=control.dataset.task;
-            if(['delete-asset','delete-task'].includes(action) && !window.confirm('删除后会同步更新 film 中的记录与文件。确认删除？')) return;
+            if(['delete-asset','delete-task'].includes(action) && !window.confirm('从当前工作流移除此记录？原始素材文件将保留。')) return;
             if(action==='trim-task'){
                 const task=control.closest('[data-wf-task]');
                 extra.parameters={inMs:Math.round(Number(task.querySelector('[data-wf-trim="in"]').value)*1000),outMs:Math.round(Number(task.querySelector('[data-wf-trim="out"]').value)*1000)};
@@ -406,6 +412,7 @@
             catch(error){node.workflowError=error.message;notify([node.id]);}
         });
         if(node.workflowBusy) panel.querySelectorAll('button,input,select,textarea').forEach(el=>{el.disabled=el.dataset.wfAction!=='cancel-task';});
+        if(!sourceFor(node,context?.nodes || [],context?.connections || [])?.frames.length) panel.querySelectorAll('button,input,select,textarea').forEach(el=>{el.disabled=true;});
     }
     window.CanvasFilmWorkflow={PREPARE,CONFIRM,isStep,isList,handles,sourceFor,framesFor,canConnect,ports,sync,bodyHtml,bind,request,title:type=>TITLES[type] || '',size:type=>isStep(type)?{w:960,h:0}:null};
 })();

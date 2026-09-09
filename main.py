@@ -19715,10 +19715,37 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         )
         request.message = "请对照参考图逐格验收待检查的输出，只返回要求的 JSON。"
     try:
-        result = await asyncio.wait_for(canvas_llm(request), timeout=LOOKBOOK_QUALITY_TIMEOUT_SECONDS)
-        return parse_lookbook_quality_result(str(result.get("text") or ""), len(images), correction_limit=8000 if is_fashion_director(options) else 1200)
+        quality_timeout = max(LOOKBOOK_QUALITY_TIMEOUT_SECONDS, 180) if is_fashion_director(options) else LOOKBOOK_QUALITY_TIMEOUT_SECONDS
+        result = await asyncio.wait_for(canvas_llm(request), timeout=quality_timeout)
+        raw_quality = str(result.get("text") or "")
+        try:
+            return parse_lookbook_quality_result(raw_quality, len(images), correction_limit=8000 if is_fashion_director(options) else 1200)
+        except (ValueError, TypeError):
+            if not is_fashion_director(options):
+                raise
+            # 只修复序列化，不重新打分；守住原始评分、结论与弱图编号。
+            field_patterns = {
+                "score": r'"score"\s*:\s*(\d+(?:\.\d+)?)',
+                "passed": r'"passed"\s*:\s*(true|false)',
+                "weak_indices": r'"weak_indices"\s*:\s*(\[[\d,\s]*\])',
+            }
+            original_fields = {key: re.search(pattern, raw_quality) for key, pattern in field_patterns.items()}
+            if not all(original_fields.values()):
+                raise ValueError("终审 JSON 不完整，无法在不改变判断的前提下修复")
+            format_request = CanvasLLMRequest(
+                message="只修复引号、转义、逗号等 JSON 格式问题。原样保留所有评分、布尔值、弱图编号和判断内容，不重新评价图片。输出完整严格 JSON。",
+                system_prompt="你是 JSON 格式修复器，不是视觉评审。待修复原文：\n" + raw_quality,
+                provider=route["provider_id"], model=route["model"], web_search=False, retry_524=0,
+            )
+            formatted = await asyncio.wait_for(canvas_llm(format_request), timeout=60)
+            fixed = str(formatted.get("text") or "")
+            for key, pattern in field_patterns.items():
+                field = re.search(pattern, fixed)
+                if not field or json.loads(field.group(1)) != json.loads(original_fields[key].group(1)):
+                    raise ValueError("格式修复改变了终审判断，已拒绝采用")
+            return parse_lookbook_quality_result(fixed, len(images), correction_limit=8000)
     except asyncio.TimeoutError:
-        return {"status": "skipped", "reason": f"质检超过 {LOOKBOOK_QUALITY_TIMEOUT_SECONDS} 秒，已保留生成图片"}
+        return {"status": "skipped", "reason": f"质检超过 {quality_timeout} 秒，已保留生成图片"}
     except Exception as exc:
         return {"status": "failed", "reason": str(exc)[:500]}
 
@@ -19791,7 +19818,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
                     image_items[index] = replacement_item
                 else:
                     image_items.append(replacement_item)
-                retry_details.append({"index": index, "correction": correction, "replaced": True})
+                retry_details.append({"index": index, "correction": correction, "replaced": True, "candidate_url": replacement})
     if any(item.get("replaced") for item in retry_details):
         if progress_callback:
             progress_callback("正在复检修复后的图片…")

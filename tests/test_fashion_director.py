@@ -309,3 +309,14 @@ def test_product_detail_crop_preserves_source_and_reference_ownership(tmp_path):
         assert detail.getpixel((50, 50))[2] > 250
     assert original.read_bytes() == before
     assert "PRODUCT EVIDENCE PACKAGE" in main.lookbook_scene_reference_package_prompt(packaged)
+
+
+@pytest.mark.parametrize("fixed_score,expected", [(86, "succeeded"), (99, "failed")])
+def test_quality_json_repair_never_changes_verdict(fixed_score, expected):
+    invalid = '{"passed":true,"score":86,"weak_indices":[],"summary":"bad "quote""}'
+    fixed = json.dumps({"passed": True, "score": fixed_score, "weak_indices": [], "summary": 'bad "quote"'})
+    llm = AsyncMock(side_effect=[{"text": invalid}, {"text": fixed}])
+    with patch.object(main, "configured_ecommerce_vision_route", return_value={"provider_id": "vision", "model": "vlm"}), patch.object(main, "canvas_llm", llm):
+        result = asyncio.run(main.analyze_lookbook_outputs(snapshot(), ["/assets/output/grid.png"]))
+    assert result["status"] == expected
+    assert not llm.call_args.args[0].images

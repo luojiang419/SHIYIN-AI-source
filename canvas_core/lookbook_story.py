@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import math
 from typing import Any, Dict, Iterable, List, Optional
+from .fashion_director import DIRECTOR_VERSION, generation_prompt as fashion_generation_prompt
 
 
 LOOKBOOK_STORY_MODE = "story-campaign"
@@ -625,6 +626,9 @@ def enforce_lookbook_shot_scale_contract(cards: List[Dict[str, Any]], count: int
     enforced: List[Dict[str, Any]] = []
     for position, source in enumerate(cards):
         card = dict(source)
+        if card.get("director_version") == DIRECTOR_VERSION:
+            enforced.append(card)
+            continue
         lock = dict(plan[position])
         camera = dict(card.get("camera") or {}) if isinstance(card.get("camera"), dict) else {}
         camera["shot_size"] = lock["shot_size"]
@@ -641,6 +645,9 @@ def enforce_lookbook_story_rhythm_contract(cards: List[Dict[str, Any]], count: i
     enforced: List[Dict[str, Any]] = []
     for position, source in enumerate(cards):
         card = dict(source)
+        if card.get("director_version") == DIRECTOR_VERSION:
+            enforced.append(card)
+            continue
         lock = dict(rhythm[position])
         card["rhythm_lock"] = lock
         enforced.append(card)
@@ -680,6 +687,8 @@ def build_lookbook_shot_prompt(
     """把全局视觉圣经和当前分镜卡编译成图片请求。"""
     index = int(card.get("index") or 1)
     layout_intent = layout_intent if isinstance(layout_intent, dict) else parse_lookbook_layout_intent(brief)
+    if card.get("director_version") == DIRECTOR_VERSION:
+        return fashion_generation_prompt(brief, bible, card, list(reference_labels or []), layout_intent)
     references = " ".join(str(item).strip() for item in (reference_labels or []) if str(item).strip())
     bible_text = str(bible or "")
     if isinstance(bible, (dict, list)):

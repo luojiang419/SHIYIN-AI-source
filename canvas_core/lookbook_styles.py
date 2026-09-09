@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 FASHION_EDITORIAL_STYLE_ID = "fashion-advertising"
-# 从 fashion-editorial-sequence-director v1.2 提炼；原文随源码归档。
-# 运行时使用紧凑规则，避免原始 Skill 挤占节点参数及模型上下文。
+# 风格卡片/兼容旧客户端使用的简介；不再作为完整导演的运行时替代。
+# 实际规划和生图由 fashion_director 加载随包分发的原始技能全文。
 FASHION_EDITORIAL_PROMPT = " ".join([
     "FASHION EDITORIAL SEQUENCE DIRECTOR v1.2 / EDITORIAL_B: create photographed, alive, opinionated high-fashion campaign imagery. User intent and explicit appearance, wardrobe, weather, lighting, camera and delivery choices override preset defaults. EDITORIAL_B is a photographic method, not a sunny filter.",
     "REFERENCE ROUTER: assign SUBJECT_IDENTITY, WARDROBE, LOCATION, STYLE_ANCHOR, SKIN_REFERENCE, LIGHT_ONLY, COLOR_ONLY, COMPOSITION_ONLY, MAKEUP_HAIR, TEXTURE_ONLY, POSE, PROP or GENERAL_MOOD. Transfer only the assigned attributes. Never borrow identity from a style, lighting or clothing reference. Preserve facial geometry, recognizable relationships, body proportions and hair identity; preserve who the person is, not source exposure, white balance or beauty retouching.",
@@ -26,10 +26,11 @@ FASHION_EDITORIAL_PROMPT = " ".join([
 FASHION_EDITORIAL_STYLE = {
     "id": FASHION_EDITORIAL_STYLE_ID,
     "name": "时尚广告",
-    "description": "真实肤质与环境光、鲜明镜头观点、事件驱动的连续时尚大片",
+    "description": "完整导演技能、商品主角、独立镜头设计与真实摄影质感",
     "prompt": FASHION_EDITORIAL_PROMPT,
     "source": "builtin",
     "skill_version": "1.2",
+    "runtime": "full-skill-director",
 }
 
 _STORE_LOCK = threading.RLock()

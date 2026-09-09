@@ -633,3 +633,9 @@ body.theme-dark .film-error {
 
 .film-scene-matches summary { cursor:pointer; font-weight:600; }
 .film-scene-matches > div { display:flex; flex-direction:column; gap:3px; margin-top:7px; }
+
+/* 与数量同一行，范围控件随双画布缩放，读数不触发节点重建。 */
+.film-grain-control { min-width:0; align-self:stretch; justify-content:space-between; }
+.film-grain-control > span { display:flex; justify-content:space-between; gap:8px; }
+.film-grain-control output { font-variant-numeric:tabular-nums; }
+.film-grain-control input[type="range"] { width:100%; min-width:0; margin:0; height:34px; padding:0; cursor:pointer; accent-color:var(--accent,#bfa477); }

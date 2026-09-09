@@ -5,6 +5,25 @@
     const REBUILD = '原始参考图只提供构图、环境语义、色彩与光线氛围证据：逐一还原对应画面的主色、色温、明暗分布、曝光、光源方向、软硬程度、阴影和空气感，禁止擅自改成统一滤镜。背景必须依据这些证据从零重新生成高清真实材质、空间结构和自然细节。禁止以原图为底板扩图、超分辨率放大、修补或直接沿用原背景像素；不得复制低清模糊、压缩噪点、涂抹纹理。保留合理的光学景深，不能把背景重建理解为所有平面都锐化。';
     const USER_SCENE='用户场景图是唯一的背景身份与空间依据：固定建筑结构、门窗/柱体位置、墙地材质、家具与地标必须保持一致，不得融合其他候选背景，也不能换回原始参考照片的背景。根据线稿/深度图背景特征，在所选用户场景内使用匹配位置拍摄，保持对应机位、景别、透视、人物落点和遮挡。原始参考照片只提供该镜头的色彩与光线氛围：将其主色、色温、曝光、光源方向、明暗分布、阴影软硬和空气感应用到用户场景中，允许重新布光但不得因此改变场景几何与材质身份。高清重建指在此固定场景和位置重新渲染真实细节，不是重新设计环境；禁止使用模糊原图底板扩图、放大或涂抹背景。无彩色参考时沿用用户场景的合理色光，不从灰度控制图推断颜色。';
 
+    function shotFidelityPrompt(refs){
+        const hasControl=refs.some(ref=>['sketch','depth'].includes(ref.inputRole));
+        const hasPhoto=refs.some(ref=>ref.inputRole==='reference');
+        return [
+            '【强复刻：画框与可见范围锁定】'+(hasControl ? '以本镜头线稿/深度图锁定结构，配对原始参考补充可辨认的裁切与遮挡；共用色光参考不得覆盖各镜头结构。' : hasPhoto ? '以当前原始参考锁定构图与可见范围。' : '没有镜头参考时按生成需求确定构图，不虚构参考证据。'),
+            '逐一核对上、下、左、右画框切过的身体部位、主体占画面比例、头顶及下颌位置、人物间距、前后层次、相机高度与俯仰。原图头部出框就保持出框，脸被裁切、头发或前景遮住就保留同样可见范围；仅见局部侧脸不能补成完整正脸，原本可见的脸也不能额外遮掉。不为展示演员身份、五官或完整服装而后退相机、扩大景别、增加头顶留白、转头看镜头或补全画外身体。演员参考出现全脸/全身不意味着本镜头必须展示。不同输出画幅尽量保持主体尺度与原有截断，不以拉远镜头容纳全身；明确要求改构图时才调整对应项目。移除参考图文字和编号不改变原构图。',
+            hasPhoto ? '【色光与反差锁定】匹配原始参考的整体反差、黑位深浅、白点亮度、中间调密度、高光肩部过渡、阴影通透度与局部明暗比，同时匹配饱和度、白平衡和环境反射色。参考柔和、低反差、奶油高光或开放阴影时如实保留，不能压黑暗部、加深鼻影、提高饱和度或局部微反差。参考本身反差高时按其还原，不一律低对比或蒙灰。重建高清材质是恢复合理细节，不是加 clarity、dehaze、HDR、硬轮廓光、锐化光晕或加硬阳光。换入深色服装仍保留自身颜色和暗部纹理，不因此拉高整个画面的对比度。人物重打光只匹配该镜头已有光比与光源软硬，不添加美妆棚灯；原图焦外和轻柔边缘保持原尺度。' : '无原始彩色参考时不声称匹配原图色光；以用户场景的曝光与光比为准，缺省采用自然摄影响应，禁止将深度灰度映射成反差。'
+        ].join('\n');
+    }
+    // 仅迁移 FW2026 的乳剂颗粒语言，不迁移其配色、姿势、机位或后处理色度校正。
+    function grainPrompt(value,hasPhoto){
+        const level=Number.isFinite(Number(value)) ? Math.round(Math.max(0,Math.min(10,Number(value)))) : 0;
+        const strength=['不额外添加','几乎不可察觉','极轻','轻微','轻至中等','适中','中等偏明显','明显','较强','强','本控件最大强度'][level];
+        return [
+            `【胶片颗粒：额外强度 ${level}/10】${level ? `在参考质感基础上增加${strength}的乳剂颗粒；强度只增加颗粒明暗起伏与可见度，不增加颗粒尺寸、锐度或整图反差。` : (hasPhoto ? '不额外叠加颗粒；原始参考已有真实胶片颗粒时保持其可见强度，不强制磨皮去噪。' : '不额外叠加颗粒，不凭空添加胶片噪点。')}`,
+            '出现颗粒时采用 FW2026 的 fine-to-medium emulsional 16mm/35mm film grain：独立细至中等乳剂颗粒，随机间距、非周期分布、微小密度与形状变化、轻微非均匀 RGB 响应；中间调与阴影稍明显，高光与肤色较轻，融入皮肤、面料和背景的同一成像表面。不是一层等距圆点贴图；禁止规则点阵、网格、棋盘格、重复纹样、均匀数字噪声、大块连接斑团、云状斑、污渍和新增雀斑。最大强度仍保留五官、织纹与细节，不改变曝光、黑白点、饱和度、光晕或景深；压缩伪影不视为胶片颗粒。'
+        ].join('\n');
+    }
+
     // 适配一键复刻 v3.1 的材质与身份规则；分镜保持自己的图号、多演员和镜头空间契约。
     function fidelityPrompt(refs){
         const has=role=>refs.some(ref=>ref.inputRole===role);
@@ -90,7 +109,7 @@
                 role_label:ref.inputRole==='scene' ? '选定用户场景：锁定空间结构、材质与地标，在匹配位置重新布光' : ref.inputRole==='depth' ? '深度图：只控制模特姿势与空间结构' : ref.inputRole==='reference' ? (matched.sceneMatch ? '原始参考图：色彩光线迁移到用户场景，不使用此图背景' : '原始参考图：只参考构图色彩光线，背景从零重建') : ref.role_label}));
             built.sceneMatch=matched.sceneMatch || null;
             const matchGuide=matched.sceneMatch ? `场景取景匹配：位置=${matched.sceneMatch.location}；机位与背景结构=${matched.sceneMatch.framing}；光线色彩迁移=${matched.sceneMatch.lighting}；匹配依据=${matched.sceneMatch.reason}。` : '';
-            built.prompt=[built.prompt,REALISM,matched.sceneMatch ? USER_SCENE : assets.some(ref=>ref.role==='reference') ? REBUILD : '依照线稿/深度图重建真实立体空间，使用指定场景的材质与光线；没有色彩参考时采用自然且物理合理的摄影光线。',matchGuide,fidelityPrompt(built.refs),'只输出当前镜头的一张完整照片，禁止拼贴、多格分镜、线稿、灰度深度图、文字编号和水印。'].filter(Boolean).join('\n');
+            built.prompt=[built.prompt,REALISM,matched.sceneMatch ? USER_SCENE : assets.some(ref=>ref.role==='reference') ? REBUILD : '依照线稿/深度图重建真实立体空间，使用指定场景的材质与光线；没有色彩参考时采用自然且物理合理的摄影光线。',matchGuide,fidelityPrompt(built.refs),shotFidelityPrompt(built.refs),grainPrompt(snapshot.storyboardGrain,built.refs.some(ref=>ref.inputRole==='reference')),'只输出当前镜头的一张完整照片，禁止拼贴、多格分镜、线稿、灰度深度图、文字编号和水印。'].filter(Boolean).join('\n');
             return built;
         };
     }

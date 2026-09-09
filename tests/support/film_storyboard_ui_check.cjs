@@ -22,7 +22,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 const contentType=file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
                 return route.fulfill({body:fs.readFileSync(file),contentType});
             });
-            await page.route('**/api/canvas-image-tasks**',async route=>{
+            await page.route(/\/api\/canvas-image-tasks(?:\/[^/?]+)?(?:\?.*)?$/,async route=>{
                 if(route.request().method()==='POST'){
                     assert.equal(matchingPending,0,'生成必须等待场景匹配完成');
                     const body=route.request().postDataJSON(); requests.push(body);
@@ -87,10 +87,21 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 });
                 return {alignment,overflow:[...el.querySelectorAll('button,select,.film-input-row')].filter(control=>{const r=control.getBoundingClientRect();return r.width && (r.left<frame.left-3 || r.right>frame.right+3);}).map(el=>el.outerHTML.slice(0,150))};
             });
+            const grain=panel.locator('[data-film-field="storyboardGrain"]');
+            assert.equal(await grain.inputValue(),'0');
+            const grainLayout=await panel.evaluate(el=>{
+                const a=el.querySelector('[data-film-field="count"]').closest('label').getBoundingClientRect();
+                const b=el.querySelector('.film-grain-control').getBoundingClientRect();
+                return {right:b.left>=a.right,aligned:Math.abs(a.top-b.top)<4};
+            });
+            assert.deepEqual(grainLayout,{right:true,aligned:true});
+            await grain.fill('7');
+            assert.equal(await panel.locator('[data-film-grain-value]').textContent(),'7');
             assert.deepEqual(layout.overflow,[]);
             assert.ok(layout.alignment.every(value=>value<4),JSON.stringify(layout));
             await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
             assert.equal(requests.length,3);
+            assert.ok(requests.every(r=>r.prompt.includes('额外强度 7/10') && r.prompt.includes('画框与可见范围锁定')));
             assert.equal(depths,0);
             assert.ok(requests.every(r=>r.reference_images.length===3 && r.auto_optimize_prompt===false));
             const result=await page.evaluate(smart=>{
@@ -132,6 +143,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 });
                 assert.equal(requests.length,countBeforeRetry+1);
                 assert.equal(requests.at(-1).auto_optimize_prompt,false);
+                assert.match(requests.at(-1).prompt,/额外强度 7\/10/);
                 assert.equal(requests.at(-1).reference_images.filter(r=>r.input_role==='reference').length,1);
                 assert.equal(requests.at(-1).reference_images.filter(r=>r.role==='control_map').length,1);
             }
@@ -208,6 +220,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 return (out?.images || []).some(r=>(r.url || r)===url);
             },{smart,url:recoveredUrl});
             assert.equal(requests.length,beforeResume+1,'刷新恢复只查询已提交任务，不重复生成');
+            assert.equal(await page.locator('[data-id="film"] [data-film-field="storyboardGrain"]').inputValue(),'7');
             assert.deepEqual(errors,[]);
             reports.push({smart,requests:requests.length,sceneRequests:sceneRequests.length,depths,result,layout,errors});
             await page.close();

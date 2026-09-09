@@ -183,3 +183,38 @@ test('已匹配镜头重试固定原场景，不重复选景或混入未选候�
     assert.deepEqual(plain(retried.refs.filter(ref=>ref.inputRole==='scene').map(ref=>ref.url)),['garden']);
     assert.equal(requests.length,1);
 });
+
+
+test('颗粒默认/边界归一化与各级强度进入单图和批量快照',async()=>{
+    for(const [value,expected] of [[undefined,0],[0,0],['7',7],[4.6,5],[-1,0],[99,10],['bad',0],[Infinity,0]]){
+        const {film,api}=harness(),n=node({storyboardGrain:value}); film.normalize(n);
+        assert.equal(n.storyboardGrain,expected);
+        for(const mode of ['single','batch']){
+            n.storyboardMode=mode;
+            const plan=api.plans(n,[ref('depth','d'),ref('reference','r')])[0];
+            const prepare=api.createPreparer(n); n.storyboardGrain=2;
+            const built=await prepare(plan);
+            assert.ok(built.prompt.includes(`额外强度 ${expected}/10`));
+            assert.match(built.prompt,/随机间距、非周期分布/);
+            assert.match(built.prompt,/禁止规则点阵/);
+            if(!expected) assert.match(built.prompt,/不额外叠加颗粒；原始参考已有真实胶片颗粒/);
+            n.storyboardGrain=expected;
+        }
+    }
+    for(let level=1;level<=10;level++){
+        const {api}=harness(),n=node({storyboardGrain:level,prompt:'一张照片'});
+        const built=await api.createPreparer(n)(api.plans(n,[])[0]);
+        assert.ok(built.prompt.includes(`额外强度 ${level}/10`));
+        assert.match(built.prompt,/无原始彩色参考时不声称匹配原图色光/);
+    }
+});
+
+test('强复刻保留截断与反差，不让身份或场景匹配扩大景别',async()=>{
+    for(const scene of [false,true]){
+        const {api}=harness(),n=node({actorCount:2});
+        const plan=api.plans(n,[ref('depth','d'),ref('reference','r'),ref('actor-0','a'),...(scene ? [ref('scene','set')] : [])])[0];
+        if(scene) plan.sceneMatch={sceneUrl:'set',location:'门边',framing:'中景',lighting:'柔光',reason:'对应'};
+        const built=await api.createPreparer(n)(plan);
+        for(const text of ['原图头部出框就保持出框','仅见局部侧脸不能补成完整正脸','原本可见的脸也不能额外遮掉','共用色光参考不得覆盖各镜头结构','整体反差、黑位深浅','不因此拉高整个画面的对比度']) assert.ok(built.prompt.includes(text),text);
+    }
+});

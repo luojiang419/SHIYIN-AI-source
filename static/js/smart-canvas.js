@@ -4557,9 +4557,10 @@ function renderH3VideoResolutionControl(){
     </div>`;
 }
 function renderH3VideoStepsControl(){
-    const value = Math.max(4, Math.min(30, Number(settings.videoSteps) || 12));
+    const rawValue = Number(settings.videoSteps);
+    const value = Number.isFinite(rawValue) ? rawValue : 12;
     return `<div class="smart-control duration-control"><button class="smart-pill" type="button"><i data-lucide="sliders-horizontal"></i><span>${value} steps</span></button>
-        <div class="smart-popover compact-popover"><div class="smart-popover-title">采样步数（4–30）</div><label class="duration-custom"><input type="number" min="4" max="30" step="1" data-param="videoSteps" value="${value}"></label></div>
+        <div class="smart-popover compact-popover"><div class="smart-popover-title">采样步数</div><label class="duration-custom"><input type="number" step="1" data-param="videoSteps" value="${value}"></label></div>
     </div>`;
 }
 function renderVideoToggleControl(key, label){
@@ -19415,7 +19416,9 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             generate_audio: Boolean(runSettings.videoGenerateAudio),
             multimodal: Boolean(runSettings.videoMultimodal),
             trusted_asset: useAssetUris,
-            steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))
+            steps: isH3
+                ? (Number.isFinite(Number(runSettings.videoSteps)) ? Number(runSettings.videoSteps) : 12)
+                : Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))
         };
         payload.linkfox_mode=runSettings.linkfoxMode || 'reference';
         payload.linkfox_camera=runSettings.linkfoxCamera || 'single';

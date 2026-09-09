@@ -140,7 +140,7 @@ class MiniMaxH3VideoTests(unittest.TestCase):
             duration=5,
             aspect_ratio="16:9",
             resolution="0.2MP 16:9 - 608x352",
-            steps=16,
+            steps=64,
             images=[
                 {"url": "data:image/png;base64,AA==", "role": "first_frame"},
                 {"url": "data:image/png;base64,AQ==", "role": "last_frame"},
@@ -161,8 +161,17 @@ class MiniMaxH3VideoTests(unittest.TestCase):
         self.assertEqual(client.post_body["mode"], "keyframes")
         self.assertEqual(client.post_body["first_frame"], "data:image/png;base64,AA==")
         self.assertEqual(client.post_body["last_frame"], "data:image/png;base64,AQ==")
-        self.assertEqual(client.post_body["steps"], 16)
+        self.assertEqual(client.post_body["steps"], 64)
         self.assertEqual(result["videos"], ["/assets/output/h3.mp4"])
+
+    def test_h3_steps_accept_values_below_previous_lower_bound(self):
+        payload = self.main.CanvasVideoRequest(
+            prompt="镜头缓慢推进",
+            provider_id="minimax-h3",
+            model="MiniMax H3",
+            steps=2,
+        )
+        self.assertEqual(payload.steps, 2)
 
     def test_multimodal_request_keeps_nine_images_and_three_videos(self):
         class FakeResponse:

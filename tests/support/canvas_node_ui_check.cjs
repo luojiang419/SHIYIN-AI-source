@@ -20,6 +20,16 @@ const path = require('node:path');
         await page.waitForSelector('.poseReplicate-node');
         await page.waitForTimeout(250);
         assert.equal(fullRenders,1,'component status must not rebuild the entire canvas');
+        const comparePorts=await page.locator('.resultCompare-node .result-compare-port').evaluateAll(ports=>ports.map(port=>({role:port.dataset.inputRole,top:port.getBoundingClientRect().top})));
+        assert.deepEqual(comparePorts.map(port=>port.role),['compare-source','compare-target']);
+        assert.ok(comparePorts[1].top-comparePorts[0].top>70,'result compare input ports must not overlap');
+        const compareState=await page.locator('.resultCompare-node').evaluate(node=>({
+            ready:node.querySelector('.result-compare-hint')?.textContent.includes('源文件已连接 · 目标文件已连接'),
+            sources:[...node.querySelectorAll('.result-compare-stage img')].map(image=>({src:image.currentSrc||image.src,width:image.naturalWidth,height:image.naturalHeight})),
+        }));
+        assert.equal(compareState.ready,true,'result compare must resolve both connected input roles');
+        assert.equal(compareState.sources.length,2);
+        assert.ok(compareState.sources.every(source=>source.src && source.width>0 && source.height>0));
         assert.equal(await page.evaluate(async()=>{
             const image=document.querySelector('.image-node img');
             queueClassicSpecialRefresh(nodes.find(n=>n.id==='pose'));

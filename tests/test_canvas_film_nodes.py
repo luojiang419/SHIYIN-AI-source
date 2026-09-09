@@ -259,7 +259,7 @@ def test_film_video_switches_to_minimax_h3_specific_settings_panel():
     assert "const H3_RESOLUTION_PRESETS = [" in FILM
     assert "function h3VideoSettingsHtml(node" in FILM
     assert "film-video-settings-h3" in FILM
-    assert "采样步数（4–30）" in FILM
+    assert "采样步数" in FILM
     assert "data-film-field=\"steps\"" in FILM
     assert "data-film-toggle=\"multimodal\"" in FILM
     assert "data-film-toggle=\"useFrameRoles\"" in FILM
@@ -326,11 +326,12 @@ def test_smart_film_video_ignores_legacy_height_and_only_resizes_horizontally():
 
 def test_film_video_h3_settings_are_normalized_and_submitted_on_both_canvases():
     assert "if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;" in FILM
-    assert "key==='steps' ? clamp(control.value,4,30)" in FILM
+    assert "key==='steps' && previousRule.id === 'minimax'" in FILM
     assert "previousRule.id !== 'minimax'" in FILM
-    assert "steps:Math.max(4,Math.min(30,Number(node.steps || 12)))" in CLASSIC
+    assert "const steps = providerId === 'minimax-h3'" in CLASSIC
     assert "videoSteps:node.steps || settingsForNodeRun.videoSteps || 12" in SMART
     assert "videoMultimodal:node.multimodal !== undefined" in SMART
+    assert "采样步数（4–30）" not in FILM
     assert "function syncH3Dimensions(node" in FILM
     assert "if(key==='resolution') syncH3Dimensions(node,'resolution');" in FILM
     assert "syncMiniMaxH3VideoDimensions(node, 'aspectRatio')" in CLASSIC

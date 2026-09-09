@@ -18,6 +18,9 @@
     const quickSaveDirectory = document.getElementById('quickSaveDir');
     const chooseQuickSaveDirectory = document.getElementById('chooseQuickSaveDirectory');
     const quickSaveHint = document.getElementById('quickSaveHint');
+    const depthMapMode = document.getElementById('depthMapMode');
+    const depthMapStatus = document.getElementById('depthMapStatus');
+    const openDepthMapTuner = document.getElementById('openDepthMapTuner');
     const updatePolicy = document.getElementById('updatePolicy');
     const updateNetworkMode = document.getElementById('updateNetworkMode');
     const updateManualProxy = document.getElementById('updateManualProxy');
@@ -55,6 +58,8 @@
     let currentBatchOutfitOutputDirectory = '';
     let currentQuickSaveMode = 'manual';
     let currentQuickSaveDirectory = '';
+    let currentDepthMapMode = 'person';
+    let currentDepthMapControls = {};
     let quickSaveStatusTimer = null;
     let statusTimer = null;
     let updateRequestSequence = 0;
@@ -86,6 +91,13 @@
         quickSaveStatus.textContent = message;
         quickSaveStatus.classList.toggle('error', isError);
         if(message && !isError) quickSaveStatusTimer = setTimeout(() => { quickSaveStatus.textContent = ''; }, 2600);
+    }
+
+    function showDepthMapStatus(message, isError=false){
+        if(!depthMapStatus) return;
+        depthMapStatus.textContent = message;
+        depthMapStatus.classList.toggle('error', isError);
+        if(message && !isError) setTimeout(() => { if(depthMapStatus.textContent === message) depthMapStatus.textContent = ''; }, 2600);
     }
 
     function showStorageStatus(message, isError=false){
@@ -436,6 +448,19 @@
         broadcastQuickSaveSettings();
     }
 
+    function broadcastDepthMapSettings(){
+        const message = {type:'depth-map-settings:changed', mode:currentDepthMapMode, controls:{...currentDepthMapControls}, updatedAt:Date.now()};
+        try { window.parent?.postMessage(message, location.origin); } catch(error) {}
+        try { window.dispatchEvent(new CustomEvent('depth-map-settings:changed', {detail:message})); } catch(error) {}
+    }
+
+    function applyDepthMapSettings(data){
+        currentDepthMapMode = data?.depth_map_mode === 'professional' ? 'professional' : 'person';
+        currentDepthMapControls = data?.depth_map_controls && typeof data.depth_map_controls === 'object' ? {...data.depth_map_controls} : {};
+        if(depthMapMode) depthMapMode.value = currentDepthMapMode;
+        broadcastDepthMapSettings();
+    }
+
     function setQuickSaveBusy(busy){
         if(quickSaveOptions) quickSaveOptions.disabled = busy;
         if(chooseQuickSaveDirectory) chooseQuickSaveDirectory.disabled = busy;
@@ -574,6 +599,7 @@
             applyOutputSettings(data);
             applyBatchOutfitOutputSettings(data);
             applyQuickSaveSettings(data);
+            applyDepthMapSettings(data);
             applyTopazSettings(data);
             applyShortcutSettings(data);
         } catch(error) {
@@ -583,6 +609,7 @@
             setOutputBusy(false);
             setBatchOutfitOutputBusy(false);
             setQuickSaveBusy(false);
+            if(depthMapMode) depthMapMode.disabled = false;
         }
     }
 
@@ -686,6 +713,31 @@
         }
     }
 
+    async function saveDepthMapMode(mode){
+        const previous = currentDepthMapMode;
+        if(depthMapMode) depthMapMode.disabled = true;
+        try {
+            const data = await saveSettings({depth_map_mode:mode});
+            applyDepthMapSettings(data);
+            showDepthMapStatus('已保存并立即生效');
+        } catch(error) {
+            currentDepthMapMode = previous;
+            if(depthMapMode) depthMapMode.value = previous;
+            showDepthMapStatus(`保存失败：${error.message}`, true);
+        } finally {
+            if(depthMapMode) depthMapMode.disabled = false;
+        }
+    }
+
+    function openIntegratedDepthMapTuner(){
+        const message = {type:'studio-open-depth-map-tuner', mode:currentDepthMapMode};
+        if(window.parent && window.parent !== window){
+            window.parent.postMessage(message, location.origin);
+            return;
+        }
+        location.href = `/static/depth-map-tuner.html?mode=${encodeURIComponent(currentDepthMapMode)}`;
+    }
+
     async function chooseQuickSaveFolder(){
         setQuickSaveBusy(true);
         try {
@@ -758,6 +810,8 @@
         if(input.value !== currentQuickSaveMode) saveQuickSaveMode(input.value);
         else selectQuickSaveMode(currentQuickSaveMode);
     });
+    depthMapMode?.addEventListener('change', () => saveDepthMapMode(depthMapMode.value));
+    openDepthMapTuner?.addEventListener('click', openIntegratedDepthMapTuner);
     chooseQuickSaveDirectory?.addEventListener('click', chooseQuickSaveFolder);
     chooseTopazInstall?.addEventListener('click', chooseTopazDirectory);
     resetTopazInstall?.addEventListener('click', resetTopazDirectory);

@@ -106,7 +106,10 @@
             node.resolution = String(node.resolution || (h3 ? H3_DEFAULT_RESOLUTION : '1080p'));
             if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;
             if(h3) syncH3Dimensions(node,'aspectRatio');
-            node.steps = clamp(node.steps || 12, 4, 30);
+            const rawSteps = Number(node.steps);
+            node.steps = h3
+                ? (Number.isFinite(rawSteps) ? rawSteps : 12)
+                : clamp(node.steps || 12, 4, 30);
             node.apiProvider = String(node.apiProvider || '');
             node.model = String(node.model || '');
             node.enhancePrompt = node.enhancePrompt !== false;
@@ -356,7 +359,7 @@
                 <label class="field"><div class="setting-title">分辨率</div><select class="select-lite" data-film-field="resolution">${h3ResolutionOptions(node.resolution)}</select></label>
             </div>
             <div class="gen-settings-row film-video-secondary-grid">
-                <label class="field"><div class="setting-title">采样步数（4–30）</div><input class="setting-input" data-film-field="steps" type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}"></label>
+                <label class="field"><div class="setting-title">采样步数</div><input class="setting-input" data-film-field="steps" type="number" step="1" value="${Number(node.steps || 12)}"></label>
                 <div class="field film-video-reference-field"><div class="setting-title">参考能力</div><div class="film-video-field-note">全能参考最多 9 图 + 3 视频；关键帧模式使用前两张图</div></div>
             </div>
             <div class="gen-settings-row film-video-toggle-grid">
@@ -682,6 +685,7 @@
                 const previousRule = modelRule(node.apiProvider, node.model);
                 node[key]=key==='duration'
                     ? clamp(control.value,1,modelRule(node.apiProvider,node.model).id === 'minimax' ? 15 : 60)
+                    : key==='steps' && previousRule.id === 'minimax' ? (Number.isFinite(Number(control.value)) ? Number(control.value) : 12)
                     : key==='steps' ? clamp(control.value,4,30)
                     : key==='storyboardGrain' ? Math.round(Math.max(0,Math.min(10,Number(control.value)||0)))
                     : key==='count' ? clamp(control.value,1,4) : control.value;
@@ -697,7 +701,8 @@
                 const nextRule = modelRule(node.apiProvider, node.model);
                 if(node.type === 'film-video' && nextRule.id === 'minimax'){
                     node.duration=clamp(node.duration,1,15);
-                    node.steps=clamp(node.steps || 12,4,30);
+                    const h3Steps = Number(node.steps);
+                    node.steps=Number.isFinite(h3Steps) ? h3Steps : 12;
                     if(!H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution=H3_DEFAULT_RESOLUTION;
                     if(key==='resolution') syncH3Dimensions(node,'resolution');
                     else syncH3Dimensions(node,'aspectRatio');

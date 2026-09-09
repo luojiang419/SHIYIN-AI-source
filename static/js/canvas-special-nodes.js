@@ -49,7 +49,14 @@
     const depthMapControlStates = new WeakMap();
     const personDepthBindings = new Map();
     let activeDepthMapDialog = null;
+    let depthMapSettings = {mode:'person', controls:{...DEFAULT_DEPTH_MAP_CONTROLS}};
+    let depthMapSettingsPromise = null;
+    let depthMapSettingsLoaded = false;
     let personDepthStatus = {state:'loading', ready:false, install_available:false, progress:0, message:'正在检查高精度人物深度组件'};
+    let professionalDepthStatus = {state:'loading', ready:false, progress:0, message:'正在检查完整画面深度模型'};
+    let professionalDepthStatusPromise = null;
+    let professionalDepthUpdatedAt = 0;
+    let professionalDepthPollTimer = 0;
     let personDepthStatusPromise = null;
     let personDepthInstallPromise = null;
     let personDepthAutoInstallAttempted = false;
@@ -71,20 +78,21 @@
         return `${item.url}|${item.name || ''}|${item.natural_w || ''}x${item.natural_h || ''}`;
     }
     function normalizeDepthMapControls(nodeOrValues){
+        const hasValues = nodeOrValues && typeof nodeOrValues === 'object' && ['farPoint','nearPoint','midtone','contrast','brightness','smooth','invert'].some(key => key in nodeOrValues);
         const source = nodeOrValues?.depthMapControls && typeof nodeOrValues.depthMapControls === 'object'
             ? nodeOrValues.depthMapControls
-            : nodeOrValues && typeof nodeOrValues === 'object' ? nodeOrValues : {};
+            : hasValues ? nodeOrValues : depthMapSettings.controls;
         const controls = {
-            farPoint:clamp(Number.isFinite(Number(source.farPoint)) ? source.farPoint : DEFAULT_DEPTH_MAP_CONTROLS.farPoint, 0, 95),
-            nearPoint:clamp(Number.isFinite(Number(source.nearPoint)) ? source.nearPoint : DEFAULT_DEPTH_MAP_CONTROLS.nearPoint, 5, 100),
-            midtone:clamp(Number.isFinite(Number(source.midtone)) ? source.midtone : DEFAULT_DEPTH_MAP_CONTROLS.midtone, -50, 50),
-            contrast:clamp(Number.isFinite(Number(source.contrast)) ? source.contrast : DEFAULT_DEPTH_MAP_CONTROLS.contrast, 50, 150),
-            brightness:clamp(Number.isFinite(Number(source.brightness)) ? source.brightness : DEFAULT_DEPTH_MAP_CONTROLS.brightness, -30, 30),
-            smooth:clamp(Number.isFinite(Number(source.smooth)) ? source.smooth : DEFAULT_DEPTH_MAP_CONTROLS.smooth, 0, 10),
+            farPoint:clamp(Number.isFinite(Number(source.farPoint)) ? source.farPoint : DEFAULT_DEPTH_MAP_CONTROLS.farPoint, 0, 99),
+            nearPoint:clamp(Number.isFinite(Number(source.nearPoint)) ? source.nearPoint : DEFAULT_DEPTH_MAP_CONTROLS.nearPoint, 1, 100),
+            midtone:clamp(Number.isFinite(Number(source.midtone)) ? source.midtone : DEFAULT_DEPTH_MAP_CONTROLS.midtone, -100, 100),
+            contrast:clamp(Number.isFinite(Number(source.contrast)) ? source.contrast : DEFAULT_DEPTH_MAP_CONTROLS.contrast, 0, 300),
+            brightness:clamp(Number.isFinite(Number(source.brightness)) ? source.brightness : DEFAULT_DEPTH_MAP_CONTROLS.brightness, -100, 100),
+            smooth:clamp(Number.isFinite(Number(source.smooth)) ? source.smooth : DEFAULT_DEPTH_MAP_CONTROLS.smooth, 0, 50),
             invert:Boolean(source.invert)
         };
-        if(controls.nearPoint < controls.farPoint + 5) controls.nearPoint = Math.min(100, controls.farPoint + 5);
-        if(controls.nearPoint < controls.farPoint + 5) controls.farPoint = Math.max(0, controls.nearPoint - 5);
+        if(controls.nearPoint <= controls.farPoint) controls.nearPoint = Math.min(100, controls.farPoint + 1);
+        if(controls.nearPoint <= controls.farPoint) controls.farPoint = Math.max(0, controls.nearPoint - 1);
         Object.keys(controls).forEach(key => {
             if(key !== 'invert') controls[key] = Math.round(Number(controls[key]));
         });
@@ -93,8 +101,8 @@
     }
     function setDepthMapControls(node, patch, changedField=''){
         const next = normalizeDepthMapControls({...normalizeDepthMapControls(node), ...(patch || {})});
-        if(changedField === 'farPoint' && next.farPoint > next.nearPoint - 5) next.nearPoint = Math.min(100, next.farPoint + 5);
-        if(changedField === 'nearPoint' && next.nearPoint < next.farPoint + 5) next.farPoint = Math.max(0, next.nearPoint - 5);
+        if(changedField === 'farPoint' && next.farPoint >= next.nearPoint) next.nearPoint = Math.min(100, next.farPoint + 1);
+        if(changedField === 'nearPoint' && next.nearPoint <= next.farPoint) next.farPoint = Math.max(0, next.nearPoint - 1);
         node.depthMapControls = normalizeDepthMapControls(next);
         return node.depthMapControls;
     }
@@ -399,6 +407,8 @@
 
     function depthMapBodyHtml(node){
         node.depthMapControls = normalizeDepthMapControls(node);
+        const depthStatus = activeDepthMapStatus();
+        const modeLabel = activeDepthMapModeLabel();
         const output = outputItem(node);
         const manualInput = node.depthMapManualInput?.url ? node.depthMapManualInput : null;
         const inputUrl = manualInput?.url || node.depthMapInputUrl || '';
@@ -406,13 +416,13 @@
         const inputSource = manualInput ? '手动优先' : inputUrl ? '连线' : '';
         const status = node.depthMapStatus || (output?.url ? 'done' : 'idle');
         const statusText = status === 'running'
-            ? '正在生成高精度人物深度图…'
+            ? `正在生成${modeLabel === '专业模式' ? '完整画面' : '人物'}深度图…`
             : status === 'failed'
                 ? (node.depthMapError || '深度图生成失败')
                 : output?.url
                     ? '深度图已就绪，可从右侧端口连接下游节点'
                     : inputUrl
-                        ? (personDepthStatus?.ready ? `${manualInput ? '手动图片' : '连线图片'}已就绪，正在准备深度推理` : `${manualInput ? '手动图片' : '连线图片'}已就绪，等待高精度组件就绪`)
+                        ? (depthStatus?.ready ? `${manualInput ? '手动图片' : '连线图片'}已就绪，正在准备${modeLabel}深度推理` : `${manualInput ? '手动图片' : '连线图片'}已就绪，等待${modeLabel}模型就绪`)
                         : '连接或手动上传一张图片后自动生成深度图';
         return `<div class="special-node depth-map-special" data-special-node="depth-map">
             <input class="special-file-input" type="file" accept="image/*" data-special-file="depth-map" hidden>
@@ -429,14 +439,14 @@
                     ${status === 'running' ? '<div class="pose-running"><i data-lucide="loader-2"></i></div>' : ''}
                 </div>
             </div>
-            ${poseReplicateComponentHtml(personDepthStatus)}
+            ${activeDepthComponentHtml()}
             <div class="special-toolbar depth-map-toolbar">
                 <button type="button" data-special-action="upload-depth-map"><i data-lucide="upload"></i><span>导入图片</span></button>
-                <button type="button" data-special-action="retry-depth-map" ${!inputUrl || status === 'running' || !personDepthStatus?.ready ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
+                <button type="button" data-special-action="retry-depth-map" ${!inputUrl || status === 'running' || !depthStatus?.ready ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
                 <button type="button" data-special-action="open-depth-controls" ${!output?.url || status === 'running' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>高级控制</span></button>
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
-            <div class="special-output-row"><span>${output?.url ? `${esc(output.name || 'person-depth.png')}${depthMapControlsAreDefault(node.depthMapControls) ? '' : ' · 已调校'}` : '输出：8-bit PNG 相对深度图'}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
+            <div class="special-output-row"><span>${output?.url ? `${esc(output.name || 'depth-map.png')}${depthMapControlsAreDefault(node.depthMapControls) ? '' : ' · 已调校'}` : `输出：${modeLabel} · 8-bit PNG 相对深度图`}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
         </div>`;
     }
 
@@ -655,15 +665,15 @@
                     </div>
                     <div class="depth-map-control-section">
                         <div class="depth-map-control-section-head"><div><strong>深度范围</strong><span>决定最远与最近区域的黑白边界</span></div></div>
-                        <label class="depth-map-control-range"><span><b>远景</b><small>更高会压暗远处</small></span><input type="range" min="0" max="95" step="1" data-depth-control-field="farPoint"><output data-depth-control-value="farPoint"></output></label>
-                        <label class="depth-map-control-range"><span><b>近景</b><small>更低会提亮近处</small></span><input type="range" min="5" max="100" step="1" data-depth-control-field="nearPoint"><output data-depth-control-value="nearPoint"></output></label>
+                        <label class="depth-map-control-range"><span><b>远景</b><small>更高会压暗远处</small></span><input type="range" min="0" max="99" step="1" data-depth-control-field="farPoint"><output data-depth-control-value="farPoint"></output></label>
+                        <label class="depth-map-control-range"><span><b>近景</b><small>更低会提亮近处</small></span><input type="range" min="1" max="100" step="1" data-depth-control-field="nearPoint"><output data-depth-control-value="nearPoint"></output></label>
                     </div>
                     <div class="depth-map-control-section">
                         <div class="depth-map-control-section-head"><div><strong>层次与细节</strong><span>调整中间距离、明暗反差和过渡</span></div></div>
-                        <label class="depth-map-control-range"><span><b>中间层次</b><small>正值提亮主体中部</small></span><input type="range" min="-50" max="50" step="1" data-depth-control-field="midtone"><output data-depth-control-value="midtone"></output></label>
-                        <label class="depth-map-control-range"><span><b>对比度</b><small>拉开前后景差异</small></span><input type="range" min="50" max="150" step="1" data-depth-control-field="contrast"><output data-depth-control-value="contrast"></output></label>
-                        <label class="depth-map-control-range"><span><b>亮度</b><small>整体抬高或压低</small></span><input type="range" min="-30" max="30" step="1" data-depth-control-field="brightness"><output data-depth-control-value="brightness"></output></label>
-                        <label class="depth-map-control-range"><span><b>平滑</b><small>柔化细碎深度噪点</small></span><input type="range" min="0" max="10" step="1" data-depth-control-field="smooth"><output data-depth-control-value="smooth"></output></label>
+                        <label class="depth-map-control-range"><span><b>中间层次</b><small>正值提亮主体中部</small></span><input type="range" min="-100" max="100" step="1" data-depth-control-field="midtone"><output data-depth-control-value="midtone"></output></label>
+                        <label class="depth-map-control-range"><span><b>对比度</b><small>拉开前后景差异</small></span><input type="range" min="0" max="300" step="1" data-depth-control-field="contrast"><output data-depth-control-value="contrast"></output></label>
+                        <label class="depth-map-control-range"><span><b>亮度</b><small>整体抬高或压低</small></span><input type="range" min="-100" max="100" step="1" data-depth-control-field="brightness"><output data-depth-control-value="brightness"></output></label>
+                        <label class="depth-map-control-range"><span><b>平滑</b><small>柔化细碎深度噪点</small></span><input type="range" min="0" max="50" step="1" data-depth-control-field="smooth"><output data-depth-control-value="smooth"></output></label>
                     </div>
                     <label class="depth-map-control-toggle"><span><i data-lucide="flip-horizontal-2"></i><span><b>反转深度</b><small>交换近处和远处的黑白关系</small></span></span><input type="checkbox" data-depth-control-field="invert"><span class="depth-map-control-switch" aria-hidden="true"></span></label>
                 </aside>
@@ -781,6 +791,18 @@
             <div class="pose-replicate-component-detail"><span>${esc(details || '深度模式需要先安装高精度组件')}</span>${canInstall ? `<button type="button" data-special-action="${action}">${state === 'connection_error' ? '重新连接' : state === 'failed' ? '重试' : '下载'}</button>` : ''}</div>
         </div>`;
     }
+    function activeDepthComponentHtml(){
+        const status = activeDepthMapStatus();
+        if(activeDepthMapMode() === 'person') return poseReplicateComponentHtml(status);
+        if(status?.ready) return '';
+        const progress = Math.max(0, Math.min(1, Number(status?.progress) || 0));
+        const percent = Math.round(progress * 100);
+        return `<div class="pose-replicate-component ${esc(status?.state || 'loading')}" data-professional-depth-state="${esc(status?.state || 'loading')}">
+            <div class="pose-replicate-component-head"><span>${esc(status?.message || '完整画面深度模型正在准备')}</span><strong>${percent}%</strong></div>
+            <div class="pose-replicate-progress" role="progressbar" aria-label="完整画面深度模型进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><i style="width:${percent}%"></i></div>
+            <div class="pose-replicate-component-detail"><span>专业模式使用完整画面深度模型，准备完成后自动继续。</span></div>
+        </div>`;
+    }
     function poseReplicateProviderOptions(providers, selected){
         const items = Array.isArray(providers) ? providers : [];
         const exists = items.some(item => item?.id === selected);
@@ -828,11 +850,11 @@
         const providers = Array.isArray(options.providers) ? options.providers : [];
         const provider = providers.find(item => item?.id === node.poseReplicateProvider);
         const modelReady = Boolean(provider && Array.isArray(provider.models) && provider.models.includes(node.poseReplicateModel));
-        const componentReady = mode !== 'depth' || Boolean(personDepthStatus?.ready);
+        const componentReady = mode !== 'depth' || Boolean(activeDepthMapStatus()?.ready);
         const ready = Boolean(action?.url && control?.url && targets.length && componentReady && modelReady);
         const activeRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0);
         const statusText = status === 'running'
-            ? (mode === 'depth' ? '正在生成高精度人物深度图…' : (node.posePreparing || '正在自动提取动作骨架…'))
+            ? (mode === 'depth' ? `正在生成${activeDepthMapMode() === 'professional' ? '完整画面' : '人物'}深度图…` : (node.posePreparing || '正在自动提取动作骨架…'))
             : status === 'failed'
                 ? (mode === 'depth' ? (node.poseDepthError || '高精度人物深度图生成失败') : (node.poseError || '动作骨架提取失败'))
                 : ready
@@ -859,7 +881,7 @@
             </div>
             <div class="pose-replicate-control-panel">
                 ${poseReplicateImageCard(control, 'control-map', mode === 'depth' ? '内部控制图 · 深度' : '内部控制图 · 骨架', status === 'running' ? 'loader-2' : mode === 'depth' ? 'scan-line' : 'activity', status === 'running' ? '控制图提取中' : status === 'failed' ? '提取失败' : '添加目标图片后自动生成', '内部生成，不占用输入端口')}
-                ${mode === 'depth' ? poseReplicateComponentHtml(personDepthStatus) : ''}
+                ${mode === 'depth' ? activeDepthComponentHtml() : ''}
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
             <textarea class="special-prompt pose-replicate-prompt" data-pose-replicate-field="poseReplicatePrompt" rows="3" placeholder="可选补充要求；留空使用固定模板，不调用 AI 助手">${esc(node.poseReplicatePrompt)}</textarea>
@@ -1145,6 +1167,85 @@
         while(current >= 1024 && index < units.length - 1){ current /= 1024; index += 1; }
         return `${current >= 100 ? Math.round(current) : current.toFixed(1)}${units[index]}`;
     }
+    function activeDepthMapMode(){ return depthMapSettings.mode === 'professional' ? 'professional' : 'person'; }
+    function activeDepthMapStatus(){ return activeDepthMapMode() === 'professional' ? professionalDepthStatus : personDepthStatus; }
+    function activeDepthMapModeLabel(){ return activeDepthMapMode() === 'professional' ? '专业模式' : '人物模式'; }
+    function isDepthMapNode(node){ return node?.type === 'depthMap' || node?.specialType === 'depth-map'; }
+    function depthMapSettingsSignature(){ return `${activeDepthMapMode()}|${depthMapControlSignature(depthMapSettings.controls)}`; }
+    function notifyDepthMapBindings(options={}){
+        personDepthBindings.forEach(binding => {
+            const node = binding.node;
+            if(isDepthMapNode(node)){
+                node.depthMapControls = normalizeDepthMapControls(depthMapSettings.controls);
+                node.depthMapSharedConfigSignature = depthMapSettingsSignature();
+                if(options.modeChanged) delete node.depthMapGeneratedSignature;
+                else if(depthMapBaseOutput(node)?.url) applyDepthMapControls(node, binding.options).catch(error => binding.options.toast?.(error.message || '共享深度参数应用失败'));
+            }
+            if(node?.poseReplicateMode === 'depth'){
+                node.poseDepthSharedConfigSignature = depthMapSettingsSignature();
+                if(options.modeChanged) delete node.poseDepthSourceSignature;
+                else applyPoseDepthGlobalControls(node, binding.options).catch(error => binding.options.toast?.(error.message || '一键复刻深度参数应用失败'));
+            }
+            try { notify(binding.options, node, true); } catch(_) {}
+        });
+    }
+    async function refreshProfessionalDepthStatus(force=false){
+        if(!force && professionalDepthUpdatedAt && Date.now() - professionalDepthUpdatedAt < 5000) return professionalDepthStatus;
+        if(professionalDepthStatusPromise) return professionalDepthStatusPromise;
+        professionalDepthStatusPromise = fetch('/api/depth/status', {cache:'no-store'})
+            .then(async response => {
+                if(!response.ok) throw new Error(await responseError(response, '完整画面深度模型状态读取失败'));
+                professionalDepthStatus = await response.json();
+                professionalDepthUpdatedAt = Date.now();
+                notifyPersonDepthBindings();
+                clearTimeout(professionalDepthPollTimer);
+                if(['checking','downloading','installing'].includes(String(professionalDepthStatus?.state || ''))){
+                    professionalDepthPollTimer = setTimeout(() => refreshProfessionalDepthStatus(true).catch(() => {}), 1500);
+                }
+                return professionalDepthStatus;
+            })
+            .catch(error => {
+                professionalDepthStatus = {state:'failed', ready:false, progress:0, message:error.message || '完整画面深度模型状态读取失败'};
+                professionalDepthUpdatedAt = Date.now();
+                notifyPersonDepthBindings();
+                return professionalDepthStatus;
+            })
+            .finally(() => { professionalDepthStatusPromise = null; });
+        return professionalDepthStatusPromise;
+    }
+    async function refreshDepthMapSettings(force=false){
+        if(depthMapSettingsLoaded && !force) return depthMapSettings;
+        if(depthMapSettingsPromise && !force) return depthMapSettingsPromise;
+        depthMapSettingsPromise = fetch('/api/app-settings', {cache:'no-store'})
+            .then(async response => {
+                if(!response.ok) throw new Error(await responseError(response, '深度图设置读取失败'));
+                const data = await response.json();
+                const previousMode = activeDepthMapMode();
+                depthMapSettings = {
+                    mode:data.depth_map_mode === 'professional' ? 'professional' : 'person',
+                    controls:normalizeDepthMapControls(data.depth_map_controls || DEFAULT_DEPTH_MAP_CONTROLS)
+                };
+                depthMapSettingsLoaded = true;
+                notifyDepthMapBindings({modeChanged:previousMode !== activeDepthMapMode()});
+                if(activeDepthMapMode() === 'professional') refreshProfessionalDepthStatus(true).catch(() => {});
+                else refreshPersonDepthStatus(true).catch(() => {});
+                return depthMapSettings;
+            })
+            .catch(() => depthMapSettings)
+            .finally(() => { depthMapSettingsPromise = null; });
+        return depthMapSettingsPromise;
+    }
+    function applyDepthMapSettingsMessage(data){
+        const previousMode = activeDepthMapMode();
+        depthMapSettings = {
+            mode:data?.mode === 'professional' ? 'professional' : 'person',
+            controls:normalizeDepthMapControls(data?.controls || DEFAULT_DEPTH_MAP_CONTROLS)
+        };
+        depthMapSettingsLoaded = true;
+        notifyDepthMapBindings({modeChanged:previousMode !== activeDepthMapMode()});
+        if(activeDepthMapMode() === 'professional') refreshProfessionalDepthStatus(true).catch(() => {});
+        else refreshPersonDepthStatus(true).catch(() => {});
+    }
     function notifyPersonDepthBindings(){
         personDepthBindings.forEach(binding => {
             try { notify(binding.options, binding.node, true); } catch(_) {}
@@ -1190,7 +1291,19 @@
     }
     function registerPersonDepthBinding(node, options){
         personDepthBindings.set(`${options.canvasKey || 'canvas'}:${node.id}`, {node, options});
-        refreshPersonDepthStatus(false).then(() => maybeAutoInstallPersonDepth(options)).catch(() => {});
+        refreshDepthMapSettings(false).catch(() => {});
+        const settingsSignature = depthMapSettingsSignature();
+        if(isDepthMapNode(node) && node.depthMapSharedConfigSignature !== settingsSignature){
+            node.depthMapControls = normalizeDepthMapControls(depthMapSettings.controls);
+            node.depthMapSharedConfigSignature = settingsSignature;
+            delete node.depthMapGeneratedSignature;
+        }
+        if(node?.poseReplicateMode === 'depth' && node.poseDepthSharedConfigSignature !== settingsSignature){
+            node.poseDepthSharedConfigSignature = settingsSignature;
+            delete node.poseDepthSourceSignature;
+        }
+        if(activeDepthMapMode() === 'professional') refreshProfessionalDepthStatus(false).catch(() => {});
+        else refreshPersonDepthStatus(false).then(() => maybeAutoInstallPersonDepth(options)).catch(() => {});
     }
     async function installPersonDepthComponent(retry=false){
         if(personDepthInstallPromise) return personDepthInstallPromise;
@@ -1779,6 +1892,11 @@
         node.poseDepthName = '';
         node.poseDepthWidth = 0;
         node.poseDepthHeight = 0;
+        node.poseDepthBaseUrl = '';
+        node.poseDepthBaseName = '';
+        node.poseDepthBaseWidth = 0;
+        node.poseDepthBaseHeight = 0;
+        delete node.poseDepthAppliedControlSignature;
         delete node.poseDepthSourceSignature;
         delete node.poseDepthFailedSignature;
         node.poseDepthStatus = 'idle';
@@ -1848,27 +1966,60 @@
             kind:'image'
         } : null;
     }
-    async function estimatePersonDepthFile(source, options, filename='person-depth.png'){
+    async function estimateConfiguredDepthFile(source, options, filename='depth-map.png'){
+        const professional = activeDepthMapMode() === 'professional';
         const sourceUrl = options.resolveUrl?.(source.url) || source.url;
         const imageResponse = await fetch(sourceUrl);
         if(!imageResponse.ok) throw new Error('输入图片读取失败');
         const form = new FormData();
         form.append('file', await imageResponse.blob(), source.name || 'depth-source.png');
-        form.append('bit_depth', '8');
-        const response = await fetch('/api/person-depth/estimate', {method:'POST', body:form});
-        if(!response.ok) throw new Error(await responseError(response, '高精度人物深度图生成失败'));
-        const width = Number(response.headers.get('X-Person-Depth-Width') || 0);
-        const height = Number(response.headers.get('X-Person-Depth-Height') || 0);
+        if(!professional) form.append('bit_depth', '8');
+        const response = await fetch(professional ? '/api/depth/estimate' : '/api/person-depth/estimate', {method:'POST', body:form});
+        if(!response.ok) throw new Error(await responseError(response, professional ? '完整画面深度图生成失败' : '高精度人物深度图生成失败'));
+        const width = Number(response.headers.get(professional ? 'X-Depth-Width' : 'X-Person-Depth-Width') || 0);
+        const height = Number(response.headers.get(professional ? 'X-Depth-Height' : 'X-Person-Depth-Height') || 0);
         const file = await uploadBlob(await response.blob(), filename);
         file.natural_w = width || file.natural_w || file.width || source.natural_w || 0;
         file.natural_h = height || file.natural_h || file.height || source.natural_h || 0;
         return file;
     }
+    async function adjustDepthFile(file, controls, options, filename='depth-map-adjusted.png'){
+        const normalized = normalizeDepthMapControls(controls);
+        if(depthMapControlsAreDefault(normalized)) return file;
+        const image = await loadImage(file.url, options.resolveUrl);
+        const canvas = document.createElement('canvas');
+        renderDepthMapControls(image, normalized, canvas);
+        const blob = await depthMapCanvasBlob(canvas);
+        const adjusted = await uploadBlob(blob, filename);
+        adjusted.natural_w = canvas.width;
+        adjusted.natural_h = canvas.height;
+        return adjusted;
+    }
+    async function applyPoseDepthGlobalControls(node, options){
+        if(!node?.poseDepthBaseUrl) return null;
+        const signature = `${node.poseDepthBaseUrl}|${depthMapControlSignature(depthMapSettings.controls)}`;
+        if(node.poseDepthAppliedControlSignature === signature && node.poseDepthUrl) return poseReplicateControlItem(node);
+        const baseFile = {
+            url:node.poseDepthBaseUrl,
+            name:node.poseDepthBaseName || 'depth-base.png',
+            natural_w:node.poseDepthBaseWidth || 0,
+            natural_h:node.poseDepthBaseHeight || 0,
+            kind:'image'
+        };
+        const file = await adjustDepthFile(baseFile, depthMapSettings.controls, options, `pose-depth-adjusted-${Date.now()}.png`);
+        node.poseDepthUrl = file.url || '';
+        node.poseDepthName = file.name || 'pose-depth.png';
+        node.poseDepthWidth = file.natural_w || file.width || baseFile.natural_w || 0;
+        node.poseDepthHeight = file.natural_h || file.height || baseFile.natural_h || 0;
+        node.poseDepthAppliedControlSignature = signature;
+        notify(options, node, true);
+        return poseReplicateControlItem(node);
+    }
     async function runPersonDepth(node, options, force=false){
         const source = poseReplicateInput(node, options, 'pose-reference');
-        const signature = `depth|${sourceSignature(source)}`;
-        if(!signature || signature === 'depth|') return;
-        if(!personDepthStatus?.ready){
+        const signature = `depth|${activeDepthMapMode()}|${sourceSignature(source)}`;
+        if(!source?.url) return;
+        if(!activeDepthMapStatus()?.ready){
             registerPersonDepthBinding(node, options);
             return;
         }
@@ -1878,11 +2029,17 @@
         const task = (async () => {
             node.poseDepthStatus = 'running'; node.poseDepthError = ''; notify(options, node, true);
             try {
-                const file = await estimatePersonDepthFile(source, options, `person-depth-${Date.now()}.png`);
+                const baseFile = await estimateConfiguredDepthFile(source, options, `${activeDepthMapMode()}-depth-base-${Date.now()}.png`);
+                node.poseDepthBaseUrl = baseFile.url || '';
+                node.poseDepthBaseName = baseFile.name || 'depth-base.png';
+                node.poseDepthBaseWidth = baseFile.natural_w || baseFile.width || 0;
+                node.poseDepthBaseHeight = baseFile.natural_h || baseFile.height || 0;
+                const file = await adjustDepthFile(baseFile, depthMapSettings.controls, options, `pose-depth-adjusted-${Date.now()}.png`);
                 node.poseDepthUrl = file.url || '';
                 node.poseDepthName = file.name || 'person-depth.png';
                 node.poseDepthWidth = file.natural_w || file.width || source.natural_w || 0;
                 node.poseDepthHeight = file.natural_h || file.height || source.natural_h || 0;
+                node.poseDepthAppliedControlSignature = `${baseFile.url}|${depthMapControlSignature(depthMapSettings.controls)}`;
                 node.poseDepthSourceSignature = signature;
                 delete node.poseDepthFailedSignature;
                 node.poseDepthStatus = 'done'; node.poseDepthError = '';
@@ -1900,9 +2057,9 @@
 
     async function runDepthMap(node, options, force=false){
         const source = depthMapInput(node, options);
-        const signature = sourceSignature(source);
-        if(!signature) return null;
-        if(!personDepthStatus?.ready){
+        const signature = `${activeDepthMapMode()}|${sourceSignature(source)}`;
+        if(!source?.url) return null;
+        if(!activeDepthMapStatus()?.ready){
             registerPersonDepthBinding(node, options);
             return null;
         }
@@ -1915,8 +2072,8 @@
             node.depthMapError = '';
             notify(options, node, true);
             try {
-                const file = await estimatePersonDepthFile(source, options, `depth-map-${Date.now()}.png`);
-                if(sourceSignature(depthMapInput(node, options)) !== signature) return null;
+                const file = await estimateConfiguredDepthFile(source, options, `depth-map-${activeDepthMapMode()}-${Date.now()}.png`);
+                if(`${activeDepthMapMode()}|${sourceSignature(depthMapInput(node, options))}` !== signature) return null;
                 node.depthMapGeneratedSignature = signature;
                 delete node.depthMapFailedSignature;
                 node.depthMapStatus = 'done';
@@ -1929,10 +2086,10 @@
                 options.toast?.('深度图已生成，可继续连接下游节点');
                 return outputItem(node) || file;
             } catch(error){
-                if(sourceSignature(depthMapInput(node, options)) === signature){
+                if(`${activeDepthMapMode()}|${sourceSignature(depthMapInput(node, options))}` === signature){
                     node.depthMapStatus = 'failed';
                     node.depthMapFailedSignature = signature;
-                    node.depthMapError = error.message || '高精度人物深度图生成失败';
+                    node.depthMapError = error.message || '深度图生成失败';
                     notify(options, node, true);
                 }
                 throw error;
@@ -2014,8 +2171,8 @@
         root.querySelector('[data-special-action="retry-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation(); openPersonDepthDialog(options, true);
         });
-        const signature = sourceSignature(source);
-        if(signature && personDepthStatus?.ready && (node.depthMapStatus !== 'failed' || node.depthMapFailedSignature !== signature)){
+        const signature = `${activeDepthMapMode()}|${sourceSignature(source)}`;
+        if(source?.url && activeDepthMapStatus()?.ready && (node.depthMapStatus !== 'failed' || node.depthMapFailedSignature !== signature)){
             runDepthMap(node, options, false).catch(() => {});
         }
     }
@@ -2140,7 +2297,7 @@
             const currentScene = poseReplicateInput(node, options, 'scene');
             const control = poseReplicateControlItem(node);
             if(!currentAction?.url || !currentTargets.length || !control?.url){ options.toast?.(`请等待${node.poseReplicateMode === 'depth' ? '深度图' : '骨架图'}提取完成，并确认服装参考已添加`); return; }
-            if(node.poseReplicateMode === 'depth' && !personDepthStatus?.ready){ options.toast?.('高精度人物深度组件尚未就绪'); return; }
+            if(node.poseReplicateMode === 'depth' && !activeDepthMapStatus()?.ready){ options.toast?.(`${activeDepthMapModeLabel()}深度模型尚未就绪`); return; }
             if(!options.generatePoseReplicate){ options.toast?.('当前画布尚未配置一键复刻生成能力'); return; }
             const prompt = String(node.poseReplicatePrompt || '').trim();
             const taskCount = currentTargets.length;
@@ -2156,8 +2313,8 @@
 
         if(action?.url){
             if(node.poseReplicateMode === 'depth'){
-                const depthSignature = `depth|${sourceSignature(action)}`;
-                if(personDepthStatus?.ready && (node.poseDepthStatus !== 'failed' || node.poseDepthFailedSignature !== depthSignature)) runPersonDepth(node, options, false).catch(() => {});
+                const depthSignature = `depth|${activeDepthMapMode()}|${sourceSignature(action)}`;
+                if(activeDepthMapStatus()?.ready && (node.poseDepthStatus !== 'failed' || node.poseDepthFailedSignature !== depthSignature)) runPersonDepth(node, options, false).catch(() => {});
             } else {
                 const poseOptions = poseReplicatePoseOptions(options);
                 const currentSignature = sourceSignature(action);
@@ -2512,11 +2669,18 @@
     }
     function bindAngle(root, node, options={}){ bindEditNode(root, node, options, 'angle'); }
 
+    window.addEventListener('message', event => {
+        if(event.origin && event.origin !== location.origin) return;
+        if(event.data?.type === 'depth-map-settings:changed') applyDepthMapSettingsMessage(event.data);
+    });
+    refreshDepthMapSettings(false).catch(() => {});
+
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
         panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
         bindPanorama, bindPose, bindDepthMap, bindDirector3d, bindPoseReplicate, bindAngle,
         buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle, generateReferenceDepth,
-        disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
+        disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration,
+        refreshDepthMapSettings, activeDepthMapMode
     };
 })();

@@ -944,6 +944,8 @@ let currentOutputCompareUrl = '';
 let currentOutputMeta = null;
 let currentOutputLightboxOutId = '';
 let currentOutputLightboxUrl = '';
+let canvasCompareViewer = null;
+const classicResultCompareViewers = new Map();
 const missingAssetUrls = new Set();
 let outputTimer = null;
 let loopContext = null;
@@ -1107,8 +1109,13 @@ const CANVAS_THEME_KEY = 'canvas_theme';
 const QUICK_TOOLBAR_COLLAPSED_KEY = 'canvas_quick_toolbar_collapsed';
 const QUICK_TOOLBAR_ITEMS_KEY = 'canvas_quick_toolbar_items_v1';
 const MEDIA_TOOLBAR_ITEMS_KEY = 'canvas_media_toolbar_items_v1';
+const CANVAS_WORK_MODE_KEY = 'canvas_work_mode_v1';
 const QUICK_TOOLBAR_MAX_ITEMS = 18;
 const MEDIA_TOOLBAR_MAX_ITEMS = 8;
+const CANVAS_VIDEO_ONLY_NODE_TYPES = new Set([
+    'video','linkfox-video','film-storyboard','film-line-art','film-video','storyboardMerge',
+    'topazVideo','director3d','dwpose','blenderDirector','film-bridge-import','h3-video','ecom-video'
+]);
 const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'film-prepare-assets', label:'准备资产', icon:'boxes', action:() => createNodeByType('film-prepare-assets')},
     {id:'film-confirm-shots', label:'确认镜头', icon:'list-checks', action:() => createNodeByType('film-confirm-shots')},
@@ -1119,7 +1126,7 @@ const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'video', label:'视频生成', icon:'clapperboard', action:() => addVideoNode()},
     {id:'linkfox-video', label:'LinkFox视频', icon:'sparkles', className:'linkfox-toolbar-btn', action:() => addLinkfoxVideoNode()},
     {id:'film-storyboard', label:'分镜合成', icon:'panels-top-left', action:() => addFilmNode('film-storyboard')},
-    {id:'storyboardMerge', label:'合并分镜', icon:'columns-3', action:() => addStoryboardMergeNode()},
+    {id:'storyboardMerge', label:'拼图', icon:'columns-3', action:() => addStoryboardMergeNode()},
     {id:'film-video', label:'影视视频', icon:'clapperboard', action:() => addFilmNode('film-video')},
     {id:'topazVideo', label:'Topaz 高清', icon:'scan-line', action:() => addTopazVideoNode()},
     {id:'panorama', label:'720°取景器', icon:'scan-line', action:() => addPanoramaNode()},
@@ -1127,6 +1134,7 @@ const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'dwpose', label:'动作提取', icon:'person-standing', action:() => addDWPoseNode()},
     {id:'depthMap', label:'深度图', icon:'scan', action:() => addDepthMapNode()},
     {id:'poseReplicate', label:'一键复刻', icon:'refresh-cw', action:() => addPoseReplicateNode()},
+    {id:'resultCompare', label:'结果对比', icon:'columns-2', action:() => addResultCompareNode()},
     {id:'blenderDirector', label:'外部导演台', icon:'box', action:() => addBlenderDirectorNode()},
     {id:'output', label:'Output', icon:'circle-dot', action:() => addOutputNode()},
     {id:'group', label:'分组', icon:'group', action:() => groupSelectedImages()},
@@ -1144,9 +1152,10 @@ const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'panorama', label:'全景', icon:'scan-line'},
     {id:'angle', label:'多角度', icon:'rotate-3d'},
     {id:'multi-view', label:'三视图', icon:'panels-top-left'},
-    {id:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
+    {id:'storyboardMerge', label:'拼图', icon:'columns-3'},
     {id:'dwpose', label:'动作提取', icon:'person-standing'},
     {id:'depthMap', label:'深度图', icon:'scan'},
+    {id:'resultCompare', label:'结果对比', icon:'columns-2'},
     {id:'addAsset', label:'添加为素材', icon:'library-big'},
     {id:'download', label:'下载', icon:'download'},
     {id:'run', label:'运行', icon:'play'},
@@ -1248,13 +1257,37 @@ function readCanvasPreferenceList(key, fallback, allowedIds, maxItems){
 function saveCanvasPreferenceList(key, value){
     try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
 }
+function canvasWorkMode(){
+    try { return localStorage.getItem(CANVAS_WORK_MODE_KEY) === 'design' ? 'design' : 'all'; }
+    catch(error){ return 'all'; }
+}
+function canvasWorkModeAllows(type){
+    return canvasWorkMode() !== 'design' || !CANVAS_VIDEO_ONLY_NODE_TYPES.has(String(type || ''));
+}
+function filterCanvasWorkModeItems(items){
+    return (items || []).filter(item => canvasWorkModeAllows(item?.type || item?.id));
+}
+function applyCanvasWorkMode(mode=canvasWorkMode()){
+    const next = mode === 'design' ? 'design' : 'all';
+    try { localStorage.setItem(CANVAS_WORK_MODE_KEY, next); } catch(error) {}
+    document.documentElement.classList.toggle('canvas-work-mode-design', next === 'design');
+    document.body.classList.toggle('canvas-work-mode-design', next === 'design');
+    document.querySelectorAll('[data-canvas-work-mode]').forEach(button => {
+        const active = button.dataset.canvasWorkMode === next;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    renderQuickToolbarItems();
+    if(canvasSettingsModal?.classList.contains('open')) renderCanvasSettings();
+    closeCreateMenu();
+}
 function quickToolbarItemIds(){
     return readCanvasPreferenceList(QUICK_TOOLBAR_ITEMS_KEY, CLASSIC_QUICK_TOOLBAR_DEFAULT, new Set(CLASSIC_QUICK_TOOLBAR_DEFS.map(item => item.id)), QUICK_TOOLBAR_MAX_ITEMS);
 }
 function renderQuickToolbarItems(){
     if(!toolbarNodeItems) return;
     const byId = new Map(CLASSIC_QUICK_TOOLBAR_DEFS.map(item => [item.id, item]));
-    const items = quickToolbarItemIds().map(id => byId.get(id)).filter(Boolean);
+    const items = filterCanvasWorkModeItems(quickToolbarItemIds().map(id => byId.get(id)).filter(Boolean));
     toolbarNodeItems.innerHTML = '';
     const row = document.createElement('div');
     row.className = 'toolbar-row';
@@ -1278,10 +1311,11 @@ function canvasSettingsListForMode(mode){
 }
 function renderCanvasSettings(){
     if(!canvasSettingsBody) return;
-    const config = canvasSettingsListForMode(canvasSettingsMode);
+    const rawConfig = canvasSettingsListForMode(canvasSettingsMode);
+    const config = {...rawConfig, defs:filterCanvasWorkModeItems(rawConfig.defs)};
     const selected = new Set(readCanvasPreferenceList(config.key, config.fallback, new Set(config.defs.map(item => item.id)), config.max));
     const hint = canvasSettingsMode === 'media'
-        ? '图片节点顶部菜单最多保留 8 项，和“更多”会按画面宽度自动分列；不可用的操作会自动隐藏。'
+        ? `图片节点顶部菜单最多保留 ${MEDIA_TOOLBAR_MAX_ITEMS} 项，和“更多”会按画面宽度自动分列；不可用的操作会自动隐藏。`
         : '只显示你最常用的节点，最多 18 项，按当前顺序排列在同一行。空间不足时可横向滚动。';
     canvasSettingsBody.innerHTML = `<div class="canvas-settings-note">${escapeHtml(hint)}</div><div class="canvas-settings-options">${config.defs.map(item => `
         <label class="canvas-settings-option"><input type="checkbox" data-canvas-setting-id="${escapeAttr(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><i data-lucide="${escapeAttr(item.icon)}"></i><span>${escapeHtml(item.label)}</span></label>`).join('')}</div>`;
@@ -1332,6 +1366,15 @@ toolbarNodeItems?.addEventListener('click', event => {
     const item = CLASSIC_QUICK_TOOLBAR_DEFS.find(def => def.id === button.dataset.toolbarNode);
     if(item) item.action();
 });
+document.getElementById('canvasWorkModeSwitch')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-canvas-work-mode]');
+    if(!button || button.classList.contains('active')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    applyCanvasWorkMode(button.dataset.canvasWorkMode);
+    setStatus(button.dataset.canvasWorkMode === 'design' ? '已切换到平面模式，仅显示平面与公共节点' : '已切换到全能模式，显示全部节点');
+});
+applyCanvasWorkMode(canvasWorkMode());
 renderQuickToolbarItems();
 function toggleQuickToolbar(){
     const collapsed = localStorage.getItem(QUICK_TOOLBAR_COLLAPSED_KEY) === '1';
@@ -4597,6 +4640,10 @@ function addDepthMapNode(point){
     const p = point || defaultPoint(110, 30);
     return addNode({id:uid('depth'), type:'depthMap', x:p.x, y:p.y, w:520, h:560, depthMapStatus:'idle'});
 }
+function addResultCompareNode(point){
+    const p = point || defaultPoint(120, 40);
+    return addNode({id:uid('result-compare'), type:'resultCompare', x:p.x, y:p.y, w:520, h:560, compareDivider:50});
+}
 function addDirector3dNode(point){
     const p = point || defaultPoint(140, 40);
     return addNode({id:uid('director3d'), type:'director3d', x:p.x, y:p.y, w:460, h:420, directorProject:null, directorCaptures:[]});
@@ -5505,9 +5552,10 @@ function linkCreateOptions(state){
             return [
                 ...(['group','image'].includes(node.type) ? [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}] : []),
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
+                {type:'resultCompare', label:'结果对比', icon:'columns-2'},
                 {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'},
             {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
-            {type:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
+            {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
             {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
                 {type:'film-video', label:'影视视频', icon:'clapperboard'},
                 {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'},
@@ -5519,6 +5567,13 @@ function linkCreateOptions(state){
     if(node.type === 'film-prepare-assets') return [{type:'image',label:'图片',icon:'image'},{type:'group',label:'图片组',icon:'group'}];
     if(node.type === 'film-confirm-shots') return [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}];
     if(node.type === 'film-video' && state.inputRole === 'workflow') return [{type:'film-confirm-shots',label:'确认镜头',icon:'list-checks'}];
+    if(node.type === 'resultCompare'){
+        return [
+            {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
+            {type:'group', label:tr('canvas.group'), icon:'group'},
+            {type:'output', label:'Output', icon:'circle-dot'}
+        ];
+    }
     if(node.type === 'poseReplicate'){
         return [{type:'image', label:tr('canvas.imageCard'), icon:'image-plus'}];
     }
@@ -5539,7 +5594,7 @@ function linkCreateOptions(state){
             {type:'dwpose', label:'动作提取', icon:'person-standing'},
             {type:'depthMap', label:'深度图', icon:'scan'},
                 {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left'},
-                {type:'storyboardMerge', label:'合并分镜', icon:'columns-3'},
+                {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
                 {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
             {type:'film-video', label:'影视视频', icon:'clapperboard'}
         ];
@@ -5611,7 +5666,7 @@ function bindLinkAdvertisingSubmenus(){
 }
 function openLinkCreateMenu(originId, originKind, clientX, clientY, inputRole=''){
     const state = {originId, originKind, inputRole, point:screenToWorld(clientX, clientY)};
-    const options = linkCreateOptions(state);
+    const options = filterCanvasWorkModeItems(linkCreateOptions(state));
     if(!options.length) return false;
     linkCreateState = state;
     createMenu.classList.remove('open');
@@ -5644,8 +5699,8 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(nodeId)}"]`);
     const rect = el?.getBoundingClientRect();
     const point = screenToWorld(clientX, clientY);
-    const inputOptions = linkCreateOptions({originId:nodeId, originKind:'in', point});
-    const outputOptions = [
+    const inputOptions = filterCanvasWorkModeItems(linkCreateOptions({originId:nodeId, originKind:'in', point}));
+    const outputOptions = filterCanvasWorkModeItems([
         {type:'output', label:'Output', icon:'circle-dot'},
         ...(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type) ? [
             {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'}
@@ -5654,7 +5709,7 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
             {type:'video', label:tr('canvas.videoGenerateNode'), icon:'clapperboard'}
         ] : [])
-    ];
+    ]);
     const buttonsHtml = (options, kind) => `<div class="node-port-menu-grid">${options.map(opt => `<button class="menu-btn" data-link-create="${escapeAttr(opt.type)}" data-link-kind="${kind}" title="${escapeAttr(opt.label)}"><i data-lucide="${escapeAttr(opt.icon)}"></i><span>${escapeHtml(opt.label.replace('生成', ''))}</span></button>`).join('')}</div>`;
     linkCreateState = {originId:nodeId, originKind:'in', point};
     createMenu.classList.remove('open');
@@ -5714,13 +5769,19 @@ function mediaToolbarItemsForNode(node){
     if(hasUsableUrl && kind === 'image'){
         ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','depthMap','storyboardMerge','download']
             .forEach(id => available.add(id));
+        available.add('resultCompare');
     }
-    const items = selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id));
+    const items = filterCanvasWorkModeItems(selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id)));
     // “添加为素材”是媒体节点的固定能力；旧版用户已保存的自定义菜单中没有该 id，
     // 仍需主动补入，避免只有新用户能看到入口。
     if(available.has('addAsset') && !items.some(item => item.id === 'addAsset')){
         const downloadIndex = items.findIndex(item => item.id === 'download');
         items.splice(downloadIndex >= 0 ? downloadIndex : items.length, 0, definitions.get('addAsset'));
+    }
+    // 结果对比是图片节点的公共能力；为已有用户补入，避免旧的菜单偏好看不到新入口。
+    if(available.has('resultCompare') && !items.some(item => item.id === 'resultCompare')){
+        const assetIndex = items.findIndex(item => item.id === 'addAsset');
+        items.splice(assetIndex >= 0 ? assetIndex : items.length, 0, definitions.get('resultCompare'));
     }
     return items;
 }
@@ -6184,7 +6245,7 @@ function createLinkedNode(type, targetInputRole=''){
         const fromId = state.originKind === 'out' ? origin.id : created.id;
         const toId = state.originKind === 'out' ? created.id : origin.id;
         const defaultImageRoles = {'lookbook':'lookbook-person', 'film-storyboard':'actor-0', 'film-line-art':'source', 'film-video':'storyboard'};
-        const inputRole = state.originKind === 'in' ? state.inputRole || '' : (targetInputRole || (origin.type === 'image' ? defaultImageRoles[created.type] || '' : ''));
+        const inputRole = state.originKind === 'in' ? state.inputRole || '' : (targetInputRole || (created.type === 'resultCompare' ? 'compare-target' : '') || (origin.type === 'image' ? defaultImageRoles[created.type] || '' : ''));
         if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
             if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) {
                 const replaced = connections.filter(c => c.to === toId && c.inputRole === inputRole);
@@ -6210,6 +6271,7 @@ function createLinkedNode(type, targetInputRole=''){
 }
 function createNodeByType(type, point){
     if(window.CanvasFilmWorkflow?.isStep(type)) return addNode({id:uid('film'),type,...(point || defaultPoint()),w:960});
+    if(!canvasWorkModeAllows(type)) return null;
     if(window.CanvasLookbookNode?.isType?.(type)) return addLookbookNode(point);
     if(window.CanvasLinkfoxVideo?.isType?.(type)) return addLinkfoxVideoNode(point);
     if(window.CanvasEcommerceNodes?.isType?.(type)) return addEcommerceNode(type, point);
@@ -6230,6 +6292,7 @@ function createNodeByType(type, point){
     if(type === 'dwpose') return addDWPoseNode(point);
     if(type === 'depthMap') return addDepthMapNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
+    if(type === 'resultCompare') return addResultCompareNode(point);
     if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
     if(type === 'output') return addOutputNode(point);
@@ -6237,6 +6300,7 @@ function createNodeByType(type, point){
     return null;
 }
 function menuAdd(type){
+    if(!canvasWorkModeAllows(type)) return null;
     const point = menuPoint ? {...menuPoint} : defaultPoint(0,0);
     closeCreateMenu();
     const historyTx = beginClassicHistoryTransaction('menu-create');
@@ -6262,6 +6326,7 @@ function menuAdd(type){
         else if(type === 'dwpose') created = addDWPoseNode(point);
         else if(type === 'depthMap') created = addDepthMapNode(point);
         else if(type === 'poseReplicate') created = addPoseReplicateNode(point);
+        else if(type === 'resultCompare') created = addResultCompareNode(point);
         else if(type === 'blenderDirector') created = addBlenderDirectorNode(point);
         else if(type === 'rh') created = addRhNode(point);
         else if(type === 'output') created = addOutputNode(point);
@@ -11259,7 +11324,7 @@ async function runStoryboardMergeNode(nodeId){
     const entries = storyboardMergeEntries(node);
     const usable = entries.filter(entry => entry.ref?.url);
     if(usable.length < 2){
-        showErrorModal('请至少连接 2 个已上传图片的图片节点', '合并分镜');
+        showErrorModal('请至少连接 2 个已上传图片的图片节点', '拼图');
         return;
     }
     pushUndo();
@@ -11303,13 +11368,13 @@ async function runStoryboardMergeNode(nodeId){
         node.outputUrl = file.url;
         node.outputName = file.name || 'storyboard_merge.png';
         node.runStatus = 'done';
-        setStatus(`合并分镜完成，共 ${usable.length} 张`);
+        setStatus(`拼图完成，共 ${usable.length} 张`);
         render();
         scheduleSave();
     } catch(error){
         node.runStatus = 'failed';
         node.runError = error.message || String(error);
-        showErrorModal(node.runError, '合并分镜失败');
+        showErrorModal(node.runError, '拼图失败');
         refreshNodes([node.id]);
     } finally {
         node.running = false;
@@ -11419,7 +11484,11 @@ async function runFilmNode(nodeId, opts={}){
         {
             const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
             if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
-            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
+            const rawSteps = Number(node.steps);
+            const steps = providerId === 'minimax-h3'
+                ? (Number.isFinite(rawSteps) ? rawSteps : 12)
+                : Math.max(4, Math.min(30, Number(node.steps || 12)));
+            const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps};
             const submittedPayload={...api.videoPromptSubmission(node,payload),canvas_id:canvas?.id||'',node_id:node.id};
             const data=providerId==='linkfox'
                 ? await window.CanvasLinkfoxVideo.generate(node,submittedPayload,{onChange:scheduleSave})
@@ -11540,7 +11609,7 @@ function renderNode(node){
     const hasFixedSize = !layoutLimits.autoHeight && Boolean((!autoMultiViewOutput && node.h) || size.h);
     // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
     const canvasLodSafe = ![
-        'panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','group','promptGroup'
+        'panorama','multiView','dwpose','depthMap','resultCompare','director3d','poseReplicate','angle','group','promptGroup'
     ].includes(node.type)
         && !window.CanvasEcommerceNodes?.isType?.(node.type)
         && !window.CanvasLookbookNode?.isType?.(node.type)
@@ -11578,7 +11647,7 @@ function renderNode(node){
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmWorkflow?.title(node.type) || window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
-    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '合并分镜' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
@@ -11787,6 +11856,7 @@ function renderNode(node){
     if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
     if(node.type === 'depthMap') body.innerHTML = window.CanvasSpecialNodes?.depthMapBodyHtml(node) || '<div class="muted-note">深度图节点加载失败</div>';
+    if(node.type === 'resultCompare') body.innerHTML = resultCompareBodyHtml(node);
     if(node.type === 'director3d') body.innerHTML = window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="muted-note">3D导演台加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageApiProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:allImageModels(provider.id)}))}) || '<div class="muted-note">一键复刻节点加载失败</div>';
     if(node.type === 'angle'){
@@ -11824,6 +11894,7 @@ function renderNode(node){
     visualShell.appendChild(body);
     el.appendChild(visualShell);
     if(node.type === 'storyboardMerge') bindStoryboardMergeNode(el, node);
+    if(node.type === 'resultCompare') bindResultCompareNode(el, node);
     const storyboardMergeSequenceToggle = el.querySelector('[data-storyboard-merge-sequence-toggle]');
     storyboardMergeSequenceToggle?.addEventListener('click', event => {
         event.preventDefault();
@@ -11847,7 +11918,7 @@ function renderNode(node){
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const inputPorts = filmPorts.length ? filmPorts : (lookbookPorts.length ? lookbookPorts : ecommercePorts);
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
-    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','depthMap','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','depthMap','resultCompare','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
     const canOutput = window.CanvasFilmWorkflow?.isStep(node.type) || window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
     if(node.type === 'linkfox-video'){
         const ports=window.CanvasLinkfoxVideo.inputPorts(node);
@@ -11860,6 +11931,8 @@ function renderNode(node){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
         el.insertAdjacentHTML('beforeend', [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
+    } else if(node.type === 'resultCompare'){
+        el.insertAdjacentHTML('beforeend', [['compare-source','源文件'],['compare-target','目标文件']].map(([role,label], index) => `<div class="port in result-compare-port" data-input-role="${role}" data-role-label="${label}" style="--result-compare-port-top:${index ? '68%' : '32%'}" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
     if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
     el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
@@ -12156,10 +12229,132 @@ function defaultNodeSize(type){
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'depthMap') return {w:520, h:560};
+    if(type === 'resultCompare') return {w:520, h:560};
     if(type === 'poseReplicate') return {w:720, h:820};
     if(type === 'angle') return {w:460, h:660};
     if(type === 'storyboardMerge') return {w:460, h:0};
     return {w:260, h:0};
+}
+
+function resultCompareInput(node, role){
+    return classicSpecialInputImage(node, role);
+}
+function resultCompareDisplayUrl(ref){
+    if(!ref?.url) return '';
+    return canvasDisplayMediaUrl(ref.url, ref.name || outputImageName(ref.url));
+}
+function resultCompareBodyHtml(node){
+    const source = resultCompareInput(node, 'compare-source');
+    const target = resultCompareInput(node, 'compare-target');
+    const sourceUrl = resultCompareDisplayUrl(source);
+    const targetUrl = resultCompareDisplayUrl(target);
+    const ready = Boolean(sourceUrl && targetUrl);
+    return `<div class="result-compare-body">
+        <div class="result-compare-stage ${ready ? '' : 'is-empty'}" data-result-compare-stage>
+            <img data-compare-before ${sourceUrl ? `src="${escapeAttr(sourceUrl)}"` : ''} alt="源文件">
+            <div class="result-compare-after-clip" data-compare-after-clip><img data-compare-after ${targetUrl ? `src="${escapeAttr(targetUrl)}"` : ''} alt="目标文件"></div>
+            <button class="result-compare-handle" data-compare-handle type="button" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Number(node.compareDivider) || 50)}" aria-label="拖动划像对比"><span>‹</span><span>›</span></button>
+            <span class="result-compare-label compare-viewer-label before">源文件</span>
+            <span class="result-compare-label compare-viewer-label after">目标文件</span>
+            ${ready ? '' : `<div class="result-compare-empty">${sourceUrl || targetUrl ? '再连接一张图片即可开始划像对比' : '连接“源文件”和“目标文件”两张图片'}</div>`}
+            <button class="result-compare-fullscreen" data-result-compare-fullscreen type="button" title="全屏对比" aria-label="全屏对比" ${ready ? '' : 'disabled'}><i data-lucide="maximize-2"></i></button>
+        </div>
+        <div class="result-compare-hint"><span>${ready ? '拖动手柄查看差异' : '支持横屏与竖屏图片'}</span><span>${sourceUrl ? '源文件已连接' : '等待源文件'} · ${targetUrl ? '目标文件已连接' : '等待目标文件'}</span></div>
+    </div>`;
+}
+function syncResultCompareStageRatio(stage){
+    if(!stage) return;
+    const candidates = [stage.querySelector('[data-compare-after]'), stage.querySelector('[data-compare-before]')].filter(Boolean);
+    const apply = image => {
+        if(!image?.naturalWidth || !image?.naturalHeight) return false;
+        const ratio = Math.max(.35, Math.min(3, image.naturalWidth / image.naturalHeight));
+        stage.style.setProperty('--result-compare-ratio', String(ratio));
+        stage.classList.toggle('is-portrait', ratio < .92);
+        stage.classList.toggle('is-landscape', ratio >= .92);
+        return true;
+    };
+    candidates.forEach(image => image.addEventListener('load', () => {
+        apply(image);
+        classicResultCompareViewers.get(stage.closest('.node')?.dataset.id)?.refresh();
+    }, {once:true}));
+    candidates.some(apply);
+}
+function bindResultCompareNode(el, node){
+    const stage = el?.querySelector('[data-result-compare-stage]');
+    if(!stage || !window.CompareViewer) return;
+    classicResultCompareViewers.get(node.id)?.destroy();
+    const viewer = new window.CompareViewer({
+        root:stage,
+        divider:Number(node.compareDivider) || 50,
+        onChange:state => {
+            node.compareDivider = state.divider;
+            scheduleSave();
+        }
+    });
+    classicResultCompareViewers.set(node.id, viewer);
+    stage.addEventListener('mousedown', event => event.stopPropagation());
+    stage.addEventListener('pointerdown', event => event.stopPropagation());
+    syncResultCompareStageRatio(stage);
+    el.querySelector('[data-result-compare-fullscreen]')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const source = resultCompareInput(node, 'compare-source');
+        const target = resultCompareInput(node, 'compare-target');
+        if(source?.url && target?.url) openCanvasResultCompare(source.url, target.url, {before:'源文件', after:'目标文件'});
+    });
+}
+function ensureCanvasCompareViewer(){
+    const overlay = document.getElementById('canvasCompareOverlay');
+    const stage = overlay?.querySelector('[data-canvas-compare-stage]');
+    if(!overlay || !stage || !window.CompareViewer) return null;
+    if(!canvasCompareViewer){
+        canvasCompareViewer = new window.CompareViewer({root:stage, divider:50});
+        overlay.querySelector('[data-canvas-compare-close]')?.addEventListener('click', closeCanvasResultCompare);
+        overlay.addEventListener('mousedown', event => event.stopPropagation());
+        document.addEventListener('keydown', event => {
+            if(event.key === 'Escape' && overlay.classList.contains('open')) closeCanvasResultCompare();
+        });
+    }
+    return canvasCompareViewer;
+}
+function openCanvasResultCompare(beforeUrl, afterUrl, labels={}){
+    if(!beforeUrl || !afterUrl) return false;
+    const overlay = document.getElementById('canvasCompareOverlay');
+    overlay?.classList.add('open');
+    overlay?.setAttribute('aria-hidden', 'false');
+    const viewer = ensureCanvasCompareViewer();
+    if(!viewer){
+        overlay?.classList.remove('open');
+        return false;
+    }
+    overlay.querySelector('[data-canvas-compare-before-label]').textContent = labels.before || '源文件';
+    overlay.querySelector('[data-canvas-compare-after-label]').textContent = labels.after || '目标文件';
+    viewer.setImages(canvasDisplayMediaUrl(beforeUrl, outputImageName(beforeUrl)), canvasDisplayMediaUrl(afterUrl, outputImageName(afterUrl)));
+    viewer.reset();
+    requestAnimationFrame(() => viewer.refresh());
+    return true;
+}
+function closeCanvasResultCompare(){
+    const overlay = document.getElementById('canvasCompareOverlay');
+    overlay?.classList.remove('open');
+    overlay?.setAttribute('aria-hidden', 'true');
+}
+function createResultCompareFromImage(sourceNode){
+    if(!sourceNode?.url || mediaKindForNode(sourceNode) !== 'image') return null;
+    pushUndo();
+    const created = addResultCompareNode({x:Number(sourceNode.x || 0) + Number(sourceNode.w || 260) + 72, y:Number(sourceNode.y || 0)});
+    if(!created) return null;
+    positionCanvasNodeRelative(created, sourceNode, 'downstream');
+    const connection = {id:uid('c'), from:sourceNode.id, to:created.id, inputRole:'compare-target'};
+    connections.push(connection);
+    indexClassicConnectionModel(connection);
+    markClassicConnectionStructureDirty();
+    selected.clear();
+    selected.add(created.id);
+    render();
+    scheduleSave();
+    setStatus('已创建结果对比节点，当前图片已连接到“目标文件”');
+    return created;
 }
 
 function storyboardMergeEntries(node){
@@ -12184,7 +12379,7 @@ function storyboardMergeBodyHtml(node){
             : `<div class="storyboard-merge-thumb is-empty" title="图片节点尚未上传图片"><div class="storyboard-merge-thumb-media"><i data-lucide="image-off"></i></div><span class="storyboard-merge-index">${index + 1}</span></div>`).join('')
         : '<div class="storyboard-merge-empty">从图片节点连接至少 2 张分镜图</div>';
     const message = node.runError ? `<div class="storyboard-merge-error">${escapeHtml(node.runError)}</div>` : `<div class="storyboard-merge-note">${usable.length} 张图片 · 横向排列 · 白色间隙 ${gap}px</div>`;
-    return `<div class="storyboard-merge-body"><div class="storyboard-merge-summary"><span>连接顺序</span><b>${usable.length}/${entries.length}</b></div><div class="storyboard-merge-thumbs">${thumbs}</div>${message}<button type="button" class="storyboard-merge-run" data-storyboard-merge-run="${escapeAttr(node.id)}" ${disabled ? 'disabled' : ''}><i data-lucide="columns-3"></i><span>${node.running ? '合并中…' : '合并分镜'}</span></button></div>`;
+    return `<div class="storyboard-merge-body"><div class="storyboard-merge-summary"><span>连接顺序</span><b>${usable.length}/${entries.length}</b></div><div class="storyboard-merge-thumbs">${thumbs}</div>${message}<button type="button" class="storyboard-merge-run" data-storyboard-merge-run="${escapeAttr(node.id)}" ${disabled ? 'disabled' : ''}><i data-lucide="columns-3"></i><span>${node.running ? '拼接中…' : '拼图'}</span></button></div>`;
 }
 
 function bindStoryboardMergeNode(el, node){
@@ -14642,7 +14837,7 @@ function h3VideoSettingsHtml(node){
             <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${h3VideoResolutionOptions(node.resolution || MINIMAX_H3_VIDEO_DEFAULTS.resolution)}</select></label>
         </div>
         <div class="gen-settings-row">
-            <label class="field"><div class="setting-title">采样步数（4–30）</div><input class="setting-input" data-h3-steps type="number" min="4" max="30" step="1" value="${Number(node.steps || 12)}"></label>
+            <label class="field"><div class="setting-title">采样步数</div><input class="setting-input" data-h3-steps type="number" step="1" value="${Number(node.steps || 12)}"></label>
             <div class="field"><div class="setting-title">参考能力</div><div class="text-[11px] text-gray-500">全能参考最多 9 图 + 3 视频；关键帧模式使用前两张图</div></div>
         </div>
         <div class="gen-settings-row">
@@ -14826,8 +15021,8 @@ function renderVideoBody(node){
     if(stepsInput){
         stepsInput.onmousedown = e => e.stopPropagation();
         stepsInput.onclick = e => e.stopPropagation();
-        stepsInput.oninput = e => { e.stopPropagation(); node.steps = Math.max(4, Math.min(30, Number(e.target.value || 12))); scheduleSave(); };
-        stepsInput.onblur = e => { e.target.value = String(Math.max(4, Math.min(30, Number(node.steps || 12)))); };
+        stepsInput.oninput = e => { e.stopPropagation(); const value = Number(e.target.value); node.steps = Number.isFinite(value) ? value : 12; scheduleSave(); };
+        stepsInput.onblur = e => { const value = Number(node.steps); e.target.value = String(Number.isFinite(value) ? value : 12); };
     }
     wrap.querySelectorAll('[data-kling-parameter]').forEach(input => {
         input.onmousedown = e => e.stopPropagation();
@@ -18243,6 +18438,10 @@ function deleteNode(id, event){
     event?.stopPropagation();
     const deletingNode = nodes.find(n => n.id === id);
     if(deletingNode?.type === 'topazVideo' && deletingNode.topazTaskId) cancelTopazVideoTask(id);
+    if(deletingNode?.type === 'resultCompare'){
+        classicResultCompareViewers.get(id)?.destroy();
+        classicResultCompareViewers.delete(id);
+    }
     pushUndo();
     destroyLTXEditor(nodes.find(n => n.id === id));
     nodes = nodes.filter(n => n.id !== id);
@@ -21315,6 +21514,7 @@ function renderSelectionHub(options={}){
         {id:'angle', label:langIsEn() ? 'Multi-angle' : '多角度', icon:'rotate-3d'},
         {id:'multi-view', label:langIsEn() ? 'Create three views' : '创建三视图', icon:'panels-top-left'},
         {id:'dwpose', label:langIsEn() ? 'Extract Pose' : '动作提取', icon:'person-standing'},
+        ...(target.kind === 'output' && node.poseReplicateSourceId ? [{id:'resultCompareFullscreen', label:'结果对比', icon:'columns-2'}] : []),
         {id:'addAsset', label:langIsEn() ? 'Add to assets' : '添加为素材', icon:'library-big'},
         {id:'download', label:tr('canvas.download'), icon:'download'}
         ] : [])
@@ -21927,6 +22127,20 @@ function addQuickActionNode(source, type){
 }
 function runMediaQuickAction(action, target){
     const sourceNode = nodes.find(item => item.id === target?.nodeId);
+    if(action === 'resultCompare' && sourceNode?.type === 'image'){
+        createResultCompareFromImage(sourceNode);
+        return;
+    }
+    if(action === 'resultCompareFullscreen' && sourceNode?.type === 'output'){
+        const poseNode = nodes.find(item => item.id === sourceNode.poseReplicateSourceId && item.type === 'poseReplicate');
+        const original = poseNode ? classicSpecialInputImage(poseNode, 'pose-reference') : null;
+        if(!original?.url || !target?.url){
+            setStatus('未找到一键复刻的目标图片，无法开始结果对比');
+            return;
+        }
+        openCanvasResultCompare(original.url, target.url, {before:'目标图片', after:'生成图片'});
+        return;
+    }
     if(action === 'addAsset'){
         if(!target?.url) return;
         openCanvasAssetSaveDialog({...target, mediaKind:target.mediaKind || (sourceNode ? mediaKindForNode(sourceNode) : 'image')});
@@ -22846,6 +23060,11 @@ function canConnect(fromId, toId, inputRole=''){
     if(workflowConnection != null) return workflowConnection && !wouldCreateGeneratorCycle(fromId,toId);
     // 图片节点底部的快速生成会直接创建 image -> output；保存前的连接清理必须保留它。
     if(from.type === 'image' && to.type === 'output') return true;
+    if(to.type === 'resultCompare'){
+        if(!['compare-source','compare-target'].includes(inputRole)) return false;
+        return (from.type === 'image' || mediaRefsFromNode(from).some(ref => ref?.url && mediaKindForRef(ref) === 'image'))
+            && !wouldCreateGeneratorCycle(fromId, toId);
+    }
     if(to.type === 'multiView'){
         if(!classicMultiViewInputSlots(to).some(([role]) => role === inputRole)) return false;
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
@@ -23895,7 +24114,7 @@ canvasDownloadSelectedMenuBtn?.addEventListener('click', e => {
     downloadSelectedCanvasNodes();
 });
 function isZoomPreviewIgnoredTarget(target){
-    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap, #canvasAssetPanel, #canvasAssetSaveModal, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox');
+    return !!target?.closest?.('#createMenu, #linkCreateMenu, #nodeInputMenu, #nodeOutputMenu, #imageNodeMenu, #connectionContextMenu, .minimap, #canvasAssetPanel, #canvasAssetSaveModal, #assetManagerModal, #workflowTransferModal, #logModal, #classicShortcutModal, #promptTemplateModal, #imageEditModal, #outputLightbox, #canvasCompareOverlay');
 }
 board.addEventListener('mousedown', e => {
     if(!zoomPreviewState || e.button !== 0) return;
@@ -24249,6 +24468,7 @@ function runClassicEditorShortcutAction(actionId){
     return false;
 }
 function classicShortcutBlockedOverlayAction(){
+    if(document.getElementById('canvasCompareOverlay')?.classList.contains('open')) return '__blocked__';
     if(logModal?.classList.contains('open')) return 'canvas.toggleLogs';
     if(classicShortcutModal?.classList.contains('open')) return 'canvas.toggleShortcuts';
     if(canvasSettingsModal?.classList.contains('open')) return '__blocked__';

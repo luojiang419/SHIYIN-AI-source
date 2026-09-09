@@ -12,6 +12,8 @@
 
 Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语法正常。下一步需要推送并用真实 macOS runner 验证编译与运行。
 
+Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专业深度/结果对比/H3/作品相关 153 项通过，视频提示词 105 项通过，8 个 JavaScript 文件语法通过。将提交这些产品源码作为下一轮 Mac 云端构建的同源快照；研究工具、设计源图删除、本地输出和历史档案不纳入。
+
 ## 下一步
 
 1. 隔离提交并推送 macOS 跨平台实现。
@@ -29,6 +31,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 - [x] 增加 GitHub Actions 双架构 workflow
 - [ ] 验证 GitHub Actions 云端构建
 - [ ] 上传并核验 Intel / Apple Silicon 产物
+- [x] 整理并验证 Windows 1.0.431 当前产品源码快照
 - [ ] 更新任务文档、提交并推送
 
 ## 最近验证状态
@@ -39,6 +42,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 - 本地 Python：安全、账号、Kling、Mac 构建契约 `41 passed`
 - Windows Rust：`cargo test --locked`，11 passed
 - 静态检查：macOS JSON/YAML/Bash/Python 编译检查通过
+- 同源产品回归：深度/结果对比/H3/作品 153 passed；视频提示词 105 passed；JavaScript 8 文件通过
 - macOS 编译：等待 GitHub Actions runner
 - 最近 Git commit：`b5a7616 docs: 记录1.0.431安装包验证`
 
@@ -108,6 +112,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 - 完成 Rust 平台模块、macOS bundle/data/sidecar 路径与更新降级接口。
 - 完成 macOS Keychain 密钥保护和 Kling 双架构内置 Node。
 - 完成 macOS app/DMG 构建、冻结后端 smoke 和双架构 Actions workflow。
+- 完成 Windows 1.0.431 当前产品源码筛选与集中回归，排除研究输出、设计源图删除和本地档案。
 
 ## 当前关键修改
 
@@ -140,6 +145,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 - 2026-09-10：Actions 首轮 `34372587813` 两架构均失败；根据完整日志增加 Intel onnxruntime marker，并修正 Rust 测试的跨平台路径假设。
 - 2026-09-10：Actions 第二轮 `34373137772` 两架构均通过到 PyInstaller，确认 Node 可执行文件真实大小后修正安全解包上限。
 - 2026-09-10：Actions 第三轮 `34374900714` 两架构完成 `.app` 和签名，仅 bundle smoke 的版本接口因漏传 token 失败；保持后端鉴权并修正测试请求。
+- 2026-09-10：整理 Windows 1.0.431 实际产品源码，相关 Python 258 项与 JavaScript 语法通过，准备进入同源 Mac 构建。
 
 ## 接力信息
 

@@ -30,7 +30,8 @@ class MiniMaxH3SmartCanvasFrontendTests(unittest.TestCase):
     def test_smart_h3_request_sends_local_reference_videos_and_steps(self):
         self.assertIn("const isH3 = isMiniMaxH3SmartSettings(runSettings);", self.javascript)
         self.assertIn("videos: refVideos", self.javascript)
-        self.assertIn("steps: Math.max(4, Math.min(30, Number(runSettings.videoSteps) || 12))", self.javascript)
+        self.assertIn("steps: isH3", self.javascript)
+        self.assertNotIn("采样步数（4–30）", self.javascript)
 
     def test_smart_h3_status_is_checked_before_generation(self):
         self.assertIn("/api/minimax-h3/status", self.javascript)

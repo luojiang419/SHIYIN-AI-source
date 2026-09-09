@@ -71,7 +71,8 @@
         }
 
         pointerDown(event){
-            if(event.target.closest('.compare-viewer-tools')) return;
+            const onHandle = Boolean(event.target.closest('.compare-viewer-handle'));
+            if(event.target.closest('.compare-viewer-tools, a, input, select') || (!onHandle && event.target.closest('button'))) return;
             this.dividerRect = this.root.getBoundingClientRect();
             if(event.button === 1){
                 event.preventDefault();

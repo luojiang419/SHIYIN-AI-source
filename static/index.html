@@ -2247,7 +2247,8 @@
             <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
             <iframe id="frame-works" data-src="/static/works.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes" allowfullscreen></iframe>
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.02.ivory-surfaces.1" loading="eager" scrolling="yes"></iframe>
-            <iframe id="frame-app-settings" data-src="/static/app-settings.html?v=2026.08.02.ivory-surfaces.1&amp;feature=shortcuts-runtime.2" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-app-settings" data-src="/static/app-settings.html?v=2026.08.02.ivory-surfaces.1&amp;feature=shortcuts-runtime.2&amp;feature=depth-map-mode.1" loading="eager" scrolling="yes"></iframe>
+            <iframe id="frame-depth-map-tuner" data-src="/static/depth-map-tuner.html?v=2026.09.06.integrated.1" loading="eager" scrolling="yes"></iframe>
             <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2026.08.14.canvas-neutral-no-blue.1&amp;feature=shortcuts-runtime.2" loading="eager" scrolling="yes"></iframe>
 
         </main>
@@ -2419,9 +2420,9 @@
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const SIDEBAR_MANUAL_MODE_KEY = 'studio_sidebar_manual_mode_v1';
         const DEFAULT_PAGE_ID = 'ecommerce';
-        const PAGE_IDS = ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings'];
+        const PAGE_IDS = ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings','depth-map-tuner'];
         const PROJECT_URL = 'https://github.com/luojiang419/SHIYIN-AI-source';
-        const ADMIN_PAGE_IDS = new Set(['api-settings', 'app-settings']);
+        const ADMIN_PAGE_IDS = new Set(['api-settings', 'app-settings', 'depth-map-tuner']);
         const STUDIO_BOOT_TIMEOUT_MS = 6000;
         let currentStudioAccount = null;
         let studioBootInFlight = false;
@@ -2808,6 +2809,13 @@
             });
         }
 
+        function forwardDepthMapSettingsChange(data) {
+            if(!data || data.type !== 'depth-map-settings:changed') return;
+            document.querySelectorAll('iframe').forEach(iframe => {
+                try { iframe.contentWindow?.postMessage(data, '*'); } catch(e) {}
+            });
+        }
+
         function broadcastStudioApiChange(message = {type:'providers-changed'}) {
             const data = typeof message === 'string'
                 ? {type:message, updated_at:Date.now()}
@@ -2826,8 +2834,14 @@
                 const frame = document.getElementById('frame-' + pageId);
                 if(frame) frame.dataset.studioDirty = event.data.dirty ? '1' : '0';
             }
+            if(event.data?.type === 'studio-open-depth-map-tuner') switchUI(null, 'depth-map-tuner');
+            if(event.data?.type === 'studio-depth-map-tuner-back') {
+                const settingsButton = document.querySelector('[onclick*="\'app-settings\'"]');
+                switchUI(settingsButton, 'app-settings');
+            }
             forwardStudioApiChange(event.data);
             forwardShortcutSettingsChange(event.data);
+            forwardDepthMapSettingsChange(event.data);
         });
 
         try {

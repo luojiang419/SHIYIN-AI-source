@@ -82,6 +82,7 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn("/api/download-output?url=${encodeURIComponent(work.url)}&name=${encodeURIComponent(name)}", self.works_js)
         self.assertIn("function workDownloadName(work)", self.works_js)
         self.assertIn("SHIYIN-${padSequence(work?.download_sequence || 1)}-${workDatePart(work)}${extensionFromWork(work)}", self.works_js)
+        self.assertIn("if(/\\.(jpg|jpeg)_x$/i.test(source)) return '.jpg';", self.works_js)
         self.assertIn("work?.download_name", self.works_js)
         self.assertIn("desktop.download.finished", self.works_js)
         self.assertNotIn('<a href="${escapeHtml(item.url)}" download=', self.works_js)
@@ -211,6 +212,17 @@ class WorksBackendTests(unittest.TestCase):
                 ))
             self.assertRegex(url, r"^/assets/output/SHIYIN-000005-\d{8}\.png$")
             self.assertTrue((output / Path(url).name).exists())
+
+    def test_jpg_x_is_normalized_to_jpg_for_work_names_and_media_response(self):
+        work = {
+            "url": "/assets/output/source.jpg_x",
+            "original_name": "source.jpg_x",
+            "created_at": 0,
+        }
+        self.assertTrue(self.main.looks_like_generated_image_url(work["url"]))
+        self.assertEqual(self.main.work_file_extension(work), ".jpg")
+        self.assertTrue(self.main.work_download_name(work, 1).endswith(".jpg"))
+        self.assertEqual(self.main.content_type_for_path("source.jpg_x"), "image/jpeg")
 
     def test_works_api_hides_trash_by_default_and_can_include_it(self):
         with tempfile.TemporaryDirectory() as root:

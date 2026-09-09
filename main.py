@@ -2793,6 +2793,8 @@ class AppSettingsUpdateRequest(BaseModel):
     quick_save_mode: Optional[str] = None
     quick_save_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
+    depth_map_mode: Optional[str] = None
+    depth_map_controls: Optional[Dict[str, Any]] = None
     shortcut_bindings: Optional[Dict[str, str]] = None
     canvas_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
     canvas_group_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
@@ -3088,6 +3090,8 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "quick_save_mode": str(config.get("quick_save_mode") or "manual"),
         "quick_save_dir": str(config.get("quick_save_dir") or "").strip(),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
+        "depth_map_mode": str(config.get("depth_map_mode") or "person"),
+        "depth_map_controls": dict(config.get("depth_map_controls") or {}),
         "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
         "canvas_arrange_spacing": config.get("canvas_arrange_spacing", 56),
         "canvas_group_arrange_spacing": config.get("canvas_group_arrange_spacing", 28),
@@ -3145,6 +3149,8 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             quick_save_mode=payload.quick_save_mode,
             quick_save_dir=payload.quick_save_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
+            depth_map_mode=payload.depth_map_mode,
+            depth_map_controls=payload.depth_map_controls,
             shortcut_bindings=payload.shortcut_bindings,
             canvas_arrange_spacing=payload.canvas_arrange_spacing,
             canvas_group_arrange_spacing=payload.canvas_group_arrange_spacing,
@@ -4494,7 +4500,8 @@ class CanvasVideoRequest(BaseModel):
     return_last_frame: bool = False
     generate_audio: bool = False
     multimodal: bool = False
-    steps: int = Field(default=12, ge=4, le=30)
+    # MiniMax H3 的采样步数由上游服务决定，不能在统一请求模型中设置 4-30 的范围。
+    steps: int = Field(default=12)
     model_parameters: Dict[str, Any] = Field(default_factory=dict)
     trusted_asset: bool = False
     canvas_id: str = Field(default="", max_length=160)
@@ -21594,7 +21601,7 @@ async def minimax_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[
         ),
         "resolution": minimax_h3_resolution(payload.aspect_ratio, payload.resolution),
         "duration": max(1, min(15, int(payload.duration or 5))),
-        "steps": max(4, min(30, int(payload.steps or 12))),
+        "steps": int(payload.steps or 12),
         "seed": payload.seed if payload.seed is not None else "random",
     }
     if use_references:

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from canvas_core.pose_replicate_prompts import pose_replicate_template_catalog, POSE_REPLICATE_TEMPLATE_ID
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jEOsAAAAASUVORK5CYII=')
-STATE = {'requests': [], 'saves': [], 'projects': {}}
+STATE = {'requests': [], 'saves': [], 'projects': {}, 'app_settings': {'depth_map_mode':'person','depth_map_controls':{'farPoint':0,'nearPoint':100,'midtone':0,'contrast':100,'brightness':0,'smooth':0,'invert':False}}}
 CONFIG = {'image_models':['private-image'], 'video_models':['private-video'], 'chat_models':['private-chat'],
     'api_providers':[
         {'id':'custom','name':'Fixture Custom','enabled':True,'image_models':['private-image'],'video_models':['private-video'],'chat_models':['private-chat']},
@@ -23,12 +23,17 @@ CONFIG = {'image_models':['private-image'], 'video_models':['private-video'], 'c
 
 def project(canvas_id):
     return {'id':canvas_id,'title':'启动架构隔离回归','kind':'classic','project':'default', 'updated_at':1,
-        'viewport':{'x':40,'y':40,'scale':0.5},'connections':[], 'nodes':[
+        'viewport':{'x':40,'y':40,'scale':0.5},'connections':[
+            {'id':'compare-source-link','from':'image','to':'compare','inputRole':'compare-source'},
+            {'id':'compare-target-link','from':'image-target','to':'compare','inputRole':'compare-target'},
+        ], 'nodes':[
             {'id':'prompt','type':'prompt','x':0,'y':0,'text':'保留原始提示词','w':350,'h':240},
             {'id':'generator','type':'generator','x':440,'y':0,'apiProvider':'custom','model':'private-image','ratio':'wide','resolution':'2k','count':1},
             {'id':'video','type':'video','x':960,'y':0,'apiProvider':'custom','model':'private-video','count':1},
-            {'id':'image','type':'image','x':0,'y':700,'url':'/fixture.png','name':'fixture.png','width':1,'height':1},
+            {'id':'image','type':'image','x':0,'y':700,'url':'/static/assets/camera-reference/angle-eye-front.png','name':'front.png','width':1024,'height':1024},
+            {'id':'image-target','type':'image','x':0,'y':1100,'url':'/static/assets/camera-reference/angle-eye-side-right.png','name':'side.png','width':1024,'height':1024},
             {'id':'depth','type':'depthMap','x':440,'y':700},
+            {'id':'compare','type':'resultCompare','x':440,'y':1320,'w':520,'h':560},
             {'id':'pose','type':'poseReplicate','x':960,'y':700},
             {'id':'rh','type':'rh','x':1480,'y':0,'workflowId':'fixture-workflow','rhKind':'workflow'},
             {'id':'h3','type':'video','x':1480,'y':700,'apiProvider':'minimax-h3','model':'MiniMax H3'},
@@ -64,6 +69,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send({'template_id':POSE_REPLICATE_TEMPLATE_ID,'items':pose_replicate_template_catalog()})
         if path=='/api/person-depth/component/status':
             return self.send({'state':'ready','ready':True,'install_available':True,'progress':1,'message':'高精度人物深度组件已就绪'})
+        if path=='/api/app-settings':
+            return self.send(STATE['app_settings'])
         if path.startswith('/api/canvases/'):
             canvas_id=path.split('/')[3]
             if path.endswith('/meta'): return self.send({'id':canvas_id,'updated_at':1})
@@ -86,8 +93,14 @@ class Handler(BaseHTTPRequestHandler):
         return self.send({'detail':'Fixture server: generation is disabled'},503)
     def do_PUT(self):
         payload=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))))
+        if urlsplit(self.path).path.rstrip('/')=='/api/app-settings':
+            STATE['app_settings'].update(payload)
+            return self.send(STATE['app_settings'])
+        parts=urlsplit(self.path).path.split('/')
+        if len(parts)<4 or parts[1:3]!=['api','canvases']:
+            return self.send({'detail':'Fixture server: PUT route is not supported'},404)
         STATE['saves'].append(payload)
-        canvas_id = self.path.split('/')[3]
+        canvas_id = parts[3]
         saved = {**project(canvas_id), **payload, 'id':canvas_id, 'updated_at':1, 'revision':1}
         STATE['projects'][canvas_id] = saved
         return self.send({'canvas':saved})

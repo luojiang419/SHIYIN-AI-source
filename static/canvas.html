@@ -35,9 +35,10 @@
     <script defer src="/static/js/i18n/studio.js?v=2026.09.05.cold-start.1"></script>
     <script defer src="/static/js/i18n/canvas.js?v=2026.09.05.cold-start.1"></script>
     <script defer src="/static/js/i18n/smart-canvas.js?v=2026.09.05.cold-start.1"></script>
-    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260904.4&feature=lookbook-style-picker.2&feature=lookbook-port-layout.1&feature=lookbook-port-labels.2&feature=selection-hub-responsive.1&feature=prompt-text-node.1&feature=prompt-node-resize.1&feature=multi-select-surfaces.1&feature=storyboard-merge.2&feature=lookbook-port-spacing.1&feature=image-quick-compact.1&feature=image-quick-single-row.1&feature=lookbook-agent.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=explicit-visibility-cull.1&feature=canvas-package.1&feature=video-reference-grid.3&feature=lookbook-layout-editor.1&feature=node-frame-standards.1&feature=preview-fixed-position.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=startup-lifecycle.2&feature=resource-lifecycle.1&feature=pose-template-settings.1&feature=generator-flex-frame.1&feature=video-compact-layout.1&feature=video-model-fit.1">
+    <link rel="stylesheet" href="/static/css/canvas.css?v=2026.08.31.selection-hub-layout.1&rev=20260906.4&feature=lookbook-style-picker.2&feature=lookbook-port-layout.1&feature=lookbook-port-labels.2&feature=selection-hub-responsive.1&feature=prompt-text-node.1&feature=prompt-node-resize.1&feature=multi-select-surfaces.1&feature=storyboard-merge.2&feature=lookbook-port-spacing.1&feature=image-quick-compact.1&feature=image-quick-single-row.1&feature=lookbook-agent.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=explicit-visibility-cull.1&feature=canvas-package.1&feature=video-reference-grid.3&feature=lookbook-layout-editor.1&feature=node-frame-standards.1&feature=preview-fixed-position.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=startup-lifecycle.2&feature=resource-lifecycle.1&feature=pose-template-settings.1&feature=generator-flex-frame.1&feature=result-compare-depth-mode.2&feature=video-compact-layout.1&feature=video-model-fit.1">
     <link rel="stylesheet" href="/static/css/pose-replicate-settings.css?v=20260905.1">
-    <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.09.05.depth-manual-input.1">
+    <link rel="stylesheet" href="/static/css/canvas-special-nodes.css?v=2026.09.05.depth-manual-input.1&feature=depth-mode.1">
+    <link rel="stylesheet" href="/static/css/compare-viewer.css?v=2026.09.06.canvas-result-compare.2">
     <link rel="stylesheet" href="/static/css/canvas-angle-3d.css?v=2026.08.21.angle-3d.1">
     <link rel="stylesheet" href="/static/css/canvas-multi-view-overrides.css?v=2026.08.21.multi-view-five-assets.2">
     <link rel="stylesheet" href="/static/css/canvas-topaz-node.css?v=2026.08.19.topaz-video.1">
@@ -56,6 +57,10 @@
         <div class="topbar">
             <div class="panel canvas-nav">
                 <button id="backToManagerBtn" class="tool-btn" type="button" title="返回画布管理" aria-label="返回画布管理" data-i18n-title="canvas.backToManager"><i data-lucide="arrow-left" class="w-4 h-4"></i></button>
+                <div id="canvasWorkModeSwitch" class="canvas-work-mode-switch" role="group" aria-label="节点工作模式">
+                    <button class="tool-btn active" type="button" data-canvas-work-mode="all" aria-pressed="true">全能</button>
+                    <button class="tool-btn" type="button" data-canvas-work-mode="design" aria-pressed="false">平面</button>
+                </div>
                 <div class="canvas-nav-meta">
                     <div id="currentCanvasTitle" class="current-canvas-title">未命名画布</div>
                     <div id="currentCanvasTime" class="current-canvas-time">--</div>
@@ -94,15 +99,15 @@
                 <button class="menu-btn" onclick="menuAdd('llm')"><i data-lucide="message-square-text" class="w-4 h-4"></i><span data-i18n="canvas.llmNode">AI助手</span></button>
                 <button class="menu-btn" onclick="menuAdd('generator')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i><span data-i18n="canvas.apiGenerate">图片生成</span></button>
                 <button class="menu-btn" onclick="menuAdd('batchGenerator')"><i data-lucide="layers-3" class="w-4 h-4"></i><span>批量处理</span></button>
-                <button class="menu-btn" onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
-                <button class="menu-btn linkfox-menu-btn" onclick="menuAdd('linkfox-video')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频生成</span></button>
+                <button class="menu-btn" data-canvas-video-only onclick="menuAdd('video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span data-i18n="canvas.videoGenerateNode">视频生成</span></button>
+                <button class="menu-btn linkfox-menu-btn" data-canvas-video-only onclick="menuAdd('linkfox-video')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频生成</span></button>
                 <div class="menu-submenu-host" data-lookbook-menu-host>
                     <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="book-open" class="w-4 h-4"></i><span>平面广告</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
                     <div class="create-submenu" role="menu" aria-label="平面广告节点">
                         <button class="menu-btn lookbook-menu-btn" type="button" onclick="menuAdd('lookbook')"><i data-lucide="book-open" class="w-4 h-4"></i><span>Lookbook 平面广告</span></button>
                     </div>
                 </div>
-                <div class="menu-submenu-host" data-film-menu-host>
+                <div class="menu-submenu-host" data-film-menu-host data-canvas-video-only>
                     <button class="menu-btn menu-submenu-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>影视制作</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
                     <div class="create-submenu" role="menu" aria-label="影视制作节点">
                         <button class="menu-btn film-workflow-create" type="button" onclick="menuCreateFilmWorkflow()"><i data-lucide="workflow" class="w-4 h-4"></i><span>创建影视工作流</span></button>
@@ -110,7 +115,7 @@
                         <button class="menu-btn" type="button" onclick="menuAdd('film-prepare-assets')"><i data-lucide="boxes" class="w-4 h-4"></i><span>准备资产</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('film-confirm-shots')"><i data-lucide="list-checks" class="w-4 h-4"></i><span>确认镜头</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('film-storyboard')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>分镜合成</span></button>
-                        <button class="menu-btn" type="button" onclick="menuAdd('storyboardMerge')"><i data-lucide="columns-3" class="w-4 h-4"></i><span>合并分镜</span></button>
+                        <button class="menu-btn" type="button" onclick="menuAdd('storyboardMerge')"><i data-lucide="columns-3" class="w-4 h-4"></i><span>拼图</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('film-line-art')"><i data-lucide="pencil-ruler" class="w-4 h-4"></i><span>生成线稿分镜</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('film-video')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>生成视频</span></button>
                         <button class="menu-btn" type="button" onclick="menuAdd('linkfox-video')"><i data-lucide="sparkles" class="w-4 h-4"></i><span>LinkFox视频生成</span></button>
@@ -124,9 +129,11 @@
                         <button class="menu-btn" type="button" onclick="menuAdd('blenderDirector')"><i data-lucide="box" class="w-4 h-4"></i><span>外部导演台</span></button>
                     </div>
                 </div>
-                <button class="menu-btn" onclick="menuAdd('director3d')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
+                <button class="menu-btn" data-canvas-video-only onclick="menuAdd('director3d')"><i data-lucide="clapperboard" class="w-4 h-4"></i><span>3D导演台</span></button>
                 <button class="menu-btn" onclick="menuAdd('depthMap')"><i data-lucide="scan" class="w-4 h-4"></i><span>深度图</span></button>
                 <button class="menu-btn" onclick="menuAdd('poseReplicate')"><i data-lucide="refresh-cw" class="w-4 h-4"></i><span>一键复刻</span></button>
+                <button class="menu-btn" onclick="menuAdd('multiView')"><i data-lucide="panels-top-left" class="w-4 h-4"></i><span>创建三视图</span></button>
+                <button class="menu-btn" onclick="menuAdd('resultCompare')"><i data-lucide="columns-2" class="w-4 h-4"></i><span>结果对比</span></button>
                 <button class="menu-btn" onclick="menuAdd('output')"><i data-lucide="circle-dot" class="w-4 h-4"></i>Output</button>
             </div>
             <div id="linkCreateMenu" class="create-menu"></div>
@@ -564,12 +571,27 @@
                 </div>
             </div>
         </div>
+        <div id="canvasCompareOverlay" class="canvas-compare-overlay" aria-hidden="true">
+            <div class="canvas-compare-fullscreen-stage" data-canvas-compare-stage>
+                <img data-compare-before alt="源文件">
+                <div class="canvas-compare-after-clip" data-compare-after-clip><img data-compare-after alt="目标文件"></div>
+                <button class="canvas-compare-handle" data-compare-handle type="button" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-label="拖动划像对比"><span>‹</span><span>›</span></button>
+                <span class="canvas-compare-label compare-viewer-label before" data-canvas-compare-before-label>源文件</span>
+                <span class="canvas-compare-label compare-viewer-label after" data-canvas-compare-after-label>目标文件</span>
+                <div class="canvas-compare-tools compare-viewer-tools" aria-label="对比工具">
+                    <button type="button" data-compare-zoom-out title="缩小" aria-label="缩小">−</button>
+                    <button type="button" data-compare-zoom-label title="恢复原始缩放" aria-label="恢复原始缩放">1×</button>
+                    <button type="button" data-compare-zoom-in title="放大" aria-label="放大">＋</button>
+                    <button type="button" data-canvas-compare-close title="关闭全屏对比" aria-label="关闭全屏对比">×</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script defer src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
     <script defer src="/static/js/director-3d.js?v=2026.08.28.director-3d.1"></script>
     <script defer src="/static/js/pose-replicate-settings.js?v=20260906.shared-prompts.1"></script>
-    <script defer src="/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1&feature=image-ratio-4x5.1&storyboard-batch=20260909&scene-match=1"></script>
+    <script defer src="/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1&feature=pose-replicate-v3.1&feature=pose-replicate-batch.1&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1&feature=depth-mode.1&storyboard-batch=20260909&scene-match=1"></script>
     <script defer src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script defer src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1&feature=image-ratio-4x5.1"></script>
     <script defer src="/static/js/canvas-lookbook-node.js?v=2026.09.07.lookbook.37&feature=story-campaign-node.1&feature=picker-mousedown.1&feature=picker-dialog-top-layer.1&feature=output-node-results.1&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=yangpeilin-methods.1&feature=lookbook-style-taxonomy.1&feature=lookbook-bottom-status.1&feature=lookbook-simple-params.1&feature=remove-output-hint.1&feature=provider-model-menu.1&feature=lookbook-click-choice.1&feature=soft-film-natural-light.1&feature=lookbook-single-dispatch.1&feature=fw-reference-film.1&feature=fw-natural-sun-grain.1&feature=fw-model-identity.1&feature=fw-original-restore.1&feature=lookbook-grain-slider.1&feature=lookbook-validated-presets-only.1&feature=lookbook-research-evidence.1&feature=levis-adaptive-campaign.2&feature=levis-advertising-variants.1&feature=optional-web-research.1&feature=ime-composition.1&feature=lookbook-layout-editor.1&feature=lookbook-settings-collapse.1"></script>
@@ -581,7 +603,8 @@
     <script defer src="/static/js/canvas-linkfox-video.js?v=2026.09.07.linkfox-input.1"></script>
     <script defer src="/static/js/canvas-topaz-node.js?v=2026.08.19.topaz-video.1"></script>
     <script defer src="/static/js/canvas-legacy-migration.js?v=2026.08.30.legacy-smart-migration.1"></script>
-<script defer src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260904.4&arrange-spacing=20260908&feature=advertising-link-menu.1&feature=story-campaign-node.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&feature=lookbook-picker.1&feature=lookbook-output-node.1&feature=lookbook-multi-run.1&feature=lookbook-auto-mode.1&feature=output-lightbox-menu.1&feature=lookbook-port-layout.1&feature=selection-hub-responsive.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&feature=vision-provider-default.1&feature=video-prompt-scroll.1&feature=prompt-node-resize.1&feature=storyboard-merge.2&feature=lookbook-submenu-exclusive.1&app-version=1.0.378&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=lookbook-count.1&feature=provider-model-menu.1&feature=lookbook-reference-type-ownership.1&feature=media-eager-queue.1&feature=media-residency-idle.3&feature=media-restore-idle.2&feature=canvas-package.1&feature=selected-download.1&feature=grid-split-return.1&feature=video-menu-unified.1&feature=lookbook-text-count-priority.1&feature=lookbook-series-anchor.1&feature=lookbook-layout-editor.1&feature=video-auto-height.2&feature=asset-quick-save.1&feature=preview-copy-image.1&feature=node-frame-standards.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=pose-replicate-v3.1&feature=pose-replicate-batch.1&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1&feature=startup-lifecycle.2&feature=resource-lifecycle.1&feature=pose-template-settings.1&feature=generator-flex-frame.1&feature=image-ratio-4x5.1&feature=video-compact-layout.1&feature=film-workflow.1&feature=film-dedicated-export.1&feature=film-import-layout.1&feature=linkfox-input.1&feature=prompt-search-optional.1&feature=lookbook-latency.1&feature=video-model-fit.1&storyboard-batch=20260909&scene-match=1&local-workflow=20260909&auto-storyboard-depth=1"></script>
+    <script defer src="/static/js/compare-viewer.js?v=2026.09.06.canvas-result-compare.2"></script>
+<script defer src="/static/js/canvas.js?v=2026.08.21.bulk-import-grid.1&rev=20260906.2&arrange-spacing=20260908&feature=advertising-link-menu.1&feature=story-campaign-node.1&feature=shortcuts-runtime.2&feature=toolbar-bottom-center.1&feature=canvas-menu-preferences.1&feature=lookbook-picker.1&feature=lookbook-output-node.1&feature=lookbook-multi-run.1&feature=lookbook-auto-mode.1&feature=output-lightbox-menu.1&feature=lookbook-port-layout.1&feature=selection-hub-responsive.1&flux2-storyboard=1&feature=node-labels.1&feature=ecommerce-workflow-group-removed.1&feature=relight-removed.1&feature=vision-provider-default.1&feature=video-prompt-scroll.1&feature=prompt-node-resize.1&feature=storyboard-merge.2&feature=lookbook-submenu-exclusive.1&app-version=1.0.378&feature=premium-editorial-research.1&feature=lookbook-agent.1&feature=lookbook-count.1&feature=provider-model-menu.1&feature=lookbook-reference-type-ownership.1&feature=media-eager-queue.1&feature=media-residency-idle.3&feature=media-restore-idle.2&feature=canvas-package.1&feature=selected-download.1&feature=grid-split-return.1&feature=video-menu-unified.1&feature=lookbook-text-count-priority.1&feature=lookbook-series-anchor.1&feature=lookbook-layout-editor.1&feature=video-auto-height.2&feature=asset-quick-save.1&feature=preview-copy-image.1&feature=node-frame-standards.1&feature=portrait-media-stage.1&feature=image-quick-drawer.1&feature=pose-replicate-v3.1&feature=pose-replicate-batch.1&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1&feature=startup-lifecycle.2&feature=resource-lifecycle.1&feature=pose-template-settings.1&feature=generator-flex-frame.1&feature=image-ratio-4x5.1&feature=result-compare-depth-mode.1&feature=video-compact-layout.1&feature=film-workflow.1&feature=film-dedicated-export.1&feature=film-import-layout.1&feature=linkfox-input.1&feature=prompt-search-optional.1&feature=lookbook-latency.1&feature=video-model-fit.1&storyboard-batch=20260909&scene-match=1&local-workflow=20260909&auto-storyboard-depth=1"></script>
     <script defer src="/static/js/canvas-connection-interactions.js?v=2026.09.09.double-click-disconnect.1"></script>
 </body>
 </html>

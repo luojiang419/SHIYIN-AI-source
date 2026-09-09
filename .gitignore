@@ -9,9 +9,12 @@ src-tauri/target/
 data/
 output/
 outputs/
+输出/
 generated-images/
 .codex-artifacts/
 案例/
+研究素材/
+测试/
 packages/
 *.log
 

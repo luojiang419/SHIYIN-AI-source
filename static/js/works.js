@@ -480,6 +480,7 @@
     function closeCompare(){el.worksCompareDialog.close();}
     function extensionFromWork(work){
         const source=String(work?.original_name || work?.url || '').split('?')[0].split('#')[0];
+        if(/\.(jpg|jpeg)_x$/i.test(source)) return '.jpg';
         const match=source.match(/\.[a-z0-9]{1,8}$/i);
         return match?match[0].toLowerCase():'.png';
     }

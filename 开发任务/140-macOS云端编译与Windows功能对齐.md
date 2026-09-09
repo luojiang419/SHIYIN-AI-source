@@ -1,7 +1,7 @@
 # macOS 云端编译与 Windows 功能对齐
 
-状态：开发中
-当前阶段：5/5，双架构云端产物已验收，待文档 Git 交付
+状态：已完成
+当前阶段：5/5，双架构云端产物已验收
 最后更新：2026-09-10 02:12
 
 ## 当前状态
@@ -29,7 +29,7 @@ Windows 1.0.431 安装包中的产品改动已形成公开源码快照：专业�
 - [x] 验证 GitHub Actions 云端构建
 - [x] 上传并核验 Intel / Apple Silicon 产物
 - [x] 整理并验证 Windows 1.0.431 当前产品源码快照
-- [ ] 更新任务文档、提交并推送
+- [x] 更新任务文档、提交并推送
 
 ## 最近验证状态
 
@@ -48,6 +48,7 @@ Windows 1.0.431 安装包中的产品改动已形成公开源码快照：专业�
 - Intel APP ZIP：149,766,674 bytes，SHA-256 `20985571a969ebc2dcc230608b32dbcac00097ebc8f124c36ccda1ca28f05ed6`
 - 本地复核：4 个文件与 manifest 和同名 `.sha256` 双重一致
 - 当前 Git commit：`a29feca test: launch macos bundle through launchservices`
+- 验收文档 commit：`9b97118 docs: 记录macOS双架构云端验收`，已推送
 
 ---
 
@@ -161,6 +162,7 @@ Windows 1.0.431 安装包中的产品改动已形成公开源码快照：专业�
 - 2026-09-10：同源 run 已验证 bootstrap cookie，修正 smoke 中不存在的 `/api/version` 为真实 `/api/runtime/info`。
 - 2026-09-10：Run `34379293088` 双架构首次全绿，下载并校验第一组 DMG/ZIP；继续补充完整 `.app` 主程序启动验收。
 - 2026-09-10：Run `34385781656` 双架构增强验收全绿；LaunchServices、完整桌面、路径和生命周期通过，最终 artifacts 已下载并校验。
+- 2026-09-10：验收记录提交 `9b97118` 已推送，任务完成。
 
 ## 接力信息
 

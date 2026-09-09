@@ -66,7 +66,7 @@ def main() -> None:
                     time.sleep(0.2)
             if not health or health.get("status") != "ok":
                 raise SystemExit("Bundled backend did not become healthy")
-            version = request_json(f"http://127.0.0.1:{port}/api/version")
+            version = request_json(f"http://127.0.0.1:{port}/api/version", token)
             expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()
             actual = str(version.get("version") or version.get("current_version") or "").strip()
             if actual != expected:

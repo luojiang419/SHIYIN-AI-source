@@ -30,6 +30,7 @@ def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
     assert "actions/checkout@v5" in workflow
     assert "actions/setup-python@v6" in workflow
     assert "actions/setup-node@v5" in workflow
+    assert "actions/cache@v4" in workflow
     assert "secrets." not in workflow
     assert "workflow_dispatch:" in workflow
     assert "feat/fashion-director-full-integration" in workflow

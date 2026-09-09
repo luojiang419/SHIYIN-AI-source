@@ -74,6 +74,15 @@ jobs:
           esac
           test "$actual" = "${{ matrix.artifact_arch }}"
 
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: macos-${{ matrix.artifact_arch }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+
       - name: Run cross-platform contracts
         env:
           CI: 'true'

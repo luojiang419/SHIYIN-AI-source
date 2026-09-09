@@ -19,7 +19,11 @@ from canvas_core.paths import APP_PATHS
 
 CLI_VERSION = "0.1.3"
 NODE_VERSION = "22.23.2"
-NODE_SHA256 = "1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97"
+NODE_SHA256 = {
+    "win-x64": "1177b4137ba5adaa56354ae40f1080c7450e8ae09cecb47da459d1c52ac99f97",
+    "darwin-arm64": "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6",
+    "darwin-x64": "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026",
+}
 CLI_INTEGRITY = {
     "china": ("cli-cn", "schksAOdI/Vafbe6rTxHERJ76nqqIByE2gLg7mYnV9lqtd6jzooEhUKnh29UfimWNouM26PEtc34c/f2+VJtyQ=="),
     "global": ("cli-global", "RAfuf0aNsiXjw+67i568fYzt44qtwoTvAl8Ulh40eCE2CEQHxWWqpM3t7fvSAklsqXGnUVigzd0ahmWzpjpI3g=="),
@@ -61,14 +65,44 @@ def cli_entry(root: Path, region: str) -> Path:
     return root / f"{region}-{CLI_VERSION}" / "package" / "dist" / "cli.js"
 
 
-def node_entry(root: Path) -> Path:
-    return root / f"node-{NODE_VERSION}-win-x64" / "node.exe"
+def node_distribution(system: str | None = None, machine: str | None = None) -> dict[str, str] | None:
+    system = str(system or platform.system()).lower()
+    machine = str(machine or platform.machine()).lower()
+    if system == "windows" and machine in {"amd64", "x86_64"}:
+        key, extension, executable = "win-x64", "zip", "node.exe"
+    elif system == "darwin" and machine in {"arm64", "aarch64"}:
+        key, extension, executable = "darwin-arm64", "tar.gz", "bin/node"
+    elif system == "darwin" and machine in {"x86_64", "amd64"}:
+        key, extension, executable = "darwin-x64", "tar.gz", "bin/node"
+    else:
+        return None
+    archive_root = f"node-v{NODE_VERSION}-{key}"
+    return {
+        "key": key,
+        "archive": f"{archive_root}.{extension}",
+        "archive_root": archive_root,
+        "executable": executable,
+        "sha256": NODE_SHA256[key],
+    }
+
+
+def node_runtime_dir(root: Path, distribution: dict[str, str] | None = None) -> Path:
+    distribution = distribution or node_distribution()
+    if not distribution:
+        return root / f"node-{NODE_VERSION}-unsupported"
+    return root / f"node-{NODE_VERSION}-{distribution['key']}"
+
+
+def node_entry(root: Path, distribution: dict[str, str] | None = None) -> Path:
+    distribution = distribution or node_distribution()
+    executable = distribution["executable"] if distribution else "node"
+    return node_runtime_dir(root, distribution) / Path(executable)
 
 
 def find_runtime(region: str) -> tuple[str, str]:
     roots = (runtime_root(), bundled_root())
     entry = next((cli_entry(root, region) for root in roots if cli_entry(root, region).is_file()), None)
-    node = next((node_entry(root) for root in roots if os.name == "nt" and node_entry(root).is_file()), None)
+    node = next((node_entry(root) for root in roots if node_entry(root).is_file()), None)
     return str(node) if node else "", str(entry) if entry else ""
 
 
@@ -115,27 +149,60 @@ def _unpack_cli(archive: Path, target: Path) -> None:
         raise RuntimeError("可灵组件缺少启动入口。")
 
 
+def _unpack_node(archive: Path, target: Path, distribution: dict[str, str]) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    root = distribution["archive_root"]
+    required = {distribution["executable"], "LICENSE"}
+    if distribution["archive"].endswith(".zip"):
+        with zipfile.ZipFile(archive) as package:
+            for relative in required:
+                with package.open(f"{root}/{relative}") as source:
+                    destination = target / Path(relative)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with destination.open("wb") as output:
+                        shutil.copyfileobj(source, output)
+    else:
+        with tarfile.open(archive, "r:gz") as package:
+            members = {member.name: member for member in package.getmembers() if member.isfile()}
+            for relative in required:
+                name = f"{root}/{relative}"
+                member = members.get(name)
+                if member is None or member.size > 100 * 1024 * 1024:
+                    raise RuntimeError(f"Node 运行时缺少或拒绝解包文件：{relative}")
+                source = package.extractfile(member)
+                if source is None:
+                    raise RuntimeError(f"Node 运行时无法读取文件：{relative}")
+                destination = target / Path(relative)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+    executable = target / Path(distribution["executable"])
+    if not executable.is_file():
+        raise RuntimeError("Node 运行时缺少可执行文件。")
+    if os.name != "nt":
+        executable.chmod(executable.stat().st_mode | 0o755)
+
+
 def prepare_runtime(root: Path, regions: tuple[str, ...], *, include_node: bool = True, repair: bool = False) -> None:
     """仅在完整下载、校验与解包之后原子发布目录，失败不污染已就绪版本。"""
     if not regions or any(region not in CLI_INTEGRITY for region in regions):
         raise RuntimeError("可灵账号区域必须是 china 或 global。")
+    distribution = node_distribution()
+    if include_node and not distribution:
+        raise RuntimeError("当前平台没有可用的内置 Node 运行时。")
     with _PREPARE_LOCK:
         root.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".prepare-", dir=root) as temporary:
             staging = Path(temporary)
             if include_node and (repair or not node_entry(root).is_file()):
-                archive = staging / "node.zip"
+                archive = staging / distribution["archive"]
                 _download(
-                    f"https://nodejs.org/dist/v{NODE_VERSION}/node-v{NODE_VERSION}-win-x64.zip",
-                    archive, "sha256", bytes.fromhex(NODE_SHA256),
+                    f"https://nodejs.org/dist/v{NODE_VERSION}/{distribution['archive']}",
+                    archive, "sha256", bytes.fromhex(distribution["sha256"]),
                 )
                 node_dir = staging / "node"
-                node_dir.mkdir()
-                with zipfile.ZipFile(archive) as package:
-                    for name in ("node.exe", "LICENSE"):
-                        with package.open(f"node-v{NODE_VERSION}-win-x64/{name}") as source, (node_dir / name).open("wb") as output:
-                            shutil.copyfileobj(source, output)
-                _publish_directory(node_dir, node_entry(root).parent)
+                _unpack_node(archive, node_dir, distribution)
+                _publish_directory(node_dir, node_runtime_dir(root, distribution))
             for region in regions:
                 if not repair and cli_entry(root, region).is_file():
                     continue
@@ -168,12 +235,12 @@ def ensure_runtime(region: str, *, repair: bool = False) -> tuple[str, str]:
     node, entry = find_runtime(region)
     if node and entry and not repair:
         return node, entry
-    supported_windows = os.name == "nt" and platform.machine().lower() in {"amd64", "x86_64"}
-    if not supported_windows:
+    bundled_distribution = node_distribution()
+    if not bundled_distribution:
         node = shutil.which("node") or ""
         if not node:
-            raise RuntimeError("当前免安装组件支持 Windows x64；此平台请提供 Node.js 18+，无需 npm。")
+            raise RuntimeError("当前平台没有内置 Node 运行时；请提供 Node.js 18+，无需 npm。")
     if repair or not entry or not node:
-        prepare_runtime(runtime_root(), (region,), include_node=supported_windows and (repair or not node), repair=repair)
+        prepare_runtime(runtime_root(), (region,), include_node=bool(bundled_distribution) and (repair or not node), repair=repair)
     managed_node, entry = find_runtime(region)
     return managed_node or node, entry

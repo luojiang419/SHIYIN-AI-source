@@ -38,6 +38,16 @@ def create_runtime(root, region="china"):
     return node, entry
 
 
+def test_node_distributions_cover_windows_and_both_macos_architectures():
+    windows = runtime.node_distribution("Windows", "AMD64")
+    apple = runtime.node_distribution("Darwin", "arm64")
+    intel = runtime.node_distribution("Darwin", "x86_64")
+    assert windows["executable"] == "node.exe" and windows["archive"].endswith(".zip")
+    assert apple["key"] == "darwin-arm64" and apple["executable"] == "bin/node"
+    assert intel["key"] == "darwin-x64" and intel["archive"].endswith(".tar.gz")
+    assert runtime.node_distribution("Linux", "x86_64") is None
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows x64 bundled Node")
 def test_bundled_runtime_connects_without_node_npm_or_kling_on_path(isolated_paths):
     node, entry = create_runtime(runtime.bundled_root())

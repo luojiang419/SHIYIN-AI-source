@@ -25,6 +25,10 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use uuid::Uuid;
 
+#[cfg(target_os = "windows")]
+mod updater;
+#[cfg(not(target_os = "windows"))]
+#[path = "updater_macos.rs"]
 mod updater;
 
 #[cfg(target_os = "windows")]
@@ -332,9 +336,35 @@ fn discover_portable_root() -> Result<PathBuf, String> {
         }
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    exe.parent()
+    let executable_dir = exe
+        .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| "无法定位 SHIYIN AI.exe 所在目录".to_string())
+        .ok_or_else(|| "无法定位 SHIYIN AI.exe 所在目录".to_string())?;
+    #[cfg(target_os = "macos")]
+    if executable_dir.file_name().and_then(|name| name.to_str()) == Some("MacOS") {
+        if let Some(resources) = executable_dir
+            .parent()
+            .map(|contents| contents.join("Resources"))
+        {
+            return Ok(resources);
+        }
+    }
+    Ok(executable_dir)
+}
+
+fn discover_data_root(portable_root: &Path) -> PathBuf {
+    if let Some(configured) = std::env::var_os("CANVAS_DATA_DIR").filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(configured);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("SHIYIN AI");
+    }
+    portable_root.join("data")
 }
 
 fn read_config(data_root: &Path) -> Result<AppConfig, String> {
@@ -381,29 +411,43 @@ fn write_close_behavior(data_root: &Path, behavior: &str) -> Result<(), String> 
 }
 
 fn port_owner(port: u16) -> String {
-    let Some(text) = command_stdout("netstat", &["-ano", "-p", "tcp"], Duration::from_secs(2))
-    else {
-        return "未知进程".to_string();
-    };
-    let needle = format!(":{port}");
-    for line in text
-        .lines()
-        .filter(|line| line.contains(&needle) && line.contains("LISTENING"))
+    #[cfg(not(target_os = "windows"))]
     {
-        if let Some(pid) = line.split_whitespace().last() {
-            let filter = format!("PID eq {pid}");
-            let name = command_stdout(
-                "tasklist",
-                &["/FI", &filter, "/FO", "CSV", "/NH"],
-                Duration::from_secs(2),
-            )
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-            return format!("PID {pid} {name}");
-        }
+        let filter = format!("-iTCP:{port}");
+        return command_stdout(
+            "lsof",
+            &["-nP", &filter, "-sTCP:LISTEN"],
+            Duration::from_secs(2),
+        )
+        .and_then(|output| output.lines().nth(1).map(str::to_string))
+        .unwrap_or_else(|| "未知进程".to_string());
     }
-    "未知进程".to_string()
+    #[cfg(target_os = "windows")]
+    {
+        let Some(text) = command_stdout("netstat", &["-ano", "-p", "tcp"], Duration::from_secs(2))
+        else {
+            return "未知进程".to_string();
+        };
+        let needle = format!(":{port}");
+        for line in text
+            .lines()
+            .filter(|line| line.contains(&needle) && line.contains("LISTENING"))
+        {
+            if let Some(pid) = line.split_whitespace().last() {
+                let filter = format!("PID eq {pid}");
+                let name = command_stdout(
+                    "tasklist",
+                    &["/FI", &filter, "/FO", "CSV", "/NH"],
+                    Duration::from_secs(2),
+                )
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+                return format!("PID {pid} {name}");
+            }
+        }
+        "未知进程".to_string()
+    }
 }
 
 fn command_stdout(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
@@ -452,23 +496,26 @@ fn rotate_log(path: &Path, max_bytes: u64, backups: u8) {
 fn ensure_port_available(port: u16, config_path: &Path) -> Result<(), String> {
     // Windows 允许 127.0.0.1 与 0.0.0.0 同时存在监听器；只检查通配地址
     // 会让桌面 sidecar 与源码后端并存，随后 WebView 可能命中错误的数据目录。
-    let port_conflict = ["0.0.0.0", "127.0.0.1"].iter().any(|address| {
-        TcpListener::bind((*address, port)).is_err()
-    });
+    let port_conflict = ["0.0.0.0", "127.0.0.1"]
+        .iter()
+        .any(|address| TcpListener::bind((*address, port)).is_err());
     if port_conflict {
-            let message = format!(
-                "端口 {port} 已被占用（{}）。\n\n请在以下文件修改端口后重新启动：\n{}",
-                port_owner(port),
-                config_path.display()
-            );
-            MessageDialog::new()
-                .set_level(MessageLevel::Error)
-                .set_title(APP_DISPLAY_NAME)
-                .set_description(&message)
-                .set_buttons(MessageButtons::Ok)
-                .show();
-            let _ = Command::new("notepad.exe").arg(config_path).spawn();
-            Err(message)
+        let message = format!(
+            "端口 {port} 已被占用（{}）。\n\n请在以下文件修改端口后重新启动：\n{}",
+            port_owner(port),
+            config_path.display()
+        );
+        MessageDialog::new()
+            .set_level(MessageLevel::Error)
+            .set_title(APP_DISPLAY_NAME)
+            .set_description(&message)
+            .set_buttons(MessageButtons::Ok)
+            .show();
+        #[cfg(target_os = "windows")]
+        let _ = Command::new("notepad.exe").arg(config_path).spawn();
+        #[cfg(not(target_os = "windows"))]
+        let _ = open::that(config_path);
+        Err(message)
     } else {
         Ok(())
     }
@@ -481,10 +528,15 @@ fn spawn_backend(
     token: &str,
 ) -> Result<Child, String> {
     let app_root = root.join("app");
+    let packaged_name = if cfg!(target_os = "windows") {
+        "canvas-backend.exe"
+    } else {
+        "canvas-backend"
+    };
     let packaged = app_root
         .join("backend")
         .join("canvas-backend")
-        .join("canvas-backend.exe");
+        .join(packaged_name);
     let parent_pid = std::process::id().to_string();
     let common = [
         "--data-dir".to_string(),
@@ -529,9 +581,12 @@ fn spawn_backend(
         command = Command::new(packaged);
         command.args(&common);
     } else {
-        let python = root.join("python").join("python.exe");
         let entry = root.join("backend_entry.py");
-        if !python.is_file() || !entry.is_file() {
+        #[cfg(target_os = "windows")]
+        let python = root.join("python").join("python.exe");
+        #[cfg(not(target_os = "windows"))]
+        let python = PathBuf::from("python3");
+        if (cfg!(target_os = "windows") && !python.is_file()) || !entry.is_file() {
             return Err("未找到 app/backend Sidecar，也未找到源码开发运行时".to_string());
         }
         command = Command::new(python);
@@ -744,7 +799,7 @@ pub fn run() {
         )
         .setup(|app| {
             let root = discover_portable_root().map_err(boxed_error)?;
-            let data_root = root.join("data");
+            let data_root = discover_data_root(&root);
             let config = read_config(&data_root).map_err(boxed_error)?;
             ensure_port_available(config.port, &data_root.join("config").join("app.json")).map_err(boxed_error)?;
             let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
@@ -762,15 +817,19 @@ pub fn run() {
             let placement = fs::read_to_string(placement_path).ok().and_then(|raw| serde_json::from_str::<WindowPlacement>(&raw).ok()).unwrap_or_default();
             // 按版本隔离 WebView 配置，避免 WebView2 会话恢复旧版本中包含一次性
             // bootstrap token 的页面。静态资源 URL 仍带版本号，启动后可安全复用当前版本缓存。
-            let webview_root = data_root.join("cache").join("webview2");
-            let webview_data_root = webview_root.join(env!("CARGO_PKG_VERSION"));
             let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title(APP_DISPLAY_NAME)
                 .min_inner_size(960.0, 640.0)
                 .inner_size(1440.0, 900.0)
-                .data_directory(webview_data_root.clone())
                 .disable_drag_drop_handler()
                 .on_download(native_download_handler);
+            #[cfg(target_os = "windows")]
+            let (webview_root, webview_data_root) = {
+                let root = data_root.join("cache").join("webview2");
+                let versioned = root.join(env!("CARGO_PKG_VERSION"));
+                window = window.data_directory(versioned.clone());
+                (root, versioned)
+            };
             // 旧版 window.json 记录的是物理像素，不能再直接恢复；否则高 DPI
             // 环境会把已保存尺寸再次按系统缩放放大，导致窗口和界面被裁切。
             let placement_uses_logical_pixels = placement.scale_factor.is_finite()
@@ -786,11 +845,17 @@ pub fn run() {
                 Ok(view) => {
                     if placement.maximized { let _ = view.maximize(); }
                     set_fullscreen_shortcut_registration(app.handle(), true);
+                    #[cfg(target_os = "windows")]
                     schedule_legacy_webview_profile_cleanup(webview_root, webview_data_root);
                 }
                 Err(error) => {
                     stop_backend(app.handle());
-                    MessageDialog::new().set_level(MessageLevel::Error).set_title("缺少 Microsoft Edge WebView2").set_description(format!("SHIYIN AI 无法创建窗口：{error}\n\n请安装 Microsoft Edge WebView2 Evergreen Runtime 后重试。\nhttps://developer.microsoft.com/microsoft-edge/webview2/")).show();
+                    let description = if cfg!(target_os = "windows") {
+                        format!("SHIYIN AI 无法创建窗口：{error}\n\n请安装 Microsoft Edge WebView2 Evergreen Runtime 后重试。\nhttps://developer.microsoft.com/microsoft-edge/webview2/")
+                    } else {
+                        format!("SHIYIN AI 无法创建窗口：{error}\n\n请更新 macOS 后重试。")
+                    };
+                    MessageDialog::new().set_level(MessageLevel::Error).set_title("无法创建 SHIYIN AI 窗口").set_description(description).show();
                     return Err(boxed_error(error.to_string()));
                 }
             }

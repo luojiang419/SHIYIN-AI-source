@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from canvas_core.auth import AuthManager
 from canvas_core.database import CanvasDatabase
-from canvas_core.secrets import DpapiProtector, SecretStore
+from canvas_core.secrets import DpapiProtector, MacOSKeychainProtector, SecretStore
 
 
 class SecurityTests(unittest.TestCase):
@@ -37,6 +37,26 @@ class SecurityTests(unittest.TestCase):
         protected = protector.protect("仅当前 Windows 用户可读取")
         self.assertNotIn("仅当前 Windows 用户可读取".encode("utf-8"), protected)
         self.assertEqual(protector.unprotect(protected), "仅当前 Windows 用户可读取")
+
+    def test_macos_keychain_protector_creates_key_and_encrypts_values(self):
+        calls = []
+
+        def runner(arguments, **_kwargs):
+            calls.append(arguments)
+            if arguments[1] == "find-generic-password" and len(calls) == 1:
+                return type("Result", (), {"returncode": 44, "stdout": "", "stderr": "missing"})()
+            if arguments[1] == "add-generic-password":
+                return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            key = next(call[-1] for call in calls if call[1] == "add-generic-password")
+            return type("Result", (), {"returncode": 0, "stdout": key + "\n", "stderr": ""})()
+
+        with unittest.mock.patch("canvas_core.secrets.sys.platform", "darwin"):
+            protector = MacOSKeychainProtector(runner=runner)
+        protected = protector.protect("macOS API 密钥")
+        self.assertNotIn("macOS API 密钥".encode(), protected)
+        self.assertEqual(protector.unprotect(protected), "macOS API 密钥")
+        self.assertEqual(calls[0][0], "security")
+        self.assertIn("-U", calls[1])
 
     def test_desktop_bootstrap_token_allows_bounded_immediate_replays(self):
         with tempfile.TemporaryDirectory() as root:

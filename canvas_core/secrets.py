@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import ctypes
+import getpass
 import os
 import re
+import subprocess
+import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Callable, Iterable, Optional
+
+from cryptography.fernet import Fernet, InvalidToken
 
 from .database import CanvasDatabase
 
@@ -90,6 +95,63 @@ class DpapiProtector:
                 self.kernel32.LocalFree(description)
 
 
+class MacOSKeychainProtector:
+    PREFIX = b"CANVAS-MACOS-KEYCHAIN-1\0"
+    SERVICE = "com.hero8152.canvas.desktop.secrets"
+
+    def __init__(self, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> None:
+        if sys.platform != "darwin":
+            raise SecretProtectionError("macOS Keychain 仅能在 macOS 上使用")
+        self.account = getpass.getuser() or "SHIYIN-AI"
+        self._runner = runner
+        key = self._read_key()
+        if not key:
+            key = Fernet.generate_key().decode("ascii")
+            result = self._run(
+                "add-generic-password", "-U", "-s", self.SERVICE,
+                "-a", self.account, "-w", key,
+            )
+            if result.returncode != 0:
+                raise SecretProtectionError("无法在 macOS Keychain 中创建 SHIYIN AI 密钥")
+        try:
+            self._fernet = Fernet(key.encode("ascii"))
+        except (ValueError, UnicodeError) as exc:
+            raise SecretProtectionError("macOS Keychain 中的 SHIYIN AI 密钥无效") from exc
+
+    def _run(self, *arguments: str) -> subprocess.CompletedProcess:
+        return self._runner(
+            ["security", *arguments], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", check=False,
+        )
+
+    def _read_key(self) -> str:
+        result = self._run(
+            "find-generic-password", "-s", self.SERVICE, "-a", self.account, "-w",
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def protect(self, value: str) -> bytes:
+        encrypted = self._fernet.encrypt(str(value).encode("utf-8"))
+        return self.PREFIX + encrypted
+
+    def unprotect(self, value: bytes) -> str:
+        payload = bytes(value)
+        if not payload.startswith(self.PREFIX):
+            raise SecretProtectionError("密钥数据格式不受支持")
+        try:
+            return self._fernet.decrypt(payload[len(self.PREFIX) :]).decode("utf-8")
+        except (InvalidToken, UnicodeError) as exc:
+            raise SecretProtectionError("macOS Keychain 密钥无法解密当前数据") from exc
+
+
+def default_secret_protector():
+    if os.name == "nt":
+        return DpapiProtector()
+    if sys.platform == "darwin":
+        return MacOSKeychainProtector()
+    raise SecretProtectionError("当前平台没有可用的系统密钥保护实现")
+
+
 def parse_env_text(raw: str) -> dict[str, str]:
     values: dict[str, str] = {}
     for raw_line in str(raw or "").splitlines():
@@ -116,7 +178,7 @@ class SecretStore:
     ) -> None:
         self.database = database
         if protect is None or unprotect is None:
-            protector = DpapiProtector()
+            protector = default_secret_protector()
             protect = protector.protect
             unprotect = protector.unprotect
         self._protect = protect

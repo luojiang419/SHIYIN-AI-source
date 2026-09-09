@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .data_layout import DataLayout
-from .secrets import DpapiProtector
+from .secrets import default_secret_protector
 
 
 ACCOUNT_SESSION_COOKIE = "canvas_account_session"
@@ -185,7 +185,7 @@ class AccountStore:
         self.accounts_root = self.data_root / "accounts"
         self.database_path = self.system_root / "accounts.db"
         if protect is None or unprotect is None:
-            protector = DpapiProtector()
+            protector = default_secret_protector()
             protect = protector.protect
             unprotect = protector.unprotect
         self._protect = protect

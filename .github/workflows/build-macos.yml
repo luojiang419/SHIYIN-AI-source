@@ -1,0 +1,82 @@
+name: Build macOS desktop artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shiyin-ai-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            label: Apple-Silicon
+            artifact_arch: arm64
+          - runner: macos-15-intel
+            label: Intel
+            artifact_arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install build dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt pyinstaller pytest
+          npm ci
+          rustup default stable
+
+      - name: Verify runner architecture
+        run: |
+          case "$(uname -m)" in
+            arm64|aarch64) actual=arm64 ;;
+            x86_64|amd64) actual=x64 ;;
+            *) echo "Unsupported runner architecture: $(uname -m)"; exit 1 ;;
+          esac
+          test "$actual" = "${{ matrix.artifact_arch }}"
+
+      - name: Run cross-platform contracts
+        env:
+          CI: 'true'
+        run: |
+          python3 -m pytest -q tests/test_security.py tests/test_accounts.py tests/test_kling_portable_runtime.py tests/test_macos_build.py
+          cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build app and DMG
+        run: bash tools/build-macos.sh
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHIYIN-AI-${{ matrix.label }}-${{ github.sha }}
+          path: |
+            dist/macos/SHIYIN-AI-*-macos-${{ matrix.artifact_arch }}.app.zip
+            dist/macos/SHIYIN-AI-*-macos-${{ matrix.artifact_arch }}.app.zip.sha256
+            dist/macos/SHIYIN-AI-*-macos-${{ matrix.artifact_arch }}.dmg
+            dist/macos/SHIYIN-AI-*-macos-${{ matrix.artifact_arch }}.dmg.sha256
+            dist/macos/SHIYIN-AI-*-macos-${{ matrix.artifact_arch }}.manifest.json
+          if-no-files-found: error
+          retention-days: 14

@@ -67,7 +67,7 @@ def test_film_video_ports_are_grouped_per_actor_and_support_inherited_count():
 
 
 def test_film_storyboard_ports_match_video_actor_groups_and_keep_scene_sketch_last():
-    assert "'film-storyboard': ['actor','outfit','prop','scene','sketch']" in FILM
+    assert "'film-storyboard': ['actor','outfit','prop','scene','sketch','depth','reference']" in FILM
     assert "...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat()" in FILM
     assert "{role:'scene',label:'场景'" in FILM
     assert "{role:'sketch',label:'线稿分镜'" in FILM
@@ -162,7 +162,7 @@ def test_film_aspect_ratio_aliases_do_not_fall_back_to_square_size():
     assert "'9:16':'story'" in CLASSIC
     assert "'16:9':'wide'" in SMART
     assert "'9:16':'story'" in SMART
-    assert "size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k')" in CLASSIC
+    assert "const size=apiImageSize(snapshot.aspectRatio || '16:9',snapshot.resolution || '2k')" in CLASSIC
 
 
 def test_film_runs_create_pending_outputs_before_waiting_for_results():
@@ -171,7 +171,7 @@ def test_film_runs_create_pending_outputs_before_waiting_for_results():
     assert "pending.canvasTaskId=task.task_id" in CLASSIC
     assert "output=createPendingOutputFromSource(node,1,meta" in SMART
     assert "output.filmSourceNodeId=node.id" in SMART
-    assert "finalizePendingNode(output,images,meta,'image')" in SMART
+    assert "finalizeSmartPendingTask(output,task.taskId,images,'image')" in SMART
     assert "status:'error'" in SMART
 
 
@@ -232,7 +232,7 @@ def test_film_input_slots_match_three_view_layout_and_keep_labels_inside_content
 def test_film_variants_use_their_parent_generation_model_sources():
     assert "imageProviderOptions:filmSmartImageProviderOptions" in SMART
     assert "imageModelOptions:filmSmartImageModelOptions" in SMART
-    assert "const imageProvider=filmSmartImageProviderId(node)" in SMART
+    assert "const provider=filmSmartImageProviderId(node)" in SMART
     assert "if(isKlingVideoNode(node)) ensureKlingCapabilities();" in CLASSIC
 
 
@@ -331,7 +331,7 @@ def test_classic_film_render_passes_image_model_sources_for_storyboard_node():
     compact_classic = " ".join(CLASSIC.split())
     assert "imageProviderOptions:filmNodeImageProviderOptions" in compact_classic
     assert "imageModelOptions:filmNodeImageModelOptions" in compact_classic
-    assert "const payload={prompt:built.prompt,provider_id:imageProvider" in CLASSIC
+    assert "const payload={prompt:built.prompt,provider_id:snapshot.apiProvider" in CLASSIC
 
 
 def test_film_connected_input_status_has_a_green_indicator_and_connected_label():

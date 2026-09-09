@@ -2190,9 +2190,73 @@ async function runSmartFilmLineArtNode(node){
     if(!refs.length){ toast('请先连接视频帧组、分镜图组或图像输出'); return; }
     return runSmartBatchGenerator(node,{prompt:window.CanvasFilmNodes.lineArtPrompt(node),runSettings:smartFilmLineArtRunSettings(node),lineArt:true});
 }
+async function runSmartFilmStoryboardNode(node){
+    const base=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
+    const provider=filmSmartImageProviderId(node) || base.provider_id || imageProviders()[0]?.id || '';
+    const snapshot={...node,type:'film-storyboard',apiProvider:provider,model:node.model || base.model || providerImageModels(provider)[0] || '',prompt:[node.prompt,smartFilmConnectedPromptTextForSubmission(node)].filter(Boolean).join('\n')};
+    const runSettings={...base,engine:'api',apiKind:'image',provider_id:provider,model:snapshot.model,ratio:node.storyboardMode==='batch' ? (node.storyboardBatchAspectRatio || 'source') : (node.aspectRatio || '16:9'),resolution:node.resolution || '2k',quality:node.quality || 'high',count:1};
+    let plans;
+    try {
+        if(!provider || !snapshot.model) throw new Error('请先配置图片生成模型');
+        plans=window.CanvasFilmStoryboard.plans(snapshot,filmSmartAssets(node));
+        if(plans.length>SMART_NODE_MEDIA_LIMIT) throw new Error(`一次最多生成 ${SMART_NODE_MEDIA_LIMIT} 个镜头，请分批连接图片`);
+    } catch(error){ toast(error.message); return; }
+    const meta=snapshotRunMeta(snapshot.prompt,node.id,snapshot.prompt,plans.flatMap(plan=>plan.assets));
+    meta.settings=settingsForStorage(runSettings);
+    const output=createPendingOutputFromSource(node,plans.length,meta,{selectOutput:false,refs:plans.map(plan=>plan.source).filter(Boolean)});
+    node.filmOutputNodeId=output.id; output.filmSourceNodeId=node.id;
+    output.runSettings=settingsForStorage(runSettings);
+    output.generationSlots=plans.map(plan=>({id:uid('generation-slot'),index:plan.index,status:'loading',sourceRef:plan.source}));
+    output.pendingTasks=[];
+    smartFilmActiveRuns.set(node.id,(smartFilmActiveRuns.get(node.id)||0)+1);
+    node.running=true; node.runError=''; node.storyboardProgress=`准备 ${plans.length} 个镜头…`;
+    render(); scheduleSave();
+    const prepare=window.CanvasFilmStoryboard.createPreparer(snapshot,{
+        depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{onProgress}),
+        onProgress:(plan,message)=>{ node.storyboardProgress=`镜头 ${plan.index+1}/${plans.length}：${message}`; render(); },
+    });
+    try {
+        await Promise.allSettled(plans.map(async plan=>{
+            const slot=output.generationSlots[plan.index];
+            const task={taskId:`storyboard-submit-${uid('task')}`,slotId:slot.id,slotIndex:plan.index,kind:'image',providerId:provider,model:snapshot.model,runSettings:settingsForStorage(runSettings),refs:plan.assets,prompt:snapshot.prompt,storyboardPlan:plan,storyboardSnapshot:snapshot};
+            try {
+                const built=await prepare(plan);
+                const imageSettings=runSettings.ratio==='source' ? await smartBatchRunSettingsForRef(runSettings,plan.source) : runSettings;
+                task.runSettings=settingsForStorage(imageSettings);
+                task.refs=built.refs; task.prompt=built.prompt;
+                const response=await fetch('/api/canvas-image-tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:built.prompt,provider_id:provider,model:snapshot.model,size:sizeForRun(imageSettings),quality:runSettings.quality,n:1,reference_images:built.refs,auto_optimize_prompt:false,prompt_context:{node_type:'film-storyboard',reference_count:built.refs.length}})});
+                const created=await response.json();
+                if(!response.ok || !created.task_id) throw new Error(created.detail || '分镜任务提交失败');
+                task.taskId=created.task_id; slot.taskId=task.taskId;
+                output.pendingTasks.push(task); scheduleSave(); await saveCanvas();
+                const result=await pollSmartCanvasTask(task.taskId);
+                const images=resultMediaUrls(result?.image_items?.length ? result.image_items : result?.images || result);
+                if(!images.length) throw new Error('分镜合成没有返回图片');
+                finalizeSmartPendingTask(output,task.taskId,images,'image');
+            } catch(error){
+                if(!output.pendingTasks?.includes(task)) (output.pendingTasks ||= []).push(task);
+                markSmartGenerationSlotFailed(output,task,`镜头 ${plan.index+1}：${error.message || error}`);
+            } finally {
+                const remaining=smartGenerationSlots(output).filter(item=>item.status==='loading').length;
+                node.storyboardProgress=`已处理 ${plans.length-remaining}/${plans.length} 个镜头`;
+                render(); scheduleSave();
+            }
+        }));
+        const failed=smartGenerationSlots(output).filter(slot=>slot.status==='error').length;
+        node.images=[...(output.images || [])];
+        node.runError=failed ? `${failed}/${plans.length} 个镜头失败，成功结果已保留；详见输出槽错误` : '';
+        node.storyboardProgress=`完成 ${plans.length-failed}/${plans.length} 个镜头${failed ? `，失败 ${failed} 个` : ''}`;
+        addSmartGenerationLog({run:{node:{id:node.id,type:'film-storyboard'},prompt:snapshot.prompt,refs:plans.flatMap(plan=>plan.assets)},outputs:node.images,runMs:output.runElapsedMs || 0,error:node.runError});
+    } finally {
+        const remaining=Math.max(0,(smartFilmActiveRuns.get(node.id)||1)-1);
+        if(remaining) smartFilmActiveRuns.set(node.id,remaining); else smartFilmActiveRuns.delete(node.id);
+        node.running=remaining>0; render(); scheduleSave();
+    }
+}
 async function runSmartFilmNode(node){
     if(!node || !window.CanvasFilmNodes) return;
     if(node.specialType === 'film-line-art') return runSmartFilmLineArtNode(node);
+    if(node.specialType === 'film-storyboard') return runSmartFilmStoryboardNode(node);
     const api=window.CanvasFilmNodes;
     const assets=filmSmartAssets(node);
     const settingsForNodeRun=node.runSettings && Object.keys(node.runSettings).length ? {...node.runSettings} : {...settings};
@@ -2208,16 +2272,7 @@ async function runSmartFilmNode(node){
     output.filmSourceNodeId=node.id;
     node.running=true; node.runError=''; render(); scheduleSave();
     try {
-        if(node.specialType === 'film-storyboard'){
-            const imageProvider=filmSmartImageProviderId(node) || settingsForNodeRun.provider_id || imageProviders()[0]?.id || '';
-            const imageModels=providerImageModels(imageProvider);
-            const imageSettings={...settingsForNodeRun,engine:'api',apiKind:'image',ratio:node.aspectRatio || settingsForNodeRun.ratio || '16:9',resolution:node.resolution || settingsForNodeRun.resolution || '2k',quality:node.quality || settingsForNodeRun.quality || 'high',count:1,provider_id:imageProvider,model:node.model || settingsForNodeRun.model || imageModels[0] || ''};
-            const created=await runApiGeneration(built.prompt,built.refs,imageSettings);
-            const results=await Promise.all((created.taskIds || []).map(taskId => pollSmartCanvasTask(taskId)));
-            const images=results.flatMap(result => (result?.image_items || result?.images || resultMediaUrls(result) || [])).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'image'}:{url:item,kind:'image'}).filter(item=>item.url);
-            if(!images.length) throw new Error('分镜合成没有返回图片');
-            node.images=images; finalizePendingNode(output,images,meta,'image');
-        } else {
+        {
             const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || '',videoSteps:node.steps || settingsForNodeRun.videoSteps || 12,videoMultimodal:node.multimodal !== undefined ? Boolean(node.multimodal) : Boolean(settingsForNodeRun.videoMultimodal),videoUseFrameRoles:node.useFrameRoles !== undefined ? Boolean(node.useFrameRoles) : Boolean(settingsForNodeRun.videoUseFrameRoles)};
             if(node.apiProvider==='linkfox') Object.assign(videoSettings,{videoGenerateAudio:node.generateAudio,videoAspect:node.aspectRatio || '',linkfoxMode:node.linkfoxMode,linkfoxCamera:node.linkfoxCamera});
             const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings,node);
@@ -3226,6 +3281,7 @@ function indexSmartNodeDom(el, node=null){
     const id = el?.dataset?.id || node?.id || '';
     if(!id || !el) throw new Error(`无法索引智能画布节点 DOM：${id || 'missing-id'}`);
     const model = node || smartNodeIndex.get(id);
+    window.CanvasFilmStoryboard?.alignPorts(el);
     removeSmartNodeDomIndex(id, {preserveGroupOwner:!isSmartGroupNode(model)});
     smartNodeDomIndex.set(id, el);
     if(model){
@@ -19175,7 +19231,7 @@ function comfyFieldKind(field){
 async function runApiGeneration(prompt, refs, runSettings=settings){
     if(!runSettings.provider_id || !runSettings.model) throw new Error(tr('smart.errNoApiModel'));
     const count = Math.max(1, Math.min(8, Number(runSettings.count || 1)));
-    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX), auto_optimize_prompt:true, prompt_context:{node_type:'smart-image', operation:runSettings.operation || '', has_reference:imageRefsOnly(refs).length > 0}};
+    const payload = {prompt, provider_id:runSettings.provider_id, model:runSettings.model, size:sizeForRun(runSettings), quality:runSettings.quality || 'auto', n:1, reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX), auto_optimize_prompt:runSettings.autoOptimizePrompt!==false, prompt_context:{node_type:runSettings.promptNodeType || 'smart-image', operation:runSettings.operation || '', has_reference:imageRefsOnly(refs).length > 0}};
     if(runSettings.operation) payload.operation = runSettings.operation;
     if(runSettings.style_reference_url) payload.style_reference_url = runSettings.style_reference_url;
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
@@ -19586,12 +19642,12 @@ async function retrySmartGenerationSlot(nodeId, slotId){
         model:previousTask?.model || node.runSettings?.model || settings.model,
         count:1
     };
-    const prompt = String(previousTask?.prompt || node.runModelPrompt || node.runPrompt || '').trim();
+    let prompt = String(previousTask?.prompt || node.runModelPrompt || node.runPrompt || '').trim();
     const taskRefs = Array.isArray(previousTask?.refs) && previousTask.refs.length
         ? previousTask.refs
         : (node.runInputRefs || node.runPromptRefs || []);
-    const refs = taskRefs.filter(ref => ref?.url).map(ref => ({...ref}));
-    if(!prompt && smartRunNeedsPrompt(retrySettings)){
+    let refs = taskRefs.filter(ref => ref?.url).map(ref => ({...ref}));
+    if(!previousTask?.storyboardPlan && !prompt && smartRunNeedsPrompt(retrySettings)){
         toast(tr('smart.toastNeedPrompt'));
         return;
     }
@@ -19604,6 +19660,15 @@ async function retrySmartGenerationSlot(nodeId, slotId){
     render();
     scheduleSave();
     try {
+        if(previousTask?.storyboardPlan){
+            const built=await window.CanvasFilmStoryboard.createPreparer(previousTask.storyboardSnapshot,{
+                depth:ref=>window.CanvasSpecialNodes.generateReferenceDepth(ref)
+            })(previousTask.storyboardPlan);
+            prompt=built.prompt; refs=built.refs;
+            previousTask.prompt=prompt; previousTask.refs=refs;
+            if(retrySettings.ratio==='source') Object.assign(retrySettings,await smartBatchRunSettingsForRef(retrySettings,previousTask.storyboardPlan.source));
+            retrySettings.autoOptimizePrompt=false; retrySettings.promptNodeType='film-storyboard';
+        }
         const submitted = await runApiGeneration(prompt, refs, retrySettings);
         const taskId = submitted.taskIds?.[0];
         if(!taskId) throw new Error(tr('smart.errRunFailed'));

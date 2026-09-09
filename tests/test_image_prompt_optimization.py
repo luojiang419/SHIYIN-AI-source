@@ -172,7 +172,7 @@ def test_image_request_snapshot_keeps_optimization_settings_without_secrets():
 def test_canvas_generators_enable_automatic_optimization():
     classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
     smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
-    assert classic.count("auto_optimize_prompt:true") >= 11
+    assert classic.count("auto_optimize_prompt:true") >= 10
     for node_type in (
         "panorama",
         "special-image-edit",
@@ -183,9 +183,10 @@ def test_canvas_generators_enable_automatic_optimization():
         "storyboard-transform",
     ):
         assert f"node_type:'{node_type}'" in classic
-    assert "auto_optimize_prompt:true" in smart
-    assert "auto_optimize_prompt:runSettings.autoOptimizePrompt !== false" not in smart
-    assert "prompt_context:{node_type:'smart-image'" in smart
+    assert "auto_optimize_prompt:runSettings.autoOptimizePrompt!==false" in smart
+    assert "prompt_context:{node_type:runSettings.promptNodeType || 'smart-image'" in smart
+    assert "retrySettings.autoOptimizePrompt=false" in smart
+    assert "auto_optimize_prompt:false,prompt_context:{node_type:'film-storyboard'" in classic
     assert "'/api/canvas/pose-replicate-tasks'" in classic
     assert "'/api/canvas/pose-replicate-tasks'" in smart
     assert "prompt_optimized: result.prompt || ''" in classic

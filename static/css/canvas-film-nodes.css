@@ -620,3 +620,13 @@ body.theme-dark .film-error {
 .theme-dark .film-mention-menu button {
     color:var(--text);
 }
+
+/* 分镜模式与逐镜输入摘要 */
+.film-storyboard-mode { display:flex; flex-shrink:0; order:3; margin-left:auto; padding:3px; gap:2px; border:1px solid var(--border); border-radius:9px; }
+.film-storyboard-mode button { border:0; border-radius:6px; padding:6px 9px; background:transparent; color:var(--muted); cursor:pointer; font:inherit; white-space:nowrap; }
+.film-storyboard-mode button.active { background:var(--accent,#5865f2); color:#fff; }
+.film-storyboard-mode button:focus-visible { outline:2px solid var(--accent,#5865f2); outline-offset:2px; }
+.film-storyboard-summary { display:flex; flex-direction:column; gap:5px; padding:9px 11px; border:1px solid var(--border); border-radius:9px; line-height:1.6; overflow-wrap:anywhere; }
+.film-storyboard-summary small { color:var(--muted); }
+.film-storyboard .film-node-toolbar { flex-wrap:wrap; }
+.film-storyboard select:disabled { opacity:.65; }

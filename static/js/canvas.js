@@ -2917,6 +2917,7 @@ function toggleZoomPreview(){
 function refreshGeometry(){
     invalidateCanvasGeometry();
     alignClassicMultiViewPorts();
+    window.CanvasFilmStoryboard?.alignPorts(nodesEl);
     renderLinks();
     renderSelectionHub();
 }
@@ -11016,7 +11017,7 @@ function classicFilmAssets(node){
     const direct = connections.filter(c => c.to === node.id).flatMap(connection => {
         const source = nodes.find(item => item.id === connection.from);
         const inputRole = connection.inputRole || '';
-        return mediaRefsFromNode(source).map(ref => ({
+        return classicFilmSourceRefs(source).map(ref => ({
             ref,
             role:inputRole,
             inputRole,
@@ -11259,11 +11260,82 @@ async function runStoryboardMergeNode(nodeId){
     }
 }
 
+async function runFilmStoryboardNode(node, opts={}){
+    const api=window.CanvasFilmStoryboard;
+    const snapshot={...node,prompt:[node.prompt,connectedCanvasPromptTextForSubmission(node)].filter(Boolean).join('\n')};
+    snapshot.apiProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
+    snapshot.model=resolveImageModel(node.model || providerImageModels(snapshot.apiProvider)[0]);
+    let plans;
+    try {
+        if(!snapshot.apiProvider || !snapshot.model) throw new Error('请先配置图片生成模型');
+        plans=api.plans(snapshot,classicFilmAssets(node));
+        if(plans.length>CANVAS_OUTPUT_MEDIA_LIMIT) throw new Error(`一次最多生成 ${CANVAS_OUTPUT_MEDIA_LIMIT} 个镜头，请分批连接图片`);
+    } catch(error){ if(opts.cascade) throw error; showErrorModal(error.message,'分镜合成'); return; }
+    const out=outputForNode(node,560,true), batchId=uid('storyboard-batch');
+    const size=apiImageSize(snapshot.aspectRatio || '16:9',snapshot.resolution || '2k');
+    const cascadeTargetId=cascadeTargetIdFromOptions(opts);
+    plans.forEach(plan=>{
+        plan.pending=makePendingForRun(uid('p'),runSnapshot(snapshot,snapshot.prompt,plan.assets),node,{refs:plan.assets,cascadeTargetId,requestSize:size},{
+            canvasTaskType:'online-image',providerId:snapshot.apiProvider,model:snapshot.model,appendGenerated:true,
+            storyboardBatchId:batchId,batchIndex:plan.index,batchTotal:plans.length,sourceRef:plan.source,
+        });
+    });
+    out._pending=[...(out._pending || []),...plans.map(plan=>plan.pending)];
+    node.running=true; node.runStatus='running'; node.runError='';
+    node.storyboardProgress=`准备 ${plans.length} 个镜头…`;
+    refreshRunNodes(node,out); scheduleSave();
+    const prepare=api.createPreparer(snapshot,{
+        depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{resolveUrl:url=>canvasDisplayMediaUrl(url),onProgress}),
+        onProgress:(plan,message)=>{ node.storyboardProgress=`镜头 ${plan.index+1}/${plans.length}：${message}`; refreshRunNodes(node,out); },
+    });
+    let completed=0;
+    const results=await Promise.allSettled(plans.map(async plan=>{
+        try {
+            const built=await prepare(plan);
+            const requestSize=snapshot.storyboardMode==='batch'
+                ? await storyboardTransformSize(plan.source,snapshot.model,snapshot.storyboardBatchAspectRatio || 'source',snapshot.resolution || '2k') : size;
+            plan.pending.previewSize=pendingPreviewSizeFromSizeString(requestSize);
+            if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
+            plan.pending.run=runSnapshot(snapshot,built.prompt,built.refs);
+            plan.pending.run.taskLabel=`分镜 ${plan.index+1}/${plans.length}`;
+            plan.pending.refs=built.refs;
+            const payload={prompt:built.prompt,provider_id:snapshot.apiProvider,model:snapshot.model,size:requestSize,quality:normalizedImageQuality(snapshot.quality)||'high',reference_images:built.refs,auto_optimize_prompt:false,prompt_context:{node_type:'film-storyboard',reference_count:built.refs.length}};
+            const task=await createCanvasImageTask(payload,{cascadeTargetId});
+            if(!task?.task_id) throw new Error('分镜任务未返回任务 ID');
+            plan.pending.canvasTaskId=task.task_id;
+            refreshRunNodes(node,out); scheduleSave(); await saveCanvas();
+            const status=await pollCanvasImageTask(task.task_id,{cascadeTargetId});
+            if(status!=='succeeded') throw new Error(plan.pending.error || '分镜生成失败');
+        } catch(error){
+            const pending=pendingById(out,plan.pending.id);
+            if(pending){ pending.failed=true; pending.error=`镜头 ${plan.index+1}：${error.message || error}`; }
+            throw error;
+        } finally {
+            completed++; node.storyboardProgress=`已处理 ${completed}/${plans.length} 个镜头`;
+            refreshRunNodes(node,out); scheduleSave();
+        }
+    }));
+    const failed=results.filter(result=>result.status==='rejected').length;
+    node.running=classicFilmHasActiveRun(node,out);
+    node.runStatus=node.running ? 'running' : failed ? 'failed' : 'done';
+    node.runError=failed ? `${failed}/${plans.length} 个镜头失败，成功结果已保留；详见输出槽错误` : '';
+    node.storyboardProgress=`完成 ${plans.length-failed}/${plans.length} 个镜头${failed ? `，失败 ${failed} 个` : ''}`;
+    refreshRunNodes(node,out); scheduleSave();
+    setStatus(node.storyboardProgress);
+    if(failed && opts.cascade) throw new Error(node.runError);
+}
+function classicFilmSourceRefs(source, visited=new Set()){
+    if(!source || visited.has(source.id)) return [];
+    const next=new Set([...visited,source.id]);
+    if(source.type==='group') return (source.items || []).flatMap(id=>classicFilmSourceRefs(nodes.find(item=>item.id===id),next));
+    return mediaRefsFromNode(source);
+}
 async function runFilmNode(nodeId, opts={}){
     const node=nodes.find(item => item.id === nodeId && window.CanvasFilmNodes?.isType?.(item.type));
     if(!node) return;
     if(window.CanvasFilmWorkflow?.isList(node)) return window.CanvasFilmWorkflow.request(node,'generate');
     if(node.type === 'film-line-art') return runFilmLineArtNode(node,opts);
+    if(node.type === 'film-storyboard') return runFilmStoryboardNode(node,opts);
     if(node.type === 'film-video' && isKlingVideoNode(node) && !await ensureKlingGenerationAvailable(opts)) return;
     const api=window.CanvasFilmNodes;
     const built=api.buildPrompt(node,classicFilmAssets(node),{provider:node.apiProvider,model:node.model,promptText:target => connectedCanvasPromptTextForSubmission(target)});
@@ -11271,28 +11343,14 @@ async function runFilmNode(nodeId, opts={}){
     const refs=imageRefsOnly(built.refs).map((ref,index)=>({...ref,name:ref.name || `图${index+1}`}));
     const out=outputForNode(node,560,true);
     const run=runSnapshot(node,built.prompt,refs);
-    const storyboardCount = node.type === 'film-storyboard'
-        ? Math.max(1, Math.min(4, Number(node.count || 1)))
-        : 1;
-    const pendingIds = Array.from({length:storyboardCount}, () => uid('p'));
+    const pendingIds = [uid('p')];
     const pendings = pendingIds.map(id => makePendingForRun(id,run,node,{refs}));
     const pending = pendings[0];
     if(pendings.length === 1) out._pending=[...(out._pending || []),pending];
     else out._pending=[...(out._pending || []),...pendings];
     node.running=true; node.runError=''; node.runStatus='running'; refreshRunNodes(node,out); scheduleSave();
     try {
-        if(node.type === 'film-storyboard'){
-            const imageProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
-            const payload={prompt:built.prompt,provider_id:imageProvider,model:resolveImageModel(node.model || providerImageModels(imageProvider)[0]),size:apiImageSize(node.aspectRatio || '16:9',node.resolution || '2k'),reference_images:refs.slice(0,CANVAS_REFERENCE_IMAGE_MAX),quality:normalizedImageQuality(node.quality) || 'high',auto_optimize_prompt:true,prompt_context:{node_type:'film-storyboard',reference_count:refs.length}};
-            pendings.forEach(pending => { pending.previewSize=pendingPreviewSizeFromSizeString(payload.size); });
-            const tasks=await Promise.all(pendings.map(() => createCanvasImageTask(payload)));
-            tasks.forEach((task,index) => { pendings[index].canvasTaskId=task.task_id; if(index === 0) pending.canvasTaskId=task.task_id; });
-            refreshRunNodes(node,out); scheduleSave();
-            const results=await Promise.all(tasks.map(task => waitCanvasImageTaskResult(task.task_id)));
-            const images=results.flatMap(result => result.images || result.image_items || []);
-            if(!images.length) throw new Error('分镜合成没有返回图片');
-            mergeGeneratedOutputs(node,images,false); out._pending=(out._pending || []).filter(item => !pendingIds.includes(item.id)); appendOutputImagesWithoutDuplicates(out,images); node.runStatus='done'; setStatus(`分镜合成完成，共 ${images.length} 张`);
-        } else {
+        {
             const providerId = resolveVideoProviderId(node.apiProvider || 'comfly');
             if(providerId === 'kling-cli' && isKlingOmni30Model(node.model)) node.model = preferredKlingOmniModel(node);
             const payload={prompt:built.prompt,provider_id:providerId,model:node.model || (providerId === 'kling-cli' ? KLING_VIDEO_3_0_OMNI_MODEL : 'veo3-fast'),duration:Number(node.duration || 5),aspect_ratio:providerId === 'linkfox' ? (node.aspectRatio || '') : (node.aspectRatio || '16:9'),resolution:node.resolution || '1080p',images:refs,videos:videoRefsOnly(built.refs).map(ref=>ref.url),audios:audioRefsOnly(built.refs).map(ref=>ref.url),enhance_prompt:Boolean(node.enhancePrompt),enable_upsample:false,watermark:false,camerafixed:false,generate_audio:Boolean(node.generateAudio),multimodal:Boolean(node.multimodal),use_frame_roles:Boolean(node.useFrameRoles),steps:Math.max(4,Math.min(30,Number(node.steps || 12)))};
@@ -18619,9 +18677,25 @@ function providerIdForPending(pending){
         || pending?.run?.node?.provider_id
         || 'comfly';
 }
+function orderFilmStoryboardResults(out,pending,gen){
+    if(pending.storyboardBatchId){
+        // 只替换本批占据的位置，保持其他运行的结果位置；刷新恢复也走同一完成入口。
+        const sorted=(out.images || []).filter(item=>item?.storyboardBatchId===pending.storyboardBatchId).sort((a,b)=>a.storyboardIndex-b.storyboardIndex);
+        let index=0;
+        out.images=(out.images || []).map(item=>item?.storyboardBatchId===pending.storyboardBatchId ? sorted[index++] : item);
+        if(gen){
+            const orderedUrls=sorted.map(outputUrlValue), members=new Set(orderedUrls);
+            let generatedIndex=0;
+            gen.generatedOutputs=(gen.generatedOutputs || []).map(item=>members.has(outputUrlValue(item)) ? orderedUrls[generatedIndex++] : item);
+        }
+        if(gen){ gen.running=classicFilmHasActiveRun(gen,out); gen.runStatus=gen.running ? 'running' : (out._pending || []).some(item=>item.storyboardBatchId===pending.storyboardBatchId && item.failed) ? 'failed' : 'done'; }
+    }
+}
 function completeRecoverPendingOutput(out, pending, result){
     if(!out || !pending || !result) return;
-    const images = result.images || [];
+    const images = (result.images || result.image_items || []).map(item=>pending.storyboardBatchId
+        ? {...(typeof item==='object' ? item : {url:item}),storyboardBatchId:pending.storyboardBatchId,storyboardIndex:pending.batchIndex}
+        : item);
     if(!images.length) return;
     const meta = {
         runMs: nowMs() - Number(pending.startedAt || nowMs()),
@@ -18637,6 +18711,7 @@ function completeRecoverPendingOutput(out, pending, result){
         gen.runError = '';
         gen.running = false;
     }
+    orderFilmStoryboardResults(out,pending,gen);
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
     scheduleSave();
@@ -18702,6 +18777,7 @@ async function pollCanvasImageTask(taskId, options={}){
             }
             const data = await res.json();
             if(data.status === 'succeeded'){
+                if(found.pending.storyboardBatchId && !(data.result?.images?.length ? data.result.images : data.result?.image_items || []).some(outputUrlValue)) throw new Error('分镜合成没有返回图片');
                 completeCanvasImageTask(taskId, data.result || {});
                 return 'succeeded';
             }
@@ -18746,7 +18822,9 @@ function completeCanvasImageTask(taskId, result){
     };
     meta.run.request = requestMetaFromResult(result);
     const gen = nodes.find(n => n.id === meta.run?.node?.id);
-    const images = result.images || [];
+    const images = (result.images || result.image_items || []).map(item=>pending.storyboardBatchId
+        ? {...(typeof item==='object' ? item : {url:item}),storyboardBatchId:pending.storyboardBatchId,storyboardIndex:pending.batchIndex}
+        : item);
     out._pending = (out._pending || []).filter(p => p.id !== pending.id);
     if(pending.multiViewIndex != null){
         const raw = images[0];
@@ -18773,6 +18851,7 @@ function completeCanvasImageTask(taskId, result){
         gen.runError = '';
         gen.running = false;
     }
+    orderFilmStoryboardResults(out,pending,gen);
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
     scheduleSave();
@@ -18785,7 +18864,7 @@ function failCanvasImageTask(taskId, message, taskData={}){
     const runMs = nowMs() - Number(pending.startedAt || nowMs());
     const recoverTaskId = taskData?.upstream_task_id || taskData?.task_id || extractUpstreamTaskId(message);
     const gen = nodes.find(n => n.id === run?.node?.id);
-    if(recoverTaskId){
+    if(recoverTaskId || pending.storyboardBatchId){
         pending.failed = true;
         pending.querying = false;
         pending.error = message || tr('canvas.generationFailed');
@@ -18797,7 +18876,7 @@ function failCanvasImageTask(taskId, message, taskData={}){
             gen.runError = pending.error;
             if(pending.multiViewIndex != null){ gen.multiViewStatus = 'error'; gen.multiViewError = pending.error; }
             if(pending?.cascadeTargetId) gen._cascadeFailed = true;
-            gen.running = false;
+            gen.running = pending.storyboardBatchId ? classicFilmHasActiveRun(gen,out) : false;
         }
         addGenerationLog({run, outputs:[], runMs, error:pending.error});
         refreshRunNodes(gen, out);
@@ -19068,6 +19147,7 @@ function appendOutputImages(out, images, compareRef, metas=[], layout=null){
         if(source.name) item.name = source.name;
         if(source.kind || source.mediaKind) item.kind = source.kind || source.mediaKind;
         if(source.multiViewIndex != null) item.multiViewIndex = source.multiViewIndex;
+        if(source.storyboardBatchId){ item.storyboardBatchId=source.storyboardBatchId; item.storyboardIndex=Number(source.storyboardIndex)||0; }
         if(source.lookbookTaskId) item.lookbookTaskId = String(source.lookbookTaskId);
         if(source.lookbookShotIndex != null) item.lookbookShotIndex = Number(source.lookbookShotIndex);
         if(source.grid) item.grid = source.grid;
@@ -22721,7 +22801,7 @@ function canConnect(fromId, toId, inputRole=''){
             return ['prompt','promptGroup','loop','llm','group'].includes(from.type)
                 && !wouldCreateGeneratorCycle(fromId,toId);
         }
-        return ['image','group','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','film-line-art','batchGenerator','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'storyboardMerge'){

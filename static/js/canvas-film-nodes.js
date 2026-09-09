@@ -4,7 +4,7 @@
     const TYPES = ['film-storyboard','film-video'];
     const LINE_ART_TYPE = 'film-line-art';
     const ROLE_ORDER = {
-        'film-storyboard': ['actor','outfit','prop','scene','sketch'],
+        'film-storyboard': ['actor','outfit','prop','scene','sketch','depth','reference'],
         'film-video': ['storyboard','actor','outfit','prop'],
         'film-line-art': ['source'],
     };
@@ -82,6 +82,8 @@
         node.visionModel = String(node.visionModel || '');
         node.promptWebSearch = node.promptWebSearch === true;
         if(node.type === 'film-storyboard'){
+            node.storyboardMode = node.storyboardMode === 'batch' ? 'batch' : 'single';
+            node.storyboardBatchAspectRatio = node.storyboardBatchAspectRatio || 'source';
             node.aspectRatio = node.aspectRatio || '16:9';
             node.resolution = node.resolution || '2k';
             node.quality = node.quality || 'high';
@@ -140,7 +142,9 @@
             return [
                 ...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat(),
                 {role:'scene',label:'场景',title:'连接场景参考图'},
-                {role:'sketch',label:'线稿分镜',title:'连接线稿分镜参考图'},
+                {role:'sketch',label:'线稿分镜',title:'连接线稿图片或编组输出；批量时每张生成一个镜头'},
+                {role:'depth',label:'深度图',title:'连接已有深度图，直接控制姿势与空间，不再提取深度'},
+                {role:'reference',label:'参考图',title:'连接原始照片或编组输出，自动提取深度并参考原图色彩光线'},
             ];
         }
         if(node.type === 'film-video'){
@@ -167,7 +171,7 @@
             return withProductDetail(`道具${String.fromCharCode(65 + index)}`);
         }
         return withProductDetail(node.type === 'film-storyboard'
-            ? ({scene:'场景',sketch:'线稿分镜'}[role] || role)
+            ? ({scene:'场景',sketch:'线稿分镜',depth:'深度图',reference:'参考图（构图与色光）'}[role] || role)
                 : node.type === LINE_ART_TYPE
                     ? ({source:'视频帧 / 分镜组'}[role] || role)
                 : ({storyboard:'分镜图',prompt:'提示词'}[role] || role));
@@ -317,14 +321,14 @@
         const autoParse = node.type === 'film-video' && !hasPrompt && kinds.some(kind=>['image','video'].includes(kind)) && kinds.every(kind=>['image','video'].includes(kind));
         const polish = node.type === 'film-video' ? `<button type="button" class="prompt-polish-btn film-prompt-polish${autoParse ? ' auto-parse' : ''}" data-film-action="polish" data-film-prompt-mode="${autoParse ? 'auto-parse' : 'polish'}" title="${autoParse ? '按图片顺序分析画面并生成视频提示词' : '按当前视频模型规范润色提示词'}"><i data-lucide="${autoParse ? 'scan-eye' : 'wand-sparkles'}"></i><span>${autoParse ? '自动解析' : '润色'}</span></button>` : '';
         const searchToggle = node.type === 'film-video' ? `<label class="video-prompt-search-toggle"><input type="checkbox" data-video-prompt-search ${node.promptWebSearch === true ? 'checked' : ''}>联网案例增强（可选）</label>` : '';
-        return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产">${esc(node.prompt)}</textarea>${polish}</div></label>${searchToggle}`;
+        return `<label class="film-prompt-field"><span>生成需求</span><div class="film-prompt-editor-wrap"><textarea data-film-field="prompt" rows="5" placeholder="${node.type==='film-storyboard' ? (node.storyboardMode==='batch' ? '填写所有镜头共用的补充要求；每镜构图、动作与色光自动参照对应图片' : '填写画面、服化道和光线要求；输入 @ 可引用资产') : '输入镜头、动作、镜头运动、节奏和声音要求；输入 @ 可引用映射资产'}">${esc(node.prompt)}</textarea>${polish}</div></label>${searchToggle}`;
     }
     function inputSlotHtml(node, port, options={}){
         const assets = options.assets?.(node) || [];
-        const count = assets.filter(item => String(item?.role || item?.inputRole || '') === port.role && item?.url).length;
+        const count = assets.filter(item => String(item?.role || item?.inputRole || '') === port.role && (item?.ref || item)?.url).length;
         const connected = Boolean(count || options.connected?.(node, port.role));
         const state = connected ? '已连接' : '可选输入';
-        const stateHtml = connected ? '<span class="film-input-status-dot" aria-hidden="true"></span>已连接' : state;
+        const stateHtml = connected ? '<span class="film-input-status-dot" aria-hidden="true"></span>已连接' + (count ? ` ${count} 张` : '') : state;
         return `<div class="film-input-row" data-input-role="${esc(port.role)}" data-port-index="${Number(options.index || 0)}"><span><i data-lucide="${connected ? 'circle-check' : 'circle-dashed'}"></i><strong>${esc(port.label)}</strong></span><b class="${connected ? 'has-input' : ''}">${stateHtml}</b></div>`;
     }
     function h3ResolutionOptions(selected){
@@ -383,15 +387,16 @@
                     : (lineArtAssets.length ? `已连接 ${lineArtAssets.length} 张图片` : '可输入任意数量图片');
         return `<div class="film-node-panel ${node.type}">
             <div class="film-node-scroll">
-                <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span>${isLineArt ? '<span class="film-line-art-badge">逐帧转换</span>' : '<button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button>'}</div>
+                <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span>${node.type === 'film-storyboard' ? `<div class="film-storyboard-mode" role="group" aria-label="分镜生成模式">${['single','batch'].map(mode=>`<button type="button" data-film-mode="${mode}" aria-pressed="${node.storyboardMode===mode}" class="${node.storyboardMode===mode ? 'active' : ''}">${mode==='single' ? '单图' : '批量模式'}</button>`).join('')}</div>` : ''}${isLineArt ? '<span class="film-line-art-badge">逐帧转换</span>' : '<button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button>'}</div>
                 <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
+                ${node.type === 'film-storyboard' ? `<div class="film-storyboard-summary" role="status"><strong>${esc(window.CanvasFilmStoryboard?.summary(node,options.assets?.(node)||[]) || '')}</strong><small>线稿 / 深度图控制姿势；参考图自动提深度、还原色光并重建高清背景。编组输出自动读取组内图片。</small>${node.storyboardProgress ? `<small>${esc(node.storyboardProgress)}</small>` : ''}</div>` : ''}
                 ${isLineArt ? `<div class="film-line-art-batch-summary"><strong>${esc(lineArtStatus)}</strong><small>每张图片独立提交，批量并行生成</small></div>` : ''}
                 <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
                 ${promptHtml(node, options)}
-                ${node.type === 'film-video' ? videoSettings : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option><option value="4:5" ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option ${node.aspectRatio==='3:4'?'selected':''}>3:4</option><option ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>生成数量<select data-film-field="count">${[1,2,3,4].map(count => `<option value="${count}" ${node.count===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
+                ${node.type === 'film-video' ? videoSettings : isLineArt ? `<div class="film-image-settings film-line-art-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="aspectRatio"><option value="source" ${node.aspectRatio==='source'?'selected':''}>源画幅</option><option value="16:9" ${node.aspectRatio==='16:9'?'selected':''}>16:9</option><option value="1:1" ${node.aspectRatio==='1:1'?'selected':''}>1:1</option><option value="9:16" ${node.aspectRatio==='9:16'?'selected':''}>9:16</option><option value="3:2" ${node.aspectRatio==='3:2'?'selected':''}>3:2</option><option value="2:3" ${node.aspectRatio==='2:3'?'selected':''}>2:3</option><option value="4:5" ${node.aspectRatio==='4:5'?'selected':''}>4:5</option></select></label><label>分辨率<select data-film-field="resolution"><option value="1k" ${node.resolution==='1k'?'selected':''}>1K</option><option value="2k" ${node.resolution==='2k'?'selected':''}>2K</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label><label>质量<select data-film-field="quality"><option value="auto" ${node.quality==='auto'?'selected':''}>自动</option><option value="medium" ${node.quality==='medium'?'selected':''}>标准</option><option value="high" ${node.quality==='high'?'selected':''}>高质量</option></select></label></div>` : `<div class="film-image-settings"><select data-film-field="apiProvider">${providerOptions}</select><select data-film-field="model">${modelOptions}</select><label>画幅<select data-film-field="${node.storyboardMode==='batch' ? 'storyboardBatchAspectRatio' : 'aspectRatio'}">${(node.storyboardMode==='batch' ? ['source','16:9','9:16','1:1','3:4','4:5'] : ['16:9','9:16','1:1','3:4','4:5']).map(ratio=>`<option value="${ratio}" ${(node.storyboardMode==='batch' ? node.storyboardBatchAspectRatio : node.aspectRatio)===ratio?'selected':''}>${ratio==='source' ? '源画幅' : ratio}</option>`).join('')}</select></label><label>分辨率<select data-film-field="resolution"><option ${node.resolution==='1k'?'selected':''}>1k</option><option ${node.resolution==='2k'?'selected':''}>2k</option><option ${node.resolution==='4k'?'selected':''}>4k</option></select></label><label>${node.storyboardMode==='batch' ? '每镜数量' : '生成数量'}<select data-film-field="count" ${node.storyboardMode==='batch' ? 'disabled' : ''}>${[1,2,3,4].map(count => `<option value="${count}" ${(node.storyboardMode==='batch' ? 1 : node.count)===count?'selected':''}>${count} 张</option>`).join('')}</select></label></div>`}
                 ${node.runError ? `<div class="film-error">${esc(node.runError)}</div>` : ''}
             </div>
-            <div class="film-node-actions">${isLineArt ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run" title="${node.type === 'film-video' ? '生成前自动解析素材并适配所选模型；保留原始创意' : action}"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
+            <div class="film-node-actions">${isLineArt || (node.type==='film-storyboard' && node.storyboardMode==='batch') ? '' : `<button type="button" class="film-parse-button" data-film-action="parse"><i data-lucide="scan-eye"></i>${parseText}</button>`}<button type="button" class="film-run-button" data-film-action="run" title="${node.type === 'film-video' ? '生成前自动解析素材并适配所选模型；保留原始创意' : action}"><i data-lucide="${node.type === 'film-video' ? 'clapperboard' : 'wand-sparkles'}"></i>${node.running ? '生成中（可继续）' : action}</button></div>
         </div>`;
     }
     function notify(options,node,render=false){ options.onChange?.(node,{render}); }
@@ -560,6 +565,14 @@
     function bind(root,node,options={}){
         if(node.apiProvider === 'linkfox') window.CanvasLinkfoxVideo.bindUnified(root,node,()=>notify(options,node,true));
         normalize(node);
+        root.querySelectorAll('[data-film-mode]').forEach(button=>{
+            button.addEventListener('pointerdown',event=>event.stopPropagation());
+            button.addEventListener('click',event=>{
+                event.stopPropagation();
+                node.storyboardMode=button.dataset.filmMode;
+                notify(options,node,true);
+            });
+        });
         const searchToggle = root.querySelector('[data-video-prompt-search]');
         if(searchToggle){
             searchToggle.addEventListener('mousedown', event => event.stopPropagation());

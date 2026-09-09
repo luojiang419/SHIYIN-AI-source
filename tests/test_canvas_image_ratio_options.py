@@ -75,7 +75,9 @@ class CanvasImageRatioOptionsTests(unittest.TestCase):
         self.assertIn("['1:1','3:4','4:5','4:3','9:16','16:9']", self.ecommerce)
         self.assertIn("['1:1','2:3','3:4','4:3','4:5','9:16','16:9']", self.ecommerce)
         self.assertIn("const ratios=['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9']", self.lookbook)
-        self.assertGreaterEqual(self.film.count("node.aspectRatio==='4:5'"), 2)
+        self.assertIn("node.aspectRatio==='4:5'", self.film)
+        self.assertIn("['source','16:9','9:16','1:1','3:4','4:5']", self.film)
+        self.assertIn("storyboardBatchAspectRatio", self.film)
         self.assertIn('<option value="4:5">4:5 竖屏</option>', self.classic_html)
         self.assertIn("'2:3','4:5'].includes(options.ratio)", self.classic)
 

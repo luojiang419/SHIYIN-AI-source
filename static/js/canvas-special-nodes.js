@@ -1803,6 +1803,33 @@
             }
         };
     }
+    async function generateReferenceDepth(source, options={}){
+        // 兼容未提供全局深度设置的版本；始终复用一键复刻的深度推理入口。
+        const configured=typeof refreshDepthMapSettings==='function';
+        if(configured) await refreshDepthMapSettings(true);
+        const professional=configured && activeDepthMapMode()==='professional';
+        const controls=configured ? {...depthMapSettings.controls} : {...DEFAULT_DEPTH_MAP_CONTROLS};
+        const readStatus=()=>professional ? refreshProfessionalDepthStatus(true) : refreshPersonDepthStatus(true);
+        let status=await readStatus();
+        if(!professional && !status?.ready && status?.install_available && !PERSON_DEPTH_ACTIVE_STATES.has(status.state)){
+            status=await installPersonDepthComponent();
+        }
+        const deadline=Date.now()+60*60*1000;
+        while(!status?.ready){
+            if(!PERSON_DEPTH_ACTIVE_STATES.has(status?.state) || Date.now()>deadline){
+                throw new Error(status?.message || '深度组件尚未就绪，请在深度设置中检查后重试');
+            }
+            options.onProgress?.(`${status.message || '正在准备深度组件'}${Number.isFinite(Number(status.progress)) ? ` (${Math.round(Math.max(0,Math.min(1,Number(status.progress)))*100)}%)` : ''}`);
+            await new Promise(resolve=>setTimeout(resolve,1500));
+            status=await readStatus();
+        }
+        if(configured && professional !== (activeDepthMapMode()==='professional')) throw new Error('深度模式已更改，请重新生成当前镜头');
+        const base=configured
+            ? await estimateConfiguredDepthFile(source,options,`storyboard-depth-${Date.now()}.png`)
+            : await estimatePersonDepthFile(source,options,`storyboard-depth-${Date.now()}.png`);
+        if(typeof adjustDepthFile==='function') return adjustDepthFile(base,controls,options,`storyboard-depth-adjusted-${Date.now()}.png`);
+        return base;
+    }
     function poseReplicateControlItem(node){
         if(node.poseReplicateMode === 'depth'){
             return node.poseDepthUrl ? {
@@ -2489,7 +2516,7 @@
         DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
         panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
         bindPanorama, bindPose, bindDepthMap, bindDirector3d, bindPoseReplicate, bindAngle,
-        buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle,
+        buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle, generateReferenceDepth,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration
     };
 })();

@@ -4540,10 +4540,10 @@ function addEcommerceNode(type, point){
     node.id = uid(prefix);
     return addNode(node);
 }
-function createFilmWorkflow(point){
+function createFilmWorkflow(point, parentHistoryTx=null){
     if(!ensureCanvas()) return null;
     const base = point || defaultPoint(0,0);
-    const historyTx = beginClassicHistoryTransaction('film-workflow-create');
+    const historyTx = parentHistoryTx || beginClassicHistoryTransaction('film-workflow-create');
     beginCanvasMutationBatch();
     try {
         const storyboard = addFilmNode('film-storyboard',{x:base.x,y:base.y});
@@ -4563,7 +4563,7 @@ function createFilmWorkflow(point){
         return {storyboard,storyboardOutput,video,videoOutput};
     } finally {
         endCanvasMutationBatch();
-        commitClassicHistoryTransaction(historyTx);
+        if(!parentHistoryTx) commitClassicHistoryTransaction(historyTx);
     }
 }
 function addH3VideoNode(point){
@@ -5545,20 +5545,93 @@ function linkCreateOptions(state){
     }
     return [];
 }
+function linkAdvertisingAllowsFilm(){
+    return typeof canvasWorkModeAllows !== 'function' || canvasWorkModeAllows('film-storyboard');
+}
+function imageLinkAdvertisingGroups(state){
+    const origin = nodes.find(node => node.id === state.originId);
+    if(state.originKind !== 'out' || origin?.type !== 'image' || (origin.url && mediaKindForNode(origin) !== 'image')) return [];
+    return [
+        {label:'平面广告', icon:'book-open', items:[
+            {type:'lookbook', label:'Lookbook 平面广告', icon:'book-open', inputRole:'lookbook-person'}
+        ]},
+        ...(linkAdvertisingAllowsFilm() ? [{label:'影视广告', icon:'clapperboard', items:[
+            {type:'film-workflow', label:'创建影视工作流', icon:'workflow'},
+            {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left', inputRole:'actor-0'},
+            {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
+            {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler', inputRole:'source'},
+            {type:'film-video', label:'生成视频', icon:'clapperboard', inputRole:'storyboard'},
+            {type:'linkfox-video', label:'LinkFox视频生成', icon:'sparkles', inputRole:'reference-image'},
+            {type:'dwpose', label:'动作提取', icon:'person-standing'},
+            {type:'depthMap', label:'深度图', icon:'scan'},
+            {type:'poseReplicate', label:'一键复刻', icon:'refresh-cw', inputRole:'pose-reference'},
+            {type:'multiView', label:'创建三视图', icon:'panels-top-left', inputRole:'model-front'},
+            {type:'panorama', label:'720°取景器', icon:'scan-line'}
+        ]}] : [])
+    ];
+}
+function linkCreateButtonHtml(option){
+    return `<button type="button" class="menu-btn" data-link-create="${escapeAttr(option.type)}" data-link-input-role="${escapeAttr(option.inputRole || '')}"><i data-lucide="${escapeAttr(option.icon)}" class="w-4 h-4"></i><span>${escapeHtml(option.label)}</span></button>`;
+}
+function bindLinkAdvertisingSubmenus(){
+    const hosts = [...linkCreateMenu.querySelectorAll('[data-link-ad-group]')];
+    hosts.forEach(host => {
+        const trigger = host.querySelector('.menu-submenu-trigger');
+        const submenu = host.querySelector('.create-submenu');
+        let closeTimer = 0;
+        const setOpen = open => {
+            clearTimeout(closeTimer);
+            if(open) hosts.filter(other => other !== host).forEach(other => other.closeLinkSubmenu?.());
+            host.classList.toggle('submenu-open', open);
+            trigger.setAttribute('aria-expanded', String(open));
+            submenu.style.display = open ? 'block' : 'none';
+            if(!open) return;
+            const margin = 10, gap = 8;
+            const rect = trigger.getBoundingClientRect(), sub = submenu.getBoundingClientRect();
+            const flip = rect.right + gap + sub.width > window.innerWidth - margin;
+            host.classList.toggle('submenu-flip', flip);
+            submenu.style.left = `${Math.max(margin, Math.min(window.innerWidth - sub.width - margin, flip ? rect.left - sub.width - gap : rect.right + gap))}px`;
+            submenu.style.top = `${Math.max(margin, Math.min(window.innerHeight - sub.height - margin, rect.top - 8))}px`;
+        };
+        host.closeLinkSubmenu = () => setOpen(false);
+        host.addEventListener('pointerenter', () => setOpen(true));
+        host.addEventListener('pointerleave', () => { closeTimer = window.setTimeout(() => setOpen(false), 140); });
+        submenu.addEventListener('pointerenter', () => clearTimeout(closeTimer));
+        trigger.addEventListener('click', event => { event.stopPropagation(); setOpen(true); });
+        host.addEventListener('keydown', event => {
+            if(event.key === 'Escape' || event.key === 'ArrowLeft'){
+                event.preventDefault(); event.stopPropagation(); setOpen(false); trigger.focus();
+            } else if(event.key === 'ArrowRight'){
+                event.preventDefault(); setOpen(true); submenu.querySelector('button')?.focus();
+            }
+        });
+    });
+    linkCreateMenu.onscroll = () => hosts.forEach(host => host.closeLinkSubmenu());
+}
 function openLinkCreateMenu(originId, originKind, clientX, clientY, inputRole=''){
     const state = {originId, originKind, inputRole, point:screenToWorld(clientX, clientY)};
     const options = linkCreateOptions(state);
     if(!options.length) return false;
     linkCreateState = state;
     createMenu.classList.remove('open');
-    linkCreateMenu.innerHTML = options.map(opt => `<button class="menu-btn" data-link-create="${escapeAttr(opt.type)}"><i data-lucide="${escapeAttr(opt.icon)}" class="w-4 h-4"></i><span>${escapeHtml(opt.label)}</span></button>`).join('');
+    linkCreateMenu.innerHTML = options.map(linkCreateButtonHtml).join('') + imageLinkAdvertisingGroups(state).map(group => `
+        <div class="menu-submenu-host" data-link-ad-group>
+            <button type="button" class="menu-btn menu-submenu-trigger" aria-haspopup="menu" aria-expanded="false"><i data-lucide="${escapeAttr(group.icon)}" class="w-4 h-4"></i><span>${escapeHtml(group.label)}</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
+            <div class="create-submenu" role="menu" aria-label="${escapeAttr(group.label)}节点" style="display:none">${group.items.map(linkCreateButtonHtml).join('')}</div>
+        </div>`).join('');
     linkCreateMenu.style.left = `${clientX}px`;
     linkCreateMenu.style.top = `${clientY}px`;
     linkCreateMenu.classList.add('open');
+    linkCreateMenu.style.maxHeight = 'calc(100vh - 20px)';
+    linkCreateMenu.style.overflowY = 'auto';
+    const menuRect = linkCreateMenu.getBoundingClientRect();
+    linkCreateMenu.style.left = `${Math.max(10, Math.min(window.innerWidth - menuRect.width - 10, clientX))}px`;
+    linkCreateMenu.style.top = `${Math.max(10, Math.min(window.innerHeight - menuRect.height - 10, clientY))}px`;
+    bindLinkAdvertisingSubmenus();
     linkCreateMenu.querySelectorAll('[data-link-create]').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
-            createLinkedNode(btn.dataset.linkCreate);
+            createLinkedNode(btn.dataset.linkCreate, btn.dataset.linkInputRole || '');
         };
     });
     refreshIcons(linkCreateMenu);
@@ -5609,6 +5682,8 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     return true;
 }
 function closeLinkCreateMenu(){
+    linkCreateMenu.querySelectorAll('[data-link-ad-group]').forEach(host => host.closeLinkSubmenu?.());
+    linkCreateMenu.onscroll = null;
     linkCreateMenu.classList.remove('open');
     linkCreateMenu.innerHTML = '';
     nodeInputMenu.classList.remove('open');
@@ -6089,7 +6164,7 @@ async function downloadGroupNodeImages(groupId){
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }
 }
-function createLinkedNode(type){
+function createLinkedNode(type, targetInputRole=''){
     const state = linkCreateState;
     closeLinkCreateMenu();
     if(!state) return;
@@ -6100,12 +6175,15 @@ function createLinkedNode(type){
     let createdConnection = null;
     const removedConnectionIds = [];
     try {
-        const created = createNodeByType(type, state.point);
+        const workflow = type === 'film-workflow' && state.originKind === 'out' && linkAdvertisingAllowsFilm()
+            ? createFilmWorkflow(state.point, historyTx) : null;
+        const created = workflow?.storyboard || createNodeByType(type, state.point);
         if(!created) return;
-        positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');
+        if(!workflow) positionCanvasNodeRelative(created, origin, state.originKind === 'out' ? 'downstream' : 'upstream');
         const fromId = state.originKind === 'out' ? origin.id : created.id;
         const toId = state.originKind === 'out' ? created.id : origin.id;
-        const inputRole = state.originKind === 'in' ? state.inputRole || '' : '';
+        const defaultImageRoles = {'lookbook':'lookbook-person', 'film-storyboard':'actor-0', 'film-line-art':'source', 'film-video':'storyboard'};
+        const inputRole = state.originKind === 'in' ? state.inputRole || '' : (targetInputRole || (origin.type === 'image' ? defaultImageRoles[created.type] || '' : ''));
         if(canConnect(fromId, toId, inputRole) && !connections.some(c => c.from === fromId && c.to === toId && (c.inputRole || '') === inputRole)){
             if(inputRole && !classicMultiViewRoleAllowsMultiple(toId, inputRole) && !classicFilmInputAllowsMultiple(toId, inputRole)) {
                 const replaced = connections.filter(c => c.to === toId && c.inputRole === inputRole);

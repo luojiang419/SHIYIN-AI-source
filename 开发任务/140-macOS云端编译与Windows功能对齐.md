@@ -117,6 +117,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 
 ## 已知问题
 
+- GitHub 不允许从默认分支尚不存在的新 workflow 执行 `workflow_dispatch`；当前先使用仅 feature branch 的 paths 限定 push 触发，进入默认分支后可直接手动调度。
 - 当前 Windows 版自动更新只识别 EXE，Mac 更新安装需要独立机制。
 - macOS 云端产物没有 Apple Developer ID 时只能 ad-hoc/未公证，首次打开会受 Gatekeeper 提示影响。
 - Topaz、DWPose GPU、本地 FFmpeg/Kling CLI 等能力需要逐项确认 macOS 依赖，不应以“能编译”冒充完全可用。
@@ -132,6 +133,7 @@ Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语�
 
 - 2026-09-09：任务启动；确认仓库已公开，完成 Actions 权限、凭据和首轮平台差异检查。
 - 2026-09-10：完成第一版 macOS 运行时与打包链，本地 Python/Rust/静态契约通过，准备触发真实云端构建。
+- 2026-09-10：首次 `workflow_dispatch` 因 workflow 尚未进入默认分支被 GitHub 返回 404；改用当前 feature branch 限定 push 触发。
 
 ## 接力信息
 

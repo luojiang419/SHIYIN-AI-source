@@ -29,6 +29,7 @@ def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
     assert "actions/upload-artifact@v4" in workflow
     assert "secrets." not in workflow
     assert "workflow_dispatch:" in workflow
+    assert "feat/fashion-director-full-integration" in workflow
 
 
 def test_desktop_runtime_has_platform_specific_updater_and_bundle_paths():

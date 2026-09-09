@@ -2,6 +2,22 @@ name: Build macOS desktop artifacts
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/fashion-director-full-integration
+    paths:
+      - '.github/workflows/build-macos.yml'
+      - 'canvas_core/**'
+      - 'src-tauri/**'
+      - 'static/**'
+      - 'skills/**'
+      - 'tools/build-macos.sh'
+      - 'tools/smoke-macos-bundle.py'
+      - 'canvas-backend.spec'
+      - 'requirements.txt'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'VERSION'
 
 permissions:
   contents: read

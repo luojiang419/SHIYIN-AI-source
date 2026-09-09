@@ -141,7 +141,7 @@
         if(node.type === 'film-storyboard'){
             return [
                 ...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat(),
-                {role:'scene',label:'场景',title:'连接场景参考图'},
+                {role:'scene',label:'场景',title:'连接一张或多张用户背景图；AI 按镜头匹配场景与取景位置，参考图色光应用到选定场景'},
                 {role:'sketch',label:'线稿分镜',title:'连接线稿图片或编组输出；批量时每张生成一个镜头'},
                 {role:'depth',label:'深度图',title:'连接已有深度图，直接控制姿势与空间，不再提取深度'},
                 {role:'reference',label:'参考图',title:'连接原始照片或编组输出，自动提取深度并参考原图色彩光线'},
@@ -360,6 +360,16 @@
             <div class="gen-settings-row film-video-primary-grid"><label class="field"><div class="setting-title">时长</div><input class="setting-input" data-film-field="duration" type="number" min="1" max="60" value="${node.duration}"></label><label class="field"><div class="setting-title">画幅</div><select class="select-lite" data-film-field="aspectRatio">${['16:9','9:16','1:1','4:3'].map(value => `<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select></label><label class="field"><div class="setting-title">分辨率</div><select class="select-lite" data-film-field="resolution"><option value="480p" ${node.resolution==='480p'?'selected':''}>480P</option><option value="720p" ${node.resolution==='720p'?'selected':''}>720P</option><option value="1080p" ${node.resolution==='1080p'?'selected':''}>1080P（推荐）</option><option value="4k" ${node.resolution==='4k'?'selected':''}>4K</option></select></label></div>
         </div>`;
     }
+    function sceneMatchesHtml(node){
+        const groups=new Map();
+        (node.storyboardSceneMatches || []).forEach(match=>{
+            if(!match.sceneUrl) return;
+            const group=groups.get(match.sceneUrl) || {name:match.sceneName || '用户场景',items:[]};
+            group.items.push(match);groups.set(match.sceneUrl,group);
+        });
+        if(!groups.size) return '';
+        return `<details class="film-scene-matches" ${node.storyboardSceneMatchesOpen ? 'open' : ''}><summary>最近场景匹配 · ${groups.size} 个任务组</summary>${[...groups.values()].map(group=>`<div><strong>${esc(group.name)} → 镜头 ${group.items.map(match=>Number(match.index)+1).join('、')}</strong>${group.items.map(match=>`<small>镜头 ${Number(match.index)+1}：${esc(match.location)}</small>`).join('')}</div>`).join('')}</details>`;
+    }
     function bodyHtml(node, options={}){
         normalize(node);
         const isLineArt = node.type === LINE_ART_TYPE;
@@ -389,7 +399,7 @@
             <div class="film-node-scroll">
                 <div class="film-node-toolbar"><span class="film-node-kicker">影视制作</span>${node.type === 'film-storyboard' ? `<div class="film-storyboard-mode" role="group" aria-label="分镜生成模式">${['single','batch'].map(mode=>`<button type="button" data-film-mode="${mode}" aria-pressed="${node.storyboardMode===mode}" class="${node.storyboardMode===mode ? 'active' : ''}">${mode==='single' ? '单图' : '批量模式'}</button>`).join('')}</div>` : ''}${isLineArt ? '<span class="film-line-art-badge">逐帧转换</span>' : '<button type="button" class="film-add-actor" data-film-action="add-actor"><i data-lucide="user-round-plus"></i>添加演员</button>'}</div>
                 <div class="film-input-list">${inputPorts(node).map((port,index) => inputSlotHtml(node, port, {...options,index})).join('')}</div>
-                ${node.type === 'film-storyboard' ? `<div class="film-storyboard-summary" role="status"><strong>${esc(window.CanvasFilmStoryboard?.summary(node,options.assets?.(node)||[]) || '')}</strong><small>线稿 / 深度图控制姿势；参考图自动提深度、还原色光并重建高清背景。编组输出自动读取组内图片。</small>${node.storyboardProgress ? `<small>${esc(node.storyboardProgress)}</small>` : ''}</div>` : ''}
+                ${node.type === 'film-storyboard' ? `<div class="film-storyboard-summary" role="status"><strong>${esc(window.CanvasFilmStoryboard?.summary(node,options.assets?.(node)||[]) || '')}</strong><small>线稿 / 深度图控制姿势与机位；连接场景后，AI 自动匹配背景位置，并将参考图色光应用到用户场景。多张背景作为候选，不混合生成。</small>${node.storyboardProgress ? `<small>${esc(node.storyboardProgress)}</small>` : ''}${sceneMatchesHtml(node)}</div>` : ''}
                 ${isLineArt ? `<div class="film-line-art-batch-summary"><strong>${esc(lineArtStatus)}</strong><small>每张图片独立提交，批量并行生成</small></div>` : ''}
                 <div class="film-mapping-title">资产映射 <small data-film-model-rule></small></div><div data-film-mapping>${mappingHtml(node, options.assets?.(node) || [], options)}</div>
                 ${promptHtml(node, options)}
@@ -565,6 +575,11 @@
     function bind(root,node,options={}){
         if(node.apiProvider === 'linkfox') window.CanvasLinkfoxVideo.bindUnified(root,node,()=>notify(options,node,true));
         normalize(node);
+        const sceneDetails=root.querySelector('.film-scene-matches');
+        if(sceneDetails){
+            ['pointerdown','mousedown','click'].forEach(type=>sceneDetails.addEventListener(type,event=>event.stopPropagation()));
+            sceneDetails.addEventListener('toggle',()=>{ node.storyboardSceneMatchesOpen=sceneDetails.open; notify(options,node); });
+        }
         root.querySelectorAll('[data-film-mode]').forEach(button=>{
             button.addEventListener('pointerdown',event=>event.stopPropagation());
             button.addEventListener('click',event=>{

@@ -630,3 +630,6 @@ body.theme-dark .film-error {
 .film-storyboard-summary small { color:var(--muted); }
 .film-storyboard .film-node-toolbar { flex-wrap:wrap; }
 .film-storyboard select:disabled { opacity:.65; }
+
+.film-scene-matches summary { cursor:pointer; font-weight:600; }
+.film-scene-matches > div { display:flex; flex-direction:column; gap:3px; margin-top:7px; }

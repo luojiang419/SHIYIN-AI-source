@@ -2195,6 +2195,8 @@ async function runSmartFilmStoryboardNode(node){
     const provider=filmSmartImageProviderId(node) || base.provider_id || imageProviders()[0]?.id || '';
     const snapshot={...node,type:'film-storyboard',apiProvider:provider,model:node.model || base.model || providerImageModels(provider)[0] || '',prompt:[node.prompt,smartFilmConnectedPromptTextForSubmission(node)].filter(Boolean).join('\n')};
     const runSettings={...base,engine:'api',apiKind:'image',provider_id:provider,model:snapshot.model,ratio:node.storyboardMode==='batch' ? (node.storyboardBatchAspectRatio || 'source') : (node.aspectRatio || '16:9'),resolution:node.resolution || '2k',quality:node.quality || 'high',count:1};
+    snapshot.visionProvider=resolveVideoVisionProviderId(node.visionProvider || '');
+    snapshot.visionModel=resolveChatModel(node.visionModel || '',snapshot.visionProvider);
     let plans;
     try {
         if(!provider || !snapshot.model) throw new Error('请先配置图片生成模型');
@@ -2209,9 +2211,12 @@ async function runSmartFilmStoryboardNode(node){
     output.generationSlots=plans.map(plan=>({id:uid('generation-slot'),index:plan.index,status:'loading',sourceRef:plan.source}));
     output.pendingTasks=[];
     smartFilmActiveRuns.set(node.id,(smartFilmActiveRuns.get(node.id)||0)+1);
-    node.running=true; node.runError=''; node.storyboardProgress=`准备 ${plans.length} 个镜头…`;
+    node.running=true; node.runError=''; node.storyboardSceneMatches=[];
+    node.storyboardProgress=`准备 ${plans.length} 个镜头…`;
     render(); scheduleSave();
     const prepare=window.CanvasFilmStoryboard.createPreparer(snapshot,{
+        plans,
+        onSceneMatches:matches=>{ node.storyboardSceneMatches=matches.filter(item=>item.sceneMatch).map(item=>({index:item.index,...item.sceneMatch})); render(); scheduleSave(); },
         depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{onProgress}),
         onProgress:(plan,message)=>{ node.storyboardProgress=`镜头 ${plan.index+1}/${plans.length}：${message}`; render(); },
     });
@@ -2224,6 +2229,8 @@ async function runSmartFilmStoryboardNode(node){
                 const imageSettings=runSettings.ratio==='source' ? await smartBatchRunSettingsForRef(runSettings,plan.source) : runSettings;
                 task.runSettings=settingsForStorage(imageSettings);
                 task.refs=built.refs; task.prompt=built.prompt;
+                task.sceneMatch=built.sceneMatch;
+                task.storyboardPlan={...plan,sceneMatch:built.sceneMatch};
                 const response=await fetch('/api/canvas-image-tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:built.prompt,provider_id:provider,model:snapshot.model,size:sizeForRun(imageSettings),quality:runSettings.quality,n:1,reference_images:built.refs,auto_optimize_prompt:false,prompt_context:{node_type:'film-storyboard',reference_count:built.refs.length}})});
                 const created=await response.json();
                 if(!response.ok || !created.task_id) throw new Error(created.detail || '分镜任务提交失败');

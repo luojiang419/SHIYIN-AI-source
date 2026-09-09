@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const {test}=require('node:test');
 function harness(){
     const ctx={window:{},console}; vm.createContext(ctx);
-    for(const file of ['canvas-film-nodes','canvas-film-storyboard']) vm.runInContext(fs.readFileSync(`static/js/${file}.js`,'utf8'),ctx);
+    for(const file of ['canvas-film-nodes','canvas-film-scene-matcher','canvas-film-storyboard']) vm.runInContext(fs.readFileSync(`static/js/${file}.js`,'utf8'),ctx);
     return {film:ctx.window.CanvasFilmNodes,api:ctx.window.CanvasFilmStoryboard,ctx};
 }
 const node=(extra={})=>({type:'film-storyboard',apiProvider:'custom',model:'image-model',...extra});
@@ -88,4 +88,71 @@ test('普通智能生图继续默认优化，分镜重试保留完整控制提�
     assert.equal(requests[0].prompt_context.node_type,'smart-image');
     assert.equal(requests[1].auto_optimize_prompt,false);
     assert.equal(requests[1].prompt_context.node_type,'film-storyboard');
+});
+function sceneFetch(requests, choose=(shot,scenes)=>scenes[0].scene_id){
+    return async(url,options)=>{
+        assert.equal(url,'/api/canvas-llm');
+        const body=JSON.parse(options.body); requests.push(body);
+        const manifest=JSON.parse(body.message.match(/SCENE_MATCH_INPUT\n([^\n]+)/)[1]);
+        return {ok:true,json:async()=>({text:JSON.stringify({matches:manifest.shots.map(shot=>({shot_id:shot.shot_id,scene_id:choose(shot,manifest.scenes),location:'靠窗第二根柱子前，保留门窗地标',framing:'平视侧拍，门框在右侧，前景柱体遮挡',lighting:'将原参考的暖色侧光与冷色阴影迁移到用户场景',reason:'柱体与门窗的空间关系匹配'}))})})};
+    };
+}
+test('单图场景定位只分析一次，多个结果复用用户背景与参考色光',async()=>{
+    const {api}=harness(),requests=[],n=node({count:3});
+    const plans=api.plans(n,[ref('actor-0','actor'),ref('scene','room'),ref('sketch','sketch'),ref('reference','color')]);
+    const prepare=api.createPreparer(n,{plans,matchFetch:sceneFetch(requests),depth:()=>{throw Error('显式线稿不提深度');}});
+    const results=await Promise.all(plans.map(prepare));
+    assert.equal(requests.length,1);
+    assert.equal(requests[0].images.length,3,'只解析结构/色光和背景，不发送演员');
+    assert.equal(new Set(results.map(r=>r.sceneMatch.sceneUrl)).size,1);
+    for(const built of results){
+        assert.equal(built.sceneMatch.sceneUrl,'room');
+        assert.match(built.prompt,/用户场景图是唯一的背景身份/);
+        assert.match(built.prompt,/不能换回原始参考照片的背景/);
+        assert.match(built.prompt,/靠窗第二根柱子前/);
+        assert.match(built.refs.find(r=>r.url==='color').role_label,/色彩光线迁移到用户场景/);
+        assert.ok(!built.prompt.includes('背景必须依据这些证据从零重新生成'),'连接用户场景时不使用无场景重建规则');
+    }
+});
+test('批量候选按镜头分组匹配，每镜只提交自己的背景',async()=>{
+    const {api}=harness(),requests=[],n=node({storyboardMode:'batch'});
+    const plans=api.plans(n,[ref('scene','room'),ref('scene','garden'),ref('sketch','s1'),ref('sketch','s2')]);
+    let groups;
+    const prepare=api.createPreparer(n,{plans,matchFetch:sceneFetch(requests,(shot,scenes)=>scenes[shot.shot_id==='H1' ? 0 : 1].scene_id),onSceneMatches:matches=>{groups=matches;}});
+    const results=await Promise.all(plans.map(prepare));
+    assert.equal(requests.length,1);
+    assert.deepEqual(plain(results.map(r=>r.refs.filter(ref=>ref.inputRole==='scene').map(ref=>ref.url))),[['room'],['garden']]);
+    assert.deepEqual(plain(groups.map(plan=>plan.sceneMatch.sceneId)),['S1','S2']);
+    assert.equal(plans[0].assets.filter(ref=>ref.role==='scene').length,2,'候选快照不可被选择结果覆盖');
+});
+test('超过20张候选全部参与分批匹配并复选，不截断、不融合背景',async()=>{
+    const {api,ctx}=harness(),requests=[],n=node({storyboardMode:'batch'});
+    const assets=[...Array.from({length:25},(_,i)=>ref('scene','scene'+(i+1))),ref('depth','d1'),ref('depth','d2')];
+    const plans=api.plans(n,assets);
+    const matches=await ctx.window.CanvasFilmSceneMatcher.matchPlans(n,plans,{fetch:sceneFetch(requests,(shot,scenes)=>{
+        const desired=shot.shot_id==='H1' ? 'S2' : 'S25';return scenes.find(scene=>scene.scene_id===desired)?.scene_id || scenes[0].scene_id;
+    })});
+    assert.equal(requests.length,4,'三个初筛批次 + 一个复选批次');
+    assert.ok(requests.every(request=>request.images.length<=20));
+    const visited=new Set(requests.flatMap(request=>request.images.filter(url=>url.startsWith('scene'))));
+    assert.equal(visited.size,25);
+    assert.deepEqual(plain(matches.map(plan=>plan.sceneMatch.sceneId)),['S2','S25']);
+});
+test('匹配结果未知编号、缺少镜头或位置时停止，避免未经匹配出图',async()=>{
+    const {api}=harness(),n=node({storyboardMode:'batch'});
+    const plans=api.plans(n,[ref('scene','scene'),ref('reference','photo')]);
+    let depthCalls=0;
+    for(const text of ['not-json','null','{"matches":[null]}','{"matches":[{"shot_id":"H1","scene_id":"S1"}]}','{"matches":[]}',JSON.stringify({matches:[{shot_id:'H1',scene_id:'S99'}]})]){
+        const prepare=api.createPreparer(n,{plans,depth:async()=>{depthCalls++;return {url:'depth'};},matchFetch:async()=>({ok:true,json:async()=>({text})})});
+        await assert.rejects(()=>prepare(plans[0]),/场景匹配/);
+    }
+    assert.equal(depthCalls,0);
+});
+test('已匹配镜头重试固定原场景，不重复选景或混入未选候选',async()=>{
+    const {api}=harness(),requests=[],n=node({storyboardMode:'batch'});
+    const plan=api.plans(n,[ref('scene','room'),ref('scene','garden'),ref('sketch','s1')])[0];
+    const first=await api.createPreparer(n,{matchFetch:sceneFetch(requests,(_shot,scenes)=>scenes[1].scene_id)})(plan);
+    const retried=await api.createPreparer(n,{matchFetch:()=>{throw Error('不应重新匹配');}})({...plan,sceneMatch:first.sceneMatch});
+    assert.deepEqual(plain(retried.refs.filter(ref=>ref.inputRole==='scene').map(ref=>ref.url)),['garden']);
+    assert.equal(requests.length,1);
 });

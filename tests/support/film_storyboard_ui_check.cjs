@@ -13,7 +13,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
     try {
         for(const smart of [false,true]){
             const page=await browser.newPage({viewport:{width:1440,height:1100}});
-            const errors=[],requests=[],tasks=new Map(); let depths=0,failSecond=true,failGeneration=false,holdResults=false,seed=true;
+            const errors=[],requests=[],tasks=new Map(),sceneRequests=[]; let depths=0,failSecond=true,failGeneration=false,holdResults=false,seed=true,badMatches=false,matchingPending=0;
             page.on('pageerror',error=>errors.push(error.message));
             if(process.env.STORYBOARD_CANDIDATE_DIR) await page.route('**/static/**',route=>{
                 const relative=decodeURIComponent(new URL(route.request().url()).pathname).replace(/^\//,'');
@@ -24,6 +24,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
             });
             await page.route('**/api/canvas-image-tasks**',async route=>{
                 if(route.request().method()==='POST'){
+                    assert.equal(matchingPending,0,'生成必须等待场景匹配完成');
                     const body=route.request().postDataJSON(); requests.push(body);
                     const shot=(body.reference_images.find(ref=>ref.input_role==='reference') || body.reference_images.find(ref=>['sketch','depth'].includes(ref.input_role)))?.url || '';
                     if(failSecond && shot.includes('shot=2')) return route.fulfill({status:503,json:{detail:'fixture 镜头2提交失败'}});
@@ -36,6 +37,14 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 if(failGeneration && task.shot.includes('shot=2')) return route.fulfill({json:{status:'failed',error:'fixture 服务端生成失败'}});
                 await new Promise(resolve=>setTimeout(resolve,task.shot.includes('shot=1') ? 350 : 20));
                 return route.fulfill({json:{status:'succeeded',result:{images:[{url:`/fixture.png?result=${id}`,kind:'image'}]}}});
+            });
+            await page.route('**/api/canvas-llm',async route=>{
+                const body=route.request().postDataJSON();sceneRequests.push(body);
+                const manifest=JSON.parse(body.message.match(/SCENE_MATCH_INPUT\n([^\n]+)/)[1]);
+                matchingPending++;
+                await new Promise(resolve=>setTimeout(resolve,40));
+                matchingPending--;
+                return route.fulfill({json:{text:JSON.stringify({matches:manifest.shots.map((shot,index)=>({shot_id:shot.shot_id,scene_id:badMatches ? 'S999' : manifest.scenes[index%manifest.scenes.length].scene_id,location:`${index ? '花园拱门' : '室内门窗'}旁的人物落点`,framing:'保留线稿对应的机位与背景柱体遮挡',lighting:'迁移原始参考图的暖色侧光、冷阴影与曝光',reason:'门窗轮廓、纵深与人物位置对应'}))})}});
             });
             await page.route('**/api/person-depth/estimate',route=>{ depths++; return route.fulfill({contentType:'image/png',headers:{'X-Person-Depth-Width':'1024','X-Person-Depth-Height':'1024'},body:png}); });
             await page.route('**/api/ai/upload',route=>route.fulfill({json:{files:[{url:`/fixture.png?depth=${depths}`,name:'depth.png',kind:'image',natural_w:1024,natural_h:1024}]}}));
@@ -136,7 +145,50 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
             await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
             assert.equal(depths,depthBefore,'已有深度不再次提取'); assert.equal(requests.length,requestBefore+2,'单图数量保留');
             assert.ok(requests.slice(requestBefore).every(r=>r.reference_images.some(ref=>ref.role==='control_map')));
+            const beforeSceneSingle=requests.length;
+            await page.evaluate(smart=>{
+                const img=(id)=>smart ? {id,type:'smart-image',x:1400,y:0,images:[{url:`/fixture.png?scene=${id}`,name:id,kind:'image',natural_w:1024,natural_h:1024}]} : {id,type:'image',x:1400,y:0,url:`/fixture.png?scene=${id}`,name:id,width:1024,height:1024};
+                nodes.push(img('room'),img('garden'),{id:'backgrounds',type:smart ? 'smart-group' : 'group',x:1700,y:0,w:300,h:200,items:['room','garden']});
+                const edges=smart ? canvas.connections : connections;
+                edges.push({id:'background',from:'backgrounds',to:'film',inputRole:'scene'},{id:'color',from:'s1',to:'film',inputRole:'reference'});
+                render();
+            },smart);
+            await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
+            assert.equal(sceneRequests.length,1,'单图的多个输出共用一次 AI 场景匹配');
+            assert.equal(requests.length,beforeSceneSingle+2);
+            for(const request of requests.slice(beforeSceneSingle)){
+                assert.equal(request.reference_images.filter(ref=>ref.input_role==='scene').length,1);
+                assert.ok(request.reference_images.find(ref=>ref.input_role==='scene').url.includes('scene=room'));
+                assert.match(request.prompt,/用户场景图是唯一的背景身份/);
+                assert.match(request.prompt,/室内门窗旁的人物落点/);
+                assert.match(request.prompt,/不能换回原始参考照片的背景/);
+            }
             await panel.locator('[data-film-mode="batch"]').click();
+            await page.evaluate(smart=>{
+                const edges=smart ? canvas.connections : connections;
+                for(let i=edges.length-1;i>=0;i--) if(edges[i].to==='film' && ['depth','reference'].includes(edges[i].inputRole)) edges.splice(i,1);
+                edges.push({id:'scene-shots',from:'shots',to:'film',inputRole:'reference'});render();
+            },smart);
+            const beforeSceneBatch=requests.length;
+            await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
+            assert.equal(sceneRequests.length,2,'批量一次快速分析两个镜头和两个背景');
+            assert.equal(requests.length,beforeSceneBatch+2);
+            assert.deepEqual(requests.slice(beforeSceneBatch).map(request=>request.reference_images.find(ref=>ref.input_role==='scene').url),['/fixture.png?scene=room','/fixture.png?scene=garden']);
+            assert.match(await panel.locator('.film-scene-matches summary').textContent(),/2 个任务组/);
+            await panel.locator('.film-scene-matches summary').click();
+            assert.equal(await panel.locator('.film-scene-matches').evaluate(el=>el.open),true);
+            assert.match(await panel.locator('.film-scene-matches').textContent(),/garden → 镜头 2/);
+            await panel.screenshot({path:`${artifacts}/${smart ? 'smart' : 'classic'}-scene-match.png`});
+            badMatches=true; const beforeBad=requests.length;
+            await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
+            assert.equal(requests.length,beforeBad,'错误的场景编号不能派发图片任务');
+            badMatches=false;
+            // 恢复之前的单深度输入，复查新匹配阶段不会改变既有后台图片任务恢复。
+            await page.evaluate(smart=>{
+                const edges=smart ? canvas.connections : connections;
+                for(let i=edges.length-1;i>=0;i--) if(edges[i].to==='film' && ['scene','reference'].includes(edges[i].inputRole)) edges.splice(i,1);
+                edges.push({id:'resume-depth',from:'s3',to:'film',inputRole:'depth'});render();
+            },smart);
             holdResults=true; const beforeResume=requests.length;
             await page.evaluate(smart=>{ if(smart) void runSmartFilmNode(nodes.find(n=>n.id==='film')); else void runFilmNode('film'); },smart);
             await page.waitForFunction(smart=>{
@@ -157,7 +209,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
             },{smart,url:recoveredUrl});
             assert.equal(requests.length,beforeResume+1,'刷新恢复只查询已提交任务，不重复生成');
             assert.deepEqual(errors,[]);
-            reports.push({smart,requests:requests.length,depths,result,layout,errors});
+            reports.push({smart,requests:requests.length,sceneRequests:sceneRequests.length,depths,result,layout,errors});
             await page.close();
         }
         fs.writeFileSync(`${artifacts}/report.json`,JSON.stringify(reports,null,2));

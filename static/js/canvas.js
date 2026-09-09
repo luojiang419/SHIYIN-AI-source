@@ -11265,6 +11265,8 @@ async function runFilmStoryboardNode(node, opts={}){
     const snapshot={...node,prompt:[node.prompt,connectedCanvasPromptTextForSubmission(node)].filter(Boolean).join('\n')};
     snapshot.apiProvider=resolveImageProviderId(node.apiProvider || defaultImageGenerationSelection().providerId);
     snapshot.model=resolveImageModel(node.model || providerImageModels(snapshot.apiProvider)[0]);
+    snapshot.visionProvider=resolveVideoVisionProviderId(node.visionProvider || '');
+    snapshot.visionModel=resolveChatModel(node.visionModel || '',snapshot.visionProvider);
     let plans;
     try {
         if(!snapshot.apiProvider || !snapshot.model) throw new Error('请先配置图片生成模型');
@@ -11282,9 +11284,12 @@ async function runFilmStoryboardNode(node, opts={}){
     });
     out._pending=[...(out._pending || []),...plans.map(plan=>plan.pending)];
     node.running=true; node.runStatus='running'; node.runError='';
+    node.storyboardSceneMatches=[];
     node.storyboardProgress=`准备 ${plans.length} 个镜头…`;
     refreshRunNodes(node,out); scheduleSave();
     const prepare=api.createPreparer(snapshot,{
+        plans,
+        onSceneMatches:matches=>{ node.storyboardSceneMatches=matches.filter(item=>item.sceneMatch).map(item=>({index:item.index,...item.sceneMatch})); refreshRunNodes(node,out); scheduleSave(); },
         depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{resolveUrl:url=>canvasDisplayMediaUrl(url),onProgress}),
         onProgress:(plan,message)=>{ node.storyboardProgress=`镜头 ${plan.index+1}/${plans.length}：${message}`; refreshRunNodes(node,out); },
     });
@@ -11299,6 +11304,8 @@ async function runFilmStoryboardNode(node, opts={}){
             plan.pending.run=runSnapshot(snapshot,built.prompt,built.refs);
             plan.pending.run.taskLabel=`分镜 ${plan.index+1}/${plans.length}`;
             plan.pending.refs=built.refs;
+            plan.pending.sceneMatch=built.sceneMatch;
+            plan.pending.run.sceneMatch=built.sceneMatch;
             const payload={prompt:built.prompt,provider_id:snapshot.apiProvider,model:snapshot.model,size:requestSize,quality:normalizedImageQuality(snapshot.quality)||'high',reference_images:built.refs,auto_optimize_prompt:false,prompt_context:{node_type:'film-storyboard',reference_count:built.refs.length}};
             const task=await createCanvasImageTask(payload,{cascadeTargetId});
             if(!task?.task_id) throw new Error('分镜任务未返回任务 ID');

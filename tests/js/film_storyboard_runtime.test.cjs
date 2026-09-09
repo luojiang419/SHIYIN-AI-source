@@ -84,6 +84,24 @@ test('已有控制图跳过深度推理，相同参考单次点击仅处理一�
     await Promise.all(api.plans(n,[ref('reference','r')]).map(prepare));
     assert.equal(calls,1);
 });
+test('深度队列按唯一参考图上报真实进度，并把结果映射回对应标签',async()=>{
+    const {film,api}=harness(),n=node({storyboardMode:'batch'}),events=[];
+    const plans=api.plans(n,[ref('reference','photo-1'),ref('reference','photo-2')]);
+    const prepare=api.createPreparer(n,{plans,onDepthState:event=>{ events.push(plain(event));api.applyDepthState(n,event); },depth:async(source,onProgress)=>{
+        onProgress('模型推理中');
+        return {url:`${source.url}-depth`,name:`${source.name}-depth.png`};
+    }});
+    await Promise.all(plans.map(prepare));
+    const running=events.filter(event=>event.status==='running' && event.message==='正在提取参考图深度');
+    const ready=events.filter(event=>event.status==='ready');
+    assert.deepEqual(plain(running.map(event=>[event.index,event.completed,event.total])),[[1,0,2],[2,1,2]]);
+    assert.deepEqual(plain(ready.map(event=>[event.index,event.completed,event.total])),[[1,1,2],[2,2,2]]);
+    assert.deepEqual(plain(n.storyboardDepthPreviews.map(item=>[item.sourceUrl,item.status,item.url])),[['photo-1','ready','photo-1-depth'],['photo-2','ready','photo-2-depth']]);
+    assert.equal(n.storyboardProgress,'参考图深度已全部提取 2/2');
+    const html=film.bodyHtml(n,{assets:()=>[ref('reference','photo-1'),ref('reference','photo-2')]});
+    assert.match(html,/photo-1-depth/);assert.match(html,/photo-2-depth/);
+    assert.equal((html.match(/film-depth-preview is-ready/g) || []).length,2);
+});
 test('深度失败隔离，后续镜头仍可完成；不截断超限共享资产',async()=>{
     const {api}=harness(),n=node({storyboardMode:'batch'});
     const prepare=api.createPreparer(n,{depth:async r=>{if(r.url==='bad') throw Error('坏图'); return {url:'depth'};}});

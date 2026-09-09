@@ -46,7 +46,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 matchingPending--;
                 return route.fulfill({json:{text:JSON.stringify({matches:manifest.shots.map((shot,index)=>({shot_id:shot.shot_id,scene_id:badMatches ? 'S999' : manifest.scenes[index%manifest.scenes.length].scene_id,location:`${index ? '花园拱门' : '室内门窗'}旁的人物落点`,framing:'保留线稿对应的机位与背景柱体遮挡',lighting:'迁移原始参考图的暖色侧光、冷阴影与曝光',reason:'门窗轮廓、纵深与人物位置对应'}))})}});
             });
-            await page.route('**/api/person-depth/estimate',route=>{ depths++; return route.fulfill({contentType:'image/png',headers:{'X-Person-Depth-Width':'1024','X-Person-Depth-Height':'1024'},body:png}); });
+            await page.route('**/api/person-depth/estimate',async route=>{ depths++; await new Promise(resolve=>setTimeout(resolve,250)); return route.fulfill({contentType:'image/png',headers:{'X-Person-Depth-Width':'1024','X-Person-Depth-Height':'1024'},body:png}); });
             await page.route('**/api/ai/upload',route=>route.fulfill({json:{files:[{url:`/fixture.png?depth=${depths}`,name:'depth.png',kind:'image',natural_w:1024,natural_h:1024}]}}));
             const id=`storyboard-${smart ? 'smart' : 'classic'}-${Date.now()}`;
             if(smart){
@@ -119,7 +119,11 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 edges.push({id:'photos',from:'shots',to:'film',inputRole:'reference'});
                 render();
             },smart);
-            await page.evaluate(smart=>smart ? runSmartFilmNode(nodes.find(n=>n.id==='film')) : runFilmNode('film'),smart);
+            await page.evaluate(smart=>{ if(smart) void runSmartFilmNode(nodes.find(n=>n.id==='film')); else void runFilmNode('film'); },smart);
+            await page.waitForFunction(()=>nodes.find(n=>n.id==='film')?.storyboardDepthPreviews?.some(item=>item.status==='running'));
+            assert.match(await panel.locator('.film-storyboard-summary').textContent(),/正在提取参考图深度 1\/2 · 已完成 0\/2/);
+            await panel.screenshot({path:`${artifacts}/${smart ? 'smart' : 'classic'}-depth-progress.png`});
+            await page.waitForFunction(()=>nodes.find(n=>n.id==='film')?.running===false);
             assert.equal(depths,2); assert.equal(requests.length-before,2);
             for(const request of requests.slice(before)){
                 assert.equal(request.reference_images.length,4);
@@ -127,6 +131,9 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
                 assert.match(request.prompt,/背景必须依据这些证据从零重新生成/);
                 assert.match(request.prompt,/禁止以原图为底板扩图/);
             }
+            assert.equal(await panel.locator('.film-depth-preview.is-ready').count(),2);
+            assert.ok((await panel.locator('.film-depth-preview.is-ready img').all()).length===2);
+            await panel.screenshot({path:`${artifacts}/${smart ? 'smart' : 'classic'}-depth-ready.png`});
             const failedGeneration=await page.evaluate(smart=>{
                 const film=nodes.find(n=>n.id==='film');
                 const out=smart ? nodes.find(n=>n.id===film.filmOutputNodeId) : nodes.find(n=>n.type==='output');

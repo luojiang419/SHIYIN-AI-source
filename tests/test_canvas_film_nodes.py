@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FILM = (ROOT / "static" / "js" / "canvas-film-nodes.js").read_text(encoding="utf-8")
+STORYBOARD = (ROOT / "static" / "js" / "canvas-film-storyboard.js").read_text(encoding="utf-8")
 CLASSIC = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
 SMART = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 CLASSIC_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
@@ -71,6 +72,16 @@ def test_film_storyboard_ports_match_video_actor_groups_and_keep_scene_sketch_la
     assert "...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat()" in FILM
     assert "{role:'scene',label:'场景'" in FILM
     assert "{role:'sketch',label:'线稿分镜'" in FILM
+
+
+def test_film_storyboard_depth_preview_and_real_progress_are_shared_by_both_canvases():
+    assert "function depthPreviewHtml(node,ref)" in FILM
+    assert "film-depth-preview is-ready" in FILM
+    assert "function depthReferences(plans=[])" in STORYBOARD
+    assert "function applyDepthState(node,event)" in STORYBOARD
+    assert "正在提取参考图深度 ${position} · ${done}" in STORYBOARD
+    assert "onDepthState:event=>{ api.applyDepthState(node,event)" in CLASSIC
+    assert "onDepthState:event=>{ window.CanvasFilmStoryboard.applyDepthState(node,event)" in SMART
 
 
 def test_film_product_detail_mapping_is_preserved_for_realistic_storyboards():

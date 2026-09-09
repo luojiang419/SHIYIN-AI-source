@@ -11332,6 +11332,7 @@ async function runFilmStoryboardNode(node, opts={}){
         plans,
         onSceneMatches:matches=>{ node.storyboardSceneMatches=matches.filter(item=>item.sceneMatch).map(item=>({index:item.index,...item.sceneMatch})); refreshRunNodes(node,out); scheduleSave(); },
         depth:(ref,onProgress)=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{resolveUrl:url=>canvasDisplayMediaUrl(url),onProgress}),
+        onDepthState:event=>{ api.applyDepthState(node,event); refreshRunNodes(node,out); scheduleSave(); },
         onProgress:(plan,message)=>{ node.storyboardProgress=`镜头 ${plan.index+1}/${plans.length}：${message}`; refreshRunNodes(node,out); },
     });
     let completed=0;

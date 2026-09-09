@@ -63,12 +63,70 @@
             return (node.storyboardMode==='batch' ? `已识别 ${items.length} 个镜头 · 每镜 1 张 · 共用演员与服化道` : `单图合成 · 生成 ${items.length} 张`)+(scenes ? ` · AI 匹配 ${scenes} 张场景图` : '');
         } catch(error){ return error.message; }
     }
+    function depthReferences(plans=[]){
+        const seen=new Set(),refs=[];
+        plans.forEach(plan=>{
+            if(plan.assets.some(ref=>['sketch','depth'].includes(ref.role))) return;
+            plan.assets.filter(ref=>ref.role==='reference' && ref.url).forEach(ref=>{
+                if(seen.has(ref.url)) return;
+                seen.add(ref.url);refs.push({...ref});
+            });
+        });
+        return refs;
+    }
+    function applyDepthState(node,event){
+        if(!node || !event) return;
+        if(event.status==='queue'){
+            node.storyboardDepthPreviews=(event.references || []).map(ref=>({sourceUrl:ref.url,sourceName:ref.name || '',status:'queued'}));
+            return;
+        }
+        const sourceUrl=event.reference?.url;
+        if(!sourceUrl) return;
+        const previews=Array.isArray(node.storyboardDepthPreviews) ? node.storyboardDepthPreviews.map(item=>({...item})) : [];
+        const index=previews.findIndex(item=>item.sourceUrl===sourceUrl);
+        const previous=index>=0 ? previews[index] : {sourceUrl,sourceName:event.reference?.name || ''};
+        const next={...previous,status:event.status};
+        if(event.depth?.url){
+            next.url=event.depth.url;
+            next.name=event.depth.name || 'depth.png';
+            next.natural_w=event.depth.natural_w || event.depth.width || 0;
+            next.natural_h=event.depth.natural_h || event.depth.height || 0;
+        }
+        if(event.message) next.message=event.message; else delete next.message;
+        if(event.error) next.error=event.error; else delete next.error;
+        if(index>=0) previews[index]=next; else previews.push(next);
+        node.storyboardDepthPreviews=previews;
+        const position=`${event.index}/${event.total}`;
+        const done=`已完成 ${event.completed}/${event.total}`;
+        if(event.status==='running'){
+            const detail=event.message && event.message!=='正在提取参考图深度' ? ` · ${event.message}` : '';
+            node.storyboardProgress=`正在提取参考图深度 ${position} · ${done}${detail}`;
+        } else if(event.status==='ready'){
+            node.storyboardProgress=event.completed===event.total ? `参考图深度已全部提取 ${event.completed}/${event.total}` : `参考图深度提取进度 ${event.completed}/${event.total}`;
+        } else if(event.status==='error'){
+            node.storyboardProgress=`参考图深度提取失败 ${position} · ${done}`;
+        }
+    }
     function createPreparer(node, options={}){
         // 每次点击独立快照与缓存，输入或全局参数变化不会复用上一批控制图。
         const snapshot={...node};
         const cache=new Map();
         let depthQueue=Promise.resolve();
         let sceneMatching=null;
+        const queuedDepthRefs=depthReferences(options.plans || []);
+        const depthStates=new Map(queuedDepthRefs.map(ref=>[ref.url,'queued']));
+        options.onDepthState?.({status:'queue',references:queuedDepthRefs,total:queuedDepthRefs.length,completed:0,processed:0});
+        const emitDepthState=(ref,status,details={},plan=null)=>{
+            depthStates.set(ref.url,status);
+            const event={
+                status,reference:ref,index:queuedDepthRefs.findIndex(item=>item.url===ref.url)+1,total:queuedDepthRefs.length,
+                completed:[...depthStates.values()].filter(value=>value==='ready').length,
+                processed:[...depthStates.values()].filter(value=>value==='ready' || value==='error').length,
+                ...details,
+            };
+            if(options.onDepthState) options.onDepthState(event);
+            else if(status==='running') options.onProgress?.(plan,details.message || '正在提取参考图深度');
+        };
         return async plan=>{
             let matched=plan;
             if(plan.assets.some(ref=>ref.role==='scene')){
@@ -89,9 +147,16 @@
             if(!explicitControl){
                 const depths=await Promise.all(assets.filter(ref=>ref.role==='reference').map(async ref=>{
                     if(!cache.has(ref.url)){
-                        const work=depthQueue.then(()=>{
-                            options.onProgress?.(plan,'正在提取参考图深度');
-                            return options.depth(ref, message=>options.onProgress?.(plan,message));
+                        const work=depthQueue.then(async()=>{
+                            emitDepthState(ref,'running',{message:'正在提取参考图深度'},plan);
+                            try {
+                                const depth=await options.depth(ref,message=>emitDepthState(ref,'running',{message},plan));
+                                emitDepthState(ref,'ready',{depth},plan);
+                                return depth;
+                            } catch(error){
+                                emitDepthState(ref,'error',{error:error?.message || String(error)},plan);
+                                throw error;
+                            }
                         });
                         cache.set(ref.url,work);
                         depthQueue=work.catch(()=>{});
@@ -129,5 +194,5 @@
             });
         });
     }
-    window.CanvasFilmStoryboard={plans,summary,createPreparer,alignPorts};
+    window.CanvasFilmStoryboard={plans,summary,depthReferences,applyDepthState,createPreparer,alignPorts};
 })();

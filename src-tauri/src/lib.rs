@@ -965,8 +965,13 @@ mod tests {
         let url = "blob:http://127.0.0.1:3000/example"
             .parse()
             .expect("valid URL");
+        let destination = if cfg!(target_os = "windows") {
+            Path::new("C:\\Downloads\\local-work.webp")
+        } else {
+            Path::new("/Users/test/Downloads/local-work.webp")
+        };
         assert_eq!(
-            suggested_download_name(&url, Path::new("C:\\Downloads\\local-work.webp")),
+            suggested_download_name(&url, destination),
             "local-work.webp"
         );
     }

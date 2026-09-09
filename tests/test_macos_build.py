@@ -27,6 +27,9 @@ def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
     assert "macos-15-intel" in workflow and "macos-15" in workflow
     assert "Apple-Silicon" in workflow and "Intel" in workflow
     assert "actions/upload-artifact@v4" in workflow
+    assert "actions/checkout@v5" in workflow
+    assert "actions/setup-python@v6" in workflow
+    assert "actions/setup-node@v5" in workflow
     assert "secrets." not in workflow
     assert "workflow_dispatch:" in workflow
     assert "feat/fashion-director-full-integration" in workflow

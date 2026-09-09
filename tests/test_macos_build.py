@@ -24,7 +24,7 @@ def test_macos_build_packages_same_web_skills_and_backend():
     smoke = (ROOT / "tools/smoke-macos-bundle.py").read_text(encoding="utf-8")
     assert "HTTPCookieProcessor" in smoke
     assert "/api/auth/bootstrap" in smoke
-    assert 'cookie.name == "canvas_session"' in smoke
+    assert 'cookie.name == "canvas_account_session"' in smoke
 
 
 def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
@@ -35,7 +35,7 @@ def test_macos_workflow_is_public_artifact_only_and_dual_architecture():
     assert "actions/checkout@v5" in workflow
     assert "actions/setup-python@v6" in workflow
     assert "actions/setup-node@v5" in workflow
-    assert "actions/cache@v4" in workflow
+    assert "actions/cache@v6" in workflow
     assert "secrets." not in workflow
     assert "workflow_dispatch:" in workflow
     assert "feat/fashion-director-full-integration" in workflow

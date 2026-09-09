@@ -77,7 +77,7 @@ def main() -> None:
             opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
             with opener.open(f"http://127.0.0.1:{port}/api/auth/bootstrap", timeout=3) as response:
                 response.read()
-            if not any(cookie.name == "canvas_session" for cookie in cookie_jar):
+            if not any(cookie.name == "canvas_account_session" for cookie in cookie_jar):
                 raise SystemExit("Desktop bootstrap did not create an authenticated session cookie")
             version = request_json(f"http://127.0.0.1:{port}/api/version", opener=opener)
             expected = (app_root / "VERSION").read_text(encoding="utf-8").strip()

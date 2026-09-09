@@ -1,25 +1,22 @@
 # macOS 云端编译与 Windows 功能对齐
 
 状态：开发中
-当前阶段：3/5，本地实现与静态验证完成
-最后更新：2026-09-10 00:05
+当前阶段：5/5，双架构云端产物已验收，待文档 Git 交付
+最后更新：2026-09-10 02:12
 
 ## 当前状态
 
-源码仓库 `luojiang419/SHIYIN-AI-source` 已经是 Public，GitHub Actions 已启用，无需再次修改可见性。当前 CI 只在 `windows-latest` 构建并发布 Windows EXE；macOS 只有依赖系统 Python 的脚本运行方式，不是与 Windows 对等的原生桌面安装包。
+源码仓库 `luojiang419/SHIYIN-AI-source` 已经是 Public，GitHub Actions 已启用，无需再次修改可见性。已完成 macOS Apple Silicon 与 Intel 原生 `.app.zip` / `.dmg` 云端构建，用户无需安装 Python、Node 或 npm。
 
 已完成首轮跨平台实现：Rust updater 按平台隔离；桌面宿主可定位 `.app/Contents/Resources`、无扩展名 sidecar 和 Application Support 数据目录；macOS 使用 Keychain + Fernet 保护数据库密钥；Kling 自包含 Node 覆盖 darwin arm64/x64；新增同源 staging、ad-hoc 签名、bundle smoke、DMG/ZIP/哈希/manifest 脚本及双架构 Actions workflow。
 
-Windows 本地 Python 41 项与 Rust 11 项回归已通过，JSON/YAML/Bash 语法正常。下一步需要推送并用真实 macOS runner 验证编译与运行。
+最终 Actions Run `34385781656` 在 commit `a29feca` 上全绿：Apple Silicon 6m07s、Intel 7m44s。两架构均通过 Python/Rust contracts、PyInstaller、Kling 双区空 PATH、Tauri bundle、ad-hoc codesign、sidecar smoke、LaunchServices 完整 `.app` 启动、bootstrap/session、Resources 与 Application Support 路径、父子进程退出、DMG/ZIP 和 artifact 上传。
 
-Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专业深度/结果对比/H3/作品相关 153 项通过，视频提示词 105 项通过，8 个 JavaScript 文件语法通过。将提交这些产品源码作为下一轮 Mac 云端构建的同源快照；研究工具、设计源图删除、本地输出和历史档案不纳入。
+Windows 1.0.431 安装包中的产品改动已形成公开源码快照：专业深度/结果对比/H3/作品相关 153 项通过，视频提示词 105 项通过，8 个 JavaScript 文件语法通过。Mac 与 Windows 使用同一套 Web、skills 和 Python backend；研究工具、设计源图删除、本地输出和历史档案未纳入。
 
 ## 下一步
 
-1. 隔离提交并推送 macOS 跨平台实现。
-2. 触发 `build-macos.yml`，跟踪 Apple Silicon / Intel runner 的真实日志并修复。
-3. 下载 Actions artifacts，复核 DMG/ZIP/manifest/SHA-256。
-4. 整理并验证需要进入云端构建的当前功能源码，确保与 Windows 1.0.431 实际内容对齐。
+当前任务已完成。交付 `dist/macos-cloud-1.0.431-final/` 内 Apple Silicon 与 Intel 的 DMG、APP ZIP、SHA-256 和 manifest；云端记录为 Actions Run `34385781656`。
 
 ## 当前 TODO
 
@@ -29,8 +26,8 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - [x] 完成 Python backend 与密钥存储 macOS 适配
 - [x] 完成 macOS `.app/.dmg` 构建及本地静态测试
 - [x] 增加 GitHub Actions 双架构 workflow
-- [ ] 验证 GitHub Actions 云端构建
-- [ ] 上传并核验 Intel / Apple Silicon 产物
+- [x] 验证 GitHub Actions 云端构建
+- [x] 上传并核验 Intel / Apple Silicon 产物
 - [x] 整理并验证 Windows 1.0.431 当前产品源码快照
 - [ ] 更新任务文档、提交并推送
 
@@ -43,8 +40,14 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - Windows Rust：`cargo test --locked`，11 passed
 - 静态检查：macOS JSON/YAML/Bash/Python 编译检查通过
 - 同源产品回归：深度/结果对比/H3/作品 153 passed；视频提示词 105 passed；JavaScript 8 文件通过
-- macOS 编译：等待 GitHub Actions runner
-- 最近 Git commit：`b5a7616 docs: 记录1.0.431安装包验证`
+- macOS 云端：Run `34385781656` success；Apple Silicon 6m07s，Intel 7m44s
+- 完整 APP smoke：两架构 `desktop=ok`、`health=ok`、版本 `1.0.431`，Resources/Application Support 路径和父子进程退出通过
+- Apple Silicon DMG：172,753,113 bytes，SHA-256 `318c3f373798473eebb3eaf12f2bf546f694cf626949190c4be3d11403c6d7f3`
+- Apple Silicon APP ZIP：155,996,849 bytes，SHA-256 `6b9edda34f050a8cbad0d7b94fc74e8e4b9b6286fb2e5658b5f5bfbca3b9d332`
+- Intel DMG：167,046,958 bytes，SHA-256 `fad93ace136f769787d5bed798f02c81a7c74fe9ffe4fddb6a572f6271c85637`
+- Intel APP ZIP：149,766,674 bytes，SHA-256 `20985571a969ebc2dcc230608b32dbcac00097ebc8f124c36ccda1ca28f05ed6`
+- 本地复核：4 个文件与 manifest 和同名 `.sha256` 双重一致
+- 当前 Git commit：`a29feca test: launch macos bundle through launchservices`
 
 ---
 
@@ -91,8 +94,8 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - [x] 阶段 1：仓库、凭据与跨平台差异审计
 - [x] 阶段 2：运行时代码跨平台适配
 - [x] 阶段 3：macOS 打包脚本与本地静态验证
-- [ ] 阶段 4：GitHub Actions 云端构建与修复
-- [ ] 阶段 5：真实产物核验与最终交付
+- [x] 阶段 4：GitHub Actions 云端构建与修复
+- [x] 阶段 5：真实产物核验与最终交付
 
 ## 验收标准
 
@@ -113,12 +116,16 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 完成 macOS Keychain 密钥保护和 Kling 双架构内置 Node。
 - 完成 macOS app/DMG 构建、冻结后端 smoke 和双架构 Actions workflow。
 - 完成 Windows 1.0.431 当前产品源码筛选与集中回归，排除研究输出、设计源图删除和本地档案。
+- 完成多轮真实 Actions 诊断与修复，最终双架构 workflow 全绿。
+- 下载最终云端 artifacts，并独立复核四个成品的版本、架构、大小和 SHA-256。
 
 ## 当前关键修改
 
 - 新建本任务文档，建立五阶段交付状态。
 - 新增 `updater_macos.rs`、`tauri.macos.conf.json`、`build-macos.sh`、`smoke-macos-bundle.py` 和 `build-macos.yml`。
 - 修改桌面宿主、密钥存储和 Kling runtime，使 Windows 与 macOS 使用同一业务后端和静态资源。
+- 提交 Windows 1.0.431 当前产品功能源码快照，Mac 构建不再落后于本机安装包。
+- 扩展 bundle smoke，真实通过 LaunchServices 启动完整 `.app` 并验证生命周期。
 
 ## 已知问题
 
@@ -132,13 +139,13 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 当前 Windows 版自动更新只识别 EXE，Mac 更新安装需要独立机制。
 - macOS 云端产物没有 Apple Developer ID 时只能 ad-hoc/未公证，首次打开会受 Gatekeeper 提示影响。
 - Topaz、DWPose GPU、本地 FFmpeg/Kling CLI 等能力需要逐项确认 macOS 依赖，不应以“能编译”冒充完全可用。
-- 当前工作区存在其他任务改动，提交与云端构建快照必须精确筛选。
+- 当前工作区仍保留与本任务无关的设计源图删除、研究分析工具和历史未跟踪文档，本任务未提交这些内容。
 
 ## 后续优化
 
 - 配置 Apple Developer ID、notarization 和 stapling。
 - 为 macOS 增加独立更新资产选择与签名校验。
-- 将 Kling 独立 Node runtime 扩展到 darwin-arm64 / darwin-x64。
+- 将 macOS 产物接入正式 Release 分发并增加长期保留策略。
 
 ## 开发日志
 
@@ -152,6 +159,8 @@ Windows 1.0.431 安装包中的未提交产品改动已完成集中回归：专�
 - 2026-09-10：根据第四轮 Apple 原始日志，将 smoke 修正为真实 desktop bootstrap + session cookie 鉴权；取消含旧 smoke 的排队 run。
 - 2026-09-10：同源 run 已完成到 bootstrap；修正 smoke 的真实 cookie 名，并升级 actions/cache v6 后重新构建。
 - 2026-09-10：同源 run 已验证 bootstrap cookie，修正 smoke 中不存在的 `/api/version` 为真实 `/api/runtime/info`。
+- 2026-09-10：Run `34379293088` 双架构首次全绿，下载并校验第一组 DMG/ZIP；继续补充完整 `.app` 主程序启动验收。
+- 2026-09-10：Run `34385781656` 双架构增强验收全绿；LaunchServices、完整桌面、路径和生命周期通过，最终 artifacts 已下载并校验。
 
 ## 接力信息
 

@@ -10,6 +10,33 @@ function harness(){
 const node=(extra={})=>({type:'film-storyboard',apiProvider:'custom',model:'image-model',...extra});
 const ref=(role,url)=>({role,ref:{url,name:url,kind:'image'}});
 const plain=value=>JSON.parse(JSON.stringify(value));
+
+test('质感规则按实际控制图分支，并保留多演员映射与用户换装范围',async()=>{
+    for(const mode of ['single','batch']){
+        for(const control of ['sketch','depth','reference']){
+            const {api}=harness(),n=node({actorCount:2,storyboardMode:mode,prompt:'只换上装，保留眼镜'});
+            const plan=api.plans(n,[ref('actor-0','A'),ref('outfit-0','shirt-A'),ref('actor-1','B'),ref('outfit-1','shirt-B'),ref(control,'shot')])[0];
+            const built=await api.createPreparer(n,{depth:async()=>({url:'generated-depth'})})(plan);
+            assert.deepEqual(plain(built.refs.filter(r=>/^(actor|outfit)-/.test(r.inputRole)).map(r=>[r.inputRole,r.url])),[['actor-0','A'],['outfit-0','shirt-A'],['actor-1','B'],['outfit-1','shirt-B']]);
+            for(const text of ['只换上装，保留眼镜','不混脸、不串衣','自然皮肤纹理','服装提取与换装边界','折峰折谷','全主体重打光','不锁死源图 RGB']) assert.ok(built.prompt.includes(text),text);
+            assert.equal(built.prompt.includes('【有依据的衣片褶皱复刻】'),control!=='sketch');
+            assert.equal(built.prompt.includes('当前没有深度图'),control==='sketch');
+            assert.ok(!built.prompt.includes('唯一编辑底图'));
+            assert.ok(!built.prompt.includes('只有一个最终模特'));
+        }
+    }
+});
+
+test('无演员或服装资产时使用缺省来源，不虚构指定资产',async()=>{
+    const {api}=harness(),n=node({prompt:'自然人物近景'});
+    for(const assets of [[],[ref('sketch','s')],[ref('actor-0','actor'),ref('depth','d')]]){
+        const built=await api.createPreparer(n)(api.plans(n,assets)[0]);
+        assert.ok(built.prompt.includes('未指定服装参考时'));
+        assert.ok(!built.prompt.includes('【服装提取与换装边界】'));
+        assert.equal(built.prompt.includes('未连接演员参考时'),!assets.some(r=>r.role==='actor-0'));
+        assert.match(built.prompt,/只输出当前镜头的一张完整照片/);
+    }
+});
 test('旧画布默认单图、多演员资产与原有数量保留',()=>{
     const {film,api}=harness(), n=node({count:3,actorCount:2});
     film.normalize(n); assert.equal(n.storyboardMode,'single');

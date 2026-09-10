@@ -9235,6 +9235,32 @@ function applyImageEdit(){
 function nodeHasLiveMedia(node){
     return node?.type === 'image' && node.url && ['video','audio'].includes(mediaKindForNode(node));
 }
+// 在新节点绑定交互前迁移图片，保留解码像素、低清缓存和正在运行的媒体队列任务。
+// 匹配预览版本而非仅原始 URL，避免资源更新后显示旧图。
+function reuseCanvasNodeImages(previous, root){
+    if(!previous || !root) return;
+    const signature = img => JSON.stringify([
+        img.dataset.originalSrc || img.dataset.url || '',
+        img.dataset.previewSrc || img.getAttribute('src') || '',
+        img.dataset.previewKind || 'image'
+    ]);
+    const reusable = new Map();
+    previous.querySelectorAll('img[data-preview-src]').forEach(img => {
+        const key=signature(img);
+        if(!reusable.has(key)) reusable.set(key,[]);
+        reusable.get(key).push(img);
+    });
+    root.querySelectorAll('img[data-preview-src]').forEach(fresh => {
+        const old=reusable.get(signature(fresh))?.shift();
+        if(!old) return;
+        // 只同步呈现属性；src、队列状态与媒体驻留标记属于原元素。
+        for(const name of ['class','style','alt','title','width','height','draggable']){
+            if(fresh.hasAttribute(name)) old.setAttribute(name,fresh.getAttribute(name));
+            else old.removeAttribute(name);
+        }
+        fresh.replaceWith(old);
+    });
+}
 function captureMediaPlaybackState(media){
     if(!media) return null;
     return {
@@ -9517,7 +9543,7 @@ function render(){
     const reusableMediaNodes = new Map();
     nodesEl.querySelectorAll('.node').forEach(el => {
         const node = canvasNodeIndex.get(el.dataset.id);
-        if(nodeHasLiveMedia(node)) reusableMediaNodes.set(node.id, el);
+        if(node && ['image','output'].includes(node.type)) reusableMediaNodes.set(node.id, el);
     });
     applyViewport();
     [...nodesEl.children].forEach(child => {
@@ -11840,6 +11866,8 @@ function syncClassicMediaNodeOrientation(el, node, mediaEl=null){
     return portrait;
 }
 function renderNode(node){
+    const priorNode=canvasNodeDomIndex.get(node.id);
+    const previous=priorNode?.classList.contains(`${node.type}-node`) ? priorNode : null;
     window.CanvasLookbookNode?.normalize?.(node);
     window.CanvasEcommerceNodes?.normalize?.(node);
     window.CanvasFilmNodes?.normalize?.(node);
@@ -11937,8 +11965,13 @@ function renderNode(node){
                     : `<div class="media-card audio-card"><i data-lucide="file-audio" class="w-8 h-8"></i><div class="audio-title">${escapeHtml(node.name || 'Audio')}</div><div class="audio-sub">AUDIO</div><audio src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="metadata"></audio></div>`;
                 body.innerHTML = `<div class="image-preview-wrap">${mediaHtml}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || nodeTitleForMedia(node))}</div>`;
             }
+            reuseCanvasNodeImages(previous, body);
             const previewWrap = body.querySelector('.image-preview-wrap');
             const loadedImg = body.querySelector('img');
+            loadedImg?._canvasNodeMediaEvents?.abort();
+            const mediaEvents = new AbortController();
+            if(loadedImg) loadedImg._canvasNodeMediaEvents = mediaEvents;
+            const onImage = (type, handler, capture=false) => loadedImg.addEventListener(type, handler, {capture, signal:mediaEvents.signal});
             const videoPlayBtn = body.querySelector('.canvas-video-play');
             const syncMediaOrientation = () => syncClassicMediaNodeOrientation(el, node, loadedImg);
             const openPreview = e => {
@@ -11968,19 +12001,19 @@ function renderNode(node){
                 openImageNodeMenu(node.id, e.clientX, e.clientY);
             };
             if(loadedImg && isEditableImage){
-                loadedImg.addEventListener('mousedown', e => {
+                onImage('mousedown', e => {
                     if(e.detail >= 2) openPreview(e);
                 }, true);
-                loadedImg.addEventListener('dblclick', openPreview, true);
+                onImage('dblclick', openPreview, true);
             }
             if(loadedImg && mediaKind === 'video'){
-                loadedImg.addEventListener('mousedown', e => {
+                onImage('mousedown', e => {
                     if(e.button !== 0) return;
                     e.preventDefault();
                     e.stopPropagation();
                     e.stopImmediatePropagation();
                 }, true);
-                loadedImg.addEventListener('click', e => {
+                onImage('click', e => {
                     e.preventDefault();
                     e.stopPropagation();
                     e.stopImmediatePropagation();
@@ -12002,7 +12035,7 @@ function renderNode(node){
             }
             body.addEventListener('dblclick', openPreview, true);
             if(loadedImg){
-                loadedImg.addEventListener('load', () => {
+                onImage('load', () => {
                     syncMediaOrientation();
                     scheduleClassicNodeRectMeasure([node.id]);
                 });
@@ -12127,6 +12160,7 @@ function renderNode(node){
             renderPendingOutput(p)
         ).join('');
         body.innerHTML = renderOutputGrid(node, pendingHtml);
+        reuseCanvasNodeImages(previous, body);
         body.onwheel = e => {
             e.stopPropagation();
         };

@@ -2,13 +2,14 @@
 (function(){
     'use strict';
     const DATABASE = 'shiyin-page-state-v1';
+    const STORAGE_TIMEOUT_MS = 1500;
     const sessions = new Map();
     let account = '', epoch = 0, databasePromise, validationPromise;
     let resolveAccount;
     const accountReady = new Promise(resolve => { resolveAccount = resolve; });
     function configure(value){
-        const id = String(value?.id || value?.user_id || '');
-        if(!id) return;
+        const id = String(value?.account_id || value?.id || value?.user_id || '');
+        if(!id){ resolveAccount(''); return; }
         if(account && account !== id){ epoch++;sessions.clear(); }
         account = id;
         resolveAccount(id);
@@ -26,24 +27,35 @@
     }
     function verifyAccount(){
         if(validationPromise)return validationPromise;
-        validationPromise=fetch('/api/account/me',{cache:'no-store'}).then(response=>response.ok?response.json():null)
-            .then(data=>{if(data?.account && (data.account.id || data.account.user_id))configure(data.account);else resolveAccount('');})
-            .catch(()=>resolveAccount(''));
+        const controller=new AbortController();
+        const timeout=setTimeout(()=>{controller.abort();resolveAccount('');},6000);
+        validationPromise=fetch('/api/account/me',{cache:'no-store',signal:controller.signal}).then(response=>response.ok?response.json():null)
+            .then(data=>configure(data?.account))
+            .catch(()=>resolveAccount(''))
+            .finally(()=>clearTimeout(timeout));
         return validationPromise;
     }
     function database(){
         if(databasePromise) return databasePromise;
         databasePromise = new Promise(resolve => {
-            if(!window.indexedDB){ resolve(null); return; }
+            let settled=false;
+            const finish=value=>{
+                if(settled){value?.close();return;}
+                settled=true;clearTimeout(timeout);resolve(value);
+            };
+            const timeout=setTimeout(()=>finish(null),STORAGE_TIMEOUT_MS);
             let request;
-            try { request = indexedDB.open(DATABASE, 1); }
-            catch(error){ resolve(null); return; }
+            try {
+                if(!window.indexedDB){finish(null);return;}
+                request = indexedDB.open(DATABASE, 1);
+            }
+            catch(error){ finish(null); return; }
             request.onupgradeneeded = () => request.result.createObjectStore('pages');
             request.onsuccess = () => {
                 request.result.onversionchange = () => request.result.close();
-                resolve(request.result);
+                finish(request.result);
             };
-            request.onerror = request.onblocked = () => resolve(null);
+            request.onerror = request.onblocked = () => finish(null);
         });
         return databasePromise;
     }
@@ -52,12 +64,18 @@
         const db = await database();
         if(!db) return null;
         return new Promise(resolve => {
+            let transaction;
+            const finish=value=>{clearTimeout(timeout);resolve(value);};
+            const timeout=setTimeout(()=>{
+                finish(null);
+                try{transaction?.abort();}catch(error){}
+            },STORAGE_TIMEOUT_MS);
             try {
-                const transaction = db.transaction('pages', writing ? 'readwrite' : 'readonly');
+                transaction = db.transaction('pages', writing ? 'readwrite' : 'readonly');
                 const request = writing ? transaction.objectStore('pages').put(value, key) : transaction.objectStore('pages').get(key);
-                transaction.oncomplete = () => resolve(writing ? true : request.result || null);
-                transaction.onerror = transaction.onabort = () => resolve(null);
-            } catch(error){ resolve(null); }
+                transaction.oncomplete = () => finish(writing ? true : request.result || null);
+                transaction.onerror = transaction.onabort = () => finish(null);
+            } catch(error){ finish(null); }
         });
     }
     function session(name){

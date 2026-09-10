@@ -22,7 +22,7 @@ async function fixture(page){
     };
     await page.route('**/api/**',async route=>{
         const request=route.request(), path=new URL(request.url()).pathname;
-        if(path==='/api/account/me')return route.fulfill({json:{account:{id:account,account,is_admin:true}}});
+        if(path==='/api/account/me')return route.fulfill({json:{account:{account_id:account,account,role:'admin',is_admin:true}}});
         if(path==='/api/media-preview')return route.fulfill({contentType:'image/png',body:png});
         if(path==='/api/person-depth/estimate')return route.fulfill({contentType:'image/png',body:png});
         let response;
@@ -65,9 +65,9 @@ async function checkpoint(page,name){
                 const latest=(await session.read()).draft==='latest-19';
                 const valid=session.guard();session.mark();const staleIgnored=!valid();
                 await session.flush();
-                StudioPageState.configure({id:'account-b'});
+                StudioPageState.configure({account_id:'account-b'});
                 const separated=await StudioPageState.session('core-test').read()===null;
-                StudioPageState.configure({id:'account-a'});
+                StudioPageState.configure({account_id:'account-a'});
                 const resumed=StudioPageState.session('core-test');
                 const persisted=(await resumed.read())?.draft==='latest-19';
                 await resumed.remove();resumed.save({draft:'cannot resurrect'});
@@ -206,7 +206,7 @@ async function checkpoint(page,name){
         {
             const page=await browser.newPage(),api=await fixture(page);
             await page.goto(`${base}/static/index.html`);
-            await page.waitForFunction(()=>typeof currentStudioAccount!=='undefined' && currentStudioAccount?.id);
+            await page.waitForFunction(()=>typeof currentStudioAccount!=='undefined' && currentStudioAccount?.account_id);
             await page.evaluate(()=>pauseStudioFramePreload('test'));
             for(const id of ['ecommerce','gpt-chat','canvas','asset-manager','works','api-settings','app-settings','depth-map-tuner']){
                 await page.evaluate(id=>switchUI(null,id),id);

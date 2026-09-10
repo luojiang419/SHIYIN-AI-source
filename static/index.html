@@ -2940,36 +2940,38 @@
         async function restoreActivePage() {
             if(studioBootInFlight) return;
             studioBootInFlight = true;
-            restoreSidebarPinned();
             try {
+                restoreSidebarPinned();
                 await loadStudioAccount();
+                try {
+                    await studioShellSession?.restore(saved=>{
+                        if(PAGE_IDS.includes(saved.page)) localStorage.setItem(ACTIVE_PAGE_KEY,saved.page);
+                        studioRestoredCanvasUrl=String(saved.canvasUrl || '');
+                    });
+                } catch(error) {
+                    console.warn('工作台状态恢复失败，继续加载页面', error);
+                }
+                const remembered = localStorage.getItem(ACTIVE_PAGE_KEY);
+                const id = PAGE_IDS.includes(remembered) && (!ADMIN_PAGE_IDS.has(remembered) || currentStudioAccount.is_admin)
+                    ? remembered
+                    : DEFAULT_PAGE_ID;
+                restoreSidebarSettings(id);
+                const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
+                switchUI(trigger, id, { skipRemember:true });
+                // 只为当前入口页等待一次就绪，超时后仍解除遮罩。
+                const activeFrame = document.getElementById('frame-' + id);
+                await waitForStudioFrame(activeFrame);
+                finishStudioBoot();
+                preloadStudioFrames(id);
+                if(currentStudioAccount.is_admin) {
+                    ensureShiyingApiKeyOnboarding();
+                    checkForUpdates();
+                }
             } catch(error) {
                 console.error(error);
                 showStudioBootError(error);
+            } finally {
                 studioBootInFlight = false;
-                return;
-            }
-            await studioShellSession?.restore(saved=>{
-                if(PAGE_IDS.includes(saved.page)) localStorage.setItem(ACTIVE_PAGE_KEY,saved.page);
-                studioRestoredCanvasUrl=String(saved.canvasUrl || '');
-            });
-            const remembered = localStorage.getItem(ACTIVE_PAGE_KEY);
-            const id = PAGE_IDS.includes(remembered) && (!ADMIN_PAGE_IDS.has(remembered) || currentStudioAccount.is_admin)
-                ? remembered
-                : DEFAULT_PAGE_ID;
-            restoreSidebarSettings(id);
-            const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
-            switchUI(trigger, id, { skipRemember:true });
-            // 只为当前入口页等待一次就绪，避免启动后看到空白舞台；超时后仍解除遮罩，
-            // 页面自身的错误态和重试逻辑继续负责后续反馈，不把启动流程永久卡住。
-            const activeFrame = document.getElementById('frame-' + id);
-            await waitForStudioFrame(activeFrame);
-            finishStudioBoot();
-            preloadStudioFrames(id);
-            studioBootInFlight = false;
-            if(currentStudioAccount.is_admin) {
-                ensureShiyingApiKeyOnboarding();
-                checkForUpdates();
             }
         }
         studioShellSession?.watch(()=>({

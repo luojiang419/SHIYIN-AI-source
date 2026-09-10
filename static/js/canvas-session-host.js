@@ -89,6 +89,7 @@
         current = entry;
         entry.used = ++sequence;
         activate(entry.frame);
+        window.StudioPageState?.session('shell').checkpoint();
         prune();
         return true;
     }
@@ -98,6 +99,7 @@
         if(manager) activate(manager);
         else setActive(current.frame, false);
         current = null;
+        window.StudioPageState?.session('shell').checkpoint();
         const target = manager?.contentWindow || window;
         target.postMessage({type:'canvas-session-manager', project}, location.origin);
         prune();
@@ -111,8 +113,10 @@
     }
     // 仅在删除已成功或服务器明确报告不存在时调用，防止恢复后复用已删除实例。
     function invalidate(id){
+        void window.StudioPageState?.session(`canvas:${id}`).remove();
         for(const entry of [...editors]){
             if((editorState(entry)?.id || entry.id) !== id) continue;
+            entry.frame.contentWindow?.CanvasSessionLifecycle?.forgetCheckpoint?.();
             if(entry === current) back(entry.frame.contentWindow);
             entry.frame.remove();
             const index = editors.indexOf(entry);

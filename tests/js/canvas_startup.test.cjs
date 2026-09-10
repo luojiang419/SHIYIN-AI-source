@@ -40,6 +40,7 @@ function editor(h){
     const calls=[];
     const ctx={window:{CanvasStartup:h.startup, location:{replace:() => calls.push('redirect')}},
         canvas:null, nodes:[], connections:[], selected:new Set(), canvasConfigRevision:0, canvasConfigRequestSequence:0,
+        localCanvasSaveSequence:0, checkpointCanvasPage:()=>{},
         imageModels:['default-image'],chatModels:[],videoModels:['default-video'],msChatModels:[],
         DEFAULT_VIDEO_MODELS:['default-video'], apiProviders:[], managedProviderId:'comfly', models:{},
         runningHubWorkflowCache:{}, console:{error:()=>{},warn:()=>{}},

@@ -1,5 +1,6 @@
 (function(){
     'use strict';
+    const pageSession = window.StudioPageState?.session('works');
     const WORKS_VIEW_SETTINGS_KEY = 'works_view_settings_v1';
     function readViewSettings(){
         try { const value=JSON.parse(localStorage.getItem(WORKS_VIEW_SETTINGS_KEY) || '{}'); return value && typeof value === 'object' ? value : {}; }
@@ -318,7 +319,7 @@
     let worksLoadId = 0;
     let worksLoadController = null;
     const completedPageCursors = new Set();
-    async function loadWorks({reset=false}={}){
+    async function loadWorks({reset=false,preserve=false}={}){
         if(state.loading && !reset) return;
         if(!reset && !state.nextCursor) return;
         worksLoadController?.abort();
@@ -327,9 +328,13 @@
         state.loading = true;
         state.loadError = '';
         let received = false;
+        let unchanged = false;
+        const valid = pageSession?.guard() || (()=>true);
+        const previousScroll = el.worksGrid.scrollTop;
+        const previousCount = state.works.length;
         el.worksRefresh.disabled=true;
         try {
-            if(reset){
+            if(reset && !preserve){
                 state.works=[];
                 state.total=0;
                 state.nextCursor='';
@@ -339,21 +344,34 @@
                 state.renderEnd=-1;
                 el.worksGrid.scrollTop=0;
             }
-            renderVirtual(true);
+            if(!preserve) renderVirtual(true);
             const requestedCursor = reset ? '' : state.nextCursor;
-            const data=await fetchJson(`/api/works?${queryParams(requestedCursor)}`,{cache:'no-store',signal:worksLoadController.signal});
+            let data=await fetchJson(`/api/works?${queryParams(requestedCursor)}`,{cache:'no-store',signal:worksLoadController.signal});
+            if(preserve){
+                const seen=new Set();
+                while(data.next_cursor && (data.works || []).length < previousCount && !seen.has(data.next_cursor)){
+                    seen.add(data.next_cursor);
+                    const next=await fetchJson(`/api/works?${queryParams(data.next_cursor)}`,{cache:'no-store',signal:worksLoadController.signal});
+                    data={...next,works:[...(data.works || []),...(next.works || [])]};
+                }
+                if(!valid()) { unchanged=true; return; }
+                unchanged=JSON.stringify(data.works || [])===JSON.stringify(state.works);
+            }
             if(loadId !== worksLoadId) return;
             const merged = reset ? (data.works || []) : [...state.works, ...(data.works || [])];
             state.works = [...new Map(merged.map(item=>[item.id,item])).values()];
             sortWorksForDisplay();
             state.total = Number(data.total || state.works.length);
             state.nextCursor = data.next_cursor || '';
+            if(reset) completedPageCursors.clear();
             completedPageCursors.add(requestedCursor);
             if(state.nextCursor && completedPageCursors.has(state.nextCursor)){
                 state.nextCursor = '';
                 throw new Error('作品分页未前进，请刷新列表');
             }
             renderKinds();
+            if(preserve) el.worksGrid.scrollTop=previousScroll;
+            pageSession?.checkpoint();
             received = true;
         } catch(error){
             if(loadId === worksLoadId && error.name !== 'AbortError'){
@@ -365,7 +383,7 @@
             if(loadId !== worksLoadId) return;
             state.loading=false;
             el.worksRefresh.disabled=false;
-            renderVirtual(true);
+            if(!unchanged) renderVirtual(true);
             // 短页或高屏幕可能没有新的 scroll 事件；成功后检查是否还需补足视口。
             if(received) requestAnimationFrame(handleScroll);
         }
@@ -383,6 +401,7 @@
             if(state.compareWork?.id===work.id) state.compareWork=work;
             renderVirtual(true);
             syncCompareFavorite();
+            pageSession?.mark();pageSession?.checkpoint();
         } catch(error){ toast(error.message); }
     }
     async function updateMetadata(workId,changes){
@@ -391,6 +410,7 @@
         if(index>=0) state.works[index]=data.work;
         if(state.compareWork?.id===workId) state.compareWork=data.work;
         renderKinds();renderVirtual(true);syncCompareFavorite();
+        pageSession?.mark();pageSession?.checkpoint();
         return data.work;
     }
     async function setTrashed(workId,trashed){
@@ -588,6 +608,7 @@
             state.batchBusyAction='';
             renderKinds();
             renderVirtual(true);
+            pageSession?.mark();pageSession?.checkpoint();
             toast(action==='delete' ? `已永久删除 ${data.deleted_files || data.deleted_records || ids.length} 个作品` : action==='trash' ? `已移到回收站 ${data.count || ids.length} 个作品` : `已收藏 ${data.count || ids.length} 个作品`);
         } catch(error){
             state.batchBusy=false;
@@ -635,7 +656,7 @@
         document.addEventListener('keyup',event=>{if(event.key==='Shift')state.shiftPressed=false;});
         window.addEventListener('blur',()=>{state.shiftPressed=false;});
     }
-    document.addEventListener('DOMContentLoaded',()=>{
+    document.addEventListener('DOMContentLoaded',async ()=>{
         cache();bind();
         el.worksGrid.addEventListener('error', event => {
             if (!event.target.matches?.('[data-work-thumbnail]')) return;
@@ -644,6 +665,16 @@
             message.textContent = '预览不可用，请刷新重试';
             event.target.replaceWith(message);
         }, true);
-        loadWorks({reset:true});
+        pageSession?.watch(()=>({
+            works:state.works,total:state.total,nextCursor:state.nextCursor,tab:state.tab,search:state.search,kind:state.kind,
+            sortOrder:state.sortOrder,mediaType:state.mediaType,selectedIds:[...state.selectedIds],selectionMode:state.selectionMode,
+            scroll:el.worksGrid.scrollTop
+        }));
+        const restored=await pageSession?.restore(saved=>{
+            Object.assign(state,{...saved,selectedIds:new Set(saved.selectedIds || []),loading:false});
+            el.worksSearch.value=state.search;renderKinds();el.worksKind.value=state.kind;
+            renderVirtual(true);el.worksGrid.scrollTop=saved.scroll || 0;renderVirtual(true);
+        });
+        void loadWorks({reset:true,preserve:Boolean(restored)});
     });
 })();

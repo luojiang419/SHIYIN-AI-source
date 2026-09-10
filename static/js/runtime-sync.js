@@ -13,6 +13,9 @@
         ecommerce_settings: ['studio_ecommerce_settings_v2'],
     };
     const state = { values:{}, allowedKeys:null, revision:0, actorId:'', socket:null, reconnectTimer:null, backoff:1000, applying:false, ready:false, readyPromise:null };
+    let localEditSequence=0;
+    let pendingPreferenceWrites=0;
+    let preferenceWriteChain=Promise.resolve();
     state.actorId = localStorage.getItem('client_id') || localStorage.getItem('canvas_sync_actor_id') || `web-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
     localStorage.setItem('client_id', state.actorId);
     localStorage.setItem('canvas_sync_actor_id', state.actorId);
@@ -22,7 +25,9 @@
         const values = {};
         Object.entries(STORAGE).forEach(([name, keys]) => {
             for(const key of keys){
-                const value = localStorage.getItem(key);
+                const accountId=window.StudioPageState?.accountId;
+                const storageKey=name==='ecommerce_settings' && window.StudioPageState ? (accountId?`${key}:account:${accountId}`:'') : key;
+                const value = storageKey ? localStorage.getItem(storageKey) : null;
                 if(value){ values[name] = value; break; }
             }
         });
@@ -37,7 +42,11 @@
         try {
             Object.entries(values || {}).forEach(([name, value]) => {
                 const keys = STORAGE[name] || [];
-                keys.forEach(key => localStorage.setItem(key, String(value)));
+                keys.forEach(key => {
+                    localStorage.setItem(key,String(value));
+                    const accountId=window.StudioPageState?.accountId;
+                    if(name==='ecommerce_settings' && accountId)localStorage.setItem(`${key}:account:${accountId}`,String(value));
+                });
             });
             if(values?.theme) window.StudioTheme?.apply?.(values.theme);
             if(values?.language) window.StudioI18n?.set?.(values.language, {sync:false});
@@ -48,9 +57,12 @@
         } finally { state.applying = false; }
     }
     async function readPreferences(){
+        const readSequence=localEditSequence;
+        if(window.StudioPageState)await window.StudioPageState.ready();
         const response = await fetch('/api/preferences', {cache:'no-store'});
         if(!response.ok) throw new Error(`preferences HTTP ${response.status}`);
         const data = await response.json();
+        if(readSequence!==localEditSequence || pendingPreferenceWrites>0) return data;
         state.allowedKeys = Array.isArray(data.allowed_keys) ? data.allowed_keys : null;
         state.values = data.values || {};
         state.revision = Number(data.revision || 0);
@@ -63,7 +75,7 @@
         applyValues(state.values);
         return data;
     }
-    async function writePreferences(values, baseRevision, importIfEmpty){
+    async function writePreferences(values, baseRevision, importIfEmpty, editSequence=localEditSequence){
         values = allowedValues(values);
         const response = await fetch('/api/preferences', {
             method:'PUT', headers:{'Content-Type':'application/json'},
@@ -76,12 +88,12 @@
             state.revision = Number(latest.revision || 0);
             // 冲突阶段不广播旧偏好，避免把正在输入的 iframe 重绘到上一版状态。
             const merged = {...state.values, ...values};
-            return writePreferences(merged, state.revision, false);
+            return writePreferences(merged, state.revision, false, editSequence);
         }
         if(!response.ok) throw new Error(data.detail || `preferences HTTP ${response.status}`);
         state.values = data.values || {};
         state.revision = Number(data.revision || 0);
-        applyValues(state.values);
+        if(editSequence===localEditSequence) applyValues(state.values);
         return data;
     }
     function ready(){
@@ -92,10 +104,15 @@
         if(!isTop()){
             try { return window.top.RuntimeSync?.setPreference(name, value) || Promise.resolve(); } catch(e) { return Promise.resolve(); }
         }
-        if(!state.ready) return ready().then(() => setPreference(name, value));
-        if(Array.isArray(state.allowedKeys) && !state.allowedKeys.includes(name)) return Promise.resolve();
-        if(state.applying) return new Promise(resolve => setTimeout(() => resolve(setPreference(name, value)), 25));
-        return writePreferences({...state.values, [name]:value}, state.revision, false).catch(() => {});
+        const editSequence=++localEditSequence;
+        pendingPreferenceWrites++;
+        const write=async ()=>{
+            await ready();
+            if(Array.isArray(state.allowedKeys) && !state.allowedKeys.includes(name)) return;
+            return writePreferences({...state.values,[name]:value},state.revision,false,editSequence);
+        };
+        preferenceWriteChain=preferenceWriteChain.then(write,write).finally(()=>{pendingPreferenceWrites--;});
+        return preferenceWriteChain.catch(()=>{});
     }
     function dispatchMessage(message){
         window.dispatchEvent(new CustomEvent('canvas-realtime-message', {detail:message}));

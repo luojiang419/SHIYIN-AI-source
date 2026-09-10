@@ -1,5 +1,8 @@
 (function(){
     'use strict';
+    const pageSession=window.StudioPageState?.session('app-settings');
+    let pageSettings=null;
+    let pageSettingsPending=false;
 
     const options = document.getElementById('closeBehaviorOptions');
     const status = document.getElementById('saveStatus');
@@ -367,15 +370,18 @@
     }
 
     async function loadUpdateSettings(){
-        try { applyUpdateSettings((await desktopRequest('desktop-update-settings:get')).settings); }
+        const valid=pageSession?.guard() || (()=>true);
+        try { const response=await desktopRequest('desktop-update-settings:get'); if(valid()) applyUpdateSettings(response.settings); }
         catch(error) { showUpdateStatus(error.message, true); [updatePolicy, updateNetworkMode, updateManualProxy, checkDesktopUpdate].forEach(item => { if(item) item.disabled = true; }); }
     }
 
     async function saveUpdateSettings(){
+        const valid=pageSession?.guard() || (()=>true);
         try {
             showUpdateStatus('保存中…');
             const response = await desktopRequest('desktop-update-settings:save', {settings:{updatePolicy:updatePolicy.value, networkMode:updateNetworkMode.value, manualProxyUrl:updateManualProxy.value}});
-            applyUpdateSettings(response.settings);
+            if(valid()) applyUpdateSettings(response.settings);
+            pageSession?.checkpoint();
             showUpdateStatus('已保存');
         } catch(error) { showUpdateStatus(error.message, true); }
     }
@@ -586,13 +592,7 @@
         }
     }
 
-    async function loadSettings(){
-        options.disabled = true;
-        setOutputBusy(true);
-        setBatchOutfitOutputBusy(true);
-        applyShortcutSettings({shortcut_bindings:{}});
-        try {
-            const data = await requestSettings('/api/app-settings', {cache:'no-store'});
+    function applyPageSettings(data){
             currentBehavior = closeBehaviorFromServer(data.close_behavior);
             selectBehavior(currentBehavior);
             updateCloseBehaviorNote();
@@ -602,6 +602,21 @@
             applyDepthMapSettings(data);
             applyTopazSettings(data);
             applyShortcutSettings(data);
+    }
+
+    async function loadSettings(){
+        const valid=pageSession?.guard() || (()=>true);
+        const requestSnapshot=pageSettings;
+        options.disabled = !pageSession?.restored;
+        setOutputBusy(!pageSession?.restored);
+        setBatchOutfitOutputBusy(!pageSession?.restored);
+        if(!pageSession?.restored) applyShortcutSettings({shortcut_bindings:{}});
+        try {
+            const data = await requestSettings('/api/app-settings', {cache:'no-store'});
+            if(!valid() || pageSettingsPending || pageSettings!==requestSnapshot) return;
+            pageSettings=data;
+            applyPageSettings(data);
+            pageSession?.checkpoint();
         } catch(error) {
             showStatus(`${t('appSettings.loadFailed')}：${error.message}`, true);
         } finally {
@@ -614,11 +629,16 @@
     }
 
     async function saveSettings(values){
-        return requestSettings('/api/app-settings', {
-            method:'PUT',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(values),
+        pageSettingsPending=true;
+        pageSettings={...(pageSettings || {}),...values};
+        pageSession?.mark();pageSession?.checkpoint();
+        const valid=pageSession?.guard() || (()=>true);
+        const data=await requestSettings('/api/app-settings', {
+            method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(values),
         });
+        if(valid()){pageSettings=data;pageSettingsPending=false;}
+        pageSession?.checkpoint();
+        return valid()?data:pageSettings;
     }
 
     async function saveBehavior(value){
@@ -858,5 +878,17 @@
         if(event.origin && event.origin !== location.origin) return;
         if(event.data?.type === 'studio-language') window.StudioI18n?.set?.(event.data.lang,{sync:false});
     });
-    document.addEventListener('DOMContentLoaded', async () => { await loadSettings(); checkTopazCapabilities(); loadUpdateSettings(); loadStorageSummary(); }, {once:true});
+    document.addEventListener('DOMContentLoaded', async () => {
+        pageSession?.watch(()=>({data:pageSettings,pending:pageSettingsPending,search:shortcutSearch?.value || '',category:shortcutCategory?.value || '',
+            scroll:[...document.querySelectorAll('main,.settings-content')].map(el=>el.scrollTop)}));
+        await pageSession?.restore(saved=>{
+            if(saved.data){pageSettings=saved.data;pageSettingsPending=Boolean(saved.pending);applyPageSettings(pageSettings);}
+            if(shortcutSearch)shortcutSearch.value=saved.search || '';
+            if(shortcutCategory)shortcutCategory.value=saved.category || '';
+            renderShortcutSettings();
+            document.querySelectorAll('main,.settings-content').forEach((el,index)=>{el.scrollTop=saved.scroll?.[index] || 0;});
+        });
+        if(pageSettingsPending) void saveSettings(pageSettings).catch(error=>showStatus(error.message,true));
+        void loadSettings();void checkTopazCapabilities();void loadUpdateSettings();void loadStorageSummary();
+    }, {once:true});
 })();

@@ -1,3 +1,4 @@
+const listPageSession=window.StudioPageState?.session('canvas-list');
 // canvas-list.js — Project Workspace.
 // Two-pane: LEFT project list, RIGHT pannable/zoomable board of canvas cards.
 // Self-contained; relies only on global fetch / StudioI18n / lucide.
@@ -181,6 +182,8 @@ function currentProject(){ return projects.find(p => p.id === currentProjectId) 
 function canvasesInProject(pid){ return canvases.filter(c => (c.project || 'default') === pid); }
 
 async function loadAll({preserveViewport = false} = {}){
+    const valid=listPageSession?.guard() || (()=>true);
+    const before=JSON.stringify([projects,canvases]);
     try {
         const [pRes, cRes] = await Promise.all([
             fetch('/api/projects'),
@@ -188,6 +191,7 @@ async function loadAll({preserveViewport = false} = {}){
         ]);
         const pData = pRes.ok ? await pRes.json() : { projects: [] };
         const cData = cRes.ok ? await cRes.json() : { canvases: [] };
+        if(!valid()) return;
         projects = (pData.projects || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         if(!projects.length) projects = [{ id: 'default', name: L('默认项目','Default'), order: 0, canvas_count: 0 }];
         canvases = cData.canvases || [];
@@ -197,9 +201,9 @@ async function loadAll({preserveViewport = false} = {}){
             currentProjectId = def ? def.id : 'default';
         }
         rememberProjectId(currentProjectId);
-        renderProjects();
-        renderBoard();
+        if(before!==JSON.stringify([projects,canvases])){renderProjects();renderBoard();}
         if(!preserveViewport) resetView();
+        listPageSession?.checkpoint();
         refreshTrashCount();
     } catch(e){
         console.error(e);
@@ -1076,5 +1080,12 @@ document.addEventListener('visibilitychange', () => {
 /* ===== Boot ===== */
 window.StudioI18n?.apply?.();
 applyViewport();
-loadAll();
+listPageSession?.watch(()=>({projects,canvases,currentProjectId,viewport:{...viewport}}));
+void (async()=>{
+    const restored=await listPageSession?.restore(saved=>{
+        projects=saved.projects || [];canvases=saved.canvases || [];currentProjectId=saved.currentProjectId || 'default';
+        Object.assign(viewport,saved.viewport || {});renderProjects();renderBoard();applyViewport();
+    });
+    await loadAll({preserveViewport:Boolean(restored)});
+})();
 refreshIcons();

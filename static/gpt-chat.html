@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <script src="/static/js/studio-page-state.js?v=2026.09.10.1"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>GPT 对话</title>
@@ -23,7 +24,7 @@
     </script>
     <link rel="stylesheet" href="/static/vendor/css/tailwind.generated.css?v=2026.07.26.performance.1">
     <script src="/static/vendor/js/lucide.js?v=2026.06.30.1782781876"></script>
-    <script src="/static/js/theme.js?v=2026.07.31.theme-picker.1"></script>
+    <script src="/static/js/theme.js?v=2026.07.31.theme-picker.1&state=2026.09.10.1"></script>
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/media-cache-client.js?v=2026.09.02.media-cache-nonblocking-trim.3"></script>
     <script src="/static/js/image-preview.js?v=2026.08.05.shared-preview.1"></script>
@@ -660,6 +661,7 @@
             document.getElementById('chatTitle').textContent = title || defaultTitle();
         }
         function applyLanguage(lang){
+            if(lang && window.StudioI18n?.lang?.()===lang) return;
             if(lang && window.StudioI18n) StudioI18n.set(lang);
             document.title = tr('chat.title');
             if(!currentConversation?.title || currentConversation.title === '新对话' || currentConversation.title === 'New Chat') setChatTitle('');
@@ -682,6 +684,8 @@
             return 'u-' + Math.random().toString(16).slice(2) + Date.now();
         }
 
+        const chatPageSession=window.StudioPageState?.session('gpt-chat');
+        let conversationRequestSequence=0;
         const USER_KEY = 'gpt_chat_browser_user';
         const CHAT_SETTINGS_KEY = 'gpt_chat_settings_v1';
         const CHAT_LAST_CONVERSATION_KEY = 'gpt_chat_last_conversation_v1';
@@ -890,8 +894,10 @@
         }
 
         async function loadConfig(){
+            const valid=chatPageSession?.guard() || (()=>true);
             try {
                 const data = await fetch('/api/runtime/config').then(r=>r.json());
+                if(!valid()) return;
                 config = { ...config, ...data };
                 apiProviders = Array.isArray(config.api_providers) ? config.api_providers : [];
                 config.chat_model = (config.chat_models || []).find(m => m === 'gpt-5.5') || config.chat_model || 'gpt-5.5';
@@ -900,6 +906,7 @@
                 setMode(mode, false);
                 updateModelLabel();
                 saveChatSettings();
+                chatPageSession?.checkpoint();
             } catch(e) {}
         }
         try {
@@ -1089,7 +1096,9 @@
         }
 
         async function loadConversations(){
+            const valid=chatPageSession?.guard() || (()=>true);
             const data = await fetch('/api/conversations', {headers:{'X-User-ID':userId}}).then(r=>r.json());
+            if(!valid()) return;
             conversations = data.conversations || [];
             renderThreads();
             if(!currentConversation) {
@@ -1098,6 +1107,18 @@
                 if(target) await openConversation(target.id);
             }
             if(!currentConversation) renderMessages([]);
+            chatPageSession?.checkpoint();
+        }
+
+        async function refreshCurrentConversation(){
+            const id=currentConversation?.id;if(!id)return;
+            const valid=chatPageSession?.guard() || (()=>true);
+            const data=await fetch(`/api/conversations/${id}`,{headers:{'X-User-ID':userId}}).then(r=>r.json());
+            if(!valid() || currentConversation?.id!==id || !data.conversation)return;
+            if(JSON.stringify(currentConversation.messages)!==JSON.stringify(data.conversation.messages)){
+                currentConversation=data.conversation;setChatTitle(currentConversation.title);renderMessages(currentConversation.messages || []);
+            }
+            chatPageSession?.checkpoint();
         }
 
         function renderThreads(){
@@ -1128,6 +1149,7 @@
 
         async function newConversation(){
             const data = await fetch('/api/conversations', {method:'POST', headers:headers(), body:JSON.stringify({title:'新对话'})}).then(r=>r.json());
+            if(request!==conversationRequestSequence || !valid()) return;
             currentConversation = data.conversation;
             rememberConversation(currentConversation.id);
             setChatTitle(currentConversation.title);
@@ -1137,6 +1159,8 @@
         }
 
         async function openConversation(id, closePanel=false){
+            const request=++conversationRequestSequence;
+            const valid=chatPageSession?.guard() || (()=>true);
             const data = await fetch(`/api/conversations/${id}`, {headers:{'X-User-ID':userId}}).then(r=>r.json());
             currentConversation = data.conversation;
             rememberConversation(currentConversation.id);
@@ -1144,6 +1168,7 @@
             renderThreads();
             renderMessages(currentConversation.messages || []);
             if(closePanel) toggleHistory(false);
+            chatPageSession?.checkpoint();
         }
 
         async function deleteConversation(id, event){
@@ -1371,6 +1396,7 @@
         }
 
         function renderMessages(messages){
+            chatPageSession?.schedule();
             const box = document.getElementById('messages');
             box.innerHTML = '';
             if(!messages.length){
@@ -1923,6 +1949,8 @@
             setReferenceHint('');
             input.value = '';
             autoGrow(input);
+            chatPageSession?.mark();
+            chatPageSession?.checkpoint();
             if(!currentConversation){
                 currentConversation = {id:'', title:'新对话', messages:[]};
                 document.getElementById('messages').innerHTML = '';
@@ -2051,15 +2079,26 @@
         function scrollBottom(){ requestAnimationFrame(() => { const box = document.getElementById('messages'); box.scrollTop = box.scrollHeight; }); }
         function escapeHtml(str){ return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 
-        window.onload = async () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             applyLanguage();
-            syncSystemPromptUI();
-            setChatRatio(chatRatio);
-            setChatResolution(chatResolution);
-            await loadConfig();
-            await loadConversations();
+            chatPageSession?.watch(()=>({conversations,currentConversation,config,refs,
+                settings:{mode, provider, msModel, activeChatModel, activeImageProvider, activeImageModel, systemPrompt, chatProviderModels, chatRatio, chatResolution, chatPresetResolution, chatCustomSize, modelPickerScope},draft:document.getElementById('messageInput').value,scroll:document.getElementById('messages').scrollTop}));
+            const restored=await chatPageSession?.restore(saved=>{
+                conversations=saved.conversations || [];currentConversation=saved.currentConversation || null;
+                config=saved.config || config;apiProviders=config.api_providers || [];
+                ({mode, provider, msModel, activeChatModel, activeImageProvider, activeImageModel, systemPrompt, chatProviderModels, chatRatio, chatResolution, chatPresetResolution, chatCustomSize, modelPickerScope}={mode, provider, msModel, activeChatModel, activeImageProvider, activeImageModel, systemPrompt, chatProviderModels, chatRatio, chatResolution, chatPresetResolution, chatCustomSize, modelPickerScope,...saved.settings});
+                refs=saved.refs || [];
+                syncSystemPromptUI();setMode(mode,false);updateModelLabel();renderThreads();renderRefs();
+                if(currentConversation) setChatTitle(currentConversation.title);
+                renderMessages(currentConversation?.messages || []);
+                document.getElementById('messageInput').value=saved.draft || '';
+                autoGrow(document.getElementById('messageInput'));
+                requestAnimationFrame(()=>{document.getElementById('messages').scrollTop=saved.scroll || 0;});
+            });
+            syncSystemPromptUI();setChatRatio(chatRatio);setChatResolution(chatResolution);
             updateComposerOverflow();
-        };
+            void Promise.allSettled([loadConfig(),loadConversations(),restored?refreshCurrentConversation():Promise.resolve()]);
+        },{once:true});
     </script>
 </body>
 </html>

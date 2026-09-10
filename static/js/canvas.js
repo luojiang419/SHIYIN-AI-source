@@ -436,6 +436,7 @@ function setCanvasRouteActive(active){
         }
         pauseCanvasRouteMedia();
         saveLocalViewport();
+        checkpointCanvasPage(true);
         if(canvas && localCanvasDirty && !savingCanvasNow){
             clearTimeout(saveTimer);
             saveTimer = null;
@@ -907,6 +908,9 @@ let remoteSyncBusy = false;
 let canvasRouteActive = window.top === window;
 let canvasSessionSuspended = false;
 let canvasSessionConfigDirty = false;
+let canvasPageSession = null;
+let canvasPageConfig = null;
+let canvasPageCheckpointTimer = 0;
 let classicParentShortcutWindow = null;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
@@ -1240,6 +1244,7 @@ function saveLocalViewport(){
     try {
         sessionStorage.setItem(CANVAS_SESSION_VIEWPORTS_KEY, JSON.stringify(map));
     } catch(e) {}
+    checkpointCanvasPage();
 }
 function applyTheme(theme){
     const dark = theme === 'dark';
@@ -2995,6 +3000,7 @@ function scheduleSave(){
     if(!canvas || applyingRemoteCanvas) return;
     localCanvasSaveSequence += 1;
     localCanvasDirty = true;
+    checkpointCanvasPage();
     setStatus('Saving...');
     clearTimeout(saveTimer);
     if(saveIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(saveIdleHandle); saveIdleHandle = 0; }
@@ -3262,6 +3268,7 @@ async function saveCanvas(){
         localCanvasDirty = Boolean(saveHadNewerEdits || saveCanvasAgain);
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
         setStatus(localCanvasDirty ? 'Saving...' : 'Saved');
+        checkpointCanvasPage();
         loadCanvasList(false);
         savedVideoClipSequencesByCanvas.set(
             savingCanvasId,
@@ -3282,6 +3289,7 @@ async function saveCanvas(){
 }
 
 function applyCanvasRuntimeConfig(cfg){
+    canvasPageConfig=cfg;
     loadLocalModelLists();
     imageModels = cfg.image_models?.length ? cfg.image_models : imageModels;
     chatModels = cfg.chat_models?.length ? cfg.chat_models : chatModels;
@@ -3854,6 +3862,35 @@ async function setCanvasTitle(id, title){
         console.error(e);
     }
 }
+function captureCanvasPage(){
+    return {canvas:{...canvas,nodes:serializableCanvasNodes(),connections,viewport:{...viewport}},config:canvasPageConfig,
+        dirty:localCanvasDirty,selected:[...selected],undoStack,redoStack,undoStackBytes,redoStackBytes};
+}
+function checkpointCanvasPage(immediate=false){
+    if(!canvas || !canvasPageConfig) return;
+    if(immediate){
+        clearTimeout(canvasPageCheckpointTimer);canvasPageCheckpointTimer=0;
+        canvasPageSession?.checkpoint();
+    } else if(!canvasPageCheckpointTimer){
+        canvasPageCheckpointTimer=setTimeout(()=>{canvasPageCheckpointTimer=0;canvasPageSession?.checkpoint();},80);
+    }
+}
+function restoreCanvasPage(saved,session){
+    applyCanvasRuntimeConfig(saved.config);
+    canvas=saved.canvas;
+    nodes=migrateLegacySmartCanvasNodes(canvas.nodes || []).nodes;
+    connections=canvas.connections || [];
+    viewport=localViewportForCanvas(canvas.id,canvas.viewport || {x:0,y:0,scale:1});
+    lastCanvasUpdatedAt=Number(canvas.updated_at || 0);
+    localCanvasDirty=Boolean(saved.dirty);
+    resetTransientRunState(nodes);sanitizeConnections();
+    selected=new Set(saved.selected || []);
+    undoStack=saved.undoStack || [];redoStack=saved.redoStack || [];
+    undoStackBytes=Number(saved.undoStackBytes || 0);redoStackBytes=Number(saved.redoStackBytes || 0);
+    rememberCanvasListProject(canvas.project || 'default');setCanvasMode(true);render();
+    hideCanvasStartupNotice();setStatus(localCanvasDirty?'Saving...':'Ready');
+    session.afterPaint(startCanvasSecondaryStartup);
+}
 async function openCanvas(id){
     setStatus('Opening...');
     const session = window.CanvasStartup.open(id);
@@ -3864,10 +3901,29 @@ async function openCanvas(id){
     classicFirstPreviewCanvasId = '';
     classicFirstPreviewLoadedCanvasId = '';
     showCanvasStartupNotice(id);
+    canvasPageSession=window.StudioPageState?.session(`canvas:${id}`) || null;
+    canvasPageSession?.setCapture(()=>canvas?.id===id && canvasPageConfig ? captureCanvasPage() : undefined);
+    const openingSequence=localCanvasSaveSequence;
+    let restoredCanvas=null;
+    let restoredConfigRevision=configRevision;
     try {
+        const saved=await canvasPageSession?.read();
+        if(!session.isCurrent()) return;
+        if(localCanvasSaveSequence===openingSequence && saved?.canvas?.id===id && saved.config){
+            restoreCanvasPage(saved,session);restoredCanvas=canvas;restoredConfigRevision=canvasConfigRevision;
+        }
         const result = await session.ready;
         if(!session.isCurrent()) return;
         if(result.error) throw result.error;
+        if(restoredCanvas){
+            if(canvas===restoredCanvas && localCanvasSaveSequence===openingSequence && !localCanvasDirty){
+                if(restoredConfigRevision===canvasConfigRevision) applyCanvasRuntimeConfig(result.config);
+                if(Number(result.data.canvas.updated_at || 0)>lastCanvasUpdatedAt) applyRemoteCanvasData(result.data.canvas);
+            }
+            if(localCanvasDirty) void saveCanvas();
+            checkpointCanvasPage();
+            return;
+        }
         // 已在设置广播中应用的新配置优先于启动时发出的旧请求。
         if(configRevision === canvasConfigRevision) applyCanvasRuntimeConfig(result.config);
         const data = result.data;
@@ -3897,12 +3953,15 @@ async function openCanvas(id){
         if(prunedRuntimeCollections || legacyMigration.changed) scheduleSave();
         setStatus('Ready');
         hideCanvasStartupNotice();
+        checkpointCanvasPage();
         session.afterPaint(startCanvasSecondaryStartup);
     } catch(e) {
         if(!session.isCurrent()) return;
+        if(restoredCanvas && !(e.resource==='canvas' && e.status===404 && !localCanvasDirty)){setStatus('已恢复本地状态，同步暂未完成');return;}
         setStatus(tr('canvas.openFailed'));
         console.error(e);
         if(e.resource === 'canvas' && e.status === 404){
+            void canvasPageSession?.remove();
             try {
                 if(window.parent !== window && window.parent.CanvasSessionHost){
                     window.parent.CanvasSessionHost.invalidate(id);
@@ -4003,6 +4062,7 @@ function applyRemoteCanvasData(remote){
         setStatus('Synced');
     } finally {
         applyingRemoteCanvas = false;
+        checkpointCanvasPage();
     }
 }
 function resetTransientRunState(list=nodes){
@@ -24885,6 +24945,8 @@ function escapeAttr(str){ return escapeHtml(str); }
 
 window.CanvasSessionLifecycle = {
     setActive:setCanvasRouteActive,
+    checkpoint:checkpointCanvasPage,
+    forgetCheckpoint:()=>canvasPageSession?.remove(),
     state:() => ({
         id:canvas?.id || '',
         evictable:!localCanvasDirty && !savingCanvasNow && !saveCanvasAgain
@@ -24893,6 +24955,9 @@ window.CanvasSessionLifecycle = {
             && !nodes.some(node => node.running || node.runStatus === 'running' || node._pending?.length)
     })
 };
+
+    window.addEventListener('pagehide',()=>checkpointCanvasPage(true));
+    document.addEventListener('click',()=>queueMicrotask(checkpointCanvasPage),true);
 
 async function initializeCanvasPage(){
     window.CanvasPerformance?.record?.('classic.editor-ready', performance.now());

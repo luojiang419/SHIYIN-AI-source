@@ -1,5 +1,7 @@
 (function(){
     'use strict';
+    const pageSession=window.StudioPageState?.session('depth-map-tuner');
+    let depthBlob=null;
 
     const RANGES = Object.freeze({
         farPoint:[0,99], nearPoint:[1,100], midtone:[-100,100],
@@ -102,7 +104,7 @@
     }
     function setBusy(busy){ state.busy=busy;el.depthProcessing.hidden=!busy;el.depthInputStage.disabled=busy;el.depthSaveConfig.disabled=busy;el.depthExportImage.disabled=busy||!state.depthImage; }
     function loadImage(url){ return new Promise((resolve,reject) => { const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('图片解码失败'));image.src=url; }); }
-    function clearDepth(){ if(state.depthUrl) URL.revokeObjectURL(state.depthUrl);state.depthUrl='';state.depthImage=null;el.depthOutputCanvas.hidden=true;el.depthOutputEmpty.hidden=false;el.depthExportImage.disabled=true;el.depthOutputMeta.textContent='8-BIT PNG'; }
+    function clearDepth(){ depthBlob=null; if(state.depthUrl) URL.revokeObjectURL(state.depthUrl);state.depthUrl='';state.depthImage=null;el.depthOutputCanvas.hidden=true;el.depthOutputEmpty.hidden=false;el.depthExportImage.disabled=true;el.depthOutputMeta.textContent='8-BIT PNG'; }
     async function processFile(file){
         if(!file || state.busy) return;
         const request=++state.request;
@@ -116,25 +118,29 @@
             const response=await fetch(endpoint,{method:'POST',body:form});
             if(!response.ok){ const data=await response.json().catch(()=>({}));throw new Error(data.detail||'深度图提取失败'); }
             if(request!==state.request)return;
-            const blob=await response.blob();state.depthUrl=URL.createObjectURL(blob);state.depthImage=await loadImage(state.depthUrl);
+            const blob=await response.blob();depthBlob=blob;state.depthUrl=URL.createObjectURL(blob);state.depthImage=await loadImage(state.depthUrl);
             const width=Number(response.headers.get(state.mode==='professional'?'X-Depth-Width':'X-Person-Depth-Width'))||state.depthImage.naturalWidth;
             const height=Number(response.headers.get(state.mode==='professional'?'X-Depth-Height':'X-Person-Depth-Height'))||state.depthImage.naturalHeight;
             el.depthOutputMeta.textContent=`${width} × ${height} · 8-BIT PNG`;schedulePreview();toast('深度提取完成，可实时调整参数');
         } catch(error){ if(request===state.request){clearDepth();el.depthTunerStatus.textContent=error.message||'深度图提取失败';toast(el.depthTunerStatus.textContent,true);} }
-        finally{ if(request===state.request)setBusy(false); }
+        finally{ if(request===state.request){setBusy(false);pageSession?.checkpoint();} }
     }
     async function loadSettings(){
+        const valid=pageSession?.guard() || (()=>true);
         try {
             const data=await requestJson('/api/app-settings',{cache:'no-store'});
+            if(!valid() || pageSession?.restored) return;
             state.mode=data.depth_map_mode==='professional'?'professional':'person';state.controls=normalizeControls(data.depth_map_controls||DEFAULTS);syncMode();syncControls();
             el.depthTunerStatus.textContent=state.mode==='professional'?'专业模式已就绪：输入图片后提取完整画面深度。':'人物模式已就绪：输入图片后仅提取人物深度。';
         } catch(error){ el.depthTunerStatus.textContent=`设置读取失败：${error.message}`;toast(el.depthTunerStatus.textContent,true); }
     }
     async function saveConfig(){
+        const valid=pageSession?.guard() || (()=>true);
         if(state.busy)return;el.depthSaveConfig.disabled=true;el.depthTunerStatus.textContent='正在保存共享配置…';
         try {
             const data=await requestJson('/api/app-settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({depth_map_mode:state.mode,depth_map_controls:state.controls})});
-            state.controls=normalizeControls(data.depth_map_controls||state.controls);syncControls();
+            if(valid()){state.controls=normalizeControls(data.depth_map_controls||state.controls);syncControls();}
+            pageSession?.checkpoint();
             const message={type:'depth-map-settings:changed',mode:state.mode,controls:{...state.controls},updatedAt:Date.now()};
             try{window.parent?.postMessage(message,location.origin);}catch(error){}
             el.depthTunerStatus.textContent='配置已保存，并已通知所有深度图节点立即生效。';toast('深度图配置已保存');
@@ -152,7 +158,23 @@
         el.depthResetControls.onclick=()=>setControls(DEFAULTS);el.depthExportImage.onclick=exportDepth;el.depthSaveConfig.onclick=saveConfig;
         el.depthTunerBack.onclick=()=>{if(window.parent&&window.parent!==window)window.parent.postMessage({type:'studio-depth-map-tuner-back'},location.origin);else location.href='/static/app-settings.html';};
         window.addEventListener('message',event=>{if(event.origin&&event.origin!==location.origin)return;if(event.data?.type==='studio-theme'){document.documentElement.classList.toggle('studio-theme-dark',event.data.theme==='dark');document.documentElement.classList.toggle('studio-theme-pure-white',event.data.theme==='pure-white');}});
-        syncControls();loadSettings();
+        pageSession?.watch(()=>({mode:state.mode,controls:state.controls,file:state.file,depthBlob,outputMeta:el.depthOutputMeta.textContent}));
+        syncControls();
+        void (async()=>{
+            await pageSession?.restore(async saved=>{
+                const valid=pageSession.guard();
+                const inputUrl=saved.file?URL.createObjectURL(saved.file):'';
+                const depthUrl=saved.depthBlob?URL.createObjectURL(saved.depthBlob):'';
+                const depthImage=depthUrl?await loadImage(depthUrl):null;
+                if(!valid()){if(inputUrl)URL.revokeObjectURL(inputUrl);if(depthUrl)URL.revokeObjectURL(depthUrl);return;}
+                Object.assign(state,{mode:saved.mode || 'person',controls:normalizeControls(saved.controls),file:saved.file || null,inputUrl,depthUrl,depthImage});
+                depthBlob=saved.depthBlob || null;
+                if(inputUrl){el.depthInputImage.src=inputUrl;el.depthInputImage.hidden=false;el.depthInputEmpty.hidden=true;el.depthInputMeta.textContent=saved.file.name;}
+                el.depthOutputMeta.textContent=saved.outputMeta || '';
+                syncMode();syncControls();schedulePreview();
+            });
+            void loadSettings();
+        })();
     }
     initialize();
 })();

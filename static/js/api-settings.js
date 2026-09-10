@@ -1,3 +1,6 @@
+const apiPageSession=window.StudioPageState?.session('api-settings');
+let apiPageDirty=false;
+let apiLinkfoxDirty=false;
 let providers = [];
 const LINKFOX_PROVIDER_ID = 'linkfox';
 const ECOMMERCE_VISION_PROVIDER_ID = 'ecommerce-vision';
@@ -211,6 +214,7 @@ function trf(key, vars={}){
 }
 function setStatus(text){ statusEl.textContent = text || ''; }
 function scheduleProviderAutoSave(delay=520){
+    apiPageDirty=true;apiPageSession?.mark();
     clearTimeout(providerAutoSaveTimer);
     setStatus('等待自动保存…');
     providerAutoSaveTimer = setTimeout(() => {
@@ -2446,7 +2450,7 @@ function handleProviderDragEnd(){
 function renderEditor(){
     const item = provider();
     if(!item) return;
-    const isLinkfox = item.id === LINKFOX_PROVIDER_ID || item.is_virtual;
+    const isLinkfox = Boolean(item.id === LINKFOX_PROVIDER_ID || item.is_virtual);
     document.body.classList.toggle('show-linkfox-provider', isLinkfox);
     if(linkfoxConfigBlock){
         linkfoxConfigBlock.hidden = !isLinkfox;
@@ -3556,17 +3560,21 @@ function renderLinkfoxConfig(data){
     setLinkfoxConfigStatus(item.configured && item.installed ? '已就绪' : '待配置', item.configured && item.installed);
 }
 async function loadLinkfoxConfig(){
+    const valid=apiPageSession?.guard() || (()=>true);
     try {
         const response = await fetch('/api/linkfox-config', {cache:'no-store'});
         const data = await response.json();
         if(!response.ok) throw new Error(data.detail || '读取 LinkFox 配置失败');
+        if(!valid() || apiLinkfoxDirty) return;
         renderLinkfoxConfig(data);
+        apiPageSession?.checkpoint();
     } catch(error){
         setLinkfoxConfigStatus('读取失败', false);
         if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = error.message || String(error);
     }
 }
 async function saveLinkfoxConfig(){
+    const valid=apiPageSession?.guard() || (()=>true);
     if(!linkfoxGatewayInput) return false;
     const gateway = String(linkfoxGatewayInput.value || '').trim();
     const apiKey = String(linkfoxApiKeyInput?.value || '').trim();
@@ -3579,7 +3587,8 @@ async function saveLinkfoxConfig(){
         });
         const data = await response.json();
         if(!response.ok) throw new Error(data.detail || '保存 LinkFox 配置失败');
-        renderLinkfoxConfig(data);
+        if(valid()){apiLinkfoxDirty=false;renderLinkfoxConfig(data);}
+        apiPageSession?.checkpoint();
         if(linkfoxConfigMessage) linkfoxConfigMessage.textContent = 'LinkFox 配置已保存';
         return true;
     } catch(error){
@@ -3620,14 +3629,17 @@ async function clearLinkfoxKey(){
     }
 }
 async function loadProviders(){
+    const valid=apiPageSession?.guard() || (()=>true);
     setStatus(tr('api.loading'));
     try {
         const data = await fetch('/api/providers').then(r => r.json());
+        if(!valid() || apiPageDirty) return;
         providers = (data.providers || []).filter(item => item.id !== LINKFOX_PROVIDER_ID);
         providers.push(LINKFOX_PROVIDER);
         restoreProviderOrder();
-        selectedId = sortedProviders()[0]?.id || '';
+        if(!providers.some(item=>item.id===selectedId)) selectedId = sortedProviders()[0]?.id || '';
         renderEditor();
+        apiPageSession?.checkpoint();
         setStatus('');
     } catch(err) {
         setStatus(tr('api.loadFailed'));
@@ -3639,6 +3651,7 @@ function saveProviders(options={}){
     return providerSaveChain;
 }
 async function persistProviders(options={}){
+    const stillCurrent=apiPageSession?.guard() || (()=>true);
     try { syncEditor(); }
     catch(error) {
         setStatus(error.message || '请求地址不合法');
@@ -3806,6 +3819,8 @@ async function persistProviders(options={}){
         selectedId = provider()?.id || providers[0]?.id || '';
         if(options.render === false) renderProviderList();
         else renderEditor();
+        if(stillCurrent()) apiPageDirty=false;
+        apiPageSession?.checkpoint();
         setStatus(options.auto ? '已自动保存' : tr('api.saved'));
         // 广播变更，画布等其他 iframe 立即重新拉取最新平台/模型列表
         broadcastStudioApiChange('providers-changed');
@@ -3828,8 +3843,6 @@ window.addEventListener('message', event => {
     if(event.data?.type === 'studio-theme' && window.StudioTheme) window.StudioTheme.set(event.data.theme);
     if(event.data?.type === 'studio-lang' && window.StudioI18n) {
         window.StudioI18n.set(event.data.lang);
-        if(recommendInlineOpen) renderRecommendApi();
-        else renderEditor();
     }
 });
 window.addEventListener('pagehide', stopJimengLoginPolling);
@@ -3855,12 +3868,35 @@ window.addEventListener('studio-lang-change', () => {
     if(recommendInlineOpen) renderRecommendApi();
     else renderEditor();
 });
-window.onload = () => {
+function captureApiPage(){
+    const clean=value=>{
+        if(Array.isArray(value)) return value.map(clean);
+        if(value && typeof value==='object') return Object.fromEntries(Object.entries(value)
+            .filter(([key])=>!/(^api_key$|^wallet_api_key$|secret|password|authorization|access_token|access_key_id|^_clear)/i.test(key)).map(([key,item])=>[key,clean(item)]));
+        return value;
+    };
+    const draft=Object.fromEntries([...(settingsContent?.querySelectorAll('input[id],select[id],textarea[id]') || [])]
+        .filter(input=>!['password','file'].includes(input.type) && !/(key|secret|token|authorization|paste)/i.test(input.id))
+        .map(input=>[input.id,input.type==='checkbox'?input.checked:input.value]));
+    return {providers:clean(providers),selectedId,recommendInlineOpen,dirty:apiPageDirty,linkfoxDirty:apiLinkfoxDirty,draft,scroll:settingsContent?.scrollTop || 0};
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
     if(window.StudioTheme) window.StudioTheme.apply();
     if(window.StudioI18n) window.StudioI18n.apply();
     syncRecommendView();
-    loadProviders();
-    loadLinkfoxConfig();
+    apiPageSession?.watch(captureApiPage);
+    await apiPageSession?.restore(saved=>{
+        providers=saved.providers || [];selectedId=saved.selectedId || '';apiPageDirty=Boolean(saved.dirty);apiLinkfoxDirty=Boolean(saved.linkfoxDirty);
+        recommendInlineOpen=saved.recommendInlineOpen===true;syncRecommendView();
+        renderEditor();
+        Object.entries(saved.draft || {}).forEach(([id,value])=>{const input=document.getElementById(id);if(input){if(input.type==='checkbox')input.checked=Boolean(value);else input.value=value;}});
+        if(settingsContent) settingsContent.scrollTop=saved.scroll || 0;
+    });
+    if(apiPageDirty) scheduleProviderAutoSave(0);
+    void loadProviders();
+    void loadLinkfoxConfig();
+    linkfoxGatewayInput?.addEventListener('input',()=>{apiLinkfoxDirty=true;});
     linkfoxSaveBtn?.addEventListener('click', saveLinkfoxConfig);
     linkfoxCheckBtn?.addEventListener('click', checkLinkfoxConfig);
     linkfoxClearKeyBtn?.addEventListener('click', clearLinkfoxKey);
@@ -3911,4 +3947,4 @@ window.onload = () => {
         if(control.type === 'password' || control.type === 'file' || control === rhPasteInput) return;
         scheduleProviderAutoSave(0);
     });
-};
+},{once:true});

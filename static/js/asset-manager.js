@@ -1,3 +1,4 @@
+const assetPageSession = window.StudioPageState?.session('asset-manager');
 const root = document.getElementById('assetManagerRoot');
 const statusEl = document.getElementById('assetStatus');
 const refreshBtn = document.getElementById('refreshBtn');
@@ -1148,7 +1149,10 @@ async function refreshCanvasAssets(options={}){
         if(canvasAssetsRefreshInFlight === task) canvasAssetsRefreshInFlight = null;
     }
 }
+function captureAssetPage(){ return {activeTab, assetLibrary, promptLibrary, referenceSlotTypes, apiProviders, activeAssetLibraryId, activeAssetCategoryId, activeAssetClassFilter, openAssetClassGroup, activeWorkflowLibraryId, activeWorkflowCategoryId, activePromptLibraryId, activePromptCategory, assetTreeFocus, promptTreeFocus, selectedAssetId, selectedWorkflowId, selectedPromptId, selectedReferenceTypeId, selectedAssetIds, selectedWorkflowIds, selectedPromptIds, assetQuery, workflowQuery, promptQuery, sharedFolders, activeSharedFolderId, activeSharedFolderName, localFolders, localFolderMap, localItemMap, activeLocalFolderId, selectedLocalId, selectedLocalIds, localQuery, localAssets, localAssetsLoaded, localUploadTree, activeLocalUploadFolder, activeLocalUploadClassFilter, selectedLocalUploadId, selectedLocalUploadIds, localUploadQuery, canvasAssetsData, canvasAssetsLoaded, activeCanvasAssetCategory, activeCanvasAssetCanvasId, selectedCanvasAssetId, selectedCanvasAssetIds, canvasAssetQuery, canvasAssetSort, canvasAssetSortOrder, canvasAssetMediaType, scroll:[...document.querySelectorAll('.nav-scroll,.content-scroll,.detail-scroll')].map(el=>el.scrollTop)}; }
 async function loadAll(){
+    const valid=assetPageSession?.guard() || (()=>true);
+    const before=JSON.stringify([assetLibrary,promptLibrary,referenceSlotTypes,apiProviders]);
     setStatus('加载中...');
     const [assetData, promptData, referenceTypeData, providerData] = await Promise.all([
         apiJson('/api/asset-library'),
@@ -1156,24 +1160,17 @@ async function loadAll(){
         apiJson('/api/reference-slot-types').catch(() => ({types:[]})),
         apiJson('/api/runtime/providers').catch(() => ({providers:[]}))
     ]);
+    if(!valid()) return;
     assetLibrary = assetData.library || {libraries:[], categories:[]};
     promptLibrary = promptData.library || {libraries:[]};
     referenceSlotTypes = normalizeReferenceSlotTypes(referenceTypeData.types);
     apiProviders = Array.isArray(providerData.providers) ? providerData.providers : [];
     canvasAssetsData = canvasAssetsLoaded ? canvasAssetsData : {categories:[], canvases:[], items:[]};
-    // 刷新时默认回到「服装电商素材库」
     const libs = assetLibraries();
-    activeAssetLibraryId = (libs.find(lib => lib.id === 'default') || libs[0])?.id || '';
-    activeWorkflowLibraryId = (libs.find(lib => lib.id === 'default') || libs[0])?.id || '';
-    activeAssetCategoryId = '';
-    activeWorkflowCategoryId = '';
-    selectedAssetId = '';
-    selectedWorkflowId = '';
-    selectedAssetIds.clear();
-    selectedWorkflowIds.clear();
-    selectedPromptIds.clear();
-    selectedCanvasAssetIds.clear();
-    render();
+    if(!libs.some(lib=>lib.id===activeAssetLibraryId)) activeAssetLibraryId=(libs.find(lib=>lib.id==='default') || libs[0])?.id || '';
+    if(!libs.some(lib=>lib.id===activeWorkflowLibraryId)) activeWorkflowLibraryId=activeAssetLibraryId;
+    if(before!==JSON.stringify([assetLibrary,promptLibrary,referenceSlotTypes,apiProviders])) render();
+    assetPageSession?.checkpoint();
     setStatus('准备就绪');
 }
 async function ensureTabData(tab=activeTab){
@@ -1187,6 +1184,7 @@ async function ensureTabData(tab=activeTab){
     }
 }
 function render(){
+    assetPageSession?.schedule();
     if(activeTab === 'workflows') activeTab = 'assets';
     const scrollState = [...document.querySelectorAll('.nav-scroll,.content-scroll,.detail-scroll')]
         .map((el, index) => ({index, top:el.scrollTop, left:el.scrollLeft}));
@@ -4738,4 +4736,12 @@ window.addEventListener('canvas-realtime-message', event => handleCanvasAssetRea
 document.addEventListener('visibilitychange', () => {
     if(!document.hidden && activeTab === 'canvas-assets' && canvasAssetsLoadedToken !== canvasAssetsChangeToken) scheduleCanvasAssetsRefresh(0);
 });
-document.addEventListener('DOMContentLoaded', () => loadAll().catch(err => setStatus(err.message || '加载失败')));
+document.addEventListener('DOMContentLoaded', async () => {
+    assetPageSession?.watch(captureAssetPage);
+    await assetPageSession?.restore(saved=>{
+        ({activeTab, assetLibrary, promptLibrary, referenceSlotTypes, apiProviders, activeAssetLibraryId, activeAssetCategoryId, activeAssetClassFilter, openAssetClassGroup, activeWorkflowLibraryId, activeWorkflowCategoryId, activePromptLibraryId, activePromptCategory, assetTreeFocus, promptTreeFocus, selectedAssetId, selectedWorkflowId, selectedPromptId, selectedReferenceTypeId, selectedAssetIds, selectedWorkflowIds, selectedPromptIds, assetQuery, workflowQuery, promptQuery, sharedFolders, activeSharedFolderId, activeSharedFolderName, localFolders, localFolderMap, localItemMap, activeLocalFolderId, selectedLocalId, selectedLocalIds, localQuery, localAssets, localAssetsLoaded, localUploadTree, activeLocalUploadFolder, activeLocalUploadClassFilter, selectedLocalUploadId, selectedLocalUploadIds, localUploadQuery, canvasAssetsData, canvasAssetsLoaded, activeCanvasAssetCategory, activeCanvasAssetCanvasId, selectedCanvasAssetId, selectedCanvasAssetIds, canvasAssetQuery, canvasAssetSort, canvasAssetSortOrder, canvasAssetMediaType} = {...captureAssetPage(),...saved});
+        render();
+        requestAnimationFrame(()=>document.querySelectorAll('.nav-scroll,.content-scroll,.detail-scroll').forEach((el,index)=>{el.scrollTop=saved.scroll?.[index] || 0;}));
+    });
+    void loadAll().then(()=>ensureTabData(activeTab)).catch(err=>setStatus(err.message || '加载失败'));
+});

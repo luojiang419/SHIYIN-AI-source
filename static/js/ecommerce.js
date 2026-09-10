@@ -1,5 +1,6 @@
 (function(){
     'use strict';
+    const pageSession=window.StudioPageState?.session('ecommerce');
 
     const requestedWorkspace = new URLSearchParams(window.location.search).get('workspace');
     if(requestedWorkspace === 'free-creation'){
@@ -138,6 +139,7 @@
         settingsNeedsMigration:false,
         workspaces:Object.fromEntries(Object.keys(OPERATION_CONFIG).map(operation => [operation, createWorkspace()])),
         settingsSerialized:'',
+        preferencePending:false,
         settingsPersistTimer:null,
         preferenceWriteChain:Promise.resolve(),
         preferenceEchoGuardUntil:0,
@@ -326,7 +328,13 @@
 
     function loadSettings(serialized=''){
         try {
-            const raw = serialized || localStorage.getItem(SETTINGS_KEY) || localStorage.getItem(LEGACY_SETTINGS_KEY) || '{}';
+            const accountId=window.StudioPageState?.accountId;
+            let scoped='';
+            try {scoped=(window.top.RuntimeSync || window.RuntimeSync)?.state?.values?.ecommerce_settings || '';}catch(error){}
+            const legacy=window.StudioPageState
+                ? (accountId ? localStorage.getItem(`${SETTINGS_KEY}:account:${accountId}`) : '')
+                : localStorage.getItem(SETTINGS_KEY) || localStorage.getItem(LEGACY_SETTINGS_KEY);
+            const raw = serialized || scoped || legacy || '{}';
             const saved = JSON.parse(raw);
             const schemaVersion = Number(saved.schema_version || 0);
             state.settingsNeedsMigration = schemaVersion !== SETTINGS_SCHEMA_VERSION;
@@ -406,13 +414,8 @@
         }]));
     }
 
-    function persistSettings(options={}){
-        const shouldSync = options.sync !== false;
-        if(state.settingsPersistTimer) {
-            clearTimeout(state.settingsPersistTimer);
-            state.settingsPersistTimer = null;
-        }
-        const snapshot = {
+    function snapshotEcommerceSettings(){
+        return {
             schema_version:SETTINGS_SCHEMA_VERSION,
             operation:state.operation,
             mode:state.mode,
@@ -427,10 +430,26 @@
             batch_outfit:window.EcommerceBatchOutfit?.snapshot?.() || state.batchOutfit,
             workspaces:serializableWorkspaces(),
         };
+    }
+
+    function persistSettings(options={}){
+        pageSession?.mark();
+        const shouldSync = options.sync !== false;
+        if(state.settingsPersistTimer) {
+            clearTimeout(state.settingsPersistTimer);
+            state.settingsPersistTimer = null;
+        }
+        const snapshot = snapshotEcommerceSettings();
         const serialized = JSON.stringify(snapshot);
         state.settingsSerialized = serialized;
+        state.preferencePending = true;
+        pageSession?.checkpoint();
         state.preferenceEchoGuardUntil = Math.max(state.preferenceEchoGuardUntil, Date.now() + 1500);
-        try { localStorage.setItem(SETTINGS_KEY, serialized); } catch(e) {}
+        try {
+            localStorage.setItem(SETTINGS_KEY,serialized);
+            const accountId=window.StudioPageState?.accountId;
+            if(accountId)localStorage.setItem(`${SETTINGS_KEY}:account:${accountId}`,serialized);
+        } catch(e) {}
         if(shouldSync) syncPreferenceSnapshot(serialized);
         else scheduleSettingsPersistence(Number(options.delay || 700));
     }
@@ -451,13 +470,16 @@
     }
 
     function syncPreferenceSnapshot(serialized, attempt=0){
+        if(serialized!==state.settingsSerialized) return;
         if(IS_FREE_CREATION) return;
         let runtime = window.RuntimeSync || null;
         if(!runtime) {
             try { runtime = window.top?.RuntimeSync || null; } catch(e) { runtime = null; }
         }
         if(runtime?.setPreference) {
-            const write = () => Promise.resolve(runtime.setPreference('ecommerce_settings', serialized)).catch(() => {
+            const write = () => Promise.resolve(runtime.setPreference('ecommerce_settings', serialized)).then(result=>{
+                if(result && state.settingsSerialized===serialized){state.preferencePending=false;pageSession?.checkpoint();}
+            }).catch(() => {
                 if(attempt < 5) setTimeout(() => syncPreferenceSnapshot(serialized, attempt + 1), 120);
             });
             state.preferenceWriteChain = state.preferenceWriteChain.then(write, write);
@@ -492,7 +514,7 @@
     }
 
     function shouldIgnoreIncomingSettings(){
-        return Date.now() < state.preferenceEchoGuardUntil || isTextEditingElement();
+        return state.preferencePending || Date.now() < state.preferenceEchoGuardUntil || isTextEditingElement();
     }
 
     function applyIncomingSettings(serialized){
@@ -3326,6 +3348,7 @@
     }
 
     function storeTask(task){
+        pageSession?.schedule();
         const id = taskIdOf(task);
         if(!id) return null;
         const previous = state.tasksById.get(id) || {};
@@ -3629,8 +3652,10 @@
     }
 
     async function loadTask(taskId, closeDrawer=true){
+        const valid=pageSession?.guard() || (()=>true);
         try {
             const task = await fetchJson(`/api/ecommerce/tasks/${encodeURIComponent(taskId)}`);
+            if(!valid()) return;
             storeTask(task);
             captureWorkspace();
             if(OPERATION_CONFIG[task.operation]) state.operation = task.operation;
@@ -3717,6 +3742,7 @@
             (response.tasks || []).filter(taskMatchesWorkspace).forEach(storeTask);
             renderTaskList();
             renderCandidateRail();
+            pageSession?.checkpoint();
             scheduleTaskPolling(100);
             return state.tasks;
         } catch(error) {
@@ -4017,8 +4043,11 @@
     }
 
     async function loadCapabilities(){
+        const valid=pageSession?.guard() || (()=>true);
         try {
             state.capabilities = await fetchJsonWithTimeout('/api/ecommerce/capabilities');
+            pageSession?.checkpoint();
+            if(!valid()) return;
             state.referenceSlotTypes = Array.isArray(state.capabilities.reference_slot_types) ? state.capabilities.reference_slot_types : [];
             const reconciledSlotTypes = reconcileUniversalSlotTypes();
             updateCapabilityStatus();
@@ -4028,6 +4057,7 @@
             updateRouteSummary();
             if(reconciledSlotTypes) persistSettings();
         } catch(error) {
+            if(state.capabilities || !valid()) return;
             state.capabilities = {models:[],providers:[],routes:{},pose_presets:[],background_presets:[],studio_reference_presets:[]};
             state.referenceSlotTypes = [];
             updateCapabilityStatus();
@@ -4197,7 +4227,12 @@
         configureWorkspaceVariant();
         renderInitialWorkspace();
         // 偏好同步不能阻塞首屏；服务端值到达后通过 canvas.preferences 事件覆盖本地快照。
-        void waitForPreferenceBootstrap().catch(() => {});
+        const preferenceBootstrapValid=pageSession?.guard() || (()=>true);
+        void waitForPreferenceBootstrap().then(()=>{
+            if(!preferenceBootstrapValid() || shouldIgnoreIncomingSettings())return;
+            let incoming='';try{incoming=(window.top.RuntimeSync || window.RuntimeSync)?.state?.values?.ecommerce_settings || '';}catch(error){}
+            if(incoming)applyIncomingSettings(String(incoming));
+        }).catch(() => {});
         loadSettings();
         restoreWorkspace(state.operation);
         window.EcommerceBatchOutfit?.hydrate?.(state.batchOutfit);
@@ -4210,6 +4245,26 @@
         bindUniversalDockDrop();
         bindReferencePreview();
         bindComparison();
+        pageSession?.watch(()=>({settings:snapshotEcommerceSettings(),pending:state.preferencePending,capabilities:state.capabilities,tasks:state.tasks,
+            scroll:[el.inputSlots?.scrollLeft || 0,document.scrollingElement?.scrollTop || 0]}));
+        const restored=await pageSession?.restore(saved=>{
+            loadSettings(JSON.stringify(saved.settings || {}));
+            state.preferencePending=Boolean(saved.pending);
+            state.capabilities=saved.capabilities || null;
+            state.referenceSlotTypes=state.capabilities?.reference_slot_types || [];
+            (saved.tasks || []).forEach(storeTask);
+            Object.values(state.workspaces).forEach(workspace=>{workspace.currentTask=state.tasksById.get(workspace.taskId) || null;});
+            restoreWorkspace(state.operation);
+            window.EcommerceBatchOutfit?.hydrate?.(state.batchOutfit);
+            syncGenerationParameterControls();updateTabs();renderInputs();renderOperationControls();
+            populateModelSelectors();updateCapabilityStatus();renderTaskList();renderCandidateRail();
+            if(state.currentTask) renderTaskResult(state.currentTask);
+            if(el.inputSlots) el.inputSlots.scrollLeft=saved.scroll?.[0] || 0;
+            if(document.scrollingElement) document.scrollingElement.scrollTop=saved.scroll?.[1] || 0;
+            if(el.generateButton && state.capabilities) el.generateButton.disabled=false;
+        });
+        if(restored && state.preferencePending) persistSettings();
+        const startupValid=pageSession?.guard() || (()=>true);
         // 能力和历史任务在后台并行加载，先让页面退出 busy 状态，避免慢接口造成整页空白。
         const capabilitiesTask = loadCapabilities();
         const tasksTask = loadTasks();
@@ -4217,7 +4272,7 @@
         el.ecommercePage?.setAttribute('aria-busy', 'false');
         void Promise.allSettled([capabilitiesTask, tasksTask]).then(async () => {
             const savedTaskId = activeWorkspace().taskId || sessionStorage.getItem(CURRENT_TASK_KEY);
-            if(savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
+            if(!restored && startupValid() && savedTaskId && state.tasks.some(item => item.id === savedTaskId)) await loadTask(savedTaskId, false);
             if(el.generateButton) el.generateButton.disabled = false;
         }).catch(error => {
             console.warn('ecommerce deferred bootstrap failed', error);

@@ -21,13 +21,13 @@ def test_canvas_scripts_keep_order_without_document_write():
     scripts = re.findall(r'<script([^>]*?)src="([^\"]+)"[^>]*>', html)
     assert scripts[0][1].startswith('/static/js/canvas-startup.js?')
     assert html.index('canvas-startup.js') < html.index('rel="stylesheet"')
-    assert all('defer' in attrs for attrs, _ in scripts[1:])
+    assert all('defer' in attrs or url.startswith('/static/js/studio-page-state.js?') for attrs, url in scripts[1:])
     paths = [url.split('?')[0] for _, url in scripts]
     assert '/static/js/i18n.js' not in paths
     assert paths.index('/static/js/i18n-core.js') < paths.index('/static/js/i18n/canvas.js')
     assert paths.index('/static/js/canvas-special-nodes.js') < paths.index('/static/js/canvas.js')
     assert paths.index('/static/js/canvas-legacy-migration.js') < paths.index('/static/js/canvas.js')
     assert '/static/js/i18n/smart-canvas.js' in paths  # 提示词库仍使用 smart.* 翻译。
-    assert paths[-1] == '/static/js/canvas.js'
+    assert paths.index('/static/js/canvas.js') < paths.index('/static/js/canvas-connection-interactions.js')
     for path in paths:
         assert (ROOT / path.lstrip('/')).is_file()

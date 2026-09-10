@@ -505,7 +505,19 @@ function openCanvas(c){
     // 画布编辑器是当前页面最重的入口；点击后立即让宿主停止其它 iframe 预热，
     // 避免列表导航与 ecommerce/works 等页面同时争用 WebView 主线程和连接池。
     try { window.parent?.postMessage({type:'studio-preload-pause', reason:'canvas-navigation'}, '*'); } catch(e) {}
-    window.location.href = `/static/canvas.html?id=${enc}&project=${project}&v=2026.08.14.canvas-neutral-no-blue.1&feature=shortcuts-runtime.2`;
+    const url = `/static/canvas.html?id=${enc}&project=${project}&v=2026.08.14.canvas-neutral-no-blue.1&feature=shortcuts-runtime.2`;
+    try {
+        const host = window.parent === window ? window.CanvasSessionHost : window.parent.CanvasSessionHost;
+        if(host?.open(url)) return;
+    } catch(e) {}
+    window.location.href = url;
+}
+
+function invalidateCanvasSession(id){
+    try {
+        const host = window.parent === window ? window.CanvasSessionHost : window.parent.CanvasSessionHost;
+        host?.invalidate(id);
+    } catch(e) {}
 }
 
 /* ===== Card create flow ===== */
@@ -861,6 +873,7 @@ async function deleteCanvas(id){
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if(!res.ok) throw new Error('delete failed');
+        invalidateCanvasSession(id);
         canvases = canvases.filter(x => x.id !== id);
         renderBoard();
         renderProjects();
@@ -957,6 +970,7 @@ async function purgeCanvas(id){
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(id)}/purge`, { method: 'DELETE' });
         if(!res.ok) throw new Error('purge failed');
+        invalidateCanvasSession(id);
         deletedCanvases = deletedCanvases.filter(c => c.id !== id);
         renderTrash();
         const n = deletedCanvases.length;
@@ -1029,6 +1043,13 @@ document.addEventListener('keydown', e => {
 // language switch from parent (index.html) via postMessage
 window.addEventListener('message', event => {
     if(event.origin && event.origin !== location.origin) return;
+    if(event.data?.type === 'canvas-session-manager'){
+        if(event.data.project){
+            currentProjectId = event.data.project;
+            rememberProjectId(currentProjectId);
+        }
+        void loadAll({preserveViewport:true});
+    }
     handleCanvasListSync(event.data);
     if(event.data?.type === 'studio-lang'){
         if(event.data.lang && window.StudioI18n) StudioI18n.set(event.data.lang);

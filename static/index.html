@@ -2621,6 +2621,8 @@
             if(!iframe) return;
             const active = iframe.classList.contains('active');
             iframe.dataset.routeActive = active ? '1' : '0';
+            iframe.inert = !active;
+            iframe.setAttribute('aria-hidden', String(!active));
             if(!iframe.src) return;
             try {
                 iframe.contentWindow?.postMessage({
@@ -2746,7 +2748,7 @@
                     last:Number(frame.dataset.lastActiveAt || 0),
                     dirty:frame.dataset.studioDirty === '1',
                 }))
-                .filter(item => !item.dirty && !IFRAME_PROTECTED_PAGES.has(item.pageId))
+                .filter(item => !item.dirty && item.frame.dataset.canvasSessionResident !== '1' && !IFRAME_PROTECTED_PAGES.has(item.pageId))
                 .sort((a,b) => b.last - a.last);
             frames.slice(IFRAME_KEEP_RECENT).forEach(item => {
                 if(now - item.last < IFRAME_IDLE_UNLOAD_MS) return;
@@ -2917,6 +2919,7 @@
         }
 
         async function logoutStudioAccount() {
+            window.CanvasSessionHost?.clear();
             try { await fetch('/api/account/logout', {method:'POST'}); }
             finally {
                 await window.ShiyinMediaCache?.clear?.();
@@ -3826,6 +3829,7 @@
             }
         }
     </script>
+    <script src="/static/js/canvas-session-host.js?v=2026.09.10.1"></script>
     <script src="/static/js/desktop-updater.js?v=1.0.74"></script>
 </body>
 

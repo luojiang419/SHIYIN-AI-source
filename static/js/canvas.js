@@ -115,6 +115,7 @@ function classicMediaViewportEntry(element){
     };
 }
 function classicPreviewCandidate(img, allowLoading=false){
+    if(canvasSessionSuspended) return null;
     const preview = img?.dataset?.previewSrc || '';
     if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
     if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
@@ -138,7 +139,7 @@ function ensureClassicMediaQueue(){
         imageTimeoutMs:20000,
         videoTimeoutMs:45000,
         maxAttempts:2,
-        hasPending:() => Boolean(nodesEl?.querySelector?.('img[data-preview-src][data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"]')),
+        hasPending:() => !canvasSessionSuspended && Boolean(nodesEl?.querySelector?.('img[data-preview-src][data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"]')),
         collectCandidates:() => classicMediaElementsInWindow().map(img => classicPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(classicPreviewCandidate(img, true)),
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
@@ -172,7 +173,7 @@ function ensureClassicMediaResidency(){
         maxResidentPixels:CLASSIC_MEDIA_RESIDENCY_PIXELS,
         isViewportReady:() => {
             const rect = board?.getBoundingClientRect?.();
-            return Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
+            return !canvasSessionSuspended && Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
         },
         collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
             .map(classicMediaViewportEntry).filter(Boolean),
@@ -395,7 +396,9 @@ function refreshCanvasLanguage(){
     if(canvas) render();
 }
 async function refreshCanvasConfigFromSettings(){
+    if(canvasSessionSuspended){ canvasSessionConfigDirty = true; return; }
     if(!await loadConfig()) return;
+    if(canvasSessionSuspended){ canvasSessionConfigDirty = true; return; }
     (nodes || []).forEach(node => {
         sanitizeImageNodeProviderModel(node);
         sanitizeVideoNodeProviderModel(node);
@@ -417,7 +420,9 @@ function resumeCanvasRouteMedia(){
     });
 }
 function setCanvasRouteActive(active){
+    const wasSuspended = canvasSessionSuspended;
     canvasRouteActive = Boolean(active);
+    canvasSessionSuspended = !canvasRouteActive || document.hidden;
     window.CanvasStartup?.setVisible(canvasRouteActive && !document.hidden);
     document.documentElement.classList.toggle('studio-route-inactive', !canvasRouteActive);
     syncClassicParentShortcutListeners();
@@ -430,9 +435,20 @@ function setCanvasRouteActive(active){
             outputTimer = null;
         }
         pauseCanvasRouteMedia();
+        saveLocalViewport();
+        if(canvas && localCanvasDirty && !savingCanvasNow){
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            void saveCanvas();
+        }
         return;
     }
     resumeCanvasRouteMedia();
+    if(wasSuspended) scheduleClassicMediaQueue();
+    if(canvasSessionConfigDirty){
+        canvasSessionConfigDirty = false;
+        void refreshCanvasConfigFromSettings();
+    }
     if(canvas){
         startCanvasRemotePolling();
         checkRemoteCanvasVersion();
@@ -450,9 +466,8 @@ window.addEventListener('message', event => {
     }
     if(event.data?.type === 'shortcut-bindings:changed') applyClassicShortcutOverrides(event.data.bindings || {});
     if(event.data?.type === 'canvas-focus'){
-        // 从其他标签页切换回画布时，重新拉取工作流列表并刷新节点
-        refreshCanvasConfigFromSettings();
-        if(canvas) syncRemoteCanvasNow();
+        // 重新聚焦只探测版本；配置变更由 providers/platform 广播驱动。
+        if(canvas) void checkRemoteCanvasVersion();
     }
 });
 window.addEventListener('pagehide', () => {
@@ -465,7 +480,8 @@ document.addEventListener('visibilitychange', () => setCanvasRouteActive(canvasR
 window.addEventListener('pageshow', event => {
     if(event.persisted){
         const id = new URLSearchParams(window.location.search).get('id');
-        if(id) void openCanvas(id);
+        if(id && canvas?.id === id) setCanvasRouteActive(canvasRouteActive);
+        else if(id) void openCanvas(id);
     }
 });
 window.addEventListener('canvas-realtime-message', event => {
@@ -864,7 +880,10 @@ const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';
 const CANVAS_COLOR_OPTIONS = ['red','orange','amber','green','teal','blue','violet','pink','slate'];
 // 先绑定返回，避免编辑器后续初始化较慢时丢失来源项目。
 backToManagerBtn?.addEventListener('click', () => {
-    window.location.href = canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject());
+    const project = canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject();
+    try { if(window.parent !== window && window.parent.CanvasSessionHost?.back(window, project)) return; }
+    catch(e) {}
+    window.location.href = canvasListUrlForProject(project);
 });
 let localCanvasDirty = false;
 let savingCanvasNow = false;
@@ -886,6 +905,8 @@ let remoteSyncTimer = null;
 let remoteSyncInterval = null;
 let remoteSyncBusy = false;
 let canvasRouteActive = window.top === window;
+let canvasSessionSuspended = false;
+let canvasSessionConfigDirty = false;
 let classicParentShortcutWindow = null;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
@@ -3882,6 +3903,12 @@ async function openCanvas(id){
         setStatus(tr('canvas.openFailed'));
         console.error(e);
         if(e.resource === 'canvas' && e.status === 404){
+            try {
+                if(window.parent !== window && window.parent.CanvasSessionHost){
+                    window.parent.CanvasSessionHost.invalidate(id);
+                    return;
+                }
+            } catch(ignore) {}
             window.location.replace(canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject()));
         } else {
             showCanvasStartupNotice(id, e);
@@ -3933,6 +3960,8 @@ function classicCanvasTextInputActive(){
 }
 function applyRemoteCanvasData(remote){
     if(!remote || !canvas || remote.id !== canvas.id) return;
+    if(Number(remote.updated_at || 0) < Number(lastCanvasUpdatedAt || 0)
+        || (remote.revision && Number(remote.revision) < Number(canvas.revision || 0))) return;
     if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain){
         clearTimeout(remoteSyncTimer);
         remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1000);
@@ -4037,23 +4066,28 @@ async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
     }
 }
 async function syncRemoteCanvasNow(){
-    if(!canvas) return;
+    if(!canvas || canvasSessionSuspended) return;
     if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain || classicCanvasTextInputActive()){
         clearTimeout(remoteSyncTimer);
         remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 800);
         return;
     }
+    const requestCanvas = canvas;
+    const requestSequence = localCanvasSaveSequence;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}`);
+        const res = await fetch(`/api/canvases/${requestCanvas.id}`);
         if(!res.ok) throw new Error(tr('canvas.openFailed'));
         const data = await res.json();
+        // 即便新编辑已保存、dirty 已清空，也不能应用编辑之前发出的旧请求。
+        if(canvas !== requestCanvas || localCanvasSaveSequence !== requestSequence
+            || canvasSessionSuspended || classicCanvasTextInputActive()) return;
         const remote = data.canvas;
-        if(Number(remote?.updated_at || 0) >= Number(lastCanvasUpdatedAt || 0)){
+        if(Number(remote?.updated_at || 0) > Number(lastCanvasUpdatedAt || 0)){
             applyRemoteCanvasData(remote);
         }
     } catch(e) {
         console.error(e);
-        setStatus('Sync failed');
+        if(canvas === requestCanvas && !canvasSessionSuspended) setStatus('Sync failed');
     }
 }
 async function checkRemoteCanvasVersion(){
@@ -4061,10 +4095,18 @@ async function checkRemoteCanvasVersion(){
     if(!canvas || applyingRemoteCanvas || remoteSyncBusy) return;
     if(document.hidden) return;
     remoteSyncBusy = true;
+    const requestCanvasId = canvas.id;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}/meta`);
+        const res = await fetch(`/api/canvases/${requestCanvasId}/meta`);
+        if(res.status === 404 && canvas?.id === requestCanvasId){
+            if(window.CanvasSessionLifecycle.state().evictable){
+                try { window.parent.CanvasSessionHost?.invalidate(requestCanvasId); } catch(e) {}
+            }
+            return;
+        }
         if(!res.ok) throw new Error('meta failed');
         const meta = await res.json();
+        if(canvas?.id !== requestCanvasId) return;
         const remoteUpdatedAt = Number(meta.updated_at || 0);
         if(remoteUpdatedAt > Number(lastCanvasUpdatedAt || 0)){
             await syncRemoteCanvasNow();
@@ -4088,6 +4130,7 @@ function stopCanvasRemotePolling(){
 }
 function handleCanvasUpdatedMessage(data){
     if(!canvas || !data || (data.type !== 'canvas_updated' && !(data.type === 'entity.changed' && data.topic === 'canvas'))) return;
+    if(canvasSessionSuspended) return;
     const remoteActorId = data.actor_id || data.client_id;
     const remoteCanvasId = data.entity_id || data.canvas_id;
     if(remoteActorId && remoteActorId === CLIENT_ID) return;
@@ -9020,6 +9063,7 @@ function restoreMediaPlaybackState(media, state){
             try { media.currentTime = state.currentTime; } catch(e) {}
         }
         if(!state.paused && typeof media.play === 'function'){
+            if(canvasSessionSuspended){ media.dataset.routePausedByStudio = '1'; return; }
             const promise = media.play();
             if(promise?.catch) promise.catch(() => {});
         }
@@ -14146,7 +14190,7 @@ function renderLLMNodePane(container, node){
     const fitInput = () => fitAutoTextNode(node, container.closest('.node'), [inputEl], {minLines:3});
     bindScrollableText(inputEl);
     if(!isReadonly){
-        inputEl.oninput = e => { node.userInput = e.target.value; fitInput(); };
+        inputEl.oninput = e => { node.userInput = e.target.value; fitInput(); scheduleSave(); };
     }
     bindScrollableText(container.querySelector('.llm-result-output'));
     container.querySelector('.llm-pane-resizer').onmousedown = e => startLLMPaneResize(e, node);
@@ -24838,6 +24882,17 @@ function outputMediaDragPayload(dataTransfer){
 }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 function escapeAttr(str){ return escapeHtml(str); }
+
+window.CanvasSessionLifecycle = {
+    setActive:setCanvasRouteActive,
+    state:() => ({
+        id:canvas?.id || '',
+        evictable:!localCanvasDirty && !savingCanvasNow && !saveCanvasAgain
+            && !saveTimer && !saveIdleHandle && !applyingRemoteCanvas
+            && !activeCanvasTaskPolls.size && !activeEcommerceLookbookPolls.size && !activeCanvasVideoTaskPolls.size
+            && !nodes.some(node => node.running || node.runStatus === 'running' || node._pending?.length)
+    })
+};
 
 async function initializeCanvasPage(){
     window.CanvasPerformance?.record?.('classic.editor-ready', performance.now());

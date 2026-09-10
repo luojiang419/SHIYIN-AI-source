@@ -449,7 +449,7 @@ dependencies = [
 
 [[package]]
 name = "canvas-desktop"
-version = "1.0.433"
+version = "1.0.434"
 dependencies = [
  "arboard",
  "open",

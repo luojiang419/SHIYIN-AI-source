@@ -19,6 +19,7 @@
         total:0,
         nextCursor:'',
         loading:false,
+        loadError:'',
         tab:'all',
         search:'',
         kind:'',
@@ -284,7 +285,8 @@
     }
     function renderVirtual(force=false){
         const metrics = gridMetrics();
-        const totalRows = Math.ceil(Math.max(state.total,state.works.length) / metrics.columns);
+        // API total 仅用于计数；未收到的作品不能撑开可滚动的空白占位区。
+        const totalRows = Math.ceil(state.works.length / metrics.columns);
         const scrollTop = el.worksGrid.scrollTop || 0;
         const visibleRows = Math.ceil((el.worksGrid.clientHeight || 600) / metrics.rowHeight);
         const startRow = Math.max(0, Math.floor(scrollTop / metrics.rowHeight) - OVERSCAN_ROWS);
@@ -292,8 +294,8 @@
         const start = startRow * metrics.columns;
         const end = Math.min(state.works.length, endRow * metrics.columns);
         el.worksCount.textContent=String(state.total || state.works.length);
-        el.worksGrid.classList.toggle('hidden',state.total===0 && !state.loading);
-        el.worksEmpty.classList.toggle('hidden',state.total!==0 || state.loading);
+        el.worksGrid.classList.toggle('hidden',state.total===0 && !state.loading && !state.loadError);
+        el.worksEmpty.classList.toggle('hidden',state.total!==0 || state.loading || Boolean(state.loadError));
         if(el.worksDownloadAll) el.worksDownloadAll.disabled = !(state.total || state.works.length);
         if(el.worksClearAll) el.worksClearAll.disabled = !(state.total || state.works.length);
         el.worksTabs.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===state.tab));
@@ -302,14 +304,20 @@
         if(!force && state.renderStart === start && state.renderEnd === end) return;
         state.renderStart = start;
         state.renderEnd = end;
-        const spacerHeight = Math.max(0, totalRows * metrics.rowHeight - GRID_GAP);
+        const contentHeight = Math.max(0, totalRows * metrics.rowHeight - GRID_GAP);
+        const hasFooter = state.loading || state.nextCursor || state.loadError;
+        const spacerHeight = contentHeight + (hasFooter ? 64 : 0);
         const cards = state.works.slice(start,end).map((item,i)=>renderCard(item,start+i,metrics)).join('');
-        const loading = state.loading ? '<div class="works-loading">加载中...</div>' : '';
+        const footerStyle = `top:${contentHeight + 12}px;bottom:auto`;
+        const loading = state.loading ? `<div class="works-loading" role="status" style="${footerStyle}">加载中...</div>`
+            : hasFooter ? `<button type="button" class="works-loading" data-works-load-more style="${footerStyle}">${state.loadError ? `${escapeHtml(state.loadError)} · 点击重试` : '加载更多'}</button>` : '';
         el.worksGrid.innerHTML = `<div class="works-virtual-spacer" style="position:relative;height:${spacerHeight}px">${cards}${loading}</div>`;
         bindGridActions();
+        el.worksGrid.querySelector('[data-works-load-more]')?.addEventListener('click',()=>loadWorks({reset:!state.nextCursor}));
     }
     let worksLoadId = 0;
     let worksLoadController = null;
+    const completedPageCursors = new Set();
     async function loadWorks({reset=false}={}){
         if(state.loading && !reset) return;
         if(!reset && !state.nextCursor) return;
@@ -317,31 +325,49 @@
         worksLoadController = new AbortController();
         const loadId = ++worksLoadId;
         state.loading = true;
+        state.loadError = '';
+        let received = false;
         el.worksRefresh.disabled=true;
         try {
             if(reset){
                 state.works=[];
                 state.total=0;
                 state.nextCursor='';
+                completedPageCursors.clear();
                 state.selectedIds.clear();
                 state.renderStart=-1;
                 state.renderEnd=-1;
                 el.worksGrid.scrollTop=0;
             }
             renderVirtual(true);
-            const data=await fetchJson(`/api/works?${queryParams(reset?'':state.nextCursor)}`,{cache:'no-store',signal:worksLoadController.signal});
+            const requestedCursor = reset ? '' : state.nextCursor;
+            const data=await fetchJson(`/api/works?${queryParams(requestedCursor)}`,{cache:'no-store',signal:worksLoadController.signal});
             if(loadId !== worksLoadId) return;
-            state.works = reset ? (data.works || []) : [...state.works, ...(data.works || [])];
+            const merged = reset ? (data.works || []) : [...state.works, ...(data.works || [])];
+            state.works = [...new Map(merged.map(item=>[item.id,item])).values()];
             sortWorksForDisplay();
             state.total = Number(data.total || state.works.length);
             state.nextCursor = data.next_cursor || '';
+            completedPageCursors.add(requestedCursor);
+            if(state.nextCursor && completedPageCursors.has(state.nextCursor)){
+                state.nextCursor = '';
+                throw new Error('作品分页未前进，请刷新列表');
+            }
             renderKinds();
-        } catch(error){ if(loadId === worksLoadId && error.name !== 'AbortError') toast(error.message); }
+            received = true;
+        } catch(error){
+            if(loadId === worksLoadId && error.name !== 'AbortError'){
+                state.loadError = error.message;
+                toast(error.message);
+            }
+        }
         finally {
             if(loadId !== worksLoadId) return;
             state.loading=false;
             el.worksRefresh.disabled=false;
             renderVirtual(true);
+            // 短页或高屏幕可能没有新的 scroll 事件；成功后检查是否还需补足视口。
+            if(received) requestAnimationFrame(handleScroll);
         }
     }
     function scheduleReload(){
@@ -573,7 +599,7 @@
     function handleScroll(){
         renderVirtual();
         const remaining = el.worksGrid.scrollHeight - el.worksGrid.scrollTop - el.worksGrid.clientHeight;
-        if(remaining < 1200 && state.nextCursor && !state.loading) loadWorks();
+        if(remaining < 1200 && state.nextCursor && !state.loading && !state.loadError) loadWorks();
     }
     function bind(){
         el.worksRefresh.addEventListener('click',()=>loadWorks({reset:true}));

@@ -115,10 +115,10 @@
         return value ? new Date(value*1000).toLocaleString() : '-';
     }
     function queryParams(cursor=''){
-        const params = new URLSearchParams({limit:String(PAGE_LIMIT),include_trashed:'true'});
+        const params = new URLSearchParams({limit:String(PAGE_LIMIT),include_trashed:state.tab === 'trash' ? 'true' : 'false'});
         if(cursor) params.set('cursor', cursor);
         if(state.tab === 'favorite') params.set('favorite','true');
-        if(state.tab === 'trash') params.set('include_trashed','true');
+        if(state.tab === 'trash') params.set('trashed_only','true');
         if(state.kind) params.set('kind', state.kind);
         if(state.search.trim()) params.set('search', state.search.trim());
         params.set('sort_order', state.sortOrder);
@@ -287,18 +287,20 @@
     function renderVirtual(force=false){
         const metrics = gridMetrics();
         // API total 仅用于计数；未收到的作品不能撑开可滚动的空白占位区。
-        const totalRows = Math.ceil(state.works.length / metrics.columns);
+        const visibleWorks = state.works.filter(serverVisible);
+        const visibleTotal = Math.max(0, state.total - (state.works.length - visibleWorks.length));
+        const totalRows = Math.ceil(visibleWorks.length / metrics.columns);
         const scrollTop = el.worksGrid.scrollTop || 0;
         const visibleRows = Math.ceil((el.worksGrid.clientHeight || 600) / metrics.rowHeight);
         const startRow = Math.max(0, Math.floor(scrollTop / metrics.rowHeight) - OVERSCAN_ROWS);
         const endRow = Math.min(totalRows, startRow + visibleRows + OVERSCAN_ROWS * 2);
         const start = startRow * metrics.columns;
-        const end = Math.min(state.works.length, endRow * metrics.columns);
-        el.worksCount.textContent=String(state.total || state.works.length);
-        el.worksGrid.classList.toggle('hidden',state.total===0 && !state.loading && !state.loadError);
-        el.worksEmpty.classList.toggle('hidden',state.total!==0 || state.loading || Boolean(state.loadError));
-        if(el.worksDownloadAll) el.worksDownloadAll.disabled = !(state.total || state.works.length);
-        if(el.worksClearAll) el.worksClearAll.disabled = !(state.total || state.works.length);
+        const end = Math.min(visibleWorks.length, endRow * metrics.columns);
+        el.worksCount.textContent=String(visibleTotal);
+        el.worksGrid.classList.toggle('hidden',visibleTotal===0 && !state.loading && !state.loadError);
+        el.worksEmpty.classList.toggle('hidden',visibleTotal!==0 || state.loading || Boolean(state.loadError));
+        if(el.worksDownloadAll) el.worksDownloadAll.disabled = !visibleTotal;
+        if(el.worksClearAll) el.worksClearAll.disabled = !visibleTotal;
         el.worksTabs.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===state.tab));
         renderViewControls();
         renderSelectionActions();
@@ -308,7 +310,7 @@
         const contentHeight = Math.max(0, totalRows * metrics.rowHeight - GRID_GAP);
         const hasFooter = state.loading || state.nextCursor || state.loadError;
         const spacerHeight = contentHeight + (hasFooter ? 64 : 0);
-        const cards = state.works.slice(start,end).map((item,i)=>renderCard(item,start+i,metrics)).join('');
+        const cards = visibleWorks.slice(start,end).map((item,i)=>renderCard(item,start+i,metrics)).join('');
         const footerStyle = `top:${contentHeight + 12}px;bottom:auto`;
         const loading = state.loading ? `<div class="works-loading" role="status" style="${footerStyle}">加载中...</div>`
             : hasFooter ? `<button type="button" class="works-loading" data-works-load-more style="${footerStyle}">${state.loadError ? `${escapeHtml(state.loadError)} · 点击重试` : '加载更多'}</button>` : '';
@@ -414,12 +416,12 @@
         return data.work;
     }
     async function setTrashed(workId,trashed){
-        if(trashed && !window.confirm(t('works.trashConfirm'))) return;
         try {
             await updateMetadata(workId,{trashed});
             if(state.compareWork?.id===workId && trashed) closeCompare();
             toast(t(trashed?'works.trashedDone':'works.restoredDone'));
-            if(state.tab !== 'trash') scheduleReload();
+            state.selectedIds.delete(workId);
+            scheduleReload();
         } catch(error){ toast(error.message); }
     }
     async function revealWork(workId){
@@ -523,10 +525,14 @@
         const video=el.worksPreviewVideo;
         const isSpace=event.code==='Space' || event.key===' ';
         const isPreviewVideoOpen=Boolean(el.worksPreviewDialog?.open && video && !video.hidden);
+        const fullscreen=document.fullscreenElement;
+        const isVideoFullscreen=Boolean(fullscreen && (fullscreen===video || fullscreen.contains(video)));
         const isEditableTarget=event.target?.matches?.('input,textarea,select,[contenteditable="true"]');
-        if(!isPreviewVideoOpen || !isSpace || isEditableTarget || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+        if(!isPreviewVideoOpen || !isSpace || (!isVideoFullscreen && isEditableTarget) || event.altKey || event.ctrlKey || event.metaKey) return;
+        // 在原生 video 控件处理之前接管；keyup 也消费，避免聚焦按钮再次触发 click。
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if(event.type==='keyup' || event.repeat) return;
         if(video.paused || video.ended) video.play().catch(error=>toast(error.message || t('works.preview')));
         else video.pause();
     }
@@ -586,7 +592,6 @@
         const ids=[...state.selectedIds];
         if(!ids.length || state.batchBusy) return;
         if(action==='delete' && !window.confirm('删除后将永久删除选中的作品文件，无法恢复；如只想隐藏请使用“移到回收站”。确定继续吗？')) return;
-        if(action==='trash' && !window.confirm('确定将选中的作品移到回收站吗？')) return;
         state.batchBusy=true;
         state.batchBusyAction=action==='delete'?'删除':action==='trash'?'移到回收站':'收藏';
         renderSelectionActions();
@@ -609,6 +614,7 @@
             renderKinds();
             renderVirtual(true);
             pageSession?.mark();pageSession?.checkpoint();
+            if(action==='trash') scheduleReload();
             toast(action==='delete' ? `已永久删除 ${data.deleted_files || data.deleted_records || ids.length} 个作品` : action==='trash' ? `已移到回收站 ${data.count || ids.length} 个作品` : `已收藏 ${data.count || ids.length} 个作品`);
         } catch(error){
             state.batchBusy=false;
@@ -641,7 +647,8 @@
         el.closeWorksPreview.addEventListener('click',closePreview);
         el.worksPreviewDialog.addEventListener('click',event=>{if(event.target===el.worksPreviewDialog)closePreview();});
         el.worksPreviewFullscreen.addEventListener('click',togglePreviewFullscreen);
-        document.addEventListener('keydown',handlePreviewFullscreenKeydown);
+        window.addEventListener('keydown',handlePreviewFullscreenKeydown,true);
+        window.addEventListener('keyup',handlePreviewFullscreenKeydown,true);
         el.worksGrid.addEventListener('scroll',handleScroll,{passive:true});
         window.addEventListener('resize',()=>renderVirtual(true));
         el.worksDownloadAll.addEventListener('click',downloadAll);

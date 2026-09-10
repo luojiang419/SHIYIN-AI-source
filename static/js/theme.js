@@ -233,7 +233,7 @@
 
     if(!window.RuntimeSync){
         const script = document.createElement('script');
-        script.src = '/static/js/runtime-sync.js?v=2026.09.10.ordered-page-state.1';
+        script.src = '/static/js/runtime-sync.js?v=2026.09.10.toolbar.1';
         document.head.appendChild(script);
     }
 })();

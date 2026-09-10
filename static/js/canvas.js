@@ -71,6 +71,7 @@ const CLASSIC_MEDIA_RESIDENCY_GRACE_MS = 3000;
 const CLASSIC_MEDIA_RESIDENCY_IDLE_MS = 600;
 const CLASSIC_MEDIA_RESTORE_IDLE_MS = 250;
 let classicMediaQueueController = null;
+let canvasEntryPreparing = false;
 let classicMediaResidencyController = null;
 let classicMediaResidencyTimer = 0;
 let classicMediaRestoreAfter = 0;
@@ -109,7 +110,7 @@ function classicMediaViewportEntry(element){
         element,
         node,
         visible,
-        eligible:visible || near || pinned,
+        eligible:canvasEntryPreparing || visible || near || pinned,
         pinned,
         distance:Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))
     };
@@ -121,6 +122,7 @@ function classicPreviewCandidate(img, allowLoading=false){
     if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
     const entry = classicMediaViewportEntry(img);
     if(!entry?.eligible) return null;
+    if(canvasEntryPreparing) return {img, priority:entry.visible ? 0 : 10, distance:entry.distance};
     const currentSource = String(img.getAttribute?.('src') || '');
     const hasVisibleFallback = Boolean(currentSource && currentSource !== preview);
     if((img.dataset.previewState === 'evicted' || hasVisibleFallback) && !entry.pinned && performance.now() < classicMediaRestoreAfter) return null;
@@ -173,7 +175,7 @@ function ensureClassicMediaResidency(){
         maxResidentPixels:CLASSIC_MEDIA_RESIDENCY_PIXELS,
         isViewportReady:() => {
             const rect = board?.getBoundingClientRect?.();
-            return !canvasSessionSuspended && Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
+            return !canvasEntryPreparing && !canvasSessionSuspended && Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
         },
         collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
             .map(classicMediaViewportEntry).filter(Boolean),
@@ -1282,6 +1284,8 @@ function readCanvasPreferenceList(key, fallback, allowedIds, maxItems){
 }
 function saveCanvasPreferenceList(key, value){
     try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+    const name = key === MEDIA_TOOLBAR_ITEMS_KEY ? 'canvas_media_toolbar' : 'canvas_quick_toolbar';
+    void (window.RuntimeSync || window.top?.RuntimeSync)?.setPreference(name, JSON.stringify(value));
 }
 function canvasWorkMode(){
     try { return localStorage.getItem(CANVAS_WORK_MODE_KEY) === 'design' ? 'design' : 'all'; }
@@ -1330,6 +1334,18 @@ function renderQuickToolbarItems(){
     refreshIcons(toolbarNodeItems);
 }
 let canvasSettingsMode = 'toolbar';
+window.addEventListener('canvas-toolbar-preferences', event => {
+    if(!event.detail?.canvas_media_toolbar && !event.detail?.canvas_quick_toolbar) return;
+    renderQuickToolbarItems();
+    if(canvasSettingsModal?.classList.contains('open')) renderCanvasSettings();
+    if(canvas) nodesEl.querySelectorAll('.node[data-id]:has([data-node-media-toolbar])').forEach(el => {
+        const node = nodes.find(item => item.id === el.dataset.id);
+        if(!node) return;
+        el.querySelector('[data-node-media-toolbar]')?.remove();
+        const html = classicMediaToolbarHtml(node);
+        if(html){el.insertAdjacentHTML('beforeend', html);bindClassicMediaToolbar(el,node);refreshIcons(el.querySelector('[data-node-media-toolbar]'));}
+    });
+});
 function canvasSettingsListForMode(mode){
     return mode === 'media'
         ? {key:MEDIA_TOOLBAR_ITEMS_KEY, defs:CLASSIC_MEDIA_TOOLBAR_DEFS, fallback:CLASSIC_MEDIA_TOOLBAR_DEFAULT, max:MEDIA_TOOLBAR_MAX_ITEMS}
@@ -1380,6 +1396,7 @@ canvasSettingsReset?.addEventListener('click', () => {
     saveCanvasPreferenceList(config.key, config.fallback);
     renderCanvasSettings();
     if(canvasSettingsMode === 'toolbar') renderQuickToolbarItems();
+    else render();
 });
 canvasToolbarSettingsBtn?.addEventListener('click', event => {
     event.preventDefault();
@@ -2436,6 +2453,7 @@ function rebuildClassicMediaSpatialGrid(){
     return classicMediaSpatialGrid;
 }
 function classicMediaElementsInWindow(){
+    if(canvasEntryPreparing) return [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])];
     const view = currentWorldViewRect();
     const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
     const query = {x:view.x - margin, y:view.y - margin, w:view.w + margin * 2, h:view.h + margin * 2};
@@ -3888,8 +3906,7 @@ function restoreCanvasPage(saved,session){
     undoStack=saved.undoStack || [];redoStack=saved.redoStack || [];
     undoStackBytes=Number(saved.undoStackBytes || 0);redoStackBytes=Number(saved.redoStackBytes || 0);
     rememberCanvasListProject(canvas.project || 'default');setCanvasMode(true);render();
-    hideCanvasStartupNotice();setStatus(localCanvasDirty?'Saving...':'Ready');
-    session.afterPaint(startCanvasSecondaryStartup);
+    setStatus('正在准备缩略图');
 }
 async function openCanvas(id){
     setStatus('Opening...');
@@ -3921,7 +3938,10 @@ async function openCanvas(id){
                 if(Number(result.data.canvas.updated_at || 0)>lastCanvasUpdatedAt) applyRemoteCanvasData(result.data.canvas);
             }
             if(localCanvasDirty) void saveCanvas();
+            await prepareCanvasEntry(session);
+            if(!session.isCurrent()) return;
             checkpointCanvasPage();
+            session.afterPaint(startCanvasSecondaryStartup);
             return;
         }
         // 已在设置广播中应用的新配置优先于启动时发出的旧请求。
@@ -3951,13 +3971,14 @@ async function openCanvas(id){
         renderCanvasList();
         render();
         if(prunedRuntimeCollections || legacyMigration.changed) scheduleSave();
+        await prepareCanvasEntry(session);
+        if(!session.isCurrent()) return;
         setStatus('Ready');
-        hideCanvasStartupNotice();
         checkpointCanvasPage();
         session.afterPaint(startCanvasSecondaryStartup);
     } catch(e) {
         if(!session.isCurrent()) return;
-        if(restoredCanvas && !(e.resource==='canvas' && e.status===404 && !localCanvasDirty)){setStatus('已恢复本地状态，同步暂未完成');return;}
+        if(restoredCanvas && !(e.resource==='canvas' && e.status===404 && !localCanvasDirty)){await prepareCanvasEntry(session);session.afterPaint(startCanvasSecondaryStartup);setStatus('已恢复本地状态，同步暂未完成');return;}
         setStatus(tr('canvas.openFailed'));
         console.error(e);
         if(e.resource === 'canvas' && e.status === 404){
@@ -3974,22 +3995,54 @@ async function openCanvas(id){
         }
     }
 }
+async function prepareCanvasEntry(session){
+    canvasEntryPreparing = true;
+    window.canvasEntryOverlay?.update(35, '正在准备缩略图');
+    const images = [...nodesEl.querySelectorAll('img[data-preview-src]')];
+    try {
+        while(session.isCurrent()){
+            ensureClassicMediaQueue()?.drainNow();
+            const pending = images.filter(img => img.isConnected && !['loaded','failed'].includes(img.dataset.previewState));
+            const finished = images.length - pending.length;
+            window.canvasEntryOverlay?.update(35 + 60 * (images.length ? finished / images.length : 1), `缩略图 ${finished} / ${images.length}`);
+            if(!pending.length) break;
+            await new Promise(resolve => setTimeout(resolve, 80));
+        }
+        if(!session.isCurrent()) return;
+        const failed = images.filter(img => img.isConnected && img.dataset.previewState === 'failed');
+        if(failed.length){
+            let retry;
+            window.canvasEntryOverlay?.error(`${failed.length} 张缩略图未能加载`, () => {retry=true;}, () => {retry=false;});
+            while(retry === undefined && session.isCurrent()) await new Promise(resolve => setTimeout(resolve,100));
+            if(!session.isCurrent()) return;
+            if(retry){
+                failed.forEach(img => {img.dataset.previewState='queued';delete img.dataset.previewAttempt;delete img.dataset.previewRetryAt;});
+                showCanvasStartupNotice(session.id);
+                return await prepareCanvasEntry(session);
+            }
+        }
+        window.canvasEntryOverlay?.update(100, '准备完成');
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        if(session.isCurrent()) hideCanvasStartupNotice();
+    } finally {
+        if(session.isCurrent()) canvasEntryPreparing = false;
+    }
+}
 function showCanvasStartupNotice(id, error=null){
-    const notice = document.getElementById('canvasStartupNotice');
-    if(!notice) return;
-    notice.hidden = false;
-    const message = notice.querySelector('[data-startup-message]');
-    message.textContent = error
-        ? (langIsEn() ? 'Could not load the canvas. Please retry.' : '画布加载失败，请重试。')
-        : (langIsEn() ? 'Opening canvas…' : '正在打开画布…');
-    const retry = notice.querySelector('button');
-    retry.hidden = !error;
-    retry.textContent = langIsEn() ? 'Retry' : '重试';
-    retry.onclick = () => openCanvas(id);
+    canvasEntryPreparing = !error;
+    if(error || window.canvasEntryOverlay?.el.querySelector('button')){
+        window.canvasEntryOverlay?.remove();
+        window.canvasEntryOverlay = null;
+    }
+    window.canvasEntryOverlay ||= window.CanvasEntryProgress.create();
+    document.getElementById('shell').inert = true;
+    window.canvasEntryOverlay.update(8, '正在读取工程与配置');
+    if(error) window.canvasEntryOverlay.error('画布加载失败，请重试。', () => openCanvas(id));
 }
 function hideCanvasStartupNotice(){
-    const notice = document.getElementById('canvasStartupNotice');
-    if(notice) notice.hidden = true;
+    window.canvasEntryOverlay?.remove();
+    window.canvasEntryOverlay = null;
+    document.getElementById('shell').inert = false;
 }
 function migrateLegacySmartCanvasNodes(sourceNodes){
     const helper = window.CanvasLegacySmartMigration;
@@ -24961,6 +25014,12 @@ window.CanvasSessionLifecycle = {
 
 async function initializeCanvasPage(){
     window.CanvasPerformance?.record?.('classic.editor-ready', performance.now());
+    let preferenceTimer;
+    try {
+        await Promise.race([(window.RuntimeSync || window.top?.RuntimeSync)?.ready?.(),
+            new Promise(resolve => {preferenceTimer=setTimeout(resolve,6000);})]);
+    } finally {clearTimeout(preferenceTimer);}
+    renderQuickToolbarItems();
     startCanvasStatsLoop();
     updateCanvasStats();
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem(CANVAS_THEME_KEY) || 'light');

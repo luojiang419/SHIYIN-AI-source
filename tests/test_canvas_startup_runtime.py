@@ -21,7 +21,7 @@ def test_canvas_scripts_keep_order_without_document_write():
     scripts = re.findall(r'<script([^>]*?)src="([^\"]+)"[^>]*>', html)
     assert scripts[0][1].startswith('/static/js/canvas-startup.js?')
     assert html.index('canvas-startup.js') < html.index('rel="stylesheet"')
-    assert all('defer' in attrs or url.startswith('/static/js/studio-page-state.js?') for attrs, url in scripts[1:])
+    assert all('defer' in attrs or url.startswith(('/static/js/studio-page-state.js?', '/static/js/canvas-entry-progress.js?')) for attrs, url in scripts[1:])
     paths = [url.split('?')[0] for _, url in scripts]
     assert '/static/js/i18n.js' not in paths
     assert paths.index('/static/js/i18n-core.js') < paths.index('/static/js/i18n/canvas.js')

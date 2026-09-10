@@ -47,6 +47,7 @@ function editor(h){
         loadLocalModelLists:()=>{}, migrateLegacySmartCanvasNodes:nodes=>({nodes,changed:false}),
         localViewportForCanvas:(_id,value)=>value, tr:key=>key,
         showCanvasStartupNotice:(_id,error)=>{if(error)calls.push('error');}, hideCanvasStartupNotice:()=>{},
+        prepareCanvasEntry:async()=>{},
         startCanvasSecondaryStartup:()=>calls.push('secondary'),
         canvasListUrlForProject:()=>'/list',
         scheduleSave:()=>calls.push('save'),
@@ -182,12 +183,13 @@ function editor(h){
         const calls=[];
         const ctx={window:{location:{search:'?id=dom'}},document:{readyState,
             addEventListener:(event,cb,options)=>{assert.equal(event,'DOMContentLoaded');assert.equal(options.once,true);ready=cb;}},
-            localStorage:{getItem:()=>null},URLSearchParams,performance:{now:()=>1},CANVAS_THEME_KEY:'theme',tr:x=>x,
+            localStorage:{getItem:()=>null},URLSearchParams,setTimeout,clearTimeout,performance:{now:()=>1},CANVAS_THEME_KEY:'theme',tr:x=>x,
             openCanvas:async id=>calls.push(id)};
-        for(const name of ['startCanvasStatsLoop','updateCanvasStats','applyTheme','loadClassicShortcutLocalFallback',
+        for(const name of ['renderQuickToolbarItems','startCanvasStatsLoop','updateCanvasStats','applyTheme','loadClassicShortcutLocalFallback',
             'loadClassicShortcutSettings','applyQuickToolbarState','initOutputCompareEvents','initOutputPreviewZoomEvents','applyViewport'])ctx[name]=()=>{};
         vm.runInNewContext(init,ctx);
         if(readyState==='loading'){assert.deepEqual(calls,[]);await ready();}
+        await tick();
         assert.deepEqual(calls,['dom']);assert.equal(ctx.window.onload,undefined);
     }
     // 同语言的重复通知不重绘，切换语言只通过一个入口刷新。

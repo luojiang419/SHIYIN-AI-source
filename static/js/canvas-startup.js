@@ -106,10 +106,12 @@
                     throw new Error('Invalid canvas project');
                 }
                 timings.dataReadyAt = host.performance.now();
+                if(session.isCurrent()) host.canvasEntryOverlay?.update(22, '工程数据已读取');
                 return data;
             }),
             readJson('/api/runtime/config', controller.signal, 'config').then(config => {
                 timings.configReadyAt = host.performance.now();
+                if(session.isCurrent()) host.canvasEntryOverlay?.update(28, '配置已准备');
                 return config;
             })
         ]).then(([data, config]) => {

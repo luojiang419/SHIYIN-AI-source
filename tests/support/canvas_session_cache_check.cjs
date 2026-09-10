@@ -74,16 +74,18 @@ async function waitUntil(predicate){
             const open = async id => {
                 await list.evaluate(id => openCanvas({id,project:'default'}),id);
                 const frame = page.frames().find(f => f.url().includes(`/static/canvas.html?id=${id}&`));
-                if(frame){ await frame.waitForFunction(() => window.CanvasSessionLifecycle?.state().id); return frame; }
+                if(frame){ await frame.waitForFunction(() => window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay); return frame; }
                 await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some(f => f.src.includes('/static/canvas.html')));
                 await sleep(50);
                 const loaded=page.frames().find(f => f.url().includes(`canvas.html?id=${id}&`));
-                await loaded.waitForFunction(() => window.CanvasSessionLifecycle?.state().id);
+                await loaded.waitForFunction(() => window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay);
                 return loaded;
             };
             const a = await open('a');
             await a.waitForFunction(() => document.querySelector('[data-id="image-0"] img')?.naturalWidth>0);
-            await sleep(1800);
+            await a.waitForFunction(() => !window.canvasEntryOverlay);
+            // 首开现在准备全画布预览，等待现有驻留预算完成低清缩略图收敛。
+            await sleep(5000);
             await a.evaluate(() => {
                 window.cacheDocument=document;
                 window.cacheImage=document.querySelector('[data-id="image-0"] img');

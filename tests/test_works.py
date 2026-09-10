@@ -58,7 +58,7 @@ class WorksFrontendContractTests(unittest.TestCase):
         self.assertIn('data-tab="favorite"', self.works)
         self.assertIn('data-tab="trash"', self.works)
         self.assertIn("const PAGE_LIMIT = 120", self.works_js)
-        self.assertIn("new URLSearchParams({limit:String(PAGE_LIMIT),include_trashed:'true'})", self.works_js)
+        self.assertIn("new URLSearchParams({limit:String(PAGE_LIMIT),include_trashed:state.tab === 'trash' ? 'true' : 'false'})", self.works_js)
         self.assertIn("params.set('cursor', cursor)", self.works_js)
         self.assertIn("state.nextCursor = data.next_cursor || ''", self.works_js)
         self.assertIn("/favorite`,{method:'PUT'", self.works_js)
@@ -136,6 +136,19 @@ class WorksBackendTests(unittest.TestCase):
     def setUpClass(cls):
         import main
         cls.main = main
+
+    def test_trash_filter_is_applied_before_pagination(self):
+        items = [{"id": str(i), "created_at": i, "trashed": i % 2 == 0} for i in range(8)]
+        with patch.object(self.main.WORKS_SNAPSHOT_CACHE, "get", return_value=items):
+            normal = self.main.list_generated_works_sync(limit=2)
+            trash = self.main.list_generated_works_sync(limit=2, trashed_only=True)
+            next_page = self.main.list_generated_works_sync(limit=2, trashed_only=True, cursor=trash["next_cursor"])
+        self.assertEqual(normal["total"], 4)
+        self.assertTrue(all(not w["trashed"] for w in normal["works"]))
+        self.assertEqual(trash["total"], 4)
+        self.assertTrue(all(w["trashed"] for w in trash["works"] + next_page["works"]))
+        self.assertEqual(len({w["id"] for w in trash["works"] + next_page["works"]}), 4)
+        self.assertEqual(next_page["next_cursor"], "")
 
     def test_work_metadata_overrides_name_and_keeps_soft_trash_recoverable(self):
         record = {

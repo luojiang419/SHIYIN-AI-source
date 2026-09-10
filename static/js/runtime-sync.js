@@ -11,6 +11,8 @@
         default_chat_provider: ['studio_default_chat_provider'],
         default_chat_model: ['studio_default_chat_model'],
         ecommerce_settings: ['studio_ecommerce_settings_v2'],
+        canvas_media_toolbar: ['canvas_media_toolbar_items_v1'],
+        canvas_quick_toolbar: ['canvas_quick_toolbar_items_v1'],
     };
     const state = { values:{}, allowedKeys:null, revision:0, actorId:'', socket:null, reconnectTimer:null, backoff:1000, applying:false, ready:false, readyPromise:null };
     let localEditSequence=0;
@@ -48,6 +50,7 @@
                     if(name==='ecommerce_settings' && accountId)localStorage.setItem(`${key}:account:${accountId}`,String(value));
                 });
             });
+            window.dispatchEvent(new CustomEvent('canvas-toolbar-preferences', {detail:values}));
             if(values?.theme) window.StudioTheme?.apply?.(values.theme);
             if(values?.language) window.StudioI18n?.set?.(values.language, {sync:false});
             if(values?.ui_scale) window.StudioScale?.apply?.(values.ui_scale);

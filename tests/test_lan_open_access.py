@@ -47,7 +47,7 @@ class LanAccountAccessContractTests(unittest.TestCase):
         self.assertIn('@app.get("/api/runtime/config")', self.main)
         self.assertNotIn('"base_url": AI_BASE_URL', self.main.split('@app.get("/api/runtime/config")', 1)[1].split('@app.get("/api/models")', 1)[0])
         self.assertIn('data-admin-only hidden', self.index)
-        self.assertIn("USER_PREFERENCE_KEYS = {\"theme\", \"language\"}", self.main)
+        self.assertIn("USER_PREFERENCE_KEYS = {\"theme\", \"language\", \"canvas_media_toolbar\", \"canvas_quick_toolbar\"}", self.main)
 
     def test_pairing_routes_and_code_generator_are_removed(self):
         self.assertNotIn('@app.post("/api/auth/pair")', self.main)

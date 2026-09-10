@@ -27,9 +27,10 @@ def test_works_video_surfaces_use_stream_proxy_for_remote_urls():
     assert "el.worksPreviewDialog?.open && video && !video.hidden" in WORKS
     assert "[contenteditable=\"true\"]" in WORKS
     assert "if(video.paused || video.ended) video.play()" in WORKS
-    assert "document.addEventListener('keydown',handlePreviewFullscreenKeydown)" in WORKS
+    assert "window.addEventListener('keydown',handlePreviewFullscreenKeydown,true)" in WORKS
+    assert "window.addEventListener('keyup',handlePreviewFullscreenKeydown,true)" in WORKS
     assert "if(raw.startsWith('/assets/') || raw.startsWith('/output/'))" in WORKS
-    assert "video-playback-directory-fix" in (ROOT / "static/works.html").read_text(encoding="utf-8")
+    assert "entry-fixes=20260910.2" in (ROOT / "static/works.html").read_text(encoding="utf-8")
     assert ".works-preview-frame > [hidden] { display:none !important; }" in (ROOT / "static/css/works.css").read_text(encoding="utf-8")
 
 

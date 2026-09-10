@@ -186,9 +186,10 @@ async function loadAll({preserveViewport = false} = {}){
     const before=JSON.stringify([projects,canvases]);
     try {
         const [pRes, cRes] = await Promise.all([
-            fetch('/api/projects'),
-            fetch('/api/canvases')
+            fetch('/api/projects', {signal:AbortSignal.timeout(15000)}),
+            fetch('/api/canvases', {signal:AbortSignal.timeout(15000)})
         ]);
+        if(!pRes.ok || !cRes.ok) throw new Error('Canvas list request failed');
         const pData = pRes.ok ? await pRes.json() : { projects: [] };
         const cData = cRes.ok ? await cRes.json() : { canvases: [] };
         if(!valid()) return;
@@ -205,9 +206,12 @@ async function loadAll({preserveViewport = false} = {}){
         if(!preserveViewport) resetView();
         listPageSession?.checkpoint();
         refreshTrashCount();
+        window.canvasListEntryOverlay?.remove();
+        window.canvasListEntryOverlay = null;
     } catch(e){
         console.error(e);
         setStatus(L('加载失败','Load failed'));
+        window.canvasListEntryOverlay?.error('画布列表加载失败，请重试。', () => loadAll());
     }
 }
 

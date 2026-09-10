@@ -2777,8 +2777,10 @@ PREFERENCE_KEYS = {
     "default_chat_provider",
     "default_chat_model",
     "ecommerce_settings",
+    "canvas_media_toolbar",
+    "canvas_quick_toolbar",
 }
-USER_PREFERENCE_KEYS = {"theme", "language"}
+USER_PREFERENCE_KEYS = {"theme", "language", "canvas_media_toolbar", "canvas_quick_toolbar"}
 
 
 class AccountCredentialsRequest(BaseModel):
@@ -27204,6 +27206,7 @@ def list_generated_works_sync(
     include_trashed: bool = False,
     sort_order: str = "desc",
     media_type: str = "all",
+    trashed_only: bool = False,
 ):
     normalized_kind = str(kind or "").strip().lower()
     normalized_media = str(media_type or "all").strip().lower()
@@ -27215,7 +27218,9 @@ def list_generated_works_sync(
     filtered: List[Dict[str, Any]] = []
     query = str(search or "").strip().lower()
     for item in works:
-        if not include_trashed and item.get("trashed"):
+        if trashed_only and not item.get("trashed"):
+            continue
+        if not include_trashed and not trashed_only and item.get("trashed"):
             continue
         if favorite is True and not item.get("favorite"):
             continue
@@ -27253,11 +27258,11 @@ def list_generated_works_sync(
 @app.get("/api/works")
 async def list_generated_works(
     favorite: Optional[bool] = None, kind: str = "", search: str = "", limit: int = 500,
-    cursor: str = "", include_trashed: bool = False, sort_order: str = "desc", media_type: str = "all",
+    cursor: str = "", include_trashed: bool = False, sort_order: str = "desc", media_type: str = "all", trashed_only: bool = False,
 ):
     return await asyncio.to_thread(
         list_generated_works_sync, favorite, kind, search, limit, cursor,
-        include_trashed, sort_order, media_type,
+        include_trashed, sort_order, media_type, trashed_only,
     )
 
 

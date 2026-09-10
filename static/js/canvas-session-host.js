@@ -6,6 +6,33 @@
     let sequence = 0;
     let current = null;
     let manager = null;
+    let entryWait = null;
+    function waitForEntry(frame){
+        entryWait?.overlay.remove();
+        if(entryWait) clearTimeout(entryWait.timer);
+        entryWait = null;
+        if(!frame || frame.dataset.frameReady === '1') return;
+        const overlay = window.CanvasEntryProgress.create(frame.parentElement);
+        overlay.update(4, '正在加载画布页面');
+        const timer = setTimeout(() => {
+            if(entryWait?.frame !== frame) return;
+            overlay.error('页面加载较慢，请检查连接或重试。', () => {
+                frame.src = frame.src;
+                waitForEntry(frame);
+            });
+        }, 20000);
+        entryWait = {frame, overlay, timer};
+        frame.addEventListener('load', () => finishEntryWait(frame), {once:true});
+    }
+    function finishEntryWait(frame){
+        if(entryWait?.frame !== frame) return;
+        entryWait.overlay.remove();
+        clearTimeout(entryWait.timer);
+        entryWait = null;
+    }
+    window.addEventListener('message', event => {
+        if(event.origin === location.origin && event.data?.type === 'canvas-entry-mounted' && entryWait?.frame.contentWindow === event.source) finishEntryWait(entryWait.frame);
+    });
     const studio = () => Boolean(document.getElementById('frame-canvas'));
 
     function editorState(entry){
@@ -89,12 +116,14 @@
         current = entry;
         entry.used = ++sequence;
         activate(entry.frame);
+        waitForEntry(entry.frame);
         window.StudioPageState?.session('shell').checkpoint();
         prune();
         return true;
     }
     function back(source, project){
         if(!current || current.frame.contentWindow !== source) return false;
+        waitForEntry(null);
         current.used = ++sequence;
         if(manager) activate(manager);
         else setActive(current.frame, false);
@@ -106,6 +135,7 @@
         return true;
     }
     function clear(){
+        waitForEntry(null);
         if(current && manager) activate(manager);
         current = null;
         for(const entry of editors) entry.frame.remove();
@@ -123,7 +153,7 @@
             if(index >= 0) editors.splice(index, 1);
         }
     }
-    window.CanvasSessionHost = {open, back, prune, clear, invalidate};
+    window.CanvasSessionHost = {open, back, prune, clear, invalidate, waitForEntry};
     // 未保存/运行中会话暂时越过上限，完成后自动收敛。
     window.setInterval(prune, 30000);
 })();

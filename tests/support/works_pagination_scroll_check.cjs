@@ -35,7 +35,7 @@ const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
             const next = mode==='repeat' && start===120 ? 'works#120' : start+works.length<total?`works#${start+works.length}`:'';
             await route.fulfill({json:{works,total,next_cursor:next}}).catch(()=>{});
         });
-        await page.goto('http://127.0.0.1:3064/static/works.html');
+        await page.goto(`${process.env.WORKS_TEST_BASE || 'http://127.0.0.1:3064'}/static/works.html`);
         await page.waitForSelector('.works-card');
         const initial = await page.locator('#worksGrid').evaluate(grid=>({height:grid.scrollHeight,viewport:grid.clientHeight}));
         await page.locator('#worksGrid').evaluate(grid=>{grid.scrollTop=6400;});

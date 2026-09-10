@@ -72,6 +72,38 @@ const CLASSIC_MEDIA_RESIDENCY_IDLE_MS = 600;
 const CLASSIC_MEDIA_RESTORE_IDLE_MS = 250;
 let classicMediaQueueController = null;
 let canvasEntryPreparing = false;
+const classicLowResPrepared = new Map();
+const classicLowResByImage = new WeakMap();
+let classicLowResPreparing = 0;
+function preparedClassicLowResSource(img){
+    const source=canvasMediaPreviewUrl(img.dataset?.originalSrc || img.dataset?.url || '',96);
+    if(!source) return '';
+    if(img.getAttribute('src')===source) return source;
+    const own=classicLowResByImage.get(img);
+    if(own?.source===source) return own.ready ? source : '';
+    const cached=classicLowResPrepared.get(source);
+    if(cached){classicLowResByImage.set(img,cached);return cached.ready ? source : '';}
+    if(classicLowResPreparing>=4) return '';
+    if(classicLowResPrepared.size>=512){
+        const oldest=[...classicLowResPrepared].find(([,item])=>!item.pending);
+        if(oldest) classicLowResPrepared.delete(oldest[0]);
+    }
+    const probe=new Image(),record={source,probe,ready:false,pending:true};
+    classicLowResPrepared.set(source,record);classicLowResPreparing++;
+    classicLowResByImage.set(img,record);
+    let finished=false;
+    const finish=ready=>{
+        if(finished) return;finished=true;clearTimeout(timer);
+        probe.onload=probe.onerror=null;record.ready=ready;record.pending=false;classicLowResPreparing--;
+        scheduleClassicMediaResidency();
+    };
+    const timer=setTimeout(()=>finish(false),20000);
+    probe.onload=()=>Promise.resolve().then(()=>probe.decode()).then(()=>finish(true),()=>finish(false));
+    probe.onerror=()=>finish(false);
+    probe.src=source;
+    // 降采样图片未完成前保留节点已有像素，避免进入后内存整理再次制造空白。
+    return '';
+}
 let classicMediaResidencyController = null;
 let classicMediaResidencyTimer = 0;
 let classicMediaRestoreAfter = 0;
@@ -122,7 +154,10 @@ function classicPreviewCandidate(img, allowLoading=false){
     if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
     const entry = classicMediaViewportEntry(img);
     if(!entry?.eligible) return null;
-    if(canvasEntryPreparing) return {img, priority:entry.visible ? 0 : 10, distance:entry.distance};
+    if(canvasEntryPreparing){
+        if(img.dataset.previewState==='evicted' && img.complete && img.naturalWidth>0) return null;
+        return {img, priority:entry.visible ? 0 : 10, distance:entry.distance};
+    }
     const currentSource = String(img.getAttribute?.('src') || '');
     const hasVisibleFallback = Boolean(currentSource && currentSource !== preview);
     if((img.dataset.previewState === 'evicted' || hasVisibleFallback) && !entry.pinned && performance.now() < classicMediaRestoreAfter) return null;
@@ -179,7 +214,7 @@ function ensureClassicMediaResidency(){
         },
         collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
             .map(classicMediaViewportEntry).filter(Boolean),
-        imageLowResSource:img => canvasMediaPreviewUrl(img.dataset?.originalSrc || img.dataset?.url || '', 96),
+        imageLowResSource:preparedClassicLowResSource,
         onChange:() => ensureClassicMediaQueue()?.schedule(),
         onRecord:entry => window.CanvasPerformance?.record?.('classic.media-residency', 0, {
             action:entry.action,
@@ -447,6 +482,19 @@ function setCanvasRouteActive(active){
         return;
     }
     resumeCanvasRouteMedia();
+    if(wasSuspended && canvas && !canvasEntryPreparing){
+        const id=canvas.id;
+        const session={id,isCurrent:()=>canvas?.id===id,entryDependenciesReady:true};
+        showCanvasStartupNotice(id);
+        void (async()=>{
+            if(canvasSessionConfigDirty){canvasSessionConfigDirty=false;await refreshCanvasConfigFromSettings();}
+            await checkRemoteCanvasVersion();
+            if(!session.isCurrent()) return;
+            await prepareCanvasEntry(session);
+            if(session.isCurrent()){startCanvasRemotePolling();refreshOutputTimer();}
+        })().catch(error=>{if(session.isCurrent()) showCanvasStartupNotice(id,error);});
+        return;
+    }
     if(wasSuspended) scheduleClassicMediaQueue();
     if(canvasSessionConfigDirty){
         canvasSessionConfigDirty = false;
@@ -3534,15 +3582,12 @@ async function startCanvasSecondaryStartup(session){
     resumeTopazVideoTasks();
     startCanvasRemotePolling();
     await Promise.allSettled([
-        loadCanvasConfigCapabilities({isCurrent:session.isCurrent}),
         touchCanvasOpened(openedCanvasId).then(touched => {
             if(!session.isCurrent() || canvas?.id !== openedCanvasId || !touched?.updated_at) return;
             canvas.updated_at = Number(touched.updated_at);
             lastCanvasUpdatedAt = Math.max(lastCanvasUpdatedAt, canvas.updated_at);
         }),
-        refreshMissingCanvasAssets(openedCanvasId).then(assetsChanged => {
-            if(assetsChanged && session.isCurrent() && canvas?.id === openedCanvasId) render();
-        })
+
     ]);
 }
 function renderCanvasListInto(list){
@@ -3997,29 +4042,62 @@ async function openCanvas(id){
 }
 async function prepareCanvasEntry(session){
     canvasEntryPreparing = true;
-    window.canvasEntryOverlay?.update(35, '正在准备缩略图');
-    const images = [...nodesEl.querySelectorAll('img[data-preview-src]')];
     try {
-        while(session.isCurrent()){
-            ensureClassicMediaQueue()?.drainNow();
-            const pending = images.filter(img => img.isConnected && !['loaded','failed'].includes(img.dataset.previewState));
-            const finished = images.length - pending.length;
-            window.canvasEntryOverlay?.update(35 + 60 * (images.length ? finished / images.length : 1), `缩略图 ${finished} / ${images.length}`);
-            if(!pending.length) break;
-            await new Promise(resolve => setTimeout(resolve, 80));
-        }
-        if(!session.isCurrent()) return;
-        const failed = images.filter(img => img.isConnected && img.dataset.previewState === 'failed');
-        if(failed.length){
-            let retry;
-            window.canvasEntryOverlay?.error(`${failed.length} 张缩略图未能加载`, () => {retry=true;}, () => {retry=false;});
-            while(retry === undefined && session.isCurrent()) await new Promise(resolve => setTimeout(resolve,100));
+        if(!session.entryDependenciesReady){
+            window.canvasEntryOverlay?.update(30, '正在准备节点配置与资源');
+            const [,assetsChanged]=await Promise.all([
+                loadCanvasConfigCapabilities({isCurrent:session.isCurrent}),
+                refreshMissingCanvasAssets(session.id)
+            ]);
             if(!session.isCurrent()) return;
-            if(retry){
-                failed.forEach(img => {img.dataset.previewState='queued';delete img.dataset.previewAttempt;delete img.dataset.previewRetryAt;});
-                showCanvasStartupNotice(session.id);
-                return await prepareCanvasEntry(session);
+            if(assetsChanged) render();
+            session.entryDependenciesReady=true;
+        }
+        while(session.isCurrent()){
+            const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
+            if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
+            const result=await window.CanvasResourceReady.wait({
+                root:nodesEl,isCurrent:session.isCurrent,
+                active:()=>!canvasSessionSuspended,
+                drain:()=>ensureClassicMediaQueue()?.drainNow(),
+                progress:(done,total)=>window.canvasEntryOverlay?.update(35+60*(total?done/total:1), `正在准备节点资源 ${done} / ${total}`)
+            });
+            if(!session.isCurrent() || result.cancelled) return;
+            if(!result.failed.length){
+                // 同时准备内存整理需要的小图，进入后不会再因切换低清源等待网络。
+                let pending=true;
+                while(pending && session.isCurrent()){
+                    const images=[...nodesEl.querySelectorAll('img[data-preview-src]')].filter(img=>img.dataset.originalSrc || img.dataset.url);
+                    let settled=0;
+                    for(const img of images){
+                        const source=preparedClassicLowResSource(img);
+                        if(source || classicLowResByImage.get(img)?.pending===false) settled++;
+                    }
+                    window.canvasEntryOverlay?.update(96,`正在整理资源缓存 ${settled} / ${images.length}`);
+                    pending=settled<images.length;
+                    if(pending) await new Promise(resolve=>setTimeout(resolve,80));
+                }
+                if(!session.isCurrent()) return;
+                // 缓存准备期间仍可能有节点刷新，再核对一次当前 DOM。
+                const finalCheck=await window.CanvasResourceReady.wait({root:nodesEl,isCurrent:session.isCurrent,
+                    active:()=>!canvasSessionSuspended,drain:()=>ensureClassicMediaQueue()?.drainNow(),progress:()=>{}});
+                if(!session.isCurrent()) return;
+                if(!finalCheck.failed.length) break;
+                result.failed=finalCheck.failed;
             }
+            let retry=false;
+            window.canvasEntryOverlay?.error(`${result.failed.length} 项资源尚未准备好`,()=>{retry=true;},()=>returnToCanvasManager(),'返回列表');
+            while(!retry && session.isCurrent()) await new Promise(resolve=>setTimeout(resolve,100));
+            if(!session.isCurrent()) return;
+            result.failed.forEach(el=>{
+                if(el.dataset.previewSrc){el.dataset.previewState='queued';delete el.dataset.previewAttempt;delete el.dataset.previewRetryAt;}
+                else if(el.tagName==='IMG'){const src=el.getAttribute('src');el.removeAttribute('src');el.src=src;}
+                else if(el.load) el.load();
+            });
+            const assetsChanged=await refreshMissingCanvasAssets(session.id);
+            if(!session.isCurrent()) return;
+            if(assetsChanged) render();
+            showCanvasStartupNotice(session.id);
         }
         window.canvasEntryOverlay?.update(100, '准备完成');
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -4028,6 +4106,7 @@ async function prepareCanvasEntry(session){
         if(session.isCurrent()) canvasEntryPreparing = false;
     }
 }
+
 function showCanvasStartupNotice(id, error=null){
     canvasEntryPreparing = !error;
     if(error || window.canvasEntryOverlay?.el.querySelector('button')){

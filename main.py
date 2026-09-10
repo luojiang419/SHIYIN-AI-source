@@ -17,6 +17,7 @@ import time
 import traceback
 import shutil
 import asyncio
+import sqlite3
 import logging
 import requests
 import zipfile
@@ -66,6 +67,7 @@ from canvas_core.storage_bootstrap import (
 )
 from canvas_core.auth import AuthManager, SESSION_COOKIE
 from canvas_core.accounts import (
+    is_account_database_busy,
     ACCOUNT_SESSION_COOKIE,
     ADMIN_ACCOUNT,
     AccountIdentity,
@@ -361,7 +363,15 @@ async def account_authentication_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if request.method == "OPTIONS" or path in PUBLIC_HTTP_PATHS:
         return await call_next(request)
-    identity = await asyncio.to_thread(ACCOUNT_STORE.resolve_session, request_account_token(request))
+    try:
+        identity = await asyncio.to_thread(ACCOUNT_STORE.resolve_session, request_account_token(request))
+    except sqlite3.OperationalError as error:
+        if not is_account_database_busy(error):
+            raise
+        return JSONResponse(
+            {"detail": "正在准备账号数据，请稍后重试", "code": "account_database_busy"},
+            status_code=503, headers={"Retry-After": "1"},
+        )
     if identity and identity.is_admin and not is_loopback_address(request_remote_address(request)):
         identity = None
     if not identity:

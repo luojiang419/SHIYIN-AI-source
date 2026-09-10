@@ -98,8 +98,11 @@ async function waitUntil(predicate){
                 const c=document.createElement('canvas'); c.width=64;c.height=64;
                 const ctx=c.getContext('2d');ctx.fillStyle='#4387c9';ctx.fillRect(0,0,64,64);
                 const stream=c.captureStream(10), recorder=new MediaRecorder(stream,{mimeType:'video/webm'}), chunks=[];
+                let color=0;
+                const draw=setInterval(()=>{ctx.fillStyle=`rgb(${color++%255},80,100)`;ctx.fillRect(0,0,64,64);},80);
                 recorder.ondataavailable=e=>chunks.push(e.data);
                 await new Promise(resolve=>{recorder.onstop=resolve;recorder.start();setTimeout(()=>recorder.stop(),600);});
+                clearInterval(draw);
                 stream.getTracks().forEach(t=>t.stop());
                 return [...new Uint8Array(await new Blob(chunks,{type:'video/webm'}).arrayBuffer())];
             });

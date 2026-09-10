@@ -181,17 +181,32 @@ function onBoardWheel(e){
 function currentProject(){ return projects.find(p => p.id === currentProjectId) || projects[0] || null; }
 function canvasesInProject(pid){ return canvases.filter(c => (c.project || 'default') === pid); }
 
+let canvasListLoadSequence=0;
+async function fetchCanvasListData(url,isCurrent){
+    for(let attempt=0;attempt<3;attempt++){
+        try {
+            const response=await fetch(url,{signal:AbortSignal.timeout(15000),cache:'no-store'});
+            if(!response.ok){const error=new Error(`Canvas list HTTP ${response.status}`);error.status=response.status;throw error;}
+            return await response.json();
+        } catch(error){
+            if(!isCurrent() || attempt===2 || (error.status && error.status<500 && error.status!==429)) throw error;
+            window.canvasListEntryOverlay?.update(12,'正在等待服务就绪，自动重试中…');
+            await new Promise(resolve=>setTimeout(resolve,500*(attempt+1)));
+            if(!isCurrent()) throw error;
+        }
+    }
+}
 async function loadAll({preserveViewport = false} = {}){
+    const sequence=++canvasListLoadSequence;
+    const isCurrent=()=>sequence===canvasListLoadSequence;
     const valid=listPageSession?.guard() || (()=>true);
     const before=JSON.stringify([projects,canvases]);
     try {
-        const [pRes, cRes] = await Promise.all([
-            fetch('/api/projects', {signal:AbortSignal.timeout(15000)}),
-            fetch('/api/canvases', {signal:AbortSignal.timeout(15000)})
+        const [pData,cData]=await Promise.all([
+            fetchCanvasListData('/api/projects',isCurrent),
+            fetchCanvasListData('/api/canvases',isCurrent)
         ]);
-        if(!pRes.ok || !cRes.ok) throw new Error('Canvas list request failed');
-        const pData = pRes.ok ? await pRes.json() : { projects: [] };
-        const cData = cRes.ok ? await cRes.json() : { canvases: [] };
+        if(!isCurrent()) return;
         if(!valid()) return;
         projects = (pData.projects || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         if(!projects.length) projects = [{ id: 'default', name: L('默认项目','Default'), order: 0, canvas_count: 0 }];
@@ -209,6 +224,7 @@ async function loadAll({preserveViewport = false} = {}){
         window.canvasListEntryOverlay?.remove();
         window.canvasListEntryOverlay = null;
     } catch(e){
+        if(!isCurrent()) return;
         console.error(e);
         setStatus(L('加载失败','Load failed'));
         window.canvasListEntryOverlay?.error('画布列表加载失败，请重试。', () => loadAll());

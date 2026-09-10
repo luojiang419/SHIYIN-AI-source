@@ -25,6 +25,13 @@ MAX_ACCOUNT_CHARS = 4096
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
+def is_account_database_busy(error: sqlite3.OperationalError) -> bool:
+    code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+    return code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or str(error).lower() in {
+        "database is locked", "database table is locked",
+    }
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -331,7 +338,16 @@ class AccountStore:
                     str(account["id"]), str(account["account"]), "user", str(account["folder_name"])
                 )
             if timestamp - int(row["last_seen_at"] or 0) >= 60_000:
-                connection.execute("UPDATE sessions SET last_seen_at=? WHERE token_hash=?", (timestamp, digest))
+                # 心跳不参与授权判定；不能让并发媒体请求争抢写锁导致有效会话报错。
+                connection.execute("PRAGMA busy_timeout=0")
+                try:
+                    connection.execute(
+                        "UPDATE sessions SET last_seen_at=? WHERE token_hash=? AND last_seen_at<?",
+                        (timestamp, digest, timestamp - 60_000),
+                    )
+                except sqlite3.OperationalError as error:
+                    if not is_account_database_busy(error):
+                        raise
             return identity
 
     def logout(self, token: str) -> None:

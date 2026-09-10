@@ -482,7 +482,7 @@ console.log(JSON.stringify({ok:true}));
         self.assertIn("mediaResidentReason === 'budget'", SMART_JS)
         self.assertIn("maxResidentPixels", CANVAS_JS)
         self.assertIn("maxResidentPixels", SMART_JS)
-        self.assertIn("imageLowResSource:img", CANVAS_JS)
+        self.assertIn("imageLowResSource:preparedClassicLowResSource", CANVAS_JS)
         self.assertIn("imageLowResSource:img", SMART_JS)
         self.assertIn('loading="eager" decoding="async"', CANVAS_JS)
         self.assertIn('loading="eager" decoding="async"', SMART_JS)

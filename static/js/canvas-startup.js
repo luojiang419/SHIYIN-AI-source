@@ -18,9 +18,15 @@
     let sequence = 0;
     const configRequests = new Set();
 
-    async function readJson(url, signal, resource){
+    async function readJson(url, signal, resource, attempt=0){
         const response = await host.fetch(url, {signal, cache:'no-store'});
         if(!response.ok){
+            const detail=await response.json().catch(()=>({}));
+            if(response.status===503 && detail.code==='account_database_busy' && attempt<2 && !signal.aborted){
+                host.canvasEntryOverlay?.update(12,'正在等待账号数据就绪，自动重试中…');
+                await new Promise(resolve=>host.setTimeout(resolve,500*(attempt+1)));
+                return readJson(url,signal,resource,attempt+1);
+            }
             const error = new Error(`${resource} request failed (${response.status})`);
             error.resource = resource;
             error.status = response.status;

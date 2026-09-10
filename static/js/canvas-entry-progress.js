@@ -29,11 +29,11 @@
                 el.querySelector('[role=progressbar]').setAttribute('aria-valuenow', String(Math.round(value)));
                 el.querySelector('.canvas-entry-detail').textContent = detail;
             },
-            error(message, retry, proceed){
+            error(message, retry, proceed, proceedLabel='继续进入'){
                 el.querySelector('[data-entry-message]').textContent = message;
                 const actions = el.querySelector('[data-entry-actions]');
                 actions.replaceChildren();
-                for(const [label, action] of [['重试',retry],['继续进入',proceed]]){
+                for(const [label, action] of [['重试',retry],[proceedLabel,proceed]]){
                     if(!action) continue;
                     const button = document.createElement('button');
                     button.textContent = label; button.onclick = action; actions.appendChild(button);

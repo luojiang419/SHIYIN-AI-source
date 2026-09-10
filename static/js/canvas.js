@@ -4344,7 +4344,7 @@ document.querySelectorAll('[data-brush-color]').forEach(button => {
 });
 // 图片编辑区滚轮缩放
 document.getElementById('imageEditStage').addEventListener('wheel', event => {
-    if(!cropState) return;
+    if(!cropState || document.getElementById('cropImage')?.dataset.editorLoadState !== 'ready') return;
     event.preventDefault();
     event.stopPropagation();
     const stage = event.currentTarget;
@@ -7521,6 +7521,7 @@ function resizeEditTextCanvas(){
     renderEditTextCanvas();
 }
 function resizeEditDrawCanvas(){
+    if(imageEditMode === 'preview') return;
     const img = document.getElementById('cropImage');
     const canvasEl = editDrawCanvas();
     const w = Math.max(1, img.naturalWidth || img.clientWidth || 1);
@@ -7538,6 +7539,13 @@ function resizeEditDrawCanvas(){
     }
 }
 function setImageEditMode(mode, userTouched=false){
+    const editorImage = document.getElementById('cropImage');
+    if(mode !== 'preview' && editorImage?.dataset.editorLoadState !== 'ready'){
+        editorImage.dataset.editorPendingMode = mode;
+        document.getElementById('imageEditSub').textContent = '原图加载完成后即可编辑';
+        return;
+    }
+    if(userTouched) delete editorImage.dataset.editorPendingMode;
     if(userTouched) imageEditModeTouched = true;
     const prevImageEditMode = imageEditMode;
     if(mode !== 'brush') removeEditTextInlineEditor(true);
@@ -7594,7 +7602,7 @@ function setImageEditMode(mode, userTouched=false){
     syncEditDrawingHistoryButtons();
     syncBrushToolButtons();
     syncTextToolState(true);
-    refreshIcons();
+    refreshIcons(document.getElementById('imageEditModal'));
 }
 function editDrawSnapshot(){
     const canvasEl = editDrawCanvas();
@@ -8536,6 +8544,7 @@ function openImageEditor(nodeId, initialMode='crop'){
     if(!node?.url) return;
     if(mediaKindForNode(node) !== 'image') return;
     if(!['preview','crop','outpaint','mask','brush','resize','grid'].includes(initialMode)) initialMode = 'crop';
+    if(cropState?.nodeId === nodeId && document.getElementById('imageEditModal').classList.contains('open')) return;
     cropState = {nodeId, x:0, y:0, w:0, h:0};
     // 重置自定义宫格状态
     gridCustomMode = false;
@@ -8570,56 +8579,57 @@ function openImageEditor(nodeId, initialMode='crop'){
     _updateZoomLabel();
     const modal = document.getElementById('imageEditModal');
     const img = document.getElementById('cropImage');
+    delete img.dataset.editorPendingMode;
+    // 上一次编辑的原尺寸画布不应占用新预览的内存和清屏时间。
+    for(const canvas of [editDrawCanvas(), editTextCanvas()]){
+        if(canvas){ canvas.width = 1; canvas.height = 1; }
+    }
     img.style.width = '';
     img.style.height = '';
     img.style.maxWidth = '';
     img.style.maxHeight = '';
     modal.classList.add('open');
-    const editorSrcToken = `${nodeId}:${Date.now()}`;
-    img.dataset.editorSrcToken = editorSrcToken;
-    img.onload = () => {
-        // 记录 zoom=1 时的基础显示尺寸
-        imageEditBaseW = img.clientWidth;
-        imageEditBaseH = img.clientHeight;
-        _updateZoomLabel();
-        syncImageResizeControls();
-        resizeEditDrawCanvas();
-        resetEditDrawingHistory();
-        clearEditDrawing(true);
-        resetCropBox();
-        if(!imageEditModeTouched) setImageEditMode(initialMode);
-        syncImageEditOverflow();
-        refreshIcons();
-    };
-    img.crossOrigin = 'anonymous';
-    const fullEditorSrc = canvasDisplayMediaUrl(node.url, node.name || '');
-    const quickEditorSrc = canvasMediaPreviewUrl(node.url, initialMode === 'preview' ? 1536 : 2048);
-    if(quickEditorSrc && quickEditorSrc !== fullEditorSrc){
-        img.src = quickEditorSrc;
-        requestAnimationFrame(() => {
-            setTimeout(() => {
-                if(!cropState || cropState.nodeId !== nodeId) return;
-                if(!modal.classList.contains('open') || img.dataset.editorSrcToken !== editorSrcToken) return;
-                if(img.getAttribute('src') !== fullEditorSrc) img.src = fullEditorSrc;
-            }, initialMode === 'preview' ? 120 : 60);
-        });
-    } else {
-        img.src = fullEditorSrc;
-    }
-    setImageEditMode(initialMode);
-    refreshIcons();
+    const sourceImage = document.querySelector(`.node[data-id="${CSS.escape(nodeId)}"] .image-preview-wrap img`);
+    window.CanvasImagePreview.open({
+        img,
+        stage:document.getElementById('imageEditStage'),
+        sourceImage:sourceImage?.dataset.originalSrc === canvasOriginalMediaUrl(node.url) ? sourceImage : null,
+        previewSrc:canvasMediaPreviewUrl(node.url, 512),
+        originalSrc:canvasDisplayMediaUrl(node.url, node.name || ''),
+        onReady:() => {
+            // 原图只交接一次，编辑初始化不会被缩略图/原图两次 load 反复清空。
+            imageEditBaseW = img.clientWidth;
+            imageEditBaseH = img.clientHeight;
+            _updateZoomLabel();
+            resetEditDrawingHistory();
+            clearEditDrawing(true);
+            resetCropBox();
+            const readyMode = img.dataset.editorPendingMode || (imageEditModeTouched ? imageEditMode : initialMode);
+            delete img.dataset.editorPendingMode;
+            setImageEditMode(readyMode);
+            syncImageEditOverflow();
+            refreshIcons(modal);
+        }
+    });
+    // 加载中只显示像素副本；裁剪、画笔等始终等待原图，避免低清误导出。
+    setImageEditMode('preview');
+    refreshIcons(modal);
 }
 function closeImageEditor(){
     document.getElementById('imageEditModal').classList.remove('open');
     const img = document.getElementById('cropImage');
+    window.CanvasImagePreview.cancel(img);
     img.onload = null;
-    delete img.dataset.editorSrcToken;
+    delete img.dataset.editorPendingMode;
     img.removeAttribute('src');
     img.style.width = '';
     img.style.height = '';
     img.style.maxWidth = '';
     img.style.maxHeight = '';
     clearEditDrawing(true);
+    for(const canvas of [editDrawCanvas(), editTextCanvas()]){
+        if(canvas){ canvas.width = 1; canvas.height = 1; }
+    }
     cropState = null;
     cropDrag = null;
     editDrawState = null;
@@ -8978,6 +8988,7 @@ async function applyImageResize(){
     scheduleSave();
 }
 function applyImageEdit(){
+    if(document.getElementById('cropImage')?.dataset.editorLoadState !== 'ready') return;
     if(imageEditMode === 'outpaint') return applyImageOutpaint();
     if(imageEditMode === 'mask') return applyImageMask();
     if(imageEditMode === 'brush') return applyImageBrush();

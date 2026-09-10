@@ -8,7 +8,7 @@
             return '2026.09.02.media-cache-nonblocking-trim.3';
         }
     })();
-    const workerUrl = `/media-cache-sw.js?v=${CACHE_VERSION}`;
+    const workerUrl = `/media-cache-sw.js?v=${CACHE_VERSION}&schema=session-v3`;
     let registrationPromise = null;
 
     function register(){

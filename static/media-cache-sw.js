@@ -1,281 +1,158 @@
-/* SHIYIN-AI generated-image cache service worker. */
-const CACHE_PREFIX = 'shiyin-generated-images-';
+'use strict';
+// 媒体缓存独立于应用版本；会话分区 + 实际源版本共同确定身份。
+const CACHE_NAME = 'shiyin-media-session-v3';
 const STATIC_CACHE_PREFIX = 'shiyin-static-assets-';
-const WORKER_VERSION = (() => {
-    try { return new URL(self.location.href).searchParams.get('v') || 'v2'; }
-    catch (error) { return 'v2'; }
-})();
-const CACHE_NAME = `${CACHE_PREFIX}${WORKER_VERSION}`;
-const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}${WORKER_VERSION}`;
-const MAX_ENTRIES = 500;
-const MAX_BYTES = 512 * 1024 * 1024;
-const GENERATED_CACHE_RETENTION = 3;
-const MEDIA_PREVIEW_REFRESH_INTERVAL = 30 * 1000;
-const DB_NAME = 'shiyin-generated-image-cache';
-const DB_STORE = 'entries';
-const mediaPreviewRefreshes = new Map();
-const mediaPreviewRefreshAt = new Map();
-let cacheTrimTask = null;
-
-function isSameOrigin(request) {
-    try { return new URL(request.url).origin === self.location.origin; } catch (error) { return false; }
-}
-
-function isCacheablePath(url) {
-    const path = url.pathname;
-    if (path === '/api/media-preview' || path === '/api/image-jpeg' || path === '/api/download-output') return true;
-    return path.startsWith('/output/') || path.startsWith('/assets/output/') || path.startsWith('/assets/generated/');
-}
+const STATIC_CACHE_NAME = `${STATIC_CACHE_PREFIX}v3`;
+const MAX_ENTRIES = 1000;
+const MAX_BYTES = 256 * 1024 * 1024;
+const MAX_ITEM_BYTES = 16 * 1024 * 1024;
+const inflight = new Map();
+let authPending = null;
+let authEpoch = 0;
+let accountMutation = null;
+let trimPending = null;
+let lastTrim = 0;
 
 function isCacheableRequest(request) {
-    if (request.method !== 'GET' || !isSameOrigin(request)) return false;
-    if (request.destination && request.destination !== 'image') return false;
-    try { return isCacheablePath(new URL(request.url)); } catch (error) { return false; }
+    const url = new URL(request.url);
+    return request.method === 'GET' && url.origin === self.location.origin
+        && (!request.destination || request.destination === 'image')
+        && (['/api/media-preview', '/api/image-jpeg', '/api/download-output'].includes(url.pathname)
+            || url.pathname.startsWith('/assets/') || url.pathname.startsWith('/output/'));
 }
-
+function hasContentRevision(url) {
+    return ['rev', 'v', 'hash', 'version'].some(key => Boolean(url.searchParams.get(key)));
+}
 function isVersionedStaticAssetRequest(request) {
-    if (request.method !== 'GET' || !isSameOrigin(request)) return false;
-    if (!['script', 'style', 'font', 'image'].includes(request.destination)) return false;
-    try {
-        const url = new URL(request.url);
-        if (!url.pathname.startsWith('/static/') || url.pathname === '/media-cache-sw.js') return false;
-        return hasContentRevision(url);
-    } catch (error) {
-        return false;
-    }
+    const url = new URL(request.url);
+    return request.method === 'GET' && url.origin === self.location.origin
+        && url.pathname.startsWith('/static/') && !url.pathname.startsWith('/static/assets/')
+        && ['script', 'style', 'font', 'image'].includes(request.destination) && hasContentRevision(url);
 }
-
 async function handleStaticAssetRequest(request) {
     const cache = await caches.open(STATIC_CACHE_NAME);
     const cached = await cache.match(request);
     if (cached) return cached;
-    try {
-        const response = await fetch(request);
-        if (response.ok) await cache.put(request, response.clone());
-        return response;
-    } catch (error) {
-        return cached || Response.error();
+    const response = await fetch(request);
+    if (response.ok) await cache.put(request, response.clone());
+    return response;
+}
+async function authenticatedScope() {
+    // 只合并正在执行的鉴权，不缓存鉴权结果；登出/过期立即停止缓存读取。
+    if (accountMutation) await accountMutation.catch(() => {});
+    const epoch = authEpoch;
+    if (!authPending) {
+        const pending = fetch('/api/auth/status', {cache:'no-store', credentials:'same-origin'})
+            .then(response => response.ok ? response.headers.get('X-Media-Account') || '' : '')
+            .catch(() => '').finally(() => { if (authPending === pending) authPending = null; });
+        authPending = pending;
     }
+    const scope = await authPending;
+    return epoch === authEpoch ? scope : authenticatedScope();
 }
-
-function hasContentRevision(url) {
-    return ['rev', 'v', 'hash', 'version'].some(key => Boolean(url.searchParams.get(key)));
-}
-
-function needsFreshNetwork(request) {
-    try {
-        const url = new URL(request.url);
-        // 预览接口由 stale-while-revalidate 单独处理；文件名通常是内容寻址的，
-        // 没有版本 query 时也应优先复用缓存，避免每次重绘都触发网络和磁盘 I/O。
-        return url.pathname.startsWith('/api/');
-    } catch (error) {
-        return true;
-    }
-}
-
-function openMetaDb() {
-    return new Promise((resolve, reject) => {
-        if (!self.indexedDB) { resolve(null); return; }
-        const request = indexedDB.open(DB_NAME, 1);
-        request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE, {keyPath: 'url'});
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => resolve(null);
+function handleAccountMutation(request) {
+    ++authEpoch;
+    authPending = null;
+    const pending = fetch(request).finally(() => {
+        ++authEpoch;
+        authPending = null;
+        if (accountMutation === pending) accountMutation = null;
     });
+    accountMutation = pending;
+    return pending;
 }
-
-async function readMeta() {
-    const db = await openMetaDb();
-    if (!db) return [];
-    return new Promise(resolve => {
-        const tx = db.transaction(DB_STORE, 'readonly');
-        const request = tx.objectStore(DB_STORE).getAll();
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => resolve([]);
-    });
+function scopedKey(request, scope) {
+    const url = new URL(request.url);
+    url.searchParams.set('__media_session', scope);
+    return new Request(url.href);
 }
-
-async function writeMeta(entry) {
-    const db = await openMetaDb();
-    if (!db) return;
-    try {
-        const tx = db.transaction(DB_STORE, 'readwrite');
-        tx.objectStore(DB_STORE).put(entry);
-    } catch (error) {}
-}
-
-async function deleteMeta(url) {
-    const db = await openMetaDb();
-    if (!db) return;
-    try {
-        const tx = db.transaction(DB_STORE, 'readwrite');
-        tx.objectStore(DB_STORE).delete(url);
-    } catch (error) {}
-}
-
 async function trimCache(cache) {
-    const entries = await readMeta();
-    if (!entries.length) return;
-    let totalBytes = entries.reduce((sum, item) => sum + Number(item.bytes || 0), 0);
-    const ordered = [...entries].sort((a, b) => Number(a.touchedAt || 0) - Number(b.touchedAt || 0));
-    while (ordered.length > MAX_ENTRIES || totalBytes > MAX_BYTES) {
-        const oldest = ordered.shift();
-        if (!oldest) break;
-        await cache.delete(oldest.url);
-        await deleteMeta(oldest.url);
-        totalBytes -= Number(oldest.bytes || 0);
+    let total = 0;
+    const entries = [];
+    for (const key of await cache.keys()) {
+        const response = await cache.match(key);
+        const bytes = Number(response?.headers.get('X-Cache-Bytes') || 0);
+        total += bytes;
+        entries.push({key, bytes});
+    }
+    while (entries.length > MAX_ENTRIES || total > MAX_BYTES) {
+        const oldest = entries.shift();
+        await cache.delete(oldest.key);
+        total -= oldest.bytes;
     }
 }
-
-function scheduleTrimCache(cache) {
-    if(cacheTrimTask) return;
-    cacheTrimTask = trimCache(cache).catch(() => {}).finally(() => { cacheTrimTask = null; });
+function scheduleTrimCache(cache, event) {
+    if (trimPending || Date.now() - lastTrim < 10000) return;
+    lastTrim = Date.now();
+    trimPending = trimCache(cache).catch(() => {}).finally(() => { trimPending = null; });
+    event.waitUntil(trimPending);
 }
-
-async function cacheResponse(request, response) {
-    if (!response || !response.ok || !String(response.headers.get('content-type') || '').toLowerCase().startsWith('image/')) return;
+async function cacheResponse(cache, key, response, scope) {
+    if (!response.ok || response.status === 206 || response.headers.get('X-Media-Account') !== scope
+        || !String(response.headers.get('content-type') || '').startsWith('image/')) return;
+    const declared = Number(response.headers.get('content-length') || 0);
+    // 未知大小的上游响应不读入内存；有界本地预览才进入持久缓存。
+    if (!declared || declared > MAX_ITEM_BYTES) return;
+    const body = await response.clone().blob();
+    if (body.size > MAX_ITEM_BYTES) return;
+    const headers = new Headers(response.headers);
+    headers.delete('Vary'); // key 已包含已认证会话，不依赖 JS 无法读取的 Cookie。
+    headers.set('X-Cache-Bytes', String(body.size));
+    headers.set('X-Cache-Time', String(Date.now()));
+    await cache.put(key, new Response(body, {status:response.status, headers}));
+}
+async function handleImageRequest(request, event) {
+    const scope = await authenticatedScope();
+    const epoch = authEpoch;
+    if (!scope) return fetch(new Request(request, {cache:'no-store'}));
     const cache = await caches.open(CACHE_NAME);
-    await cache.put(request, response.clone());
-    await writeMeta({
-        url: request.url,
-        bytes: Number(response.headers.get('content-length') || 0),
-        touchedAt: Date.now(),
-    });
-    // 裁剪不能阻塞当前图片响应；大缓存清理留在后台串行执行。
-    scheduleTrimCache(cache);
+    const key = scopedKey(request, scope);
+    const cached = await cache.match(key);
+    if (epoch !== authEpoch) return handleImageRequest(request, event);
+    const url = new URL(request.url);
+    const age = Date.now() - Number(cached?.headers.get('X-Cache-Time') || 0);
+    if (cached && (hasContentRevision(url) || age < 30000)) return cached;
+    let pending = inflight.get(key.url);
+    if (!pending) {
+        pending = fetch(new Request(request, {cache:'no-cache'})).then(response => {
+            // 鉴权和媒体请求之间若发生账号切换，不返回另一账号的数据。
+            if (epoch !== authEpoch || (response.ok && response.headers.get('X-Media-Account') !== scope)) return Response.error();
+            event.waitUntil(cacheResponse(cache, key, response, scope).catch(() => {}));
+            return response;
+        }).finally(() => inflight.delete(key.url));
+        inflight.set(key.url, pending);
+    }
+    scheduleTrimCache(cache, event);
+    return (await pending).clone();
 }
-
-async function matchGeneratedImage(request) {
-    const names = [CACHE_NAME];
-    try {
-        const keys = await caches.keys();
-        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).forEach(key => names.push(key));
-    } catch (error) {}
-    for(const name of names){
-        try {
-            const response = await (await caches.open(name)).match(request);
-            if(response) return {response, cacheName:name};
-        } catch (error) {}
-    }
-    return null;
-}
-
-async function handleImageRequest(request) {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request);
-    if (cached) return cached;
-    const legacy = await matchGeneratedImage(request);
-    if(legacy?.response){
-        // 升级后把命中的旧版本缩略图提升到当前 cache，避免冷启动时重复生成。
-        cache.put(request, legacy.response.clone()).catch(() => {});
-        return legacy.response;
-    }
-    try {
-        const response = await fetch(request);
-        await cacheResponse(request, response);
-        return response;
-    } catch (error) {
-        return Response.error();
-    }
-}
-
-async function networkFirstImageRequest(request) {
-    try {
-        // 绕过浏览器 HTTP 缓存，避免同 URL 的新生成结果被旧响应遮蔽。
-        const response = await fetch(new Request(request, {cache: 'no-store'}));
-        await cacheResponse(request, response);
-        return response;
-    } catch (error) {
-        const cache = await caches.open(CACHE_NAME);
-        const cached = await cache.match(request);
-        return cached || Response.error();
-    }
-}
-
-function isMediaPreviewRequest(request) {
-    try { return new URL(request.url).pathname === '/api/media-preview'; }
-    catch (error) { return false; }
-}
-
-async function staleWhileRevalidateMediaPreview(request, event) {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request) || (await matchGeneratedImage(request))?.response;
-    const key = request.url;
-    const now = Date.now();
-    let refresh = mediaPreviewRefreshes.get(key);
-    if(!refresh && (!mediaPreviewRefreshAt.has(key) || now - mediaPreviewRefreshAt.get(key) >= MEDIA_PREVIEW_REFRESH_INTERVAL)){
-        mediaPreviewRefreshAt.set(key, now);
-        refresh = fetch(new Request(request, {cache: 'no-store'}))
-            .then(response => cacheResponse(request, response).then(() => response))
-            .finally(() => mediaPreviewRefreshes.delete(key));
-        mediaPreviewRefreshes.set(key, refresh);
-    }
-    if (cached) {
-        // 首屏直接复用已有缩略图；同一 URL 的后台刷新去重并节流，重复 render 不再制造洪峰。
-        if(refresh) event.waitUntil(refresh.catch(() => {}));
-        return cached;
-    }
-    try {
-        if(!refresh){
-            refresh = fetch(new Request(request, {cache: 'no-store'}))
-                .then(response => cacheResponse(request, response).then(() => response))
-                .finally(() => mediaPreviewRefreshes.delete(key));
-            mediaPreviewRefreshes.set(key, refresh);
-        }
-        return await refresh;
-    }
-    catch (error) { return Response.error(); }
-}
-
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil((async () => {
     const keys = await caches.keys();
-    // generated-image cache 按内容 URL 复用，静态资源版本升级不应清空缩略图。
-    // 只保留最近几个版本，避免长期升级造成无限增长。
-    const generated = keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME);
-    if(generated.length > GENERATED_CACHE_RETENTION - 1){
-        await Promise.all(generated.slice(0, generated.length - (GENERATED_CACHE_RETENTION - 1)).map(key => caches.delete(key)));
-    }
-    await Promise.all(keys.filter(key => key.startsWith(STATIC_CACHE_PREFIX) && key !== STATIC_CACHE_NAME).map(key => caches.delete(key)));
+    // 旧缓存没有账号边界，禁止复用。
+    await Promise.all(keys.filter(key => key !== CACHE_NAME && key !== STATIC_CACHE_NAME
+        && (key.startsWith('shiyin-generated-image') || key.startsWith('shiyin-media-') || key.startsWith(STATIC_CACHE_PREFIX)))
+        .map(key => caches.delete(key)));
+    if (self.indexedDB) self.indexedDB.deleteDatabase('shiyin-generated-image-cache');
     await self.clients.claim();
 })()));
-
 self.addEventListener('fetch', event => {
-    if (isVersionedStaticAssetRequest(event.request)) {
-        event.respondWith(handleStaticAssetRequest(event.request));
-        return;
-    }
-    if (isCacheableRequest(event.request)) {
-        if (isMediaPreviewRequest(event.request)) {
-            event.respondWith(staleWhileRevalidateMediaPreview(event.request, event));
-        } else {
-            event.respondWith(needsFreshNetwork(event.request)
-                ? networkFirstImageRequest(event.request)
-                : handleImageRequest(event.request));
-        }
-    }
+    const url = new URL(event.request.url);
+    if (url.origin === self.location.origin && event.request.method === 'POST'
+        && ['/api/account/login','/api/account/logout','/api/account/register'].includes(url.pathname)) event.respondWith(handleAccountMutation(event.request));
+    else if (isVersionedStaticAssetRequest(event.request)) event.respondWith(handleStaticAssetRequest(event.request));
+    else if (isCacheableRequest(event.request)) event.respondWith(handleImageRequest(event.request, event));
 });
-
 self.addEventListener('message', event => {
-    if (event.data?.type === 'activate-media-cache-worker') {
-        event.waitUntil(self.skipWaiting());
-    }
-    if (event.data?.type === 'clear-generated-image-cache') {
-        event.waitUntil((async () => {
-            await caches.delete(CACHE_NAME);
-            const db = await openMetaDb();
-            try { db?.close(); } catch (error) {}
-            if (self.indexedDB) indexedDB.deleteDatabase(DB_NAME);
-        })());
-    }
-    if (event.data?.type === 'invalidate-generated-image-cache') {
-        event.waitUntil((async () => {
-            const cache = await caches.open(CACHE_NAME);
-            const urls = Array.isArray(event.data.urls) ? event.data.urls : [];
-            await Promise.all(urls.map(async url => {
-                if (typeof url !== 'string' || !url) return;
-                await cache.delete(url);
-                await deleteMeta(url);
-            }));
-        })());
-    }
+    if (event.data?.type === 'activate-media-cache-worker') event.waitUntil(self.skipWaiting());
+    if (event.data?.type === 'clear-generated-image-cache') event.waitUntil(caches.delete(CACHE_NAME));
+    if (event.data?.type === 'invalidate-generated-image-cache') event.waitUntil((async () => {
+        const urls = (event.data.urls || []).map(url => new URL(url, self.location.origin).href);
+        const cache = await caches.open(CACHE_NAME);
+        for (const key of await cache.keys()) {
+            const url = new URL(key.url);
+            url.searchParams.delete('__media_session');
+            const original = url.searchParams.get('url');
+            if (urls.includes(url.href) || (original && urls.includes(new URL(original, self.location.origin).href))) await cache.delete(key);
+        }
+    })());
 });

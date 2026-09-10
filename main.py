@@ -30,6 +30,7 @@ import ipaddress
 import xml.etree.ElementTree as ET
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from contextvars import copy_context
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from threading import Lock, Thread
@@ -73,6 +74,8 @@ from canvas_core.accounts import (
     is_loopback_address,
 )
 from canvas_core.account_storage import ScopedPath, current_account_id, reset_current_account, set_current_account
+from canvas_core.media_integrity import atomic_write_bytes, canonical_media_extension, file_image_info, image_content_info
+from canvas_core.works_snapshot import WorksSnapshotCache, database_stamp
 from canvas_core.lookbook_styles import (
     FASHION_EDITORIAL_STYLE, FASHION_EDITORIAL_STYLE_ID,
     load_styles as load_lookbook_styles, save_styles as save_lookbook_styles, shiying_cover_route,
@@ -358,7 +361,7 @@ async def account_authentication_middleware(request: Request, call_next):
     path = request.url.path.rstrip("/") or "/"
     if request.method == "OPTIONS" or path in PUBLIC_HTTP_PATHS:
         return await call_next(request)
-    identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
+    identity = await asyncio.to_thread(ACCOUNT_STORE.resolve_session, request_account_token(request))
     if identity and identity.is_admin and not is_loopback_address(request_remote_address(request)):
         identity = None
     if not identity:
@@ -373,7 +376,17 @@ async def account_authentication_middleware(request: Request, call_next):
         return JSONResponse({"detail": "普通账号无权查看或修改本机配置"}, status_code=403)
     context_token = set_current_account(identity.account_id)
     try:
-        return await call_next(request)
+        response = await call_next(request)
+        # 相对媒体 URL 在不同账号间相同。HTTP 缓存必须按 Cookie 隔离，
+        # SW 用不可逆会话标识分区，且缓存命中前重新鉴权。
+        if path.startswith(("/api/", "/assets/", "/output/")):
+            response.headers["X-Media-Account"] = hashlib.sha256(request_account_token(request).encode()).hexdigest()[:24]
+            response.headers["Vary"] = ", ".join(dict.fromkeys(
+                [part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()] + ["Cookie"]
+            ))
+            response.headers["Cache-Control"] = "private, no-cache" if path.startswith(("/assets/", "/output/", "/api/media-preview", "/api/image-jpeg")) else "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
     finally:
         reset_current_account(context_token)
 
@@ -5628,6 +5641,10 @@ def canvas_asset_kind(value, url=""):
     if isinstance(value, dict):
         explicit = str(value.get("kind") or value.get("mediaKind") or value.get("type") or "").lower()
         names.extend(str(value.get(key) or "").strip() for key in ("name", "filename", "file", "title"))
+    # 节点快照还包含研究网页、API 地址、来源链接；不能把未知 URL 默认当图片。
+    extension = os.path.splitext(urllib.parse.urlsplit(url or canvas_asset_url_value(value)).path)[1].lower()
+    if extension in {".html", ".htm", ".json", ".php", ".aspx"}:
+        return "file"
     if "video" in explicit:
         return "video"
     if "audio" in explicit:
@@ -5641,7 +5658,11 @@ def canvas_asset_kind(value, url=""):
             return "video"
         if asset_library_media_kind(name) == "audio":
             return "audio"
-    return asset_library_media_kind(url or canvas_asset_url_value(value))
+    if "image" in explicit or canonical_media_extension(extension, "") in MEDIA_FILE_KIND_EXTS["image"]:
+        return "image"
+    if extension in {".txt", ".md", ".srt", ".vtt"}:
+        return "text"
+    return "file"
 
 def canvas_asset_name(value, url="", fallback="asset"):
     if isinstance(value, dict):
@@ -5731,7 +5752,8 @@ def canvas_assets_index():
     cleanup_expired_canvas_trash()
     records = DATABASE.list_canvas_records(include_deleted=False)
     with CANVAS_ASSETS_INDEX_LOCK:
-        previous = dict(CANVAS_ASSETS_INDEX_CACHE.get("items_by_canvas") or {})
+        scope = str(DATABASE.path)
+        previous = dict((CANVAS_ASSETS_INDEX_CACHE.get("items_by_canvas") or {}).get(scope) or {})
         current = {}
         for record in records:
             canvas_id = str(record.get("id") or "")
@@ -5752,7 +5774,10 @@ def canvas_assets_index():
             canvas_counts[kind] = canvas_counts.get(kind, 0) + 1
             item_counts["all"] += len(canvas_items)
             item_counts[kind] = item_counts.get(kind, 0) + len(canvas_items)
-        CANVAS_ASSETS_INDEX_CACHE["items_by_canvas"] = current
+        scopes = CANVAS_ASSETS_INDEX_CACHE.setdefault("items_by_canvas", {})
+        scopes[scope] = current
+        while len(scopes) > 8:
+            scopes.pop(next(iter(scopes)))
     canvases.sort(key=lambda item: (0 if item.get("pinned") else 1, -int(item.get("updated_at") or item.get("created_at") or 0)))
     items.sort(key=lambda item: int(item.get("canvas_updated_at") or item.get("created_at") or 0), reverse=True)
     categories = [
@@ -8220,6 +8245,7 @@ def media_preview_cache_paths(path: str, width: int):
 # 避免 PIL/ffmpeg 抢占默认 asyncio 线程池；同一个文件+尺寸的并发请求共享
 # 一个 Future，防止多个请求重复解码、抽帧和写盘。
 MEDIA_PREVIEW_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="media-preview")
+VIDEO_PREVIEW_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="video-preview")
 MEDIA_PREVIEW_INFLIGHT_LOCK = Lock()
 MEDIA_PREVIEW_INFLIGHT: Dict[str, Future] = {}
 MEDIA_PREVIEW_FAILURE_TTL_SECONDS = 20.0
@@ -8270,7 +8296,7 @@ def build_media_preview(path: str, width: int, webp_path: str, png_path: str):
         return webp_path, "image/webp"
     if os.path.exists(png_path):
         return png_path, "image/png"
-    os.makedirs(MEDIA_PREVIEW_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(webp_path), exist_ok=True)
     if is_video_preview_file(path):
         img = generate_video_preview_image(path, width)
     else:
@@ -8279,10 +8305,14 @@ def build_media_preview(path: str, width: int, webp_path: str, png_path: str):
             img.thumbnail((width, width), Image.LANCZOS)
             img = img.convert("RGBA" if image_has_alpha(img) else "RGB")
     try:
-        img.save(webp_path, format="WEBP", quality=80, method=1)
+        buffer = BytesIO()
+        img.save(buffer, format="WEBP", quality=80, method=1)
+        atomic_write_bytes(webp_path, buffer.getvalue())
         return webp_path, "image/webp"
     except Exception:
-        img.save(png_path, format="PNG")
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        atomic_write_bytes(png_path, buffer.getvalue())
         return png_path, "image/png"
 
 
@@ -8300,7 +8330,8 @@ async def get_or_build_media_preview(path: str, width: int, webp_path: str, png_
             MEDIA_PREVIEW_FAILURES.pop(key, None)
         future = MEDIA_PREVIEW_INFLIGHT.get(key)
         if future is None:
-            future = MEDIA_PREVIEW_EXECUTOR.submit(build_media_preview, path, width, webp_path, png_path)
+            executor = VIDEO_PREVIEW_EXECUTOR if is_video_preview_file(path) else MEDIA_PREVIEW_EXECUTOR
+            future = executor.submit(copy_context().run, build_media_preview, path, width, webp_path, png_path)
             MEDIA_PREVIEW_INFLIGHT[key] = future
 
             def forget(done: Future, cache_key=key):
@@ -8335,15 +8366,18 @@ def resolve_media_preview_request(url: str, width: int):
 
 
 @app.get("/api/media-preview")
-async def media_preview(url: str, w: int = 512):
+async def media_preview(url: str, w: int = 512, request: Request = None):
     width = max(64, min(2048, int(w or 512)))
     path, webp_path, png_path, cached = await asyncio.to_thread(resolve_media_preview_request, url, width)
+    etag = '"' + os.path.basename(webp_path).split('.')[0] + '"'
+    if cached and request is not None and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
     if cached:
-        return FileResponse(cached[0], media_type=cached[1])
+        return FileResponse(cached[0], media_type=cached[1], headers={"ETag": etag})
 
     try:
         out_path, media_type = await get_or_build_media_preview(path, width, webp_path, png_path)
-        return FileResponse(out_path, media_type=media_type)
+        return FileResponse(out_path, media_type=media_type, headers={"ETag": etag})
     except Exception as exc:
         raise HTTPException(status_code=415, detail=f"无法生成预览图：{exc}") from exc
 
@@ -9481,6 +9515,9 @@ def sanitize_asset_name(name, fallback="asset"):
     return name[:120] or fallback
 
 def content_type_for_path(path):
+    detected = file_image_info(path)
+    if detected:
+        return detected[1]
     ext = os.path.splitext(path)[1].lower()
     # 兼容历史或上游产生的伪扩展名（例如 image.jpg_x）。
     # 文件内容仍是 JPEG，必须返回图片 MIME 才能被作品管理页渲染。
@@ -10798,7 +10835,7 @@ def normalized_image_extension(extension: str = "") -> str:
     ext = str(extension or "").strip().lower()
     if ext == ".jpeg":
         return ".jpg"
-    if ext in {".png", ".jpg", ".webp"}:
+    if ext in {".png", ".jpg", ".webp", ".gif", ".bmp", ".tiff", ".avif"}:
         return ext
     return ".png"
 
@@ -10837,31 +10874,26 @@ def next_work_output_target(extension: str = ".png", category: str = "output") -
 
 
 def write_image_bytes_to_output(raw: bytes, extension: str, *, prefix: str, category: str, enterprise_filename: bool) -> str:
+    extension, _ = image_content_info(raw)
     if enterprise_filename:
         with WORK_OUTPUT_FILENAME_LOCK:
             filename, path = next_work_output_target(extension, category)
-            with open(path, "wb") as f:
-                f.write(raw)
+            atomic_write_bytes(path, raw)
         url = output_url_for(filename, category)
         register_internal_media_object(url, category, "image", "generated")
         return url
     filename = f"{prefix}{uuid.uuid4().hex[:10]}{normalized_image_extension(extension)}"
     path = output_path_for(filename, category)
-    with open(path, "wb") as f:
-        f.write(raw)
+    atomic_write_bytes(path, raw)
     url = output_url_for(filename, category)
     register_internal_media_object(url, category, "image", "generated")
     return url
 
 
 def copy_image_to_enterprise_output(source_path: str, category: str = "output") -> str:
-    extension = normalized_image_extension(os.path.splitext(source_path)[1])
-    with WORK_OUTPUT_FILENAME_LOCK:
-        filename, destination = next_work_output_target(extension, category)
-        shutil.copy2(source_path, destination)
-    url = output_url_for(filename, category)
-    register_internal_media_object(url, category, "image", "generated-copy")
-    return url
+    with open(source_path, "rb") as handle:
+        raw = handle.read()
+    return write_image_bytes_to_output(raw, "", prefix="", category=category, enterprise_filename=True)
 
 
 async def save_ai_image_to_output(image_data, prefix="online_", category="output", enterprise_filename: bool = False):
@@ -10869,19 +10901,18 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
         mime_type = str(image_data.get("mime_type") or "").lower()
         extension = image_extension_from_content_type(mime_type, ".png")
         raw = base64.b64decode(image_data["value"])
-        return write_image_bytes_to_output(raw, extension, prefix=prefix, category=category, enterprise_filename=enterprise_filename)
-    value = image_data["value"]
+        return await asyncio.to_thread(write_image_bytes_to_output, raw, extension, prefix=prefix, category=category, enterprise_filename=enterprise_filename)
+    value = canonical_local_media_origin_url(image_data["value"])
     if value.startswith("/output/") or value.startswith("/assets/"):
+        source_path = await asyncio.to_thread(output_file_from_url, value)
+        info = await asyncio.to_thread(file_image_info, source_path) if source_path else None
+        if not info:
+            raise HTTPException(status_code=502, detail="生成结果引用的本地图片不存在或无法读取")
         if enterprise_filename:
-            source_path = output_file_from_url(value)
-            if source_path and os.path.isfile(source_path):
-                source_name = os.path.basename(source_path)
-                if work_output_filename_is_enterprise(source_name):
-                    return value
-                try:
-                    return copy_image_to_enterprise_output(source_path, category)
-                except Exception as exc:
-                    print(f"复制生成图片为作品命名失败: {exc}")
+            source_name = os.path.basename(source_path)
+            if work_output_filename_is_enterprise(source_name) and os.path.splitext(source_name)[1].lower() == info[0]:
+                return value
+            return await asyncio.to_thread(copy_image_to_enterprise_output, source_path, category)
         return value
     try:
         timeout = httpx.Timeout(connect=20.0, read=300.0, write=60.0, pool=20.0)
@@ -10890,10 +10921,11 @@ async def save_ai_image_to_output(image_data, prefix="online_", category="output
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "")
             extension = image_extension_from_content_type(content_type, os.path.splitext(urllib.parse.urlsplit(value).path)[1])
-            return write_image_bytes_to_output(response.content, extension, prefix=prefix, category=category, enterprise_filename=enterprise_filename)
+            return await asyncio.to_thread(write_image_bytes_to_output, response.content, extension, prefix=prefix, category=category, enterprise_filename=enterprise_filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as e:
-        print(f"保存上游图片失败: {e}")
-        return value
+        raise HTTPException(status_code=502, detail=f"生成结果未能保存到本机，请重试下载：{e}") from e
 
 def image_output_meta(url, source_item=None):
     meta = {"url": url, "kind": "image"}
@@ -13412,11 +13444,16 @@ def view_image(filename: str, type: str = "input", subfolder: str = ""):
 @app.get("/api/download-output")
 def download_output(request: Request, url: str, name: str = "", inline: bool = False):
     path = output_file_from_url(url)
-    if not path:
-        path = local_media_file_by_basename(filename_from_media_url(url, ""))
+    if not path and internal_media_request_path(url):
+        path = work_local_file_path({"url": url})
     if path:
         filename = sanitize_export_filename(os.path.basename(name) if name else os.path.basename(path), os.path.basename(path))
+        image_info = file_image_info(path)
+        if image_info:
+            filename = os.path.splitext(filename)[0] + image_info[0]
         return FileResponse(path, media_type=content_type_for_path(path), filename=None if inline else filename)
+    if internal_media_request_path(url):
+        raise HTTPException(status_code=404, detail="媒体文件不存在")
     # 远程文件：流式代理，绝不把整段视频/大文件读进内存（否则多个视频同时代理会撑爆内存、拖垮单进程服务）。
     parsed = urllib.parse.urlparse(str(url or "").strip())
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
@@ -13434,8 +13471,14 @@ def download_output(request: Request, url: str, name: str = "", inline: bool = F
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"远程文件下载失败：{exc}")
     content_type = upstream.headers.get("content-type") or "application/octet-stream"
+    if content_type.split(";", 1)[0].strip().lower() in {"text/html", "application/xhtml+xml", "application/json"}:
+        upstream.close()
+        raise HTTPException(status_code=415, detail="资源地址返回了网页或接口错误，无法作为媒体打开")
     fallback = filename_from_media_url(url, "download.bin")
     filename = sanitize_export_filename(os.path.basename(name) if name else fallback, fallback)
+    if content_type.lower().startswith("image/"):
+        extension = mimetypes.guess_extension(content_type.split(";", 1)[0].strip()) or ""
+        filename = os.path.splitext(filename)[0] + canonical_media_extension(extension)
     disposition = "inline" if inline else "attachment"
     headers = {"Content-Disposition": f"{disposition}; filename*=UTF-8''{urllib.parse.quote(filename)}"}
     content_length = upstream.headers.get("content-length")
@@ -26760,14 +26803,15 @@ def work_item_id(history_id: str, index: int, url: str) -> str:
 
 
 def work_file_extension(work: Dict[str, Any]) -> str:
+    if work.get("detected_extension"):
+        return canonical_media_extension(work["detected_extension"])
     source = str(work.get("original_name") or work.get("url") or "").split("?", 1)[0].split("#", 1)[0]
     extension = os.path.splitext(urllib.parse.unquote(source))[1].lower()
     # 某些上游图片地址会把 JPEG 标记为 .jpg_x；作品名必须回到标准 .jpg。
     if extension in {".jpg_x", ".jpeg_x"}:
         return ".jpg"
-    if not extension or len(extension) > 12 or re.search(r'[\\/:*?"<>|]', extension):
-        return ".png"
-    return extension
+    kind = str(work.get("media_type") or work.get("kind") or "").lower()
+    return canonical_media_extension(extension, ".mp4" if "video" in kind else ".mp3" if "audio" in kind else ".png")
 
 
 def work_date_part(work: Dict[str, Any]) -> str:
@@ -26795,6 +26839,8 @@ def work_display_name(work: Dict[str, Any], sequence: int = 1, used_names: Optio
     值才视为用户自定义名称。
     """
     original_name = str(work.get("original_name") or "").strip()
+    if work_output_filename_is_enterprise(original_name):
+        original_name = os.path.splitext(original_name)[0] + work_file_extension(work)
     current_name = str(work.get("name") or "").strip()
     if not current_name or current_name == original_name or work_output_filename_is_enterprise(current_name):
         candidate = original_name if work_output_filename_is_enterprise(original_name) else work_download_name(work, sequence)
@@ -26842,8 +26888,8 @@ def work_local_file_path(work: Dict[str, Any]) -> str:
     url = str(work.get("url") or "").strip()
     candidates = []
     path = output_file_from_url(url)
-    if path:
-        candidates.append(path)
+    if path and os.path.isfile(path):
+        return path
     parsed = urllib.parse.urlparse(url)
     # 远程 CDN 地址不能按 basename 在本地盲猜，否则可能打开同名的另一份文件，
     # 让“打开目录”看起来成功但实际定位错误。仅允许内部媒体 URL 进入兼容回退。
@@ -26851,8 +26897,7 @@ def work_local_file_path(work: Dict[str, Any]) -> str:
     if is_external:
         return ""
     basename = filename_from_media_url(url, "")
-    if basename:
-        candidates.append(local_media_file_by_basename(basename))
+    if basename and internal_media_request_path(url).startswith(("/assets/output/", "/output/")):
         # 兼容旧版迁移后仍保留在 exports/generated 的作品。作品接口使用
         # /assets/output URL，但旧文件实际位于 exports/generated 下，原先会
         # 因此只能预览/下载，无法定位到文件所在目录。
@@ -27026,9 +27071,22 @@ def finalize_work_items(works: List[Dict[str, Any]], offset: int = 0) -> List[Di
     for index, item in enumerate(works, offset + 1):
         value = normalize_local_media_origins(dict(item))
         value["media_type"] = work_media_type(value)
+        local_path = work_local_file_path(value)
+        value["resource_status"] = "local" if local_path else "missing" if internal_media_request_path(value.get("url")) else "remote"
+        if local_path:
+            info = file_image_info(local_path)
+            if info:
+                value["detected_extension"] = info[0]
+                value["media_type"] = "image"
+            elif value["media_type"] == "image":
+                value["resource_status"] = "invalid"
+            stat = os.stat(local_path)
+            value["media_revision"] = f"{stat.st_mtime_ns:x}-{stat.st_size:x}"
+            # 旧 exports/generated 地址仍保留作品 ID，但显示使用真实可解析路径。
+            value["preview_source"] = media_url_from_path(local_path) or value.get("url", "")
         # 同一批生成结果共享历史记录时间，无法区分每个文件的真实完成时间。
         # 对本地媒体使用文件 mtime，远程媒体或旧文件不存在时继续沿用历史时间。
-        file_created_at = work_local_file_modified_at(value)
+        file_created_at = float(os.path.getmtime(local_path)) if local_path else 0.0
         if file_created_at > 0:
             value["created_at"] = file_created_at
         value["download_sequence"] = index
@@ -27046,14 +27104,18 @@ def all_generated_works() -> List[Dict[str, Any]]:
     page = DATABASE.list_work_items(limit=1000, include_trashed=True)
     works = list(page.get("items") or [])
     cursor = str(page.get("next_cursor") or "")
+    visited_cursors = set()
     while cursor:
+        if cursor in visited_cursors:
+            raise RuntimeError("作品分页游标未前进，已中止重复读取")
+        visited_cursors.add(cursor)
         page = DATABASE.list_work_items(limit=1000, include_trashed=True, cursor=cursor)
         works.extend(page.get("items") or [])
         cursor = str(page.get("next_cursor") or "")
     return finalize_work_items(works)
 
 
-def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = None, *, exclude_urls=None) -> List[Dict[str, Any]]:
     """把无限画布中的图片/视频资产适配成作品管理使用的统一记录。"""
     metadata = metadata if isinstance(metadata, dict) else {}
     try:
@@ -27061,13 +27123,15 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
     except Exception:
         indexed = {"items": []}
     works: List[Dict[str, Any]] = []
+    seen_urls = set(exclude_urls or ())
     for item in indexed.get("items") or []:
         if not isinstance(item, dict):
             continue
         kind = str(item.get("kind") or "").lower()
-        url = str(item.get("url") or "").strip()
-        if kind not in {"image", "video"} or not url:
+        url = canonical_local_media_origin_url(str(item.get("url") or "").strip())
+        if kind not in {"image", "video"} or not url or url in seen_urls:
             continue
+        seen_urls.add(url)
         asset_id = f"canvas-{str(item.get('id') or '').strip()}"
         if asset_id == "canvas-":
             continue
@@ -27080,9 +27144,6 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
         raw_created_at = float(item.get("created_at") or item.get("canvas_updated_at") or 0)
         if raw_created_at > 10000000000:
             raw_created_at /= 1000.0
-        file_created_at = work_local_file_modified_at({"url": url})
-        if file_created_at > 0:
-            raw_created_at = file_created_at
         works.append({
             "id": asset_id,
             "history_id": f"canvas:{item.get('canvas_id') or ''}",
@@ -27123,15 +27184,18 @@ def all_works_with_canvas(metadata: Optional[Dict[str, Dict[str, Any]]] = None) 
     metadata = metadata if isinstance(metadata, dict) else work_metadata()
     generated = all_generated_works()
     seen_urls = {str(item.get("url") or "").strip() for item in generated if str(item.get("url") or "").strip()}
-    canvas_items = [item for item in canvas_generated_work_items(metadata) if str(item.get("url") or "").strip() not in seen_urls]
+    # 在文件解析/内容探测之前去重；同一图片可被数十个画布节点引用。
+    canvas_items = canvas_generated_work_items(metadata, exclude_urls=seen_urls)
     works = generated + canvas_items
     works.sort(key=lambda item: (float(item.get("created_at") or 0), str(item.get("id") or "")), reverse=True)
     normalize_work_display_names(works)
     return works
 
 
-@app.get("/api/works")
-async def list_generated_works(
+WORKS_SNAPSHOT_CACHE = WorksSnapshotCache()
+
+
+def list_generated_works_sync(
     favorite: Optional[bool] = None,
     kind: str = "",
     search: str = "",
@@ -27141,13 +27205,13 @@ async def list_generated_works(
     sort_order: str = "desc",
     media_type: str = "all",
 ):
-    metadata = work_metadata()
-    DATABASE.ensure_work_items_indexed(metadata)
     normalized_kind = str(kind or "").strip().lower()
     normalized_media = str(media_type or "all").strip().lower()
     if normalized_media not in {"all", "image", "video"}:
         normalized_media = "all"
-    works = all_works_with_canvas(metadata)
+    works = WORKS_SNAPSHOT_CACHE.get(
+        str(DATABASE.path), lambda: database_stamp(DATABASE.path), all_works_with_canvas,
+    )
     filtered: List[Dict[str, Any]] = []
     query = str(search or "").strip().lower()
     for item in works:
@@ -27177,7 +27241,24 @@ async def list_generated_works(
     page_items = filtered[offset:offset + safe_limit]
     next_cursor = f"works#{offset + len(page_items)}" if offset + len(page_items) < len(filtered) else ""
     normalize_work_display_names(page_items, offset)
+    for item in page_items:
+        source = item.get("preview_source") or item.get("url") or ""
+        if internal_media_request_path(source) and item.get("resource_status") == "local":
+            item["preview_url"] = "/api/media-preview?" + urllib.parse.urlencode({
+                "url": source, "w": 512, "rev": item.get("media_revision", ""),
+            })
     return {"works": page_items, "total": len(filtered), "next_cursor": next_cursor}
+
+
+@app.get("/api/works")
+async def list_generated_works(
+    favorite: Optional[bool] = None, kind: str = "", search: str = "", limit: int = 500,
+    cursor: str = "", include_trashed: bool = False, sort_order: str = "desc", media_type: str = "all",
+):
+    return await asyncio.to_thread(
+        list_generated_works_sync, favorite, kind, search, limit, cursor,
+        include_trashed, sort_order, media_type,
+    )
 
 
 def update_work_metadata(work_id: str, *, name: Optional[str] = None, favorite: Optional[bool] = None, trashed: Optional[bool] = None) -> Tuple[Dict[str, Any], int]:

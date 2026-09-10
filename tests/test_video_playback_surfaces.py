@@ -15,7 +15,8 @@ def test_canvas_asset_index_canonicalizes_loopback_media_urls_before_returning_t
 def test_works_video_surfaces_use_stream_proxy_for_remote_urls():
     assert "function mediaPlaybackUrl(url, name='video.mp4')" in WORKS
     assert "/api/download-output?inline=1&url=" in WORKS
-    assert "mediaPlaybackUrl(item.url, item.name)" in WORKS
+    assert "item.preview_url || mediaDisplayUrl(item.url, item.name)" in WORKS
+    assert '<video src="${escapeHtml(mediaPlaybackUrl(item.url' not in WORKS
     assert "mediaPlaybackUrl(work.url, work.name)" in WORKS
     assert "function workMediaType(item)" in WORKS
     assert "item?.original_name" in WORKS

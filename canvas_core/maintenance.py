@@ -62,7 +62,14 @@ class MaintenanceManager:
 
     def _trim_cache(self) -> dict[str, int]:
         entries: list[tuple[float, int, Path]] = []
-        for path in self._files(self.layout.cache):
+        roots = [self.layout.cache]
+        accounts = self.layout.root / "accounts"
+        if accounts.is_dir():
+            # 管理员维护线程统一管理账号缓存，避免每个账号常驻一个扫描线程。
+            roots.extend(account / "cache" for account in accounts.iterdir()
+                         if account.is_dir() and not account.is_symlink()
+                         and (account / "cache").is_dir() and not (account / "cache").is_symlink())
+        for path in (path for root in roots for path in self._files(root)):
             try:
                 stat = path.stat()
                 entries.append((stat.st_atime or stat.st_mtime, stat.st_size, path))

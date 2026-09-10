@@ -199,9 +199,12 @@ class WorksBackendTests(unittest.TestCase):
             output = Path(root) / "output"
             output.mkdir()
             (output / "SHIYIN-000004-20260722.png").write_bytes(b"old")
+            from PIL import Image
+            image_bytes = io.BytesIO()
+            Image.new('RGB', (4, 4)).save(image_bytes, format='PNG')
             payload = {
                 "type": "b64",
-                "value": base64.b64encode(b"image-bytes").decode("ascii"),
+                "value": base64.b64encode(image_bytes.getvalue()).decode("ascii"),
                 "mime_type": "image/png",
             }
             with patch.object(self.main, "OUTPUT_OUTPUT_DIR", str(output)):

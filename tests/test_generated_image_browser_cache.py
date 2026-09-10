@@ -17,11 +17,11 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
         self.assertIn("application/javascript", response.headers.get("content-type", ""))
         self.assertEqual(response.headers.get("service-worker-allowed"), "/")
         self.assertEqual(response.headers.get("cache-control"), main.HTML_CACHE_CONTROL)
-        self.assertIn("WORKER_VERSION", response.text)
-        self.assertIn("shiyin-generated-images-", response.text)
+        self.assertIn("shiyin-media-session-v3", response.text)
+        self.assertIn("authenticatedScope", response.text)
         self.assertIn("/api/media-preview", response.text)
         self.assertIn("/output/", response.text)
-        self.assertIn("request.destination !== 'image'", response.text)
+        self.assertIn("request.destination === 'image'", response.text)
 
     def test_image_cache_client_is_registered_on_image_pages(self):
         pages = (
@@ -39,19 +39,20 @@ class GeneratedImageBrowserCacheTests(unittest.TestCase):
 
     def test_cache_worker_has_bounded_versioned_storage_and_network_fallback(self):
         text = (ROOT / "static" / "media-cache-sw.js").read_text(encoding="utf-8")
-        self.assertIn("MAX_ENTRIES = 500", text)
-        self.assertIn("MAX_BYTES = 512 * 1024 * 1024", text)
+        self.assertIn("MAX_ENTRIES = 1000", text)
+        self.assertIn("MAX_BYTES = 256 * 1024 * 1024", text)
         self.assertIn("CACHE_PREFIX", text)
         self.assertIn("return Response.error()", text)
         self.assertIn("clear-generated-image-cache", text)
         self.assertIn("invalidate-generated-image-cache", text)
         self.assertIn("activate-media-cache-worker", text)
-        self.assertIn("needsFreshNetwork", text)
-        self.assertIn("cache: 'no-store'", text)
+        self.assertIn("authenticatedScope", text)
+        self.assertIn("cache:'no-store'", text)
         self.assertIn("content-type", text)
-        cache_response = text[text.index("async function cacheResponse"):text.index("async function matchGeneratedImage")]
-        self.assertIn("scheduleTrimCache(cache);", cache_response)
-        self.assertNotIn("await scheduleTrimCache(cache)", cache_response)
+        self.assertIn("scheduleTrimCache(cache, event);", text)
+        self.assertNotIn("await scheduleTrimCache(cache", text)
+        self.assertIn("response.headers.get('X-Media-Account') !== scope", text)
+        self.assertIn("headers.set('X-Cache-Bytes'", text)
 
     def test_cache_client_explicitly_activates_waiting_worker(self):
         text = (ROOT / "static" / "js" / "media-cache-client.js").read_text(encoding="utf-8")

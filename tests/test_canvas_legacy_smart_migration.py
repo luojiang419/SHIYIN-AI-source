@@ -72,13 +72,10 @@ def test_unified_editor_loads_legacy_migration_before_canvas_runtime():
     assert page.index("canvas-legacy-migration.js") < page.index("/static/js/canvas.js")
 
 
-def test_media_service_worker_serves_cached_previews_before_background_refresh():
+def test_media_service_worker_checks_session_before_cached_preview():
     worker = (ROOT / "static/media-cache-sw.js").read_text(encoding="utf-8")
-    assert "return url.pathname.startsWith('/api/');" in worker
-    assert "MEDIA_PREVIEW_REFRESH_INTERVAL" in worker
-    assert "mediaPreviewRefreshes" in worker
-    assert "matchGeneratedImage" in worker
-    assert "new Request(request, {cache: 'no-store'})" in worker
-    assert "path === '/api/media-preview'" in worker
-    assert "staleWhileRevalidateMediaPreview" in worker
-    assert "event.waitUntil(refresh.catch(() => {}))" in worker
+    body = worker[worker.index('async function handleImageRequest'):]
+    assert body.index('await authenticatedScope()') < body.index('await cache.match(key)')
+    assert "scopedKey(request, scope)" in body
+    assert "hasContentRevision(url) || age < 30000" in body
+    assert "matchGeneratedImage" not in worker

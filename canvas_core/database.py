@@ -982,7 +982,8 @@ class CanvasDatabase:
     def _encode_cursor(created_at: float, item_id: str) -> str:
         if not item_id:
             return ""
-        return f"{float(created_at):.6f}|{item_id}"
+        # SQLite REAL 比较必须保留原始 float。截成 6 位小数会使分页重复或漏项。
+        return f"{float(created_at)!r}|{item_id}"
 
     @staticmethod
     def _decode_cursor(cursor: str) -> tuple[Optional[float], str]:

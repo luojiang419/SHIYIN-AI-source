@@ -79,6 +79,14 @@
         return mediaPlaybackUrl(url, name || 'image.png');
     }
 
+    function workThumbnail(item){
+        if (['missing','invalid'].includes(item.resource_status)) return '<span class="works-media-unavailable">' + (item.resource_status === 'missing' ? '原文件缺失' : '文件内容无效') + '</span>';
+        const source = item.preview_url || mediaDisplayUrl(item.url, item.name);
+        // 卡片统一使用小预览；打开作品后才创建视频播放器或解码原图。
+        if (workMediaType(item) === 'video' && !item.preview_url) return '<span class="works-media-unavailable">点击播放视频</span>';
+        return `<img src="${escapeHtml(source)}" alt="${escapeHtml(item.name)}" loading="eager" decoding="async" data-work-thumbnail="1">`;
+    }
+
     function cache(){
         ['worksCount','worksTabs','worksSearch','worksKind','worksMediaFilter','worksSortOrder','worksRefresh','worksQuickCompare','worksClearAll','worksDownloadAll','worksGrid','worksEmpty','worksSelectionModeToggle','worksSelectionActions','worksSelectionCount','worksBatchFavorite','worksBatchDelete','worksBatchTrash','worksClearSelection','worksCompareDialog','compareWorkName','compareFavorite','closeWorksCompare','compareTargetSelect','compareTargetFileButton','compareTargetFile','compareBaseSelect','compareBaseFileButton','compareBaseFile','compareHint','worksCompareStage','worksBeforeImage','worksAfterImage','worksAfterClip','worksCompareHandle','worksZoomOut','compareWork','worksZoomReset','worksZoomIn','worksFullscreen','compareMeta','compareDownload','worksPreviewDialog','closeWorksPreview','worksPreviewFrame','worksPreviewImage','worksPreviewVideo','worksPreviewName','worksPreviewMeta','worksPreviewDownload','worksPreviewFullscreen','worksToast'].forEach(id => el[id]=byId(id));
     }
@@ -159,7 +167,7 @@
         const selected = state.selectedIds.has(item.id);
         return `<article class="works-card ${item.trashed?'trashed':''} ${selected?'selected':''}" data-work-id="${escapeHtml(item.id)}" aria-selected="${selected?'true':'false'}" style="position:absolute;width:${metrics.cardWidth}px;left:${left}px;top:${top}px">
             <label class="works-card-checkbox" title="选择作品"><input type="checkbox" data-select-work="${escapeHtml(item.id)}" ${selected?'checked':''}><span aria-hidden="true">${selected?'✓':''}</span></label>
-            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${isVideo ? `<video src="${escapeHtml(mediaPlaybackUrl(item.url, item.name))}" muted playsinline preload="metadata"></video>` : `<img src="${escapeHtml(mediaDisplayUrl(item.url, item.name))}" alt="${escapeHtml(item.name)}" loading="lazy">`}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
+            <button class="works-card-media" type="button" data-preview-work="${escapeHtml(item.id)}">${workThumbnail(item)}<span class="works-kind">${escapeHtml(kindLabel(item))}</span></button>
             ${item.trashed?'':`<button class="works-favorite ${item.favorite?'active':''}" type="button" data-favorite-work="${escapeHtml(item.id)}" aria-label="${escapeHtml(t('works.favorite'))}">${item.favorite?'★':'☆'}</button>`}
             <div class="works-card-body"><h2 title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h2><p>${escapeHtml(item.prompt || t('works.noPrompt'))}</p>
                 <div class="works-card-meta"><span>${escapeHtml(item.model || '-')}</span><span>${escapeHtml(dateText(item.created_at))}</span></div>
@@ -300,9 +308,14 @@
         el.worksGrid.innerHTML = `<div class="works-virtual-spacer" style="position:relative;height:${spacerHeight}px">${cards}${loading}</div>`;
         bindGridActions();
     }
+    let worksLoadId = 0;
+    let worksLoadController = null;
     async function loadWorks({reset=false}={}){
-        if(state.loading) return;
+        if(state.loading && !reset) return;
         if(!reset && !state.nextCursor) return;
+        worksLoadController?.abort();
+        worksLoadController = new AbortController();
+        const loadId = ++worksLoadId;
         state.loading = true;
         el.worksRefresh.disabled=true;
         try {
@@ -316,14 +329,16 @@
                 el.worksGrid.scrollTop=0;
             }
             renderVirtual(true);
-            const data=await fetchJson(`/api/works?${queryParams(reset?'':state.nextCursor)}`,{cache:'no-store'});
+            const data=await fetchJson(`/api/works?${queryParams(reset?'':state.nextCursor)}`,{cache:'no-store',signal:worksLoadController.signal});
+            if(loadId !== worksLoadId) return;
             state.works = reset ? (data.works || []) : [...state.works, ...(data.works || [])];
             sortWorksForDisplay();
             state.total = Number(data.total || state.works.length);
             state.nextCursor = data.next_cursor || '';
             renderKinds();
-        } catch(error){ toast(error.message); }
+        } catch(error){ if(loadId === worksLoadId && error.name !== 'AbortError') toast(error.message); }
         finally {
+            if(loadId !== worksLoadId) return;
             state.loading=false;
             el.worksRefresh.disabled=false;
             renderVirtual(true);
@@ -481,8 +496,8 @@
     function extensionFromWork(work){
         const source=String(work?.original_name || work?.url || '').split('?')[0].split('#')[0];
         if(/\.(jpg|jpeg)_x$/i.test(source)) return '.jpg';
-        const match=source.match(/\.[a-z0-9]{1,8}$/i);
-        return match?match[0].toLowerCase():'.png';
+        const match=source.replace(/_x$/i,'').match(/\.(png|jpe?g|webp|gif|bmp|avif|tiff?|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)$/i);
+        return match?match[0].toLowerCase().replace('.jpeg','.jpg'):'.png';
     }
     function workDatePart(work){
         const value=Number(work?.created_at || 0);
@@ -594,5 +609,15 @@
         document.addEventListener('keyup',event=>{if(event.key==='Shift')state.shiftPressed=false;});
         window.addEventListener('blur',()=>{state.shiftPressed=false;});
     }
-    document.addEventListener('DOMContentLoaded',()=>{cache();bind();loadWorks({reset:true});});
+    document.addEventListener('DOMContentLoaded',()=>{
+        cache();bind();
+        el.worksGrid.addEventListener('error', event => {
+            if (!event.target.matches?.('[data-work-thumbnail]')) return;
+            const message = document.createElement('span');
+            message.className = 'works-media-unavailable';
+            message.textContent = '预览不可用，请刷新重试';
+            event.target.replaceWith(message);
+        }, true);
+        loadWorks({reset:true});
+    });
 })();

@@ -39,6 +39,8 @@ def main():
     parser.add_argument('--resume', action='store_true', help='Only poll/download the saved task; never resubmit')
     parser.add_argument('--base-url', default='http://127.0.0.1:3000')
     parser.add_argument('--output-dir', type=Path, default=OUT)
+    parser.add_argument('--model', default='gemini-3-pro-image-preview', help='Use an explicitly configured model for a controlled comparison')
+    parser.add_argument('--prompt-file', type=Path, help='Optional reviewed full prompt for a case-specific calibration, saved verbatim in audit')
     args = parser.parse_args()
     OUT = args.output_dir.resolve()
     OUT.mkdir(parents=True, exist_ok=True)
@@ -95,14 +97,16 @@ def main():
     save('report.json', report)
     print('Fresh depth saved.', flush=True)
     compiled = compile_pose_replicate_prompt('depth', output_aspect_ratio='3:4')
-    (OUT / 'prompt.txt').write_text(compiled.final_prompt, encoding='utf-8')
+    final_prompt = args.prompt_file.read_text(encoding='utf-8') if args.prompt_file else compiled.final_prompt
+    (OUT / 'prompt.txt').write_text(final_prompt, encoding='utf-8')
     catalog = session.get(args.base_url + '/api/canvas/pose-replicate-templates', timeout=20).json()
     payload = {'mode': 'depth', 'inputs': {'pose_reference': reference('target.png', session, args.base_url), 'control_map': reference('depth.png', session, args.base_url), 'target_image': reference('garment.png', session, args.base_url)},
-               'generation': {'provider_id': 'shiying', 'model': 'gemini-3-pro-image-preview', 'resolution': '2k', 'aspect_ratio': '3:4', 'count': 1},
+               'generation': {'provider_id': 'shiying', 'model': args.model, 'resolution': '2k', 'aspect_ratio': '3:4', 'count': 1},
                'prompt_policy': {'template_id': catalog['template_id'], 'locale': 'zh-CN',
-                                 'custom_template': compiled.final_prompt, 'custom_template_key': 'depth:base-wardrobe'},
+                                 'custom_template': final_prompt, 'custom_template_key': 'depth:base-wardrobe'},
                'control_signature': 'fresh-depth-sha256:' + report['depth']['sha256']}
-    save('request-audit.json', {**payload, 'source_template_id': compiled.template_id})
+    save('request-audit.json', {**payload, 'source_template_id': compiled.template_id,
+                              'case_specific_prompt': bool(args.prompt_file)})
     response = session.post(args.base_url + '/api/canvas/pose-replicate-tasks', json=payload, timeout=60)
     response.raise_for_status()
     submission = response.json()

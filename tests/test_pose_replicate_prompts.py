@@ -502,3 +502,17 @@ def test_garment_fidelity_owns_structure_material_and_pattern(mode, has_model, h
         assert rule in result.final_prompt
     for conflict in ("默认以最大限度逐褶复刻", "先匹配衣片起伏，再", "动作褶皱的布局与峰谷关系优先于自由整理面料"):
         assert conflict not in result.final_prompt
+
+
+@pytest.mark.parametrize("mode", ["depth", "skeleton"])
+@pytest.mark.parametrize("has_model", [False, True])
+@pytest.mark.parametrize("has_scene", [False, True])
+def test_color_fidelity_keeps_garment_palette_above_scene_grading(mode, has_model, has_scene):
+    result = compile_pose_replicate_prompt(mode, has_model_subject=has_model, has_scene=has_scene)
+    garment = next(item["index"] for item in result.reference_order if item["role"] == "target_image")
+    assert f"最终服装的颜色必须匹配图{garment}服装参考中实际可见的颜色" in result.final_prompt
+    assert result.final_prompt.count("【商品色彩保真：底色与图案色分别锁定】") == 1
+    for rule in ("面料底色、每组印花/织纹色", "中间调为色彩基准", "优先于目标照片的整体调色风格", "参考本身是暖色时也不得强行漂白", "若纹理一致但底色、冷暖、饱和度或图案色不同，仍判定换装失败"):
+        assert rule in result.final_prompt
+    assert "人物和场景服从同一套白平衡" not in result.final_prompt
+    assert "不能为保留源图RGB数值而拒绝重打光" not in result.final_prompt

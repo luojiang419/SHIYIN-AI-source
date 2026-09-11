@@ -22,6 +22,7 @@ async function waitUntil(predicate){
             page.on('pageerror', error => errors.push(error.message));
             const docs = new Map();
             let reads = 0, mediaReads = 0, saves = 0;
+            const mediaUrls = [];
             let holdNextRead = false, releaseRead = null;
             let holdNextSave = false, releaseSave = null;
             for(const id of ['a','b','c','d']) docs.set(id, {
@@ -62,6 +63,7 @@ async function waitUntil(predicate){
             });
             await page.route('**/api/media-preview?*', async route => {
                 mediaReads++;
+                mediaUrls.push(route.request().url());
                 await route.fulfill({contentType:'image/png',body:fs.readFileSync('static/assets/camera-reference/angle-eye-front.png')});
             });
             await page.route('**/api/account/me', route => route.fulfill({json:{account:{id:'fixture',account:'fixture',is_admin:false}}}));
@@ -84,7 +86,7 @@ async function waitUntil(predicate){
             const a = await open('a');
             await a.waitForFunction(() => document.querySelector('[data-id="image-0"] img')?.naturalWidth>0);
             await a.waitForFunction(() => !window.canvasEntryOverlay);
-            // 首开现在准备全画布预览，等待现有驻留预算完成低清缩略图收敛。
+            // 首开只准备视口，低清预热后台执行；恢复不能重复下载已加载资源。
             await sleep(5000);
             await a.evaluate(() => {
                 window.cacheDocument=document;
@@ -114,6 +116,13 @@ async function waitUntil(predicate){
             },videoBytes);
             await sleep(500);
             const before = {reads,mediaReads};
+            const assertWarmMedia = () => {
+                const known = new Set(mediaUrls.slice(0,before.mediaReads));
+                const extra = mediaUrls.slice(before.mediaReads);
+                assert.equal(new Set(extra).size,extra.length,'恢复期间不得重复请求同一媒体');
+                assert(extra.every(url=>!known.has(url) && new URL(url).searchParams.get('w')==='96'),
+                    '恢复仅允许首次后台低清预热，不得重载已有图片');
+            };
             await a.locator('#backToManagerBtn').click();
             await a.waitForFunction(() => canvasSessionSuspended && cacheVideo.paused);
             const pausedTime=await a.evaluate(()=>cacheVideo.currentTime);
@@ -129,13 +138,13 @@ async function waitUntil(predicate){
             })),{document:true,image:true,video:true,selected:true,viewport:{x:45,y:42,scale:0.65},text:'离开前修改'});
             await sleep(500);
             assert.equal(reads,before.reads,'重复进入不请求整份工程');
-            assert.equal(mediaReads,before.mediaReads,'重复进入不重新请求媒体');
+            assertWarmMedia();
             assert.ok(saves>0); assert.equal(docs.get('a').nodes[0].text,'离开前修改');
             if(mode==='studio'){
                 await page.evaluate(()=>{switchUI(null,'app-settings');switchUI(null,'canvas');});
                 await sleep(500);
                 assert.equal(await a.evaluate(()=>document.querySelector('[data-id="image-0"] img')===cacheImage),true);
-                assert.equal(mediaReads,before.mediaReads,'主导航切换不得重新加载媒体');
+                assertWarmMedia();
             }
             // 其他窗口的变更在返回时后台更新；无需阻塞第一帧。
             await a.locator('#backToManagerBtn').click();
@@ -193,7 +202,7 @@ async function waitUntil(predicate){
             await page.evaluate(()=>CanvasSessionHost.clear());
             assert.equal(page.frames().filter(f=>f.url().includes('/static/canvas.html')).length,0);
             assert.deepEqual(errors,[]);
-            results.push({mode,nodes:301,warmMs,reentryCanvasReads:0,reentryMediaReads:0,saves});
+            results.push({mode,nodes:301,warmMs,reentryCanvasReads:0,reentryRepeatedMediaReads:0,saves});
             await page.close();
         }
         console.log(JSON.stringify(results,null,2));

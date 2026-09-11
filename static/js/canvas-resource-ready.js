@@ -3,7 +3,7 @@
     if(typeof module === 'object' && module.exports) module.exports = factory;
     else root.CanvasResourceReady = factory(root);
 })(typeof window === 'undefined' ? null : window, function(host){
-    async function wait({root, isCurrent, drain, progress, active=()=>true, timeoutMs=90000}){
+    async function wait({root, isCurrent, drain, progress, active=()=>true, include=()=>true, timeoutMs=90000}){
         const states = new WeakMap();
         let stableSince=0, previous=[];
         let elapsed=0,lastTick=Date.now();
@@ -12,9 +12,9 @@
             if(!active()){lastTick=now;await new Promise(resolve=>host.setTimeout(resolve,80));continue;}
             elapsed+=now-lastTick;lastTick=now;
             drain();
-            const missing=[...root.querySelectorAll('.missing-asset')];
+            const missing=[...root.querySelectorAll('.missing-asset')].filter(include);
             if(missing.length) return {failed:missing};
-            const elements=[...root.querySelectorAll('img,video,audio')].filter(el =>
+            const elements=[...root.querySelectorAll('img,video,audio')].filter(include).filter(el =>
                 el.dataset.previewSrc || el.getAttribute('src') || el.querySelector?.('source[src]'));
             const changed=elements.length!==previous.length || elements.some((el,i)=>el!==previous[i]);
             if(changed) stableSince=0;
@@ -33,7 +33,7 @@
                     if(el.dataset.previewSrc && el.dataset.previewState==='queued') state.started=elapsed;
                     if(el.dataset.previewState==='failed') state.error=true;
                     // 队列的 loaded 仅代表 load 事件，仍需完成解码；普通图片同样检查。
-                    const queueReady=!el.dataset.previewSrc || ['loaded','evicted'].includes(el.dataset.previewState);
+                    const queueReady=!el.dataset.previewSrc || ['ready','loaded','evicted'].includes(el.dataset.previewState);
                     if(queueReady && el.complete && el.naturalWidth>0 && !state.decoding && !state.decoded){
                         state.decoding=true;
                         Promise.resolve().then(()=>el.decode?.()).then(()=>{state.decoded=true;},error=>{

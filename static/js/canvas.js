@@ -155,6 +155,7 @@ function classicPreviewCandidate(img, allowLoading=false){
     const entry = classicMediaViewportEntry(img);
     if(!entry?.eligible) return null;
     if(canvasEntryPreparing){
+        if(!canvasEntryResourceVisible(img)) return null;
         if(img.dataset.previewState==='evicted' && img.complete && img.naturalWidth>0) return null;
         return {img, priority:entry.visible ? 0 : 10, distance:entry.distance};
     }
@@ -573,11 +574,11 @@ const connectionContextMenu = document.getElementById('connectionContextMenu');
 const selectionBox = document.getElementById('selectionBox');
 const selectionHub = document.getElementById('selectionHub');
 selectionHub?.addEventListener('mousedown', event => event.stopPropagation());
-nodesEl?.addEventListener('pointerover', event => {
+nodesEl?.addEventListener('click', event => {
     const nodeEl = event.target?.closest?.('.image-node[data-id]');
     if(!nodeEl || !nodesEl.contains(nodeEl) || (event.relatedTarget && nodeEl.contains(event.relatedTarget))) return;
     const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'image');
-    if(node) materializeClassicImageNodeChrome(nodeEl, node);
+    if(node && selected.size === 1 && selected.has(node.id)) materializeClassicImageNodeChrome(nodeEl, node);
 });
 nodesEl?.addEventListener('pointerout', event => {
     const nodeEl = event.target?.closest?.('.image-node[data-id]');
@@ -3370,14 +3371,15 @@ function applyCanvasRuntimeConfig(cfg){
     runningHubWorkflowCache = {};
     canvasConfigRevision++;
 }
-async function loadCanvasConfigCapabilities({isCurrent=() => true, refresh=true}={}){
+async function loadCanvasConfigCapabilities({isCurrent=() => true, refresh=true, visibleOnly=false, backgroundOnly=false}={}){
     const revision = canvasConfigRevision;
-    const rhNodes = nodes.filter(node => node.type === 'rh' && node.workflowId);
-    const h3Nodes = nodes.filter(isMiniMaxH3VideoNode);
+    const relevant = (visibleOnly || backgroundOnly) ? nodes.filter(node => canvasEntryResourceVisible(canvasNodeDomIndex.get(node.id)) === visibleOnly) : nodes;
+    const rhNodes = relevant.filter(node => node.type === 'rh' && node.workflowId);
+    const h3Nodes = relevant.filter(isMiniMaxH3VideoNode);
     const workflowIds = [...new Set(rhNodes.map(node => String(node.workflowId).trim()).filter(Boolean))];
     const tasks = workflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
     // H3 状态也供用户随后新建的节点使用，保留已配置平台的单次后台探测。
-    if(h3Nodes.length || apiProviders.some(provider => provider.id === 'minimax-h3')) tasks.push(loadMiniMaxH3Status());
+    if(h3Nodes.length || (!visibleOnly && apiProviders.some(provider => provider.id === 'minimax-h3'))) tasks.push(loadMiniMaxH3Status());
     await Promise.allSettled(tasks);
     if(!isCurrent() || revision !== canvasConfigRevision) return;
     // 外部能力只影响相应节点，不因配置返回而重建全部媒体、连线和输入框。
@@ -3582,6 +3584,7 @@ async function startCanvasSecondaryStartup(session){
     resumeTopazVideoTasks();
     startCanvasRemotePolling();
     await Promise.allSettled([
+        loadCanvasConfigCapabilities({isCurrent:session.isCurrent, backgroundOnly:true}),
         touchCanvasOpened(openedCanvasId).then(touched => {
             if(!session.isCurrent() || canvas?.id !== openedCanvasId || !touched?.updated_at) return;
             canvas.updated_at = Number(touched.updated_at);
@@ -4040,13 +4043,21 @@ async function openCanvas(id){
         }
     }
 }
+function canvasEntryResourceVisible(element){
+    const entry = classicMediaViewportEntry(element);
+    if(!entry || (!entry.visible && !entry.pinned)) return false;
+    // 大批量节点可能跨越多屏，只等待其中实际出现在视口内的缩略图。
+    const rect=element.getBoundingClientRect(),view=board.getBoundingClientRect();
+    if(rect.width>0 && rect.height>0) return rect.right>view.left && rect.left<view.right && rect.bottom>view.top && rect.top<view.bottom;
+    return true;
+}
 async function prepareCanvasEntry(session){
     canvasEntryPreparing = true;
     try {
         if(!session.entryDependenciesReady){
             window.canvasEntryOverlay?.update(30, '正在准备节点配置与资源');
             const [,assetsChanged]=await Promise.all([
-                loadCanvasConfigCapabilities({isCurrent:session.isCurrent}),
+                loadCanvasConfigCapabilities({isCurrent:session.isCurrent, visibleOnly:true}),
                 refreshMissingCanvasAssets(session.id)
             ]);
             if(!session.isCurrent()) return;
@@ -4058,33 +4069,14 @@ async function prepareCanvasEntry(session){
             if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
             const result=await window.CanvasResourceReady.wait({
                 root:nodesEl,isCurrent:session.isCurrent,
+                include:canvasEntryResourceVisible,
                 active:()=>!canvasSessionSuspended,
                 drain:()=>ensureClassicMediaQueue()?.drainNow(),
                 progress:(done,total)=>window.canvasEntryOverlay?.update(35+60*(total?done/total:1), `正在准备节点资源 ${done} / ${total}`)
             });
             if(!session.isCurrent() || result.cancelled) return;
-            if(!result.failed.length){
-                // 同时准备内存整理需要的小图，进入后不会再因切换低清源等待网络。
-                let pending=true;
-                while(pending && session.isCurrent()){
-                    const images=[...nodesEl.querySelectorAll('img[data-preview-src]')].filter(img=>img.dataset.originalSrc || img.dataset.url);
-                    let settled=0;
-                    for(const img of images){
-                        const source=preparedClassicLowResSource(img);
-                        if(source || classicLowResByImage.get(img)?.pending===false) settled++;
-                    }
-                    window.canvasEntryOverlay?.update(96,`正在整理资源缓存 ${settled} / ${images.length}`);
-                    pending=settled<images.length;
-                    if(pending) await new Promise(resolve=>setTimeout(resolve,80));
-                }
-                if(!session.isCurrent()) return;
-                // 缓存准备期间仍可能有节点刷新，再核对一次当前 DOM。
-                const finalCheck=await window.CanvasResourceReady.wait({root:nodesEl,isCurrent:session.isCurrent,
-                    active:()=>!canvasSessionSuspended,drain:()=>ensureClassicMediaQueue()?.drainNow(),progress:()=>{}});
-                if(!session.isCurrent()) return;
-                if(!finalCheck.failed.length) break;
-                result.failed=finalCheck.failed;
-            }
+            // 当前视口完成即可进入；低清预热由驻留控制器空闲执行，完成前保留原像素。
+            if(!result.failed.length) break;
             let retry=false;
             window.canvasEntryOverlay?.error(`${result.failed.length} 项资源尚未准备好`,()=>{retry=true;},()=>returnToCanvasManager(),'返回列表');
             while(!retry && session.isCurrent()) await new Promise(resolve=>setTimeout(resolve,100));
@@ -4103,7 +4095,7 @@ async function prepareCanvasEntry(session){
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         if(session.isCurrent()) hideCanvasStartupNotice();
     } finally {
-        if(session.isCurrent()) canvasEntryPreparing = false;
+        if(session.isCurrent()) {canvasEntryPreparing = false;scheduleClassicMediaQueue();scheduleClassicMediaResidency();}
     }
 }
 
@@ -6068,6 +6060,7 @@ function classicImageNodeSupportsPrompt(node){
 }
 function materializeClassicImageNodeChrome(el, node){
     if(!el || !node || node.type !== 'image' || !el.isConnected) return;
+    if(selected.size !== 1 || !selected.has(node.id)) return;
     const timer = classicImageChromeCleanupTimers.get(el);
     if(timer){ clearTimeout(timer); classicImageChromeCleanupTimers.delete(el); }
     if(classicImageNodeSupportsPrompt(node) && !el.querySelector('[data-image-node-prompt-panel]')){
@@ -6094,7 +6087,7 @@ function materializeClassicImageNodeChrome(el, node){
     el.dataset.imageNodeChrome = '1';
 }
 function cleanupClassicImageNodeChrome(el, node){
-    if(!el || !node || node.type !== 'image' || selected.has(node.id) || el.matches(':hover') || el.contains(document.activeElement)) return;
+    if(!el || !node || node.type !== 'image' || (selected.size === 1 && selected.has(node.id))) return;
     el.querySelector('[data-image-node-prompt-panel]')?.remove();
     el.querySelector('[data-node-media-toolbar]')?.remove();
     delete el.dataset.imageNodeChrome;
@@ -11804,7 +11797,7 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     storyboardMerge:260,
 });
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
-const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','batchGenerator','ecom-video','msgen']);
+const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','ecom-video','msgen']);
 function classicMediaNodeIsPortrait(node){
     if(!node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || 0);
@@ -12495,7 +12488,8 @@ function defaultNodeSize(type){
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
-    if(type === 'generator' || type === 'batchGenerator') return {w:380, h:0};
+    if(type === 'batchGenerator') return {w:480, h:0};
+    if(type === 'generator') return {w:380, h:0};
     if(type === 'msgen') return {w:380, h:0};
     if(type === 'video') return {w:CLASSIC_VIDEO_NODE_MIN_WIDTH, h:0};
     if(type === 'linkfox-video') return {w:480, h:0};
@@ -15372,6 +15366,7 @@ function renderPromptPreview(container, promptInputs){
 }
 function renderImageInputList(list, node, imageInputs, emptyText=null){
     if(!list) return;
+    if(node.type === 'batchGenerator') imageInputs=imageInputs.flatMap(src => imageRefsOnly(src.refs || []).map((ref,index)=>({...src,preview:ref.url,label:ref.name || `${src.label} ${index+1}`})));
     list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${escapeHtml(emptyText || tr('canvas.inputImagesEmpty'))}</div>`;
     imageInputs.forEach((src, i) => {
         const item = document.createElement('div');
@@ -16772,6 +16767,11 @@ function generatorSources(gen){
     const directNodes = connections.filter(c => c.to === gen.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean);
     return directNodes.map(n => {
         if(n.type === 'output' && (n.images||[]).length){
+            if(gen.type === 'batchGenerator') return n.images.map((item,index) => {
+                const url=outputUrlValue(item),kind=mediaKindForOutputItem(item);
+                return {id:`${n.id}:batch:${index}:${url}`,type:'outputImage',label:`上游输出 ${index+1}`,preview:url,
+                    refs:[{url,name:`output-${index+1}.png`,kind,nodeId:n.id,outputIndex:index}],prompt:''};
+            }).filter(src=>src.preview && src.refs[0].kind === 'image');
             // 从 output 节点取最新一张图当作 reference 给下游
             const reversed = [...n.images].map((item, index) => ({item, index})).reverse();
             const found = reversed.find(entry => outputUrlValue(entry.item));

@@ -15,10 +15,12 @@ def function_body(source: str, signature: str, next_marker: str) -> str:
 
 
 class CanvasInitialLoadPerformanceTests(unittest.TestCase):
-    def test_classic_canvas_schedules_touch_and_asset_check_after_first_render(self):
-        body = function_body(CANVAS_JS, "async function openCanvas(id)", "function applyRemoteCanvasData")
+    def test_classic_canvas_schedules_secondary_work_after_both_render_paths(self):
+        body = function_body(CANVAS_JS, "async function openCanvas(id)", "function canvasEntryResourceVisible")
+        # 磁盘恢复和首次打开是两个分支，不能把后一个分支的 render 与前一个分支比较。
+        self.assertLess(body.index("restoreCanvasPage(saved,session)"), body.index("session.afterPaint(startCanvasSecondaryStartup)"))
         render_at = body.index("render();")
-        self.assertLess(render_at, body.index("session.afterPaint(startCanvasSecondaryStartup)"))
+        self.assertLess(render_at, body.index("session.afterPaint(startCanvasSecondaryStartup)", render_at))
         self.assertIn("async function startCanvasSecondaryStartup(session)", CANVAS_JS)
         self.assertNotIn("await touchCanvasOpened", body)
         self.assertNotIn("await refreshMissingCanvasAssets", body)

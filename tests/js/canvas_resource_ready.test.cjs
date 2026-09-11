@@ -17,5 +17,9 @@ function root(items){return {items,querySelectorAll(selector){return selector===
  const failed=await ready.wait({root:root([broken]),isCurrent:()=>true,drain:()=>{},progress:()=>{}});
  assert.equal(failed.failed[0],broken);
  const cancelled=await ready.wait({root:r,isCurrent:()=>false,drain:()=>{},progress:()=>{}});assert(cancelled.cancelled);
+ const visible=img('/visible'),outside=img('/outside');visible.complete=true;visible.naturalWidth=10;
+ visible.dataset={previewSrc:'/visible',previewState:'ready'};
+ const scoped=await ready.wait({root:root([visible,outside]),isCurrent:()=>true,drain:()=>{},progress:()=>{},include:el=>el===visible});
+ assert.deepEqual(scoped.failed,[],'原生直接加载图片 ready 状态可解码，屏幕外图片不阻塞');
  console.log('resource readiness: DOM replacement, decode, video canplay, failures, cancellation passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

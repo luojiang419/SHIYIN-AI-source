@@ -293,7 +293,7 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node.image-node:focus-within { z-index:1000; }
 .image-node.has-image .node-visual-shell { background:var(--canvas-node-fill); border-color:var(--canvas-node-stroke); }
 .node-media-toolbar { position:absolute; left:50%; bottom:calc(100% + 10px); z-index:22; display:grid; grid-template-columns:repeat(auto-fit,minmax(clamp(76px,8vw,118px),1fr)); grid-auto-rows:clamp(36px,3.2vw,44px); gap:clamp(4px,.55vw,8px); width:min(560px,max(296px,calc(100vw - 24px))); max-height:min(220px,38vh); overflow-x:hidden; overflow-y:auto; padding:clamp(6px,.8vw,10px); border:1px solid var(--line); border-radius:clamp(13px,1.2vw,18px); background:var(--card-solid); box-shadow:0 16px 38px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translate(-50%,5px); transition:opacity .14s var(--ease),transform .14s var(--ease),visibility .14s var(--ease); }
-.node:hover > .node-media-toolbar,.node.selected > .node-media-toolbar { opacity:1; visibility:visible; pointer-events:auto; transform:translate(-50%,0); }
+.node.selected > .node-media-toolbar { opacity:1; visibility:visible; pointer-events:auto; transform:translate(-50%,0); }
 .node-media-toolbar button { min-width:0; min-height:36px; height:100%; padding:0 clamp(7px,1vw,12px); display:inline-flex; align-items:center; justify-content:center; gap:clamp(4px,.5vw,7px); border:0; border-radius:clamp(8px,.8vw,12px); background:transparent; color:var(--muted); font-size:clamp(10px,.75vw,12px); font-weight:800; cursor:pointer; white-space:nowrap; }
 .node-media-toolbar button span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .node-media-toolbar button:hover { color:var(--text); background:var(--soft); }
@@ -301,7 +301,7 @@ body.canvas-board-pan * { cursor:grabbing !important; user-select:none !importan
 .node-media-toolbar button:last-child { color:var(--strong); background:color-mix(in srgb,var(--strong) 10%,transparent); }
 .node-media-toolbar button:last-child:hover { color:var(--strong); background:color-mix(in srgb,var(--strong) 18%,transparent); }
 .image-node-prompt-panel { position:absolute; left:50%; top:calc(100% + 8px); z-index:22; width:min(520px,100%); max-width:calc(100vw - 24px); max-height:calc(100vh - 24px); box-sizing:border-box; container-type:inline-size; overflow:visible; padding:7px; border:1px solid var(--line); border-radius:13px; background:var(--card-solid); box-shadow:0 12px 30px var(--shadow); opacity:0; visibility:hidden; pointer-events:none; transform:translate(-50%,-5px); transition:opacity .14s var(--ease),transform .14s var(--ease),visibility .14s var(--ease); }
-.node:hover > .image-node-prompt-panel,.node.selected > .image-node-prompt-panel { opacity:1; visibility:visible; pointer-events:auto; transform:translate(-50%,0); }
+.node.selected > .image-node-prompt-panel { opacity:1; visibility:visible; pointer-events:auto; transform:translate(-50%,0); }
 /* 框选结果以画布整体操作为主，多选期间不让任一节点的 hover/selected 规则弹出局部面板。 */
 .board.selection-multiple .node > .node-media-toolbar,
 .board.selection-multiple .node > .image-node-prompt-panel,
@@ -1003,6 +1003,10 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .model-select { min-width:150px; max-width:100%; }
 .compact-select { min-width:58px; }
 .input-list { display:flex; align-items:flex-start; gap:8px; min-height:78px; overflow:auto; padding-bottom:2px; }
+.batch-generator-node .input-list { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); grid-auto-rows:max-content; align-content:start; gap:8px; overflow:visible; max-height:none; flex:none; }
+.batch-generator-node .input-list .input-item { width:100%; min-width:0; height:auto; aspect-ratio:1; box-sizing:border-box; }
+.batch-generator-node .generator-body > * { flex-shrink:0; }
+.batch-generator-node .node-body { overflow:visible; }
 .input-item { position:relative; width:72px; height:72px; flex:0 0 auto; border:1px solid var(--line); border-radius:16px; background:var(--soft); padding:5px; font-size:10px; color:var(--muted); cursor:grab; display:flex; align-items:center; justify-content:center; }
 .video-input-item { height:auto; min-height:0; width:92px; padding-bottom:6px; flex-direction:column; justify-content:flex-start; gap:5px; }
 .video-img-list { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); grid-auto-rows:max-content; align-items:start; align-content:start; flex:0 0 auto; min-height:78px; column-gap:8px; row-gap:12px; overflow:visible; }

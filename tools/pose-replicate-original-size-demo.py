@@ -1,0 +1,148 @@
+"""隔离数据下运行当前源码的真实复刻任务，审计送入Gemini的服装像素。"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import contextlib
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import shutil
+import sqlite3
+import sys
+import time
+
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / '输出/一键复刻服装保真-20260911/fabric-tests/attempt-e-original-size'
+INSTALLED = Path('D:/Program Files/SHIYIN AI/data')
+sys.path.insert(0, str(ROOT))
+
+
+def save(name, data):
+    (OUT / name).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+async def generate(app, report):
+    # 核验真实安装组件；复用同一目标图已验证的深度，不影响本轮传输对照。
+    from canvas_core.person_depth_components import PersonDepthComponentManager
+    app.PERSON_DEPTH_COMPONENT_MANAGER = PersonDepthComponentManager(INSTALLED / 'system/components/person-depth')
+    if not app.PERSON_DEPTH_COMPONENT_MANAGER.public_status().get('ready'):
+        raise RuntimeError('installed_depth_component_not_ready')
+    previous = OUT.parent / 'attempt-d-compact-default'
+    assert (previous / 'target.png').read_bytes() == (OUT / 'target.png').read_bytes()
+    shutil.copy2(previous / 'depth.png', OUT / 'depth.png')
+    with Image.open(OUT / 'depth.png') as depth:
+        report['depth_dimensions'] = list(depth.size)
+    report['depth_reused_from'] = str(previous / 'depth.png')
+    save('report.json', report)
+    refs = {}
+    for role, name in [('pose_reference', 'target.png'), ('control_map', 'depth.png'), ('target_image', 'garment.png')]:
+        upload = await app.upload_ai_reference(files=[app.UploadFile(filename=name, file=io.BytesIO((OUT / name).read_bytes()))])
+        refs[role] = app.AIReference(**upload['files'][0])
+
+    original_part = app.gemini_reference_part
+    reference_audit = []
+
+    def audit_part(ref):
+        part = original_part(ref)
+        inline = (part or {}).get('inlineData') or {}
+        if inline.get('data'):
+            with Image.open(io.BytesIO(base64.b64decode(inline['data']))) as image:
+                rgb = image.convert('RGB')
+                entry = {'role': ref.get('role'), 'mime': inline.get('mimeType'),
+                         'dimensions': list(image.size), 'rgb_sha256': hashlib.sha256(rgb.tobytes()).hexdigest()}
+            reference_audit.append(entry)
+            save('sent-reference-audit.json', reference_audit)
+            if ref.get('role') == 'target_image':
+                with Image.open(OUT / 'garment.png') as source:
+                    assert entry['dimensions'] == list(source.size)
+                    assert entry['rgb_sha256'] == hashlib.sha256(source.convert('RGB').tobytes()).hexdigest()
+                assert entry['mime'] == 'image/png'
+        return part
+
+    app.gemini_reference_part = audit_part
+    payload = app.PoseReplicateTaskRequest(
+        mode='depth', inputs=app.PoseReplicateInputs(**refs),
+        generation=app.PoseReplicateGeneration(provider_id='shiying', model='gemini-3-pro-image-preview',
+                                              resolution='2k', aspect_ratio='3:4', count=1),
+        control_signature='verified-depth-sha256:' + hashlib.sha256((OUT / 'depth.png').read_bytes()).hexdigest(),
+    )
+    save('request-audit.json', payload.model_dump())
+    submission = await app.create_pose_replicate_task(payload)
+    save('submission.json', submission)
+    task_id = submission['task_id']
+    report.update(task_id=task_id, active_stage='generation')
+    save('report.json', report)
+    deadline = time.monotonic() + 1200
+    while time.monotonic() < deadline:
+        task = app.CANVAS_TASKS[task_id]
+        save('task.json', {k: v for k, v in task.items() if not k.startswith('_')})
+        if task['status'] in {'succeeded', 'failed'}:
+            break
+        await asyncio.sleep(2)
+    else:
+        raise TimeoutError('generation_timeout_do_not_resubmit_automatically')
+    if task['status'] != 'succeeded':
+        raise RuntimeError('generation_failed:' + str(task.get('status_code')))
+    result = task['result']
+    images = result.get('images') or []
+    if len(images) != 1:
+        raise RuntimeError('expected_one_result')
+    source = app.output_file_from_url(images[0])
+    if not source:
+        raise RuntimeError('result_file_missing')
+    shutil.copy2(source, OUT / 'result.png')
+    audit = task['pose_replicate']
+    (OUT / 'prompt.txt').write_text(audit['final_prompt'], encoding='utf-8')
+    with Image.open(OUT / 'result.png') as result_image:
+        result_dimensions = list(result_image.size)
+    report.update(status='succeeded', template_id=audit['template_id'], prompt_source=audit['prompt_source'],
+                  generation_seconds=round(task['updated_at']-task['created_at'], 2),
+                  garment_pixels_preserved=any(e['role']=='target_image' for e in reference_audit),
+                  result_dimensions=result_dimensions)
+    report.pop('active_stage', None)
+    save('report.json', report)
+
+
+def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    if (OUT / 'submission.json').exists() or (OUT / 'result.png').exists():
+        raise RuntimeError('existing_attempt_retained_do_not_duplicate')
+    for name in ('target.png', 'garment.png'):
+        shutil.copy2(OUT.parents[1] / name, OUT / name)
+    report = {'status': 'running', 'active_stage': 'depth', 'method': 'current source task entry + original-size lossless garment; no custom template or second pass'}
+    save('report.json', report)
+    print('Starting isolated current source task with verified depth.', flush=True)
+    runtime = ROOT / '.codex-artifacts/pose-original-size-runtime'
+    os.environ.update(CANVAS_DATA_DIR=str(runtime/'data'), CANVAS_PORTABLE_ROOT=str(runtime), CANVAS_APP_ROOT=str(ROOT),
+                      CANVAS_DWPOSE_AUTO_DOWNLOAD='0', CANVAS_DEPTH_AUTO_DOWNLOAD='0')
+    from canvas_core.secrets import DpapiProtector
+    key_name = 'API_PROVIDER_SHIYING_KEY'
+    with sqlite3.connect((INSTALLED/'database/canvas.db').as_uri()+'?mode=ro', uri=True) as db:
+        provider = json.loads(db.execute('SELECT payload_json FROM providers WHERE id=?', ('shiying',)).fetchone()[0])
+        secret = db.execute('SELECT encrypted_value FROM secret_values WHERE key=?', (key_name,)).fetchone()
+        if not secret:
+            raise RuntimeError('saved_provider_credential_missing')
+        os.environ[key_name] = DpapiProtector().unprotect(bytes(secret[0]))
+    try:
+        # 底层调试输出可能含多模态载荷，不写入终端或日志。
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            import main as app
+            app.ADMIN_DATABASE.save_providers([provider])
+            asyncio.run(generate(app, report))
+    except Exception as exc:
+        report.update(status='failed', error_type=type(exc).__name__)
+        save('report.json', report)
+        print(json.dumps(report, ensure_ascii=True), flush=True)
+        raise SystemExit(1) from None
+    finally:
+        os.environ.pop(key_name, None)
+    print(json.dumps(report, ensure_ascii=True), flush=True)
+
+
+if __name__ == '__main__':
+    main()

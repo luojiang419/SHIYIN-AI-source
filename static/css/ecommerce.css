@@ -3088,6 +3088,11 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
     isolation:isolate;
     transition:transform .2s cubic-bezier(.2,.7,.25,1),border-color .18s ease,box-shadow .18s ease;
 }
+.ec-batch-input-card.is-file-dragover {
+    outline: 3px solid var(--ec-accent, #f97316);
+    outline-offset: -3px;
+}
+
 .ec-batch-input-card:hover,
 .ec-batch-view-card:hover {
     border-color:var(--ec-accent);

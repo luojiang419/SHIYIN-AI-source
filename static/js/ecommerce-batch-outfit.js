@@ -269,7 +269,7 @@
                 : `<span class="ec-batch-depth-chip ${group.status === 'preparing' ? 'is-loading' : ''}">${group.status === 'preparing' ? '深度提取中' : '等待深度图'}</span>`
             : '';
         const actionText = item.role === 'target_image' && image ? `继续添加 · ${images.length}/${TARGET_IMAGE_MAX}` : '点击替换';
-        return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''} ${hasStack ? 'has-stack' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}">
+        return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''} ${hasStack ? 'has-stack' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}" title="点击选择或拖入图片">
             <span class="ec-batch-input-label">${escapeHtml(item.label)}${item.required ? '<em>*</em>' : ''}</span>
             ${image ? `<span class="ec-batch-card-stack">${stack}<img src="${escapeHtml(image.url)}" alt="${escapeHtml(item.label)}">${controls}</span><small title="${escapeHtml(image.name || item.hint)}">${escapeHtml(image.name || item.hint)}</small><span class="ec-batch-input-replace">${actionText}</span>${depthStatus}` : `<span class="ec-batch-input-plus">+</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint)}</small>`}
             ${image ? `<span class="ec-batch-input-remove" data-batch-remove-input="${item.role}" data-batch-remove-index="${selectedIndex}" role="button" aria-label="移除${escapeHtml(item.label)}">×</span>` : ''}
@@ -583,12 +583,15 @@
         return cleanImage({...uploaded, name:uploaded.name || file.name});
     }
 
-    async function handleFileSelection(files){
-        const target = state.uploadTarget;
-        state.uploadTarget = null;
+    async function handleFileSelection(files, target=state.uploadTarget){
+        if(target === state.uploadTarget) state.uploadTarget = null;
         const group = groupById(target?.groupId);
         const selected = Array.from(files || []).filter(Boolean);
         if(!group || !target?.role || !selected.length) return;
+        if(ACTIVE_STATUSES.has(group.status) || ['uploading','preparing'].includes(group.status)) {
+            showToast('请等待当前任务完成后再上传图片', true);
+            return;
+        }
         const currentTargets = inputImages(group, 'target_image');
         const accepted = target.role === 'target_image'
             ? selected.slice(0, Math.max(0, TARGET_IMAGE_MAX - currentTargets.length))
@@ -985,6 +988,41 @@
     }
 
     function bindEvents(){
+        const clearDropHighlight = () => el.groups?.querySelectorAll('.is-file-dragover').forEach(card => card.classList.remove('is-file-dragover'));
+        const isFileDrag = event => Array.from(event.dataTransfer?.types || []).includes('Files')
+            || Array.from(event.dataTransfer?.items || []).some(item => item.kind === 'file');
+        const highlightDrop = event => {
+            if(!isFileDrag(event)) return;
+            const card = event.target.closest('[data-batch-upload]');
+            if(!card) return;
+            event.preventDefault();
+            event.stopPropagation();
+            clearDropHighlight();
+            const group = groupById(card.closest('[data-batch-group]')?.dataset.batchGroup);
+            const busy = !group || ACTIVE_STATUSES.has(group.status) || ['uploading','preparing'].includes(group.status);
+            event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+            if(!busy) card.classList.add('is-file-dragover');
+        };
+        el.groups?.addEventListener('dragenter', highlightDrop);
+        el.groups?.addEventListener('dragover', highlightDrop);
+        el.groups?.addEventListener('dragleave', event => {
+            const card = event.target.closest('[data-batch-upload]');
+            if(card && !card.contains(event.relatedTarget)) card.classList.remove('is-file-dragover');
+        });
+        el.groups?.addEventListener('drop', event => {
+            clearDropHighlight();
+            const card = event.target.closest('[data-batch-upload]');
+            if(!card || !isFileDrag(event)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            let files = Array.from(event.dataTransfer.files || []);
+            if(!files.length) files = Array.from(event.dataTransfer.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+            const images = files.filter(file => file.type.startsWith('image/'));
+            if(!images.length) { showToast('请拖入图片文件', true); return; }
+            handleFileSelection(images, {groupId:card.closest('[data-batch-group]')?.dataset.batchGroup, role:card.dataset.batchUpload});
+        });
+        window.addEventListener('dragend', clearDropHighlight, true);
+        window.addEventListener('drop', clearDropHighlight, true);
         el.add?.addEventListener('click', openAddDialog);
         el.runAll?.addEventListener('click', runAll);
         el.form?.addEventListener('submit', submitAddDialog);

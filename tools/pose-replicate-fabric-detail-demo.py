@@ -17,7 +17,8 @@ import time
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / '输出/一键复刻面料细节-20260911'
+BASE_OUT = ROOT / '输出/一键复刻面料细节-20260911'
+OUT = Path(os.environ.get('POSE_FABRIC_TEST_OUT') or BASE_OUT)
 INSTALLED = Path('D:/Program Files/SHIYIN AI/data')
 sys.path.insert(0, str(ROOT))
 
@@ -32,11 +33,21 @@ async def generate(app, report):
     app.PERSON_DEPTH_COMPONENT_MANAGER = PersonDepthComponentManager(INSTALLED / 'system/components/person-depth')
     if not app.PERSON_DEPTH_COMPONENT_MANAGER.public_status().get('ready'):
         raise RuntimeError('installed_depth_component_not_ready')
-    from canvas_core.person_depth_client import PersonDepthWorkerClient
-    app.PERSON_DEPTH_WORKER = PersonDepthWorkerClient(app.PERSON_DEPTH_COMPONENT_MANAGER)
-    result = await asyncio.to_thread(app.PERSON_DEPTH_WORKER.estimate, (OUT / 'target.png').read_bytes(), bit_depth=8)
-    (OUT / 'depth.png').write_bytes(result.content)
-    report['depth_dimensions'] = [result.width, result.height]
+    verified_depth = os.environ.get('POSE_FABRIC_TEST_DEPTH')
+    if verified_depth:
+        depth_path = Path(verified_depth)
+        with Image.open(depth_path.parent / 'target.png') as previous, Image.open(OUT / 'target.png') as current:
+            assert previous.size == current.size and previous.convert('RGB').tobytes() == current.convert('RGB').tobytes()
+        shutil.copy2(depth_path, OUT / 'depth.png')
+        with Image.open(depth_path) as depth:
+            report['depth_dimensions'] = list(depth.size)
+        report['depth_reused_from'] = str(depth_path)
+    else:
+        from canvas_core.person_depth_client import PersonDepthWorkerClient
+        app.PERSON_DEPTH_WORKER = PersonDepthWorkerClient(app.PERSON_DEPTH_COMPONENT_MANAGER)
+        result = await asyncio.to_thread(app.PERSON_DEPTH_WORKER.estimate, (OUT / 'target.png').read_bytes(), bit_depth=8)
+        (OUT / 'depth.png').write_bytes(result.content)
+        report['depth_dimensions'] = [result.width, result.height]
     save('report.json', report)
     refs = {}
     for role, name in [('pose_reference', 'target.png'), ('control_map', 'depth.png'), ('target_image', 'garment.png'), ('fabric_detail', 'fabric.png')]:
@@ -118,7 +129,7 @@ def main():
             image.save(OUT / name, format='PNG')
     report = {'status': 'running', 'active_stage': 'depth', 'method': 'current source task entry + fabric detail port + original-size lossless garment and fabric; single generation'}
     save('report.json', report)
-    print('Starting isolated current source task with fresh depth.', flush=True)
+    print('Starting isolated image test; inspect report.json for the active stage.', flush=True)
     runtime = ROOT / '.codex-artifacts/pose-fabric-detail-runtime'
     os.environ.update(CANVAS_DATA_DIR=str(runtime/'data'), CANVAS_PORTABLE_ROOT=str(runtime), CANVAS_APP_ROOT=str(ROOT),
                       CANVAS_DWPOSE_AUTO_DOWNLOAD='0', CANVAS_DEPTH_AUTO_DOWNLOAD='0')

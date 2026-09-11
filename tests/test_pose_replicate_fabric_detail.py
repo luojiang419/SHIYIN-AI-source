@@ -19,6 +19,8 @@ def test_fabric_appends_role_without_renumbering(mode, model, scene, custom):
     assert fabric.final_prompt.startswith(original.final_prompt)
     assert f'图{len(fabric.reference_order)}是服装面料' in fabric.final_prompt
     assert '放大倍率不能放大成衣图案或纤维' in fabric.final_prompt
+    assert '不提供颜色、白平衡、曝光或对比度' in fabric.final_prompt
+    assert '衣服必须独立匹配服装参考的白平衡' in fabric.final_prompt
 
 
 @pytest.mark.parametrize('batch_size,batch_outfit,enabled', [(1, None, True), (2, None, False), (1, {'group_id':'test', 'style_name':'test'}, False)])

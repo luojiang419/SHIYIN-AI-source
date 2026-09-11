@@ -21,11 +21,12 @@
     ].join('\n');
     const DWPOSE_MODEL_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
     const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
-    const POSE_REPLICATE_INPUT_ROLES = ['pose-reference','target-image','model-subject','scene'];
+    const POSE_REPLICATE_INPUT_ROLES = ['pose-reference','target-image','model-subject','scene','fabric-detail'];
     const POSE_REPLICATE_TARGET_MAX = 20;
     const POSE_REPLICATE_ROLE_LABELS = {
         'pose-reference':'目标图片',
         'target-image':'服装参考',
+        'fabric-detail':'面料细节',
         'model-subject':'模特主体',
         'scene':'场景'
     };
@@ -841,6 +842,7 @@
                 ? node.targetImages.filter(item => item?.url)
                 : node.targetImageUrl ? [{url:node.targetImageUrl, name:node.targetImageName || ''}] : []);
         const modelSubject = manualInputs['model-subject'] || (node.modelSubjectUrl ? {url:node.modelSubjectUrl} : null);
+        const fabricDetail = manualInputs['fabric-detail'] || (node.fabricDetailUrl ? {url:node.fabricDetailUrl} : null);
         const scene = manualInputs.scene || (node.sceneUrl ? {url:node.sceneUrl} : null);
         const mode = node.poseReplicateMode;
         const control = mode === 'depth'
@@ -872,10 +874,12 @@
                 ${poseReplicateInputRow(targets, 'target-image', '服装参考', Boolean(manualInputs['target-image']))}
                 ${poseReplicateInputRow(modelSubject, 'model-subject', '模特主体', Boolean(manualInputs['model-subject']), true)}
                 ${poseReplicateInputRow(scene, 'scene', '场景', Boolean(manualInputs.scene), true)}
+                ${poseReplicateInputRow(fabricDetail, 'fabric-detail', targets.length > 1 ? '面料细节 · 批量不生效' : '面料细节 · 仅单图', Boolean(manualInputs['fabric-detail']), true)}
             </div>
             <div class="pose-replicate-inputs">
                 ${poseReplicateImageCard(action, 'pose-reference', '目标图片', 'person-standing', '上传目标图片', '将以此图生成深度图或骨架图', {editable:true, manual:Boolean(manualInputs['pose-reference'])})}
                 ${poseReplicateTargetGrid(targets, Boolean(manualInputs['target-image']))}
+                ${poseReplicateImageCard(fabricDetail, 'fabric-detail', targets.length > 1 ? '面料细节 · 批量不生效' : '面料细节 · 可选', 'layers', '上传面料细节', '仅单图生效，参考绒毛、纤维与面料质感', {editable:true, manual:Boolean(manualInputs['fabric-detail'])})}
                 ${poseReplicateImageCard(modelSubject, 'model-subject', '模特主体 · 可选', 'user-round', '上传模特主体', undefined, {editable:true, manual:Boolean(manualInputs['model-subject'])})}
                 ${poseReplicateImageCard(scene, 'scene', '场景 · 可选', 'image', '上传场景', undefined, {editable:true, manual:Boolean(manualInputs.scene)})}
             </div>
@@ -1855,6 +1859,7 @@
         const prefixes = {
             'pose-reference':'poseReference',
             'target-image':'targetImage',
+            'fabric-detail':'fabricDetail',
             'model-subject':'modelSubject',
             'scene':'scene'
         };
@@ -2188,8 +2193,9 @@
         const targetChanged = assignPoseReplicateTargets(node, targets);
         const modelChanged = assignPoseReplicateInput(node, 'model-subject', modelSubject);
         const sceneChanged = assignPoseReplicateInput(node, 'scene', scene);
+        const fabricChanged = assignPoseReplicateInput(node, 'fabric-detail', poseReplicateInput(node, options, 'fabric-detail'));
         if(actionChanged) clearPoseReplicateControls(node);
-        if(actionChanged || targetChanged || modelChanged || sceneChanged) notify(options, node, true);
+        if(actionChanged || targetChanged || modelChanged || sceneChanged || fabricChanged) notify(options, node, true);
 
         root.querySelectorAll('[data-pose-replicate-upload-role]').forEach(card => {
             const role = card.dataset.poseReplicateUploadRole;
@@ -2303,7 +2309,7 @@
             const taskCount = currentTargets.length;
             node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + taskCount;
             notify(options, node, true);
-            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, control, targets:currentTargets, target:currentTargets[0], modelSubject:currentModel, scene:currentScene, mode:node.poseReplicateMode}, prompt))
+            Promise.resolve(options.generatePoseReplicate(node, {action:currentAction, control, targets:currentTargets, target:currentTargets[0], modelSubject:currentModel, scene:currentScene, fabricDetail:currentTargets.length === 1 ? poseReplicateInput(node, options, 'fabric-detail') : null, mode:node.poseReplicateMode}, prompt))
                 .catch(error => options.toast?.(error?.message || '一键复刻任务创建失败'))
                 .finally(() => {
                     node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) - taskCount;

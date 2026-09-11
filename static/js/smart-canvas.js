@@ -10329,7 +10329,7 @@ function smartNodeHtml(node){
         ${isCompactMember && (isPrompt || isLoop) ? '<div class="smart-group-member-grab" title="拖动移出分组"></div>' : ''}
         <div class="node-hint">${hint}</div>
         ${displayCount || node.pending || isQueued || isJimengPending || isPrompt || isLoop || isSmartGroup || isSpecial ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-        ${node.specialType === 'linkfox-video' ? window.CanvasLinkfoxVideo.inputPorts(node).map((port,index,ports)=>`<div class="node-port port-in" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="top:${(index+1)*100/(ports.length+1)}%;" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
+        ${node.specialType === 'linkfox-video' ? window.CanvasLinkfoxVideo.inputPorts(node).map((port,index,ports)=>`<div class="node-port port-in" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="top:${(index+1)*100/(ports.length+1)}%;" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'film-storyboard' || node.specialType === 'film-video' || node.specialType === 'film-line-art' ? window.CanvasFilmNodes.inputPorts(node).map((port,index) => `<div class="node-port port-in film-role-port" data-port="in" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="--film-port-index:${index};" title="${escapeAttr(port.title)}"></div>`).join('') : node.specialType === 'pose-replicate' ? [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景'],['fabric-detail','面料细节']].map(([role,label], index) => `<div class="node-port port-in" data-port="in" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join('') : node.specialType === 'multi-view' ? smartMultiViewInputSlots(node).map(([role, label], index) => `<div class="node-port port-in multi-view-port" data-port="in" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${74 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join('') : '<div class="node-port port-in" data-port="in" title="input"></div>'}
         <div class="node-port port-out" data-port="out" title="output"></div>
     </div>`;
 }
@@ -12270,7 +12270,7 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
             seenTargets.add(item.url);
             return true;
         });
-    const refs = [inputs.action, inputs.control, ...targets, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
+    const refs = [inputs.action, inputs.control, ...targets, inputs.modelSubject, inputs.scene, targets.length === 1 ? inputs.fabricDetail : null].filter(item => item?.url).map(item => ({...item, kind:'image'}));
     if(!inputs.action?.url || !inputs.control?.url || !targets.length) throw new Error('目标图片、内部控制图或服装参考缺失');
     const meta = snapshotRunMeta(prompt, node.id, prompt, refs);
     meta.settings = settingsForStorage(runSettings);
@@ -12289,7 +12289,8 @@ async function generateSmartPoseReplicate(node, inputs, prompt){
         const submissions = await Promise.allSettled(targets.map(async (target, targetIndex) => {
             const payload = {
                 mode:inputs.mode || node.poseReplicateMode || 'skeleton',
-                inputs:{pose_reference:inputs.action, control_map:inputs.control, target_image:target, model_subject:inputs.modelSubject || null, scene:inputs.scene || null},
+                inputs:{pose_reference:inputs.action, control_map:inputs.control, target_image:target, model_subject:inputs.modelSubject || null, scene:inputs.scene || null, fabric_detail:targets.length === 1 ? inputs.fabricDetail || null : null},
+                batch_size:targets.length,
                 user_instruction:prompt || '',
                 generation:{provider_id:providerId, model, resolution:node.poseReplicateResolution || '2k', aspect_ratio:ratio, quality:runSettings.quality || 'high', count:1},
                 prompt_policy:{template_id:'pose-replicate.v3.5', locale:'zh-CN'},
@@ -16892,7 +16893,7 @@ function connectInputNode(fromId, toId, inputRole=''){
         } else if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.specialType === 'pose-replicate'){
-        if(!['pose-reference','target-image','model-subject','scene'].includes(inputRole)) return false;
+        if(!['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole)) return false;
         if(!imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;
     }
     if(to.specialType === 'depth-map' && !imagesForNode(from).some(item => item?.url && mediaKindForItem(item) === 'image')) return false;

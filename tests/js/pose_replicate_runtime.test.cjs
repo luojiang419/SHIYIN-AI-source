@@ -43,9 +43,11 @@ async function run(){
         {url:'blue',name:'blue.png'},
         {url:'green',name:'green.png'}
     ];
+    batchHarness.inputs.fabricDetail={url:'fabric'};
     const batchPromise=batchHarness.ctx.generateClassicPoseReplicate(batchHarness.node,batchHarness.inputs,'batch');
     const batchOutput=batchHarness.ctx.nodes.find(node=>node.type==='output');
     assert.equal(batchHarness.requests.length,3);
+    assert.ok(batchHarness.requests.every(r=>r.payload.inputs.fabric_detail === null && r.payload.batch_size === 3));
     assert.equal(batchOutput._pending.length,3);
     assert.deepEqual(batchHarness.requests.map(item=>item.payload.inputs.target_image.url),['red','blue','green']);
     assert.deepEqual(batchHarness.requests.map(item=>item.payload.prompt_policy.template_id),['pose-replicate.v3.5','pose-replicate.v3.5','pose-replicate.v3.5']);
@@ -70,12 +72,15 @@ async function run(){
 
     const h=harness();
     h.node.poseReplicatePromptTemplates={'skeleton:base-wardrobe':'custom rules'};
+    h.inputs.fabricDetail={url:'fabric'};
     const a=h.ctx.generateClassicPoseReplicate(h.node,h.inputs,'first');
     const b=h.ctx.generateClassicPoseReplicate(h.node,h.inputs,'second');
     const output=h.ctx.nodes.find(node=>node.type==='output');
     assert.equal(h.ctx.nodes.length,2);assert.equal(h.ctx.connections.length,1);
     assert.equal(output._pending.length,2);assert.notEqual(output._pending[0].id,output._pending[1].id);
     assert.equal(h.requests[0].payload.prompt_policy.custom_template,'custom rules');
+    assert.equal(h.requests[0].payload.inputs.fabric_detail.url,'fabric');
+    assert.equal(h.requests[0].payload.batch_size,1);
     // 第二次先返回，结果仍合并到同一节点，各自清理自己的 pending。
     h.requests[1].resolve({ok:true,json:async()=>({task_id:'second'})}); await b;
     assert.equal(output.images.length,1);assert.equal(output._pending.length,1);

@@ -10092,7 +10092,7 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         indexClassicConnectionModel(connection);
     }
     const batch = targets.map((target, index) => {
-        const refs = [inputs.action, inputs.control, target, inputs.modelSubject, inputs.scene].filter(item => item?.url).map(item => ({...item, kind:'image'}));
+        const refs = [inputs.action, inputs.control, target, inputs.modelSubject, inputs.scene, targets.length === 1 ? inputs.fabricDetail : null].filter(item => item?.url).map(item => ({...item, kind:'image'}));
         const pendingId = uid('p');
         const run = runSnapshot({...node, id:''}, prompt, refs);
         run.nodeType = 'poseReplicate';
@@ -10113,12 +10113,14 @@ async function generateClassicPoseReplicate(node, inputs, prompt){
         const taskInputs = {...inputs, target};
         const payload = {
             mode:inputs.mode || node.poseReplicateMode || 'skeleton',
+            batch_size:targets.length,
             inputs:{
                 pose_reference:inputs.action,
                 control_map:inputs.control,
                 target_image:target,
                 model_subject:inputs.modelSubject || null,
-                scene:inputs.scene || null
+                scene:inputs.scene || null,
+                fabric_detail:targets.length === 1 ? inputs.fabricDetail || null : null
             },
             user_instruction:prompt || '',
             generation:{provider_id:providerId, model, resolution, aspect_ratio:ratio, quality:'high', count:1},
@@ -12214,7 +12216,7 @@ function renderNode(node){
     } else if(node.type === 'multiView'){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
-        el.insertAdjacentHTML('beforeend', [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
+        el.insertAdjacentHTML('beforeend', [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景'],['fabric-detail','面料细节']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(node.type === 'resultCompare'){
         el.insertAdjacentHTML('beforeend', [['compare-source','源文件'],['compare-target','目标文件']].map(([role,label], index) => `<div class="port in result-compare-port" data-input-role="${role}" data-role-label="${label}" style="--result-compare-port-top:${index ? '68%' : '32%'}" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
@@ -23426,7 +23428,7 @@ function canConnect(fromId, toId, inputRole=''){
     if(from.type === 'ecom-video') return to.type === 'output';
     const specialTypes = ['panorama','dwpose','depthMap','angle'];
     if(to.type === 'poseReplicate'){
-        if(!['pose-reference','target-image','model-subject','scene'].includes(inputRole)) return false;
+        if(!['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole)) return false;
         return ['image','group','output','panorama','dwpose','depthMap','angle'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';

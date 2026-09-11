@@ -4260,6 +4260,7 @@ class PoseReplicateInputs(BaseModel):
     target_image: AIReference
     model_subject: Optional[AIReference] = None
     scene: Optional[AIReference] = None
+    fabric_detail: Optional[AIReference] = None
 
 
 class PoseReplicateGeneration(BaseModel):
@@ -4292,6 +4293,7 @@ class PoseReplicateTaskRequest(BaseModel):
     prompt_policy: PoseReplicatePromptPolicy = Field(default_factory=PoseReplicatePromptPolicy)
     control_signature: str = ""
     batch_outfit: Optional[BatchOutfitContext] = None
+    batch_size: int = Field(default=1, ge=1, le=20)
 
 
 class BatchOutfitDeleteImagesRequest(BaseModel):
@@ -11489,7 +11491,7 @@ def gemini_reference_part(ref):
     role = str((ref or {}).get("role") or "").strip().lower()
     label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
     is_depth_map = role == "control_map" and "深度" in label
-    is_garment_reference = role == "target_image"
+    is_garment_reference = role in {"target_image", "fabric_detail"}
     pose_pair = role in {"pose_reference", "control_map"}
     value = reference_to_data_url(
         ref,
@@ -11514,6 +11516,7 @@ GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "target_image": "这是当前任务的服装参考，只提供最终服装设计、材质、版型、颜色、图案与结构细节，不提供最终人物身份、姿势或场景，也不得混入同批其他款式。",
     "model_subject": "只提供最终人物身份、面部、肤色、发型与身体比例，不提供最终服装、姿势或场景。",
     "scene": "只提供最终环境、背景结构、透视与环境光，不提供最终人物身份、服装或姿势。",
+    "fabric_detail": "这是服装面料的局部放大细节，仅提供纤维、绒毛、织物组织和表面质感；不能将放大倍率用于成衣图案尺度，款式、配色与纹样仍以完整服装参考为准。",
 }
 
 
@@ -11549,6 +11552,7 @@ def gemini_reference_roles_anchor(reference_images) -> str:
     return (
         "以上参考图已按图号和角色逐一绑定。执行时不得交换角色：最终人物身份只取模特主体（若未提供则取目标图片），"
         "最终服装只取当前服装参考，姿势只取目标图片与控制图，最终环境只取场景图（若未提供则取目标图片背景）。"
+        + ("面料细节图补充控制该服装的微观质感，服装参考继续控制款式、配色与纹样尺度。" if "fabric_detail" in roles else "")
     )
 
 
@@ -20955,6 +20959,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         "target_image": payload.inputs.target_image,
         "model_subject": payload.inputs.model_subject,
         "scene": payload.inputs.scene,
+        "fabric_detail": payload.inputs.fabric_detail if payload.batch_size == 1 and payload.batch_outfit is None else None,
     }
     missing = [role for role in ("pose_reference", "control_map", "target_image") if not input_items[role].url]
     if missing:
@@ -20998,6 +21003,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
             has_model_subject=has_model,
             has_scene=has_scene,
             output_aspect_ratio=resolved_output_ratio,
+            has_fabric_detail=bool(input_items["fabric_detail"] and input_items["fabric_detail"].url),
             user_instruction=original_instruction,
             normalized_instruction=normalized_result.get("analysis"),
             custom_template=payload.prompt_policy.custom_template,

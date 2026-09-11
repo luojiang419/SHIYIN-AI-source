@@ -24,6 +24,7 @@ ROLE_LABELS = {
     "target_image": "服装参考",
     "model_subject": "模特主体",
     "scene": "场景",
+    "fabric_detail": "面料细节",
 }
 
 _ROLE_OVERRIDE_PATTERN = re.compile(
@@ -73,7 +74,7 @@ def scenario_id(has_model_subject: bool, has_scene: bool) -> str:
     return SCENARIOS[(bool(has_model_subject), bool(has_scene))]
 
 
-def reference_order(control_mode: str, has_model_subject: bool, has_scene: bool) -> tuple[dict[str, Any], ...]:
+def reference_order(control_mode: str, has_model_subject: bool, has_scene: bool, has_fabric_detail: bool = False) -> tuple[dict[str, Any], ...]:
     mode = str(control_mode or "").strip().lower()
     if mode not in POSE_REPLICATE_MODES:
         raise PoseReplicatePromptError("一键复刻模式只支持 depth 或 skeleton")
@@ -84,6 +85,8 @@ def reference_order(control_mode: str, has_model_subject: bool, has_scene: bool)
     )
     if has_scene:
         roles.append("scene")
+    if has_fabric_detail:
+        roles.append("fabric_detail")
     return tuple(
         {
             "index": index,
@@ -133,6 +136,7 @@ def compile_pose_replicate_prompt(
     *,
     has_model_subject: bool = False,
     has_scene: bool = False,
+    has_fabric_detail: bool = False,
     output_aspect_ratio: str = "16:9",
     user_instruction: str = "",
     normalized_instruction: Mapping[str, Any] | None = None,
@@ -142,7 +146,21 @@ def compile_pose_replicate_prompt(
     output_ratio = str(output_aspect_ratio or "").strip()
     if output_ratio not in POSE_REPLICATE_OUTPUT_RATIOS:
         raise PoseReplicatePromptError("一键复刻输出画幅不受支持")
-    order = reference_order(mode, has_model_subject, has_scene)
+    order = reference_order(mode, has_model_subject, has_scene, has_fabric_detail)
+    fabric_rule = ""
+    if has_fabric_detail:
+        garment_index = next(item["index"] for item in order if item["role"] == "target_image")
+        fabric_index = next(item["index"] for item in order if item["role"] == "fabric_detail")
+        fabric_rule = (
+            f"\n\n【面料细节参考补充】\n图{fabric_index}是服装面料的局部放大细节，专门控制图{garment_index}服装的微观材质。"
+            "观察并迁移实际可见的纤维粗细、毛羽长度与密度、绒毛方向、织物组织、表面起伏、柔软度和光泽；"
+            "按成片人物距离呈现自然尺度的细毛羽和柔软纹样边缘，随服装曲面、褶皱和现场光照变化。"
+            f"服装款式、版型、底色、图案颜色、纹样形状和重复尺度仍以图{garment_index}完整服装参考为准；"
+            "局部特写的放大倍率不能放大成衣图案或纤维，不将特写平铺成贴图，不复制特写裁切、背景或光斑。"
+            "仅在换装区域应用面料质感，不能沿用目标图片旧衣的表面纹理；不改变人物、配饰及场景。"
+            "不得用锐化噪点、硬边印花或塑料光泽代替真实纤维，也不凭空添加参考中不存在的绒毛。"
+            "输出一张完整照片，不输出细节拼贴、图号或文字。"
+        )
     scenario = scenario_id(has_model_subject, has_scene)
     original = _clean_text(user_instruction, 5000)
     if custom_template is not None:
@@ -155,7 +173,7 @@ def compile_pose_replicate_prompt(
         elif original:
             prompt += "\n\n【用户补充要求】\n" + str(user_instruction)
         return PoseReplicatePrompt(
-            final_prompt=prompt, template_id=POSE_REPLICATE_TEMPLATE_ID,
+            final_prompt=prompt + fabric_rule, template_id=POSE_REPLICATE_TEMPLATE_ID,
             template_variant=f"{POSE_REPLICATE_TEMPLATE_ID}.{scenario}.{mode}.{POSE_REPLICATE_LOCALE}",
             scenario_id=scenario, control_mode=mode, output_aspect_ratio=output_ratio,
             prompt_source="custom-template", reference_order=order,
@@ -179,7 +197,7 @@ def compile_pose_replicate_prompt(
         "{{user_instruction}}", instruction
     )
     return PoseReplicatePrompt(
-        final_prompt=prompt,
+        final_prompt=prompt + fabric_rule,
         template_id=POSE_REPLICATE_TEMPLATE_ID,
         template_variant=f"{POSE_REPLICATE_TEMPLATE_ID}.{scenario}.{mode}.{POSE_REPLICATE_LOCALE}",
         scenario_id=scenario,

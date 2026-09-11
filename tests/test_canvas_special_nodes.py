@@ -508,7 +508,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         )
         self.assertIsNotNone(smart_run)
         smart_source = smart_run.group(0)
-        self.assertIn("const refs = [inputs.action, inputs.control, ...targets, inputs.modelSubject, inputs.scene]", smart_source)
+        self.assertIn("const refs = [inputs.action, inputs.control, ...targets, inputs.modelSubject, inputs.scene, targets.length === 1 ? inputs.fabricDetail : null]", smart_source)
         self.assertIn("createPendingOutputFromSource(node, targets.length", smart_source)
         self.assertIn("Promise.allSettled(targets.map", smart_source)
         self.assertIn("'/api/canvas/pose-replicate-tasks'", smart_source)

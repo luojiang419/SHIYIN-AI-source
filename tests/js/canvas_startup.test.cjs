@@ -67,6 +67,16 @@ function editor(h){
     return {ctx,calls};
 }
 (async()=>{
+    // 冷启动脚本下载期间预取已失败，正式进入不得消费已失败的 promise。
+    const cold=harness();
+    cold.startup.prefetch('cold');
+    cold.requests[0].reject(new Error('connection reset during startup'));
+    await tick();
+    const recovered=cold.startup.open('cold');
+    assert.equal(cold.requests.length,4);
+    cold.requests[2].respond(project('cold')); cold.requests[3].respond(cfg);
+    assert.equal((await recovered.ready).data.canvas.id,'cold');
+
     // 必需依赖并行，真实节点参数修正函数只在配置就绪后执行。
     const h=harness(), e=editor(h);
     h.startup.prefetch('A');

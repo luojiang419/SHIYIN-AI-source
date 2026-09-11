@@ -15752,7 +15752,7 @@ async def ai_config():
 async def runtime_ai_config():
     """普通创作页面使用的无密钥、无地址模型目录。"""
     preferred_chat_model = next((m for m in CHAT_MODELS if m == "gpt-5.5"), CHAT_MODELS[0] if CHAT_MODELS else CHAT_MODEL)
-    providers = runtime_api_providers()
+    providers = await asyncio.to_thread(runtime_api_providers)
     return {
         "chat_model": preferred_chat_model,
         "image_model": IMAGE_MODEL,
@@ -25013,11 +25013,12 @@ async def delete_conversation(conversation_id: str, request: Request, x_user_id:
 
 @app.get("/api/canvases")
 async def canvases():
-    return {"canvases": list_canvases()}
+    # 列表包含回收站维护和数据库锁等待，不能占住处理其他请求的事件循环。
+    return {"canvases": await asyncio.to_thread(list_canvases)}
 
 @app.get("/api/projects")
 async def get_projects():
-    return {"projects": list_projects()}
+    return {"projects": await asyncio.to_thread(list_projects)}
 
 @app.post("/api/projects")
 async def create_project(payload: ProjectCreateRequest):
@@ -25056,7 +25057,7 @@ async def delete_project(project_id: str):
 
 @app.get("/api/canvases/trash")
 async def trashed_canvases():
-    return {"canvases": list_deleted_canvases(), "retention_days": 30}
+    return {"canvases": await asyncio.to_thread(list_deleted_canvases), "retention_days": 30}
 
 @app.post("/api/canvases")
 async def create_canvas(payload: CanvasCreateRequest):
@@ -25064,7 +25065,7 @@ async def create_canvas(payload: CanvasCreateRequest):
 
 @app.get("/api/canvases/{canvas_id}/meta")
 async def get_canvas_meta(canvas_id: str):
-    canvas = load_canvas(canvas_id)
+    canvas = await asyncio.to_thread(load_canvas, canvas_id)
     return {
         "id": canvas.get("id"),
         "updated_at": canvas.get("updated_at", 0),

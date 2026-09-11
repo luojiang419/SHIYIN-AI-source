@@ -136,7 +136,7 @@
             if(id) prefetched = createSession(id);
         },
         open(id){
-            if(prefetched?.id === id && prefetched.isCurrent()){
+            if(prefetched?.id === id && prefetched.isCurrent() && prefetched.phase !== 'error'){
                 const session = prefetched;
                 prefetched = null;
                 return session;

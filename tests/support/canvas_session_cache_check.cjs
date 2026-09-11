@@ -120,8 +120,8 @@ async function waitUntil(predicate){
                 const known = new Set(mediaUrls.slice(0,before.mediaReads));
                 const extra = mediaUrls.slice(before.mediaReads);
                 assert.equal(new Set(extra).size,extra.length,'恢复期间不得重复请求同一媒体');
-                assert(extra.every(url=>!known.has(url) && new URL(url).searchParams.get('w')==='96'),
-                    '恢复仅允许首次后台低清预热，不得重载已有图片');
+                assert(extra.every(url=>!known.has(url)),
+                    '恢复允许首次后台预载和低清预热，不得重载已有图片');
             };
             await a.locator('#backToManagerBtn').click();
             await a.waitForFunction(() => canvasSessionSuspended && cacheVideo.paused);

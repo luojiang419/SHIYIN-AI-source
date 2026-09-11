@@ -153,7 +153,11 @@ function classicPreviewCandidate(img, allowLoading=false){
     if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
     if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
     const entry = classicMediaViewportEntry(img);
-    if(!entry?.eligible) return null;
+    if(!entry) return null;
+    if(!entry.eligible){
+        if(canvasEntryPreparing || !['queued','loading'].includes(img.dataset.previewState)) return null;
+        return {img,priority:100,distance:entry.distance};
+    }
     if(canvasEntryPreparing){
         if(!canvasEntryResourceVisible(img)) return null;
         if(img.dataset.previewState==='evicted' && img.complete && img.naturalWidth>0) return null;
@@ -180,6 +184,10 @@ function ensureClassicMediaQueue(){
         hasPending:() => !canvasSessionSuspended && Boolean(nodesEl?.querySelector?.('img[data-preview-src][data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"]')),
         collectCandidates:() => classicMediaElementsInWindow().map(img => classicPreviewCandidate(img)).filter(Boolean),
         isEligible:img => Boolean(classicPreviewCandidate(img, true)),
+        canStart:(img, queue) => {
+            const entry=classicMediaViewportEntry(img);
+            return Boolean(entry && (entry.eligible || queue.activeTotal < 2));
+        },
         fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
         replaceVideoFallback:img => replaceCanvasVideoPreviewWithFallback(img),
         onStart:() => recordClassicFirstPreviewStart(),
@@ -2509,7 +2517,9 @@ function classicMediaElementsInWindow(){
     const grid = classicMediaSpatialGridEpoch === canvasGeometryEpoch ? classicMediaSpatialGrid : rebuildClassicMediaSpatialGrid();
     const roots = grid?.search(query) || [];
     if(!roots.length) return [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])];
-    return roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]);
+    const foreground=roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]);
+    const pending=[...(nodesEl?.querySelectorAll?.('img[data-preview-src][data-preview-state="queued"]') || [])];
+    return [...new Set([...foreground,...pending])];
 }
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;

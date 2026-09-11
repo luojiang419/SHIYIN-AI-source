@@ -204,6 +204,8 @@
             if(retryAt > now()) return false;
             const kind = mediaKind(img);
             if(!hasCapacity(kind)) return false;
+            // 调用方可为后台预载保留更小预算；每次真正启动时检查，避免整批候选突破上限。
+            if(typeof options.canStart === 'function' && !options.canStart(img, snapshot())) return false;
             const attempt = Math.max(0, Number(img.dataset.previewAttempt || 0)) + 1;
             const wasEvicted = img.dataset.mediaResidentState === 'evicted';
             const task = {

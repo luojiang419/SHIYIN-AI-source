@@ -92,12 +92,12 @@ def test_depth_mode_targets_fold_alignment_without_claiming_native_depth_control
 
     required_depth_targets = (
         "提供可辨认的人体前后关系、表面起伏、遮挡边界和服装褶皱形状",
-        "【服装褶皱复刻：本次重点】",
+        "【服装褶皱复刻：以新衣结构与材料成立为前提】",
         "不要把它只当成大致站姿参考",
-        "最大限度逐褶复刻",
+        "不为逐褶一致保留旧衣的版型、厚度或面料",
         "褶皱的相对位置、起止点、走向、曲率",
-        "不合并、不抹平、不无故增减",
-        "【褶皱与新衣结构冲突的唯一例外】",
+        "不作为几何硬锁",
+        "【冲突优先级：新衣设计与材质优先于旧衣褶皱】",
         "只在确实不对应的衣片、边界和必要材料适配处局部调整",
         "不继承旧面料的亮暗与纹样",
     )
@@ -488,3 +488,17 @@ def test_depth_task_stops_before_assistant_and_generation_when_component_is_not_
     assert error.value.status_code == 503
     normalize.assert_not_awaited()
     submit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mode", ["depth", "skeleton"])
+@pytest.mark.parametrize("has_model", [False, True])
+@pytest.mark.parametrize("has_scene", [False, True])
+def test_garment_fidelity_owns_structure_material_and_pattern(mode, has_model, has_scene):
+    result = compile_pose_replicate_prompt(mode, has_model_subject=has_model, has_scene=has_scene)
+    garment = next(item["index"] for item in result.reference_order if item["role"] == "target_image")
+    assert f"图{garment}是待换衣物结构、面料和纹样的唯一来源" in result.final_prompt
+    assert result.final_prompt.count("【服装保真：先识别再替换】") == 1
+    for rule in ("参考无翻领就不得新增翻领", "扣式门襟不得改成拉链", "相对衣片的大小、密度、间距", "绒毛/毛羽", "禁止混合两图印花"):
+        assert rule in result.final_prompt
+    for conflict in ("默认以最大限度逐褶复刻", "先匹配衣片起伏，再", "动作褶皱的布局与峰谷关系优先于自由整理面料"):
+        assert conflict not in result.final_prompt

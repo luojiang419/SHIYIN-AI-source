@@ -5704,11 +5704,15 @@ def canvas_node_title(node):
         return ""
     return str(node.get("title") or node.get("name") or node.get("label") or node.get("type") or "节点")[:120]
 
+def canvas_asset_is_research_path(path):
+    return bool(re.match(r"^lookbookResearchImages(?:\[|\.|$)", str(path or "")))
+
+
 def extract_canvas_assets(canvas):
     record = canvas_record(canvas)
     canvas_id = str(record.get("id") or "")
     items = []
-    seen = set()
+    seen = {}
     nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
     for node_index, node in enumerate(nodes):
         if not isinstance(node, dict):
@@ -5720,9 +5724,12 @@ def extract_canvas_assets(canvas):
             # 避免作品管理/资产管理在桌面 WebView 中请求失效的旧端口或主机名。
             url = canonical_local_media_origin_url(url)
             dedupe_key = url
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
+            previous_index = seen.get(dedupe_key)
+            if previous_index is not None:
+                # 同图被用户放入正式图片/输出节点时，优先保留正式用途。
+                if not (canvas_asset_is_research_path(items[previous_index]["source_path"])
+                        and not canvas_asset_is_research_path(field_path)):
+                    continue
             kind = canvas_asset_kind(raw, url)
             if kind not in {"image", "video", "audio", "text"}:
                 continue
@@ -5744,13 +5751,18 @@ def extract_canvas_assets(canvas):
                 "node_title": node_title,
                 "node_type": str(node.get("type") or ""),
                 "source_path": field_path,
-                "created_at": node.get("created_at") or record.get("updated_at") or record.get("created_at") or 0,
+                # 保存画布不能改变旧资源的作品时间；旧节点缺少时间时使用固定创建时间。
+                "created_at": node.get("created_at") or record.get("created_at") or 0,
             }
             if isinstance(raw, dict):
                 for key in ("natural_w", "natural_h", "width", "height", "size", "duration", "runMs"):
                     if raw.get(key) is not None:
                         item[key] = raw.get(key)
-            items.append(item)
+            if previous_index is None:
+                seen[dedupe_key] = len(items)
+                items.append(item)
+            else:
+                items[previous_index] = item
     return items
 
 CANVAS_ASSETS_INDEX_LOCK = Lock()
@@ -27139,6 +27151,8 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
     for item in indexed.get("items") or []:
         if not isinstance(item, dict):
             continue
+        if canvas_asset_is_research_path(item.get("source_path")):
+            continue
         kind = str(item.get("kind") or "").lower()
         url = canonical_local_media_origin_url(str(item.get("url") or "").strip())
         if kind not in {"image", "video"} or not url or url in seen_urls:
@@ -27153,7 +27167,7 @@ def canvas_generated_work_items(metadata: Optional[Dict[str, Dict[str, Any]]] = 
         original_name = filename_from_media_url(url, "画布资产")
         width = int(item.get("width") or item.get("natural_w") or 0)
         height = int(item.get("height") or item.get("natural_h") or 0)
-        raw_created_at = float(item.get("created_at") or item.get("canvas_updated_at") or 0)
+        raw_created_at = float(item.get("created_at") or item.get("canvas_created_at") or 0)
         if raw_created_at > 10000000000:
             raw_created_at /= 1000.0
         works.append({

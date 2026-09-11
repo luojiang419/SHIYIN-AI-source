@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import sqlite3
@@ -41,6 +42,7 @@ def main():
     parser.add_argument('--output-dir', type=Path, default=OUT)
     parser.add_argument('--model', default='gemini-3-pro-image-preview', help='Use an explicitly configured model for a controlled comparison')
     parser.add_argument('--prompt-file', type=Path, help='Optional reviewed full prompt for a case-specific calibration, saved verbatim in audit')
+    parser.add_argument('--lossless-garment', action='store_true', help='Case test: send original garment PNG without installed-server JPEG/downsampling')
     args = parser.parse_args()
     OUT = args.output_dir.resolve()
     OUT.mkdir(parents=True, exist_ok=True)
@@ -105,8 +107,10 @@ def main():
                'prompt_policy': {'template_id': catalog['template_id'], 'locale': 'zh-CN',
                                  'custom_template': final_prompt, 'custom_template_key': 'depth:base-wardrobe'},
                'control_signature': 'fresh-depth-sha256:' + report['depth']['sha256']}
+    if args.lossless_garment:
+        payload['inputs']['target_image']['url'] = 'data:image/png;base64,' + base64.b64encode((OUT / 'garment.png').read_bytes()).decode('ascii')
     save('request-audit.json', {**payload, 'source_template_id': compiled.template_id,
-                              'case_specific_prompt': bool(args.prompt_file)})
+                              'case_specific_prompt': bool(args.prompt_file), 'lossless_garment': args.lossless_garment})
     response = session.post(args.base_url + '/api/canvas/pose-replicate-tasks', json=payload, timeout=60)
     response.raise_for_status()
     submission = response.json()

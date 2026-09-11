@@ -11489,11 +11489,13 @@ def gemini_reference_part(ref):
     role = str((ref or {}).get("role") or "").strip().lower()
     label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
     is_depth_map = role == "control_map" and "深度" in label
+    is_garment_reference = role == "target_image"
     pose_pair = role in {"pose_reference", "control_map"}
     value = reference_to_data_url(
         ref,
-        max_size=2048 if pose_pair else 1536,
-        lossless=is_depth_map,
+        max_size=2048 if pose_pair or is_garment_reference else 1536,
+        # 服装参考承担毛羽/织纹来源，不能比目标旧衣更低清或再经JPEG损失细节。
+        lossless=is_depth_map or is_garment_reference,
     )
     if not value:
         return None

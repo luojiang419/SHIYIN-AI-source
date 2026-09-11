@@ -65,6 +65,12 @@ def test_eight_fixed_routes_keep_stable_reference_order(mode, has_model, has_sce
     assert "（目标图片）" in result.final_prompt
     assert "（服装参考）" in result.final_prompt
     assert "只有一个最终模特主体实例" in result.final_prompt
+    if mode == "depth" and not has_model and not has_scene:
+        assert "图1（目标图片）提供目标人物照片" in result.final_prompt
+        assert "不输出数字标签、拼图或解释" in result.final_prompt
+        assert "只替换图3主要目标服装对应的区域" in result.final_prompt
+        assert "豹纹" not in result.final_prompt
+        return
     if has_scene:
         assert "【参考图分工】" in result.final_prompt
         assert "场景不是背板" in result.final_prompt
@@ -91,15 +97,11 @@ def test_depth_mode_targets_fold_alignment_without_claiming_native_depth_control
     result = compile_pose_replicate_prompt("depth", output_aspect_ratio="3:4")
 
     required_depth_targets = (
-        "提供可辨认的人体前后关系、表面起伏、遮挡边界和服装褶皱形状",
-        "【服装褶皱复刻：以新衣结构与材料成立为前提】",
-        "不要把它只当成大致站姿参考",
-        "不为逐褶一致保留旧衣的版型、厚度或面料",
-        "褶皱的相对位置、起止点、走向、曲率",
-        "不作为几何硬锁",
-        "【冲突优先级：新衣设计与材质优先于旧衣褶皱】",
-        "只在确实不对应的衣片、边界和必要材料适配处局部调整",
-        "不继承旧面料的亮暗与纹样",
+        "深度图只约束人体轮廓、姿势、遮挡和可靠的大尺度受力起伏",
+        "不要求与旧衣逐褶或逐像素一致",
+        "图1旧衣的表面像素没有保留权限",
+        "微观肌理",
+        "不擅自推断纤维成分",
     )
     for rule in required_depth_targets:
         assert rule in result.final_prompt
@@ -113,9 +115,9 @@ def test_base_depth_route_preserves_non_garment_pixels_and_extended_route_maps_g
     extended = compile_pose_replicate_prompt("depth", has_model_subject=True)
     scene = compile_pose_replicate_prompt("depth", has_model_subject=True, has_scene=True)
 
-    assert "只改新旧目标衣物覆盖区域的并集" in base.final_prompt
-    assert "其余可保留像素尽量沿用，不整图重绘" in base.final_prompt
-    assert "同画幅时以图1的人物位置和尺寸逐部位对齐" in base.final_prompt
+    assert "完整清除，按图3的新面料重新形成衣片" in base.final_prompt
+    assert "保留图1非服装区域" in base.final_prompt
+    assert "同画幅沿用图1裁切与主体占比" in base.final_prompt
     assert "随新体型作最小映射，不贴死旧人物的绝对像素" in extended.final_prompt
     assert "必要的主体调整只能整体等比" in extended.final_prompt
     assert "随新体型作最小映射，再按场景镜头呈现" in scene.final_prompt
@@ -180,6 +182,7 @@ def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_p
         response = asyncio.run(main.create_pose_replicate_task(task_request()))
 
     image_payload = submit.await_args.args[0]
+    submit.assert_awaited_once()
     assert image_payload.auto_optimize_prompt is False
     assert image_payload.operation == "pose_replicate"
     assert image_payload.prompt_context["prompt_source"] == "fixed-template"
@@ -446,8 +449,24 @@ def test_gemini_transport_preserves_registered_pose_depth_pair_resolution_and_de
     assert calls == [
         ("pose_reference", 2048, False),
         ("control_map", 2048, True),
-        ("target_image", 1536, False),
+        ("target_image", 2048, True),
     ]
+
+
+def test_gemini_garment_transport_keeps_fine_color_pixels_without_jpeg_or_downsampling(tmp_path):
+    import base64
+    from io import BytesIO
+    from PIL import Image
+
+    original = Image.frombytes("RGB", (1024, 1800), bytes([70, 56, 55, 187, 179, 184]) * (1024 * 1800 // 2))
+    path = tmp_path / "fine-fabric.png"
+    original.save(path)
+    with patch.object(main, "output_file_from_url", return_value=str(path)):
+        part = main.gemini_reference_part({"url": "/assets/fine-fabric.png", "role": "target_image", "role_label": "服装参考"})
+    assert part["inlineData"]["mimeType"] == "image/png"
+    with Image.open(BytesIO(base64.b64decode(part["inlineData"]["data"]))) as actual:
+        assert actual.size == original.size
+        assert actual.tobytes() == original.tobytes()
 
 
 def test_gemini_transport_keeps_untyped_references_without_extra_role_text():
@@ -460,7 +479,7 @@ def test_portrait_references_use_output_ratio_without_collage_fallback():
     assert result.audit_payload()["output_aspect_ratio"] == "16:9"
     assert "输出画幅为 16:9" in result.final_prompt
     assert "不同时优先保持完整可见动作与主体比例" in result.final_prompt
-    assert "不输出拼图、分栏、重复模特" in result.final_prompt
+    assert "不输出数字标签、拼图或解释" in result.final_prompt
 
 
 def test_pose_replicate_rejects_provider_fallback_instead_of_silently_switching():
@@ -496,6 +515,11 @@ def test_depth_task_stops_before_assistant_and_generation_when_component_is_not_
 def test_garment_fidelity_owns_structure_material_and_pattern(mode, has_model, has_scene):
     result = compile_pose_replicate_prompt(mode, has_model_subject=has_model, has_scene=has_scene)
     garment = next(item["index"] for item in result.reference_order if item["role"] == "target_image")
+    if mode == "depth" and not has_model and not has_scene:
+        for rule in ("只取图3", "微观肌理", "无翻领时不新增领片", "扣式门襟不改成拉链", "不能共享旧衣表面"):
+            assert rule in result.final_prompt
+        assert "豹纹" not in result.final_prompt
+        return
     assert f"图{garment}是待换衣物结构、面料和纹样的唯一来源" in result.final_prompt
     assert result.final_prompt.count("【服装保真：先识别再替换】") == 1
     for rule in ("参考无翻领就不得新增翻领", "扣式门襟不得改成拉链", "相对衣片的大小、密度、间距", "绒毛/毛羽", "禁止混合两图印花"):
@@ -510,6 +534,10 @@ def test_garment_fidelity_owns_structure_material_and_pattern(mode, has_model, h
 def test_color_fidelity_keeps_garment_palette_above_scene_grading(mode, has_model, has_scene):
     result = compile_pose_replicate_prompt(mode, has_model_subject=has_model, has_scene=has_scene)
     garment = next(item["index"] for item in result.reference_order if item["role"] == "target_image")
+    if mode == "depth" and not has_model and not has_scene:
+        for rule in ("配色同样只取图3", "不混入图1旧衣配色", "不以校色为理由冻结旧衣织纹", "暖色也不强行灰化"):
+            assert rule in result.final_prompt
+        return
     assert f"图{garment}服装参考是新衣配色的唯一来源" in result.final_prompt
     assert result.final_prompt.count("【商品配色还原：先建立色彩基准，再完成一次成片】") == 1
     for rule in ("面料底色、每一组印花或织纹色", "作为底色和纹样色各自的基准", "优先于目标照片的整体调色风格", "参考本来是暖色、鲜艳色或高反差时也不强行灰化", "纹理正确但配色不同仍不合格", "配色接近但纹样变大、材质改变或多出领片也不合格", "在一次生成的最终成片中同时满足"):

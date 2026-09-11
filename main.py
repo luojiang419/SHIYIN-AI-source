@@ -9648,12 +9648,12 @@ def reference_to_data_url(ref, max_size=None, *, lossless=False):
     path = output_file_from_url(ref.get("url", ""))
     if not path:
         return ref.get("url", "")
-    if max_size:
+    if max_size or lossless:
         try:
             with Image.open(path) as img:
                 img.load()
                 w, h = img.size
-                if max(w, h) > max_size:
+                if max_size and max(w, h) > max_size:
                     img.thumbnail((max_size, max_size), Image.LANCZOS)
                 if lossless:
                     if img.mode not in ("L", "LA", "RGB", "RGBA"):
@@ -11493,8 +11493,8 @@ def gemini_reference_part(ref):
     pose_pair = role in {"pose_reference", "control_map"}
     value = reference_to_data_url(
         ref,
-        max_size=2048 if pose_pair or is_garment_reference else 1536,
-        # 服装参考承担毛羽/织纹来源，不能比目标旧衣更低清或再经JPEG损失细节。
+        max_size=None if is_garment_reference else (2048 if pose_pair else 1536),
+        # 服装参考按原始尺寸无损编码，不设置软件端长边缩放上限。
         lossless=is_depth_map or is_garment_reference,
     )
     if not value:

@@ -449,24 +449,27 @@ def test_gemini_transport_preserves_registered_pose_depth_pair_resolution_and_de
     assert calls == [
         ("pose_reference", 2048, False),
         ("control_map", 2048, True),
-        ("target_image", 2048, True),
+        ("target_image", None, True),
     ]
 
 
-def test_gemini_garment_transport_keeps_fine_color_pixels_without_jpeg_or_downsampling(tmp_path):
+@pytest.mark.parametrize("image_format", ["PNG", "JPEG"])
+def test_gemini_garment_transport_keeps_fine_color_pixels_without_jpeg_or_downsampling(tmp_path, image_format):
     import base64
     from io import BytesIO
     from PIL import Image
 
-    original = Image.frombytes("RGB", (1024, 1800), bytes([70, 56, 55, 187, 179, 184]) * (1024 * 1800 // 2))
-    path = tmp_path / "fine-fabric.png"
-    original.save(path)
+    original = Image.frombytes("RGB", (256, 5000), bytes([70, 56, 55, 187, 179, 184]) * (256 * 5000 // 2))
+    path = tmp_path / ("fine-fabric.png" if image_format == "PNG" else "fine-fabric.jpg")
+    original.save(path, format=image_format)
+    with Image.open(path) as decoded:
+        expected_pixels = decoded.convert("RGB").tobytes()
     with patch.object(main, "output_file_from_url", return_value=str(path)):
         part = main.gemini_reference_part({"url": "/assets/fine-fabric.png", "role": "target_image", "role_label": "服装参考"})
     assert part["inlineData"]["mimeType"] == "image/png"
     with Image.open(BytesIO(base64.b64decode(part["inlineData"]["data"]))) as actual:
         assert actual.size == original.size
-        assert actual.tobytes() == original.tobytes()
+        assert actual.tobytes() == expected_pixels
 
 
 def test_gemini_transport_keeps_untyped_references_without_extra_role_text():

@@ -182,14 +182,15 @@ function currentProject(){ return projects.find(p => p.id === currentProjectId) 
 function canvasesInProject(pid){ return canvases.filter(c => (c.project || 'default') === pid); }
 
 let canvasListLoadSequence=0;
-async function fetchCanvasListData(url,isCurrent){
+let canvasListRequest=null;
+async function fetchCanvasListData(url,isCurrent,signal){
     for(let attempt=0;attempt<3;attempt++){
         try {
-            const response=await fetch(url,{signal:AbortSignal.timeout(15000),cache:'no-store'});
+            const response=await fetch(url,{signal,cache:'no-store'});
             if(!response.ok){const error=new Error(`Canvas list HTTP ${response.status}`);error.status=response.status;throw error;}
             return await response.json();
         } catch(error){
-            if(!isCurrent() || attempt===2 || (error.status && error.status<500 && error.status!==429)) throw error;
+            if(signal.aborted || !isCurrent() || attempt===2 || (error.status && error.status<500 && error.status!==429)) throw error;
             window.canvasListEntryOverlay?.update(12,'正在等待服务就绪，自动重试中…');
             await new Promise(resolve=>setTimeout(resolve,500*(attempt+1)));
             if(!isCurrent()) throw error;
@@ -198,16 +199,23 @@ async function fetchCanvasListData(url,isCurrent){
 }
 async function loadAll({preserveViewport = false} = {}){
     const sequence=++canvasListLoadSequence;
+    canvasListRequest?.abort();
+    const request=new AbortController();
+    canvasListRequest=request;
+    // 列表的全部重试共享预算，不能把一次 15 秒超时放大为近一分钟。
+    const timer=setTimeout(()=>request.abort(),15000);
     const isCurrent=()=>sequence===canvasListLoadSequence;
     const valid=listPageSession?.guard() || (()=>true);
-    const before=JSON.stringify([projects,canvases]);
     try {
         const [pData,cData]=await Promise.all([
-            fetchCanvasListData('/api/projects',isCurrent),
-            fetchCanvasListData('/api/canvases',isCurrent)
+            fetchCanvasListData('/api/projects',isCurrent,request.signal),
+            fetchCanvasListData('/api/canvases',isCurrent,request.signal)
         ]);
         if(!isCurrent()) return;
         if(!valid()) return;
+        const before=JSON.stringify([projects,canvases]);
+        // 服务器结果一旦应用，晚到的本地快照不能再覆盖它。
+        listPageSession?.mark();
         projects = (pData.projects || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         if(!projects.length) projects = [{ id: 'default', name: L('默认项目','Default'), order: 0, canvas_count: 0 }];
         canvases = cData.canvases || [];
@@ -218,7 +226,7 @@ async function loadAll({preserveViewport = false} = {}){
         }
         rememberProjectId(currentProjectId);
         if(before!==JSON.stringify([projects,canvases])){renderProjects();renderBoard();}
-        if(!preserveViewport) resetView();
+        if(!(typeof preserveViewport==='function' ? preserveViewport() : preserveViewport)) resetView();
         listPageSession?.checkpoint();
         refreshTrashCount();
         window.canvasListEntryOverlay?.remove();
@@ -228,6 +236,9 @@ async function loadAll({preserveViewport = false} = {}){
         console.error(e);
         setStatus(L('加载失败','Load failed'));
         window.canvasListEntryOverlay?.error('画布列表加载失败，请重试。', () => loadAll());
+    } finally {
+        clearTimeout(timer);request.abort();
+        if(canvasListRequest===request) canvasListRequest=null;
     }
 }
 
@@ -1102,10 +1113,14 @@ window.StudioI18n?.apply?.();
 applyViewport();
 listPageSession?.watch(()=>({projects,canvases,currentProjectId,viewport:{...viewport}}));
 void (async()=>{
-    const restored=await listPageSession?.restore(saved=>{
+    let restored=false;
+    const recovery=listPageSession?.restore(saved=>{
+        restored=true;
         projects=saved.projects || [];canvases=saved.canvases || [];currentProjectId=saved.currentProjectId || 'default';
         Object.assign(viewport,saved.viewport || {});renderProjects();renderBoard();applyViewport();
-    });
-    await loadAll({preserveViewport:Boolean(restored)});
+    }).catch(error=>console.warn('canvas list recovery failed',error));
+    // 缓存恢复与数据请求同时开始；取值时读取恢复状态，保留已恢复的视口。
+    await loadAll({preserveViewport:()=>restored});
+    await recovery;
 })();
 refreshIcons();

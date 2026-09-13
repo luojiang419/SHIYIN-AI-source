@@ -21,5 +21,15 @@ function root(items){return {items,querySelectorAll(selector){return selector===
  visible.dataset={previewSrc:'/visible',previewState:'ready'};
  const scoped=await ready.wait({root:root([visible,outside]),isCurrent:()=>true,drain:()=>{},progress:()=>{},include:el=>el===visible});
  assert.deepEqual(scoped.failed,[],'原生直接加载图片 ready 状态可解码，屏幕外图片不阻塞');
+ const queued=img('/queued');queued.dataset={previewSrc:'/queued',previewState:'queued'};
+ const budgetStart=Date.now();
+ const bounded=await ready.wait({root:root([queued]),isCurrent:()=>true,drain:()=>{},progress:()=>{},budgetMs:160});
+ assert.equal(bounded.pending[0],queued,'持续排队也必须受入口整体预算限制');
+ assert(Date.now()-budgetStart<1000);
+ const changing=root([]);
+ const dynamic=await ready.wait({root:changing,isCurrent:()=>true,progress:()=>{},budgetMs:160,drain:()=>{
+  const fresh=img('/fresh');fresh.complete=true;fresh.naturalWidth=100;changing.items=[fresh];
+ }});
+ assert(Array.isArray(dynamic.pending),'持续替换 DOM 不能无限重置整体预算');
  console.log('resource readiness: DOM replacement, decode, video canplay, failures, cancellation passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

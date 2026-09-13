@@ -34,11 +34,11 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
     def test_classic_asset_check_cannot_apply_to_a_newer_canvas(self):
         body = function_body(
             CANVAS_JS,
-            "async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id)",
+            "async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id,signal)",
             "async function syncRemoteCanvasNow",
         )
         self.assertIn("if(canvas?.id !== targetCanvasId) return;", body)
-        self.assertLess(body.index("if(canvas?.id !== targetCanvasId) return;"), body.rindex("missingAssetUrls.clear();"))
+        self.assertLess(body.index("if(canvas?.id !== targetCanvasId) return;"), body.index("for(const url of missingAssetUrls)"))
 
     def test_smart_canvas_loads_project_before_secondary_libraries(self):
         onload = SMART_CANVAS_JS[SMART_CANVAS_JS.index("window.onload = async () => {"):]

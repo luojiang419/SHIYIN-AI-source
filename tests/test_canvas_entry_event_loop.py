@@ -13,6 +13,7 @@ from canvas_core.account_storage import account_scope, current_account_id
     ('trashed_canvases', 'list_deleted_canvases', (), []),
     ('get_canvas_meta', 'load_canvas', ('fixture',), {'id': 'fixture'}),
     ('runtime_ai_config', 'runtime_api_providers', (), []),
+    ('touch_canvas', 'touch_canvas_sync', ('fixture',), {'id': 'fixture'}),
 ])
 def test_slow_entry_read_keeps_event_loop_responsive(route, operation, args, value):
     import main
@@ -35,6 +36,48 @@ def test_slow_entry_read_keeps_event_loop_responsive(route, operation, args, val
         result = asyncio.run(run())
     assert isinstance(result, dict)
     assert observed == ['cold-start-account', True]
+
+
+def test_asset_check_yields_and_deduplicates_in_account_context():
+    import main
+    released = threading.Event()
+    observed = []
+
+    def resolve(url):
+        observed.append((url, current_account_id(), released.wait(0.5)))
+        return None if 'missing' in url else '/fixture.png'
+
+    async def run():
+        asyncio.get_running_loop().call_later(0.02, released.set)
+        with account_scope('asset-owner'):
+            return await main.check_canvas_assets(main.CanvasAssetCheckRequest(
+                urls=['/assets/a.png', '/assets/a.png', '/assets/missing.png', 'https://example.com/a.png']))
+
+    with patch.object(main, 'output_file_from_url', side_effect=resolve):
+        result = asyncio.run(run())
+    assert result['exists'] == {'/assets/a.png': True, '/assets/missing.png': False, 'https://example.com/a.png': True}
+    assert observed == [('/assets/a.png', 'asset-owner', True), ('/assets/missing.png', 'asset-owner', True)]
+
+
+def test_static_html_rewrite_yields_to_event_loop(tmp_path):
+    import main
+    (tmp_path / 'canvas.html').write_text('<html>fixture</html>', encoding='utf-8')
+    released = threading.Event()
+    observed = []
+
+    def rewrite(html):
+        observed.append(released.wait(0.5))
+        return html
+
+    async def run():
+        asyncio.get_running_loop().call_later(0.02, released.set)
+        return await main.VersionedStaticFiles(directory=tmp_path).get_response('canvas.html', {
+            'type': 'http', 'method': 'GET', 'path': '/static/canvas.html', 'headers': [], 'query_string': b''})
+
+    with patch.object(main, 'STATIC_DIR', str(tmp_path)), patch.object(main, 'versioned_static_html', side_effect=rewrite):
+        response = asyncio.run(run())
+    assert observed == [True]
+    assert response.body == b'<html>fixture</html>'
 
 
 def test_canvas_nodes_remain_readable_while_list_waits_for_cleanup_lock(tmp_path):

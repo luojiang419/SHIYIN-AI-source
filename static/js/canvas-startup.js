@@ -46,16 +46,18 @@
     function createSession(id){
         active?.cancel();
         const {controller, finish} = requestController();
+        const lifetime = new AbortController();
         let frame = null;
         let idle = null;
         let work = null;
         let started = false;
         const timings = {requestStartedAt:host.performance.now(), dataReadyAt:null, configReadyAt:null};
         const session = {
-            id, sequence:++sequence, phase:'loading', timings,
+            id, sequence:++sequence, phase:'loading', timings, signal:lifetime.signal,
             isCurrent:() => active === session && session.phase !== 'cancelled',
             cancel(){
                 session.phase = 'cancelled';
+                lifetime.abort();
                 controller.abort();
                 finish();
                 clearScheduled();

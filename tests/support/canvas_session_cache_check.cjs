@@ -18,6 +18,7 @@ async function waitUntil(predicate){
     try {
         for(const mode of ['standalone', 'studio']){
             const page = await browser.newPage({viewport:{width:1440,height:1000}});
+            if(process.env.CANVAS_TEST_SCRIPT) await page.route('**/static/js/canvas.js?*',r=>r.fulfill({contentType:'application/javascript',body:fs.readFileSync(process.env.CANVAS_TEST_SCRIPT)}));
             const errors = [];
             page.on('pageerror', error => errors.push(error.message));
             const docs = new Map();

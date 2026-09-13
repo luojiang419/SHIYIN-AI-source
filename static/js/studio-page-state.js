@@ -22,7 +22,10 @@
                 return account;
             }
         } catch(error) {}
-        if(!['/','/static/index.html'].includes(location.pathname) || window.parent!==window) void verifyAccount();
+        if(!['/','/static/index.html'].includes(location.pathname) || window.parent!==window){
+            await verifyAccount();
+            return account;
+        }
         return accountReady;
     }
     function verifyAccount(){
@@ -32,7 +35,7 @@
         validationPromise=fetch('/api/account/me',{cache:'no-store',signal:controller.signal}).then(response=>response.ok?response.json():null)
             .then(data=>configure(data?.account))
             .catch(()=>resolveAccount(''))
-            .finally(()=>clearTimeout(timeout));
+            .finally(()=>{clearTimeout(timeout);validationPromise=null;});
         return validationPromise;
     }
     function database(){
@@ -41,7 +44,9 @@
             let settled=false;
             const finish=value=>{
                 if(settled){value?.close();return;}
-                settled=true;clearTimeout(timeout);resolve(value);
+                settled=true;clearTimeout(timeout);
+                if(!value) databasePromise=null;
+                resolve(value);
             };
             const timeout=setTimeout(()=>finish(null),STORAGE_TIMEOUT_MS);
             let request;
@@ -52,21 +57,22 @@
             catch(error){ finish(null); return; }
             request.onupgradeneeded = () => request.result.createObjectStore('pages');
             request.onsuccess = () => {
-                request.result.onversionchange = () => request.result.close();
+                request.result.onversionchange = () => {request.result.close();databasePromise=null;};
                 finish(request.result);
             };
             request.onerror = request.onblocked = () => finish(null);
         });
         return databasePromise;
     }
-    async function transact(key, value, writing=false){
-        if(!key) return null;
+    async function transact(key, value, writing=false, unavailable=()=>{}){
+        if(!key){unavailable();return null;}
         const db = await database();
-        if(!db) return null;
+        if(!db){unavailable();return null;}
         return new Promise(resolve => {
             let transaction;
             const finish=value=>{clearTimeout(timeout);resolve(value);};
             const timeout=setTimeout(()=>{
+                unavailable();
                 finish(null);
                 try{transaction?.abort();}catch(error){}
             },STORAGE_TIMEOUT_MS);
@@ -74,16 +80,22 @@
                 transaction = db.transaction('pages', writing ? 'readwrite' : 'readonly');
                 const request = writing ? transaction.objectStore('pages').put(value, key) : transaction.objectStore('pages').get(key);
                 transaction.oncomplete = () => finish(writing ? true : request.result || null);
-                transaction.onerror = transaction.onabort = () => finish(null);
-            } catch(error){ finish(null); }
+                transaction.onerror = transaction.onabort = () => {unavailable();finish(null);};
+            } catch(error){ databasePromise=null;unavailable();finish(null); }
         });
     }
     function session(name){
         if(sessions.has(name)) return sessions.get(name);
         let revision=0, capture=null, pending=null, latest=null, flushing=null, scheduled=0, hydrated=false, discarded=false;
         const ownerEpoch=epoch;
-        const keyReady=ready().then(id=>id ? `${id}:${name}` : null);
-        const initial=keyReady.then(key=>transact(key));
+        let keyReady;
+        const readInitial=()=>{
+            if(!keyReady || !account) keyReady=ready().then(id=>id ? `${id}:${name}` : null);
+            const attempt={unavailable:false};
+            attempt.promise=keyReady.then(key=>transact(key,undefined,false,()=>{attempt.unavailable=true;}));
+            return attempt;
+        };
+        let initial=readInitial();
         function flush(){
             if(flushing) return flushing;
             flushing=(async()=>{
@@ -119,7 +131,7 @@
             guard(){const ticket=revision;return ()=>!discarded && ownerEpoch===epoch && revision===ticket;},
             async restore(apply){
                 const valid=api.guard();
-                const record=await initial;
+                const record=await initial.promise;
                 if(!valid() || !record || record.schema!==1) return false;
                 await apply(structuredClone(record.value));
                 if(!valid())return false;
@@ -127,7 +139,16 @@
                 hydrated=true;
                 return true;
             },
-            read:()=>initial.then(record=>!discarded && ownerEpoch===epoch && (latest || record)?.schema===1 ? structuredClone((latest || record).value) : null),
+            async read(){
+                const attempt=initial;
+                const record=await attempt.promise;
+                if(attempt.unavailable){
+                    // 存储故障不等于“没有快照”，不能用服务器状态覆盖可能存在的离线编辑。
+                    if(initial===attempt) initial=readInitial();
+                    throw new Error('本地编辑记录暂时无法读取，请重试');
+                }
+                return !discarded && ownerEpoch===epoch && (latest || record)?.schema===1 ? structuredClone((latest || record).value) : null;
+            },
             async remove(){
                 discarded=true;pending=null;latest=null;revision++;sessions.delete(name);
                 const key=await keyReady,db=await database();

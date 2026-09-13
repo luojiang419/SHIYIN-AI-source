@@ -3,7 +3,7 @@
     if(typeof module === 'object' && module.exports) module.exports = factory;
     else root.CanvasResourceReady = factory(root);
 })(typeof window === 'undefined' ? null : window, function(host){
-    async function wait({root, isCurrent, drain, progress, active=()=>true, include=()=>true, timeoutMs=90000}){
+    async function wait({root, isCurrent, drain, progress, active=()=>true, include=()=>true, timeoutMs=90000, budgetMs=Infinity}){
         const states = new WeakMap();
         let stableSince=0, previous=[];
         let elapsed=0,lastTick=Date.now();
@@ -51,6 +51,8 @@
             }
             progress(done,elements.length);
             if(failed.length) return {failed};
+            // 整体预算包含排队和 DOM 替换，不随单个资源重试重置。
+            if(elapsed>=budgetMs) return {failed:[],pending:elements.filter(el=>!states.get(el)?.decoded)};
             if(done===elements.length){
                 if(!stableSince) stableSince=Date.now();
                 if(Date.now()-stableSince>=300) return {failed:[]};
@@ -59,5 +61,83 @@
         }
         return {cancelled:true,failed:[]};
     }
-    return {wait};
+    function monitor({root,isCurrent,drain,retryMissing}){
+        if(!host.MutationObserver) return {stop(){}};
+        const notices=new Map();
+        let timer=null,stopped=false;
+        function status(el){
+            if(el.classList.contains('missing-asset')) return 'missing';
+            if(el.tagName==='IMG'){
+                if(el.dataset.previewState==='failed') return 'failed';
+                if(el.complete && el.naturalWidth>0 && (!el.dataset.previewSrc || ['loaded','ready','evicted'].includes(el.dataset.previewState))) return 'ready';
+                if(!el.dataset.previewSrc && el.complete && !el.naturalWidth) return 'failed';
+            }else{
+                if(el.error) return 'failed';
+                if(el.readyState>=2 || (el.tagName==='VIDEO' && el.poster)) return 'ready';
+            }
+            return 'pending';
+        }
+        async function retry(node){
+            if(!isCurrent()) return;
+            for(const el of node.querySelectorAll('img,video,audio')){
+                if(status(el)!=='failed') continue;
+                if(el.dataset.previewSrc){
+                    el.dataset.previewState='queued';
+                    delete el.dataset.previewAttempt;delete el.dataset.previewRetryAt;
+                }else if(el.tagName==='IMG'){
+                    const src=el.getAttribute('src');el.removeAttribute('src');if(src) el.src=src;
+                }else el.load();
+            }
+            drain();schedule();
+            if(node.querySelector('.missing-asset')){
+                try{await retryMissing?.(node);}catch(error){host.console?.warn('canvas resource retry failed',error);}
+                schedule();
+            }
+        }
+        function scan(){
+            timer=null;
+            if(stopped || !isCurrent()){stop();return;}
+            const groups=new Map();
+            for(const el of root.querySelectorAll('img,video,audio,.missing-asset')){
+                if(!el.classList.contains('missing-asset') && !el.dataset.previewSrc && !el.getAttribute('src') && !el.querySelector('source[src]')) continue;
+                const node=el.closest('.node');
+                if(!node) continue;
+                const state=status(el);
+                if(state==='ready') continue;
+                const counts=groups.get(node) || {pending:0,failed:0,missing:0};
+                counts[state]++;groups.set(node,counts);
+            }
+            for(const [node,notice] of notices){
+                if(!groups.has(node) || !root.contains(node)){notice.remove();notices.delete(node);}
+            }
+            for(const [node,counts] of groups){
+                let notice=notices.get(node);
+                if(notice && !node.contains(notice)){notices.delete(node);notice=null;}
+                if(!notice){
+                    notice=host.document.createElement('button');notice.type='button';
+                    notice.className='canvas-resource-notice';
+                    for(const type of ['pointerdown','mousedown','dblclick']) notice.addEventListener(type,event=>event.stopPropagation());
+                    notice.addEventListener('click',event=>{event.stopPropagation();void retry(node);});
+                    node.appendChild(notice);notices.set(node,notice);
+                }
+                const failed=counts.failed+counts.missing;
+                const label=failed ? `${failed} 项资源${counts.missing?'缺失':'加载失败'} · 重试` : `${counts.pending} 项资源加载中…`;
+                if(notice.textContent!==label) notice.textContent=label;
+                notice.disabled=!failed;
+            }
+        }
+        function schedule(){if(!stopped && timer===null) timer=host.setTimeout(scan,120);}
+        const observer=new host.MutationObserver(schedule);
+        observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['src','data-preview-state']});
+        const events=['load','error','loadeddata','canplay'];
+        for(const event of events) root.addEventListener(event,schedule,true);
+        function stop(){
+            stopped=true;observer.disconnect();host.clearTimeout(timer);timer=null;
+            for(const event of events) root.removeEventListener(event,schedule,true);
+            for(const notice of notices.values()) notice.remove();
+            notices.clear();
+        }
+        schedule();return {stop};
+    }
+    return {wait,monitor};
 });

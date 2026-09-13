@@ -59,6 +59,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(body,mime=mimetypes.guess_type(file.name)[0] or 'application/octet-stream')
         if path=='/fixture.png': return self.send(PNG,mime='image/png')
         if path=='/fixture-state': return self.send(STATE)
+        if path=='/api/account/me': return self.send({'account':{'id':'fixture-account','is_admin':True}})
         if path=='/api/runtime/config':
             time.sleep(self.server.config_delay)
             if self.server.fail_config_once:

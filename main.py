@@ -2408,8 +2408,7 @@ class VersionedStaticFiles(StaticFiles):
             # 会按查询串缓存；不重写会让升级后的页面继续组合旧版资源。
             try:
                 html_path = os.path.join(STATIC_DIR, path.replace("/", os.sep))
-                with open(html_path, "r", encoding="utf-8") as handle:
-                    html = versioned_static_html(handle.read())
+                html = await asyncio.to_thread(read_versioned_static_html, html_path)
                 rewritten = Response(html, media_type="text/html; charset=utf-8")
                 rewritten.headers["Cache-Control"] = HTML_CACHE_CONTROL
                 rewritten.headers["Pragma"] = "no-cache"
@@ -2427,6 +2426,12 @@ class VersionedStaticFiles(StaticFiles):
             else UNVERSIONED_STATIC_CACHE_CONTROL
         )
         return response
+
+
+def read_versioned_static_html(path):
+    # 冷缓存的文件读取与资源版本查询也不能占用请求事件循环。
+    with open(path, "r", encoding="utf-8") as handle:
+        return versioned_static_html(handle.read())
 
 
 app.mount("/static", VersionedStaticFiles(directory=STATIC_DIR), name="static")
@@ -25173,6 +25178,10 @@ async def import_canvas_package(
 
 @app.post("/api/canvases/{canvas_id}/touch")
 async def touch_canvas(canvas_id: str):
+    return await asyncio.to_thread(touch_canvas_sync, canvas_id)
+
+
+def touch_canvas_sync(canvas_id: str):
     canvas = load_canvas(canvas_id)
     global ACTIVE_CANVAS_ID, ACTIVE_CANVAS_LAST_SEEN
     ACTIVE_CANVAS_ID = canvas["id"]
@@ -25189,10 +25198,14 @@ async def list_canvas_assets():
 
 @app.post("/api/canvas-assets/check")
 async def check_canvas_assets(payload: CanvasAssetCheckRequest):
+    return await asyncio.to_thread(check_canvas_assets_sync, payload.urls)
+
+
+def check_canvas_assets_sync(urls):
     result = {}
-    for url in payload.urls[:3000]:
+    for url in urls[:3000]:
         text = str(url or "").strip()
-        if not text:
+        if not text or text in result:
             continue
         if text.startswith("/output/") or text.startswith("/assets/"):
             result[text] = bool(output_file_from_url(text))

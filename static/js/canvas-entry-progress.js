@@ -29,6 +29,12 @@
                 el.querySelector('[role=progressbar]').setAttribute('aria-valuenow', String(Math.round(value)));
                 el.querySelector('.canvas-entry-detail').textContent = detail;
             },
+            setReturn(action){
+                const actions=el.querySelector('[data-entry-actions]');
+                if(actions.childElementCount) return;
+                const button=document.createElement('button');
+                button.textContent='返回列表';button.onclick=action;actions.appendChild(button);
+            },
             error(message, retry, proceed, proceedLabel='继续进入'){
                 el.querySelector('[data-entry-message]').textContent = message;
                 const actions = el.querySelector('[data-entry-actions]');

@@ -1,4 +1,6 @@
 @import url('/static/vendor/css/fonts.css?v=2026.05.22.1');
+.canvas-resource-notice { position:absolute; bottom:8px; left:8px; z-index:15; max-width:calc(100% - 16px); padding:5px 9px; border:1px solid var(--line-2); border-radius:8px; background:var(--card-solid); color:var(--text); font:12px/1.4 system-ui,sans-serif; cursor:pointer; }
+.canvas-resource-notice:disabled { pointer-events:none; color:var(--faint); cursor:default; }
 .canvas-startup-notice { position:fixed; inset:0; z-index:1200; display:grid; place-items:center; background:var(--page); color:var(--text); }
 .canvas-startup-notice[hidden] { display:none; }
 .canvas-startup-card { display:flex; align-items:center; gap:16px; padding:24px; background:var(--panel); border:1px solid var(--line); border-radius:16px; font-size:14px; }

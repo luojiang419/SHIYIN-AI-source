@@ -38,7 +38,7 @@ function fn(name){
 }
 function editor(h){
     const calls=[];
-    const ctx={window:{CanvasStartup:h.startup, location:{replace:() => calls.push('redirect')}},
+    const ctx={setTimeout,clearTimeout,structuredClone,window:{CanvasStartup:h.startup, location:{replace:() => calls.push('redirect')}},
         canvas:null, nodes:[], connections:[], selected:new Set(), canvasConfigRevision:0, canvasConfigRequestSequence:0,
         localCanvasSaveSequence:0, checkpointCanvasPage:()=>{},
         imageModels:['default-image'],chatModels:[],videoModels:['default-video'],msChatModels:[],
@@ -76,6 +76,10 @@ function editor(h){
     assert.equal(cold.requests.length,4);
     cold.requests[2].respond(project('cold')); cold.requests[3].respond(cfg);
     assert.equal((await recovered.ready).data.canvas.id,'cold');
+    const failedLoad=harness(),cachedFallback=failedLoad.startup.open('cached-fallback');
+    failedLoad.requests[0].reject(new Error('temporary network failure'));await cachedFallback.ready;
+    assert.equal(cachedFallback.signal.aborted,false,'数据请求失败后，本地恢复会话仍应允许资源重试');
+    failedLoad.startup.cancel();assert.equal(cachedFallback.signal.aborted,true,'取消页面必须取消后台资源请求');
 
     // 必需依赖并行，真实节点参数修正函数只在配置就绪后执行。
     const h=harness(), e=editor(h);
@@ -221,14 +225,16 @@ function editor(h){
     const assets={canvas:{id:'same'},nodes:[{}],missingAssetUrls:new Set(['keep']),
         canvasLocalAssetUrls:()=>['/assets/test.png'],console,
         fetch:()=>new Promise(resolve=>resolveAssets=resolve)};
-    vm.createContext(assets);vm.runInContext(fn('refreshMissingCanvasAssets'),assets);
+    Object.assign(assets,{AbortController,setTimeout,clearTimeout});
+    vm.createContext(assets);vm.runInContext(fn('fetchCanvasJson'),assets);vm.runInContext(fn('refreshMissingCanvasAssets'),assets);
     const checking=assets.refreshMissingCanvasAssets();assets.nodes=[{}];
-    resolveAssets({json:async()=>({exists:{'/assets/test.png':false}})});await checking;
+    resolveAssets({ok:true,json:async()=>({exists:{'/assets/test.png':false}})});await checking;
     assert.deepEqual([...assets.missingAssetUrls],['keep']);
     let resolveWorkflow;
     const workflow={runningHubWorkflowCache:{},validRunningHubWorkflowId:x=>x,
         fetch:()=>new Promise(resolve=>resolveWorkflow=resolve)};
-    vm.createContext(workflow);vm.runInContext(fn('ensureRunningHubWorkflow'),workflow);
+    Object.assign(workflow,{AbortController,setTimeout,clearTimeout});
+    vm.createContext(workflow);vm.runInContext(fn('fetchCanvasJson'),workflow);vm.runInContext(fn('ensureRunningHubWorkflow'),workflow);
     const loadingWorkflow=workflow.ensureRunningHubWorkflow('w');workflow.runningHubWorkflowCache={};
     resolveWorkflow({ok:true,json:async()=>({workflow:{title:'old'}})});await loadingWorkflow;
     assert.deepEqual(workflow.runningHubWorkflowCache,{});
@@ -260,7 +266,8 @@ function editor(h){
     let h3Response,h3Requests=0;
     const h3={minimaxH3StatusTask:null,minimaxH3State:{loaded:false,loading:false,generationEnabled:false},
         fetch:()=>{h3Requests++;return new Promise(resolve=>h3Response=resolve);},render:()=>{}};
-    vm.createContext(h3);vm.runInContext(fn('loadMiniMaxH3Status'),h3);
+    Object.assign(h3,{AbortController,setTimeout,clearTimeout});
+    vm.createContext(h3);vm.runInContext(fn('fetchCanvasJson'),h3);vm.runInContext(fn('loadMiniMaxH3Status'),h3);
     const preheat=h3.loadMiniMaxH3Status();
     let generationReady=false;
     const onGenerate=h3.loadMiniMaxH3Status().then(value=>{generationReady=value.generationEnabled;});
@@ -268,6 +275,17 @@ function editor(h){
     h3Response({ok:true,json:async()=>({generation_enabled:true})});
     await Promise.all([preheat,onGenerate]);assert.equal(generationReady,true);
     assert.equal(h3.minimaxH3StatusTask,null);
+
+    // 响应头已返回但响应体挂起，仍须能超时及被调用方取消。
+    const bounded={AbortController,setTimeout,clearTimeout,
+        fetch:async (_url,{signal})=>({ok:true,json:()=>new Promise((resolve,reject)=>{
+            signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true});
+        })})};
+    vm.createContext(bounded);vm.runInContext(fn('fetchCanvasJson'),bounded);
+    await assert.rejects(bounded.fetchCanvasJson('/stalled-body',{},20),{name:'AbortError'});
+    const parent=new AbortController();
+    const cancelledBody=bounded.fetchCanvasJson('/cancel-body',{signal:parent.signal});
+    await tick();parent.abort();await assert.rejects(cancelledBody,{name:'AbortError'});
 
     // 使用假的可控时钟，不留下真实计时器或网络连接。
     console.log('startup lifecycle, data integrity, cancellation, retry, config races and selective hydration passed');

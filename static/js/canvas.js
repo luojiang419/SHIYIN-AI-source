@@ -72,6 +72,8 @@ const CLASSIC_MEDIA_RESIDENCY_IDLE_MS = 600;
 const CLASSIC_MEDIA_RESTORE_IDLE_MS = 250;
 let classicMediaQueueController = null;
 let canvasEntryPreparing = false;
+let canvasSnapshotPending = false;
+let canvasResourceMonitor = null;
 const classicLowResPrepared = new Map();
 const classicLowResByImage = new WeakMap();
 let classicLowResPreparing = 0;
@@ -491,6 +493,10 @@ function setCanvasRouteActive(active){
         return;
     }
     resumeCanvasRouteMedia();
+    if(wasSuspended && canvasSnapshotPending && !canvasEntryPreparing){
+        void openCanvas(canvas?.id || new URLSearchParams(location.search).get('id'));
+        return;
+    }
     if(wasSuspended && canvas && !canvasEntryPreparing){
         const id=canvas.id;
         const session={id,isCurrent:()=>canvas?.id===id,entryDependenciesReady:true};
@@ -939,12 +945,7 @@ let canvasSortMode = (() => { try { return localStorage.getItem('canvasSortMode'
 const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';
 const CANVAS_COLOR_OPTIONS = ['red','orange','amber','green','teal','blue','violet','pink','slate'];
 // 先绑定返回，避免编辑器后续初始化较慢时丢失来源项目。
-backToManagerBtn?.addEventListener('click', () => {
-    const project = canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject();
-    try { if(window.parent !== window && window.parent.CanvasSessionHost?.back(window, project)) return; }
-    catch(e) {}
-    window.location.href = canvasListUrlForProject(project);
-});
+backToManagerBtn?.addEventListener('click', () => returnToCanvasManager());
 let localCanvasDirty = false;
 let savingCanvasNow = false;
 let saveCanvasAgain = false;
@@ -1716,9 +1717,7 @@ async function loadMiniMaxH3Status({renderAfter=false}={}){
         minimaxH3State = {...minimaxH3State, loading:true};
         minimaxH3StatusTask = (async () => {
             try {
-                const response = await fetch('/api/minimax-h3/status', {cache:'no-store'});
-                const data = await response.json().catch(() => ({}));
-                if(!response.ok) throw new Error(data.detail || '读取 MiniMax H3 状态失败');
+                const data = await fetchCanvasJson('/api/minimax-h3/status', {cache:'no-store'});
                 minimaxH3State = {
                     loaded:true,
                     loading:false,
@@ -3081,7 +3080,7 @@ function refreshGeometryAfterLayout(){
     });
 }
 function scheduleSave(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || canvasSnapshotPending) return;
     localCanvasSaveSequence += 1;
     localCanvasDirty = true;
     checkpointCanvasPage();
@@ -3281,7 +3280,7 @@ function serializableCanvasNodes(list=nodes){
     return (list || []).map(serializableCanvasNode);
 }
 async function saveCanvas(){
-    if(!canvas || applyingRemoteCanvas) return;
+    if(!canvas || applyingRemoteCanvas || canvasSnapshotPending) return;
     if(saveIdleHandle && 'cancelIdleCallback' in window){ window.cancelIdleCallback(saveIdleHandle); saveIdleHandle = 0; }
     if(savingCanvasNow){
         saveCanvasAgain = true;
@@ -3372,6 +3371,23 @@ async function saveCanvas(){
     }
 }
 
+async function fetchCanvasJson(url, options={}, timeoutMs=5000){
+    const controller=new AbortController();
+    const abort=()=>controller.abort();
+    const parentSignal=options.signal;
+    if(parentSignal?.aborted) controller.abort();
+    else parentSignal?.addEventListener('abort',abort,{once:true});
+    const timer=setTimeout(abort,timeoutMs);
+    try {
+        const response=await fetch(url,{...options,signal:controller.signal});
+        const data=await response.json();
+        if(!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
+        return data;
+    } finally {
+        clearTimeout(timer);
+        parentSignal?.removeEventListener('abort',abort);
+    }
+}
 function applyCanvasRuntimeConfig(cfg){
     canvasPageConfig=cfg;
     loadLocalModelLists();
@@ -3601,7 +3617,10 @@ async function startCanvasSecondaryStartup(session){
     resumeTopazVideoTasks();
     startCanvasRemotePolling();
     await Promise.allSettled([
-        loadCanvasConfigCapabilities({isCurrent:session.isCurrent, backgroundOnly:true}),
+        loadCanvasConfigCapabilities({isCurrent:session.isCurrent}),
+        refreshMissingCanvasAssets(openedCanvasId,session.signal).then(changed=>{
+            if(changed && session.isCurrent()) refreshNodes(nodes.filter(node=>canvasNodeDomIndex.get(node.id)?.querySelector('.missing-asset, [data-preview-state="failed"]')).map(node=>node.id));
+        }),
         touchCanvasOpened(openedCanvasId).then(touched => {
             if(!session.isCurrent() || canvas?.id !== openedCanvasId || !touched?.updated_at) return;
             canvas.updated_at = Number(touched.updated_at);
@@ -3950,7 +3969,7 @@ function captureCanvasPage(){
         dirty:localCanvasDirty,selected:[...selected],undoStack,redoStack,undoStackBytes,redoStackBytes};
 }
 function checkpointCanvasPage(immediate=false){
-    if(!canvas || !canvasPageConfig) return;
+    if(!canvas || !canvasPageConfig || canvasSnapshotPending) return;
     if(immediate){
         clearTimeout(canvasPageCheckpointTimer);canvasPageCheckpointTimer=0;
         canvasPageSession?.checkpoint();
@@ -3983,14 +4002,33 @@ async function openCanvas(id){
     classicFirstPreviewCanvasId = '';
     classicFirstPreviewLoadedCanvasId = '';
     showCanvasStartupNotice(id);
+    canvasSnapshotPending=true;
     canvasPageSession=window.StudioPageState?.session(`canvas:${id}`) || null;
-    canvasPageSession?.setCapture(()=>canvas?.id===id && canvasPageConfig ? captureCanvasPage() : undefined);
+    canvasPageSession?.setCapture(()=>!canvasSnapshotPending && canvas?.id===id && canvasPageConfig ? captureCanvasPage() : undefined);
     const openingSequence=localCanvasSaveSequence;
     let restoredCanvas=null;
     let restoredConfigRevision=configRevision;
     try {
-        const saved=await canvasPageSession?.read();
+        // 工程先返回时先挂载并加载首屏媒体；缓存结论出来前不允许写入和覆盖快照。
+        const snapshot=Promise.resolve(canvasPageSession?.read());
+        let snapshotSettled=false;
+        snapshot.then(()=>{snapshotSettled=true;},()=>{snapshotSettled=true;});
+        void session.ready.then(result=>{
+            if(!snapshotSettled && session.isCurrent() && !result.error){
+                const previewConfig=configRevision===canvasConfigRevision ? result.config : canvasPageConfig;
+                restoreCanvasPage({canvas:structuredClone(result.data.canvas),config:previewConfig || result.config},session);
+                window.canvasEntryOverlay?.update(30,'正在核对本地编辑记录，首屏资源同步加载中');
+            }
+        }).catch(error=>console.warn('canvas provisional preview failed',error));
+        let snapshotTimer;
+        let saved;
+        try {
+            saved=await Promise.race([snapshot,new Promise((_,reject)=>{
+                snapshotTimer=setTimeout(()=>reject(new Error('本地编辑记录读取超时，请重试以保护未同步内容')),10000);
+            })]);
+        } finally {clearTimeout(snapshotTimer);}
         if(!session.isCurrent()) return;
+        canvasSnapshotPending=false;
         if(localCanvasSaveSequence===openingSequence && saved?.canvas?.id===id && saved.config){
             restoreCanvasPage(saved,session);restoredCanvas=canvas;restoredConfigRevision=canvasConfigRevision;
         }
@@ -4070,43 +4108,32 @@ function canvasEntryResourceVisible(element){
 }
 async function prepareCanvasEntry(session){
     canvasEntryPreparing = true;
+    const entryStarted=performance.now();
     try {
-        if(!session.entryDependenciesReady){
-            window.canvasEntryOverlay?.update(30, '正在准备节点配置与资源');
-            const [,assetsChanged]=await Promise.all([
-                loadCanvasConfigCapabilities({isCurrent:session.isCurrent, visibleOnly:true}),
-                refreshMissingCanvasAssets(session.id)
-            ]);
-            if(!session.isCurrent()) return;
-            if(assetsChanged) render();
-            session.entryDependenciesReady=true;
-        }
+        canvasResourceMonitor?.stop();
+        canvasResourceMonitor=window.CanvasResourceReady.monitor?.({root:nodesEl,
+            isCurrent:session.isCurrent,drain:()=>ensureClassicMediaQueue()?.drainNow(),
+            retryMissing:async node=>{
+                await refreshMissingCanvasAssets(session.id,session.signal);
+                if(session.isCurrent()) refreshNodes([node.dataset.id]);
+            }});
         while(session.isCurrent()){
             const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
             if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
             const result=await window.CanvasResourceReady.wait({
                 root:nodesEl,isCurrent:session.isCurrent,
                 include:canvasEntryResourceVisible,
+                budgetMs:800,
                 active:()=>!canvasSessionSuspended,
                 drain:()=>ensureClassicMediaQueue()?.drainNow(),
                 progress:(done,total)=>window.canvasEntryOverlay?.update(35+60*(total?done/total:1), `正在准备节点资源 ${done} / ${total}`)
             });
             if(!session.isCurrent() || result.cancelled) return;
             // 当前视口完成即可进入；低清预热由驻留控制器空闲执行，完成前保留原像素。
-            if(!result.failed.length) break;
-            let retry=false;
-            window.canvasEntryOverlay?.error(`${result.failed.length} 项资源尚未准备好`,()=>{retry=true;},()=>returnToCanvasManager(),'返回列表');
-            while(!retry && session.isCurrent()) await new Promise(resolve=>setTimeout(resolve,100));
-            if(!session.isCurrent()) return;
-            result.failed.forEach(el=>{
-                if(el.dataset.previewSrc){el.dataset.previewState='queued';delete el.dataset.previewAttempt;delete el.dataset.previewRetryAt;}
-                else if(el.tagName==='IMG'){const src=el.getAttribute('src');el.removeAttribute('src');el.src=src;}
-                else if(el.load) el.load();
-            });
-            const assetsChanged=await refreshMissingCanvasAssets(session.id);
-            if(!session.isCurrent()) return;
-            if(assetsChanged) render();
-            showCanvasStartupNotice(session.id);
+            // 节点局部提示与重试继续工作，不让一项媒体挡住整个工程。
+            window.CanvasPerformance?.record?.('classic.entry-media-wait',performance.now()-entryStarted,
+                {failed:result.failed.length,pending:result.pending?.length || 0});
+            break;
         }
         window.canvasEntryOverlay?.update(100, '准备完成');
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -4123,9 +4150,10 @@ function showCanvasStartupNotice(id, error=null){
         window.canvasEntryOverlay = null;
     }
     window.canvasEntryOverlay ||= window.CanvasEntryProgress.create();
+    window.canvasEntryOverlay.setReturn?.(()=>returnToCanvasManager());
     document.getElementById('shell').inert = true;
     window.canvasEntryOverlay.update(8, '正在读取工程与配置');
-    if(error) window.canvasEntryOverlay.error('画布加载失败，请重试。', () => openCanvas(id));
+    if(error) window.canvasEntryOverlay.error(error.message || '画布加载失败，请重试。', () => openCanvas(id),()=>returnToCanvasManager(),'返回列表');
 }
 function hideCanvasStartupNotice(){
     window.canvasEntryOverlay?.remove();
@@ -4238,7 +4266,7 @@ function canvasLocalAssetUrls(){
     });
     return [...urls];
 }
-async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
+async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id,signal){
     const targetCanvasId = String(expectedCanvasId || '');
     const targetNodes = nodes;
     const previousMissing = new Set(missingAssetUrls);
@@ -4250,16 +4278,24 @@ async function refreshMissingCanvasAssets(expectedCanvasId=canvas?.id){
         return hasChanged();
     }
     try {
-        const data = await fetch('/api/canvas-assets/check', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({urls})
-        }).then(r => r.json());
+        const exists={};
+        // 全工程清点在后台分批执行，每个页面只有一批在途，不用一次 3000 项检查抢占磁盘。
+        for(let offset=0;offset<urls.length;offset+=128){
+            if(canvas?.id!==targetCanvasId || nodes!==targetNodes || signal?.aborted) return false;
+            const data = await fetchCanvasJson('/api/canvas-assets/check', {
+                method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({urls:urls.slice(offset,offset+128)}),signal
+            });
+            Object.assign(exists,data.exists || {});
+        }
         if(canvas?.id !== targetCanvasId) return;
         if(nodes !== targetNodes) return;
-        missingAssetUrls.clear();
-        const exists = data.exists || {};
-        Object.entries(exists).forEach(([url, ok]) => { if(!ok) missingAssetUrls.add(url); });
+        const currentUrls=new Set(urls);
+        for(const url of missingAssetUrls) if(!currentUrls.has(url)) missingAssetUrls.delete(url);
+        Object.entries(exists).forEach(([url, ok]) => {
+            if(ok===false) missingAssetUrls.add(url);
+            else if(ok===true) missingAssetUrls.delete(url);
+        });
         return hasChanged();
     } catch(e) {
         console.warn('canvas asset check failed', e);
@@ -4348,20 +4384,11 @@ function handleCanvasUpdatedMessage(data){
     setStatus('Syncing...');
 }
 async function returnToCanvasManager(){
-    clearTimeout(saveTimer);
-    if(canvas && localCanvasDirty) await saveCanvas();
-    stopCanvasRemotePolling();
-    canvas = null;
-    nodes = [];
-    connections = [];
-    selected.clear();
-    viewport = {x: -1800, y: -1000, scale: 1};
-    setCanvasMode(false);
-    trashMode = false;
-    pendingPurgeCanvasId = null;
-    refreshGateViewControls();
-    await loadCanvasList(false);
-    setCreateMode(false);
+    const project = canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject();
+    try { if(window.parent !== window && window.parent.CanvasSessionHost?.back(window, project)) return; }
+    catch(e) {}
+    checkpointCanvasPage(true);
+    window.location.href = canvasListUrlForProject(project);
 }
 function requestDeleteCanvas(id, event){
     event?.preventDefault();
@@ -15499,12 +15526,7 @@ async function ensureRunningHubWorkflow(workflowId){
     if(!workflowId) return null;
     const cache = runningHubWorkflowCache;
     if(cache[workflowId]) return cache[workflowId];
-    const res = await fetch(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
-    if(!res.ok){
-        delete cache[workflowId];
-        return null;
-    }
-    const data = await res.json();
+    const data = await fetchCanvasJson(`/api/runninghub/workflows/${encodeURIComponent(workflowId)}`);
     cache[workflowId] = data.workflow || null;
     return cache[workflowId];
 }
@@ -25147,7 +25169,7 @@ window.CanvasSessionLifecycle = {
     forgetCheckpoint:()=>canvasPageSession?.remove(),
     state:() => ({
         id:canvas?.id || '',
-        evictable:!localCanvasDirty && !savingCanvasNow && !saveCanvasAgain
+        evictable:!canvasSnapshotPending && !localCanvasDirty && !savingCanvasNow && !saveCanvasAgain
             && !saveTimer && !saveIdleHandle && !applyingRemoteCanvas
             && !activeCanvasTaskPolls.size && !activeEcommerceLookbookPolls.size && !activeCanvasVideoTaskPolls.size
             && !nodes.some(node => node.running || node.runStatus === 'running' || node._pending?.length)

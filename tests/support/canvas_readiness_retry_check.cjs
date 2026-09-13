@@ -1,6 +1,6 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
-const base='http://127.0.0.1:3027';
+const base=process.argv[2] || 'http://127.0.0.1:3027';
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'});
  try{
@@ -22,21 +22,22 @@ const base='http://127.0.0.1:3027';
   await page.evaluate(()=>{
    const old=document.querySelector('#nodes img'),img=new Image();img.src='/new-image.png';old.replaceWith(img);
   });
-  releaseOld();await page.waitForTimeout(700);
+  releaseOld();await page.waitForTimeout(250);
   assert(await page.locator('#shell').evaluate(el=>el.inert),'重绘后的普通图片未完成时必须保持遮罩');
   releaseNew();await page.waitForFunction(()=>!window.canvasEntryOverlay);
   assert(await page.locator('#nodes img').evaluate(el=>el.complete&&el.naturalWidth>0));
-  // 资源失败不能自动跳过；重试后成功才释放门禁。
+  // 资源失败局部显示，保持编辑器可操作；节点重试不重新打开工程。
   let fail=true;
   await page.route('**/api/media-preview**',r=>fail?r.fulfill({status:404,body:''}):r.fulfill({body:png,contentType:'image/png'}));
   await page.route('**/assets/input/slow.png',r=>r.fulfill({status:404,body:''}));
   await page.goto(base+'/static/canvas.html?id=dynamic');
-  await page.getByRole('button',{name:'重试',exact:true}).waitFor();
+  await page.getByRole('button',{name:'1 项资源加载失败 · 重试',exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'继续进入',exact:true}).count(),0);
-  assert(await page.locator('#shell').evaluate(el=>el.inert));
-  fail=false;await page.getByRole('button',{name:'重试',exact:true}).click();
+  assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false);
+  fail=false;await page.getByRole('button',{name:'1 项资源加载失败 · 重试',exact:true}).click();
   await page.waitForFunction(()=>!window.canvasEntryOverlay);
+  await page.waitForFunction(()=>document.querySelector('#nodes img')?.naturalWidth>0 && !document.querySelector('.canvas-resource-notice'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: automatic list retry, replaced DOM/plain image gate, failed media stays blocked, retry succeeds');
+  console.log('PASS: automatic list retry, replaced DOM decode, local media failure, retry succeeds without entry blocking');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

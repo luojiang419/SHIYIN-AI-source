@@ -2472,8 +2472,15 @@ function scheduleClassicNodeRectMeasure(ids=[]){
             });
         });
         if(!measured.length) return;
+        const resizedIds = new Set(measured.filter(item => {
+            const previous = canvasNodeRectIndex.get(item.id);
+            return !previous || previous.w !== item.rect.w || previous.h !== item.rect.h;
+        }).map(item => item.id));
         invalidateCanvasGeometry(measured.map(item => item.id));
         measured.forEach(item => canvasNodeRectIndex.set(item.id, item.rect));
+        nodes.filter(node => node.type === 'group' && node.autoArrangeInputGroup
+            && node.items?.some(id => resizedIds.has(id)))
+            .forEach(group => scheduleCanvasGroupAutoFit(group.id));
         const measuredIds = measured.map(item => item.id);
         markClassicConnectionsDirtyForNodes(measuredIds);
         if(classicConnectionDirtyIds.size) scheduleLinksRender();
@@ -6379,7 +6386,6 @@ function createInputGroupFromOutput(node, point){
             y:base.y + 58 + row * (cardH + gap),
             w:cardW,
             h:cardH,
-            preserveInputGroupSize:true,
             url,
             name:outputImageName(url)
         };
@@ -6394,9 +6400,11 @@ function createInputGroupFromOutput(node, point){
         y:base.y,
         w:cols * cardW + (cols - 1) * gap + 48,
         h:rows * cardH + (rows - 1) * gap + 90,
+        autoArrangeInputGroup:true,
         items:imageNodes.map(img => img.id)
     };
     nodes.push(group);
+    scheduleCanvasGroupAutoFit(group.id);
     return group;
 }
 function convertOutputNodeToInputGroup(nodeId){
@@ -7073,24 +7081,35 @@ function layoutUploadedMediaNodes(created, base){
     });
     return true;
 }
+const canvasGroupAutoFitPending = new WeakSet();
 function scheduleCanvasGroupAutoFit(groupId){
     if(!groupId) return;
+    const group = nodes.find(node => node.id === groupId && node.type === 'group');
+    if(!group || canvasGroupAutoFitPending.has(group)) return;
+    canvasGroupAutoFitPending.add(group);
     // 图片/视频使用 lazy 预览时，首次 render 可能还拿不到真实内容高度。
     // 在浏览器完成一轮布局和媒体解码后再复测一次，保证间距与组背景板同步更新。
     const run = () => {
-        const group = nodes.find(node => node.id === groupId && node.type === 'group');
-        if(!group) return;
+        if(!nodes.includes(group)) return;
         const before = {x:Number(group.x)||0, y:Number(group.y)||0, w:Number(group.w)||0, h:Number(group.h)||0};
-        if(!arrangeCanvasGroupContents(groupId, {skipUndo:true})) return;
+        const positions = (group.items || []).map(id => {
+            const node = nodes.find(item => item.id === id);
+            return node ? [node, node.x, node.y] : null;
+        }).filter(Boolean);
+        if(!arrangeCanvasGroupContents(groupId, {skipUndo:true, preserveOrder:Boolean(group.autoArrangeInputGroup)})) return;
         const changed = before.w !== Number(group.w)||before.h !== Number(group.h)
-            || before.x !== Number(group.x)||before.y !== Number(group.y);
+            || before.x !== Number(group.x)||before.y !== Number(group.y)
+            || positions.some(([node, x, y]) => node.x !== x || node.y !== y);
         if(changed){
             render();
             scheduleSave();
         }
     };
     requestAnimationFrame(() => requestAnimationFrame(run));
-    setTimeout(run, 180);
+    setTimeout(() => {
+        canvasGroupAutoFitPending.delete(group);
+        run();
+    }, 180);
 }
 function createGroupForUploadedNodes(created, point){
     const targets = [...(created || [])].filter(n => n?.type === 'image' && ['image','video','audio'].includes(mediaKindForNode(n)));
@@ -11812,7 +11831,6 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
 const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','ecom-video','msgen']);
 function classicMediaNodeIsPortrait(node){
-    if(node?.preserveInputGroupSize) return false;
     if(!node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || 0);
     const height = Number(node.natural_h || node.height || 0);
@@ -11848,7 +11866,6 @@ function normalizeClassicNodeLayout(node){
     else if(Object.prototype.hasOwnProperty.call(node,'h')) delete node.h;
 }
 function syncClassicMediaNodeOrientation(el, node, mediaEl=null){
-    if(node?.preserveInputGroupSize) return false;
     if(!el || !node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || mediaEl?.naturalWidth || mediaEl?.videoWidth || 0);
     const height = Number(node.natural_h || node.height || mediaEl?.naturalHeight || mediaEl?.videoHeight || 0);

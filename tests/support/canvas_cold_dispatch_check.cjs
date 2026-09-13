@@ -13,7 +13,7 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
  try{
   for(const scenario of (process.env.CANVAS_TEST_SCENARIOS?.split(',') || ['shell-cache','list-cache','list-timeout','dirty-cache','slow-assets','slow-capability','slow-media','failed-media','cache-error','account-retry'])){
    const context=await browser.newContext({viewport:{width:1440,height:900}});
-   const page=await context.newPage();const errors=[],requests=[],saves=[];let release,fail=true;
+   const page=await context.newPage();const errors=[],requests=[],saves=[];let release,fail=true,storageFailure=true;
    if(process.env.CANVAS_TEST_SCRIPT) await page.route('**/static/js/canvas.js?*',r=>r.fulfill({contentType:'application/javascript',body:require('node:fs').readFileSync(process.env.CANVAS_TEST_SCRIPT)}));
    const gate=new Promise(resolve=>release=resolve);const started=Date.now();
    page.on('pageerror',e=>errors.push(e.message));
@@ -30,7 +30,7 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
    const data=structuredClone(project);
    if(scenario==='slow-capability') data.nodes.push({id:'h3',type:'video',apiProvider:'minimax-h3',model:'MiniMax H3',x:850,y:0});
    await page.route('**/api/canvases/cold',r=>{
-    if(r.request().method()==='PUT'){saves.push(r.request().postDataJSON());return r.fulfill({json:{canvas:{...data,...saves.at(-1),updated_at:2}}});}
+    if(r.request().method()==='PUT'){saves.push(r.request().postDataJSON());Object.assign(data,saves.at(-1),{updated_at:2});return r.fulfill({json:{canvas:data}});}
     return r.fulfill({json:{canvas:data}});
    });
    const png=await(await page.request.get(base+'/fixture.png')).body();
@@ -55,10 +55,20 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
     }
     await page.route('**/static/js/studio-page-state.js*',async r=>{
      const response=await r.fetch();let body=await response.text();
-     if(scenario==='cache-error')body=body.replace('const db = await database();','const db = null;');
-     else body=body.replace('let initial=readInitial();',`let initial=readInitial();if(${scenario==='shell-cache' ? "name==='shell'" : 'true'}) initial.promise=window.__cacheGate.then(()=>(${JSON.stringify(record)}));`);
+     if(scenario==='cache-error'){
+      if(storageFailure) body=body.replace('const db = await database();','const db = null;');
+     }else body=body.replace('let initial=readInitial();',`let initial=readInitial();if(${scenario==='shell-cache' ? "name==='shell'" : 'true'}) initial.promise=window.__cacheGate.then(()=>(${JSON.stringify(record)}));`);
      await r.fulfill({response,body});
     });
+    if(scenario==='cache-error'){
+     await page.goto(base+'/fixture.png');
+     await page.evaluate(record=>new Promise((resolve,reject)=>{
+      const req=indexedDB.open('shiyin-page-state-v1',1);
+      req.onupgradeneeded=()=>req.result.createObjectStore('pages');
+      req.onerror=()=>reject(req.error);
+      req.onsuccess=()=>{const db=req.result,tx=db.transaction('pages','readwrite');tx.objectStore('pages').put(record,'cold-test:canvas:cold');tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>reject(tx.error);};
+     }),record);
+    }
    }
    if(scenario==='list-timeout')await page.addInitScript(()=>{
     const originalFetch=window.fetch,originalTimer=window.setTimeout;
@@ -99,13 +109,22 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
     await page.waitForFunction(()=>!window.canvasEntryOverlay);
     assert(accountReads>=2,'账号预检暂时失败后可以重试');
    }else if(scenario==='cache-error'){
-    await page.getByText('本地编辑记录暂时无法读取，请重试',{exact:true}).waitFor();
-    await page.evaluate(()=>{checkpointCanvasPage(true);void saveCanvas();});
-    assert.equal(saves.length,0);assert(await page.locator('#shell').evaluate(el=>el.inert));
-    assert(await page.getByRole('button',{name:'返回列表',exact:true}).count());
-    await page.getByRole('button',{name:'返回列表',exact:true}).click();
-    await page.waitForURL('**/canvas-list.html*');
-    await page.waitForFunction(()=>!window.canvasListEntryOverlay);
+    await page.waitForFunction(()=>!window.canvasEntryOverlay);
+    assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false,'可选缓存失败不再阻止进入');
+    await page.locator('#canvasRecoveryNotice').waitFor();
+    await page.evaluate(async()=>{nodes.find(n=>n.id==='text').prompt='new server edit';scheduleSave();await saveCanvas();});
+    assert(saves.some(s=>s.nodes.find(n=>n.id==='text').prompt==='new server edit'));
+    const pointer=await page.evaluate(()=>JSON.parse(localStorage.getItem('shiyin-page-recovery-v1:cold-test:canvas:cold')));
+    assert(pointer.active.startsWith('cold-test:canvas:cold::recovery:'));
+    assert(pointer.archived.includes('cold-test:canvas:cold'));
+    storageFailure=false;await page.reload();
+    await page.waitForFunction(()=>!window.canvasEntryOverlay);
+    assert.equal(await page.evaluate(()=>nodes.find(n=>n.id==='text').prompt),'new server edit','重启不得重新应用旧脏快照');
+    const downloadPromise=page.waitForEvent('download');
+    await page.getByRole('button',{name:'导出旧恢复记录',exact:true}).click();
+    const downloaded=await downloadPromise;
+    const recovery=JSON.parse(require('node:fs').readFileSync(await downloaded.path(),'utf8'));
+    assert.equal(recovery.records[0].value.canvas.nodes.find(n=>n.id==='text').prompt,'local unsynced text','旧记录仍完整保留且可导出');
    }else{
     await page.waitForFunction(()=>!window.canvasEntryOverlay,{},{timeout:3500});
     assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false);

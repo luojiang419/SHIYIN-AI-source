@@ -3,6 +3,7 @@
     'use strict';
     const DATABASE = 'shiyin-page-state-v1';
     const STORAGE_TIMEOUT_MS = 1500;
+    const RECOVERY_POINTER = 'shiyin-page-recovery-v1:';
     const sessions = new Map();
     let account = '', epoch = 0, databasePromise, validationPromise;
     let resolveAccount;
@@ -89,13 +90,54 @@
         let revision=0, capture=null, pending=null, latest=null, flushing=null, scheduled=0, hydrated=false, discarded=false;
         const ownerEpoch=epoch;
         let keyReady;
+        let canonicalKey='',recoveryKeys=[];
+        function resolveStorageKey(id){
+            if(!id) return null;
+            canonicalKey=`${id}:${name}`;
+            try {
+                const pointer=JSON.parse(localStorage.getItem(RECOVERY_POINTER+canonicalKey) || 'null');
+                if(pointer?.active?.startsWith(canonicalKey+'::recovery:')){
+                    recoveryKeys=(pointer.archived || []).filter(key=>key===canonicalKey || key.startsWith(canonicalKey+'::recovery:'));
+                    return pointer.active;
+                }
+            } catch(error) {}
+            return canonicalKey;
+        }
         const readInitial=()=>{
-            if(!keyReady || !account) keyReady=ready().then(id=>id ? `${id}:${name}` : null);
+            if(!keyReady || !account) keyReady=ready().then(resolveStorageKey);
             const attempt={unavailable:false};
             attempt.promise=keyReady.then(key=>transact(key,undefined,false,()=>{attempt.unavailable=true;}));
             return attempt;
         };
         let initial=readInitial();
+        function showRecoveryNotice(){
+            if(!name.startsWith('canvas:') || document.getElementById('canvasRecoveryNotice')) return;
+            const notice=document.createElement('div');notice.id='canvasRecoveryNotice';notice.setAttribute('role','status');
+            notice.style.cssText='position:fixed;right:16px;top:16px;z-index:10900;max-width:340px;padding:12px 14px;border-radius:10px;border:1px solid var(--line,#777);background:var(--card-solid,#282828);color:var(--text,#eee);font:12px/1.6 system-ui;box-shadow:0 4px 18px #0002';
+            const message=document.createElement('div');message.textContent='恢复缓存暂不可用，已打开已保存的工程。旧缓存已保留，可稍后导出。';
+            const exportButton=document.createElement('button');exportButton.type='button';exportButton.textContent='导出旧恢复记录';
+            exportButton.style.cssText='margin-top:8px;padding:4px 8px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit';
+            exportButton.onclick=async()=>{
+                exportButton.disabled=true;
+                try {
+                    let failed=false;
+                    const records=[];
+                    for(const key of recoveryKeys){
+                        const record=await transact(key,undefined,false,()=>{failed=true;});
+                        if(record) records.push(record);
+                    }
+                    if(failed) throw new Error('旧缓存仍暂时不可读，请稍后再试。');
+                    if(!records.length){message.textContent='未找到旧的恢复记录；当前工程可继续正常使用。';return;}
+                    const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,records},null,2)],{type:'application/json'}));
+                    const link=document.createElement('a');link.href=url;link.download=`canvas-recovery-${Date.now()}.json`;link.click();
+                    setTimeout(()=>URL.revokeObjectURL(url),30000);
+                    message.textContent='旧恢复记录已导出，原缓存仍保留。';
+                }catch(error){message.textContent=error.message;}
+                finally{exportButton.disabled=false;}
+            };
+            const close=document.createElement('button');close.type='button';close.textContent='关闭';close.style.cssText=exportButton.style.cssText+';margin-left:8px';close.onclick=()=>notice.remove();
+            notice.append(message,exportButton,close);document.body.appendChild(notice);
+        }
         function flush(){
             if(flushing) return flushing;
             flushing=(async()=>{
@@ -143,10 +185,23 @@
                 const attempt=initial;
                 const record=await attempt.promise;
                 if(attempt.unavailable){
-                    // 存储故障不等于“没有快照”，不能用服务器状态覆盖可能存在的离线编辑。
-                    if(initial===attempt) initial=readInitial();
-                    throw new Error('本地编辑记录暂时无法读取，请重试');
+                    // 可选缓存不能挡住已保存的工程。先持久化新槽位指针，再允许写新快照；
+                    // 不覆盖未知旧记录，后续重启也不能误将旧脏快照重新应用到新编辑上。
+                    const oldKey=await keyReady;
+                    if(!oldKey || discarded || ownerEpoch!==epoch) return null;
+                    if(initial===attempt){
+                        const active=`${canonicalKey}::recovery:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+                        const archived=[...new Set([...recoveryKeys,oldKey])];
+                        try {localStorage.setItem(RECOVERY_POINTER+canonicalKey,JSON.stringify({active,archived}));}
+                        catch(error){throw new Error('恢复标记无法保存，请检查软件数据目录权限后重试');}
+                        recoveryKeys=archived;keyReady=Promise.resolve(active);
+                        // 新槽位由本会话创建，可确定不存在旧快照，无需再次等待故障存储。
+                        initial={unavailable:false,promise:Promise.resolve(null)};
+                    }
+                    showRecoveryNotice();
+                    return latest?.schema===1 ? structuredClone(latest.value) : null;
                 }
+                if(recoveryKeys.length) showRecoveryNotice();
                 return !discarded && ownerEpoch===epoch && (latest || record)?.schema===1 ? structuredClone((latest || record).value) : null;
             },
             async remove(){

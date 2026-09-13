@@ -128,6 +128,10 @@ fn prune_legacy_webview_profiles(webview_root: &Path, active_profile: &Path) {
         if path == active_profile {
             continue;
         }
+        // IndexedDB 包含未同步编辑及归档恢复记录，不能按普通浏览器缓存随升级删除。
+        if path.join("EBWebView").join("Default").join("IndexedDB").is_dir() {
+            continue;
+        }
         if path.parent() == Some(webview_root) {
             let _ = fs::remove_dir_all(path);
         }
@@ -993,8 +997,9 @@ mod tests {
         ));
         let active = root.join("1.0.400");
         let legacy = root.join("1.0.399");
+        let recovery = root.join("1.0.398").join("EBWebView").join("Default").join("IndexedDB");
         let shared = root.join("shared");
-        for directory in [&active, &legacy, &shared] {
+        for directory in [&active, &legacy, &shared, &recovery] {
             fs::create_dir_all(directory).expect("create webview test profile");
         }
 
@@ -1003,6 +1008,7 @@ mod tests {
         assert!(active.is_dir());
         assert!(!legacy.exists());
         assert!(shared.is_dir());
+        assert!(recovery.is_dir(), "旧版离线编辑和归档记录必须保留");
         fs::remove_dir_all(root).expect("remove webview cleanup fixture");
     }
 

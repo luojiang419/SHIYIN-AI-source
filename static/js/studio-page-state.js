@@ -110,11 +110,11 @@
             return attempt;
         };
         let initial=readInitial();
-        function showRecoveryNotice(){
+        function showRecoveryNotice(degraded=false){
             if(!name.startsWith('canvas:') || document.getElementById('canvasRecoveryNotice')) return;
             const notice=document.createElement('div');notice.id='canvasRecoveryNotice';notice.setAttribute('role','status');
             notice.style.cssText='position:fixed;right:16px;top:16px;z-index:10900;max-width:340px;padding:12px 14px;border-radius:10px;border:1px solid var(--line,#777);background:var(--card-solid,#282828);color:var(--text,#eee);font:12px/1.6 system-ui;box-shadow:0 4px 18px #0002';
-            const message=document.createElement('div');message.textContent='恢复缓存暂不可用，已打开已保存的工程。旧缓存已保留，可稍后导出。';
+            const message=document.createElement('div');message.textContent=degraded ? '恢复缓存暂不可用，已打开已保存的工程。旧缓存已保留，可稍后导出。' : '有保留的旧恢复记录，当前工程可正常使用，可按需导出。';
             const exportButton=document.createElement('button');exportButton.type='button';exportButton.textContent='导出旧恢复记录';
             exportButton.style.cssText='margin-top:8px;padding:4px 8px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit';
             exportButton.onclick=async()=>{
@@ -198,7 +198,7 @@
                         // 新槽位由本会话创建，可确定不存在旧快照，无需再次等待故障存储。
                         initial={unavailable:false,promise:Promise.resolve(null)};
                     }
-                    showRecoveryNotice();
+                    showRecoveryNotice(true);
                     return latest?.schema===1 ? structuredClone(latest.value) : null;
                 }
                 if(recoveryKeys.length) showRecoveryNotice();

@@ -6379,6 +6379,7 @@ function createInputGroupFromOutput(node, point){
             y:base.y + 58 + row * (cardH + gap),
             w:cardW,
             h:cardH,
+            preserveInputGroupSize:true,
             url,
             name:outputImageName(url)
         };
@@ -11811,6 +11812,7 @@ const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
 const CLASSIC_COMPACT_NODE_TYPES = new Set(['image','prompt','loop','group','promptGroup']);
 const CLASSIC_FLEX_GENERATOR_NODE_TYPES = new Set(['generator','ecom-video','msgen']);
 function classicMediaNodeIsPortrait(node){
+    if(node?.preserveInputGroupSize) return false;
     if(!node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || 0);
     const height = Number(node.natural_h || node.height || 0);
@@ -11846,6 +11848,7 @@ function normalizeClassicNodeLayout(node){
     else if(Object.prototype.hasOwnProperty.call(node,'h')) delete node.h;
 }
 function syncClassicMediaNodeOrientation(el, node, mediaEl=null){
+    if(node?.preserveInputGroupSize) return false;
     if(!el || !node || node.type !== 'image' || !node.url || !['image','video'].includes(mediaKindForNode(node))) return false;
     const width = Number(node.natural_w || node.width || mediaEl?.naturalWidth || mediaEl?.videoWidth || 0);
     const height = Number(node.natural_h || node.height || mediaEl?.naturalHeight || mediaEl?.videoHeight || 0);

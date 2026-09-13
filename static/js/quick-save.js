@@ -6,10 +6,23 @@
     let state = {mode:'manual', directory:'', loaded:false};
     let toastTimer = 0;
 
+    function isDesktop(){
+        // 画布等页面嵌在同源桌面窗口中；普通 Web iframe 不代表桌面环境。
+        try {
+            let host = window;
+            while(host){
+                if(typeof host.__TAURI__?.core?.invoke === 'function' || typeof host.__TAURI_INTERNALS__?.invoke === 'function') return true;
+                if(host.parent === host) break;
+                host = host.parent;
+            }
+        } catch(error) {}
+        return false;
+    }
+
     function applySettings(value){
         state = {
-            mode:value?.mode === 'silent' ? 'silent' : 'manual',
-            directory:String(value?.directory || ''),
+            mode:isDesktop() && value?.mode === 'silent' ? 'silent' : 'manual',
+            directory:isDesktop() ? String(value?.directory || '') : '',
             loaded:true,
         };
         window.dispatchEvent(new CustomEvent('quick-save-settings-changed', {detail:{...state}}));
@@ -17,6 +30,7 @@
     }
 
     async function loadSettings(){
+        if(!isDesktop()) return applySettings({mode:'manual', directory:''});
         try {
             const response = await fetch(API_URL, {cache:'no-store'});
             if(!response.ok) return applySettings({mode:'manual', directory:''});
@@ -29,7 +43,7 @@
     const ready = loadSettings();
 
     function isSilent(){
-        return state.mode === 'silent' && Boolean(state.directory);
+        return isDesktop() && state.mode === 'silent' && Boolean(state.directory);
     }
 
     function filenameFromUrl(url, fallback='download.bin'){
@@ -184,6 +198,7 @@
     }
 
     function requestDesktopBatchSave(list){
+        if(!isDesktop()) return null;
         if(window.parent === window || !window.parent?.postMessage) return null;
         const requestId = `quick-save-batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         return new Promise((resolve, reject) => {
@@ -213,12 +228,14 @@
         list.forEach((item, index) => {
             setTimeout(() => {
                 const link = document.createElement('a');
-                link.href = downloadResourceUrl(item);
+                const blobUrl = item?.blob instanceof Blob ? URL.createObjectURL(item.blob) : '';
+                link.href = blobUrl || downloadResourceUrl(item);
                 link.download = item.name;
                 link.dataset.quickSaveBypass = '1';
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
+                if(blobUrl) setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
             }, index * 120);
         });
         return {handled:true, cancelled:false, count:list.length, mode:'manual'};
@@ -230,6 +247,7 @@
             .filter(item => item?.url || item?.blob instanceof Blob)
             .map(item => ({...item, name:safeName(item?.name || filenameFromUrl(item?.url), item?.url)}));
         if(!list.length) return {handled:true, count:0};
+        if(!isDesktop()) return fallbackIndividualDownloads(list);
         if(isSilent()){
             showToast(`正在静默保存 ${list.length} 个文件`);
             let count = 0;
@@ -264,6 +282,7 @@
 
     document.addEventListener('click', event => {
         const anchor = event.target?.closest?.('a');
+        if(!isDesktop()) return;
         if(!isDownloadLink(anchor)) return;
         if(state.loaded && !isSilent()) return;
         event.preventDefault();
@@ -299,6 +318,7 @@
 
     window.ShiyinQuickSave = {
         ready,
+        isDesktop,
         isSilent,
         getState:async () => ({...(await ready), ...state}),
         refresh:loadSettings,

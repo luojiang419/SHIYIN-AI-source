@@ -70,6 +70,20 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('#batchOutfitFileInput').setInputFiles({name:'target.png',mimeType:'image/png',buffer:png});
         await page.locator('.ec-batch-depth-chip.is-ready').waitFor();
         assert.equal(depthRequests, 1);
+        const targetCard = page.locator('[data-batch-group]').first().locator('[data-batch-upload="pose_reference"]');
+        await targetCard.hover();
+        await targetCard.locator('[data-batch-adjust-depth]').click();
+        await page.locator('.ec-depth-adjust-dialog').waitFor();
+        await page.waitForFunction(() => document.querySelector('[data-depth-value="contrast"]')?.textContent === '100');
+        assert.equal(await page.locator('[data-depth-field="contrast"]').inputValue(), '100');
+        await page.locator('[data-depth-field="contrast"]').fill('145');
+        assert.equal(await page.locator('[data-depth-value="contrast"]').textContent(), '145');
+        if(screenshotPath) await page.screenshot({path:screenshotPath.replace(/(\.[^.]+)$/, '-depth-dialog$1')});
+        await page.locator('[data-depth-save]').click();
+        await page.locator('.ec-depth-adjust-dialog').waitFor({state:'detached'});
+        assert.equal(depthRequests, 1);
+        assert.equal(await page.evaluate(() => EcommerceBatchOutfit.snapshot().groups[0].depth_controls.contrast), 145);
+        assert.notEqual(await page.evaluate(() => EcommerceBatchOutfit.snapshot().groups[0].control_map.url), await page.evaluate(() => EcommerceBatchOutfit.snapshot().groups[0].base_control_map.url));
         await page.locator('[data-batch-group]').first().locator('[data-batch-upload="target_image"]').click();
         await page.locator('#batchOutfitFileInput').setInputFiles([
             {name:'garment-1.png',mimeType:'image/png',buffer:png},

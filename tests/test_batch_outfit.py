@@ -124,6 +124,19 @@ def test_batch_outfit_supports_multi_garment_stack_and_independent_grid_ratio():
     assert "'16:9'" in BATCH_JS
 
 
+def test_batch_outfit_target_card_supports_persistent_manual_depth_adjustment():
+    assert "data-batch-adjust-depth" in BATCH_JS
+    assert "base_control_map:group.baseControlMap" in BATCH_JS
+    assert "depth_controls:group.depthControls" in BATCH_JS
+    assert "function renderAdjustedDepth" in BATCH_JS
+    assert "Number.POSITIVE_INFINITY" in BATCH_JS
+    assert "depthControlsAreDefault(controls)" in BATCH_JS
+    for field in ("farPoint", "nearPoint", "midtone", "contrast", "brightness", "smooth", "invert"):
+        assert f'data-depth-field="{field}"' in BATCH_JS
+    assert ".ec-batch-depth-action" in BATCH_CSS
+    assert ".ec-depth-adjust-dialog" in BATCH_CSS
+
+
 def test_batch_outfit_renders_persistent_pending_work_slots_until_results_arrive():
     assert "pending_works:group.pendingWorks" in BATCH_JS
     assert "group.pendingWorks = targetImages.map" in BATCH_JS

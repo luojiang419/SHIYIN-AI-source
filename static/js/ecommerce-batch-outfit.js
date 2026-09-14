@@ -5,6 +5,7 @@
     const PERSON_DEPTH_ACTIVE_STATES = new Set(['checking','downloading','verifying','installing','smoke']);
     const TARGET_IMAGE_MAX = 20;
     const GRID_RATIOS = ['16:9','4:5','1:1','3:4','9:16','4:3','3:2','2:3'];
+    const DEFAULT_DEPTH_CONTROLS = {farPoint:0,nearPoint:100,midtone:0,contrast:100,brightness:0,smooth:0,invert:false};
     const INPUTS = [
         {role:'pose_reference', label:'目标图', required:true, hint:'人物、姿势与画幅基准'},
         {role:'target_image', label:'服装参考', required:true, hint:'当前款式或色号'},
@@ -28,6 +29,7 @@
         previewPointerId:null,
         previewLastPoint:null,
         initialized:false,
+        depthDialog:null,
     };
     const el = {};
 
@@ -95,6 +97,7 @@
             if(image) inputs[item.role] = image;
         });
         const controlMap = cleanImage(value.controlMap || value.control_map);
+        const baseControlMap = cleanImage(value.baseControlMap || value.base_control_map) || controlMap;
         const works = (Array.isArray(value.works) ? value.works : []).map(cleanWork).filter(Boolean);
         const taskIds = (Array.isArray(value.taskIds) ? value.taskIds : value.task_ids || []).map(item => String(item || '')).filter(Boolean).slice(-40);
         const runTaskIds = (Array.isArray(value.runTaskIds) ? value.runTaskIds : value.run_task_ids || []).map(item => String(item || '')).filter(Boolean).slice(-TARGET_IMAGE_MAX);
@@ -114,6 +117,8 @@
             styleName,
             inputs,
             controlMap,
+            baseControlMap,
+            depthControls:normalizeDepthControls(value.depthControls || value.depth_controls),
             controlSourceUrl:String(value.controlSourceUrl || value.control_source_url || ''),
             taskIds,
             currentTaskId:String(value.currentTaskId || value.current_task_id || taskIds[taskIds.length - 1] || ''),
@@ -132,13 +137,15 @@
 
     function snapshot(){
         return {
-            schema_version:2,
+            schema_version:3,
             grid_ratio:state.gridRatio,
             groups:state.groups.map(group => ({
                 id:group.id,
                 style_name:group.styleName,
                 inputs:group.inputs,
                 control_map:group.controlMap,
+                base_control_map:group.baseControlMap,
+                depth_controls:group.depthControls,
                 control_source_url:group.controlSourceUrl,
                 task_ids:group.taskIds,
                 current_task_id:group.currentTaskId,
@@ -154,6 +161,19 @@
             selected_group_id:state.selectedGroupId,
             selected_image_index:state.selectedImageIndex,
         };
+    }
+
+    function normalizeDepthControls(value){
+        const source = value && typeof value === 'object' ? value : {};
+        const clamp = (key,min,max) => Math.max(min,Math.min(max,Number(source[key] ?? DEFAULT_DEPTH_CONTROLS[key]) || 0));
+        const controls = {
+            farPoint:clamp('farPoint',0,99), nearPoint:clamp('nearPoint',1,100),
+            midtone:clamp('midtone',-100,100), contrast:clamp('contrast',0,300),
+            brightness:clamp('brightness',-100,100), smooth:clamp('smooth',0,50),
+            invert:Boolean(source.invert),
+        };
+        if(controls.nearPoint <= controls.farPoint) controls.nearPoint = Math.min(100,controls.farPoint + 1);
+        return controls;
     }
 
     function hydrate(value){
@@ -272,6 +292,7 @@
         return `<button type="button" class="ec-batch-input-card ${image ? 'has-image' : ''} ${hasStack ? 'has-stack' : ''}" data-batch-upload="${item.role}" aria-label="${escapeHtml(item.label)}" title="点击选择或拖入图片">
             <span class="ec-batch-input-label">${escapeHtml(item.label)}${item.required ? '<em>*</em>' : ''}</span>
             ${image ? `<span class="ec-batch-card-stack">${stack}<img src="${escapeHtml(image.url)}" alt="${escapeHtml(item.label)}">${controls}</span><small title="${escapeHtml(image.name || item.hint)}">${escapeHtml(image.name || item.hint)}</small><span class="ec-batch-input-replace">${actionText}</span>${depthStatus}` : `<span class="ec-batch-input-plus">+</span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.hint)}</small>`}
+            ${image && item.role === 'pose_reference' && group.controlMap?.url ? '<span class="ec-batch-depth-action" data-batch-adjust-depth role="button" tabindex="0">调整深度图</span>' : ''}
             ${image ? `<span class="ec-batch-input-remove" data-batch-remove-input="${item.role}" data-batch-remove-index="${selectedIndex}" role="button" aria-label="移除${escapeHtml(item.label)}">×</span>` : ''}
         </button>`;
     }
@@ -612,6 +633,8 @@
             } else group.inputs[target.role] = images[0];
             if(target.role === 'pose_reference') {
                 group.controlMap = null;
+                group.baseControlMap = null;
+                group.depthControls = normalizeDepthControls(null);
                 group.controlSourceUrl = '';
             }
             group.status = 'draft';
@@ -640,6 +663,8 @@
         } else delete group.inputs[role];
         if(role === 'pose_reference') {
             group.controlMap = null;
+            group.baseControlMap = null;
+            group.depthControls = normalizeDepthControls(null);
             group.controlSourceUrl = '';
         }
         group.status = 'draft';
@@ -709,6 +734,8 @@
             const controlMap = await uploadBlob(await response.blob(), `batch-outfit-depth-${Date.now()}.png`);
             if(group.inputs.pose_reference?.url !== source.url) return null;
             group.controlMap = controlMap;
+            group.baseControlMap = controlMap;
+            group.depthControls = normalizeDepthControls(null);
             group.controlSourceUrl = source.url;
             group.status = 'draft';
             group.error = '';
@@ -729,6 +756,61 @@
         });
         state.controlPromises.set(group.id, {sourceUrl:source.url, promise});
         return promise;
+    }
+
+    function loadImage(url){
+        return new Promise((resolve,reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error('深度图预览载入失败'));
+            image.src = url;
+        });
+    }
+
+    function renderAdjustedDepth(image, controls, canvas, maxSize=1200){
+        const scale = Math.min(1,maxSize / Math.max(image.naturalWidth || image.width,image.naturalHeight || image.height));
+        const width = Math.max(1,Math.round((image.naturalWidth || image.width) * scale));
+        const height = Math.max(1,Math.round((image.naturalHeight || image.height) * scale));
+        const work = document.createElement('canvas'); work.width=width; work.height=height;
+        const context=work.getContext('2d',{willReadFrequently:true}); context.drawImage(image,0,0,width,height);
+        const pixels=context.getImageData(0,0,width,height); const data=pixels.data;
+        const far=controls.farPoint/100, near=controls.nearPoint/100, gamma=Math.pow(2,-controls.midtone/100);
+        for(let index=0;index<data.length;index+=4){
+            let value=(data[index]/255-far)/Math.max(.01,near-far);
+            value=Math.max(0,Math.min(1,value)); value=Math.pow(value,gamma);
+            value=(value-.5)*(controls.contrast/100)+.5+controls.brightness/100;
+            value=Math.max(0,Math.min(1,value)); if(controls.invert) value=1-value;
+            data[index]=data[index+1]=data[index+2]=Math.round(value*255);
+        }
+        context.putImageData(pixels,0,0); canvas.width=width; canvas.height=height;
+        const output=canvas.getContext('2d'); output.save();
+        if(controls.smooth>0) output.filter=`blur(${Math.max(.2,controls.smooth*width/1000).toFixed(2)}px)`;
+        output.drawImage(work,0,0); output.restore();
+    }
+
+    function canvasBlob(canvas){ return new Promise((resolve,reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('深度图参数合成失败')),'image/png')); }
+    function depthControlsAreDefault(controls){ return Object.keys(DEFAULT_DEPTH_CONTROLS).every(key => controls[key] === DEFAULT_DEPTH_CONTROLS[key]); }
+
+    async function openDepthAdjuster(group, trigger){
+        if(!group?.baseControlMap?.url || !group.inputs.pose_reference?.url) return showToast('深度图尚未准备完成',true);
+        state.depthDialog?.remove();
+        const overlay=document.createElement('div'); overlay.className='ec-depth-adjust-overlay';
+        overlay.innerHTML=`<section class="ec-depth-adjust-dialog" role="dialog" aria-modal="true" aria-labelledby="ecDepthAdjustTitle">
+            <header><div><span>DEPTH MAP</span><h2 id="ecDepthAdjustTitle">调整深度图</h2><p>调整只处理已提取的深度图，不会重新运行模型。</p></div><button type="button" data-depth-close aria-label="关闭">×</button></header>
+            <div class="ec-depth-adjust-body"><div class="ec-depth-adjust-previews"><figure><figcaption>目标图片</figcaption><img src="${escapeHtml(group.inputs.pose_reference.url)}" alt="目标图片"></figure><figure><figcaption>实时深度图</figcaption><canvas data-depth-preview></canvas></figure></div>
+            <aside><label>远景 <output data-depth-value="farPoint"></output><input type="range" min="0" max="99" data-depth-field="farPoint"></label><label>近景 <output data-depth-value="nearPoint"></output><input type="range" min="1" max="100" data-depth-field="nearPoint"></label><label>中间层次 <output data-depth-value="midtone"></output><input type="range" min="-100" max="100" data-depth-field="midtone"></label><label>对比度 <output data-depth-value="contrast"></output><input type="range" min="0" max="300" data-depth-field="contrast"></label><label>亮度 <output data-depth-value="brightness"></output><input type="range" min="-100" max="100" data-depth-field="brightness"></label><label>平滑 <output data-depth-value="smooth"></output><input type="range" min="0" max="50" data-depth-field="smooth"></label><label class="ec-depth-invert"><input type="checkbox" data-depth-field="invert">反转深度</label></aside></div>
+            <footer><span data-depth-status>实时预览已就绪</span><div><button type="button" data-depth-reset>恢复默认</button><button type="button" class="primary" data-depth-save>应用并完成</button></div></footer></section>`;
+        document.body.appendChild(overlay); state.depthDialog=overlay;
+        const controls=normalizeDepthControls(group.depthControls); const canvas=overlay.querySelector('[data-depth-preview]');
+        let image;
+        const sync=()=>{ overlay.querySelectorAll('[data-depth-field]').forEach(input=>{const key=input.dataset.depthField; input.type==='checkbox' ? input.checked=controls[key] : input.value=controls[key];}); overlay.querySelectorAll('[data-depth-value]').forEach(output=>output.textContent=controls[output.dataset.depthValue]); if(image) renderAdjustedDepth(image,controls,canvas); };
+        const close=()=>{ overlay.remove(); state.depthDialog=null; trigger?.focus?.(); };
+        overlay.querySelectorAll('[data-depth-field]').forEach(input=>input.addEventListener(input.type==='checkbox'?'change':'input',()=>{const key=input.dataset.depthField; controls[key]=input.type==='checkbox'?input.checked:Number(input.value); Object.assign(controls,normalizeDepthControls(controls)); sync();}));
+        overlay.querySelector('[data-depth-reset]').addEventListener('click',()=>{Object.assign(controls,DEFAULT_DEPTH_CONTROLS); sync();});
+        overlay.querySelector('[data-depth-save]').addEventListener('click',async()=>{const button=overlay.querySelector('[data-depth-save]'); const status=overlay.querySelector('[data-depth-status]'); button.disabled=true; status.textContent='正在保存深度图…'; try { let adjusted=group.baseControlMap; if(!depthControlsAreDefault(controls)){const fullCanvas=document.createElement('canvas'); renderAdjustedDepth(image,controls,fullCanvas,Number.POSITIVE_INFINITY); adjusted=await uploadBlob(await canvasBlob(fullCanvas),`batch-outfit-depth-adjusted-${Date.now()}.png`);} group.controlMap=adjusted; group.depthControls=normalizeDepthControls(controls); group.updatedAt=Date.now(); persist(); render(); close(); showToast('深度图参数已应用'); } catch(error){status.textContent=error.message||'深度图保存失败'; button.disabled=false;} });
+        overlay.querySelectorAll('[data-depth-close]').forEach(button=>button.addEventListener('click',close)); overlay.addEventListener('click',event=>{if(event.target===overlay) close();});
+        try { image=await loadImage(group.baseControlMap.url); sync(); overlay.querySelector('[data-depth-close]').focus(); }
+        catch(error) { close(); throw error; }
     }
 
     function resolveGenerationRoute(group){
@@ -1041,6 +1123,8 @@
             const article = event.target.closest('[data-batch-group]');
             if(!article) return;
             const groupId = article.dataset.batchGroup;
+            const adjustDepth = event.target.closest('[data-batch-adjust-depth]');
+            if(adjustDepth) { event.preventDefault(); event.stopPropagation(); openDepthAdjuster(groupById(groupId),adjustDepth).catch(error=>showToast(error.message||'深度图调整失败',true)); return; }
             const removeInputButton = event.target.closest('[data-batch-remove-input]');
             if(removeInputButton) { event.preventDefault(); event.stopPropagation(); removeInput(groupId, removeInputButton.dataset.batchRemoveInput, Number(removeInputButton.dataset.batchRemoveIndex || 0)); return; }
             const stepButton = event.target.closest('[data-batch-input-step]');

@@ -1,4 +1,4 @@
-param([string]$InstallRoot = 'D:\Program Files\SHIYIN Distribution Center')
+﻿param([string]$InstallRoot = 'D:\Program Files\SHIYIN Distribution Center')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $builtRoot = [IO.File]::ReadAllText((Join-Path $projectRoot 'dist/distribution-latest.txt')).Trim()
@@ -28,12 +28,9 @@ $shortcut = $wsh.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Deskto
 $shortcut.TargetPath = $executable
 $shortcut.WorkingDirectory = $InstallRoot
 $shortcut.Save()
-$startup = $wsh.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'SHIYIN 分发服务.lnk'))
-$startup.TargetPath = $executable
-$startup.Arguments = '--service'
-$startup.WorkingDirectory = $InstallRoot
-$startup.WindowStyle = 7
-$startup.Save()
+# 同步已保存的用户偏好，不在重新部署时强制重新开启自启动。
+$startupSync = Start-Process -FilePath $executable -ArgumentList '--sync-startup' -WorkingDirectory $InstallRoot -WindowStyle Hidden -Wait -PassThru
+if ($startupSync.ExitCode -ne 0) { throw 'Failed to synchronize startup preference' }
 foreach ($rule in @(@{Name='SHIYIN Distribution TCP';Protocol='TCP';Port=3011},@{Name='SHIYIN Distribution UDP';Protocol='UDP';Port=3012})) {
     if (-not (Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName $rule.Name -Direction Inbound -Action Allow -Protocol $rule.Protocol -LocalPort $rule.Port -Profile Private -RemoteAddress LocalSubnet | Out-Null

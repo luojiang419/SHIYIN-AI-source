@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, PublicFormat, NoEncryption
+from distribution.desktop_settings import startup_enabled, set_startup
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = Path(os.environ.get('SHIYIN_DISTRIBUTION_DATA', 'D:/SHIYIN-Distribution'))
@@ -64,7 +65,8 @@ class Center:
         self.data.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.config_path = self.data / 'settings.json'
-        self.config = {'port': port, 'auto_start': True, 'address': local_ip()}
+        self.config = {'port': port, 'auto_start': True, 'address': local_ip(), 'theme': 'system',
+                       'background_on_close': True, 'launch_at_login': startup_enabled(), 'start_hidden': True}
         if self.config_path.exists():
             self.config.update(json.loads(self.config_path.read_text('utf-8')))
         self.admin_port = admin_port
@@ -73,6 +75,7 @@ class Center:
         self.zeroconf = None
         self.job = {'running': False, 'message': '', 'error': ''}
         self.started = time.time()
+        self.desktop_action = {'sequence': 0, 'action': ''}
         token_path = self.data / 'admin-token'
         if not token_path.exists():
             token_path.write_text(secrets.token_urlsafe(36), 'ascii')
@@ -165,7 +168,8 @@ class Center:
             logs = [dict(r) for r in db.execute('SELECT * FROM logs ORDER BY created DESC LIMIT 100')]
         return {'running': bool(self.server), 'url': self.url, 'public_key': self.public_key,
                 'settings': self.config, 'releases': releases, 'clients': clients, 'logs': logs,
-                'job': dict(self.job), 'data': str(self.data), 'uptime': int(time.time() - self.started)}
+                'job': dict(self.job), 'data': str(self.data), 'uptime': int(time.time() - self.started),
+                'desktop_action': dict(self.desktop_action)}
 
     def launch_job(self, action):
         with self.lock:
@@ -311,14 +315,32 @@ class Center:
                                 db.execute("UPDATE releases SET state='archived' WHERE kind=? AND state='published'", (row['kind'],))
                             db.execute('UPDATE releases SET state=? WHERE id=?', (state, body['id']))
                         owner.log(body['id'] + ' → ' + state)
+                    elif path == '/api/desktop-action':
+                        action = body.get('action')
+                        if action not in ('show', 'background', 'close'):
+                            raise ValueError('桌面操作无效')
+                        owner.desktop_action = {'sequence': owner.desktop_action['sequence'] + 1, 'action': action}
                     elif path == '/api/settings':
                         port = int(body.get('port', owner.config['port']))
                         address = str(body.get('address', owner.config['address']))
-                        if not 1024 <= port <= 65534 or port in (owner.admin_port, owner.admin_port - 1): raise ValueError('端口无效或与管理端口冲突')
+                        if not 1024 <= port <= 65534 or port in (3012, owner.admin_port): raise ValueError('端口无效或与管理端口冲突')
                         ipaddress.IPv4Address(address)
-                        with socket.socket() as probe: probe.bind((address, 0))
-                        owner.config.update(port=port, address=address, auto_start=bool(body.get('auto_start', True)))
-                        atomic_json(owner.config_path, owner.config)
+                        if 'address' in body:
+                            with socket.socket() as probe: probe.bind((address, 0))
+                        next_config = dict(owner.config, port=port, address=address)
+                        theme = body.get('theme', owner.config['theme'])
+                        if theme not in ('system', 'dark', 'light'):
+                            raise ValueError('主题无效')
+                        next_config['theme'] = theme
+                        for field in ('auto_start', 'background_on_close', 'launch_at_login', 'start_hidden'):
+                            if field in body:
+                                if not isinstance(body[field], bool):
+                                    raise ValueError('开关参数必须为布尔值')
+                                next_config[field] = body[field]
+                        if 'launch_at_login' in body:
+                            set_startup(next_config['launch_at_login'])
+                        atomic_json(owner.config_path, next_config)
+                        owner.config = next_config
                     else: return self.json({'error': '接口不存在'}, 404)
                     return self.json(owner.status())
                 except Exception as exc:

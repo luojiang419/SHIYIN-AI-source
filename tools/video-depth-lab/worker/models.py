@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import importlib
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,14 @@ MODEL_PROFILES = {
 }
 
 
+def _source_root(lab_root: Path) -> Path:
+    return Path(os.getenv("SHIYIN_VIDEO_DEPTH_SOURCE_ROOT") or lab_root / "runtime" / "sources")
+
+
+def _model_root(lab_root: Path) -> Path:
+    return Path(os.getenv("SHIYIN_VIDEO_DEPTH_MODEL_ROOT") or lab_root / "runtime" / "models")
+
+
 def get_profile(key: str) -> ModelProfile:
     try:
         return MODEL_PROFILES[key]
@@ -77,8 +86,8 @@ def get_profile(key: str) -> ModelProfile:
 def model_status(lab_root: Path) -> list[dict[str, object]]:
     rows = []
     for profile in MODEL_PROFILES.values():
-        source = lab_root / "runtime" / "sources" / profile.source_dir
-        checkpoint = lab_root / "runtime" / "models" / profile.checkpoint
+        source = _source_root(lab_root) / profile.source_dir
+        checkpoint = _model_root(lab_root) / profile.checkpoint
         rows.append(
             {
                 "key": profile.key,
@@ -167,8 +176,8 @@ def _install_windows_sdpa_compatibility() -> None:
 def _load_gemdepth(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], None]):
     import torch
 
-    source = lab_root / "runtime" / "sources" / profile.source_dir
-    checkpoint_path = lab_root / "runtime" / "models" / profile.checkpoint
+    source = _source_root(lab_root) / profile.source_dir
+    checkpoint_path = _model_root(lab_root) / profile.checkpoint
     _clear_conflicting_modules()
     sys.path.insert(0, str(source / "model"))
     sys.path.insert(0, str(source))
@@ -196,8 +205,8 @@ def _load_gemdepth(lab_root: Path, profile: ModelProfile, emit: Callable[[int, s
 def _load_vda(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], None]):
     import torch
 
-    source = lab_root / "runtime" / "sources" / profile.source_dir
-    checkpoint_path = lab_root / "runtime" / "models" / profile.checkpoint
+    source = _source_root(lab_root) / profile.source_dir
+    checkpoint_path = _model_root(lab_root) / profile.checkpoint
     _clear_conflicting_modules()
     sys.path.insert(0, str(source))
     module = importlib.import_module("video_depth_anything.video_depth")

@@ -12,8 +12,9 @@ from .person_depth_components import PersonDepthComponentManager, sha256_file
 
 
 class PersonDepthLanServer:
-    def __init__(self, manager: PersonDepthComponentManager) -> None:
+    def __init__(self, manager: PersonDepthComponentManager, video_depth_manager: Optional[PersonDepthComponentManager] = None) -> None:
         self.manager = manager
+        self.video_depth_manager = video_depth_manager
         self._lock = threading.RLock()
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -63,6 +64,8 @@ class PersonDepthLanServer:
             "url": f"http://{self._host}:{self._port}" if self._server else "",
             "component_ready": installation is not None,
             "manifest_ready": self._manifest_path().is_file() if installation else False,
+            "video_depth_ready": bool(self.video_depth_manager and self.video_depth_manager.installation_path()),
+            "video_depth_manifest_ready": bool(self.video_depth_manager and self._manifest_path(self.video_depth_manager).is_file()),
             "update_ready": update is not None,
             "update_version": update[0] if update else "",
             "update_asset": update[1].name if update else "",
@@ -128,15 +131,19 @@ class PersonDepthLanServer:
         _version, installer, checksum = update
         return installer if name == installer.name else checksum if name == checksum.name else None
 
-    def _manifest_path(self) -> Path:
-        return self.manager.component_root / "lan-share" / "manifest.json"
+    def _manifest_path(self, manager: Optional[PersonDepthComponentManager] = None) -> Path:
+        active = manager or self.manager
+        return active.component_root / "lan-share" / "manifest.json"
 
-    def ensure_manifest(self) -> dict[str, Any]:
-        installation = self.manager.installation_path()
-        if installation is None or not self.manager.verify_installed(run_smoke=False):
-            raise RuntimeError("本机人物深度组件尚未安装或校验失败")
-        target = self._manifest_path()
-        current = self.manager._read_current()
+    def ensure_manifest(self, component: str = "person-depth") -> dict[str, Any]:
+        manager = self.video_depth_manager if component == "video-depth" else self.manager
+        if manager is None:
+            raise RuntimeError("本机未配置深度视频模型组件")
+        installation = manager.installation_path()
+        if installation is None or not manager.verify_installed(run_smoke=False):
+            raise RuntimeError(f"本机{getattr(manager, 'display_name', '人物深度组件')}尚未安装或校验失败")
+        target = self._manifest_path(manager)
+        current = manager._read_current()
         if target.is_file():
             cached = json.loads(target.read_text(encoding="utf-8"))
             if cached.get("installation") == current.get("installation") and cached.get("protocol_version") == 1:
@@ -148,8 +155,8 @@ class PersonDepthLanServer:
                 files.append({"path": relative, "size": path.stat().st_size, "sha256": sha256_file(path)})
         payload = {
             "protocol_version": 1,
-            "component": "person-depth",
-            "version": str(self.manager.manifest.get("version") or ""),
+            "component": getattr(manager, "component_name", "person-depth"),
+            "version": str(manager.manifest.get("version") or ""),
             "installation": current.get("installation"),
             "total_bytes": sum(item["size"] for item in files),
             "files": files,
@@ -180,6 +187,23 @@ class PersonDepthLanServer:
                         if installation is None:
                             raise RuntimeError("本机人物深度组件尚未安装")
                         relative = Path(unquote(urlsplit(self.path).path.removeprefix("/person-depth/files/")))
+                        if relative.is_absolute() or ".." in relative.parts:
+                            self.send_error(400)
+                            return
+                        path = (installation / relative).resolve()
+                        path.relative_to(installation.resolve())
+                        if not path.is_file():
+                            self.send_error(404)
+                            return
+                        self._file(path)
+                    elif self.path.split("?", 1)[0] == "/video-depth/manifest.json":
+                        self._json(owner.ensure_manifest("video-depth"))
+                    elif self.path.split("?", 1)[0].startswith("/video-depth/files/"):
+                        manager = owner.video_depth_manager
+                        installation = manager.installation_path() if manager else None
+                        if installation is None:
+                            raise RuntimeError("本机深度视频模型尚未安装")
+                        relative = Path(unquote(urlsplit(self.path).path.removeprefix("/video-depth/files/")))
                         if relative.is_absolute() or ".." in relative.parts:
                             self.send_error(400)
                             return

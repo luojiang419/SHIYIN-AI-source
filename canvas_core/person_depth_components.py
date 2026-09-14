@@ -52,6 +52,7 @@ class PersonDepthPackageSpec:
     sha256: str
     domestic_url: str
     official_url: str
+    target_path: str = ""
 
 
 class PersonDepthManifestError(ValueError):
@@ -88,7 +89,13 @@ class PersonDepthComponentManager:
         proxy_provider: Callable[[], Mapping[str, str]] = windows_system_proxies,
         smoke_runner: Optional[Callable[[Sequence[str], Path], None]] = None,
         sleep: Callable[[float], None] = time.sleep,
+        component_name: str = PERSON_DEPTH_COMPONENT,
+        display_name: str = "高精度人物深度组件",
+        lan_path: str = "person-depth",
     ) -> None:
+        self.component_name = str(component_name or PERSON_DEPTH_COMPONENT)
+        self.display_name = str(display_name or "高精度人物深度组件")
+        self.lan_path = str(lan_path or self.component_name).strip("/")
         self.component_root = Path(component_root).expanduser().resolve()
         self.download_root = self.component_root / "downloads"
         self.installations_root = self.component_root / "installations"
@@ -148,25 +155,23 @@ class PersonDepthComponentManager:
             raise PersonDepthManifestError("person-depth manifest 必须是 JSON 对象")
         return payload
 
-    @staticmethod
-    def _pending_manifest(message: str) -> dict[str, object]:
+    def _pending_manifest(self, message: str) -> dict[str, object]:
         return {
             "schema_version": 1,
-            "component": PERSON_DEPTH_COMPONENT,
+            "component": self.component_name,
             "version": "",
             "enabled": False,
-            "message": message or "高精度人物深度组件发布清单不可用",
+            "message": message or f"{self.display_name}发布清单不可用",
             "command": [],
             "required_paths": [],
             "packages": [],
         }
 
-    @classmethod
-    def _normalize_manifest(cls, raw: Mapping[str, object]) -> dict[str, object]:
+    def _normalize_manifest(self, raw: Mapping[str, object]) -> dict[str, object]:
         payload = dict(raw)
         if int(payload.get("schema_version") or 0) != 1:
             raise PersonDepthManifestError("不支持的 person-depth manifest 版本")
-        if str(payload.get("component") or "") != PERSON_DEPTH_COMPONENT:
+        if str(payload.get("component") or "") != self.component_name:
             raise PersonDepthManifestError("person-depth manifest 组件名称不匹配")
         payload["version"] = str(payload.get("version") or "").strip()
         command = payload.get("command")
@@ -193,6 +198,9 @@ class PersonDepthComponentManager:
                 raise PersonDepthManifestError("person-depth package id 无效")
             if size <= 0 or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
                 raise PersonDepthManifestError(f"person-depth package {package_id} 缺少大小或 SHA-256")
+            target_path = str(raw.get("target_path") or "").replace("\\", "/").strip("/")
+            if target_path and (Path(target_path).is_absolute() or ".." in Path(target_path).parts):
+                raise PersonDepthManifestError(f"person-depth package {package_id} target_path 无效")
             specs.append(
                 PersonDepthPackageSpec(
                     package_id=package_id,
@@ -200,6 +208,7 @@ class PersonDepthComponentManager:
                     sha256=digest,
                     domestic_url=str(raw.get("domestic_url") or "").strip(),
                     official_url=str(raw.get("official_url") or "").strip(),
+                    target_path=target_path,
                 )
             )
         return specs
@@ -214,10 +223,10 @@ class PersonDepthComponentManager:
 
     def _initial_message(self) -> str:
         if self._manifest_error:
-            return "高精度人物深度组件发布清单无效"
+            return f"{self.display_name}发布清单无效"
         if not self._install_available():
-            return str(self.manifest.get("message") or "高精度人物深度组件暂不可安装")
-        return "高精度人物深度组件尚未安装"
+            return str(self.manifest.get("message") or f"{self.display_name}暂不可安装")
+        return f"{self.display_name}尚未安装"
 
     def status(self) -> dict[str, object]:
         with self._state_lock:
@@ -264,12 +273,12 @@ class PersonDepthComponentManager:
                 state="checking",
                 ready=False,
                 consent_required=False,
-                message="正在检查高精度人物深度组件",
+                message=f"正在检查{self.display_name}",
                 error="",
             )
             self._thread = threading.Thread(
                 target=self.ensure_now,
-                name="person-depth-component-install",
+                name=f"{self.component_name}-component-install",
                 daemon=True,
             )
             self._thread.start()
@@ -304,7 +313,7 @@ class PersonDepthComponentManager:
                 self._update_state(
                     state="failed",
                     ready=False,
-                    message="高精度人物深度组件安装失败，可重试",
+                    message=f"{self.display_name}安装失败，可重试",
                     error=message[:2000],
                 )
                 return False
@@ -347,7 +356,7 @@ class PersonDepthComponentManager:
                 self._update_state(
                     state="failed",
                     ready=False,
-                    message="本机高精度人物深度组件安装失败",
+                    message=f"本机{self.display_name}安装失败",
                     error=(str(exc) or exc.__class__.__name__)[:2000],
                 )
                 raise
@@ -381,7 +390,7 @@ class PersonDepthComponentManager:
                 source_label=label,
                 downloaded_bytes=0,
                 total_bytes=sum(item.size for item in self.specs),
-                message=f"正在通过{label}下载高精度人物深度组件",
+                message=f"正在通过{label}下载{self.display_name}",
                 error="",
             )
             try:
@@ -400,12 +409,12 @@ class PersonDepthComponentManager:
         base = self._lan_source_url
         session = self._new_session(None)
         try:
-            response = session.get(f"{base}/person-depth/manifest.json", timeout=(3, 10))
+            response = session.get(f"{base}/{self.lan_path}/manifest.json", timeout=(3, 10))
             response.raise_for_status()
             payload = response.json()
         finally:
             session.close()
-        if not isinstance(payload, dict) or str(payload.get("component") or "") != PERSON_DEPTH_COMPONENT:
+        if not isinstance(payload, dict) or str(payload.get("component") or "") != self.component_name:
             raise PersonDepthComponentUnavailable("局域网清单的组件标识无效")
         if int(payload.get("protocol_version") or 0) != 1:
             raise PersonDepthComponentUnavailable("局域网组件传输协议版本不匹配")
@@ -428,7 +437,7 @@ class PersonDepthComponentManager:
         staging.mkdir(parents=True, exist_ok=False)
         self._update_state(
             state="downloading", source="lan", source_label="局域网服务器",
-            downloaded_bytes=0, total_bytes=total, message=f"正在从 {base} 直接传输高精度人物深度组件", error="",
+            downloaded_bytes=0, total_bytes=total, message=f"正在从 {base} 直接传输{self.display_name}", error="",
         )
         completed = 0
         progress_lock = threading.Lock()
@@ -439,14 +448,14 @@ class PersonDepthComponentManager:
             target = staging / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             spec = PersonDepthPackageSpec(relative.as_posix(), size, digest, "", "")
-            url = f"{base}/person-depth/files/{urllib.parse.quote(relative.as_posix(), safe='/')}"
+            url = f"{base}/{self.lan_path}/files/{urllib.parse.quote(relative.as_posix(), safe='/')}"
             self._download_package_with_retries(url, target, spec, None, "局域网服务器", 0, total)
             with progress_lock:
                 completed += size
                 self._update_state(downloaded_bytes=completed, total_bytes=total)
 
         try:
-            with ThreadPoolExecutor(max_workers=8, thread_name_prefix="person-depth-lan") as pool:
+            with ThreadPoolExecutor(max_workers=8, thread_name_prefix=f"{self.component_name}-lan") as pool:
                 futures = [pool.submit(download_one, entry) for entry in files]
                 for future in as_completed(futures):
                     future.result()
@@ -559,7 +568,7 @@ class PersonDepthComponentManager:
         if existing > spec.size:
             partial.unlink(missing_ok=True)
             existing = 0
-        headers = {"User-Agent": "SHIYIN-AI-Person-Depth/1.0"}
+        headers = {"User-Agent": f"SHIYIN-AI-{self.component_name}/1.0"}
         if existing:
             headers["Range"] = f"bytes={existing}-"
         session = self._new_session(proxies)
@@ -616,7 +625,7 @@ class PersonDepthComponentManager:
         source: str,
         source_label: str,
     ) -> None:
-        self._update_state(state="verifying", message="正在校验高精度人物深度组件下载包")
+        self._update_state(state="verifying", message=f"正在校验{self.display_name}下载包")
         for spec, archive in archives:
             if not self._valid_archive(archive, spec):
                 raise PersonDepthComponentUnavailable(f"{spec.package_id} SHA-256 校验失败")
@@ -624,9 +633,14 @@ class PersonDepthComponentManager:
         staging = self.staging_root / uuid.uuid4().hex
         staging.mkdir(parents=True, exist_ok=False)
         try:
-            self._update_state(state="installing", message="正在安装高精度人物深度组件")
-            for _spec, archive in archives:
-                self._safe_extract(archive, staging)
+            self._update_state(state="installing", message=f"正在安装{self.display_name}")
+            for spec, archive in archives:
+                if spec.target_path:
+                    target = staging / Path(spec.target_path)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(archive, target)
+                else:
+                    self._safe_extract(archive, staging)
             self._activate_staging(staging, source, source_label, [
                 {"id": spec.package_id, "size": spec.size, "sha256": spec.sha256}
                 for spec, _archive in archives
@@ -645,7 +659,7 @@ class PersonDepthComponentManager:
             atomic_write_json(
                 staging / "component-manifest.json",
                 {
-                    "component": PERSON_DEPTH_COMPONENT,
+                    "component": self.component_name,
                     "version": self.manifest["version"],
                     "source": source,
                     "source_label": source_label,
@@ -653,7 +667,7 @@ class PersonDepthComponentManager:
                     "packages": packages,
                 },
             )
-            self._update_state(state="smoke", message="正在进行高精度人物深度组件小图 smoke 验证")
+            self._update_state(state="smoke", message=f"正在进行{self.display_name} smoke 验证")
             self.smoke_runner(self._worker_command_for(staging), staging)
             self.installations_root.mkdir(parents=True, exist_ok=True)
             installed = self.installations_root / f"{self.manifest['version']}-{uuid.uuid4().hex}"
@@ -661,7 +675,7 @@ class PersonDepthComponentManager:
             atomic_write_json(
                 self.current_path,
                 {
-                    "component": PERSON_DEPTH_COMPONENT,
+                    "component": self.component_name,
                     "version": self.manifest["version"],
                     "installation": installed.name,
                     "source": source,
@@ -752,7 +766,7 @@ class PersonDepthComponentManager:
     def worker_command(self) -> list[str]:
         root = self.installation_path()
         if root is None or not self.verify_installed(run_smoke=False):
-            raise PersonDepthComponentUnavailable("高精度人物深度组件尚未就绪")
+            raise PersonDepthComponentUnavailable(f"{self.display_name}尚未就绪")
         return self._worker_command_for(root)
 
     @staticmethod
@@ -781,6 +795,6 @@ class PersonDepthComponentManager:
             source_label=source_label,
             downloaded_bytes=total,
             total_bytes=total,
-            message="高精度人物深度组件已就绪",
+            message=f"{self.display_name}已就绪",
             error="",
         )

@@ -62,6 +62,7 @@ from canvas_core.storage_bootstrap import (
     MAINTENANCE,
     MIGRATION_REPORT,
     PERSON_DEPTH_COMPONENT_MANAGER,
+    VIDEO_DEPTH_MODEL_MANAGER,
     SECRET_MIGRATION_REPORT,
     SECRET_STORE,
 )
@@ -241,7 +242,7 @@ DEPTH_AUTO_DOWNLOAD_ENABLED = str(os.getenv("CANVAS_DEPTH_AUTO_DOWNLOAD", "1")).
     "0", "false", "no", "off",
 }
 PERSON_DEPTH_WORKER = PersonDepthWorkerClient(PERSON_DEPTH_COMPONENT_MANAGER)
-PERSON_DEPTH_LAN_SERVER = PersonDepthLanServer(PERSON_DEPTH_COMPONENT_MANAGER)
+PERSON_DEPTH_LAN_SERVER = PersonDepthLanServer(PERSON_DEPTH_COMPONENT_MANAGER, VIDEO_DEPTH_MODEL_MANAGER)
 
 
 def render_dwpose_image(image: Image.Image):
@@ -517,7 +518,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "1.0.445"
+APP_VERSION = "1.0.446"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -655,6 +656,7 @@ async def startup_event():
         DEPTH_MODEL_MANAGER.start_background()
     lan_config = read_app_config(APP_PATHS.data_root)
     PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
+    VIDEO_DEPTH_MODEL_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
     PERSON_DEPTH_LAN_SERVER.configure(
         bool(lan_config.get("person_depth_lan_server_enabled")),
         str(lan_config.get("person_depth_lan_host") or "192.168.0.24"),
@@ -2399,13 +2401,13 @@ os.makedirs(OUTPUT_INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_OUTPUT_DIR, exist_ok=True)
 os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
 os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
+VIDEO_DEPTH_TASKS = VideoDepthTaskService(APP_PATHS.app_root, VIDEO_DEPTH_MODEL_MANAGER)
 # static 和内置 workflows 属于只读程序资源，不在运行时创建或改写。
 
 HTML_CACHE_CONTROL = "no-store, max-age=0, must-revalidate"
 VERSIONED_STATIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
 UNVERSIONED_STATIC_CACHE_CONTROL = "no-cache, max-age=0, must-revalidate"
 
-VIDEO_DEPTH_TASKS = VideoDepthTaskService(PROJECT_MODULE_DIR)
 
 class VersionedStaticFiles(StaticFiles):
     """只让带 v 参数的静态资源长缓存，并给 HTML 内嵌资源统一换版本键。"""
@@ -3213,6 +3215,7 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
+    VIDEO_DEPTH_MODEL_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
     PERSON_DEPTH_LAN_SERVER.configure(
         bool(config.get("person_depth_lan_server_enabled")),
         str(config.get("person_depth_lan_host") or "192.168.0.24"),
@@ -3230,7 +3233,13 @@ def person_depth_lan_status(request: Request):
 @app.post("/api/person-depth/lan/prepare", status_code=202)
 def prepare_person_depth_lan_bundle(request: Request):
     require_admin(request)
-    Thread(target=PERSON_DEPTH_LAN_SERVER.ensure_manifest, name="person-depth-lan-manifest", daemon=True).start()
+    def prepare_depth_manifests():
+        for component in ("person-depth", "video-depth"):
+            try:
+                PERSON_DEPTH_LAN_SERVER.ensure_manifest(component)
+            except RuntimeError:
+                continue
+    Thread(target=prepare_depth_manifests, name="depth-components-lan-manifest", daemon=True).start()
     return PERSON_DEPTH_LAN_SERVER.status()
 
 

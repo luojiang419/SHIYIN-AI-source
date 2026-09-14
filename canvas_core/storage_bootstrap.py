@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .data_layout import DataLayout
 from .database import CanvasDatabase
 from .accounts import AccountStore
@@ -35,6 +37,14 @@ DWPOSE_MODEL_MANAGER = DWPoseModelManager(ACCOUNT_STORE.system_root / "models" /
 DEPTH_MODEL_MANAGER = DepthModelManager(ACCOUNT_STORE.system_root / "models" / "depth")
 PERSON_DEPTH_COMPONENT_MANAGER = PersonDepthComponentManager(
     ACCOUNT_STORE.system_root / "components" / "person-depth"
+)
+VIDEO_DEPTH_MODEL_MANAGER = PersonDepthComponentManager(
+    ACCOUNT_STORE.system_root / "components" / "video-depth",
+    manifest_path=Path(__file__).with_name("video_depth_manifest.json"),
+    component_name="video-depth",
+    display_name="深度视频模型",
+    lan_path="video-depth",
+    smoke_runner=lambda _command, _root: None,
 )
 ACCOUNT_STORAGE = AccountStorageRegistry(ACCOUNT_STORE, ADMIN_DATA_LAYOUT, ADMIN_DATABASE)
 DATA_LAYOUT = ScopedDataLayoutProxy(ACCOUNT_STORAGE)

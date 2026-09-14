@@ -47,7 +47,11 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     $specialNodesPath = Join-Path $Root 'app\web\js\canvas-special-nodes.js'
     $topazPath = Join-Path $Root 'app\web\js\canvas-topaz-node.js'
     $personDepthManifestPath = Join-Path $Root 'app\backend\canvas-backend\_internal\canvas_core\person_depth_manifest.json'
-    foreach ($requiredPath in @($canvasPath, $canvasListPath, $specialNodesPath, $topazPath, $personDepthManifestPath)) {
+    $videoDepthManifestPath = Join-Path $Root 'app\backend\canvas-backend\_internal\canvas_core\video_depth_manifest.json'
+    $videoDepthWorkerPath = Join-Path $Root 'app\runtime\video-depth\video-depth-worker\video-depth-worker.exe'
+    $videoDepthSourcePath = Join-Path $Root 'app\runtime\video-depth\sources\video-depth-anything\video_depth_anything\video_depth.py'
+    $videoDepthFfmpegPath = Join-Path $Root 'app\runtime\video-depth\bin\ffmpeg.exe'
+    foreach ($requiredPath in @($canvasPath, $canvasListPath, $specialNodesPath, $topazPath, $personDepthManifestPath, $videoDepthManifestPath, $videoDepthWorkerPath, $videoDepthSourcePath, $videoDepthFfmpegPath)) {
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
             throw "Staged web asset is missing: $requiredPath"
         }
@@ -56,8 +60,14 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
         }
     }
     $canvasHtml = [IO.File]::ReadAllText($canvasPath)
+    $specialNodesJs = [IO.File]::ReadAllText($specialNodesPath)
     if (-not $canvasHtml.Contains("menuAdd('topazVideo')")) {
         throw 'Staged canvas is missing the Topaz create-menu entry.'
+    }
+    if (-not $canvasHtml.Contains("menuAdd('depthVideo')")) { throw 'Staged canvas is missing the depth-video create-menu entry.' }
+    if (-not $specialNodesJs.Contains('bindDepthVideo')) { throw 'Staged canvas special nodes are missing depth-video behavior.' }
+    if (Get-ChildItem (Join-Path $Root 'app\runtime\video-depth') -Recurse -File -Filter '*.pth' -ErrorAction SilentlyContinue) {
+        throw 'Staged installer must not contain video-depth model weights.'
     }
     $h3SkillPath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\SKILL.md'
     $h3BaseGuidePath = Join-Path $Root 'app\skills\video-prompt-polish\minimax-h3\references\base-en.txt'
@@ -92,7 +102,6 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     if (-not $canvasListJs.Contains("&v=$ExpectedVersion")) {
         throw "Staged canvas navigation cache version is not $ExpectedVersion."
     }
-    $specialNodesJs = [IO.File]::ReadAllText($specialNodesPath)
     if (-not $specialNodesJs.Contains('maybeAutoInstallPersonDepth')) {
         throw 'Staged canvas special nodes are missing person-depth automatic installation.'
     }
@@ -129,6 +138,33 @@ New-Item -ItemType Directory -Force (Join-Path $stageRoot 'app\backend') | Out-N
 Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $stageRoot 'SHIYIN AI.exe')
 Copy-Item -LiteralPath $backendSource -Destination (Join-Path $stageRoot 'app\backend\canvas-backend') -Recurse
 Copy-Item -LiteralPath (Join-Path $projectRoot 'static') -Destination (Join-Path $stageRoot 'app\web') -Recurse
+
+# 深度视频运行时随安装包发布；VDA Base 模型权重由组件管理器首次使用时按需下载。
+$videoDepthDist = Join-Path $buildRoot 'video-depth-dist'
+$videoDepthWork = Join-Path $buildRoot 'video-depth-work'
+$videoDepthRuntime = Join-Path $stageRoot 'app\runtime\video-depth'
+Remove-BuildPath $videoDepthDist $buildRoot
+Remove-BuildPath $videoDepthWork $buildRoot
+& python -m PyInstaller --noconfirm --clean --distpath $videoDepthDist --workpath $videoDepthWork (Join-Path $projectRoot 'video-depth-worker.spec')
+if ($LASTEXITCODE -ne 0) { throw 'Video-depth worker PyInstaller build failed.' }
+$videoDepthWorker = Join-Path $videoDepthDist 'video-depth-worker'
+if (-not (Test-Path -LiteralPath (Join-Path $videoDepthWorker 'video-depth-worker.exe') -PathType Leaf)) { throw 'Video-depth worker executable is missing.' }
+New-Item -ItemType Directory -Force $videoDepthRuntime | Out-Null
+Copy-Item -LiteralPath $videoDepthWorker -Destination (Join-Path $videoDepthRuntime 'video-depth-worker') -Recurse
+$vdaSource = Join-Path $projectRoot 'tools\video-depth-lab\runtime\sources\video-depth-anything'
+$vdaTarget = Join-Path $videoDepthRuntime 'sources\video-depth-anything'
+New-Item -ItemType Directory -Force $vdaTarget | Out-Null
+foreach ($sourceName in @('video_depth_anything', 'utils', 'LICENSE')) {
+    Copy-Item -LiteralPath (Join-Path $vdaSource $sourceName) -Destination $vdaTarget -Recurse -Force
+}
+Get-ChildItem $vdaTarget -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Remove-Item -Recurse -Force
+$ffmpegRoot = 'C:\ProgramData\chocolatey\lib\ffmpeg\tools\ffmpeg\bin'
+foreach ($toolName in @('ffmpeg.exe', 'ffprobe.exe')) {
+    $toolSource = Join-Path $ffmpegRoot $toolName
+    if (-not (Test-Path -LiteralPath $toolSource -PathType Leaf)) { throw "Bundled video-depth tool is missing: $toolSource" }
+    New-Item -ItemType Directory -Force (Join-Path $videoDepthRuntime 'bin') | Out-Null
+    Copy-Item -LiteralPath $toolSource -Destination (Join-Path $videoDepthRuntime "bin\$toolName") -Force
+}
 # 独立 Node + 官方自包含 CLI，安装用户无需预装 npm；构建门禁验证空 PATH 执行。
 $klingRuntime = Join-Path $buildRoot 'kling-runtime'
 & python (Join-Path $PSScriptRoot 'prepare-kling-runtime.py') --output $klingRuntime | Out-Host

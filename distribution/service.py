@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlsplit
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, PublicFormat, NoEncryption
 from distribution.desktop_settings import startup_enabled, set_startup
+from distribution.traffic import Traffic
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = Path(os.environ.get('SHIYIN_DISTRIBUTION_DATA', 'D:/SHIYIN-Distribution'))
@@ -93,6 +94,27 @@ class Center:
                 CREATE TABLE IF NOT EXISTS clients (ip TEXT PRIMARY KEY, seen REAL, version TEXT);
                 CREATE TABLE IF NOT EXISTS logs (created REAL, message TEXT);
             ''')
+        self.traffic = Traffic(self.db)
+        self.blob_labels = None
+
+    def touch_client(self, ip, version=''):
+        with self.db() as db:
+            db.execute('''INSERT INTO clients VALUES (?,?,?) ON CONFLICT(ip) DO UPDATE SET
+                seen=excluded.seen, version=CASE WHEN excluded.version!='' THEN excluded.version ELSE clients.version END''',
+                (ip, time.time(), version[:80]))
+
+    def blob_label(self, sha):
+        with self.lock:
+            if self.blob_labels is None:
+                labels = {}
+                with self.db() as db:
+                    releases = db.execute('SELECT kind,version,manifest FROM releases ORDER BY created').fetchall()
+                for release in releases:
+                    manifest = json.loads(json.loads(release['manifest'])['payload'])
+                    for item in manifest['files']:
+                        labels[item['sha256']] = f"{release['kind']} · {release['version']} · {item['path']}"
+                self.blob_labels = labels
+            return self.blob_labels.get(sha, sha)
 
     def db(self):
         conn = sqlite3.connect(self.data / 'index.db', timeout=15)
@@ -131,6 +153,7 @@ class Center:
                 server.shutdown()
                 server.server_close()
                 self.log('分发服务已停止')
+            self.traffic.flush()
 
     def advertise(self):
         try:
@@ -169,7 +192,7 @@ class Center:
         return {'running': bool(self.server), 'url': self.url, 'public_key': self.public_key,
                 'settings': self.config, 'releases': releases, 'clients': clients, 'logs': logs,
                 'job': dict(self.job), 'data': str(self.data), 'uptime': int(time.time() - self.started),
-                'desktop_action': dict(self.desktop_action)}
+                'desktop_action': dict(self.desktop_action), 'traffic': self.traffic.snapshot()}
 
     def launch_job(self, action):
         with self.lock:
@@ -264,6 +287,8 @@ class Center:
                 raise ValueError('此版本已存在，请使用新的版本号')
             db.execute("UPDATE releases SET state='archived' WHERE kind=? AND state='published'", (kind,))
             db.execute('INSERT INTO releases VALUES (?,?,?,?,?,?)', (release_id, kind, version, envelope, 'published', time.time()))
+        with self.lock:
+            self.blob_labels = None
         self.log('已发布 ' + release_id + f'，{len(files)} 个文件')
 
     def active(self, kind):
@@ -382,20 +407,21 @@ class Center:
                         # 旧客户端不得静默套用新发布；迁移更新器后才能检查协议 v2。
                         return self.json({'error': '请先迁移桌面更新器'}, 409)
                     if path == '/v1/catalog':
-                        with owner.db() as db:
-                            db.execute('INSERT OR REPLACE INTO clients VALUES (?,?,?)', (self.client_address[0], time.time(), self.headers.get('X-Shiyin-Version', '')[:80]))
+                        owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
                         release = owner.active('hot')
                         return self.json(json.loads(release['manifest']) if release else {'release': None})
                     if path.startswith('/v1/blobs/'):
                         sha = path.removeprefix('/v1/blobs/')
                         if not re.fullmatch(r'[0-9a-f]{64}', sha): raise ValueError('哈希无效')
-                        return self.file(owner.data / 'blobs' / sha)
+                        return self.file(owner.data / 'blobs' / sha, owner.blob_label(sha))
                     for kind in ('person-depth', 'video-depth'):
                         if path.startswith('/' + kind + '/'):
                             release = owner.active(kind)
                             if not release: return self.json({'error': '组件尚未发布'}, 404)
                             manifest = json.loads(json.loads(release['manifest'])['payload'])
-                            if path == '/' + kind + '/manifest.json': return self.json(manifest)
+                            if path == '/' + kind + '/manifest.json':
+                                owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
+                                return self.json(manifest)
                             rel = path.removeprefix('/' + kind + '/files/')
                             relative_path(rel)
                             item = next((f for f in manifest['files'] if f['path'] == rel), None)
@@ -428,7 +454,7 @@ class Center:
                 except Exception as exc:
                     self.json({'error': str(exc)}, 400)
 
-            def file(self, path):
+            def file(self, path, resource=None):
                 if not path.is_file(): return self.json({'error': '文件不存在'}, 404)
                 size = path.stat().st_size
                 start, end = 0, size - 1
@@ -447,14 +473,29 @@ class Center:
                 self.send_header('Accept-Ranges', 'bytes')
                 if ranged: self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
                 self.end_headers()
-                with path.open('rb') as handle:
-                    handle.seek(start)
-                    remaining = end - start + 1
-                    while remaining > 0:
-                        chunk = handle.read(min(1024 * 1024, remaining))
-                        if not chunk: break
-                        self.wfile.write(chunk)
-                        remaining -= len(chunk)
+                owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
+                total = max(0, end - start + 1)
+                key = owner.traffic.begin(self.client_address[0], resource or unquote(urlsplit(self.path).path), total, start, size)
+                remaining = total
+                self.connection.settimeout(30)
+                try:
+                    with path.open('rb') as handle:
+                        handle.seek(start)
+                        while remaining > 0:
+                            chunk = handle.read(min(256 * 1024, remaining))
+                            if not chunk: break
+                            view = memoryview(chunk)
+                            while view:
+                                sent = self.connection.send(view)
+                                if not sent: raise ConnectionResetError('下载连接关闭')
+                                owner.traffic.advance(key, sent)
+                                remaining -= sent
+                                view = view[sent:]
+                except OSError:
+                    # 响应头已发送，不再向文件流追加 JSON 错误内容。
+                    pass
+                finally:
+                    owner.traffic.finish(key, remaining == 0)
         return Handler
 
 

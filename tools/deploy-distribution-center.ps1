@@ -10,6 +10,7 @@ if (Test-Path -LiteralPath $tokenPath) {
     try {
         $status = Invoke-RestMethod 'http://127.0.0.1:3013/api/status' -Headers $headers
         if ($status.job.running) { throw 'An import job is still running. Wait for it to finish.' }
+        if ($status.traffic.active_count -gt 0) { throw 'Downloads are still active. Wait for them to finish before deployment.' }
         Invoke-RestMethod 'http://127.0.0.1:3013/api/stop' -Method Post -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
     } catch [System.Net.WebException] { }
 }

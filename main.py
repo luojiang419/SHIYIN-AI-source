@@ -142,6 +142,7 @@ from canvas_core.video_frame_extraction import (
     probe_video_frames,
     validate_extraction_options,
 )
+from canvas_core.video_depth import VideoDepthTaskService, VideoDepthUnavailable
 from canvas_core.bridge_package import BridgePackageError, read_bridge_package, write_bridge_package
 from canvas_core.bridge_media import materialize_bridge_frames
 from canvas_core.bridge_direct import DirectBridgeError, materialize_direct_bridge_frames
@@ -2404,6 +2405,7 @@ HTML_CACHE_CONTROL = "no-store, max-age=0, must-revalidate"
 VERSIONED_STATIC_CACHE_CONTROL = "public, max-age=31536000, immutable"
 UNVERSIONED_STATIC_CACHE_CONTROL = "no-cache, max-age=0, must-revalidate"
 
+VIDEO_DEPTH_TASKS = VideoDepthTaskService(PROJECT_MODULE_DIR)
 
 class VersionedStaticFiles(StaticFiles):
     """只让带 v 参数的静态资源长缓存，并给 HTML 内嵌资源统一换版本键。"""
@@ -4588,6 +4590,10 @@ class LinkFoxVideoRequest(BaseModel):
     entry: str = "img2video"
     mode: str = "reference"
     imageList: List[str] = Field(default_factory=list)
+class VideoDepthTaskRequest(BaseModel):
+    input_url: str = Field(min_length=1, max_length=4096)
+
+
     imageUrl: str = ""
     lastFrameImageUrl: str = ""
     videoType: str = ""
@@ -28313,6 +28319,71 @@ async def estimate_depth(request: Request, file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail=str(exc).replace("DWPose", "深度")) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail="深度输入图片无法读取") from exc
+@app.get("/api/video-depth/status")
+def video_depth_status(request: Request):
+    request_identity(request)
+    return VIDEO_DEPTH_TASKS.status()
+
+
+@app.post("/api/video-depth/upload")
+async def upload_video_depth_input(request: Request, file: UploadFile = File(...)):
+    request_identity(request)
+    original_name = str(file.filename or "video.mp4")
+    ext = Path(original_name).suffix.lower()
+    allowed = {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"}
+    if ext not in allowed and not str(file.content_type or "").lower().startswith("video/"):
+        raise HTTPException(status_code=400, detail="请选择视频文件")
+    if ext not in allowed:
+        ext = ".mp4"
+    filename = f"depth_video_input_{uuid.uuid4().hex[:12]}{ext}"
+    path = output_path_for(filename, "input")
+    total = 0
+    limit = 2 * 1024 * 1024 * 1024
+    try:
+        with open(path, "wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise HTTPException(status_code=413, detail="深度视频输入不能超过 2GB")
+                output.write(chunk)
+    except BaseException:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+    if total <= 0:
+        os.remove(path)
+        raise HTTPException(status_code=400, detail="输入视频为空")
+    url = output_url_for(filename, "input")
+    register_internal_media_object(url, "input", "video", "video-depth-upload")
+    return {"file": {"url": url, "name": original_name, "kind": "video", "mime": file.content_type or "video/mp4"}}
+
+
+@app.post("/api/video-depth/tasks", status_code=202)
+def create_video_depth_task(payload: VideoDepthTaskRequest, request: Request):
+    request_identity(request)
+    source = output_file_from_url(payload.input_url)
+    if not source:
+        raise HTTPException(status_code=400, detail="深度视频输入必须是主应用中的本地视频")
+    try:
+        return VIDEO_DEPTH_TASKS.create(source, os.fspath(OUTPUT_OUTPUT_DIR), media_url_from_path)
+    except VideoDepthUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/video-depth/tasks/{task_id}")
+def get_video_depth_task(task_id: str, request: Request):
+    request_identity(request)
+    task = VIDEO_DEPTH_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="深度视频任务不存在或服务已重启")
+    return task
+
+
     status = DEPTH_MODEL_MANAGER.status()
     if not status.get("ready") and not await asyncio.to_thread(DEPTH_MODEL_MANAGER.verify_installed):
         if DEPTH_AUTO_DOWNLOAD_ENABLED:

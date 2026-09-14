@@ -48,6 +48,7 @@
     const panoramaStates = new WeakMap();
     const poseTasks = new Map();
     const depthMapControlStates = new WeakMap();
+    const depthVideoTasks = new Map();
     const personDepthBindings = new Map();
     let activeDepthMapDialog = null;
     let depthMapSettings = {mode:'person', controls:{...DEFAULT_DEPTH_MAP_CONTROLS}};
@@ -202,6 +203,7 @@
         const type = node?.specialType || node?.type;
         if(type === 'dwpose') return '动作提取';
         if(type === 'depth-map' || type === 'depthMap') return '深度图';
+        if(type === 'depth-video' || type === 'depthVideo') return '深度视频';
         if(type === 'pose-replicate' || type === 'poseReplicate') return '一键复刻';
         if(type === 'relight') return '灯光重塑';
         if(type === 'angle') return '角度调整';
@@ -210,11 +212,11 @@
     function outputItem(node){
         const item = Array.isArray(node?.images) ? node.images.find(img => img?.url) : null;
         if(item?.url) return item;
-        if(node?.outputUrl) return {url:node.outputUrl, name:node.outputName || 'reference.png', kind:'image', natural_w:node.outputWidth || 0, natural_h:node.outputHeight || 0};
+        if(node?.outputUrl) return {url:node.outputUrl, name:node.outputName || 'reference.png', kind:node.outputKind || 'image', natural_w:node.outputWidth || 0, natural_h:node.outputHeight || 0};
         return null;
     }
     function setOutputItem(node, file, options){
-        const item = {...file, kind:'image'};
+        const item = {...file, kind:file?.kind || 'image'};
         if(options.smart){
             node.images = [item];
             node.title = specialTitle(node);
@@ -223,6 +225,7 @@
             node.outputName = item.name || 'reference.png';
             node.outputWidth = item.natural_w || 0;
             node.outputHeight = item.natural_h || 0;
+            node.outputKind = item.kind;
         }
         options.onOutput?.(node, item);
     }
@@ -233,6 +236,7 @@
         delete node.outputName;
         delete node.outputWidth;
         delete node.outputHeight;
+        delete node.outputKind;
         delete node.specialGeneratedSourceSignature;
         delete node.specialGeneratedControlSignature;
         if(hadOutput) options.onOutput?.(node, null);
@@ -450,6 +454,154 @@
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
             <div class="special-output-row"><span>${output?.url ? `${esc(output.name || 'depth-map.png')}${depthMapControlsAreDefault(node.depthMapControls) ? '' : ' · 已调校'}` : `输出：${modeLabel} · 8-bit PNG 相对深度图`}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
         </div>`;
+    }
+
+    function depthVideoInput(node, options){
+        if(node?.depthVideoManualInput?.url) return {...node.depthVideoManualInput, kind:'video'};
+        const connected = options.getInputVideo?.(node);
+        return connected?.url ? {...connected, kind:'video'} : null;
+    }
+
+    function syncDepthVideoInput(node, source){
+        const next = sourceSignature(source);
+        const changed = String(node.depthVideoInputSignature || '') !== next;
+        node.depthVideoInputSignature = next;
+        node.depthVideoInputUrl = source?.url || '';
+        node.depthVideoInputName = source?.name || '';
+        return changed;
+    }
+
+    function clearDepthVideoResult(node, options){
+        clearOutputItem(node, options);
+        node.depthVideoStatus = 'idle';
+        node.depthVideoProgress = 0;
+        node.depthVideoMessage = '';
+        node.depthVideoError = '';
+        delete node.depthVideoTaskId;
+        delete node.depthVideoGeneratedSignature;
+    }
+
+    function depthVideoPlayer(url, label, slot){
+        if(!url) return `<div class="special-empty"><i data-lucide="${slot === 'input' ? 'video' : 'scan-line'}"></i><strong>${slot === 'input' ? '点击上传输入视频' : '等待生成'}</strong><span>${slot === 'input' ? '也支持从左侧端口连接视频' : '输出完整时长的相对深度视频'}</span></div>`;
+        return `<video src="${esc(url)}" preload="metadata" playsinline data-depth-video-media="${slot}"></video><button type="button" class="depth-video-play" data-depth-video-play="${slot}" title="播放${esc(label)}" aria-label="播放${esc(label)}"><i data-lucide="play"></i></button>`;
+    }
+
+    function depthVideoBodyHtml(node){
+        const output = outputItem(node);
+        const inputUrl = node.depthVideoManualInput?.url || node.depthVideoInputUrl || '';
+        const inputName = node.depthVideoManualInput?.name || node.depthVideoInputName || '输入视频';
+        const status = node.depthVideoStatus || (output?.url ? 'done' : 'idle');
+        const progress = Math.max(0, Math.min(100, Number(node.depthVideoProgress) || 0));
+        const statusText = status === 'running' || status === 'queued'
+            ? (node.depthVideoMessage || '正在生成深度视频')
+            : status === 'failed' ? (node.depthVideoError || '深度视频生成失败')
+            : output?.url ? '深度视频已就绪，可从右侧端口连接下游节点'
+            : inputUrl ? '输入视频已就绪，正在准备生成' : '连接或手动上传视频后自动生成深度视频';
+        return `<div class="special-node depth-video-special" data-special-node="depth-video">
+            <input class="special-file-input" type="file" accept="video/*,.mkv,.avi" data-special-file="depth-video" hidden>
+            <div class="depth-video-preview-grid">
+                <div class="depth-video-preview-card ${inputUrl ? 'has-video' : ''}" data-depth-video-input-card role="button" tabindex="0" title="点击上传或替换输入视频">
+                    <span class="depth-map-preview-label">输入视频</span>${depthVideoPlayer(inputUrl, '输入视频', 'input')}
+                    ${node.depthVideoManualInput?.url ? '<span class="depth-map-input-source is-manual">手动优先</span><button type="button" class="depth-map-remove-input" data-depth-video-remove-input title="移除手动输入视频" aria-label="移除手动输入视频"><i data-lucide="trash-2"></i></button>' : inputUrl ? '<span class="depth-map-input-source">连线</span>' : ''}
+                </div>
+                <div class="depth-video-preview-card ${output?.url ? 'has-video' : ''}">
+                    <span class="depth-map-preview-label">深度视频</span>${depthVideoPlayer(output?.url || '', '深度视频', 'output')}
+                    ${status === 'running' || status === 'queued' ? `<div class="depth-video-progress"><span style="width:${progress}%"></span><b>${Math.round(progress)}%</b></div>` : ''}
+                </div>
+            </div>
+            <div class="special-toolbar depth-map-toolbar">
+                <button type="button" data-special-action="upload-depth-video"><i data-lucide="upload"></i><span>导入视频</span></button>
+                <button type="button" data-special-action="retry-depth-video" ${!inputUrl || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
+            </div>
+            <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
+            <div class="special-output-row"><span>${output?.url ? esc(output.name || 'depth-preview.mp4') : '输出：VDA Base · FP16 · Relative Depth'}</span><b>${node.depthVideoWidth && node.depthVideoHeight ? `${node.depthVideoWidth}×${node.depthVideoHeight}` : ''}</b></div>
+        </div>`;
+    }
+
+    async function uploadDepthVideo(file){
+        if(!file || (!String(file.type || '').startsWith('video/') && !/\.(mkv|avi|mov|m4v|mp4|webm)$/i.test(file.name || ''))) throw new Error('请选择视频文件');
+        const form = new FormData();
+        form.append('file', file, file.name || 'video.mp4');
+        const response = await fetch('/api/video-depth/upload', {method:'POST', body:form});
+        if(!response.ok) throw new Error(await responseError(response, '视频上传失败'));
+        const data = await response.json();
+        if(!data.file?.url) throw new Error('上传接口没有返回视频');
+        return {...data.file, kind:'video'};
+    }
+
+    async function pollDepthVideo(node, options, taskId){
+        if(depthVideoTasks.has(taskId)) return depthVideoTasks.get(taskId);
+        const task = (async () => {
+            while(node.depthVideoTaskId === taskId){
+                const response = await fetch(`/api/video-depth/tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
+                if(!response.ok) throw new Error(await responseError(response, '深度视频任务查询失败'));
+                const state = await response.json();
+                node.depthVideoStatus = state.status;
+                node.depthVideoProgress = state.progress || 0;
+                node.depthVideoMessage = state.message || '';
+                if(state.status === 'done'){
+                    const item = {url:state.outputUrl, name:state.outputName || 'depth-preview.mp4', kind:'video', natural_w:state.width || 0, natural_h:state.height || 0};
+                    node.depthVideoWidth = state.width || 0; node.depthVideoHeight = state.height || 0;
+                    node.depthVideoGeneratedSignature = node.depthVideoInputSignature;
+                    setOutputItem(node, item, options); notify(options, node, true); options.toast?.('深度视频已生成'); return item;
+                }
+                if(state.status === 'failed') throw new Error(state.error || state.message || '深度视频生成失败');
+                notify(options, node, true);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            return null;
+        })().catch(error => {
+            if(node.depthVideoTaskId === taskId){ node.depthVideoStatus = 'failed'; node.depthVideoError = error.message || '深度视频生成失败'; notify(options, node, true); }
+            throw error;
+        }).finally(() => depthVideoTasks.delete(taskId));
+        depthVideoTasks.set(taskId, task);
+        return task;
+    }
+
+    async function runDepthVideo(node, options, force=false){
+        const source = depthVideoInput(node, options);
+        const signature = sourceSignature(source);
+        if(!source?.url) return null;
+        if(!force && node.depthVideoGeneratedSignature === signature && outputItem(node)?.url) return outputItem(node);
+        node.depthVideoStatus = 'queued'; node.depthVideoProgress = 0; node.depthVideoError = ''; notify(options, node, true);
+        const response = await fetch('/api/video-depth/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input_url:source.url})});
+        if(!response.ok){ const error = new Error(await responseError(response, '深度视频任务创建失败')); node.depthVideoStatus = 'failed'; node.depthVideoError = error.message; notify(options, node, true); throw error; }
+        const task = await response.json();
+        node.depthVideoTaskId = task.id; node.depthVideoStatus = task.status || 'queued'; notify(options, node, true);
+        return pollDepthVideo(node, options, task.id);
+    }
+
+    function bindDepthVideo(root, node, options={}){
+        if(!root || !node) return;
+        let source = depthVideoInput(node, options);
+        if(syncDepthVideoInput(node, source)){ clearDepthVideoResult(node, options); notify(options, node, true); }
+        const input = root.querySelector('[data-special-file="depth-video"]');
+        const card = root.querySelector('[data-depth-video-input-card]');
+        const choose = event => { if(event?.target?.closest('[data-depth-video-play],[data-depth-video-remove-input]')) return; event?.preventDefault(); event?.stopPropagation(); input?.click(); };
+        card?.addEventListener('click', choose);
+        card?.addEventListener('keydown', event => { if(event.key === 'Enter' || event.key === ' ') choose(event); });
+        root.querySelector('[data-special-action="upload-depth-video"]')?.addEventListener('click', choose);
+        if(input) input.onchange = async () => {
+            try { node.depthVideoManualInput = await uploadDepthVideo(input.files?.[0]); source = depthVideoInput(node, options); syncDepthVideoInput(node, source); clearDepthVideoResult(node, options); notify(options, node, true); runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); }
+            catch(error){ options.toast?.(error.message || '视频导入失败'); } finally { input.value = ''; }
+        };
+        root.querySelector('[data-depth-video-remove-input]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); delete node.depthVideoManualInput; source = depthVideoInput(node, options); syncDepthVideoInput(node, source); clearDepthVideoResult(node, options); notify(options, node, true); if(source?.url) runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); });
+        root.querySelector('[data-special-action="retry-depth-video"]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); });
+        root.querySelectorAll('[data-depth-video-play]').forEach(button => button.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            const video = root.querySelector(`[data-depth-video-media="${button.dataset.depthVideoPlay}"]`);
+            if(!video) return;
+            if(video.paused){ root.querySelectorAll('video').forEach(item => { if(item !== video) item.pause(); }); video.play().catch(() => {}); }
+            else video.pause();
+        }));
+        root.querySelectorAll('video').forEach(video => {
+            const button = root.querySelector(`[data-depth-video-play="${video.dataset.depthVideoMedia}"]`);
+            video.addEventListener('play', () => { button?.classList.add('is-playing'); if(button) button.innerHTML = '<i data-lucide="pause"></i>'; window.lucide?.createIcons?.({nodes:[button]}); });
+            video.addEventListener('pause', () => { button?.classList.remove('is-playing'); if(button) button.innerHTML = '<i data-lucide="play"></i>'; window.lucide?.createIcons?.({nodes:[button]}); });
+            video.addEventListener('ended', () => video.pause());
+        });
+        if(node.depthVideoTaskId && ['queued','running'].includes(node.depthVideoStatus)) pollDepthVideo(node, options, node.depthVideoTaskId).catch(error => options.toast?.(error.message));
+        else if(source?.url && !outputItem(node)?.url && (!node.depthVideoStatus || node.depthVideoStatus === 'idle')) runDepthVideo(node, options).catch(error => options.toast?.(error.message));
     }
 
     function depthMapControlState(node){
@@ -2695,8 +2847,8 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
-        bindPanorama, bindPose, bindDepthMap, bindDirector3d, bindPoseReplicate, bindAngle,
+        panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, depthVideoBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
+        bindPanorama, bindPose, bindDepthMap, bindDepthVideo, bindDirector3d, bindPoseReplicate, bindAngle,
         buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle, generateReferenceDepth,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration,
         refreshDepthMapSettings, activeDepthMapMode

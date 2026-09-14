@@ -4,6 +4,20 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::net::UdpSocket;
 
 const PUBLIC_KEY: &str = include_str!("../distribution-public-key.hex");
+const BASELINE_RELEASE: &str = include_str!("../distribution-baseline.txt");
+
+fn effective_release(applied: &str, baseline: &str) -> String {
+    [applied.trim(), baseline.trim()].into_iter()
+        .filter(|v| v.len() == 14 && v.bytes().all(|b| b.is_ascii_digit()))
+        .max().unwrap_or("").to_string()
+}
+
+fn installed_release(data: &Path) -> String {
+    let applied = fs::read_to_string(hot_update_state_path(data)).ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["version"].as_str().map(str::to_string)).unwrap_or_default();
+    effective_release(&applied, BASELINE_RELEASE)
+}
 const ROOTS: [&str; 3] = ["app/web", "app/backend/canvas-backend", "app/skills"];
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -91,9 +105,7 @@ fn discovered() -> Option<String> {
 pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Manifest, String, String)>, String> {
     if !settings.lan_update_enabled { return Ok(None); }
     let small_agent = build_lan_update_agent();
-    let applied = fs::read_to_string(hot_update_state_path(data)).ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v["version"].as_str().map(str::to_string)).unwrap_or_default();
+    let applied = installed_release(data);
     let current=format!("{} / {}",env!("CARGO_PKG_VERSION"),applied);
     let mut base = settings.lan_update_url.clone();
     let raw = match read_small(&small_agent, &format!("{base}/v1/catalog"), &current) {
@@ -163,6 +175,7 @@ pub(super) fn download(root: &Path, data: &Path, m: &Manifest, raw: &str, base: 
 pub(super) fn pending_valid(data: &Path, p: &PendingUpdate) -> bool {
     let expected = update_dir(data).join("hot").join(&p.version).join("envelope.json");
     p.version.len() == 14 && p.version.bytes().all(|b| b.is_ascii_digit())
+        && p.version > installed_release(data)
         && Path::new(&p.asset_path) == expected && sha256(&expected).is_ok_and(|s| s == p.sha256)
         && fs::read_to_string(&expected).ok().and_then(|s| verify(&s).ok()).is_some_and(|m| m.version == p.version)
 }
@@ -258,6 +271,7 @@ pub(super) fn session(app: &AppHandle, s: &UpdateInstallSession) -> Result<(), S
     let dir = update_dir(data).join("hot").join(&m.version);
     if m.version != s.version || envelope != dir.join("envelope.json") || sha256(envelope)? != s.sha256 { return Err("更新会话不匹配".into()); }
     if version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) { return Err("更新器基线不足".into()); }
+    if m.version <= installed_release(data) { return Err("此热更新不晚于已安装基线".into()); }
     emit_progress(app, 1, 12, "关闭旧版本", "正在等待主程序和后端退出…", "热更新已签名并逐文件校验", false, false);
     wait_for_exit_with_timeout(s.old_pid, Duration::from_secs(120))?;
     emit_progress(app, 2, 35, "应用热更新", "正在备份并替换应用文件…", "用户数据保持在独立目录", false, false);
@@ -373,6 +387,12 @@ pub(super) fn cli(args: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn baseline_prevents_old_updates_on_fresh_or_existing_installs() {
+        assert_eq!(effective_release("", "20260914180000"), "20260914180000");
+        assert_eq!(effective_release("20260914154010", "20260914180000"), "20260914180000");
+        assert_eq!(effective_release("20260915120000", "20260914180000"), "20260915120000");
+        assert_eq!(effective_release("invalid", "20260914180000\n"), "20260914180000");
+    }
     #[test] fn rejects_untrusted_and_escaping_updates() {
         assert!(relative("app/web/../config/x").is_err());
         assert!(relative("app/web/a:stream").is_err());

@@ -124,6 +124,8 @@ if (-not $SkipBackend) {
 }
 
 if (-not $SkipDesktop) {
+    # 全量基线已包含此前源码，阻止新装或覆盖安装后回灌旧热更新。
+    [IO.File]::WriteAllText((Join-Path $projectRoot 'src-tauri\distribution-baseline.txt'), (Get-Date -Format 'yyyyMMddHHmmss'), [Text.UTF8Encoding]::new($false))
     & npm run desktop:host-build
     if ($LASTEXITCODE -ne 0) { throw 'Tauri build failed.' }
 }

@@ -96,6 +96,7 @@ from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
 from canvas_core.depth_inference import DepthInference, DepthUnavailableError
 from canvas_core.person_depth_client import PersonDepthWorkerClient, PersonDepthWorkerError
 from canvas_core.person_depth_components import PersonDepthComponentUnavailable
+from canvas_core.person_depth_lan import PersonDepthLanServer
 from canvas_core.pose_replicate_prompts import (
     POSE_REPLICATE_TEMPLATE_ID,
     PoseReplicatePromptError,
@@ -239,6 +240,7 @@ DEPTH_AUTO_DOWNLOAD_ENABLED = str(os.getenv("CANVAS_DEPTH_AUTO_DOWNLOAD", "1")).
     "0", "false", "no", "off",
 }
 PERSON_DEPTH_WORKER = PersonDepthWorkerClient(PERSON_DEPTH_COMPONENT_MANAGER)
+PERSON_DEPTH_LAN_SERVER = PersonDepthLanServer(PERSON_DEPTH_COMPONENT_MANAGER)
 
 
 def render_dwpose_image(image: Image.Image):
@@ -650,6 +652,13 @@ async def startup_event():
         DWPOSE_MODEL_MANAGER.start_background()
     if DEPTH_AUTO_DOWNLOAD_ENABLED:
         DEPTH_MODEL_MANAGER.start_background()
+    lan_config = read_app_config(APP_PATHS.data_root)
+    PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
+    PERSON_DEPTH_LAN_SERVER.configure(
+        bool(lan_config.get("person_depth_lan_server_enabled")),
+        str(lan_config.get("person_depth_lan_host") or "192.168.0.24"),
+        int(lan_config.get("person_depth_lan_port") or 3011),
+    )
     # 供应商清理、密钥初始化和遗留占位修复都不是服务就绪的必要条件，
     # 与文件扫描一起延后到健康检查之后，避免桌面宿主等待这些磁盘操作。
     # 历史任务恢复可能读取大量持久化记录，同样不阻塞 /api/health 和首屏窗口。
@@ -669,6 +678,7 @@ async def shutdown_startup_maintenance():
         except asyncio.CancelledError:
             pass
     await asyncio.to_thread(PERSON_DEPTH_WORKER.close)
+    await asyncio.to_thread(PERSON_DEPTH_LAN_SERVER.stop)
     task = STARTUP_MAINTENANCE_TASK
     STARTUP_MAINTENANCE_TASK = None
     if task and not task.done():
@@ -2828,6 +2838,10 @@ class AppSettingsUpdateRequest(BaseModel):
     shortcut_bindings: Optional[Dict[str, str]] = None
     canvas_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
     canvas_group_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
+    person_depth_lan_server_enabled: Optional[bool] = None
+    person_depth_lan_host: Optional[str] = None
+    person_depth_lan_port: Optional[int] = Field(default=None, ge=1024, le=65535, strict=True)
+    person_depth_lan_source: Optional[str] = None
 
 
 @app.get("/pair")
@@ -3125,6 +3139,11 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
         "canvas_arrange_spacing": config.get("canvas_arrange_spacing", 56),
         "canvas_group_arrange_spacing": config.get("canvas_group_arrange_spacing", 28),
+        "person_depth_lan_server_enabled": bool(config.get("person_depth_lan_server_enabled")),
+        "person_depth_lan_host": str(config.get("person_depth_lan_host") or "192.168.0.24"),
+        "person_depth_lan_port": int(config.get("person_depth_lan_port") or 3011),
+        "person_depth_lan_source": str(config.get("person_depth_lan_source") or ""),
+        "person_depth_lan_status": PERSON_DEPTH_LAN_SERVER.status(),
         "runtime_mode": RUNTIME_OPTIONS.mode,
     }
 
@@ -3184,10 +3203,33 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             shortcut_bindings=payload.shortcut_bindings,
             canvas_arrange_spacing=payload.canvas_arrange_spacing,
             canvas_group_arrange_spacing=payload.canvas_group_arrange_spacing,
+            person_depth_lan_server_enabled=payload.person_depth_lan_server_enabled,
+            person_depth_lan_host=payload.person_depth_lan_host,
+            person_depth_lan_port=payload.person_depth_lan_port,
+            person_depth_lan_source=payload.person_depth_lan_source,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
+    PERSON_DEPTH_LAN_SERVER.configure(
+        bool(config.get("person_depth_lan_server_enabled")),
+        str(config.get("person_depth_lan_host") or "192.168.0.24"),
+        int(config.get("person_depth_lan_port") or 3011),
+    )
     return app_settings_response(config)
+
+
+@app.get("/api/person-depth/lan/status")
+def person_depth_lan_status(request: Request):
+    require_admin(request)
+    return PERSON_DEPTH_LAN_SERVER.status()
+
+
+@app.post("/api/person-depth/lan/prepare", status_code=202)
+def prepare_person_depth_lan_bundle(request: Request):
+    require_admin(request)
+    Thread(target=PERSON_DEPTH_LAN_SERVER.ensure_manifest, name="person-depth-lan-manifest", daemon=True).start()
+    return PERSON_DEPTH_LAN_SERVER.status()
 
 
 @app.get("/api/app-settings/quick-save")

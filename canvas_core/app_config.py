@@ -27,6 +27,10 @@ DEFAULT_DEPTH_MAP_CONTROLS: dict[str, Any] = {
     "invert": False,
 }
 DEFAULT_SHORTCUT_BINDINGS: dict[str, str] = {}
+DEFAULT_PERSON_DEPTH_LAN_SERVER_ENABLED = False
+DEFAULT_PERSON_DEPTH_LAN_HOST = "192.168.0.24"
+DEFAULT_PERSON_DEPTH_LAN_PORT = 3011
+DEFAULT_PERSON_DEPTH_LAN_SOURCE = "http://192.168.0.24:3011"
 _CONFIG_LOCK = RLock()
 
 
@@ -103,6 +107,10 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
                 "depth_map_mode": DEFAULT_DEPTH_MAP_MODE,
                 "depth_map_controls": DEFAULT_DEPTH_MAP_CONTROLS.copy(),
                 "shortcut_bindings": DEFAULT_SHORTCUT_BINDINGS.copy(),
+                "person_depth_lan_server_enabled": DEFAULT_PERSON_DEPTH_LAN_SERVER_ENABLED,
+                "person_depth_lan_host": DEFAULT_PERSON_DEPTH_LAN_HOST,
+                "person_depth_lan_port": DEFAULT_PERSON_DEPTH_LAN_PORT,
+                "person_depth_lan_source": DEFAULT_PERSON_DEPTH_LAN_SOURCE,
                 "canvas_arrange_spacing": 56,
                 "canvas_group_arrange_spacing": 28,
             }
@@ -126,6 +134,13 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         value["depth_map_mode"] = depth_map_mode if depth_map_mode in DEPTH_MAP_MODES else DEFAULT_DEPTH_MAP_MODE
         value["depth_map_controls"] = _normalize_depth_map_controls(value.get("depth_map_controls"))
         value["shortcut_bindings"] = _normalize_shortcut_bindings(value.get("shortcut_bindings"))
+        value["person_depth_lan_server_enabled"] = bool(value.get("person_depth_lan_server_enabled", False))
+        value["person_depth_lan_host"] = str(value.get("person_depth_lan_host") or DEFAULT_PERSON_DEPTH_LAN_HOST).strip()
+        try:
+            value["person_depth_lan_port"] = int(value.get("person_depth_lan_port") or DEFAULT_PERSON_DEPTH_LAN_PORT)
+        except (TypeError, ValueError):
+            value["person_depth_lan_port"] = DEFAULT_PERSON_DEPTH_LAN_PORT
+        value["person_depth_lan_source"] = str(value.get("person_depth_lan_source") or "").strip().rstrip("/")
         for key, default in (("canvas_arrange_spacing", 56), ("canvas_group_arrange_spacing", 28)):
             try:
                 value[key] = _normalize_canvas_arrange_spacing(value.get(key, default))
@@ -148,8 +163,12 @@ def update_app_settings(
     shortcut_bindings: dict[str, str] | None = None,
     canvas_arrange_spacing: int | None = None,
     canvas_group_arrange_spacing: int | None = None,
+    person_depth_lan_server_enabled: bool | None = None,
+    person_depth_lan_host: str | None = None,
+    person_depth_lan_port: int | None = None,
+    person_depth_lan_source: str | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and depth_map_mode is None and depth_map_controls is None and shortcut_bindings is None and canvas_arrange_spacing is None and canvas_group_arrange_spacing is None:
+    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and depth_map_mode is None and depth_map_controls is None and shortcut_bindings is None and canvas_arrange_spacing is None and canvas_group_arrange_spacing is None and person_depth_lan_server_enabled is None and person_depth_lan_host is None and person_depth_lan_port is None and person_depth_lan_source is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -199,6 +218,23 @@ def update_app_settings(
             value["depth_map_controls"] = _normalize_depth_map_controls(depth_map_controls)
         if shortcut_bindings is not None:
             value["shortcut_bindings"] = _normalize_shortcut_bindings(shortcut_bindings)
+        if person_depth_lan_server_enabled is not None:
+            value["person_depth_lan_server_enabled"] = bool(person_depth_lan_server_enabled)
+        if person_depth_lan_host is not None:
+            host = str(person_depth_lan_host or "").strip()
+            if not host or len(host) > 255:
+                raise ValueError("局域网服务器地址无效")
+            value["person_depth_lan_host"] = host
+        if person_depth_lan_port is not None:
+            port = int(person_depth_lan_port)
+            if not 1024 <= port <= 65535:
+                raise ValueError("局域网服务器端口必须为 1024～65535")
+            value["person_depth_lan_port"] = port
+        if person_depth_lan_source is not None:
+            source = str(person_depth_lan_source or "").strip().rstrip("/")
+            if source and not source.startswith("http://"):
+                raise ValueError("局域网下载地址必须使用 http://")
+            value["person_depth_lan_source"] = source
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
         temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

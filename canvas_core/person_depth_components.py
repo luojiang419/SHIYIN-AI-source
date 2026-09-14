@@ -3,13 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
@@ -104,6 +107,7 @@ class PersonDepthComponentManager:
         self._state_lock = threading.RLock()
         self._ensure_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
+        self._lan_source_url = ""
         self._manifest_error = ""
         try:
             self.manifest = self._normalize_manifest(
@@ -133,6 +137,9 @@ class PersonDepthComponentManager:
         }
         if self.verify_installed(run_smoke=False):
             self._mark_ready(self._current_source_label() or "已安装组件")
+
+    def set_lan_source(self, value: str) -> None:
+        self._lan_source_url = str(value or "").strip().rstrip("/")
 
     @staticmethod
     def _read_manifest(path: Path) -> dict[str, object]:
@@ -346,6 +353,12 @@ class PersonDepthComponentManager:
                 raise
 
     def _download_and_install(self) -> bool:
+        if self._lan_source_url:
+            try:
+                if self._download_lan_files():
+                    return True
+            except Exception as exc:  # noqa: BLE001
+                self._record_attempt("局域网服务器", str(exc) or exc.__class__.__name__)
         proxies = dict(self.proxy_provider() or {})
         attempts: list[tuple[str, str, Optional[Mapping[str, str]]]] = [
             ("domestic", "国内镜像直连", None),
@@ -382,6 +395,67 @@ class PersonDepthComponentManager:
                 errors.append(f"{label}：{message}")
                 self._record_attempt(label, message)
         raise PersonDepthComponentUnavailable("；".join(errors) or "发布清单没有可用下载源")
+
+    def _download_lan_files(self) -> bool:
+        base = self._lan_source_url
+        session = self._new_session(None)
+        try:
+            response = session.get(f"{base}/person-depth/manifest.json", timeout=(3, 10))
+            response.raise_for_status()
+            payload = response.json()
+        finally:
+            session.close()
+        if not isinstance(payload, dict) or str(payload.get("component") or "") != PERSON_DEPTH_COMPONENT:
+            raise PersonDepthComponentUnavailable("局域网清单的组件标识无效")
+        if int(payload.get("protocol_version") or 0) != 1:
+            raise PersonDepthComponentUnavailable("局域网组件传输协议版本不匹配")
+        raw_files = payload.get("files")
+        if not isinstance(raw_files, list) or not raw_files or len(raw_files) > 20000:
+            raise PersonDepthComponentUnavailable("局域网组件清单不完整")
+        files: list[tuple[Path, int, str]] = []
+        for item in raw_files:
+            relative = Path(str(item.get("path") or "").replace("\\", "/")) if isinstance(item, dict) else Path()
+            size = int(item.get("size") or 0) if isinstance(item, dict) else 0
+            digest = str(item.get("sha256") or "").lower() if isinstance(item, dict) else ""
+            if not relative.parts or relative.is_absolute() or ".." in relative.parts or size < 0 or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise PersonDepthComponentUnavailable("局域网组件文件清单无效")
+            files.append((relative, size, digest))
+        total = sum(size for _relative, size, _digest in files)
+        if total <= 0 or total != int(payload.get("total_bytes") or 0):
+            raise PersonDepthComponentUnavailable("局域网组件总大小无效")
+        self.staging_root.mkdir(parents=True, exist_ok=True)
+        staging = self.staging_root / uuid.uuid4().hex
+        staging.mkdir(parents=True, exist_ok=False)
+        self._update_state(
+            state="downloading", source="lan", source_label="局域网服务器",
+            downloaded_bytes=0, total_bytes=total, message=f"正在从 {base} 直接传输高精度人物深度组件", error="",
+        )
+        completed = 0
+        progress_lock = threading.Lock()
+
+        def download_one(entry: tuple[Path, int, str]) -> None:
+            nonlocal completed
+            relative, size, digest = entry
+            target = staging / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            spec = PersonDepthPackageSpec(relative.as_posix(), size, digest, "", "")
+            url = f"{base}/person-depth/files/{urllib.parse.quote(relative.as_posix(), safe='/')}"
+            self._download_package_with_retries(url, target, spec, None, "局域网服务器", 0, total)
+            with progress_lock:
+                completed += size
+                self._update_state(downloaded_bytes=completed, total_bytes=total)
+
+        try:
+            with ThreadPoolExecutor(max_workers=8, thread_name_prefix="person-depth-lan") as pool:
+                futures = [pool.submit(download_one, entry) for entry in files]
+                for future in as_completed(futures):
+                    future.result()
+            self._activate_staging(staging, "lan", "局域网服务器", [])
+            self._record_attempt("局域网服务器")
+            self._mark_ready("局域网服务器")
+            return True
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _check_disk_space(self) -> None:
         self.component_root.mkdir(parents=True, exist_ok=True)
@@ -553,6 +627,20 @@ class PersonDepthComponentManager:
             self._update_state(state="installing", message="正在安装高精度人物深度组件")
             for _spec, archive in archives:
                 self._safe_extract(archive, staging)
+            self._activate_staging(staging, source, source_label, [
+                {"id": spec.package_id, "size": spec.size, "sha256": spec.sha256}
+                for spec, _archive in archives
+            ])
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _activate_staging(
+        self,
+        staging: Path,
+        source: str,
+        source_label: str,
+        packages: list[dict[str, object]],
+    ) -> None:
             self._validate_required_paths(staging)
             atomic_write_json(
                 staging / "component-manifest.json",
@@ -562,10 +650,7 @@ class PersonDepthComponentManager:
                     "source": source,
                     "source_label": source_label,
                     "installed_at": int(time.time() * 1000),
-                    "packages": [
-                        {"id": spec.package_id, "size": spec.size, "sha256": spec.sha256}
-                        for spec, _archive in archives
-                    ],
+                    "packages": packages,
                 },
             )
             self._update_state(state="smoke", message="正在进行高精度人物深度组件小图 smoke 验证")
@@ -584,8 +669,6 @@ class PersonDepthComponentManager:
                     "activated_at": int(time.time() * 1000),
                 },
             )
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
 
     @staticmethod
     def _safe_extract(archive: Path, target: Path) -> None:

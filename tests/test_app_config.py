@@ -156,6 +156,24 @@ class AppConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "必须是数字"):
                 update_app_settings(data_root, depth_map_controls={"contrast": "high"})
 
+    def test_person_depth_lan_settings_are_persisted_and_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            saved = update_app_settings(
+                data_root,
+                person_depth_lan_server_enabled=True,
+                person_depth_lan_host="192.168.0.24",
+                person_depth_lan_port=3011,
+                person_depth_lan_source="http://192.168.0.24:3011/",
+            )
+            self.assertTrue(saved["person_depth_lan_server_enabled"])
+            self.assertEqual(saved["person_depth_lan_source"], "http://192.168.0.24:3011")
+            self.assertEqual(read_app_config(data_root)["person_depth_lan_port"], 3011)
+            with self.assertRaisesRegex(ValueError, "1024"):
+                update_app_settings(data_root, person_depth_lan_port=80)
+            with self.assertRaisesRegex(ValueError, "http://"):
+                update_app_settings(data_root, person_depth_lan_source="https://192.168.0.24:3011")
+
     def test_generated_files_use_persistent_sequence_and_date(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

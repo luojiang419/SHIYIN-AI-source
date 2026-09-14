@@ -24,7 +24,7 @@
     <script src="/static/js/focus-guard.js?v=2026.08.02.ime-focus.1"></script>
     <script src="/static/js/i18n.js?v=2026.07.26.close-prompt.1"></script>
     <link rel="stylesheet" href="/static/css/theme.css?v=2026.07.23.app-settings.2">
-    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.08.arrange-spacing.1">
+    <link rel="stylesheet" href="/static/css/app-settings.css?v=2026.09.14.person-depth-lan.1">
     <link rel="stylesheet" href="/static/css/studio-unified.css?v=2026.08.02.ivory-surfaces.1">
 </head>
 <body>
@@ -200,6 +200,27 @@
             <p id="depthMapModeHint" class="app-settings-note">人物模式只提取画面人物；专业模式提取完整画面的相对深度。进入调参时会自动沿用当前模式。</p>
         </section>
 
+        <section class="app-settings-card" aria-labelledby="personDepthLanTitle">
+            <div class="app-settings-card-heading">
+                <div><p class="eyebrow">局域网分发</p><h2 id="personDepthLanTitle">人物深度组件下载渠道</h2></div>
+                <span id="personDepthLanStatus" class="app-settings-inline-status" role="status"></span>
+            </div>
+            <label class="app-settings-option">
+                <input id="personDepthLanServerEnabled" type="checkbox">
+                <span class="app-settings-option-copy"><strong>将本机作为下载服务器</strong><small>直接传输本机已安装组件文件，供同一局域网内的电脑下载。</small></span>
+            </label>
+            <div class="person-depth-lan-grid">
+                <label><span>服务器地址</span><input id="personDepthLanHost" type="text" value="192.168.0.24" spellcheck="false"></label>
+                <label><span>端口</span><input id="personDepthLanPort" type="number" value="3011" min="1024" max="65535"></label>
+                <button id="savePersonDepthLan" class="secondary-button" type="button">保存设置</button>
+                <button id="preparePersonDepthLan" class="secondary-button" type="button">生成文件清单</button>
+            </div>
+            <label class="person-depth-lan-source"><span>局域网下载地址</span>
+                <input id="personDepthLanSource" type="url" value="http://192.168.0.24:3011" spellcheck="false">
+            </label>
+            <p id="personDepthLanHint" class="app-settings-note">客户端优先使用此地址，连接失败时自动回退到原有公网下载源。</p>
+        </section>
+
         <section class="app-settings-card app-settings-shortcuts-card" aria-labelledby="shortcutSettingsTitle">
             <div class="app-settings-card-heading">
                 <div>
@@ -318,6 +339,6 @@
         </section>
     </main>
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
-    <script src="/static/js/app-settings.js?v=2026.09.06.depth-map-mode.1&state=2026.09.10.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.09.14.person-depth-lan.1&state=2026.09.10.1"></script>
 </body>
 </html>

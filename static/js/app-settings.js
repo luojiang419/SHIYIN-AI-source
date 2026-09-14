@@ -24,6 +24,14 @@
     const depthMapMode = document.getElementById('depthMapMode');
     const depthMapStatus = document.getElementById('depthMapStatus');
     const openDepthMapTuner = document.getElementById('openDepthMapTuner');
+    const personDepthLanServerEnabled = document.getElementById('personDepthLanServerEnabled');
+    const personDepthLanHost = document.getElementById('personDepthLanHost');
+    const personDepthLanPort = document.getElementById('personDepthLanPort');
+    const personDepthLanSource = document.getElementById('personDepthLanSource');
+    const personDepthLanStatus = document.getElementById('personDepthLanStatus');
+    const personDepthLanHint = document.getElementById('personDepthLanHint');
+    const savePersonDepthLan = document.getElementById('savePersonDepthLan');
+    const preparePersonDepthLan = document.getElementById('preparePersonDepthLan');
     const updatePolicy = document.getElementById('updatePolicy');
     const updateNetworkMode = document.getElementById('updateNetworkMode');
     const updateManualProxy = document.getElementById('updateManualProxy');
@@ -602,6 +610,51 @@
             applyDepthMapSettings(data);
             applyTopazSettings(data);
             applyShortcutSettings(data);
+            applyPersonDepthLanSettings(data);
+    }
+
+    function applyPersonDepthLanSettings(data){
+        if(personDepthLanServerEnabled) personDepthLanServerEnabled.checked = Boolean(data.person_depth_lan_server_enabled);
+        if(personDepthLanHost) personDepthLanHost.value = data.person_depth_lan_host || '192.168.0.24';
+        if(personDepthLanPort) personDepthLanPort.value = String(data.person_depth_lan_port || 3011);
+        if(personDepthLanSource) personDepthLanSource.value = data.person_depth_lan_source || '';
+        const state = data.person_depth_lan_status || {};
+        if(personDepthLanStatus) personDepthLanStatus.textContent = state.running ? '服务运行中' : data.person_depth_lan_server_enabled ? '启动失败' : '未启用';
+        if(personDepthLanHint) personDepthLanHint.textContent = state.error
+            ? `服务启动失败：${state.error}`
+            : state.running ? `${state.url} · ${state.manifest_ready ? '文件清单已就绪' : '等待生成文件清单'}` : '客户端优先使用此地址，连接失败时自动回退到原有公网下载源。';
+    }
+
+    async function savePersonDepthLanSettings(){
+        const port = Number(personDepthLanPort?.value || 0);
+        savePersonDepthLan.disabled = true;
+        try {
+            const data = await saveSettings({
+                person_depth_lan_server_enabled:Boolean(personDepthLanServerEnabled?.checked),
+                person_depth_lan_host:String(personDepthLanHost?.value || '').trim(),
+                person_depth_lan_port:port,
+                person_depth_lan_source:String(personDepthLanSource?.value || '').trim(),
+            });
+            applyPersonDepthLanSettings(data);
+            showStatus('局域网下载渠道已保存');
+        } catch(error) {
+            showStatus(`局域网设置保存失败：${error.message}`, true);
+        } finally {
+            savePersonDepthLan.disabled = false;
+        }
+    }
+
+    async function preparePersonDepthLanBundle(){
+        preparePersonDepthLan.disabled = true;
+        if(personDepthLanStatus) personDepthLanStatus.textContent = '正在准备';
+        try {
+            await requestSettings('/api/person-depth/lan/prepare', {method:'POST'});
+            if(personDepthLanHint) personDepthLanHint.textContent = '正在校验本机组件并生成文件清单，完成后局域网客户端即可直接下载。';
+        } catch(error) {
+            if(personDepthLanHint) personDepthLanHint.textContent = `准备失败：${error.message}`;
+        } finally {
+            preparePersonDepthLan.disabled = false;
+        }
     }
 
     async function loadSettings(){
@@ -832,6 +885,8 @@
     });
     depthMapMode?.addEventListener('change', () => saveDepthMapMode(depthMapMode.value));
     openDepthMapTuner?.addEventListener('click', openIntegratedDepthMapTuner);
+    savePersonDepthLan?.addEventListener('click', savePersonDepthLanSettings);
+    preparePersonDepthLan?.addEventListener('click', preparePersonDepthLanBundle);
     chooseQuickSaveDirectory?.addEventListener('click', chooseQuickSaveFolder);
     chooseTopazInstall?.addEventListener('click', chooseTopazDirectory);
     resetTopazInstall?.addEventListener('click', resetTopazDirectory);

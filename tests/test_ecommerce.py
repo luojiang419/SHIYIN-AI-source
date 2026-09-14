@@ -2037,7 +2037,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("data-task-candidate-time", self.javascript)
         self.assertIn("syncCandidateTimer()", self.javascript)
         self.assertIn("const IS_FREE_CREATION = false", self.javascript)
-        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.09.14.batch-depth-adjust.1"', self.index_html)
+        self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.09.14.batch-work-thumbs-desc.1"', self.index_html)
         self.assertNotIn('id="frame-free-creation"', self.index_html)
         self.assertNotIn("switchUI(this, 'free-creation')", self.index_html)
         self.assertIn('/static/js/ecommerce.js?v=2026.09.06.batch-outfit.4', self.html)

@@ -148,6 +148,11 @@ def test_batch_outfit_renders_persistent_pending_work_slots_until_results_arrive
     assert ".ec-batch-work-thumb-pending .ec-spinner" in BATCH_CSS
 
 
+def test_batch_outfit_renders_completed_work_thumbnails_newest_first():
+    assert "group.works.map((entry,index) => ({entry,index})).reverse()" in BATCH_JS
+    assert 'data-batch-work-index="${index}"' in BATCH_JS
+
+
 def test_batch_outfit_settings_surface_has_dedicated_directory():
     for element_id in ("batchOutfitOutputDir", "chooseBatchOutfitOutput", "resetBatchOutfitOutput"):
         assert f'id="{element_id}"' in APP_SETTINGS_HTML

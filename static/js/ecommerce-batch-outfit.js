@@ -531,7 +531,7 @@
                 </div>
                 <button class="ec-batch-work-nav next" type="button" data-batch-work-step="1" aria-label="下一张作品" ${nextDisabled ? 'disabled' : ''}>›</button>`;
         const thumbs = [
-            ...group.works.map((entry,index) => `<button type="button" class="${index === state.selectedImageIndex ? 'active' : ''}" data-batch-work-index="${index}" aria-label="查看作品 ${index + 1}"><img src="${escapeHtml(entry.url)}" alt="作品 ${index + 1}"><span>${index + 1}</span></button>`),
+            ...group.works.map((entry,index) => ({entry,index})).reverse().map(({entry,index}) => `<button type="button" class="${index === state.selectedImageIndex ? 'active' : ''}" data-batch-work-index="${index}" aria-label="查看作品 ${index + 1}"><img src="${escapeHtml(entry.url)}" alt="作品 ${index + 1}"><span>${index + 1}</span></button>`),
             ...group.pendingWorks.map((pending,index) => {
                 const displayIndex = group.works.length + index;
                 return `<button type="button" class="ec-batch-work-thumb-pending ${displayIndex === state.selectedImageIndex ? 'active' : ''}" data-batch-work-index="${displayIndex}" aria-label="作品 ${pending.targetIndex + 1} 生成中"><span class="ec-spinner" aria-hidden="true"></span><small>生成中</small></button>`;

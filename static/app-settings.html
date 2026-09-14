@@ -333,12 +333,19 @@
                 <label class="app-settings-update-proxy">手动代理地址
                     <input id="updateManualProxy" type="url" placeholder="http://127.0.0.1:7890">
                 </label>
+                <label class="app-settings-update-lan-toggle">
+                    <input id="updateLanEnabled" type="checkbox" checked>
+                    <span>优先使用局域网更新</span>
+                </label>
+                <label class="app-settings-update-proxy">局域网更新地址
+                    <input id="updateLanUrl" type="url" value="http://192.168.0.24:3011" spellcheck="false">
+                </label>
                 <button id="checkDesktopUpdate" type="button">检查更新</button>
             </div>
-            <p class="app-settings-note">更新源固定为公开 GitHub Release；下载完成后可选择立即更新或下次启动更新。</p>
+            <p class="app-settings-note">启用后先从局域网下载安装包；连接失败、没有可用版本或校验失败时自动回退 GitHub Release。</p>
         </section>
     </main>
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
-    <script src="/static/js/app-settings.js?v=2026.09.14.person-depth-lan.1&state=2026.09.10.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.09.14.lan-update.1&state=2026.09.10.1"></script>
 </body>
 </html>

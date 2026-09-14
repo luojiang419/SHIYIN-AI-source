@@ -90,6 +90,14 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn('id="updateNetworkMode"', source)
         self.assertIn('value="automatic"', source)
         self.assertIn('value="manualProxy"', source)
+        self.assertIn('id="updateLanEnabled"', source)
+        self.assertIn('id="updateLanUrl"', source)
+        updater = UPDATER.read_text(encoding="utf-8")
+        self.assertIn("lan_update_enabled", updater)
+        self.assertIn("lan_update_url", updater)
+        self.assertIn('format!("{}/update/manifest.json", settings.lan_update_url)', updater)
+        self.assertIn("局域网更新源不可用，回退 GitHub", updater)
+        self.assertIn("局域网更新包下载或校验失败，回退 GitHub", updater)
 
     def test_local_desktop_page_can_invoke_only_update_commands(self):
         build_source = BUILD_RS.read_text(encoding="utf-8")

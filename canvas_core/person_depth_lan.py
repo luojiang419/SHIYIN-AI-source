@@ -55,6 +55,7 @@ class PersonDepthLanServer:
 
     def status(self) -> dict[str, Any]:
         installation = self.manager.installation_path()
+        update = self._latest_update()
         return {
             "running": self._server is not None,
             "host": self._host,
@@ -62,8 +63,70 @@ class PersonDepthLanServer:
             "url": f"http://{self._host}:{self._port}" if self._server else "",
             "component_ready": installation is not None,
             "manifest_ready": self._manifest_path().is_file() if installation else False,
+            "update_ready": update is not None,
+            "update_version": update[0] if update else "",
+            "update_asset": update[1].name if update else "",
             "error": self._error,
         }
+
+    def _update_roots(self) -> tuple[Path, ...]:
+        data_root = self.manager.component_root.parents[2]
+        return data_root / "update" / "downloads", data_root.parent / "dist" / "installer"
+
+    def _latest_update(self) -> Optional[tuple[str, Path, Path]]:
+        candidates: list[tuple[tuple[int, int, int], str, Path, Path]] = []
+        pattern = re.compile(r"^SHIYIN-AI-Setup-(\d+)\.(\d+)\.(\d+)\.exe$")
+        for root in self._update_roots():
+            if not root.is_dir():
+                continue
+            for installer in root.glob("SHIYIN-AI-Setup-*.exe"):
+                match = pattern.fullmatch(installer.name)
+                checksum = installer.with_name(f"{installer.name}.sha256")
+                if not match or not checksum.is_file() or installer.stat().st_size <= 0:
+                    continue
+                raw = checksum.read_text(encoding="utf-8").split()
+                if len(raw) != 2 or raw[1] != installer.name or not re.fullmatch(r"[0-9a-fA-F]{64}", raw[0]):
+                    continue
+                version = ".".join(match.groups())
+                candidates.append((tuple(map(int, match.groups())), version, installer, checksum))
+        if not candidates:
+            return None
+        _parts, version, installer, checksum = max(candidates, key=lambda item: item[0])
+        return version, installer, checksum
+
+    def update_manifest(self) -> dict[str, Any]:
+        update = self._latest_update()
+        if update is None:
+            raise RuntimeError("本机没有可分发的软件更新安装包")
+        version, installer, checksum = update
+        base = f"http://{self._host}:{self._port}/update/files"
+        return {
+            "tag_name": f"v{version}",
+            "draft": False,
+            "prerelease": False,
+            "body": "通过局域网分发的软件更新",
+            "assets": [
+                {
+                    "name": installer.name,
+                    "browser_download_url": f"{base}/{installer.name}",
+                    "size": installer.stat().st_size,
+                    "digest": f"sha256:{checksum.read_text(encoding='utf-8').split()[0].lower()}",
+                },
+                {
+                    "name": checksum.name,
+                    "browser_download_url": f"{base}/{checksum.name}",
+                    "size": checksum.stat().st_size,
+                    "digest": "",
+                },
+            ],
+        }
+
+    def update_file(self, name: str) -> Optional[Path]:
+        update = self._latest_update()
+        if update is None:
+            return None
+        _version, installer, checksum = update
+        return installer if name == installer.name else checksum if name == checksum.name else None
 
     def _manifest_path(self) -> Path:
         return self.manager.component_root / "lan-share" / "manifest.json"
@@ -123,6 +186,18 @@ class PersonDepthLanServer:
                         path = (installation / relative).resolve()
                         path.relative_to(installation.resolve())
                         if not path.is_file():
+                            self.send_error(404)
+                            return
+                        self._file(path)
+                    elif self.path.split("?", 1)[0] == "/update/manifest.json":
+                        self._json(owner.update_manifest())
+                    elif self.path.split("?", 1)[0].startswith("/update/files/"):
+                        name = unquote(urlsplit(self.path).path.removeprefix("/update/files/"))
+                        if Path(name).name != name:
+                            self.send_error(400)
+                            return
+                        path = owner.update_file(name)
+                        if path is None:
                             self.send_error(404)
                             return
                         self._file(path)

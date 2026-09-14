@@ -13,7 +13,7 @@ from canvas_core.person_depth_components import PersonDepthComponentManager
 
 class FakeManager:
     def __init__(self, root: Path) -> None:
-        self.component_root = root / "component"
+        self.component_root = root / "data" / "system" / "components" / "person-depth"
         self.installation = self.component_root / "installations" / "test"
         self.installation.mkdir(parents=True)
         (self.installation / "runtime").mkdir()
@@ -52,6 +52,23 @@ def test_lan_server_serves_manifest_and_byte_ranges():
                 assert response.status == 206
                 assert response.headers["Content-Range"] == "bytes 2-5/10"
                 assert response.read() == b"2345"
+
+            update_root = service._update_roots()[1]
+            update_root.mkdir(parents=True, exist_ok=True)
+            installer = update_root / "SHIYIN-AI-Setup-1.2.3.exe"
+            installer.write_bytes(b"installer-content")
+            digest = hashlib.sha256(installer.read_bytes()).hexdigest()
+            checksum = installer.with_name(f"{installer.name}.sha256")
+            checksum.write_text(f"{digest}  {installer.name}\n", encoding="utf-8")
+            release = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/update/manifest.json").read())
+            assert release["tag_name"] == "v1.2.3"
+            assert release["assets"][0]["digest"] == f"sha256:{digest}"
+            update_request = urllib.request.Request(
+                release["assets"][0]["browser_download_url"], headers={"Range": "bytes=0-8"}
+            )
+            with urllib.request.urlopen(update_request) as response:
+                assert response.status == 206
+                assert response.read() == b"installer"
         finally:
             service.stop()
 

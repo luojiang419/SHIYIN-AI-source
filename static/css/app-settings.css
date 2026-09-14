@@ -81,6 +81,8 @@ button, input, select { font:inherit; }
 .app-settings-update-grid label { display:grid; gap:7px; color:var(--as-soft); font-size:11px; font-weight:750; }
 .app-settings-update-grid select, .app-settings-update-grid input { width:100%; height:42px; padding:0 12px; border:1px solid var(--as-line); border-radius:12px; outline:0; background:var(--as-control); color:var(--as-text); font-size:12px; }
 .app-settings-update-proxy { grid-column:1 / -1; }
+.app-settings-update-grid .app-settings-update-lan-toggle { grid-column:1 / -1; display:flex; align-items:center; gap:9px; }
+.app-settings-update-grid .app-settings-update-lan-toggle input { width:18px; height:18px; padding:0; accent-color:var(--as-accent); }
 .app-settings-update-grid button { justify-self:start; height:42px; padding:0 16px; border:1px solid var(--as-accent); border-radius:12px; background:var(--as-accent); color:var(--as-bg); cursor:pointer; font-size:11px; font-weight:800; }
 .app-settings-update-grid button:disabled { opacity:.55; cursor:wait; }
 #updateSaveStatus { min-height:20px; color:var(--as-success); font-size:11px; }

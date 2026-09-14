@@ -40,10 +40,13 @@ const PROGRESS_DONE: u8 = 100;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 pub struct UpdateSettings {
     pub update_policy: String,
     pub network_mode: String,
     pub manual_proxy_url: String,
+    pub lan_update_enabled: bool,
+    pub lan_update_url: String,
 }
 
 impl Default for UpdateSettings {
@@ -52,6 +55,8 @@ impl Default for UpdateSettings {
             update_policy: AUTOMATIC.into(),
             network_mode: AUTOMATIC_PROXY.into(),
             manual_proxy_url: "http://127.0.0.1:7890".into(),
+            lan_update_enabled: true,
+            lan_update_url: "http://192.168.0.24:3011".into(),
         }
     }
 }
@@ -148,6 +153,18 @@ fn normalize_settings(mut settings: UpdateSettings) -> Result<UpdateSettings, St
     settings.manual_proxy_url = normalize_proxy(&settings.manual_proxy_url);
     if settings.network_mode == MANUAL_PROXY && settings.manual_proxy_url.is_empty() {
         return Err("手动代理地址必须是 http:// 或 https:// URL。".into());
+    }
+    settings.lan_update_url = settings
+        .lan_update_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    if settings.lan_update_enabled
+        && (!settings.lan_update_url.starts_with("http://")
+            || settings.lan_update_url.contains('?')
+            || settings.lan_update_url.contains('#'))
+    {
+        return Err("局域网更新地址必须是有效的 http:// 地址。".into());
     }
     Ok(settings)
 }
@@ -247,6 +264,15 @@ fn build_update_agent(proxy_url: Option<&str>) -> Result<ureq::Agent, String> {
     ))
 }
 
+fn build_lan_update_agent() -> ureq::Agent {
+    ureq::Agent::new_with_config(
+        ureq::Agent::config_builder()
+            .https_only(false)
+            .timeout_global(Some(Duration::from_secs(5)))
+            .build(),
+    )
+}
+
 fn update_agents(settings: &UpdateSettings) -> Result<Vec<ureq::Agent>, String> {
     match settings.network_mode.as_str() {
         DIRECT => Ok(vec![build_update_agent(None)?]),
@@ -297,8 +323,87 @@ fn fetch_text(agent: &ureq::Agent, url: &str) -> Result<String, String> {
     Ok(text)
 }
 
+fn parse_release(raw: &str, agent: ureq::Agent) -> Result<ResolvedRelease, String> {
+    let release: GitHubRelease = serde_json::from_str(raw)
+        .map_err(|_| "更新服务器返回了无效的 Release 数据。".to_string())?;
+    if release.draft || release.prerelease {
+        return Err("最新 Release 不是正式版本。".into());
+    }
+    let version = normalize_version(&release.tag_name)
+        .ok_or_else(|| "Release 标签必须为 vX.Y.Z。".to_string())?;
+    let expected = installer_asset_name(&version);
+    let mut assets = release
+        .assets
+        .iter()
+        .filter(|asset| asset.name == expected)
+        .cloned();
+    let asset = assets
+        .next()
+        .ok_or_else(|| format!("Release 缺少唯一的 EXE 更新包：{expected}"))?;
+    if assets.next().is_some() || asset.size == 0 || asset.browser_download_url.is_empty() {
+        return Err(format!("Release 的 EXE 更新资产无效或重复：{expected}"));
+    }
+    let checksum_name = format!("{expected}.sha256");
+    let mut checksums = release
+        .assets
+        .iter()
+        .filter(|asset| asset.name == checksum_name)
+        .cloned();
+    let checksum = checksums
+        .next()
+        .filter(|asset| {
+            checksums.next().is_none() && asset.size > 0 && !asset.browser_download_url.is_empty()
+        })
+        .ok_or_else(|| format!("Release 缺少唯一的校验文件：{checksum_name}"))?;
+    Ok(ResolvedRelease {
+        version,
+        asset,
+        checksum,
+        notes: release.body,
+        agent,
+    })
+}
+
 fn resolve_release(data: &Path, settings: &UpdateSettings) -> Result<ResolvedRelease, String> {
     let mut last_error = None;
+    let mut lan_release = None;
+    if settings.lan_update_enabled {
+        let agent = build_lan_update_agent();
+        let url = format!("{}/update/manifest.json", settings.lan_update_url);
+        let asset_prefix = format!("{}/update/files/", settings.lan_update_url);
+        match fetch_text(&agent, &url)
+            .and_then(|raw| parse_release(&raw, agent.clone()))
+            .and_then(|release| {
+                if !release
+                    .asset
+                    .browser_download_url
+                    .starts_with(&asset_prefix)
+                    || !release
+                        .checksum
+                        .browser_download_url
+                        .starts_with(&asset_prefix)
+                {
+                    return Err("局域网更新清单包含站外下载地址。".into());
+                }
+                Ok(release)
+            }) {
+            Ok(release) if version_is_newer(&release.version, env!("CARGO_PKG_VERSION")) => {
+                log(
+                    data,
+                    &format!(
+                        "发现局域网更新 v{}：{}",
+                        release.version, settings.lan_update_url
+                    ),
+                );
+                return Ok(release);
+            }
+            Ok(release) => lan_release = Some(release),
+            Err(error) => {
+                log(data, &format!("局域网更新源不可用，回退 GitHub：{error}"));
+                last_error = Some(error);
+            }
+        }
+    }
     for agent in update_agents(settings)? {
         let raw = match fetch_text(&agent, RELEASE_API_URL) {
             Ok(raw) => raw,
@@ -307,46 +412,10 @@ fn resolve_release(data: &Path, settings: &UpdateSettings) -> Result<ResolvedRel
                 continue;
             }
         };
-        let release: GitHubRelease = serde_json::from_str(&raw)
-            .map_err(|_| "更新服务器返回了无效的 Release 数据。".to_string())?;
-        if release.draft || release.prerelease {
-            return Err("最新 Release 不是正式版本。".into());
-        }
-        let version = normalize_version(&release.tag_name)
-            .ok_or_else(|| "Release 标签必须为 vX.Y.Z。".to_string())?;
-        let expected = installer_asset_name(&version);
-        let mut assets = release
-            .assets
-            .iter()
-            .filter(|asset| asset.name == expected)
-            .cloned();
-        let asset = assets
-            .next()
-            .ok_or_else(|| format!("Release 缺少唯一的 EXE 更新包：{expected}"))?;
-        if assets.next().is_some() || asset.size == 0 || asset.browser_download_url.is_empty() {
-            return Err(format!("Release 的 EXE 更新资产无效或重复：{expected}"));
-        }
-        let checksum_name = format!("{expected}.sha256");
-        let mut checksums = release
-            .assets
-            .iter()
-            .filter(|asset| asset.name == checksum_name)
-            .cloned();
-        let checksum = checksums
-            .next()
-            .filter(|asset| {
-                checksums.next().is_none()
-                    && asset.size > 0
-                    && !asset.browser_download_url.is_empty()
-            })
-            .ok_or_else(|| format!("Release 缺少唯一的校验文件：{checksum_name}"))?;
-        return Ok(ResolvedRelease {
-            version,
-            asset,
-            checksum,
-            notes: release.body,
-            agent,
-        });
+        return parse_release(&raw, agent);
+    }
+    if let Some(release) = lan_release {
+        return Ok(release);
     }
     if let Some(error) = last_error {
         log(data, &format!("更新服务器连接失败：{error}"));
@@ -552,12 +621,30 @@ pub async fn download_update(state: State<'_, DesktopState>) -> Result<UpdateInf
             if settings.update_policy == DISABLED {
                 return Err("自动更新已在设置中关闭。".into());
             }
-            let release = resolve_release(&data_root, &settings)?;
+            let mut release = resolve_release(&data_root, &settings)?;
             let available = version_is_newer(&release.version, env!("CARGO_PKG_VERSION"));
             if available {
-                download_release(&data_root, &release)?;
+                if let Err(error) = download_release(&data_root, &release) {
+                    let lan_prefix = format!("{}/update/files/", settings.lan_update_url);
+                    if !settings.lan_update_enabled
+                        || !release.asset.browser_download_url.starts_with(&lan_prefix)
+                    {
+                        return Err(error);
+                    }
+                    log(
+                        &data_root,
+                        &format!("局域网更新包下载或校验失败，回退 GitHub：{error}"),
+                    );
+                    let mut github_settings = settings.clone();
+                    github_settings.lan_update_enabled = false;
+                    release = resolve_release(&data_root, &github_settings)?;
+                    if version_is_newer(&release.version, env!("CARGO_PKG_VERSION")) {
+                        download_release(&data_root, &release)?;
+                    }
+                }
             }
-            Ok(info(&release, available))
+            let downloaded = version_is_newer(&release.version, env!("CARGO_PKG_VERSION"));
+            Ok(info(&release, downloaded))
         })();
         release_lock(lock);
         if let Err(error) = &result {
@@ -1212,10 +1299,23 @@ mod tests {
                 assert!(normalize_settings(UpdateSettings {
                     update_policy: policy.into(),
                     network_mode: network.into(),
-                    manual_proxy_url: "127.0.0.1:7890".into()
+                    manual_proxy_url: "127.0.0.1:7890".into(),
+                    ..UpdateSettings::default()
                 })
                 .is_ok());
             }
         }
+    }
+    #[test]
+    fn old_settings_gain_lan_update_defaults_and_invalid_urls_are_rejected() {
+        let old = r#"{"updatePolicy":"manual","networkMode":"direct","manualProxyUrl":""}"#;
+        let settings: UpdateSettings = serde_json::from_str(old).unwrap();
+        assert!(settings.lan_update_enabled);
+        assert_eq!(settings.lan_update_url, "http://192.168.0.24:3011");
+        assert!(normalize_settings(UpdateSettings {
+            lan_update_url: "https://example.com".into(),
+            ..UpdateSettings::default()
+        })
+        .is_err());
     }
 }

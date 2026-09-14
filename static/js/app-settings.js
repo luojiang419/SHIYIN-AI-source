@@ -35,6 +35,8 @@
     const updatePolicy = document.getElementById('updatePolicy');
     const updateNetworkMode = document.getElementById('updateNetworkMode');
     const updateManualProxy = document.getElementById('updateManualProxy');
+    const updateLanEnabled = document.getElementById('updateLanEnabled');
+    const updateLanUrl = document.getElementById('updateLanUrl');
     const updateSaveStatus = document.getElementById('updateSaveStatus');
     const checkDesktopUpdate = document.getElementById('checkDesktopUpdate');
     const storageStatus = document.getElementById('storageStatus');
@@ -373,6 +375,9 @@
         updatePolicy.value = settings.updatePolicy || 'automatic';
         updateNetworkMode.value = settings.networkMode || 'automaticProxy';
         updateManualProxy.value = settings.manualProxyUrl || 'http://127.0.0.1:7890';
+        updateLanEnabled.checked = settings.lanUpdateEnabled !== false;
+        updateLanUrl.value = settings.lanUpdateUrl || 'http://192.168.0.24:3011';
+        updateLanUrl.disabled = !updateLanEnabled.checked;
         updateManualProxy.disabled = updateNetworkMode.value !== 'manualProxy';
         checkDesktopUpdate.disabled = updatePolicy.value === 'disabled';
     }
@@ -380,14 +385,14 @@
     async function loadUpdateSettings(){
         const valid=pageSession?.guard() || (()=>true);
         try { const response=await desktopRequest('desktop-update-settings:get'); if(valid()) applyUpdateSettings(response.settings); }
-        catch(error) { showUpdateStatus(error.message, true); [updatePolicy, updateNetworkMode, updateManualProxy, checkDesktopUpdate].forEach(item => { if(item) item.disabled = true; }); }
+        catch(error) { showUpdateStatus(error.message, true); [updatePolicy, updateNetworkMode, updateManualProxy, updateLanEnabled, updateLanUrl, checkDesktopUpdate].forEach(item => { if(item) item.disabled = true; }); }
     }
 
     async function saveUpdateSettings(){
         const valid=pageSession?.guard() || (()=>true);
         try {
             showUpdateStatus('保存中…');
-            const response = await desktopRequest('desktop-update-settings:save', {settings:{updatePolicy:updatePolicy.value, networkMode:updateNetworkMode.value, manualProxyUrl:updateManualProxy.value}});
+            const response = await desktopRequest('desktop-update-settings:save', {settings:{updatePolicy:updatePolicy.value, networkMode:updateNetworkMode.value, manualProxyUrl:updateManualProxy.value, lanUpdateEnabled:updateLanEnabled.checked, lanUpdateUrl:updateLanUrl.value}});
             if(valid()) applyUpdateSettings(response.settings);
             pageSession?.checkpoint();
             showUpdateStatus('已保存');
@@ -865,6 +870,8 @@
     updatePolicy?.addEventListener('change', saveUpdateSettings);
     updateNetworkMode?.addEventListener('change', () => { updateManualProxy.disabled = updateNetworkMode.value !== 'manualProxy'; saveUpdateSettings(); });
     updateManualProxy?.addEventListener('change', saveUpdateSettings);
+    updateLanEnabled?.addEventListener('change', () => { updateLanUrl.disabled = !updateLanEnabled.checked; saveUpdateSettings(); });
+    updateLanUrl?.addEventListener('change', saveUpdateSettings);
     checkDesktopUpdate?.addEventListener('click', async () => {
         checkDesktopUpdate.disabled = true;
         try { await desktopRequest('desktop-update:check'); } catch(error) { showUpdateStatus(error.message, true); } finally { checkDesktopUpdate.disabled = false; }

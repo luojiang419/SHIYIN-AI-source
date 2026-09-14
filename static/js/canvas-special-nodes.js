@@ -445,6 +445,7 @@
                 <button type="button" data-special-action="upload-depth-map"><i data-lucide="upload"></i><span>导入图片</span></button>
                 <button type="button" data-special-action="retry-depth-map" ${!inputUrl || status === 'running' || !depthStatus?.ready ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
                 <button type="button" data-special-action="open-depth-controls" ${!output?.url || status === 'running' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>高级控制</span></button>
+                <button type="button" data-special-action="export-depth-map" ${!output?.url || status === 'running' ? 'disabled' : ''}><i data-lucide="external-link"></i><span>导出深度图</span></button>
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
             <div class="special-output-row"><span>${output?.url ? `${esc(output.name || 'depth-map.png')}${depthMapControlsAreDefault(node.depthMapControls) ? '' : ' · 已调校'}` : `输出：${modeLabel} · 8-bit PNG 相对深度图`}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
@@ -2166,6 +2167,17 @@
         });
         root.querySelector('[data-special-action="open-depth-controls"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation(); openDepthMapControls(node, options, event.currentTarget);
+        });
+        root.querySelector('[data-special-action="export-depth-map"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            const output = outputItem(node);
+            if(!output?.url){ options.toast?.('请先生成深度图'); return; }
+            const outputNode = options.createOutputNode?.(node, {...output, kind:'image'});
+            if(!outputNode){ options.toast?.('深度图输出节点创建失败'); return; }
+            outputNode.title = '深度图输出';
+            node.depthMapExportNodeId = outputNode.id || node.depthMapExportNodeId || '';
+            notify(options, node, true);
+            options.toast?.('已创建深度图输出节点');
         });
         root.querySelector('[data-special-action="install-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation(); openPersonDepthDialog(options, false);

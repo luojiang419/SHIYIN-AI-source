@@ -144,7 +144,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("一键复刻", page)
             self.assertIn("/static/css/pose-replicate-node.css?v=2026.09.05.pose-replicate-batch.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.14.depth-export.1", page)
             self.assertIn("feature=pose-replicate-v3.5", page)
             self.assertIn("feature=pose-replicate-batch.1", page)
             self.assertIn("feature=pose-replicate-auto-ratio.1", page)
@@ -562,8 +562,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         for page in (self.classic_html, self.smart_html):
             self.assertIn("深度图", page)
             self.assertIn("feature=depth-map-node.1", page)
-            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.05.pose-replicate-batch.1", page)
-            self.assertIn("/static/css/canvas-special-nodes.css?v=2026.09.05.depth-manual-input.1", page)
+            self.assertIn("/static/js/canvas-special-nodes.js?v=2026.09.14.depth-export.1", page)
+            self.assertIn("/static/css/canvas-special-nodes.css?v=2026.09.14.depth-export.1", page)
 
         for marker in (
             "function depthMapBodyHtml(node)",
@@ -581,6 +581,11 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "已手动添加输入图片，连线输入暂时忽略",
             "已移除手动输入图片，恢复使用连线输入",
             "data-special-action=\"open-depth-controls\"",
+            "data-special-action=\"export-depth-map\"",
+            "options.createOutputNode?.(node, {...output, kind:'image'})",
+            "outputNode.title = '深度图输出'",
+            "node.depthMapExportNodeId = outputNode.id",
+            "已创建深度图输出节点",
             "DEFAULT_DEPTH_MAP_CONTROLS",
             "DEPTH_MAP_CONTROL_PRESETS",
             "function openDepthMapControls(node, options, trigger=null)",
@@ -669,6 +674,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn(".depth-map-control-previews", depth_styles)
         self.assertIn(".depth-map-control-range", depth_styles)
         self.assertIn(".depth-map-control-toggle", depth_styles)
+        self.assertIn('[data-special-action="export-depth-map"]{margin-left:auto}', depth_styles)
 
     def test_pose_replicate_new_defaults_and_legacy_mode_are_explicit(self):
         for source in (self.classic, self.smart):

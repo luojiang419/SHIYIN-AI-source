@@ -23,24 +23,36 @@
         modal.className = 'studio-modal';
         modal.innerHTML = `
             <div class="studio-modal-panel" role="dialog" aria-modal="true" aria-label="更新已下载完成">
-                <div class="studio-modal-head"><div><div class="studio-modal-kicker">SHIYIN AI</div><h2 class="studio-modal-title">更新已下载完成</h2></div><button class="studio-modal-close" type="button" aria-label="关闭">×</button></div>
+                <div class="studio-modal-head"><div><div class="studio-modal-kicker">SHIYIN AI</div><h2 class="studio-modal-title">发现新更新</h2></div><button class="studio-modal-close" type="button" aria-label="关闭">×</button></div>
                 <div class="studio-modal-body"><p class="studio-modal-copy">新版本 ${version} 已准备好。现在更新会关闭并重启软件；也可以安排到下次启动时更新。</p><div class="update-notes-box"><div class="update-notes-head"><strong>更新说明</strong><span class="update-notes-version">${version}</span></div><p class="update-notes-empty"></p></div></div>
                 <div class="studio-modal-actions"><button class="studio-modal-btn" type="button" data-action="defer">下次启动更新</button><button class="studio-modal-btn primary" type="button" data-action="apply">立即更新</button></div>
             </div>`;
         modal.querySelector('.update-notes-empty').textContent = notes;
+        modal.querySelector('.studio-modal-title').textContent = info.downloaded ? '更新已下载完成' : info.kind === 'hot' ? '发现局域网热更新' : '发现软件更新';
+        modal.querySelector('.studio-modal-copy').textContent = `${info.kind === 'hot' ? '热更新' : '新版本'} ${version} · ${(Number(info.assetSize || 0) / 1048576).toFixed(1)} MB。点击立即更新后下载并验证，完成后自动退出、安装并重新启动。请先保存正在编辑的内容。`;
+        modal.querySelector('[data-action="defer"]').textContent = info.downloaded ? '下次启动更新' : '稍后提醒';
         modal.querySelector('.studio-modal-close').addEventListener('click', closeModal);
         modal.querySelector('[data-action="defer"]').addEventListener('click', async () => {
             try {
-                await invoke('defer_downloaded_update');
+                if (info.downloaded) await invoke('defer_downloaded_update');
                 closeModal();
-                alert(`已安排在下次启动时更新到 ${version}。`);
+                if (info.downloaded) alert(`已安排在下次启动时更新到 ${version}。`);
             } catch (error) { alert(`安排更新失败：${error.message || error}`); }
         });
         modal.querySelector('[data-action="apply"]').addEventListener('click', async event => {
             const button = event.currentTarget;
             button.disabled = true;
             button.textContent = '正在启动更新器…';
-            try { await invoke('apply_downloaded_update'); } catch (error) { button.disabled = false; button.textContent = '立即更新'; alert(`启动更新失败：${error.message || error}`); }
+            try {
+                if (!info.downloaded) {
+                    button.textContent = '正在下载并验证更新…';
+                    modal.querySelector('.studio-modal-copy').textContent = '正在从局域网下载变更文件并验证签名，完成后将自动重启。中断下载后可重试并续传。';
+                    await invoke('download_update');
+                    info.downloaded = true;
+                }
+                button.textContent = '正在启动独立更新器…';
+                await invoke('apply_downloaded_update');
+            } catch (error) { button.disabled = false; button.textContent = '重试更新'; alert(`更新失败：${error.message || error}`); }
         });
         document.body.append(modal);
         activeModal = modal;
@@ -76,10 +88,8 @@
                 if (options.manual) showStatusModal('当前已是最新版本', `当前版本 v${result.currentVersion} 已是最新版本。`);
                 return result;
             }
-            if (button) button.textContent = '正在下载…';
-            const downloaded = result.downloaded ? result : await invoke('download_update');
-            showModal(downloaded);
-            return downloaded;
+            showModal(result);
+            return result;
         } catch (error) {
             if (options.manual) showStatusModal('检查更新失败', String(error?.message || error || '未知错误'));
             throw error;
@@ -145,6 +155,12 @@
             const settings = await invoke('get_update_settings');
             if (settings.updatePolicy === 'automatic') {
                 setTimeout(() => checkAndDownload().catch(() => {}), 1200);
+                setInterval(async () => {
+                    if (activeModal || document.hidden) return;
+                    try {
+                        if ((await invoke('get_update_settings')).updatePolicy === 'automatic') await checkAndDownload();
+                    } catch (_) {}
+                }, 60000);
             }
         } catch (_) {
             // 浏览器模式不加载桌面更新器，不影响正常使用。

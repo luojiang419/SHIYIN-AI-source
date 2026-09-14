@@ -1,10 +1,13 @@
 name: Build and publish Windows release
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      full_build:
+        description: '用户已明确要求全量编译并发布'
+        type: boolean
+        required: true
+        default: false
 
 concurrency:
   group: shiyin-ai-production-release
@@ -19,6 +22,7 @@ env:
 
 jobs:
   release:
+    if: ${{ inputs.full_build == true }}
     name: Test, build, verify, and publish
     runs-on: windows-latest
     timeout-minutes: 90

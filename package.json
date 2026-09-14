@@ -6,12 +6,14 @@
     "css:build": "node ./node_modules/tailwindcss/lib/cli.js -c tailwind.config.cjs -i ./static/css/tailwind-input.css -o ./static/vendor/css/tailwind.generated.css --minify",
     "desktop:dev": "npm run css:build && tauri dev",
     "desktop:host-build": "npm run css:build && tauri build --no-bundle",
-    "desktop:build": "npm run installer:build",
+    "desktop:build": "npm run update:publish",
     "original:installer": "powershell -ExecutionPolicy Bypass -File tools/build-original-installer.ps1",
     "installer:build": "powershell -ExecutionPolicy Bypass -File tools/build-installer.ps1",
     "installer:release": "powershell -ExecutionPolicy Bypass -File tools/release-installer.ps1",
     "release:publish": "powershell -ExecutionPolicy Bypass -File tools/release-installer.ps1",
-    "version:patch": "powershell -ExecutionPolicy Bypass -File tools/increment-version.ps1"
+    "version:patch": "powershell -ExecutionPolicy Bypass -File tools/increment-version.ps1",
+    "update:publish": "powershell -ExecutionPolicy Bypass -File tools/publish-lan-hot-update.ps1",
+    "distribution:build": "powershell -ExecutionPolicy Bypass -File tools/build-distribution-center.ps1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4",

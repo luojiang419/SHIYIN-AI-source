@@ -202,22 +202,14 @@
 
         <section class="app-settings-card" aria-labelledby="personDepthLanTitle">
             <div class="app-settings-card-heading">
-                <div><p class="eyebrow">局域网分发</p><h2 id="personDepthLanTitle">人物深度组件下载渠道</h2></div>
+                <div><p class="eyebrow">局域网分发</p><h2 id="personDepthLanTitle">局域网更新与组件下载</h2></div>
                 <span id="personDepthLanStatus" class="app-settings-inline-status" role="status"></span>
             </div>
-            <label class="app-settings-option">
-                <input id="personDepthLanServerEnabled" type="checkbox">
-                <span class="app-settings-option-copy"><strong>将本机作为下载服务器</strong><small>直接传输本机已安装组件文件，供同一局域网内的电脑下载。</small></span>
-            </label>
-            <div class="person-depth-lan-grid">
-                <label><span>服务器地址</span><input id="personDepthLanHost" type="text" value="192.168.0.24" spellcheck="false"></label>
-                <label><span>端口</span><input id="personDepthLanPort" type="number" value="3011" min="1024" max="65535"></label>
-                <button id="savePersonDepthLan" class="secondary-button" type="button">保存设置</button>
-                <button id="preparePersonDepthLan" class="secondary-button" type="button">生成文件清单</button>
-            </div>
-            <label class="person-depth-lan-source"><span>局域网下载地址</span>
+            <p class="app-settings-note">此电脑作为客户端连接独立分发中心，下载应用更新和深度模型。</p>
+            <label class="person-depth-lan-source"><span>分发中心下载地址（已内置）</span>
                 <input id="personDepthLanSource" type="url" value="http://192.168.0.24:3011" spellcheck="false">
             </label>
+            <button id="savePersonDepthLan" type="button">保存下载地址</button>
             <p id="personDepthLanHint" class="app-settings-note">客户端优先使用此地址，连接失败时自动回退到原有公网下载源。</p>
         </section>
 
@@ -346,6 +338,6 @@
         </section>
     </main>
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
-    <script src="/static/js/app-settings.js?v=2026.09.14.lan-update.1&state=2026.09.10.1"></script>
+    <script src="/static/js/app-settings.js?v=2026.09.14.lan-hot-update.1&state=2026.09.10.1"></script>
 </body>
 </html>

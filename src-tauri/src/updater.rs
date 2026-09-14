@@ -3,6 +3,7 @@ use rfd::{MessageButtons, MessageDialog, MessageLevel};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
@@ -16,6 +17,20 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
 use uuid::Uuid;
+
+#[path = "hot_updater.rs"]
+mod hot;
+
+fn full_kind() -> String { "full".into() }
+pub fn mark_hot_ready(data: &Path) { hot::mark_ready(data); }
+pub fn recover_hot_update() {
+    if let Ok(root)=discover_portable_root() {
+        if let Err(e)=hot::recover(&root,&root.join("data")) {
+            MessageDialog::new().set_title("热更新恢复失败").set_description(&e).show();
+            std::process::exit(1);
+        }
+    }
+}
 
 const RELEASE_API_URL: &str = "https://api.github.com/repos/luojiang419/SHIYIN-AI/releases/latest";
 const INSTALLER_PREFIX: &str = "SHIYIN-AI-Setup-";
@@ -86,6 +101,7 @@ struct GitHubAsset {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo {
+    pub kind: String,
     pub current_version: String,
     pub latest_version: String,
     pub available: bool,
@@ -99,6 +115,8 @@ pub struct UpdateInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingUpdate {
+    #[serde(default = "full_kind")]
+    kind: String,
     version: String,
     asset_name: String,
     asset_path: String,
@@ -214,6 +232,93 @@ fn save_pending(data: &Path, pending: &PendingUpdate) -> Result<(), String> {
 
 fn clear_pending(data: &Path) {
     let _ = fs::remove_file(pending_path(data));
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct HotUpdateFile {
+    path: String,
+    size: u64,
+    sha256: String,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct HotUpdateManifest {
+    protocol_version: u8,
+    version: String,
+    min_desktop_version: String,
+    #[serde(default)]
+    prune_roots: Vec<String>,
+    files: Vec<HotUpdateFile>,
+}
+
+fn hot_update_state_path(data: &Path) -> PathBuf {
+    update_dir(data).join("hot").join("applied.json")
+}
+
+#[cfg(test)]
+fn hot_relative_path(value: &str) -> Result<PathBuf, String> {
+    if value.is_empty() || value.contains('\\') || value.contains(':') || value.starts_with('/') {
+        return Err("热更新文件路径无效。".into());
+    }
+    let parts: Vec<&str> = value.split('/').collect();
+    if parts
+        .iter()
+        .any(|part| part.is_empty() || *part == "." || *part == "..")
+    {
+        return Err("热更新文件路径包含非法目录。".into());
+    }
+    let allowed = value.starts_with("app/web/")
+        || value.starts_with("app/backend/canvas-backend/")
+        || value.starts_with("app/skills/");
+    if !allowed {
+        return Err(format!("热更新文件不在允许目录：{value}"));
+    }
+    Ok(parts.iter().collect())
+}
+
+#[cfg(test)]
+fn validate_hot_manifest(manifest: &HotUpdateManifest) -> Result<(), String> {
+    if manifest.protocol_version != 1
+        || manifest.version.len() != 14
+        || !manifest.version.chars().all(|value| value.is_ascii_digit())
+        || normalize_version(&manifest.min_desktop_version).is_none()
+        || manifest.files.is_empty()
+        || manifest.files.len() > 20_000
+    {
+        return Err("局域网热更新清单格式无效。".into());
+    }
+    let mut paths = HashSet::new();
+    for file in &manifest.files {
+        hot_relative_path(&file.path)?;
+        if file.size == 0
+            || file.sha256.len() != 64
+            || !file.sha256.chars().all(|value| value.is_ascii_hexdigit())
+            || !paths.insert(file.path.as_str())
+        {
+            return Err(format!("局域网热更新文件条目无效：{}", file.path));
+        }
+    }
+    for root in &manifest.prune_roots {
+        let probe = format!("{}/placeholder", root.trim_end_matches('/'));
+        hot_relative_path(&probe)?;
+    }
+    Ok(())
+}
+
+fn collect_hot_files(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        if path.is_dir() {
+            collect_hot_files(&path, files)?;
+        } else if path.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn normalize_version(value: &str) -> Option<String> {
@@ -423,6 +528,16 @@ fn resolve_release(data: &Path, settings: &UpdateSettings) -> Result<ResolvedRel
     Err("无法连接更新服务器。请检查网络或代理设置后重试。".into())
 }
 
+fn published_lan_full(settings: &UpdateSettings) -> Result<Option<ResolvedRelease>, String> {
+    let agent=build_lan_update_agent();
+    let url=format!("{}/update/manifest.json",settings.lan_update_url);
+    let raw=match fetch_text(&agent,&url){Ok(raw)=>raw,Err(_)=>return Ok(None)};
+    let release=parse_release(&raw,agent)?;
+    let prefix=format!("{}/update/files/",settings.lan_update_url);
+    if !release.asset.browser_download_url.starts_with(&prefix) || !release.checksum.browser_download_url.starts_with(&prefix){return Err("局域网全量包地址越界".into());}
+    Ok(Some(release))
+}
+
 fn sha256(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| format!("无法读取更新文件：{e}"))?;
     let mut hash = Sha256::new();
@@ -450,6 +565,7 @@ fn checksum_value(raw: &str, expected_name: &str) -> Result<String, String> {
 }
 
 fn pending_valid(data: &Path, pending: &PendingUpdate) -> bool {
+    if pending.kind == "hot" { return hot::pending_valid(data, pending); }
     let path = Path::new(&pending.asset_path);
     path.is_file()
         && path.file_name().and_then(|name| name.to_str()) == Some(pending.asset_name.as_str())
@@ -468,6 +584,7 @@ fn pending_valid(data: &Path, pending: &PendingUpdate) -> bool {
 
 fn info(release: &ResolvedRelease, downloaded: bool) -> UpdateInfo {
     UpdateInfo {
+        kind: "full".into(),
         current_version: env!("CARGO_PKG_VERSION").into(),
         latest_version: release.version.clone(),
         available: version_is_newer(&release.version, env!("CARGO_PKG_VERSION")),
@@ -541,6 +658,7 @@ fn download_release(data: &Path, release: &ResolvedRelease) -> Result<(), String
     save_pending(
         data,
         &PendingUpdate {
+            kind: "full".into(),
             version: release.version.clone(),
             asset_name: release.asset.name.clone(),
             asset_path: destination.display().to_string(),
@@ -592,6 +710,18 @@ pub async fn check_for_update(state: State<'_, DesktopState>) -> Result<UpdateIn
             if settings.update_policy == DISABLED {
                 return Err("自动更新已在设置中关闭。".into());
             }
+            if let Some((manifest, _, _)) = hot::check(&data_root, &settings)? {
+                let downloaded = load_pending(&data_root).is_some_and(|p| p.kind == "hot" && p.version == manifest.version && hot::pending_valid(&data_root, &p));
+                return Ok(hot::information(&manifest, downloaded));
+            }
+            // 局域网中心是正式更新源；没有发布时不悄悄升级到 GitHub 全量包。
+            if settings.lan_update_enabled {
+                if let Some(release)=published_lan_full(&settings)? {
+                    let downloaded=load_pending(&data_root).is_some_and(|p|p.kind=="full"&&p.version==release.version&&pending_valid(&data_root,&p));
+                    return Ok(info(&release,downloaded));
+                }
+                return Ok(UpdateInfo { kind: "hot".into(), current_version: env!("CARGO_PKG_VERSION").into(), latest_version: env!("CARGO_PKG_VERSION").into(), available: false, downloaded: false, asset_name: String::new(), asset_size: 0, release_notes: String::new(), message: "暂无新的局域网热更新".into() });
+            }
             let release = resolve_release(&data_root, &settings)?;
             let downloaded = load_pending(&data_root)
                 .map(|pending| {
@@ -613,6 +743,7 @@ pub async fn check_for_update(state: State<'_, DesktopState>) -> Result<UpdateIn
 #[tauri::command]
 pub async fn download_update(state: State<'_, DesktopState>) -> Result<UpdateInfo, String> {
     let data_root = state.data_root.clone();
+    let install_root = state.portable_root.clone();
     let update_busy = Arc::clone(&state.update_busy);
     tauri::async_runtime::spawn_blocking(move || {
         let lock = acquire_lock(&update_busy)?;
@@ -620,6 +751,19 @@ pub async fn download_update(state: State<'_, DesktopState>) -> Result<UpdateInf
             let settings = load_settings(&data_root);
             if settings.update_policy == DISABLED {
                 return Err("自动更新已在设置中关闭。".into());
+            }
+            if let Some((manifest, raw, base)) = hot::check(&data_root, &settings)? {
+                hot::download(&install_root, &data_root, &manifest, &raw, &base)?;
+                return Ok(hot::information(&manifest, true));
+            }
+            if settings.lan_update_enabled {
+                if let Some(release)=published_lan_full(&settings)? {
+                    if version_is_newer(&release.version,env!("CARGO_PKG_VERSION")) {
+                        download_release(&data_root,&release)?;
+                        return Ok(info(&release,true));
+                    }
+                }
+                return Err("没有可下载的新更新，请重新检查。".into());
             }
             let mut release = resolve_release(&data_root, &settings)?;
             let available = version_is_newer(&release.version, env!("CARGO_PKG_VERSION"));
@@ -712,7 +856,21 @@ fn launch_helper(
         &format!("--version={}", pending.version),
         &format!("--sha256={}", pending.sha256),
         &format!("--old-pid={old_pid}"),
+        &format!("--kind={}", pending.kind),
     ]);
+    let write_probe = root.join(format!(".update-write-probe-{}", Uuid::new_v4()));
+    let writable = File::create(&write_probe).is_ok();
+    let _ = fs::remove_file(&write_probe);
+    if !writable && pending.kind == "hot" {
+        let arguments: Vec<String> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let status = command_without_console("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", r#"$ErrorActionPreference='Stop'; $a=(($env:SHIYIN_HELPER_ARGS | ConvertFrom-Json) | ForEach-Object { '"' + $_.Replace('"','\"') + '"' }) -join ' '; Start-Process -FilePath $env:SHIYIN_HELPER_EXE -ArgumentList $a -WorkingDirectory $env:SHIYIN_HELPER_ROOT -WindowStyle Hidden -Verb RunAs | Out-Null"#])
+            .env("SHIYIN_HELPER_ARGS", serde_json::to_string(&arguments).map_err(|e|e.to_string())?)
+            .env("SHIYIN_HELPER_EXE", &helper).env("SHIYIN_HELPER_ROOT", root)
+            .status().map_err(|e|e.to_string())?;
+        if !status.success() { return Err("没有获得更新应用文件所需的管理员权限，当前软件保持运行。".into()); }
+        return Ok(());
+    }
     command
         .current_dir(root)
         .stdin(Stdio::null())
@@ -756,6 +914,8 @@ fn value(arguments: &[String], name: &str) -> Option<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInstallSession {
+    #[serde(default = "full_kind")]
+    pub kind: String,
     pub session_id: String,
     pub version: String,
     pub installer_path: String,
@@ -789,6 +949,7 @@ fn parse_update_session_args(arguments: &[String]) -> Option<UpdateInstallSessio
         return None;
     }
     Some(UpdateInstallSession {
+        kind: value(arguments, "--kind=").unwrap_or_else(full_kind),
         session_id: value(arguments, "--session-id=")?,
         version: value(arguments, "--version=")?,
         installer_path: value(arguments, "--update-installer=")?,
@@ -801,6 +962,7 @@ fn parse_update_session_args(arguments: &[String]) -> Option<UpdateInstallSessio
 
 pub fn run_update_session_window_from_args() -> bool {
     let arguments: Vec<String> = std::env::args().collect();
+    if hot::cli(&arguments) { return true; }
     let Some(session) = parse_update_session_args(&arguments) else {
         return false;
     };
@@ -895,6 +1057,7 @@ fn emit_progress(
 }
 
 fn run_installer_session(app: &AppHandle, session: &UpdateInstallSession) -> Result<(), String> {
+    if session.kind == "hot" { return hot::session(app, session); }
     let data = Path::new(&session.data_root);
     let installer = Path::new(&session.installer_path);
     let root = Path::new(&session.install_root);
@@ -1317,5 +1480,35 @@ mod tests {
             ..UpdateSettings::default()
         })
         .is_err());
+    }
+
+    #[test]
+    fn hot_update_paths_are_confined_to_replaceable_app_directories() {
+        assert_eq!(
+            hot_relative_path("app/web/js/canvas.js").unwrap(),
+            PathBuf::from("app/web/js/canvas.js")
+        );
+        assert!(hot_relative_path("SHIYIN AI.exe").is_err());
+        assert!(hot_relative_path("app/web/../../data/config/app.json").is_err());
+        assert!(hot_relative_path("app\\web\\index.html").is_err());
+    }
+
+    #[test]
+    fn hot_update_manifest_rejects_duplicate_or_invalid_files() {
+        let valid_file = HotUpdateFile {
+            path: "app/web/index.html".into(),
+            size: 5,
+            sha256: "a".repeat(64),
+        };
+        let mut manifest = HotUpdateManifest {
+            protocol_version: 1,
+            version: "20260914160000".into(),
+            min_desktop_version: env!("CARGO_PKG_VERSION").into(),
+            prune_roots: vec!["app/web".into()],
+            files: vec![valid_file.clone()],
+        };
+        assert!(validate_hot_manifest(&manifest).is_ok());
+        manifest.files.push(valid_file);
+        assert!(validate_hot_manifest(&manifest).is_err());
     }
 }

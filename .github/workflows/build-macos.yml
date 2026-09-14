@@ -2,22 +2,12 @@ name: Build macOS desktop artifacts
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/fashion-director-full-integration
-    paths:
-      - '.github/workflows/build-macos.yml'
-      - 'canvas_core/**'
-      - 'src-tauri/**'
-      - 'static/**'
-      - 'skills/**'
-      - 'tools/build-macos.sh'
-      - 'tools/smoke-macos-bundle.py'
-      - 'canvas-backend.spec'
-      - 'requirements.txt'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'VERSION'
+    inputs:
+      full_build:
+        description: '用户已明确要求全量编译'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ inputs.full_build == true }}
     name: Build ${{ matrix.label }}
     strategy:
       fail-fast: false

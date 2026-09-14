@@ -16,6 +16,7 @@ a = Analysis(
     pathex=["."],
     binaries=[],
     datas=[
+        ("canvas_core/distribution-public-key.hex", "canvas_core"),
         ("canvas_core/person_depth_manifest.json", "canvas_core"),
         ("canvas_core/video_depth_manifest.json", "canvas_core"),
         ("skills/fashion-editorial-sequence-director", "skills/fashion-editorial-sequence-director"),

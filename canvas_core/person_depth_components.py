@@ -406,11 +406,20 @@ class PersonDepthComponentManager:
         raise PersonDepthComponentUnavailable("；".join(errors) or "发布清单没有可用下载源")
 
     def _download_lan_files(self) -> bool:
+        from .distribution_client import discover_source
         base = self._lan_source_url
         session = self._new_session(None)
         try:
-            response = session.get(f"{base}/{self.lan_path}/manifest.json", timeout=(3, 10))
-            response.raise_for_status()
+            try:
+                response = session.get(f"{base}/{self.lan_path}/manifest.json", timeout=(3, 10))
+                response.raise_for_status()
+            except requests.RequestException:
+                discovered = discover_source(base)
+                if discovered == base:
+                    raise
+                base = discovered
+                response = session.get(f"{base}/{self.lan_path}/manifest.json", timeout=(3, 10))
+                response.raise_for_status()
             payload = response.json()
         finally:
             session.close()

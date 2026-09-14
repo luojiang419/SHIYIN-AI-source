@@ -82,6 +82,7 @@
     let shortcutRecordingId = '';
     let shortcutSaveSequence = 0;
     let shortcutStatusTimer = null;
+    let personDepthLanStatusPending = false;
 
     const t = key => window.StudioI18n?.t?.(key) || key;
 
@@ -618,47 +619,47 @@
             applyPersonDepthLanSettings(data);
     }
 
+    function renderPersonDepthLanStatus(state){
+        state = state || {};
+        if(personDepthLanStatus) personDepthLanStatus.textContent = state.connected ? '已连接分发中心' : '客户端模式';
+        if(personDepthLanHint) personDepthLanHint.textContent = state.connected
+            ? `${state.url} · 应用热更新与模型从独立分发中心下载`
+            : (state.error || '已内置管理员电脑下载地址，正在等待分发中心连接。');
+    }
+
     function applyPersonDepthLanSettings(data){
         if(personDepthLanServerEnabled) personDepthLanServerEnabled.checked = Boolean(data.person_depth_lan_server_enabled);
         if(personDepthLanHost) personDepthLanHost.value = data.person_depth_lan_host || '192.168.0.24';
         if(personDepthLanPort) personDepthLanPort.value = String(data.person_depth_lan_port || 3011);
         if(personDepthLanSource) personDepthLanSource.value = data.person_depth_lan_source || '';
-        const state = data.person_depth_lan_status || {};
-        if(personDepthLanStatus) personDepthLanStatus.textContent = state.running ? '服务运行中' : data.person_depth_lan_server_enabled ? '启动失败' : '未启用';
-        if(personDepthLanHint) personDepthLanHint.textContent = state.error
-            ? `服务启动失败：${state.error}`
-            : state.running ? `${state.url} · ${state.manifest_ready ? '文件清单已就绪' : '等待生成文件清单'}` : '客户端优先使用此地址，连接失败时自动回退到原有公网下载源。';
+        renderPersonDepthLanStatus(data.person_depth_lan_status, Boolean(data.person_depth_lan_server_enabled));
+    }
+
+    async function refreshPersonDepthLanStatus(){
+        if(personDepthLanStatusPending || document.hidden) return;
+        personDepthLanStatusPending = true;
+        try {
+            renderPersonDepthLanStatus(await requestSettings('/api/person-depth/lan/status', {cache:'no-store'}));
+        } catch(error) {
+            if(personDepthLanHint) personDepthLanHint.textContent = `服务状态读取失败：${error.message}`;
+        } finally {
+            personDepthLanStatusPending = false;
+        }
     }
 
     async function savePersonDepthLanSettings(){
-        const port = Number(personDepthLanPort?.value || 0);
         savePersonDepthLan.disabled = true;
         try {
             const data = await saveSettings({
-                person_depth_lan_server_enabled:Boolean(personDepthLanServerEnabled?.checked),
-                person_depth_lan_host:String(personDepthLanHost?.value || '').trim(),
-                person_depth_lan_port:port,
                 person_depth_lan_source:String(personDepthLanSource?.value || '').trim(),
             });
             applyPersonDepthLanSettings(data);
+            await refreshPersonDepthLanStatus();
             showStatus('局域网下载渠道已保存');
         } catch(error) {
             showStatus(`局域网设置保存失败：${error.message}`, true);
         } finally {
             savePersonDepthLan.disabled = false;
-        }
-    }
-
-    async function preparePersonDepthLanBundle(){
-        preparePersonDepthLan.disabled = true;
-        if(personDepthLanStatus) personDepthLanStatus.textContent = '正在准备';
-        try {
-            await requestSettings('/api/person-depth/lan/prepare', {method:'POST'});
-            if(personDepthLanHint) personDepthLanHint.textContent = '正在校验本机组件并生成文件清单，完成后局域网客户端即可直接下载。';
-        } catch(error) {
-            if(personDepthLanHint) personDepthLanHint.textContent = `准备失败：${error.message}`;
-        } finally {
-            preparePersonDepthLan.disabled = false;
         }
     }
 
@@ -893,7 +894,6 @@
     depthMapMode?.addEventListener('change', () => saveDepthMapMode(depthMapMode.value));
     openDepthMapTuner?.addEventListener('click', openIntegratedDepthMapTuner);
     savePersonDepthLan?.addEventListener('click', savePersonDepthLanSettings);
-    preparePersonDepthLan?.addEventListener('click', preparePersonDepthLanBundle);
     chooseQuickSaveDirectory?.addEventListener('click', chooseQuickSaveFolder);
     chooseTopazInstall?.addEventListener('click', chooseTopazDirectory);
     resetTopazInstall?.addEventListener('click', resetTopazDirectory);
@@ -951,6 +951,8 @@
             document.querySelectorAll('main,.settings-content').forEach((el,index)=>{el.scrollTop=saved.scroll?.[index] || 0;});
         });
         if(pageSettingsPending) void saveSettings(pageSettings).catch(error=>showStatus(error.message,true));
-        void loadSettings();void checkTopazCapabilities();void loadUpdateSettings();void loadStorageSummary();
+        void loadSettings().finally(refreshPersonDepthLanStatus);void checkTopazCapabilities();void loadUpdateSettings();void loadStorageSummary();
+        setInterval(refreshPersonDepthLanStatus, 3000);
+        document.addEventListener('visibilitychange', () => { if(!document.hidden) void refreshPersonDepthLanStatus(); });
     }, {once:true});
 })();

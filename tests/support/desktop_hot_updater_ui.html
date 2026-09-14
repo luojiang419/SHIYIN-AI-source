@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>热更新弹窗回归测试</title>
+<style>body{background:#12181e;color:#edf3f7;font:15px 'Segoe UI','Microsoft YaHei';padding:30px}.studio-modal{position:fixed;inset:0;background:#0009;display:grid;place-items:center}.studio-modal-panel{background:#1c252e;border:1px solid #425564;border-radius:12px;width:min(600px,90vw);padding:26px}.studio-modal-head,.studio-modal-actions{display:flex;justify-content:space-between;gap:12px}.studio-modal-body{line-height:1.8}.studio-modal-btn,button{background:#264235;color:white;border:1px solid #49675a;padding:12px;border-radius:6px;cursor:pointer}.update-notes-box{background:#121a20;padding:16px;margin:18px 0}.update-notes-head{display:flex;justify-content:space-between}.studio-modal-copy{color:#c6d2dc}.studio-modal-kicker{color:#79cba0;font-size:12px}</style>
+<h1>热更新弹窗回归测试</h1><p>使用软件的实际 desktop-updater.js；原生命令由测试桩记录，不更新当前软件。</p><button onclick="openDesktopUpdater()">检查更新</button><p id="calls"></p><p id="result"></p>
+<script>
+const calls=[];
+const candidate={kind:'hot',available:true,downloaded:false,currentVersion:'1.0.446',latestVersion:'20260914154010',assetSize:12582912,releaseNotes:'独立分发服务、签名验证、自动重启与回滚。'};
+window.__TAURI__={core:{invoke:async(command)=>{
+ calls.push(command);document.getElementById('calls').textContent=calls.join(' → ');
+ if(command==='get_update_settings')return{updatePolicy:'manual'};
+ if(command==='check_for_update')return {...candidate};
+ if(command==='download_update')return {...candidate,downloaded:true};
+ if(command==='apply_downloaded_update'){document.getElementById('result').textContent='PASS：确认后依次下载并启动独立更新器';return;}
+ if(command==='defer_downloaded_update')throw Error('未下载时不能安排安装');
+ throw Error('未知测试命令：'+command);
+}}};
+</script><script src="../../static/js/desktop-updater.js"></script></html>

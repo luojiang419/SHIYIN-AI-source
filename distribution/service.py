@@ -1,0 +1,458 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import socket
+import sqlite3
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote, urlsplit
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, PublicFormat, NoEncryption
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATA = Path(os.environ.get('SHIYIN_DISTRIBUTION_DATA', 'D:/SHIYIN-Distribution'))
+ALLOWED_ROOTS = ('app/web', 'app/backend/canvas-backend', 'app/skills')
+
+
+def digest(path):
+    with Path(path).open('rb') as handle:
+        return hashlib.file_digest(handle, 'sha256').hexdigest()
+
+
+def atomic_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + '.' + secrets.token_hex(6) + '.tmp')
+    temp.write_text(json.dumps(value, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    os.replace(temp, path)
+
+
+def local_ip():
+    # UDP connect 只查询路由，不发送数据；优先办公网，避免 VPN 默认路由。
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(('192.168.0.1', 9))
+            return probe.getsockname()[0]
+        except OSError:
+            return socket.gethostbyname(socket.gethostname())
+
+
+def relative_path(value, hot=False):
+    if not isinstance(value, str) or not value or '\\' in value or ':' in value:
+        raise ValueError('文件路径无效')
+    parts = value.split('/')
+    if any(p in ('', '.', '..') or p.endswith(('.', ' ')) for p in parts):
+        raise ValueError('文件路径越界')
+    if hot and value != 'SHIYIN AI.exe' and not any(value.startswith(p + '/') for p in ALLOWED_ROOTS):
+        raise ValueError('热更新只能包含应用文件')
+    return Path(*parts)
+
+
+class Center:
+    def __init__(self, data, port=3011, admin_port=3013):
+        self.data = Path(data).resolve()
+        self.data.mkdir(parents=True, exist_ok=True)
+        self.lock = threading.RLock()
+        self.config_path = self.data / 'settings.json'
+        self.config = {'port': port, 'auto_start': True, 'address': local_ip()}
+        if self.config_path.exists():
+            self.config.update(json.loads(self.config_path.read_text('utf-8')))
+        self.admin_port = admin_port
+        self.server = None
+        self.discovery = None
+        self.zeroconf = None
+        self.job = {'running': False, 'message': '', 'error': ''}
+        self.started = time.time()
+        token_path = self.data / 'admin-token'
+        if not token_path.exists():
+            token_path.write_text(secrets.token_urlsafe(36), 'ascii')
+        self.token = token_path.read_text('ascii')
+        key_path = self.data / 'signing-key'
+        if not key_path.exists():
+            key = Ed25519PrivateKey.generate()
+            key_path.write_bytes(key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()))
+        self.key = Ed25519PrivateKey.from_private_bytes(key_path.read_bytes())
+        self.public_key = self.key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
+        with self.db() as db:
+            db.executescript('''
+                CREATE TABLE IF NOT EXISTS releases (id TEXT PRIMARY KEY, kind TEXT, version TEXT,
+                    manifest TEXT, state TEXT, created REAL);
+                CREATE TABLE IF NOT EXISTS clients (ip TEXT PRIMARY KEY, seen REAL, version TEXT);
+                CREATE TABLE IF NOT EXISTS logs (created REAL, message TEXT);
+            ''')
+
+    def db(self):
+        conn = sqlite3.connect(self.data / 'index.db', timeout=15)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def log(self, message):
+        with self.db() as db:
+            db.execute('INSERT INTO logs VALUES (?, ?)', (time.time(), str(message)))
+
+    def start(self):
+        with self.lock:
+            if self.server:
+                return
+            server = ThreadingHTTPServer(('0.0.0.0', int(self.config['port'])), self.handler(False))
+            server.daemon_threads = True
+            self.server = server
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.advertise()
+            self.log('分发服务启动：' + self.url)
+
+    @property
+    def url(self):
+        return f"http://{self.config['address']}:{self.config['port']}"
+
+    def stop(self):
+        with self.lock:
+            server, self.server = self.server, None
+            if self.discovery:
+                self.discovery.close()
+                self.discovery = None
+            if self.zeroconf:
+                self.zeroconf.close()
+                self.zeroconf = None
+            if server:
+                server.shutdown()
+                server.server_close()
+                self.log('分发服务已停止')
+
+    def advertise(self):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(('0.0.0.0', 3012))
+            sock.settimeout(1)
+            self.discovery = sock
+            def respond():
+                while self.discovery is sock:
+                    try:
+                        raw, addr = sock.recvfrom(2048)
+                        if raw == b'SHIYIN-DISCOVER-2':
+                            sock.sendto(json.dumps({'url': self.url, 'public_key': self.public_key}).encode(), addr)
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        break
+            threading.Thread(target=respond, daemon=True).start()
+        except OSError as exc:
+            self.log('UDP 发现不可用：' + str(exc))
+        try:
+            from zeroconf import ServiceInfo, Zeroconf
+            zc = Zeroconf()
+            zc.register_service(ServiceInfo('_shiyin-update._tcp.local.',
+                'SHIYIN._shiyin-update._tcp.local.', addresses=[socket.inet_aton(self.config['address'])],
+                port=int(self.config['port']), properties={'public_key': self.public_key}))
+            self.zeroconf = zc
+        except Exception as exc:
+            self.log('mDNS 不可用，使用 UDP/IP：' + str(exc))
+
+    def status(self):
+        with self.db() as db:
+            releases = [dict(r) for r in db.execute('SELECT id,kind,version,state,created FROM releases ORDER BY created DESC')]
+            clients = [dict(r) for r in db.execute('SELECT * FROM clients ORDER BY seen DESC')]
+            logs = [dict(r) for r in db.execute('SELECT * FROM logs ORDER BY created DESC LIMIT 100')]
+        return {'running': bool(self.server), 'url': self.url, 'public_key': self.public_key,
+                'settings': self.config, 'releases': releases, 'clients': clients, 'logs': logs,
+                'job': dict(self.job), 'data': str(self.data), 'uptime': int(time.time() - self.started)}
+
+    def launch_job(self, action):
+        with self.lock:
+            if self.job['running']:
+                raise ValueError('已有导入任务正在执行')
+            self.job = {'running': True, 'message': '正在校验并导入文件…', 'error': ''}
+        def run():
+            try:
+                action()
+                self.job['message'] = '校验与发布完成'
+            except Exception as exc:
+                self.job['error'] = str(exc)
+                self.log('导入失败：' + str(exc))
+            finally:
+                self.job['running'] = False
+        threading.Thread(target=run, daemon=True).start()
+
+    def blob(self, path, expected=None):
+        sha = digest(path)
+        if expected and sha != expected:
+            raise ValueError(f'校验失败：{Path(path).name}')
+        target = self.data / 'blobs' / sha
+        target.parent.mkdir(exist_ok=True)
+        if not target.exists():
+            temp = target.with_suffix('.' + secrets.token_hex(6) + '.part')
+            shutil.copyfile(path, temp)
+            if digest(temp) != sha:
+                temp.unlink()
+                raise ValueError('导入过程中源文件发生变化')
+            os.replace(temp, target)
+        return sha
+
+    def import_release(self, source, kind, notes=''):
+        source = Path(source).resolve(strict=True)
+        files = []
+        if kind == 'hot':
+            manifest = json.loads((source / 'manifest.json').read_text('utf-8-sig'))
+            version = str(manifest['version'])
+            if not re.fullmatch(r'\d{14}', version):
+                raise ValueError('热更新版本必须为14位时间序号')
+            if not re.fullmatch(r'\d+\.\d+\.\d+', str(manifest.get('min_desktop_version', ''))):
+                raise ValueError('缺少有效的最低桌面基线版本')
+            if not isinstance(manifest.get('files'), list) or not 0 < len(manifest['files']) <= 20000:
+                raise ValueError('热更新文件数量无效')
+            manifest['protocol_version'] = 2
+            for item in manifest['files']:
+                if not isinstance(item.get('size'), int) or item['size'] < 0 or not re.fullmatch(r'[0-9a-f]{64}', str(item.get('sha256', ''))):
+                    raise ValueError('文件大小或 SHA-256 格式无效')
+                rel = relative_path(item['path'], hot=True)
+                path = (source / 'files' / rel).resolve(strict=True)
+                path.relative_to((source / 'files').resolve())
+                if path.stat().st_size != item['size']:
+                    raise ValueError('文件大小不匹配：' + item['path'])
+                self.blob(path, item['sha256'])
+                files.append(dict(item))
+            roots = manifest.get('prune_roots', [])
+            if any(r not in ALLOWED_ROOTS for r in roots):
+                raise ValueError('清理目录超出应用白名单')
+        elif kind in ('person-depth', 'video-depth'):
+            current = source / 'current.json'
+            if current.exists():
+                current_data = json.loads(current.read_text('utf-8'))
+                installation = (source / 'installations' / current_data['installation']).resolve(strict=True)
+                installation.relative_to(source / 'installations')
+                source = installation
+            version = time.strftime('%Y%m%d%H%M%S')
+            for path in sorted(source.rglob('*')):
+                if path.is_file():
+                    path.resolve().relative_to(source)
+                    rel = path.relative_to(source).as_posix()
+                    relative_path(rel)
+                    files.append({'path': rel, 'size': path.stat().st_size, 'sha256': self.blob(path)})
+            manifest = {'protocol_version': 1, 'component': kind, 'version': version, 'installation': version}
+        elif kind == 'full':
+            match = re.fullmatch(r'SHIYIN-AI-Setup-(\d+\.\d+\.\d+)\.exe', source.name)
+            if not match:
+                raise ValueError('请选择正式全量安装包')
+            version = match[1]
+            files = [{'path': source.name, 'size': source.stat().st_size, 'sha256': self.blob(source)}]
+            manifest = {'version': version}
+        else:
+            raise ValueError('未知资源类型')
+        paths = [f['path'].lower() for f in files]
+        if not files or len(set(paths)) != len(paths):
+            raise ValueError('文件清单为空或有重复路径')
+        manifest.update(files=files, total_bytes=sum(f['size'] for f in files), notes=notes)
+        release_id = kind + '-' + version
+        raw = json.dumps(manifest, ensure_ascii=False, separators=(',', ':'))
+        envelope = json.dumps({'payload': raw, 'signature': self.key.sign(raw.encode()).hex(), 'public_key': self.public_key})
+        with self.db() as db:
+            if db.execute('SELECT 1 FROM releases WHERE id=?', (release_id,)).fetchone():
+                raise ValueError('此版本已存在，请使用新的版本号')
+            db.execute("UPDATE releases SET state='archived' WHERE kind=? AND state='published'", (kind,))
+            db.execute('INSERT INTO releases VALUES (?,?,?,?,?,?)', (release_id, kind, version, envelope, 'published', time.time()))
+        self.log('已发布 ' + release_id + f'，{len(files)} 个文件')
+
+    def active(self, kind):
+        with self.db() as db:
+            row = db.execute("SELECT * FROM releases WHERE kind=? AND state='published' ORDER BY created DESC LIMIT 1", (kind,)).fetchone()
+        return dict(row) if row else None
+
+    def handler(self, admin):
+        owner = self
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def json(self, value, status=200):
+                raw = json.dumps(value, ensure_ascii=False).encode()
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Length', str(len(raw)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def authenticated(self):
+                return secrets.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + owner.token)
+
+            def do_POST(self):
+                if not admin or not self.authenticated():
+                    return self.json({'error': '需要本机管理授权'}, 403)
+                try:
+                    size = int(self.headers.get('Content-Length', 0))
+                    if size > 65536:
+                        raise ValueError('请求过大')
+                    body = json.loads(self.rfile.read(size) or b'{}')
+                    path = urlsplit(self.path).path
+                    if path == '/api/start': owner.start()
+                    elif path == '/api/stop': owner.stop()
+                    elif path == '/api/restart':
+                        owner.stop()
+                        owner.start()
+                    elif path == '/api/import':
+                        owner.launch_job(lambda: owner.import_release(body['source'], body['kind'], body.get('notes', '')))
+                    elif path == '/api/release':
+                        with owner.db() as db:
+                            row = db.execute('SELECT * FROM releases WHERE id=?', (body['id'],)).fetchone()
+                            if not row: raise ValueError('资源不存在')
+                            state = body['state']
+                            if state not in ('published', 'paused'): raise ValueError('状态无效')
+                            if state == 'published':
+                                db.execute("UPDATE releases SET state='archived' WHERE kind=? AND state='published'", (row['kind'],))
+                            db.execute('UPDATE releases SET state=? WHERE id=?', (state, body['id']))
+                        owner.log(body['id'] + ' → ' + state)
+                    elif path == '/api/settings':
+                        port = int(body.get('port', owner.config['port']))
+                        address = str(body.get('address', owner.config['address']))
+                        if not 1024 <= port <= 65534 or port in (owner.admin_port, owner.admin_port - 1): raise ValueError('端口无效或与管理端口冲突')
+                        ipaddress.IPv4Address(address)
+                        with socket.socket() as probe: probe.bind((address, 0))
+                        owner.config.update(port=port, address=address, auto_start=bool(body.get('auto_start', True)))
+                        atomic_json(owner.config_path, owner.config)
+                    else: return self.json({'error': '接口不存在'}, 404)
+                    return self.json(owner.status())
+                except Exception as exc:
+                    return self.json({'error': str(exc)}, 400)
+
+            def do_GET(self):
+                try:
+                    path = unquote(urlsplit(self.path).path)
+                    if admin:
+                        if path == '/api/status':
+                            if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
+                            return self.json(owner.status())
+                        if path in ('/', '/panel.js', '/panel.css'):
+                            name = {'/': 'panel.html', '/panel.js': 'panel.js', '/panel.css': 'panel.css'}[path]
+                            raw = (Path(__file__).parent / name).read_bytes()
+                            self.send_response(200)
+                            self.send_header('Content-Type', {'/': 'text/html; charset=utf-8', '/panel.js': 'text/javascript', '/panel.css': 'text/css'}[path])
+                            self.send_header('Content-Length', str(len(raw)))
+                            self.send_header('Cache-Control', 'no-store')
+                            self.end_headers()
+                            return self.wfile.write(raw)
+                        return self.json({'error': '不存在'}, 404)
+                    if path == '/health':
+                        return self.json({'ok': True, 'url': owner.url, 'public_key': owner.public_key, 'protocol': 2})
+                    if path == '/':
+                        raw = ('<!doctype html><meta charset="utf-8"><title>SHIYIN 局域网下载</title>'
+                               '<body style="background:#12191f;color:#e5eef5;font:16px sans-serif;padding:60px">'
+                               '<h1>SHIYIN 局域网下载</h1><p>旧版本首次接入：保存并退出软件，下载并运行迁移工具，选择软件安装目录。</p>'
+                               '<p><a style="color:#8fe0b4" href="/SHIYIN-Hot-Update.exe">下载热更新迁移工具</a></p>'
+                               '<p>完成这一次迁移后，后续更新会直接在软件内弹出提示，点击即可更新并自动重启。</p>').encode('utf-8')
+                        self.send_response(200)
+                        self.send_header('Content-Type','text/html; charset=utf-8')
+                        self.send_header('Content-Length',str(len(raw)))
+                        self.end_headers()
+                        return self.wfile.write(raw)
+                    if path == '/SHIYIN-Hot-Update.exe':
+                        return self.file(owner.data / 'bootstrap' / 'SHIYIN-Hot-Update.exe')
+                    if path == '/hot-update/manifest.json':
+                        # 旧客户端不得静默套用新发布；迁移更新器后才能检查协议 v2。
+                        return self.json({'error': '请先迁移桌面更新器'}, 409)
+                    if path == '/v1/catalog':
+                        with owner.db() as db:
+                            db.execute('INSERT OR REPLACE INTO clients VALUES (?,?,?)', (self.client_address[0], time.time(), self.headers.get('X-Shiyin-Version', '')[:80]))
+                        release = owner.active('hot')
+                        return self.json(json.loads(release['manifest']) if release else {'release': None})
+                    if path.startswith('/v1/blobs/'):
+                        sha = path.removeprefix('/v1/blobs/')
+                        if not re.fullmatch(r'[0-9a-f]{64}', sha): raise ValueError('哈希无效')
+                        return self.file(owner.data / 'blobs' / sha)
+                    for kind in ('person-depth', 'video-depth'):
+                        if path.startswith('/' + kind + '/'):
+                            release = owner.active(kind)
+                            if not release: return self.json({'error': '组件尚未发布'}, 404)
+                            manifest = json.loads(json.loads(release['manifest'])['payload'])
+                            if path == '/' + kind + '/manifest.json': return self.json(manifest)
+                            rel = path.removeprefix('/' + kind + '/files/')
+                            relative_path(rel)
+                            item = next((f for f in manifest['files'] if f['path'] == rel), None)
+                            if not item: return self.json({'error': '文件不在发布清单'}, 404)
+                            return self.file(owner.data / 'blobs' / item['sha256'])
+                    if path == '/update/manifest.json':
+                        release = owner.active('full')
+                        if not release: return self.json({'error': '暂无全量包'}, 404)
+                        manifest = json.loads(json.loads(release['manifest'])['payload'])
+                        item = manifest['files'][0]
+                        checksum = f"{item['sha256']}  {item['path']}\n"
+                        return self.json({'tag_name': 'v' + release['version'], 'draft': False, 'prerelease': False, 'body': manifest.get('notes', ''), 'assets': [
+                            {'name': item['path'], 'size': item['size'], 'browser_download_url': owner.url + '/update/files/' + item['path']},
+                            {'name': item['path'] + '.sha256', 'size': len(checksum), 'browser_download_url': owner.url + '/update/files/' + item['path'] + '.sha256'}]})
+                    if path.startswith('/update/files/'):
+                        release = owner.active('full')
+                        if not release: return self.json({'error': '暂无全量包'}, 404)
+                        item = json.loads(json.loads(release['manifest'])['payload'])['files'][0]
+                        name = path.removeprefix('/update/files/')
+                        if name == item['path']: return self.file(owner.data / 'blobs' / item['sha256'])
+                        if name == item['path'] + '.sha256':
+                            raw = f"{item['sha256']}  {item['path']}\n".encode()
+                            self.send_response(200)
+                            self.send_header('Content-Length', str(len(raw)))
+                            self.end_headers()
+                            return self.wfile.write(raw)
+                    return self.json({'error': '不存在'}, 404)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except Exception as exc:
+                    self.json({'error': str(exc)}, 400)
+
+            def file(self, path):
+                if not path.is_file(): return self.json({'error': '文件不存在'}, 404)
+                size = path.stat().st_size
+                start, end = 0, size - 1
+                ranged = self.headers.get('Range', '')
+                if ranged:
+                    match = re.fullmatch(r'bytes=(\d+)-(\d*)', ranged)
+                    if not match or int(match[1]) >= size:
+                        return self.json({'error': 'Range 越界'}, 416)
+                    start = int(match[1])
+                    end = min(int(match[2]) if match[2] else end, end)
+                    if end < start: return self.json({'error': 'Range 无效'}, 416)
+                self.send_response(206 if ranged else 200)
+                self.send_header('Content-Length', str(max(0, end - start + 1)))
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('ETag', '"' + path.name + '"')
+                self.send_header('Accept-Ranges', 'bytes')
+                if ranged: self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+                self.end_headers()
+                with path.open('rb') as handle:
+                    handle.seek(start)
+                    remaining = end - start + 1
+                    while remaining > 0:
+                        chunk = handle.read(min(1024 * 1024, remaining))
+                        if not chunk: break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+        return Handler
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data', type=Path, default=DEFAULT_DATA)
+    parser.add_argument('--port', type=int, default=3011)
+    parser.add_argument('--admin-port', type=int, default=3013)
+    args = parser.parse_args()
+    center = Center(args.data, args.port, args.admin_port)
+    admin = ThreadingHTTPServer(('127.0.0.1', args.admin_port), center.handler(True))
+    admin.daemon_threads = True
+    if center.config['auto_start']:
+        try: center.start()
+        except OSError as exc: center.log('启动失败，请检查端口占用：' + str(exc))
+    try: admin.serve_forever()
+    finally:
+        center.stop()
+        admin.server_close()
+
+
+if __name__ == '__main__':
+    main()

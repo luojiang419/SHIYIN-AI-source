@@ -781,6 +781,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    updater::recover_hot_update();
     if updater::apply_pending_update_on_startup() {
         return;
     }
@@ -864,6 +866,8 @@ pub fn run() {
                 }
             }
             setup_tray(app)?;
+            #[cfg(target_os = "windows")]
+            updater::mark_hot_ready(&data_root);
             let monitor = app.handle().clone();
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_millis(500));
@@ -938,8 +942,13 @@ pub fn run() {
             choose_download_directory,
             write_download_file,
         ]);
+    let mut context = tauri::generate_context!();
+    // 隔离副本验收使用独立单实例标识，避免唤起用户正在使用的正式安装版。
+    if std::env::var("SHIYIN_UPDATE_TEST_INSTANCE").as_deref() == Ok("175") {
+        context.config_mut().identifier.push_str(".update-test-175");
+    }
     builder
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("SHIYIN AI desktop runtime failed");
 }
 

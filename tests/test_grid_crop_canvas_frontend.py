@@ -49,6 +49,34 @@ class GridCropCanvasFrontendTests(unittest.TestCase):
         self.assertIn("grid-column:3 / span 1", style)
         self.assertIn("aspect-ratio:300/200", style)
 
+    def test_legacy_split_metadata_does_not_reuse_pixel_sizes_as_grid_spans(self):
+        start = self.javascript.index("function gridOutputItemStyle(grid)")
+        end = self.javascript.index("function selectionBoxLocalPoint", start)
+        function_source = self.javascript[start:end]
+        legacy_grid = {
+            "type": "grid-split",
+            "groupId": "legacy-grid",
+            "rows": 3,
+            "cols": 3,
+            "row": 2,
+            "col": 1,
+            "w": 300,
+            "h": 200,
+        }
+        script = function_source + f"; console.log(JSON.stringify(gridOutputItemStyle({json.dumps(legacy_grid)})));"
+        result = subprocess.run(
+            ["node", "-e", script],
+            cwd=Path(__file__).resolve().parent.parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        style = json.loads(result.stdout)
+        self.assertIn("grid-row:3 / span 1", style)
+        self.assertIn("grid-column:2 / span 1", style)
+        self.assertNotIn("span 300", style)
+        self.assertNotIn("span 200", style)
+
 
 if __name__ == "__main__":
     unittest.main()

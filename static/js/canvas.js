@@ -20908,7 +20908,10 @@ function renameCanvasGroup(group, titleEl){
 }
 function gridOutputItemStyle(grid){
     if(!grid) return '';
-    const cellLayout = grid.itemMode === 'cells';
+    // 早期宫格裁切记录没有 itemMode，并把裁切像素尺寸保存在 w/h。
+    // 只要元数据自身声明了 grid-split，就应按单元格渲染；三视图等跨格布局
+    // 没有这个 type，仍继续使用 rowSpan/colSpan 或 w/h。
+    const cellLayout = grid.itemMode === 'cells' || grid.type === 'grid-split';
     const row = Math.max(1, Number(grid.row || 0) + 1);
     const col = Math.max(1, Number(grid.col || 0) + 1);
     const rowSpan = Math.max(1, Number(cellLayout ? 1 : (grid.rowSpan ?? grid.h ?? 1)) || 1);

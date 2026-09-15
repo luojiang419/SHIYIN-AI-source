@@ -77,19 +77,24 @@ def test_package_capability_routes_new_and_legacy_clients(server,tmp_path):
     with get(url+'/v1/catalog') as response:
         assert json.load(response)=={'release':None}
     with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
+        assert json.load(response)=={'release':None}
+    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as response:
         envelope=json.load(response)
     manifest=json.loads(envelope['payload'])
     assert manifest['protocol_version']==3 and manifest['package']['name'].endswith('.shiyin-update')
     package=manifest['package']
     with get(url+'/v1/blobs/'+package['sha256'],{'Range':'bytes=1-'}) as response:
         assert response.status==206 and len(response.read())==package['size']-1
+    c.import_release(packaged,'hot-updater','更新器修复')
     c.import_release(bootstrap_snapshot(tmp_path/'bootstrap'),'hot-bootstrap','引导')
     with get(url+'/v1/catalog') as response:
         legacy=json.loads(json.load(response)['payload'])
     with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
+        updater=json.loads(json.load(response)['payload'])
+    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as response:
         modern=json.loads(json.load(response)['payload'])
     assert legacy['protocol_version']==2 and legacy['files'][0]['path']=='SHIYIN AI.exe'
-    assert modern['protocol_version']==3
+    assert updater['notes']=='更新器修复' and modern['notes']=='单包'
 
 
 def test_package_import_rejects_corruption(server,tmp_path):

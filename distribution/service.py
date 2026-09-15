@@ -232,7 +232,7 @@ class Center:
     def import_release(self, source, kind, notes=''):
         source = Path(source).resolve(strict=True)
         files = []
-        if kind in ('hot', 'hot-bootstrap'):
+        if kind in ('hot', 'hot-bootstrap', 'hot-updater'):
             manifest = json.loads((source / 'manifest.json').read_text('utf-8-sig'))
             version = str(manifest['version'])
             if not re.fullmatch(r'\d{14}', version):
@@ -242,7 +242,7 @@ class Center:
             if not isinstance(manifest.get('files'), list) or not 0 < len(manifest['files']) <= 20000:
                 raise ValueError('热更新文件数量无效')
             protocol = manifest.get('protocol_version')
-            if protocol not in (2, 3) or (kind == 'hot-bootstrap' and protocol != 2):
+            if protocol not in (2, 3) or (kind == 'hot-bootstrap' and protocol != 2) or (kind == 'hot-updater' and protocol != 3):
                 raise ValueError('热更新协议版本无效')
             if protocol == 2 and manifest.get('package') is not None:
                 raise ValueError('旧协议不能包含增量包字段')
@@ -448,8 +448,10 @@ class Center:
                     if path == '/v1/catalog':
                         owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
                         capabilities = {value.strip() for value in self.headers.get('X-Shiyin-Capabilities', '').split(',')}
-                        if 'package-v3' in capabilities:
+                        if 'fast-extract-v1' in capabilities:
                             release = owner.active('hot')
+                        elif 'package-v3' in capabilities:
+                            release = owner.active('hot-updater')
                         else:
                             release = owner.active('hot-bootstrap')
                             if not release:

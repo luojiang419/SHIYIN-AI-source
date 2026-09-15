@@ -98,7 +98,7 @@ fn agent() -> ureq::Agent {
 
 fn read_small(agent: &ureq::Agent, url: &str, current: &str) -> Result<String, String> {
     let mut r = agent.get(url).header("X-Shiyin-Version", current)
-        .header("X-Shiyin-Capabilities", "package-v3").call().map_err(|e| e.to_string())?;
+        .header("X-Shiyin-Capabilities", "package-v3,fast-extract-v1").call().map_err(|e| e.to_string())?;
     let mut s = String::new();
     r.body_mut().as_reader().take(16 * 1024 * 1024).read_to_string(&mut s).map_err(|e| e.to_string())?;
     Ok(s)
@@ -195,7 +195,7 @@ fn download_blob(agent: &ureq::Agent, url: &str, part: &Path, size: u64, expecte
     Err(format!("下载失败（{label}，已自动重试 {} 次）：{last_error}", DOWNLOAD_ATTEMPTS - 1))
 }
 
-fn extract_package(package_path: &Path, dir: &Path, m: &Manifest) -> Result<(), String> {
+fn extract_package(package_path: &Path, dir: &Path, root: &Path, m: &Manifest) -> Result<(), String> {
     let package_file = File::open(package_path).map_err(|e| format!("无法打开增量包：{e}"))?;
     let mut archive = zip::ZipArchive::new(package_file).map_err(|e| format!("增量包格式无效：{e}"))?;
     if archive.len() != m.files.len() { return Err("增量包文件数量与签名清单不一致".into()); }
@@ -207,13 +207,13 @@ fn extract_package(package_path: &Path, dir: &Path, m: &Manifest) -> Result<(), 
         if entry.is_dir() || !seen.insert(name.to_lowercase()) { return Err("增量包包含目录或重复路径".into()); }
         let file = m.files.iter().find(|item| item.path == name).ok_or_else(|| format!("增量包包含清单外文件：{name}"))?;
         if entry.size() != file.size { return Err(format!("增量包文件大小不符：{name}")); }
+        if matches(&safe_target(root, &rel)?, file) { continue; }
         let target = dir.join("files").join(rel);
         if matches(&target, file) { continue; }
         fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
         let part = target.with_extension("extract-part");
         let mut output = File::create(&part).map_err(|e| e.to_string())?;
         io::copy(&mut (&mut entry).take(file.size + 1), &mut output).map_err(|e| format!("解压 {name} 失败：{e}"))?;
-        output.sync_all().map_err(|e| e.to_string())?;
         drop(output);
         if !matches(&part, file) { let _ = fs::remove_file(&part); return Err(format!("解压文件校验失败：{name}")); }
         if target.exists() { fs::remove_file(&target).map_err(|e| e.to_string())?; }
@@ -236,7 +236,7 @@ pub(super) fn download(root: &Path, data: &Path, m: &Manifest, raw: &str, base: 
             if target.exists() { fs::remove_file(&target).map_err(|e| e.to_string())?; }
             fs::rename(&part, &target).map_err(|e| e.to_string())?;
         }
-        extract_package(&target, &dir, m)?;
+        extract_package(&target, &dir, root, m)?;
     } else {
         for f in &m.files {
             let rel = relative(&f.path)?;
@@ -573,8 +573,13 @@ mod tests {
                 size: content.len() as u64, sha256: sha256(&source).unwrap() }], package: Some(HotUpdatePackage {
                 name: "SHIYIN-Hot-Update-20260915130002.shiyin-update".into(), size: package_path.metadata().unwrap().len(),
                 sha256: sha256(&package_path).unwrap() }) };
-        extract_package(&package_path, &dir, &manifest).unwrap();
+        extract_package(&package_path, &dir, &root, &manifest).unwrap();
         assert_eq!(fs::read(dir.join("files/app/web/package.txt")).unwrap(), content);
+        fs::remove_file(dir.join("files/app/web/package.txt")).unwrap();
+        fs::create_dir_all(root.join("app/web")).unwrap();
+        fs::write(root.join("app/web/package.txt"), content).unwrap();
+        extract_package(&package_path, &dir, &root, &manifest).unwrap();
+        assert!(!dir.join("files/app/web/package.txt").exists());
         let extra_path = root.join("extra.shiyin-update");
         let mut extra = zip::ZipWriter::new(File::create(&extra_path).unwrap());
         extra.start_file("app/web/package.txt", zip::write::SimpleFileOptions::default()).unwrap();
@@ -582,7 +587,7 @@ mod tests {
         extra.start_file("app/web/extra.txt", zip::write::SimpleFileOptions::default()).unwrap();
         extra.write_all(b"unexpected").unwrap();
         extra.finish().unwrap();
-        assert!(extract_package(&extra_path, &dir, &manifest).is_err());
+        assert!(extract_package(&extra_path, &dir, &root, &manifest).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

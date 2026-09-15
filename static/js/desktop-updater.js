@@ -41,18 +41,24 @@
         });
         modal.querySelector('[data-action="apply"]').addEventListener('click', async event => {
             const button = event.currentTarget;
+            let activityTimer = 0;
             button.disabled = true;
             button.textContent = '正在启动更新器…';
             try {
                 if (!info.downloaded) {
-                    button.textContent = '正在下载并验证更新…';
-                    modal.querySelector('.studio-modal-copy').textContent = '正在从局域网下载变更文件并验证签名，完成后将自动重启。中断下载后可重试并续传。';
+                    const started = Date.now();
+                    const renderActivity = () => { button.textContent = `正在处理… ${Math.floor((Date.now() - started) / 1000)}秒`; };
+                    renderActivity();
+                    activityTimer = setInterval(renderActivity, 1000);
+                    modal.querySelector('.studio-modal-copy').textContent = '正在下载单个增量包，并在本机解包、校验变化文件。较慢磁盘可能需要一些时间，中断后可重试并续传。';
                     await invoke('download_update');
                     info.downloaded = true;
                 }
+                clearInterval(activityTimer);
                 button.textContent = '正在启动独立更新器…';
                 await invoke('apply_downloaded_update');
             } catch (error) { button.disabled = false; button.textContent = '重试更新'; alert(`更新失败：${error.message || error}`); }
+            finally { clearInterval(activityTimer); }
         });
         document.body.append(modal);
         activeModal = modal;

@@ -48,6 +48,8 @@ def main():
         if state.get('desktop')!=desktop_hash or not desktop.exists():
             run(['cargo','build','--release','--manifest-path','src-tauri/Cargo.toml']);state['desktop']=desktop_hash
         if state.get('backend')!=backend_hash or not (backend/'canvas-backend.exe').exists():
+            # PyInstaller可能把语法错误的main当成不可导入模块而继续产出EXE。
+            run([sys.executable,'-m','compileall','-q','main.py','backend_entry.py','canvas_core'])
             run([sys.executable,'-m','PyInstaller','--noconfirm','--distpath','dist/hot-backend','--workpath','.build/hot-backend','canvas-backend.spec']);state['backend']=backend_hash
     snapshot=ROOT/'dist/hot-update'/args.version
     snapshot.mkdir(parents=True,exist_ok=False)

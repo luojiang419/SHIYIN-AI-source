@@ -28425,6 +28425,36 @@ async def estimate_depth(request: Request, file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail=str(exc).replace("DWPose", "深度")) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail="深度输入图片无法读取") from exc
+    status = DEPTH_MODEL_MANAGER.status()
+    if not status.get("ready") and not await asyncio.to_thread(DEPTH_MODEL_MANAGER.verify_installed):
+        if DEPTH_AUTO_DOWNLOAD_ENABLED:
+            DEPTH_MODEL_MANAGER.start_background()
+        detail = str(DEPTH_MODEL_MANAGER.status().get("message") or "深度模型尚未下载完成")
+        raise HTTPException(status_code=503, detail=detail)
+    try:
+        result = await asyncio.to_thread(render_depth_image, image)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DepthUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        print(f"深度本地推理失败: {exc}")
+        raise HTTPException(status_code=500, detail="深度本地推理失败，请重试") from exc
+    output = BytesIO()
+    Image.fromarray(result.image_gray, mode="L").save(output, format="PNG", compress_level=4)
+    return Response(
+        output.getvalue(),
+        media_type="image/png",
+        headers={
+            "X-Depth-Width": str(result.width),
+            "X-Depth-Height": str(result.height),
+            "X-Depth-Model": "midas_v21_small_256",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+
 @app.get("/api/video-depth/status")
 def video_depth_status(request: Request):
     request_identity(request)
@@ -28489,34 +28519,6 @@ def get_video_depth_task(task_id: str, request: Request):
         raise HTTPException(status_code=404, detail="深度视频任务不存在或服务已重启")
     return task
 
-
-    status = DEPTH_MODEL_MANAGER.status()
-    if not status.get("ready") and not await asyncio.to_thread(DEPTH_MODEL_MANAGER.verify_installed):
-        if DEPTH_AUTO_DOWNLOAD_ENABLED:
-            DEPTH_MODEL_MANAGER.start_background()
-        detail = str(DEPTH_MODEL_MANAGER.status().get("message") or "深度模型尚未下载完成")
-        raise HTTPException(status_code=503, detail=detail)
-    try:
-        result = await asyncio.to_thread(render_depth_image, image)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except DepthUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        print(f"深度本地推理失败: {exc}")
-        raise HTTPException(status_code=500, detail="深度本地推理失败，请重试") from exc
-    output = BytesIO()
-    Image.fromarray(result.image_gray, mode="L").save(output, format="PNG", compress_level=4)
-    return Response(
-        output.getvalue(),
-        media_type="image/png",
-        headers={
-            "X-Depth-Width": str(result.width),
-            "X-Depth-Height": str(result.height),
-            "X-Depth-Model": "midas_v21_small_256",
-            "Cache-Control": "no-store",
-        },
-    )
 
 
 if __name__ == "__main__":

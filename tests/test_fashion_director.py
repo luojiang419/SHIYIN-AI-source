@@ -223,7 +223,8 @@ def test_complete_cached_plan_can_be_resubmitted_without_20kb_rejection():
     value = snapshot()
     value["options"]["lookbook_bible"]["product_direction"]["notes"] = "具体产品展示决定。" * 2000
     request = main.EcommerceTaskRequest(operation="universal", count=1, aspect_ratio="3:2", resolution="2k", quality="high", options=value["options"])
-    result = main.prepare_ecommerce_request(request)
+    with patch.object(main, "ecommerce_route_candidates", return_value=[{"max_reference_images": 14}]):
+        result = main.prepare_ecommerce_request(request)
     assert result["count"] == 1
     assert len(result["options"]["lookbook_shot_cards"][0]["panel_cards"]) == 9
 
@@ -232,7 +233,8 @@ def test_legacy_node_selecting_fashion_enters_complete_director():
     request = main.EcommerceTaskRequest(operation="universal", count=1, aspect_ratio="3:2", resolution="2k", quality="high",
                                        options={"prompt_policy": "lookbook", "lookbook_mode": "quick",
                                                 "lookbook_style": {"id": "fashion-advertising"}})
-    result = main.prepare_ecommerce_request(request)
+    with patch.object(main, "ecommerce_route_candidates", return_value=[{"max_reference_images": 14}]):
+        result = main.prepare_ecommerce_request(request)
     assert result["options"]["lookbook_mode"] == "story-campaign"
 
 

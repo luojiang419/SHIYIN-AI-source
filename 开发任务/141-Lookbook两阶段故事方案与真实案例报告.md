@@ -3,7 +3,7 @@
 ## 2026-09-15 当前实施状态
 
 状态：实现、回归、浏览器验证、两组真实生图与复核完成。
-分支：`fix/lookbook-editorial-diversity`。Git 按本任务独立提交；不包含其他任务的深度视频、局域网服务、Logo 或灯箱改动。
+分支：`fix/lookbook-editorial-diversity`。代码提交：`c82624f`，已推送 `origin/fix/lookbook-editorial-diversity`；不包含其他任务的深度视频、局域网服务、Logo 或灯箱改动。
 下一步：如需发布，按任务175走热更新；本轮开发与生成测试已完成。
 
 ### 已落实

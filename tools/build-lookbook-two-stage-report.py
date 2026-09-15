@@ -87,10 +87,14 @@ def main():
     parts.append(f'<p class="caption">输出图片 SHA-256：<code>{hashlib.sha256((OUT / "contact-sheet.png").read_bytes()).hexdigest()}</code></p>')
     template = (ROOT/'tools/lookbook-two-stage-report.html').read_text(encoding='utf-8')
     result = template.replace('@@CASE@@',''.join(parts)).replace('@@BRIEF_JSON@@',json.dumps(story['ad_brief'],ensure_ascii=False).replace('<','\\u003c'))
+    revised = (OUT / 'revision-2/story-response.json').exists()
+    if revised:
+        result = result.replace('视觉与语义复查：链路成功，质量仅部分达标', '首轮案例：不合格，用户已否决')
+        result = result.replace('<main>', '<main><div class="note"><b>首轮案例已被用户否决，撤回“视觉部分达标”评价。</b>本页保留为失败记录。<a href="Lookbook事件驱动重设计与实测报告.html">查看事件驱动重设计与第二轮真实实测报告 →</a></div>')
     assert '@@CASE@@' not in result and '@@BRIEF_JSON@@' not in result
     target=OUT/'Lookbook两阶段故事设计与实测报告.html'
     target.write_text(result,encoding='utf-8')
-    print(json.dumps({'report':str(target),'bytes':target.stat().st_size,'handoff_exact':True,'api_status':report['status'],'visual_acceptance':'partial'},ensure_ascii=True))
+    print(json.dumps({'report':str(target),'bytes':target.stat().st_size,'handoff_exact':True,'api_status':report['status'],'visual_acceptance':'rejected' if revised else 'partial'},ensure_ascii=True))
 
 
 if __name__=='__main__':

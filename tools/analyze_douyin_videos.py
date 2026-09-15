@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import colorsys
 import json
-import math
+import subprocess
 from pathlib import Path
 
 import cv2
@@ -26,6 +25,30 @@ def probe_capture(path: Path) -> tuple[cv2.VideoCapture, dict]:
         "width": width,
         "height": height,
         "duration_seconds": round(duration, 3),
+    }
+
+
+def probe_ffprobe(path: Path) -> dict:
+    completed = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration,size,format_name,bit_rate:stream=index,codec_type,codec_name,width,height,r_frame_rate,sample_rate,channels",
+            "-of",
+            "json",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    parsed = json.loads(completed.stdout)
+    return {
+        "format": parsed.get("format") or {},
+        "streams": parsed.get("streams") or [],
     }
 
 
@@ -170,7 +193,23 @@ def make_palette(colors: list[str], output: Path) -> None:
     image.save(output)
 
 
-def analyze_video(item: dict, video_path: Path, sheets_dir: Path, palettes_dir: Path) -> dict:
+def save_keyframes(frames: list[np.ndarray], times: list[float], output_dir: Path) -> list[str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for index, (frame, seconds) in enumerate(zip(frames, times), 1):
+        path = output_dir / f"{index:02d}_{seconds:07.2f}s.jpg"
+        cv2.imwrite(str(path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 94])
+        paths.append(str(path))
+    return paths
+
+
+def analyze_video(
+    item: dict,
+    video_path: Path,
+    sheets_dir: Path,
+    palettes_dir: Path,
+    keyframes_dir: Path,
+) -> dict:
     capture, meta = probe_capture(video_path)
     duration = float(meta["duration_seconds"])
     fps = float(meta["fps"])
@@ -186,16 +225,22 @@ def analyze_video(item: dict, video_path: Path, sheets_dir: Path, palettes_dir: 
     colors = dominant_colors(frames)
     temporal = temporal_metrics(capture, meta)
     capture.release()
-    sheet_path = sheets_dir / f"{item['id']}.jpg"
-    palette_path = palettes_dir / f"{item['id']}.png"
+    order = int(item.get("display_order") or 0)
+    prefix = f"{order:02d}_{item['id']}" if order else str(item["id"])
+    sheet_path = sheets_dir / f"{prefix}.jpg"
+    palette_path = palettes_dir / f"{prefix}.png"
+    keyframe_paths = save_keyframes(frames, times, keyframes_dir / prefix)
     make_contact_sheet(frames, times, item.get("title", ""), sheet_path)
     make_palette(colors, palette_path)
     return {
+        "display_order": order,
         "id": item["id"],
         "title": item.get("title", ""),
         "file": str(video_path),
         "contact_sheet": str(sheet_path),
         "palette_strip": str(palette_path),
+        "keyframes": keyframe_paths,
+        "ffprobe": probe_ffprobe(video_path),
         **meta,
         **temporal,
         "visual_metrics": aggregate,
@@ -208,27 +253,35 @@ def main() -> None:
     parser.add_argument("root", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    sheets_dir = root / "contact-sheets"
-    palettes_dir = root / "palettes"
+    manifest_path = root / "manifest-download.json"
+    if not manifest_path.exists():
+        manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    permanent_archive = manifest_path.name == "manifest-download.json"
+    sheets_dir = root / ("03-接触表" if permanent_archive else "contact-sheets")
+    palettes_dir = root / ("04-色板" if permanent_archive else "palettes")
+    keyframes_dir = root / ("05-关键帧" if permanent_archive else "keyframes")
     analyses = []
     failures = []
     for index, item in enumerate(manifest.get("items") or [], 1):
-        video_path = Path(item["file"])
+        video_path = Path(item.get("video_file") or item.get("file") or "")
         try:
-            result = analyze_video(item, video_path, sheets_dir, palettes_dir)
+            result = analyze_video(item, video_path, sheets_dir, palettes_dir, keyframes_dir)
             analyses.append(result)
             print(f"[{index:02d}/{len(manifest['items']):02d}] {item['id']} ok", flush=True)
         except Exception as exc:
             failures.append({"id": item.get("id"), "error": str(exc)})
             print(f"[{index:02d}/{len(manifest['items']):02d}] {item.get('id')} failed: {exc}", flush=True)
     output = {
-        "source_manifest": str(root / "manifest.json"),
+        "source_manifest": str(manifest_path),
+        "analysis_version": 2,
+        "temporary": False if permanent_archive else None,
         "count": len(analyses),
         "failed": failures,
         "items": analyses,
     }
-    (root / "analysis-metrics.json").write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_name = "manifest-analysis.json" if permanent_archive else "analysis-metrics.json"
+    (root / output_name).write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

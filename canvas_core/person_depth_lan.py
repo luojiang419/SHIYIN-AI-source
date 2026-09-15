@@ -57,6 +57,7 @@ class PersonDepthLanServer:
     def status(self) -> dict[str, Any]:
         installation = self.manager.installation_path()
         update = self._latest_update()
+        hot_update = self.hot_update_manifest(required=False)
         return {
             "running": self._server is not None,
             "host": self._host,
@@ -69,6 +70,8 @@ class PersonDepthLanServer:
             "update_ready": update is not None,
             "update_version": update[0] if update else "",
             "update_asset": update[1].name if update else "",
+            "hot_update_ready": hot_update is not None,
+            "hot_update_version": str((hot_update or {}).get("version") or ""),
             "error": self._error,
         }
 
@@ -130,6 +133,43 @@ class PersonDepthLanServer:
             return None
         _version, installer, checksum = update
         return installer if name == installer.name else checksum if name == checksum.name else None
+
+    def _hot_update_roots(self) -> tuple[Path, ...]:
+        data_root = self.manager.component_root.parents[2]
+        return data_root / "update" / "hot" / "current", data_root.parent / "dist" / "hot-update" / "current"
+
+    def _hot_update_root(self) -> Optional[Path]:
+        for root in self._hot_update_roots():
+            if (root / "manifest.json").is_file() and (root / "files").is_dir():
+                return root
+        return None
+
+    def hot_update_manifest(self, *, required: bool = True) -> Optional[dict[str, Any]]:
+        root = self._hot_update_root()
+        if root is None:
+            if required:
+                raise RuntimeError("本机尚未发布局域网热更新")
+            return None
+        payload = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        if payload.get("protocol_version") != 1 or not str(payload.get("version") or "").isdigit():
+            raise RuntimeError("局域网热更新清单格式无效")
+        files = payload.get("files")
+        if not isinstance(files, list) or not files:
+            raise RuntimeError("局域网热更新清单没有文件")
+        return payload
+
+    def hot_update_file(self, relative_name: str) -> Optional[Path]:
+        root = self._hot_update_root()
+        relative = Path(relative_name)
+        if root is None or relative.is_absolute() or ".." in relative.parts:
+            return None
+        files_root = (root / "files").resolve()
+        path = (files_root / relative).resolve()
+        try:
+            path.relative_to(files_root)
+        except ValueError:
+            return None
+        return path if path.is_file() else None
 
     def _manifest_path(self, manager: Optional[PersonDepthComponentManager] = None) -> Path:
         active = manager or self.manager
@@ -221,6 +261,15 @@ class PersonDepthLanServer:
                             self.send_error(400)
                             return
                         path = owner.update_file(name)
+                        if path is None:
+                            self.send_error(404)
+                            return
+                        self._file(path)
+                    elif self.path.split("?", 1)[0] == "/hot-update/manifest.json":
+                        self._json(owner.hot_update_manifest())
+                    elif self.path.split("?", 1)[0].startswith("/hot-update/files/"):
+                        name = unquote(urlsplit(self.path).path.removeprefix("/hot-update/files/"))
+                        path = owner.hot_update_file(name)
                         if path is None:
                             self.send_error(404)
                             return

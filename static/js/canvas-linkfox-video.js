@@ -52,7 +52,7 @@
         const controller=new AbortController();
         const timer=setTimeout(()=>controller.abort(),options.method==='POST'?180000:30000);
         try {
-            const response=await fetch(url,{...options,signal:controller.signal});
+            const response=await fetch(url,{cache:'no-store',...options,signal:controller.signal});
             const body=await response.json();
             if(!response.ok){ const error=new Error(body.detail || `LinkFox 请求失败（HTTP ${response.status}）`); error.httpStatus=response.status; throw error; }
             return body;
@@ -86,7 +86,10 @@
                 if(task.status==='succeeded'){
                     if(!task.result?.videos?.length) throw new Error('LinkFox 任务完成但没有返回视频');
                     rememberVideoPromptResult(node,task.result.request);
-                    node.linkfoxTaskId=''; await options.onChange?.(); return task.result;
+                    node.linkfoxDeliveredTaskId=taskId;
+                    node.linkfoxTaskId='';
+                    await reportTask(node,'视频已完成',options.onChange);
+                    return task.result;
                 }
                 if(['failed','interrupted','canceled','cancelled'].includes(task.status)){
                     // 已知上游任务的超时记录继续保留，避免用户误点造成重复付费。

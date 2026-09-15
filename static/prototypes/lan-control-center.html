@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SHIYIN 局域网分发中心</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      background: #0d1012;
+      color: #e8ecef;
+      --bg: #0d1012;
+      --sidebar: #121619;
+      --panel: #171c20;
+      --panel-2: #1c2227;
+      --line: #2b3339;
+      --muted: #8e9aa3;
+      --text: #e8ecef;
+      --green: #58c58b;
+      --green-bg: #183528;
+      --cyan: #61bdd0;
+      --orange: #e2a052;
+      --red: #e17070;
+      --shadow: 0 14px 36px rgba(0, 0, 0, .28);
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+    .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; height: 100vh; padding: 22px 14px 16px; border-right: 1px solid var(--line); background: var(--sidebar); }
+    .brand { display: flex; align-items: center; gap: 11px; padding: 0 9px 24px; }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #3b4a51; border-radius: 7px; background: #20282d; color: var(--green); }
+    .brand strong { display: block; font-size: 14px; }
+    .brand small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .nav { display: grid; gap: 4px; }
+    .nav button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 40px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; color: #aeb7bd; cursor: pointer; text-align: left; }
+    .nav button:hover { background: #1a2024; color: var(--text); }
+    .nav button.active { background: #202a27; color: #e9fff3; }
+    .nav button.active svg { color: var(--green); }
+    .nav svg, .button svg, .icon-button svg { width: 17px; height: 17px; flex: 0 0 auto; }
+    .sidebar-bottom { position: absolute; right: 14px; bottom: 16px; left: 14px; }
+    .service-mini { padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: #171c20; }
+    .service-mini-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgba(88, 197, 139, .1); }
+    .status-dot.stopped { background: #7d878e; box-shadow: none; }
+    .service-mini small { display: block; overflow: hidden; margin-top: 8px; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    main { min-width: 0; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 68px; padding: 0 28px; border-bottom: 1px solid var(--line); background: rgba(13, 16, 18, .96); }
+    .topbar h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0; }
+    .top-actions { display: flex; gap: 8px; }
+    .button, .icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; border: 1px solid var(--line); border-radius: 6px; background: #1b2125; cursor: pointer; }
+    .button { padding: 0 13px; }
+    .icon-button { width: 36px; padding: 0; }
+    .button:hover, .icon-button:hover { border-color: #455159; background: #22292e; }
+    .button.primary { border-color: #397859; background: #2b6f4b; color: #fff; }
+    .button.primary:hover { background: #337f57; }
+    .button.danger { border-color: #684044; color: #f19a9a; }
+    .content { width: min(1480px, 100%); margin: 0 auto; padding: 24px 28px 40px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .hero-status { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(270px, .7fr); gap: 14px; margin-bottom: 14px; }
+    .status-panel, .panel, .metric { border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+    .status-panel { display: flex; align-items: center; justify-content: space-between; min-height: 142px; padding: 22px; }
+    .status-heading { display: flex; align-items: center; gap: 13px; }
+    .pulse { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--green-bg); color: var(--green); }
+    .pulse.stopped { background: #272d31; color: #89939a; }
+    .status-panel h2 { margin: 0 0 5px; font-size: 20px; font-weight: 600; }
+    .status-panel p { margin: 0; color: var(--muted); }
+    .status-actions { display: flex; gap: 8px; }
+    .address-panel { display: block; min-width: 0; padding: 20px; }
+    .label { color: var(--muted); font-size: 12px; }
+    .address { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 10px; }
+    .address code { overflow: hidden; flex: 1; color: #d6e6eb; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .address .icon-button { height: 32px; width: 32px; }
+    .discover { display: flex; align-items: flex-start; gap: 7px; margin-top: 14px; color: var(--green); font-size: 12px; overflow-wrap: anywhere; }
+    .discover svg { flex: 0 0 auto; width: 15px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+    .metric { min-height: 112px; padding: 17px; }
+    .metric-head { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
+    .metric-head svg { width: 17px; color: var(--cyan); }
+    .metric strong { display: block; margin-top: 14px; font-size: 24px; font-weight: 600; }
+    .metric small { color: var(--muted); }
+    .grid-2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 14px; }
+    .panel { min-width: 0; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; min-height: 58px; padding: 0 17px; border-bottom: 1px solid var(--line); }
+    .panel-header h2 { margin: 0; font-size: 14px; font-weight: 600; }
+    .panel-header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { height: 40px; padding: 0 14px; color: var(--muted); font-size: 11px; font-weight: 500; text-align: left; }
+    td { height: 56px; padding: 0 14px; border-top: 1px solid #252c31; white-space: nowrap; }
+    td strong { display: block; font-size: 13px; font-weight: 550; }
+    td small { color: var(--muted); font-size: 11px; }
+    .badge { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border: 1px solid #364048; border-radius: 999px; color: #bac3c9; font-size: 11px; }
+    .badge.green { border-color: #2f6549; background: #173125; color: #78d5a2; }
+    .badge.orange { border-color: #715532; background: #352817; color: #e8b974; }
+    .badge.cyan { border-color: #34606a; background: #172e34; color: #75cfdf; }
+    .activity-list { display: grid; padding: 4px 17px 12px; }
+    .activity { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 13px 0; border-bottom: 1px solid #252c31; }
+    .activity:last-child { border-bottom: 0; }
+    .activity i { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--green); }
+    .activity strong { display: block; font-size: 12px; font-weight: 550; }
+    .activity small, .activity time { color: var(--muted); font-size: 11px; }
+    .section-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .section-toolbar h2 { margin: 0 0 4px; font-size: 18px; }
+    .section-toolbar p { margin: 0; color: var(--muted); }
+    .filters { display: flex; gap: 8px; }
+    .filters select, .search, .field input, .field select { height: 36px; border: 1px solid var(--line); border-radius: 6px; background: #151a1e; color: var(--text); }
+    .filters select { padding: 0 32px 0 10px; }
+    .search { width: 230px; padding: 0 11px; }
+    .resource-list { display: grid; gap: 10px; }
+    .resource-row { display: grid; grid-template-columns: 44px minmax(190px, 1.4fr) minmax(120px, .7fr) minmax(120px, .7fr) auto; gap: 14px; align-items: center; min-height: 74px; padding: 12px 15px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+    .resource-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 6px; background: #222b30; color: var(--cyan); }
+    .resource-icon svg { width: 18px; }
+    .resource-main strong, .resource-cell strong { display: block; font-size: 13px; }
+    .resource-main small, .resource-cell small { color: var(--muted); font-size: 11px; }
+    .row-actions { display: flex; gap: 6px; }
+    .clients-grid { display: grid; grid-template-columns: repeat(3, minmax(240px, 1fr)); gap: 12px; }
+    .client { padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+    .client-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .client-name { display: flex; align-items: center; gap: 10px; }
+    .client-name svg { width: 18px; color: var(--cyan); }
+    .client dl { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin: 18px 0 0; }
+    .client dt { color: var(--muted); font-size: 11px; }
+    .client dd { margin: 3px 0 0; font-size: 12px; }
+    .log-panel { overflow: hidden; }
+    .logs { height: min(560px, calc(100vh - 210px)); overflow: auto; padding: 10px 15px 18px; background: #101416; font-family: Consolas, monospace; font-size: 12px; }
+    .log-line { display: grid; grid-template-columns: 80px 58px minmax(0, 1fr); gap: 12px; padding: 7px 0; color: #bec7cc; }
+    .log-line time { color: #69757d; }
+    .log-level { color: var(--green); }
+    .log-level.warn { color: var(--orange); }
+    .settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, .42fr); gap: 14px; }
+    .settings-body { padding: 18px; }
+    .setting-group { padding: 0 0 20px; margin-bottom: 20px; border-bottom: 1px solid var(--line); }
+    .setting-group:last-child { padding: 0; margin: 0; border: 0; }
+    .setting-group h3 { margin: 0 0 13px; font-size: 13px; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+    .field input, .field select { width: 100%; padding: 0 10px; color: var(--text); }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 45px; }
+    .toggle-row strong { display: block; font-size: 12px; }
+    .toggle-row small { color: var(--muted); font-size: 11px; }
+    .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+    .switch input { position: absolute; opacity: 0; }
+    .switch span { position: absolute; inset: 0; border: 1px solid #475158; border-radius: 999px; background: #242a2e; cursor: pointer; }
+    .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #89939a; transition: transform .16s ease; }
+    .switch input:checked + span { border-color: #347354; background: #20583d; }
+    .switch input:checked + span::after { transform: translateX(16px); background: #d9f7e6; }
+    .architecture { padding: 18px; }
+    .architecture ol { margin: 14px 0 0; padding-left: 20px; color: #bcc5ca; }
+    .architecture li { margin: 9px 0; }
+    dialog { width: min(560px, calc(100vw - 28px)); padding: 0; border: 1px solid #3a444b; border-radius: 8px; background: #171c20; color: var(--text); box-shadow: var(--shadow); }
+    dialog::backdrop { background: rgba(2, 5, 7, .72); }
+    .dialog-head { display: flex; align-items: center; justify-content: space-between; min-height: 60px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0; font-size: 16px; }
+    .dialog-body { padding: 18px; }
+    .dropzone { display: grid; place-items: center; min-height: 130px; border: 1px dashed #445159; border-radius: 7px; background: #13181b; color: var(--muted); cursor: pointer; text-align: center; }
+    .dropzone svg { width: 24px; margin-bottom: 9px; color: var(--cyan); }
+    .dropzone strong { display: block; color: var(--text); }
+    .dialog-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 20; display: flex; align-items: center; gap: 10px; max-width: min(400px, calc(100vw - 32px)); min-height: 44px; padding: 0 14px; border: 1px solid #35664d; border-radius: 7px; background: #173024; color: #dff8ea; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translateY(12px); transition: .18s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast svg { width: 17px; flex: 0 0 auto; }
+    .mobile-menu { display: none; }
+    @media (max-width: 1050px) {
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .grid-2, .settings-layout { grid-template-columns: 1fr; }
+      .clients-grid { grid-template-columns: 1fr 1fr; }
+      .resource-row { grid-template-columns: 40px minmax(180px, 1fr) 120px auto; }
+      .resource-row .resource-cell:nth-of-type(3) { display: none; }
+    }
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: fixed; z-index: 10; width: 232px; transform: translateX(-100%); transition: transform .18s ease; box-shadow: var(--shadow); }
+      .sidebar.open { transform: translateX(0); }
+      .mobile-menu { display: inline-flex; }
+      .topbar { padding: 0 16px; }
+      .topbar h1 { font-size: 15px; }
+      .top-actions .button span { display: none; }
+      .content { padding: 16px; }
+      .hero-status { grid-template-columns: 1fr; }
+      .status-panel { align-items: flex-start; flex-direction: column; gap: 18px; }
+      .metrics, .clients-grid, .field-grid { grid-template-columns: 1fr; }
+      .section-toolbar { align-items: flex-start; flex-direction: column; }
+      .filters { width: 100%; }
+      .search { min-width: 0; flex: 1; width: auto; }
+      .resource-row { grid-template-columns: 38px minmax(0, 1fr) auto; }
+      .resource-row .resource-cell { display: none; }
+      .dialog-fields { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-mark"><i data-lucide="radio-tower"></i></span>
+        <div><strong>SHIYIN 分发中心</strong><small>局域网服务控制台</small></div>
+      </div>
+      <nav class="nav" aria-label="主导航">
+        <button class="active" data-view="overview"><i data-lucide="layout-dashboard"></i>总览</button>
+        <button data-view="resources"><i data-lucide="package-open"></i>资源与发布</button>
+        <button data-view="clients"><i data-lucide="monitor-smartphone"></i>客户端</button>
+        <button data-view="logs"><i data-lucide="scroll-text"></i>服务日志</button>
+        <button data-view="settings"><i data-lucide="settings-2"></i>服务设置</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="service-mini">
+          <div class="service-mini-line"><span>分发服务</span><i class="status-dot" data-status-dot></i></div>
+          <small id="miniAddress">192.168.0.24:3011</small>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="icon-button mobile-menu" id="mobileMenu" title="打开导航" aria-label="打开导航"><i data-lucide="menu"></i></button>
+          <h1 id="pageTitle">服务总览</h1>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" id="refreshButton" title="刷新状态" aria-label="刷新状态"><i data-lucide="refresh-cw"></i></button>
+          <button class="button primary" data-open-publish><i data-lucide="upload"></i><span>导入并发布</span></button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="view active" id="view-overview">
+          <div class="hero-status">
+            <article class="status-panel">
+              <div class="status-heading">
+                <span class="pulse" id="servicePulse"><i data-lucide="power"></i></span>
+                <div><h2 id="serviceTitle">服务运行中</h2><p id="serviceDescription">客户端可发现并下载已发布资源</p></div>
+              </div>
+              <div class="status-actions">
+                <button class="button" id="restartService"><i data-lucide="rotate-cw"></i>重启</button>
+                <button class="button danger" id="toggleService"><span id="toggleServiceIcon"><i data-lucide="square"></i></span><span>停止服务</span></button>
+              </div>
+            </article>
+            <article class="status-panel address-panel">
+              <span class="label">局域网访问地址</span>
+              <div class="address"><code id="serverAddress">http://192.168.0.24:3011</code><button class="icon-button" id="copyAddress" title="复制地址" aria-label="复制地址"><i data-lucide="copy"></i></button></div>
+              <div class="discover"><i data-lucide="radio"></i><span>自动发现已开启 · _shiyin-update._tcp.local</span></div>
+            </article>
+          </div>
+
+          <div class="metrics">
+            <article class="metric"><div class="metric-head"><span>在线客户端</span><i data-lucide="monitor"></i></div><strong>6</strong><small>今日连接 9 台</small></article>
+            <article class="metric"><div class="metric-head"><span>当前下载</span><i data-lucide="download"></i></div><strong>2</strong><small>实时 38.4 MB/s</small></article>
+            <article class="metric"><div class="metric-head"><span>已发布资源</span><i data-lucide="boxes"></i></div><strong>4</strong><small>占用 18.7 GB</small></article>
+            <article class="metric"><div class="metric-head"><span>今日流量</span><i data-lucide="activity"></i></div><strong>42.8 GB</strong><small>峰值 92.1 MB/s</small></article>
+          </div>
+
+          <div class="grid-2">
+            <section class="panel">
+              <div class="panel-header"><div><h2>当前发布</h2><p>客户端检查更新时收到的稳定频道资源</p></div><button class="icon-button" title="打开资源管理" aria-label="打开资源管理" data-go-resources><i data-lucide="arrow-up-right"></i></button></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>资源</th><th>版本</th><th>大小</th><th>状态</th></tr></thead>
+                  <tbody>
+                    <tr><td><strong>SHIYIN AI 全量包</strong><small>Windows x64</small></td><td>1.0.446</td><td>112.4 MB</td><td><span class="badge green">已发布</span></td></tr>
+                    <tr><td><strong>应用热更新</strong><small>Web + Backend</small></td><td>1.0.446.3</td><td>27.2 MB</td><td><span class="badge green">已发布</span></td></tr>
+                    <tr><td><strong>人物深度组件</strong><small>Depth Anything V2</small></td><td>2026.09</td><td>5.57 GB</td><td><span class="badge green">已发布</span></td></tr>
+                    <tr><td><strong>深度视频模型</strong><small>Video Depth Pro</small></td><td>2026.08</td><td>12.8 GB</td><td><span class="badge orange">仅预览</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header"><div><h2>最近活动</h2><p>发布与客户端更新结果</p></div></div>
+              <div class="activity-list" id="activityList">
+                <div class="activity"><i></i><div><strong>DESIGN-03 已完成热更新</strong><small>1.0.446.2 → 1.0.446.3</small></div><time>14:32</time></div>
+                <div class="activity"><i></i><div><strong>热更新 1.0.446.3 已发布</strong><small>128 个文件 · 校验通过</small></div><time>14:18</time></div>
+                <div class="activity"><i style="background:var(--orange)"></i><div><strong>EDIT-02 下载已恢复</strong><small>从 68% 断点继续</small></div><time>13:46</time></div>
+                <div class="activity"><i></i><div><strong>分发服务启动</strong><small>监听 0.0.0.0:3011</small></div><time>09:02</time></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="view-resources">
+          <div class="section-toolbar">
+            <div><h2>资源与发布</h2><p>管理全量包、热更新和本地模型，已发布文件支持断点续传。</p></div>
+            <div class="filters"><select id="resourceFilter" aria-label="资源类型"><option value="all">全部类型</option><option value="app">软件更新</option><option value="model">模型组件</option></select><input class="search" id="resourceSearch" type="search" placeholder="搜索名称或版本"></div>
+          </div>
+          <div class="resource-list" id="resourceList">
+            <article class="resource-row" data-type="app" data-search="SHIYIN AI 全量包 1.0.446"><span class="resource-icon"><i data-lucide="app-window"></i></span><div class="resource-main"><strong>SHIYIN AI 全量包</strong><small>SHIYIN-AI-Setup-1.0.446.exe</small></div><div class="resource-cell"><small>当前版本</small><strong>1.0.446</strong></div><div class="resource-cell"><small>占用空间</small><strong>112.4 MB</strong></div><div class="row-actions"><span class="badge green">稳定</span><button class="icon-button" title="更多操作" aria-label="更多操作"><i data-lucide="ellipsis"></i></button></div></article>
+            <article class="resource-row" data-type="app" data-search="应用热更新 1.0.446.3"><span class="resource-icon"><i data-lucide="zap"></i></span><div class="resource-main"><strong>应用热更新</strong><small>Web + Backend · 自动重启</small></div><div class="resource-cell"><small>当前版本</small><strong>1.0.446.3</strong></div><div class="resource-cell"><small>占用空间</small><strong>27.2 MB</strong></div><div class="row-actions"><span class="badge green">稳定</span><button class="icon-button" title="暂停发布" aria-label="暂停发布" data-pause><i data-lucide="pause"></i></button></div></article>
+            <article class="resource-row" data-type="model" data-search="人物深度组件 2026.09"><span class="resource-icon"><i data-lucide="scan-face"></i></span><div class="resource-main"><strong>人物深度组件</strong><small>6,105 个文件 · 清单已签名</small></div><div class="resource-cell"><small>当前版本</small><strong>2026.09</strong></div><div class="resource-cell"><small>占用空间</small><strong>5.57 GB</strong></div><div class="row-actions"><span class="badge green">稳定</span><button class="icon-button" title="验证文件" aria-label="验证文件" data-verify><i data-lucide="shield-check"></i></button></div></article>
+            <article class="resource-row" data-type="model" data-search="深度视频模型 2026.08"><span class="resource-icon"><i data-lucide="file-video"></i></span><div class="resource-main"><strong>深度视频模型</strong><small>Video Depth Pro · 待转稳定</small></div><div class="resource-cell"><small>当前版本</small><strong>2026.08</strong></div><div class="resource-cell"><small>占用空间</small><strong>12.8 GB</strong></div><div class="row-actions"><span class="badge orange">预览</span><button class="icon-button" title="发布到稳定频道" aria-label="发布到稳定频道" data-promote><i data-lucide="rocket"></i></button></div></article>
+          </div>
+        </section>
+
+        <section class="view" id="view-clients">
+          <div class="section-toolbar"><div><h2>客户端</h2><p>查看同事电脑的连接、版本和更新结果。</p></div><button class="button" id="discoverClients"><i data-lucide="radar"></i>重新扫描</button></div>
+          <div class="clients-grid">
+            <article class="client"><div class="client-head"><div class="client-name"><i data-lucide="monitor"></i><strong>DESIGN-03</strong></div><span class="badge green">在线</span></div><dl><div><dt>IP 地址</dt><dd>192.168.0.37</dd></div><div><dt>应用版本</dt><dd>1.0.446.3</dd></div><div><dt>最近连接</dt><dd>刚刚</dd></div><div><dt>更新状态</dt><dd>已是最新</dd></div></dl></article>
+            <article class="client"><div class="client-head"><div class="client-name"><i data-lucide="laptop"></i><strong>EDIT-02</strong></div><span class="badge cyan">下载中 72%</span></div><dl><div><dt>IP 地址</dt><dd>192.168.0.42</dd></div><div><dt>应用版本</dt><dd>1.0.445</dd></div><div><dt>实时速度</dt><dd>24.6 MB/s</dd></div><div><dt>目标版本</dt><dd>1.0.446</dd></div></dl></article>
+            <article class="client"><div class="client-head"><div class="client-name"><i data-lucide="monitor"></i><strong>PHOTO-01</strong></div><span class="badge green">在线</span></div><dl><div><dt>IP 地址</dt><dd>192.168.0.51</dd></div><div><dt>应用版本</dt><dd>1.0.446.3</dd></div><div><dt>最近连接</dt><dd>1 分钟前</dd></div><div><dt>更新状态</dt><dd>已是最新</dd></div></dl></article>
+            <article class="client"><div class="client-head"><div class="client-name"><i data-lucide="laptop"></i><strong>MEETING-04</strong></div><span class="badge orange">待重启</span></div><dl><div><dt>IP 地址</dt><dd>192.168.0.63</dd></div><div><dt>应用版本</dt><dd>1.0.446.2</dd></div><div><dt>包状态</dt><dd>校验完成</dd></div><div><dt>目标版本</dt><dd>1.0.446.3</dd></div></dl></article>
+          </div>
+        </section>
+
+        <section class="view" id="view-logs">
+          <div class="section-toolbar"><div><h2>服务日志</h2><p>查看发现、下载、校验、发布和更新回执。</p></div><button class="button" id="clearLogs"><i data-lucide="trash-2"></i>清空显示</button></div>
+          <section class="panel log-panel"><div class="logs" id="logs">
+            <div class="log-line"><time>14:35:06</time><span class="log-level">INFO</span><span>GET /v1/catalog 200 · DESIGN-03 · 8 ms</span></div>
+            <div class="log-line"><time>14:34:51</time><span class="log-level">INFO</span><span>Range 75497472-83886079 · EDIT-02 · 24.6 MB/s</span></div>
+            <div class="log-line"><time>14:32:18</time><span class="log-level">INFO</span><span>客户端回执成功 · DESIGN-03 · release=20260914-1418</span></div>
+            <div class="log-line"><time>14:18:42</time><span class="log-level">INFO</span><span>发布切换完成 · stable/app-hot/1.0.446.3</span></div>
+            <div class="log-line"><time>13:46:10</time><span class="log-level warn">WARN</span><span>下载连接中断，保留断点 · EDIT-02 · offset=68%</span></div>
+            <div class="log-line"><time>09:02:03</time><span class="log-level">INFO</span><span>mDNS 注册完成 · _shiyin-update._tcp.local</span></div>
+            <div class="log-line"><time>09:02:02</time><span class="log-level">INFO</span><span>服务已启动 · bind=0.0.0.0:3011 · private network</span></div>
+          </div></section>
+        </section>
+
+        <section class="view" id="view-settings">
+          <div class="section-toolbar"><div><h2>服务设置</h2><p>这些设置只属于管理电脑，不会写入同事电脑的服务器栏。</p></div><button class="button primary" id="saveSettings"><i data-lucide="save"></i>保存设置</button></div>
+          <div class="settings-layout">
+            <section class="panel"><div class="panel-header"><h2>网络与存储</h2></div><div class="settings-body">
+              <div class="setting-group"><h3>监听配置</h3><div class="field-grid"><label class="field">监听地址<input value="0.0.0.0" readonly></label><label class="field">服务端口<input id="portInput" type="number" min="1024" max="65535" value="3011"></label></div></div>
+              <div class="setting-group"><h3>客户端发现</h3><div class="toggle-row"><div><strong>mDNS 自动发现</strong><small>客户端通过服务名发现当前 IPv4 地址</small></div><label class="switch"><input type="checkbox" checked><span></span></label></div><div class="toggle-row"><div><strong>UDP 备用发现</strong><small>在无法使用 mDNS 的网络中广播发现</small></div><label class="switch"><input type="checkbox" checked><span></span></label></div></div>
+              <div class="setting-group"><h3>存储与传输</h3><div class="field-grid"><label class="field">资源仓库<input value="D:\SHIYIN-Distribution\store"></label><label class="field">总带宽限制<select><option>不限速</option><option>100 MB/s</option><option>50 MB/s</option></select></label></div></div>
+              <div class="setting-group"><div class="toggle-row"><div><strong>开机自动启动服务</strong><small>控制面板关闭后服务仍在后台运行</small></div><label class="switch"><input type="checkbox" checked><span></span></label></div><div class="toggle-row"><div><strong>允许客户端回退 GitHub</strong><small>局域网服务不可用时使用公网发布源</small></div><label class="switch"><input type="checkbox" checked><span></span></label></div></div>
+            </div></section>
+            <aside class="panel architecture"><span class="badge cyan">客户端连接顺序</span><ol><li>上次验证的服务地址</li><li>mDNS 自动发现</li><li>UDP 广播发现</li><li>安装包内置引导 IP</li><li>可选 GitHub 回退</li></ol></aside>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="publishDialog">
+    <div class="dialog-head"><h2>导入并发布资源</h2><button class="icon-button" data-close-dialog title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+    <div class="dialog-body">
+      <label class="dropzone" id="dropzone"><span><i data-lucide="file-up"></i><strong id="dropTitle">选择文件或拖放到这里</strong><small>支持全量安装包、热更新快照和模型目录</small></span><input id="packageFile" type="file" hidden></label>
+      <div class="dialog-fields"><label class="field">资源类型<select id="publishType"><option>自动识别</option><option>全量安装包</option><option>应用热更新</option><option>人物深度组件</option><option>深度视频模型</option></select></label><label class="field">发布频道<select><option>稳定频道</option><option>预览频道</option></select></label><label class="field">版本号<input id="publishVersion" placeholder="自动读取或填写"></label><label class="field">最低桌面版本<input value="1.0.446"></label></div>
+    </div>
+    <div class="dialog-actions"><button class="button" data-close-dialog>取消</button><button class="button primary" id="publishConfirm"><i data-lucide="shield-check"></i>校验并发布</button></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status"><i data-lucide="circle-check"></i><span></span></div>
+  <script src="../vendor/js/lucide.js"></script>
+  <script>
+    (() => {
+      const $ = selector => document.querySelector(selector);
+      const $$ = selector => [...document.querySelectorAll(selector)];
+      const saved = JSON.parse(localStorage.getItem('shiyin-distribution-prototype') || '{}');
+      let running = saved.running !== false;
+      let toastTimer;
+      const titles = {overview:'服务总览', resources:'资源与发布', clients:'客户端', logs:'服务日志', settings:'服务设置'};
+      const toast = message => {
+        $('#toast span').textContent = message;
+        $('#toast').classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 2300);
+      };
+      const addActivity = (title, detail) => {
+        const time = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+        $('#activityList').insertAdjacentHTML('afterbegin', `<div class="activity"><i></i><div><strong>${title}</strong><small>${detail}</small></div><time>${time}</time></div>`);
+      };
+      const renderService = () => {
+        $('#serviceTitle').textContent = running ? '服务运行中' : '服务已停止';
+        $('#serviceDescription').textContent = running ? '客户端可发现并下载已发布资源' : '客户端暂时无法检查和下载更新';
+        $('#toggleService span').textContent = running ? '停止服务' : '启动服务';
+        $('#toggleService').classList.toggle('danger', running);
+        $('#toggleService').classList.toggle('primary', !running);
+        $('#toggleServiceIcon').innerHTML = `<i data-lucide="${running ? 'square' : 'play'}"></i>`;
+        $('#servicePulse').classList.toggle('stopped', !running);
+        $$('[data-status-dot]').forEach(dot => dot.classList.toggle('stopped', !running));
+        localStorage.setItem('shiyin-distribution-prototype', JSON.stringify({running}));
+        window.lucide?.createIcons();
+      };
+      const switchView = name => {
+        $$('.view').forEach(view => view.classList.toggle('active', view.id === `view-${name}`));
+        $$('.nav button').forEach(button => button.classList.toggle('active', button.dataset.view === name));
+        $('#pageTitle').textContent = titles[name];
+        $('#sidebar').classList.remove('open');
+      };
+      $$('.nav button').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
+      $('[data-go-resources]').addEventListener('click', () => switchView('resources'));
+      $('#mobileMenu').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+      $('#toggleService').addEventListener('click', () => {
+        running = !running;
+        renderService();
+        addActivity(running ? '分发服务已启动' : '分发服务已停止', running ? '监听 0.0.0.0:3011' : '由管理员手动停止');
+        toast(running ? '服务已启动，客户端可以重新连接' : '服务已停止');
+      });
+      $('#restartService').addEventListener('click', () => {
+        if (!running) running = true;
+        renderService();
+        addActivity('分发服务已重启', '发现服务与下载端点已恢复');
+        toast('服务重启完成');
+      });
+      $('#refreshButton').addEventListener('click', event => {
+        event.currentTarget.querySelector('svg')?.animate([{transform:'rotate(0)'},{transform:'rotate(360deg)'}], {duration:500});
+        setTimeout(() => toast('状态已刷新'), 420);
+      });
+      $('#copyAddress').addEventListener('click', async () => {
+        const value = $('#serverAddress').textContent;
+        try { await navigator.clipboard.writeText(value); toast(`已复制 ${value}`); }
+        catch { toast('访问地址：' + value); }
+      });
+      $$('[data-open-publish]').forEach(button => button.addEventListener('click', () => $('#publishDialog').showModal()));
+      $$('[data-close-dialog]').forEach(button => button.addEventListener('click', () => $('#publishDialog').close()));
+      $('#dropzone').addEventListener('click', event => {
+        if (event.target !== $('#packageFile')) $('#packageFile').click();
+      });
+      $('#packageFile').addEventListener('change', event => {
+        const file = event.target.files[0];
+        if (file) { $('#dropTitle').textContent = file.name; $('#publishVersion').value ||= '1.0.447'; }
+      });
+      ['dragenter','dragover'].forEach(name => $('#dropzone').addEventListener(name, event => { event.preventDefault(); $('#dropzone').style.borderColor = 'var(--cyan)'; }));
+      ['dragleave','drop'].forEach(name => $('#dropzone').addEventListener(name, event => { event.preventDefault(); $('#dropzone').style.borderColor = ''; }));
+      $('#dropzone').addEventListener('drop', event => {
+        const file = event.dataTransfer.files[0];
+        if (file) { $('#dropTitle').textContent = file.name; $('#publishVersion').value ||= '1.0.447'; }
+      });
+      $('#publishConfirm').addEventListener('click', () => {
+        const name = $('#dropTitle').textContent;
+        const version = $('#publishVersion').value.trim() || '自动识别版本';
+        $('#publishDialog').close();
+        addActivity(`${$('#publishType').value} 已发布`, `${version} · 清单和 SHA-256 校验通过`);
+        toast(name === '选择文件或拖放到这里' ? '原型发布完成，未写入真实文件' : `${name} 已校验并发布`);
+      });
+      const filterResources = () => {
+        const type = $('#resourceFilter').value;
+        const query = $('#resourceSearch').value.trim().toLowerCase();
+        $$('#resourceList .resource-row').forEach(row => row.hidden = (type !== 'all' && row.dataset.type !== type) || !row.dataset.search.toLowerCase().includes(query));
+      };
+      $('#resourceFilter').addEventListener('change', filterResources);
+      $('#resourceSearch').addEventListener('input', filterResources);
+      $('[data-pause]').addEventListener('click', event => { event.currentTarget.closest('.row-actions').querySelector('.badge').textContent = '已暂停'; toast('热更新发布已暂停'); });
+      $('[data-verify]').addEventListener('click', () => toast('6,105 个文件校验通过'));
+      $('[data-promote]').addEventListener('click', event => { const badge=event.currentTarget.closest('.row-actions').querySelector('.badge'); badge.textContent='稳定'; badge.className='badge green'; toast('深度视频模型已转为稳定发布'); });
+      $('#discoverClients').addEventListener('click', () => toast('扫描完成，发现 6 台在线客户端'));
+      $('#clearLogs').addEventListener('click', () => { $('#logs').innerHTML = ''; toast('当前日志显示已清空'); });
+      $('#saveSettings').addEventListener('click', () => {
+        const port = Math.max(1024, Math.min(65535, Number($('#portInput').value) || 3011));
+        $('#portInput').value = port;
+        $('#serverAddress').textContent = `http://192.168.0.24:${port}`;
+        $('#miniAddress').textContent = `192.168.0.24:${port}`;
+        toast('服务设置已保存');
+      });
+      document.addEventListener('keydown', event => { if (event.key === 'Escape') $('#sidebar').classList.remove('open'); });
+      renderService();
+      window.lucide?.createIcons();
+    })();
+  </script>
+</body>
+</html>

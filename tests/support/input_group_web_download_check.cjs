@@ -60,6 +60,7 @@ const slice = (a, b) => canvas.slice(canvas.indexOf(a), canvas.indexOf(b, canvas
         }
         const page = await browser.newPage();
         await page.addStyleTag({path:path.join(root, 'static/css/canvas.css')});
+        await page.addStyleTag({path:path.join(root, 'static/css/canvas-multi-view-overrides.css')});
         await page.addScriptTag({content:`
             let nodes=[]; let serial=0;
             const uid=()=>String(++serial);
@@ -82,6 +83,7 @@ const slice = (a, b) => canvas.slice(canvas.indexOf(a), canvas.indexOf(b, canvas
             ${slice('function nodeRect(n){', 'const CANVAS_NODE_LAYOUT_GAP')}
             ${slice('const CANVAS_GROUP_ARRANGE_PADDING', 'function arrangeSelectedCanvasGroup(')}
             ${slice('const canvasGroupAutoFitPending', 'function createGroupForUploadedNodes(')}
+            ${slice('function gridOutputItemStyle(', 'function selectionBoxLocalPoint(')}
             let renderCount=0;
             function render(){
                 renderCount++;
@@ -100,7 +102,7 @@ const slice = (a, b) => canvas.slice(canvas.indexOf(a), canvas.indexOf(b, canvas
             }
             const settle=()=>new Promise(resolve=>setTimeout(resolve,450));
             window.checkLayout=async()=>{
-                const group=createInputGroupFromOutput({images:['a','b','c','d','e']},{x:0,y:0});
+                const group=createInputGroupFromOutput({images:['a','b','c','d','e','f','g','h','i']},{x:0,y:0});
                 render();
                 await settle();
                 function verify(){
@@ -126,10 +128,36 @@ const slice = (a, b) => canvas.slice(canvas.indexOf(a), canvas.indexOf(b, canvas
                 await settle();verify();
                 const stable=renderCount;await settle();
                 if(renderCount!==stable)throw Error('自动整理重复渲染');
+
+                const output=document.createElement('div');
+                output.className='output-node';
+                output.innerHTML='<div class="output-grid grid-layout" style="--grid-cols:3"></div>';
+                document.body.append(output);
+                const grid=output.firstElementChild;
+                for(let i=0;i<9;i++){
+                    const item=document.createElement('div');
+                    item.className='output-img-wrap';
+                    item.style.cssText=gridOutputItemStyle({type:'grid-split',groupId:'legacy',rows:3,cols:3,row:Math.floor(i/3),col:i%3,w:300,h:200});
+                    grid.append(item);
+                }
+                const outputRects=[...grid.children].map(item=>item.getBoundingClientRect());
+                const positions=new Set(outputRects.map(rect=>Math.round(rect.x)+','+Math.round(rect.y)));
+                if(positions.size!==9)throw Error('九宫格输出发生重叠');
+                if(outputRects.some(rect=>rect.width>grid.clientWidth/2))throw Error('旧裁切像素尺寸被误用为网格跨度');
+                grid.style.setProperty('--grid-cols','2');
+                grid.innerHTML='';
+                for(let i=0;i<4;i++){
+                    const item=document.createElement('div');
+                    item.className='output-img-wrap';
+                    item.style.cssText=gridOutputItemStyle({type:'grid-split',groupId:'legacy-2x2',rows:2,cols:2,row:Math.floor(i/2),col:i%2,w:300,h:200});
+                    grid.append(item);
+                }
+                const twoColumnWidth=grid.firstElementChild.getBoundingClientRect().width;
+                if(twoColumnWidth<grid.clientWidth*0.4)throw Error('输出网格没有使用记录的列数');
                 return nodes.length;
             };
         `});
-        assert.equal(await page.evaluate(() => checkLayout()), 6);
-        console.log('PASS: Web/desktop × top-level/iframe single and batch downloads; ordered input groups with late portrait sizing, spacing, bounds and stable reflow.');
+        assert.equal(await page.evaluate(() => checkLayout()), 10);
+        console.log('PASS: Web/desktop downloads; nine-cell output and ordered input groups without overlap after late media sizing.');
     } finally { await browser.close(); }
 })().catch(error => {console.error(error); process.exitCode=1;});

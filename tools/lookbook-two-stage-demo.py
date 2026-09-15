@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sqlite3
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '输出' / 'Lookbook两阶段方案-20260910'
 INSTALLED = Path('D:/Program Files/SHIYIN AI/data')
 sys.path.insert(0, str(ROOT))
+CASE_CONFIG = {'panels': 4, 'layout': '2x2', 'panel_ratio': '3:4', 'image_size': '3:4',
+               'message': '广告需求：（空）。综合唯一输入图中的全部人物、服装、相机与环境线索，策划连续4张时尚故事。保持源图衣着，采用真实环境光，四格预览，每格3:4。'}
+PLAN_ONLY = False
 
 STORY_SYSTEM = '''你是高端时尚广告的故事创意总监。此会话只完成综合看图与短故事策划，不输出生图提示词。
 输入图片是视觉事实来源，用户文字为空也必须主动从图片发展具体、有因果、可拍摄的连续微故事。
@@ -59,18 +63,20 @@ async def run(app, providers, report):
                   image_provider='shiying', image_model=model,
                   source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                   input_brief='', source_task='ecommerce_f33ca39199894008bb6ea4d302ab4acb',
-                  source_file=source.name, layout='2x2', panels=4, panel_ratio='3:4',
-                  method='两次独立多模态 LLM 请求，一次四格图片生成；无单阶段对照；非生产链路验收')
+                  source_file=source.name, layout=CASE_CONFIG['layout'], panels=CASE_CONFIG['panels'], panel_ratio=CASE_CONFIG['panel_ratio'],
+                  method='两次独立多模态 LLM 请求，一次联合预览图片生成；非生产链路验收')
     save('results.json', report)
     for stage, system in [('story', STORY_SYSTEM), ('prompts', PROMPT_SYSTEM)]:
         existing = OUT / f'{stage}-response.json'
         if existing.exists():
             data = json.loads(existing.read_text(encoding='utf-8'))['parsed']
         else:
-            message = ('广告需求：（空）。综合唯一输入图中的全部人物、服装、相机与环境线索，策划连续4张时尚故事。保持源图衣着，采用真实环境光，四格预览，每格3:4。' if stage == 'story' else
+            message = (CASE_CONFIG['message'] if stage == 'story' else
                        '已完成的第一阶段广告需求（冻结原文）：\n' + story['ad_brief'] + '\n第一阶段完整结构：\n' + json.dumps(story, ensure_ascii=False))
             save(f'{stage}-request.json', {'system_prompt':system,'message':message,'images':['reference.png'], 'messages':[], 'web_search':False, 'provider':route['provider_id'],'model':route['model']})
             started = time.perf_counter()
+            report['active_stage'] = stage
+            save('results.json', report)
             result = await asyncio.wait_for(app.canvas_llm(app.CanvasLLMRequest(
                 system_prompt=system, message=message, provider=route['provider_id'], model=route['model'],
                 images=[reference], image_labels=['R1：人物参考；观察图中全部人物及其衣着、道具和可见环境'], web_search=False, retry_524=0,
@@ -88,14 +94,22 @@ async def run(app, providers, report):
                 raise RuntimeError('empty_ad_brief')
         else:
             prompts = data
-    if len(prompts.get('shots',[])) != 4 or not prompts.get('contact_sheet_prompt'):
+    if len(prompts.get('shots',[])) != CASE_CONFIG['panels'] or not prompts.get('contact_sheet_prompt'):
         raise RuntimeError('invalid_shots')
     report['story_handoff_exact'] = prompts.get('story_used') == story['ad_brief']
+    if PLAN_ONLY:
+        report['status'] = 'planned'
+        report.pop('error_type', None)
+        report.pop('active_stage', None)
+        save('results.json', report)
+        return
     if not (OUT / 'contact-sheet.png').exists():
         started = time.perf_counter()
-        save('image-request.json', {'provider':'shiying','model':model,'size':'3:4','quality':'high','count':1,'references':['reference.png'],'prompt':prompts['contact_sheet_prompt']})
+        report['active_stage'] = 'image'
+        save('results.json', report)
+        save('image-request.json', {'provider':'shiying','model':model,'size':CASE_CONFIG['image_size'],'quality':'high','count':1,'references':['reference.png'],'prompt':prompts['contact_sheet_prompt']})
         batch = await asyncio.wait_for(app.execute_ai_image_batch(
-            prompt=prompts['contact_sheet_prompt'],provider_id='shiying',model=model,size='3:4',quality='high',
+            prompt=prompts['contact_sheet_prompt'],provider_id='shiying',model=model,size=CASE_CONFIG['image_size'],quality='high',
             references=[{'url':reference,'kind':'image','role':'subject'}],count=1,prefix='lookbook_demo_',
             allow_edit_endpoint_fallback=False,semantic_mask=True,
         ), timeout=600)
@@ -109,8 +123,10 @@ async def run(app, providers, report):
         from PIL import Image
         with Image.open(OUT / 'contact-sheet.png') as im:
             dimensions = list(im.size)
-        report['stages']['image'] = {'status':'succeeded','elapsed_s':round(time.perf_counter()-started,3),'dimensions':dimensions,'images':1,'panels':4}
+        report['stages']['image'] = {'status':'succeeded','elapsed_s':round(time.perf_counter()-started,3),'dimensions':dimensions,'images':1,'panels':CASE_CONFIG['panels']}
     report['status']='succeeded'
+    report.pop('error_type', None)
+    report.pop('active_stage', None)
     save('results.json',report)
 
 
@@ -121,6 +137,10 @@ def main():
     if report.get('status')=='succeeded':
         print('Existing successful case retained; no API calls.')
         return
+    if report.get('error_type') and not report.get('failures'):
+        report['failures'] = [{'stage': 'prompts', 'error_type': report['error_type'], 'status_code': None,
+                               'reason': 'Earlier attempt recorded exception type only; exact status code and failed-attempt duration are unavailable.'}]
+    report['status'] = 'running'
     runtime = ROOT / '.codex-artifacts/lookbook-two-stage-runtime'
     runtime.mkdir(parents=True,exist_ok=True)
     os.environ.update(CANVAS_DATA_DIR=str(runtime / 'data'),CANVAS_PORTABLE_ROOT=str(runtime),CANVAS_APP_ROOT=str(ROOT),
@@ -143,12 +163,19 @@ def main():
             asyncio.run(run(app, providers, report))
     except Exception as exc:
         report.update(status='failed',error_type=type(exc).__name__)
+        reason = str(getattr(exc, 'detail', '') or str(exc))
+        for p in providers:
+            secret = os.environ.get('API_PROVIDER_'+p['id'].upper().replace('-','_')+'_KEY', '')
+            if secret:
+                reason = reason.replace(secret, '[redacted]')
+        reason = re.sub(r'https?://\S+|data:image/\S+|sk-[\w-]+', '[redacted]', reason)
+        report.setdefault('failures', []).append({'stage': report.get('active_stage'), 'error_type':type(exc).__name__, 'status_code':getattr(exc, 'status_code', None), 'reason':reason[:500]})
         save('results.json',report)
     finally:
         for p in providers:
             os.environ.pop('API_PROVIDER_'+p['id'].upper().replace('-','_')+'_KEY',None)
     print(json.dumps(report,ensure_ascii=True,indent=2))
-    if report['status']!='succeeded':
+    if report['status'] not in {'succeeded', 'planned'}:
         raise SystemExit(1)
 
 

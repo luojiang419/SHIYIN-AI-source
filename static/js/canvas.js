@@ -12436,6 +12436,8 @@ function renderNode(node){
     return el;
 }
 function bindOutputWrap(wrap, node){
+    if(wrap._outputBound) return;
+    wrap._outputBound = true;
     const img = wrap.querySelector('img');
     const video = wrap.querySelector('video');
     const audio = wrap.querySelector('audio');
@@ -12446,33 +12448,29 @@ function bindOutputWrap(wrap, node){
     const recoverQuery = wrap.querySelector('.output-recover-query');
     const mediaUrl = wrap.dataset.outputUrl || img?.dataset.url || video?.dataset.url || '';
     const mediaKind = mediaKindForRef({url:mediaUrl});
+    wrap.onclick = e => {
+        const media = e.target.closest?.('img[data-url], video[data-output-video-fallback]');
+        if(!media || !wrap.contains(media)) return;
+        e.stopPropagation();
+        if(media.dataset.dragging) return;
+        if(mediaKind !== 'image'){
+            openOutputLightbox(media.dataset.url || mediaUrl, node);
+            return;
+        }
+        if(e.detail >= 2) return;
+        selectOutputMedia(node.id, media.dataset.url || mediaUrl, wrap);
+    };
+    wrap.ondblclick = e => {
+        const media = e.target.closest?.('img[data-url], video[data-output-video-fallback]');
+        if(!media || !wrap.contains(media)) return;
+        e.preventDefault(); e.stopPropagation();
+        openOutputLightbox(media.dataset.url || mediaUrl, node);
+    };
     if(img){
         bindCanvasOutputMediaDrag(img, mediaUrl || img.dataset.url, mediaKind);
-        img.onclick = e => {
-            e.stopPropagation();
-            if(img.dataset.dragging) return;
-            if(mediaKind !== 'image'){
-                openOutputLightbox(img.dataset.url, node);
-                return;
-            }
-            if(e.detail >= 2) return;
-            selectOutputMedia(node.id, img.dataset.url, wrap);
-        };
-        if(mediaKind === 'image') img.ondblclick = e => { e.preventDefault(); e.stopPropagation(); openOutputLightbox(img.dataset.url, node); };
     }
-    wrap.addEventListener('click', e => {
-        const fallbackVideo = e.target.closest?.('video[data-output-video-fallback]');
-        if(!fallbackVideo || !wrap.contains(fallbackVideo)) return;
-        e.stopPropagation();
-        openOutputLightbox(fallbackVideo.dataset.url, node);
-    });
     if(video){
         bindCanvasOutputMediaDrag(video, mediaUrl || video.dataset.url, mediaKind);
-        video.onclick = e => {
-            e.stopPropagation();
-            if(video.dataset.dragging) return;
-            openOutputLightbox(video.dataset.url, node);
-        };
     }
     if(fileCard){
         fileCard.onclick = e => {
@@ -12531,6 +12529,28 @@ function bindOutputWrap(wrap, node){
         };
     }
 }
+document.addEventListener('dblclick', event => {
+    const media = event.target.closest?.('.output-img-wrap img[data-url], .output-img-wrap video[data-output-video-fallback]');
+    const wrap = media?.closest?.('.output-img-wrap');
+    const nodeEl = wrap?.closest?.('.output-node[data-id]');
+    if(!media || !wrap || !nodeEl) return;
+    const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'output');
+    const url = media.dataset.url || wrap.dataset.outputUrl || '';
+    if(!node || !url) return;
+    event.preventDefault(); event.stopPropagation();
+    openOutputLightbox(url, node);
+}, true);
+document.addEventListener('click', event => {
+    const media = event.target.closest?.('.output-img-wrap img[data-url], .output-img-wrap video[data-output-video-fallback]');
+    const wrap = media?.closest?.('.output-img-wrap');
+    const nodeEl = wrap?.closest?.('.output-node[data-id]');
+    const url = media?.dataset.url || wrap?.dataset.outputUrl || '';
+    if(!media || !wrap || !nodeEl || mediaKindForOutputItem({url}) !== 'video') return;
+    const node = nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'output');
+    if(!node) return;
+    event.preventDefault(); event.stopPropagation();
+    openOutputLightbox(url, node);
+}, true);
 function outputDomKeyForItem(item){
     return `url:${outputUrlValue(item)}`;
 }
@@ -12606,6 +12626,7 @@ function refreshOutputNodeContent(node){
                 bindOutputWrap(child, node);
             }
         }
+        bindOutputWrap(child, node);
         grid.appendChild(child);
     });
     bindCanvasPreviewImageFallbacks(grid);
@@ -18926,9 +18947,11 @@ function isVideoUrl(url){
 }
 function mediaKindForOutputItem(item){
     const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
-    if(['image','video','audio','text','file'].includes(explicit)) return explicit;
     const url = outputUrlValue(item);
+    // 兼容旧版深度视频输出：旧创建器曾把 MP4 持久化为 kind:image。
+    // 文件类型证据更可靠，避免全屏查看器把视频 URL 填入 <img> 后显示空白。
     if(isVideoUrl(url)) return 'video';
+    if(['image','video','audio','text','file'].includes(explicit)) return explicit;
     if(isAudioUrl(url)) return 'audio';
     if(isTextUrl(url)) return 'text';
     return 'image';
@@ -19740,7 +19763,7 @@ function renderOutputMedia(item, useGridLayout=false){
         return `<div class="output-img-wrap" data-output-url="${safe}" data-missing-url="${safe}"${gridStyle}>${missingAssetHtml(url, true)}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'video'){
-        return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasVideoPreviewHtml(url, 512, 'alt="video output" data-video-fallback-attrs="controls data-output-video-fallback=&quot;1&quot;"')}${timePill}<button class="canvas-video-play output-video-play" type="button" title="播放"><i data-lucide="play"></i></button><div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+        return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasVideoPreviewHtml(url, 512, 'alt="video output" ondblclick="openOutputMediaFromElement(this,event)" data-video-fallback-attrs="controls data-output-video-fallback=&quot;1&quot;"')}${timePill}<button class="canvas-video-play output-video-play" type="button" title="播放"><i data-lucide="play"></i></button><div class="output-video-badge"><i data-lucide="play" class="w-3 h-3"></i>VIDEO</div><button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     if(kind === 'audio'){
         return `<div class="output-img-wrap output-audio-wrap" data-output-url="${safe}"${gridStyle}><div class="output-audio-card"><i data-lucide="file-audio" class="w-7 h-7"></i><span>${escapeHtml(outputImageName(url))}</span><audio src="${safe}" data-url="${safe}" controls preload="metadata"></audio></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
@@ -19751,6 +19774,15 @@ function renderOutputMedia(item, useGridLayout=false){
         return `<div class="output-img-wrap output-file-wrap" data-output-url="${safe}"${gridStyle}><div class="output-file-card"><i data-lucide="${icon}" class="w-7 h-7"></i><span>${escapeHtml(meta.name || outputImageName(url))}</span><small>${label}</small></div>${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
     }
     return `<div class="output-img-wrap" data-output-url="${safe}"${gridStyle}>${canvasPreviewImgHtml(url, 512, 'alt="generated output"')}${timePill}<button class="output-del" title="${tr('common.delete')}">×</button></div>`;
+}
+function openOutputMediaFromElement(element, event){
+    const wrap = element?.closest?.('.output-img-wrap');
+    const nodeEl = wrap?.closest?.('.output-node[data-id]');
+    const node = nodeEl ? nodes.find(item => item.id === nodeEl.dataset.id && item.type === 'output') : null;
+    const url = element?.dataset?.url || wrap?.dataset?.outputUrl || '';
+    if(!node || !url) return;
+    event?.preventDefault?.(); event?.stopPropagation?.();
+    openOutputLightbox(url, node);
 }
 function outputGridLayout(node){
     const images = node?.images || [];
@@ -20945,7 +20977,10 @@ function renameCanvasGroup(group, titleEl){
 }
 function gridOutputItemStyle(grid){
     if(!grid) return '';
-    const cellLayout = grid.itemMode === 'cells';
+    // 早期宫格裁切记录没有 itemMode，并把裁切像素尺寸保存在 w/h。
+    // 只要元数据自身声明了 grid-split，就应按单元格渲染；三视图等跨格布局
+    // 没有这个 type，仍继续使用 rowSpan/colSpan 或 w/h。
+    const cellLayout = grid.itemMode === 'cells' || grid.type === 'grid-split';
     const row = Math.max(1, Number(grid.row || 0) + 1);
     const col = Math.max(1, Number(grid.col || 0) + 1);
     const rowSpan = Math.max(1, Number(cellLayout ? 1 : (grid.rowSpan ?? grid.h ?? 1)) || 1);

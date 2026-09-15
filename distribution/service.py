@@ -78,6 +78,7 @@ class Center:
         self.job = {'running': False, 'message': '', 'error': ''}
         self.started = time.time()
         self.desktop_action = {'sequence': 0, 'action': ''}
+        self.bug_upload_times = {}
         token_path = self.data / 'admin-token'
         if not token_path.exists():
             token_path.write_text(secrets.token_urlsafe(36), 'ascii')
@@ -94,7 +95,13 @@ class Center:
                     manifest TEXT, state TEXT, created REAL);
                 CREATE TABLE IF NOT EXISTS clients (ip TEXT PRIMARY KEY, seen REAL, version TEXT);
                 CREATE TABLE IF NOT EXISTS logs (created REAL, message TEXT);
+                CREATE TABLE IF NOT EXISTS bug_reports (id TEXT PRIMARY KEY, created REAL, client_id TEXT,
+                    ip TEXT, kind TEXT, summary TEXT, file TEXT, user_id TEXT);
+                CREATE TABLE IF NOT EXISTS bug_devices (user_id TEXT, client_id TEXT, updated REAL,
+                    ip TEXT, file TEXT, PRIMARY KEY(user_id,client_id));
             ''')
+            if 'user_id' not in [row['name'] for row in db.execute('PRAGMA table_info(bug_reports)')]:
+                db.execute('ALTER TABLE bug_reports ADD COLUMN user_id TEXT')
         self.traffic = Traffic(self.db)
         self.blob_labels = None
 
@@ -128,6 +135,82 @@ class Center:
     def log(self, message):
         with self.db() as db:
             db.execute('INSERT INTO logs VALUES (?, ?)', (time.time(), str(message)))
+
+    def receive_bug_report(self, body, ip):
+        if not isinstance(body, dict):
+            raise ValueError('日志格式无效')
+        client_id = str(body.get('clientId') or '').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{8,64}', client_id):
+            raise ValueError('客户端标识无效')
+        user_id = str(body.get('userId') or 'admin').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', user_id):
+            raise ValueError('账号标识无效')
+        kind = str(body.get('kind') or '')
+        if kind not in ('heartbeat', 'error', 'runtime'):
+            raise ValueError('日志类型无效')
+        with self.lock:
+            now = time.time()
+            recent = [stamp for stamp in self.bug_upload_times.get(ip, []) if now - stamp < 60]
+            if len(recent) >= 120:
+                raise ValueError('日志发送过于频繁')
+            recent.append(now)
+            self.bug_upload_times[ip] = recent
+        summary = str(body.get('summary') or '')[:240]
+        report_id = f"{time.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(6)}"
+        folder = self.data / 'bug-logs' / user_id / client_id
+        folder.mkdir(parents=True, exist_ok=True)
+        report = {'id': report_id, 'receivedAt': time.time(), 'ip': ip,
+                  'clientId': client_id, 'userId': user_id, 'kind': kind, 'summary': summary,
+                  'version': str(body.get('version') or '')[:80],
+                  'details': body.get('details')}
+        machine = body.get('machine')
+        if machine is not None:
+            if not isinstance(machine, dict) or len(json.dumps(machine, ensure_ascii=False)) > 40000:
+                raise ValueError('设备信息格式无效或过大')
+            device_file = folder / 'device.json'
+            atomic_json(device_file, {'userId': user_id, 'clientId': client_id,
+                'ip': ip, 'updatedAt': report['receivedAt'], 'machine': machine})
+            with self.db() as db:
+                db.execute('INSERT INTO bug_devices VALUES (?,?,?,?,?) ON CONFLICT(user_id,client_id) '
+                    'DO UPDATE SET updated=excluded.updated,ip=excluded.ip,file=excluded.file',
+                    (user_id, client_id, report['receivedAt'], ip, str(device_file)))
+        file = folder / f'{report_id}.json'
+        atomic_json(file, report)
+        with self.db() as db:
+            db.execute('INSERT INTO bug_reports VALUES (?,?,?,?,?,?,?,?)',
+                       (report_id, report['receivedAt'], client_id, ip, kind, summary, str(file), user_id))
+        self.touch_client(ip, report['version'])
+        return {'id': report_id}
+
+    def bug_reports(self, client_id='', limit=100):
+        with self.db() as db:
+            if client_id:
+                rows = db.execute('SELECT id,created,client_id,ip,kind,summary,user_id FROM bug_reports '
+                                  'WHERE client_id=? ORDER BY created DESC LIMIT ?', (client_id, limit))
+            else:
+                rows = db.execute('SELECT id,created,client_id,ip,kind,summary,user_id FROM bug_reports '
+                                  'ORDER BY created DESC LIMIT ?', (limit,))
+            return [dict(row) for row in rows]
+
+    def bug_report(self, report_id):
+        with self.db() as db:
+            row = db.execute('SELECT file FROM bug_reports WHERE id=?', (report_id,)).fetchone()
+        if not row:
+            raise ValueError('日志不存在')
+        return json.loads(Path(row['file']).read_text('utf-8'))
+
+    def bug_devices(self):
+        with self.db() as db:
+            return [dict(row) for row in db.execute('SELECT user_id,client_id,updated,ip '
+                'FROM bug_devices ORDER BY updated DESC')]
+
+    def bug_device(self, user_id, client_id):
+        with self.db() as db:
+            row = db.execute('SELECT file FROM bug_devices WHERE user_id=? AND client_id=?',
+                             (user_id, client_id)).fetchone()
+        if not row:
+            raise ValueError('设备信息不存在')
+        return json.loads(Path(row['file']).read_text('utf-8'))
 
     def start(self):
         with self.lock:
@@ -205,7 +288,9 @@ class Center:
                 'settings': self.config, 'releases': releases, 'clients': clients, 'logs': logs,
                 'job': dict(self.job), 'data': str(self.data), 'uptime': int(time.time() - self.started),
                 'desktop_action': dict(self.desktop_action), 'traffic': self.traffic.snapshot(),
-                'target_version': target}
+                'target_version': target, 'bug_reports': self.bug_reports(),
+                'bug_devices': self.bug_devices(),
+                'bug_log_root': str(self.data / 'bug-logs')}
 
     def launch_job(self, action):
         with self.lock:
@@ -365,6 +450,16 @@ class Center:
                 return secrets.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + owner.token)
 
             def do_POST(self):
+                path = urlsplit(self.path).path
+                if not admin and path == '/v1/bug-reports':
+                    try:
+                        size = int(self.headers.get('Content-Length', 0))
+                        if not 0 < size <= 65536:
+                            raise ValueError('日志大小无效')
+                        body = json.loads(self.rfile.read(size))
+                        return self.json(owner.receive_bug_report(body, self.client_address[0]), 201)
+                    except (ValueError, OSError, json.JSONDecodeError) as exc:
+                        return self.json({'error': str(exc)}, 400)
                 if not admin or not self.authenticated():
                     return self.json({'error': '需要本机管理授权'}, 403)
                 try:
@@ -372,7 +467,6 @@ class Center:
                     if size > 65536:
                         raise ValueError('请求过大')
                     body = json.loads(self.rfile.read(size) or b'{}')
-                    path = urlsplit(self.path).path
                     if path == '/api/start': owner.start()
                     elif path == '/api/stop': owner.stop()
                     elif path == '/api/restart':
@@ -425,6 +519,17 @@ class Center:
                 try:
                     path = unquote(urlsplit(self.path).path)
                     if admin:
+                        if path == '/api/bug-reports':
+                            if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
+                            return self.json(owner.bug_reports())
+                        if path.startswith('/api/bug-devices/'):
+                            if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
+                            parts = path.split('/')
+                            if len(parts) != 5: return self.json({'error': '设备标识无效'}, 400)
+                            return self.json(owner.bug_device(parts[3], parts[4]))
+                        if path.startswith('/api/bug-reports/'):
+                            if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
+                            return self.json(owner.bug_report(path.rsplit('/', 1)[-1]))
                         if path == '/api/status':
                             if not self.authenticated(): return self.json({'error': '需要管理授权'}, 403)
                             return self.json(owner.status())

@@ -120,6 +120,48 @@ def test_public_api_cannot_mutate(server):
     assert err.value.code==403
 
 
+def test_bug_reports_are_partitioned_and_admin_only(server, tmp_path):
+    center, url = server
+    payload = {'clientId': 'client_12345678', 'kind': 'error', 'summary': 'CUDA failed',
+               'version': '1.0.447', 'details': {'error': 'no kernel image'},
+               'machine': {'cpu': [{'Name': 'Test CPU'}], 'nvidiaGpus': ['Test GPU, 555.55, 8192, 7.5']}}
+    request = urllib.request.Request(url+'/v1/bug-reports', data=json.dumps(payload).encode(),
+                                     headers={'Content-Type': 'application/json'}, method='POST')
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request) as response:
+        assert response.status == 201
+        report_id = json.load(response)['id']
+    file = center.data/'bug-logs/admin/client_12345678'/f'{report_id}.json'
+    assert json.loads(file.read_text('utf-8'))['details']['error'] == 'no kernel image'
+    assert center.bug_reports('client_12345678')[0]['summary'] == 'CUDA failed'
+    device = center.bug_device('admin', 'client_12345678')
+    assert device['machine']['nvidiaGpus'][0].startswith('Test GPU')
+    assert (file.parent/'device.json').is_file()
+    bad = dict(payload, clientId='../secret')
+    request = urllib.request.Request(url+'/v1/bug-reports', data=json.dumps(bad).encode(), method='POST')
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request)
+    assert error.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as error: get(url+'/api/bug-reports/'+report_id)
+    assert error.value.code == 404
+
+
+def test_bug_device_admin_endpoint_requires_token(tmp_path):
+    center = Center(tmp_path/'data')
+    center.receive_bug_report({'clientId': 'client_12345678', 'userId': 'user_abc',
+        'kind': 'heartbeat', 'machine': {'memory': {'totalBytes': 123}}}, '127.0.0.1')
+    http = ThreadingHTTPServer(('127.0.0.1', 0), center.handler(True))
+    thread = threading.Thread(target=http.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f'http://127.0.0.1:{http.server_port}/api/bug-devices/user_abc/client_12345678'
+        with pytest.raises(urllib.error.HTTPError) as error: get(url)
+        assert error.value.code == 403
+        with get(url, {'Authorization': 'Bearer '+center.token}) as response:
+            assert json.load(response)['machine']['memory']['totalBytes'] == 123
+    finally:
+        http.shutdown(); http.server_close(); thread.join()
+
+
 def test_import_rejects_corruption_without_changing_active(tmp_path):
     c=Center(tmp_path/'data');first=snapshot(tmp_path/'one');c.import_release(first,'hot')
     before=c.active('hot')['id']

@@ -69,6 +69,31 @@ def test_lan_server_serves_manifest_and_byte_ranges():
             with urllib.request.urlopen(update_request) as response:
                 assert response.status == 206
                 assert response.read() == b"installer"
+
+            hot_root = service._hot_update_roots()[0]
+            hot_file = hot_root / "files" / "app" / "web" / "index.html"
+            hot_file.parent.mkdir(parents=True)
+            hot_file.write_bytes(b"hot-update")
+            (hot_root / "manifest.json").write_text(json.dumps({
+                "protocol_version": 1,
+                "version": "20260914153000",
+                "min_desktop_version": "1.0.447",
+                "prune_roots": ["app/web"],
+                "files": [{
+                    "path": "app/web/index.html",
+                    "size": 10,
+                    "sha256": hashlib.sha256(b"hot-update").hexdigest(),
+                }],
+            }), encoding="utf-8")
+            hot_manifest = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/hot-update/manifest.json").read())
+            assert hot_manifest["version"] == "20260914153000"
+            hot_request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/hot-update/files/app/web/index.html",
+                headers={"Range": "bytes=4-9"},
+            )
+            with urllib.request.urlopen(hot_request) as response:
+                assert response.status == 206
+                assert response.read() == b"update"
         finally:
             service.stop()
 

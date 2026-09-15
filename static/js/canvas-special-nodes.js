@@ -39,6 +39,7 @@
         smooth:0,
         invert:false
     });
+    const DEFAULT_DEPTH_VIDEO_CONTROLS = Object.freeze({brightness:100, contrast:100, gamma:100, blur:0, invert:false});
     const DEPTH_MAP_CONTROL_PRESETS = Object.freeze({
         standard:{label:'标准', values:{...DEFAULT_DEPTH_MAP_CONTROLS}},
         portrait:{label:'人像增强', values:{farPoint:5, nearPoint:94, midtone:10, contrast:112, brightness:0, smooth:1, invert:false}},
@@ -51,6 +52,7 @@
     const depthVideoTasks = new Map();
     const personDepthBindings = new Map();
     let activeDepthMapDialog = null;
+    let activeDepthVideoDialog = null;
     let depthMapSettings = {mode:'person', controls:{...DEFAULT_DEPTH_MAP_CONTROLS}};
     let depthMapSettingsPromise = null;
     let depthMapSettingsLoaded = false;
@@ -69,6 +71,22 @@
         return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     }
     function clamp(value, min, max){ return Math.max(min, Math.min(max, Number(value) || 0)); }
+    function normalizeDepthVideoControls(nodeOrValues){
+        const source = nodeOrValues?.depthVideoControls || nodeOrValues || {};
+        const controls = {
+            brightness:Math.round(clamp(Number.isFinite(Number(source.brightness)) ? source.brightness : 100, 20, 220)),
+            contrast:Math.round(clamp(Number.isFinite(Number(source.contrast)) ? source.contrast : 100, 20, 300)),
+            gamma:Math.round(clamp(Number.isFinite(Number(source.gamma)) ? source.gamma : 100, 25, 300)),
+            blur:Math.round(clamp(Number.isFinite(Number(source.blur)) ? source.blur : 0, 0, 12)),
+            invert:Boolean(source.invert)
+        };
+        if(nodeOrValues?.depthVideoControls) nodeOrValues.depthVideoControls = controls;
+        return controls;
+    }
+    function depthVideoCssFilter(values){
+        const c = normalizeDepthVideoControls(values);
+        return `brightness(${Math.round(c.brightness * 100 / c.gamma)}%) contrast(${c.contrast}%) ${c.invert ? 'invert(1) ' : ''}blur(${c.blur}px)`;
+    }
     function nameFromUrl(url, fallback='image.png'){
         try {
             const pathname = new URL(String(url || ''), location.href).pathname;
@@ -487,6 +505,7 @@
     }
 
     function depthVideoBodyHtml(node){
+        node.depthVideoControls = normalizeDepthVideoControls(node);
         const output = outputItem(node);
         const inputUrl = node.depthVideoManualInput?.url || node.depthVideoInputUrl || '';
         const inputName = node.depthVideoManualInput?.name || node.depthVideoInputName || '输入视频';
@@ -505,17 +524,71 @@
                     ${node.depthVideoManualInput?.url ? '<span class="depth-map-input-source is-manual">手动优先</span><button type="button" class="depth-map-remove-input" data-depth-video-remove-input title="移除手动输入视频" aria-label="移除手动输入视频"><i data-lucide="trash-2"></i></button>' : inputUrl ? '<span class="depth-map-input-source">连线</span>' : ''}
                 </div>
                 <div class="depth-video-preview-card ${output?.url ? 'has-video' : ''}">
-                    <span class="depth-map-preview-label">深度视频</span>${depthVideoPlayer(output?.url || '', '深度视频', 'output')}
+                    <span class="depth-map-preview-label">深度视频</span><div class="depth-video-filtered" style="filter:${depthVideoCssFilter(node.depthVideoControls)}">${depthVideoPlayer(output?.url || '', '深度视频', 'output')}</div>
                     ${status === 'running' || status === 'queued' ? `<div class="depth-video-progress" data-depth-video-progress><span style="width:${progress}%"></span><b>${Math.round(progress)}%</b></div>` : ''}
                 </div>
             </div>
             <div class="special-toolbar depth-map-toolbar">
                 <button type="button" data-special-action="upload-depth-video"><i data-lucide="upload"></i><span>导入视频</span></button>
                 <button type="button" data-special-action="retry-depth-video" ${!inputUrl || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
+                <button type="button" data-special-action="open-depth-video-controls" ${!output?.url || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>进阶控制</span></button>
+                <button type="button" data-special-action="export-depth-video" ${!output?.url || status === 'running' || status === 'queued' || node.depthVideoExporting ? 'disabled' : ''}><i data-lucide="${node.depthVideoExporting ? 'loader-2' : 'external-link'}"></i><span>${node.depthVideoExporting ? '导出中' : '导出深度视频'}</span></button>
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
             <div class="special-output-row"><span>${output?.url ? esc(output.name || 'depth-preview.mp4') : '输出：VDA Base · FP16 · Relative Depth'}</span><b>${node.depthVideoWidth && node.depthVideoHeight ? `${node.depthVideoWidth}×${node.depthVideoHeight}` : ''}</b></div>
         </div>`;
+    }
+
+    function closeDepthVideoControls(){
+        activeDepthVideoDialog?.remove();
+        activeDepthVideoDialog = null;
+    }
+    function openDepthVideoControls(node, options){
+        closeDepthVideoControls();
+        const output = outputItem(node);
+        if(!output?.url) return;
+        const controls = normalizeDepthVideoControls(node);
+        const dialog = document.createElement('div');
+        dialog.className = 'depth-video-control-modal';
+        dialog.innerHTML = `<div class="depth-video-control-dialog" role="dialog" aria-modal="true" aria-label="深度视频进阶控制">
+            <div class="depth-video-control-head"><div><strong>深度视频进阶控制</strong><span>调整会实时应用到节点预览与导出视频</span></div><button type="button" data-depth-video-close title="关闭"><i data-lucide="x"></i></button></div>
+            <div class="depth-video-control-preview"><video src="${esc(output.url)}" controls autoplay loop muted playsinline style="filter:${depthVideoCssFilter(controls)}"></video></div>
+            <div class="depth-video-control-grid">
+                ${[['brightness','亮度',20,220],['contrast','对比度',20,300],['gamma','中间调',25,300],['blur','平滑',0,12]].map(([key,label,min,max]) => `<label><span>${label}<b data-depth-video-value="${key}">${controls[key]}${key === 'blur' ? 'px' : '%'}</b></span><input type="range" min="${min}" max="${max}" value="${controls[key]}" data-depth-video-control="${key}"></label>`).join('')}
+                <label class="depth-video-control-check"><input type="checkbox" data-depth-video-control="invert" ${controls.invert ? 'checked' : ''}><span>反转远近</span></label>
+            </div>
+            <div class="depth-video-control-footer"><button type="button" data-depth-video-reset>恢复默认</button><button type="button" class="special-primary" data-depth-video-done>完成</button></div>
+        </div>`;
+        document.body.appendChild(dialog); activeDepthVideoDialog = dialog;
+        const preview = dialog.querySelector('video');
+        const apply = () => {
+            node.depthVideoControls = normalizeDepthVideoControls(node);
+            preview.style.filter = depthVideoCssFilter(node.depthVideoControls);
+            Object.entries(node.depthVideoControls).forEach(([key,value]) => { const label=dialog.querySelector(`[data-depth-video-value="${key}"]`); if(label) label.textContent=`${value}${key === 'blur' ? 'px' : '%'}`; });
+            notify(options, node, true);
+        };
+        dialog.querySelectorAll('[data-depth-video-control]').forEach(input => input.addEventListener('input', () => { const key=input.dataset.depthVideoControl; node.depthVideoControls={...normalizeDepthVideoControls(node),[key]:input.type === 'checkbox' ? input.checked : Number(input.value)}; apply(); }));
+        dialog.querySelector('[data-depth-video-reset]').onclick=()=>{ node.depthVideoControls={...DEFAULT_DEPTH_VIDEO_CONTROLS}; dialog.querySelectorAll('[data-depth-video-control]').forEach(input=>{ input.type === 'checkbox' ? input.checked=false : input.value=node.depthVideoControls[input.dataset.depthVideoControl]; }); apply(); };
+        dialog.querySelector('[data-depth-video-close]').onclick=closeDepthVideoControls;
+        dialog.querySelector('[data-depth-video-done]').onclick=closeDepthVideoControls;
+        dialog.addEventListener('mousedown', event => { if(event.target === dialog) closeDepthVideoControls(); });
+        window.lucide?.createIcons?.({nodes:[dialog]});
+        dialog.querySelector('[data-depth-video-control]')?.focus();
+    }
+    async function exportDepthVideo(node, options){
+        const output = outputItem(node);
+        if(!output?.url) throw new Error('请先生成深度视频');
+        node.depthVideoExporting = true; notify(options, node, true);
+        try{
+            const response = await fetch('/api/video-depth/export', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input_url:output.url, controls:normalizeDepthVideoControls(node)})});
+            if(!response.ok) throw new Error(await responseError(response, '深度视频导出失败'));
+            const data = await response.json();
+            const item = {...data.file, kind:'video'};
+            const outputNode = options.createOutputNode?.(node, item);
+            if(!outputNode) throw new Error('深度视频输出节点创建失败');
+            outputNode.title = '深度视频输出'; node.depthVideoExportNodeId = outputNode.id || '';
+            options.toast?.('已创建深度视频输出节点');
+        } finally { node.depthVideoExporting=false; notify(options,node,true); }
     }
 
     async function uploadDepthVideo(file){
@@ -587,6 +660,8 @@
         };
         root.querySelector('[data-depth-video-remove-input]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); delete node.depthVideoManualInput; source = depthVideoInput(node, options); syncDepthVideoInput(node, source); clearDepthVideoResult(node, options); notify(options, node, true); if(source?.url) runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); });
         root.querySelector('[data-special-action="retry-depth-video"]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); });
+        root.querySelector('[data-special-action="open-depth-video-controls"]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); openDepthVideoControls(node, options); });
+        root.querySelector('[data-special-action="export-depth-video"]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); exportDepthVideo(node, options).catch(error => options.toast?.(error.message)); });
         root.querySelectorAll('[data-depth-video-play]').forEach(button => button.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             const video = root.querySelector(`[data-depth-video-media="${button.dataset.depthVideoPlay}"]`);

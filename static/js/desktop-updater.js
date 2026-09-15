@@ -106,6 +106,14 @@
         if (button) { button.disabled = true; button.textContent = '正在检查…'; }
         try {
             const result = await invoke('check_for_update');
+            // 补齐计划跨重启续跑时静默处理，避免每个中间版本都弹出一次提示。
+            // 即使当前清单暂时不可用，也要保留续跑状态并交给后台重试。
+            if (result.continuation) {
+                if (!result.available) return result;
+                if (!result.downloaded) await invoke('download_update');
+                await invoke('apply_downloaded_update');
+                return result;
+            }
             if (!result.available) {
                 if (options.manual) showStatusModal('当前已是最新版本', `当前版本 v${result.currentVersion} 已是最新版本。`);
                 return result;

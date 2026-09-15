@@ -17,9 +17,10 @@ class VideoDepthUnavailable(RuntimeError):
 class VideoDepthTaskService:
     """Run the validated video-depth worker without coupling it to FastAPI."""
 
-    def __init__(self, project_root: str | Path, model_manager: Any = None):
+    def __init__(self, project_root: str | Path, model_manager: Any = None, bug_reporter: Any = None):
         self.project_root = Path(project_root).resolve()
         self.model_manager = model_manager
+        self.bug_reporter = bug_reporter
         self.lab_root = self.project_root / "tools" / "video-depth-lab"
         self.worker = self.lab_root / "worker" / "main.py"
         self.python = self.lab_root / "runtime" / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -79,7 +80,7 @@ class VideoDepthTaskService:
             "message": message,
         }
 
-    def create(self, input_path: str | Path, output_root: str | Path, url_for_path: Callable[[str], str | None]) -> dict[str, Any]:
+    def create(self, input_path: str | Path, output_root: str | Path, url_for_path: Callable[[str], str | None], user_id: str = 'admin') -> dict[str, Any]:
         state = self.status()
         if not state["runtimeReady"]:
             raise VideoDepthUnavailable(state["message"])
@@ -97,6 +98,7 @@ class VideoDepthTaskService:
             "outputUrl": "",
             "outputName": "depth-preview.mp4",
             "error": "",
+            "userId": user_id,
         }
         with self._lock:
             self._tasks[task_id] = task
@@ -196,6 +198,26 @@ class VideoDepthTaskService:
             )
         except BaseException as error:
             self._update(task_id, status="failed", error=str(error)[:1000], message=str(error)[:240])
+            if self.bug_reporter:
+                from canvas_core.bug_reporter import gpu_diagnostics
+                worker_status = {}
+                try:
+                    diagnostic = subprocess.run([*runtime['command'], 'status'], cwd=runtime['cwd'],
+                        env=runtime['env'], capture_output=True, text=True, timeout=8,
+                        creationflags=flags)
+                    for line in diagnostic.stdout.splitlines():
+                        event = json.loads(line)
+                        if event.get('type') == 'result':
+                            worker_status = {key: event['result'].get(key) for key in (
+                                'torchVersion', 'cudaVersion', 'cudaArchitectures',
+                                'gpu', 'gpuComputeCapability', 'cudaAvailable')}
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+                self.bug_reporter.report('error', '深度视频生成失败', {
+                    'taskId': task_id, 'error': str(error)[:3000],
+                    'runtimeMode': runtime['mode'], 'workerStderr': stderr[-6000:] if 'stderr' in locals() else '',
+                    'gpu': gpu_diagnostics(), 'worker': worker_status, 'inputSuffix': source.suffix,
+                }, user_id=self.get(task_id).get('userId', 'admin'))
 
     def _ensure_model(self, task_id: str) -> None:
         if not self.model_manager:

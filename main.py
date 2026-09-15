@@ -144,6 +144,7 @@ from canvas_core.video_frame_extraction import (
     validate_extraction_options,
 )
 from canvas_core.video_depth import VideoDepthTaskService, VideoDepthUnavailable
+from canvas_core.bug_reporter import BugReporter, BugLogHandler
 from canvas_core.bridge_package import BridgePackageError, read_bridge_package, write_bridge_package
 from canvas_core.bridge_media import materialize_bridge_frames
 from canvas_core.bridge_direct import DirectBridgeError, materialize_direct_bridge_frames
@@ -308,6 +309,17 @@ logging.getLogger("uvicorn.access").addFilter(QuietAccessLogFilter())
 
 app = FastAPI()
 
+@app.exception_handler(Exception)
+async def report_unhandled_error(request: Request, error: Exception):
+    logging.exception("Unhandled backend error: %s", error)
+    reporter = globals().get("BUG_REPORTER")
+    if reporter:
+        reporter.report("error", "后端未处理异常", {
+            "path": request.url.path, "method": request.method,
+            "type": type(error).__name__, "error": str(error)[:3000],
+        }, user_id=current_account_id())
+    return JSONResponse({"detail": "软件运行出错，请稍后重试"}, status_code=500)
+
 PUBLIC_HTTP_PATHS = {
     "/login",
     "/favicon.ico",
@@ -397,6 +409,9 @@ async def account_authentication_middleware(request: Request, call_next):
             return RedirectResponse("/login", status_code=303)
         return JSONResponse({"detail": "请先登录或注册账号"}, status_code=401)
     request.state.account_identity = identity
+    reporter = globals().get("BUG_REPORTER")
+    if reporter:
+        reporter.mark_user_active(identity.account_id)
     if (
         not identity.is_admin
         and (path in ADMIN_ONLY_HTTP_PATHS or any(path.startswith(prefix) for prefix in ADMIN_ONLY_HTTP_PREFIXES))
@@ -2409,7 +2424,9 @@ os.makedirs(OUTPUT_INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_OUTPUT_DIR, exist_ok=True)
 os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
 os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
-VIDEO_DEPTH_TASKS = VideoDepthTaskService(APP_PATHS.app_root, VIDEO_DEPTH_MODEL_MANAGER)
+BUG_REPORTER = BugReporter(APP_PATHS.data_root)
+logging.getLogger().addHandler(BugLogHandler(BUG_REPORTER))
+VIDEO_DEPTH_TASKS = VideoDepthTaskService(APP_PATHS.app_root, VIDEO_DEPTH_MODEL_MANAGER, BUG_REPORTER)
 # static 和内置 workflows 属于只读程序资源，不在运行时创建或改写。
 
 HTML_CACHE_CONTROL = "no-store, max-age=0, must-revalidate"
@@ -4584,16 +4601,21 @@ class CanvasVideoRequest(BaseModel):
     node_id: str = Field(default="", max_length=160)
 
 
+class VideoDepthTaskRequest(BaseModel):
+    input_url: str = Field(min_length=1, max_length=4096)
+
+
+class VideoDepthExportRequest(BaseModel):
+    input_url: str = Field(min_length=1, max_length=4096)
+    controls: Dict[str, Any] = Field(default_factory=dict)
+
+
 class LinkFoxVideoRequest(BaseModel):
     """LinkFox 图转视频节点的业务参数；入口字段由适配器再次严格校验。"""
 
     entry: str = "img2video"
     mode: str = "reference"
     imageList: List[str] = Field(default_factory=list)
-class VideoDepthTaskRequest(BaseModel):
-    input_url: str = Field(min_length=1, max_length=4096)
-
-
     imageUrl: str = ""
     lastFrameImageUrl: str = ""
     videoType: str = ""
@@ -28364,6 +28386,109 @@ def retry_person_depth_component(request: Request):
     return install_person_depth_component(request)
 
 
+@app.get("/api/video-depth/status")
+def video_depth_status(request: Request):
+    request_identity(request)
+    return VIDEO_DEPTH_TASKS.status()
+
+
+@app.post("/api/video-depth/upload")
+async def upload_video_depth_input(request: Request, file: UploadFile = File(...)):
+    request_identity(request)
+    original_name = str(file.filename or "video.mp4")
+    ext = Path(original_name).suffix.lower()
+    allowed = {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"}
+    if ext not in allowed and not str(file.content_type or "").lower().startswith("video/"):
+        raise HTTPException(status_code=400, detail="请选择视频文件")
+    if ext not in allowed:
+        ext = ".mp4"
+    filename = f"depth_video_input_{uuid.uuid4().hex[:12]}{ext}"
+    path = output_path_for(filename, "input")
+    total = 0
+    limit = 2 * 1024 * 1024 * 1024
+    try:
+        with open(path, "wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise HTTPException(status_code=413, detail="深度视频输入不能超过 2GB")
+                output.write(chunk)
+    except BaseException:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+    if total <= 0:
+        os.remove(path)
+        raise HTTPException(status_code=400, detail="输入视频为空")
+    url = output_url_for(filename, "input")
+    register_internal_media_object(url, "input", "video", "video-depth-upload")
+    return {"file": {"url": url, "name": original_name, "kind": "video", "mime": file.content_type or "video/mp4"}}
+
+
+@app.post("/api/video-depth/tasks", status_code=202)
+def create_video_depth_task(payload: VideoDepthTaskRequest, request: Request):
+    request_identity(request)
+    source = output_file_from_url(payload.input_url)
+    if not source:
+        raise HTTPException(status_code=400, detail="深度视频输入必须是主应用中的本地视频")
+    try:
+        return VIDEO_DEPTH_TASKS.create(source, os.fspath(OUTPUT_OUTPUT_DIR), media_url_from_path, current_account_id())
+    except VideoDepthUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/video-depth/tasks/{task_id}")
+def get_video_depth_task(task_id: str, request: Request):
+    request_identity(request)
+    task = VIDEO_DEPTH_TASKS.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="深度视频任务不存在或服务已重启")
+    return task
+
+
+@app.post("/api/video-depth/export")
+async def export_adjusted_video_depth(payload: VideoDepthExportRequest, request: Request):
+    request_identity(request)
+    source = output_file_from_url(payload.input_url)
+    if not source or not Path(source).is_file():
+        raise HTTPException(status_code=400, detail="深度视频导出仅支持本地生成结果")
+    tools = resolve_video_clip_tools()
+    if not tools.ffmpeg:
+        raise HTTPException(status_code=503, detail="未检测到 FFmpeg，无法导出深度视频")
+    controls = payload.controls if isinstance(payload.controls, dict) else {}
+    brightness = max(20, min(220, int(controls.get("brightness", 100))))
+    contrast = max(20, min(300, int(controls.get("contrast", 100))))
+    gamma = max(25, min(300, int(controls.get("gamma", 100))))
+    blur = max(0, min(12, int(controls.get("blur", 0))))
+    # CSS preview applies brightness first, then contrast; gamma is the preview's brightness divisor.
+    brightness_factor = round(brightness * 100 / gamma) / 100
+    contrast_factor = contrast / 100
+    filters = [f"lut=y='clip((val*{brightness_factor:.4f}-128)*{contrast_factor:.4f}+128,0,255)':u=128:v=128"]
+    if bool(controls.get("invert")):
+        filters.append("negate")
+    if blur:
+        filters.append(f"boxblur={blur}:1")
+    filename = f"depth_video_export_{uuid.uuid4().hex[:12]}.mp4"
+    destination = Path(OUTPUT_OUTPUT_DIR) / filename
+    command = [tools.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source), "-vf", ",".join(filters), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-an", str(destination)]
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    result = await asyncio.to_thread(subprocess.run, command, capture_output=True, text=True, creationflags=flags)
+    if result.returncode != 0 or not destination.is_file():
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=(result.stderr or "深度视频导出失败").strip()[-500:])
+    url = media_url_from_path(str(destination))
+    if not url:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="无法注册导出的深度视频")
+    register_internal_media_object(url, "output", "video", "video-depth-export")
+    return {"file": {"url": url, "name": filename, "kind": "video", "mime": "video/mp4"}}
+
+
 @app.post("/api/person-depth/estimate")
 async def estimate_person_depth(
     request: Request,
@@ -28452,73 +28577,6 @@ async def estimate_depth(request: Request, file: UploadFile = File(...)):
             "Cache-Control": "no-store",
         },
     )
-
-
-
-@app.get("/api/video-depth/status")
-def video_depth_status(request: Request):
-    request_identity(request)
-    return VIDEO_DEPTH_TASKS.status()
-
-
-@app.post("/api/video-depth/upload")
-async def upload_video_depth_input(request: Request, file: UploadFile = File(...)):
-    request_identity(request)
-    original_name = str(file.filename or "video.mp4")
-    ext = Path(original_name).suffix.lower()
-    allowed = {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"}
-    if ext not in allowed and not str(file.content_type or "").lower().startswith("video/"):
-        raise HTTPException(status_code=400, detail="请选择视频文件")
-    if ext not in allowed:
-        ext = ".mp4"
-    filename = f"depth_video_input_{uuid.uuid4().hex[:12]}{ext}"
-    path = output_path_for(filename, "input")
-    total = 0
-    limit = 2 * 1024 * 1024 * 1024
-    try:
-        with open(path, "wb") as output:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > limit:
-                    raise HTTPException(status_code=413, detail="深度视频输入不能超过 2GB")
-                output.write(chunk)
-    except BaseException:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        raise
-    if total <= 0:
-        os.remove(path)
-        raise HTTPException(status_code=400, detail="输入视频为空")
-    url = output_url_for(filename, "input")
-    register_internal_media_object(url, "input", "video", "video-depth-upload")
-    return {"file": {"url": url, "name": original_name, "kind": "video", "mime": file.content_type or "video/mp4"}}
-
-
-@app.post("/api/video-depth/tasks", status_code=202)
-def create_video_depth_task(payload: VideoDepthTaskRequest, request: Request):
-    request_identity(request)
-    source = output_file_from_url(payload.input_url)
-    if not source:
-        raise HTTPException(status_code=400, detail="深度视频输入必须是主应用中的本地视频")
-    try:
-        return VIDEO_DEPTH_TASKS.create(source, os.fspath(OUTPUT_OUTPUT_DIR), media_url_from_path)
-    except VideoDepthUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-
-@app.get("/api/video-depth/tasks/{task_id}")
-def get_video_depth_task(task_id: str, request: Request):
-    request_identity(request)
-    task = VIDEO_DEPTH_TASKS.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="深度视频任务不存在或服务已重启")
-    return task
-
 
 
 if __name__ == "__main__":

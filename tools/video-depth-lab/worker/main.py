@@ -292,6 +292,8 @@ def run_status() -> dict[str, Any]:
         "torchVersion": torch.__version__,
         "cudaAvailable": torch.cuda.is_available(),
         "cudaVersion": torch.version.cuda,
+        "cudaArchitectures": torch.cuda.get_arch_list(),
+        "gpuComputeCapability": list(torch.cuda.get_device_capability(0)) if torch.cuda.is_available() else [],
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "",
         "gpuMemoryBytes": torch.cuda.get_device_properties(0).total_memory if torch.cuda.is_available() else 0,
         "ffmpeg": ffmpeg or "",

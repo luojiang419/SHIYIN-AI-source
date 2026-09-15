@@ -56,21 +56,43 @@ function renderTraffic(data){
   if(!clients.size)$('#clientList').append(element('p','尚无客户端连接记录','muted'));
 }
 const resourceIcons={hot:'PackageOpen','hot-bootstrap':'RefreshCw','hot-updater':'Zap',full:'AppWindow','person-depth':'ScanFace','video-depth':'FileVideo'};
-function releaseRow(item,actions){
+const releaseGroups=[
+  {id:'application',title:'应用热更新',description:'面向日常功能发布的应用增量包',kinds:['hot']},
+  {id:'updater',title:'更新器与兼容组件',description:'更新器修复包及旧客户端引导包',kinds:['hot-updater','hot-bootstrap']},
+  {id:'models',title:'模型组件',description:'独立分发的人物深度与视频深度模型',kinds:['person-depth','video-depth']},
+  {id:'installer',title:'全量安装包',description:'仅用于完整安装或明确要求的全量升级',kinds:['full']}
+];
+function releaseRow(item,actions,index){
   if(!actions){const row=element('tr'),name=element('td');name.append(element('strong',names[item.kind]||item.kind),element('small',item.kind==='hot'?'单个签名包':item.kind==='hot-bootstrap'?'旧客户端兼容':item.kind==='hot-updater'?'v3客户端迁移':item.kind==='full'?'Windows x64':'模型组件'));row.append(name,element('td',item.version,'version'),element('td',new Date(item.created*1000).toLocaleDateString()));const status=element('td');status.append(element('span',states[item.state],'badge green'));row.append(status);return row;}
   const row=element('article','','resource-row'),mark=element('span','','resource-icon'),copy=element('div','','resource-main'),version=element('div','','resource-cell'),actionsBox=element('div','','row-actions');mark.append(icon(resourceIcons[item.kind]||'Boxes'));copy.append(element('strong',names[item.kind]||item.kind),element('small','发布于 '+new Date(item.created*1000).toLocaleString()));version.append(element('small','资源版本'),element('strong',item.version));
   actionsBox.append(element('span',states[item.state],'badge '+(item.state==='published'?'green':'orange')));const button=element('button',item.state==='published'?'暂停发布':'发布此版本','button');button.onclick=()=>act('release',{id:item.id,state:item.state==='published'?'paused':'published'});actionsBox.append(button);row.append(mark,copy,version,actionsBox);return row;
+}
+function renderReleaseGroups(releases){
+  const sorted=[...releases].sort((a,b)=>Number(b.created)-Number(a.created));
+  const sections=releaseGroups.map(group=>{
+    const items=sorted.filter(item=>group.kinds.includes(item.kind));
+    if(!items.length)return null;
+    const section=element('section','','resource-section');
+    const header=element('div','','resource-section-header'),copy=element('div'),title=element('h3',group.title),description=element('p',group.description);
+    copy.append(title,description);header.append(copy,element('span',items.length+' 个版本','resource-count'));section.append(header);
+    const list=element('div','','resource-section-list');
+    items.forEach((item,index)=>{const row=releaseRow(item,true,index+1);row.prepend(element('span',String(index+1).padStart(2,'0'),'resource-order'));list.append(row);});
+    section.append(list);return {section,latest:Number(items[0].created)||0};
+  }).filter(Boolean).sort((a,b)=>b.latest-a.latest).map(entry=>entry.section);
+  $('#releaseList').replaceChildren(...sections);
+  if(!sections.length)$('#releaseList').append(element('p','尚未发布资源，请先导入热更新或模型。','empty'));
 }
 function render(data){
   state=data;$('#running').textContent=data.running?'服务运行中':'服务已停止';$('#address').textContent=data.url;$('#toggleText').textContent=data.running?'停止服务':'启动服务';$('#toggle').classList.toggle('danger',data.running);$('#miniState').textContent=data.running?'分发服务运行中':'分发服务已停止';$('#miniDot').classList.toggle('stopped',!data.running);$('#servicePulse').classList.toggle('stopped',!data.running);$('#miniAddress').textContent=data.url.replace('http://','');$('#serviceDescription').textContent=data.running?'客户端可发现并下载已发布资源':'客户端暂时无法检查与下载资源';
   applyTheme(data.settings.theme || 'system');
   $('#online').textContent=data.clients.filter(c=>Date.now()/1000-c.seen<300).length;$('#published').textContent=data.releases.filter(r=>r.state==='published').length;$('#uptime').textContent=Math.floor(data.uptime/60)+' 分钟';
   $('#summary').replaceChildren(...data.releases.filter(r=>r.state==='published').map(r=>releaseRow(r,false)));if(!$('#summary').children.length){const tr=element('tr'),td=element('td','尚未发布资源，请先导入热更新或模型。','empty');td.colSpan=4;tr.append(td);$('#summary').append(tr);}
-  $('#releaseList').replaceChildren(...data.releases.map(r=>releaseRow(r,true)));
+  renderReleaseGroups(data.releases);
   $('#logList').replaceChildren(...data.logs.map(l=>{const row=element('div','','log-line');row.append(element('time',new Date(l.created*1000).toLocaleTimeString()),element('span',l.message));return row;}));
   $('#activityList').replaceChildren(...data.logs.slice(0,4).map(l=>{const row=element('div','','activity'),copy=element('div');copy.append(element('strong',l.message));row.append(element('i'),copy,element('time',new Date(l.created*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})));return row;}));
   if(!data.logs.length)$('#activityList').append(element('p','暂无活动记录','empty'));
   $('#dataRoot').textContent=data.data;$('#publicKey').textContent=data.public_key;
+  renderBugs(data);
   renderTraffic(data);
   if(!$('#settings').contains(document.activeElement)){
     $('#ip').value=data.settings.address;$('#port').value=data.settings.port;$('#autostart').checked=data.settings.auto_start;
@@ -83,7 +105,36 @@ function render(data){
 let refreshing=false;
 async function refresh(){if(refreshing||busy)return;refreshing=true;try{render(await api('status'));if(!state.job.running&&!state.job.error&&$('#notice').classList.contains('error')){$('#notice').hidden=true;$('#notice').classList.remove('error');}}catch(e){message('监控连接失败，当前显示为上次数据：'+e.message,true);}finally{refreshing=false;}}
 async function act(name,body={}){if(busy)return;busy=true;try{render(await api(name,body));message(name==='import'?'导入已开始，可在日志中查看结果':'操作完成');}catch(e){message(e.message,true);}finally{busy=false;}}
-function navigate(view){document.querySelectorAll('.view').forEach(s=>s.hidden=s.id!==view);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.view===view));$('#title').textContent={overview:'服务总览',releases:'资源与发布',clients:'客户端',logs:'服务日志',settings:'服务设置'}[view];window.scrollTo(0,0);}
+let selectedBugClient='', selectedBugReport='';
+function renderBugs(data){
+  $('#bugRoot').textContent=data.bug_log_root||'';
+  const reports=data.bug_reports||[];
+  const devices=data.bug_devices||[];
+  const clients=new Map();
+  for(const c of data.clients)clients.set(c.ip,{ip:c.ip,seen:c.seen,clientId:''});
+  for(const r of reports){const key=(r.user_id||'admin')+' / '+r.client_id;if(!clients.has(key))clients.set(key,{ip:r.ip,seen:r.created,clientId:key});}
+  for(const d of devices){const key=d.user_id+' / '+d.client_id;if(!clients.has(key))clients.set(key,{ip:d.ip,seen:d.updated,clientId:key});}
+  $('#bugClients').replaceChildren(...Array.from(clients.values()).filter(c=>c.clientId).map(c=>{
+    const b=element('button',c.clientId+' · '+c.ip+' · '+(Date.now()/1000-c.seen<300?'在线':'离线'),'bug-item');
+    b.classList.toggle('active',selectedBugClient===c.clientId);b.onclick=async()=>{
+      selectedBugClient=selectedBugClient===c.clientId?'':c.clientId;renderBugs(state);
+      if(!selectedBugClient){$('#bugHardware').textContent='选择客户端查看设备信息';return;}
+      const [user,client]=selectedBugClient.split(' / ');
+      try{const detail=await api('bug-devices/'+encodeURIComponent(user)+'/'+encodeURIComponent(client));
+        $('#bugHardware').textContent='更新于 '+new Date(detail.updatedAt*1000).toLocaleString()+'\n'+JSON.stringify(detail.machine,null,2);
+      }catch(e){$('#bugHardware').textContent='尚无设备快照';}
+    };return b;
+  }));
+  const shown=reports.filter(r=>!selectedBugClient||(r.user_id||'admin')+' / '+r.client_id===selectedBugClient);
+  $('#bugReports').replaceChildren(...shown.map(r=>{
+    const b=element('button','','bug-item');
+    b.append(element('strong',r.kind==='error'?'错误':r.kind==='heartbeat'?'运行状态':'运行日志'),element('span',r.summary||r.client_id),element('small',new Date(r.created*1000).toLocaleString()));
+    b.classList.toggle('active',selectedBugReport===r.id);
+    b.onclick=async()=>{selectedBugReport=r.id;renderBugs(state);try{$('#bugDetail').textContent=JSON.stringify(await api('bug-reports/'+encodeURIComponent(r.id)),null,2);}catch(e){message(e.message,true);}};return b;
+  }));
+  if(!shown.length)$('#bugReports').append(element('p','暂无报告','empty'));
+}
+function navigate(view){document.querySelectorAll('.view').forEach(s=>s.hidden=s.id!==view);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.view===view));$('#title').textContent={overview:'服务总览',releases:'资源与发布',clients:'客户端',bugs:'BUG反馈',logs:'服务日志',settings:'服务设置'}[view];window.scrollTo(0,0);}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>navigate(b.dataset.view));
 document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>navigate(b.dataset.go));
 $('#toggle').onclick=()=>act(state?.running?'stop':'start');$('#restart').onclick=()=>act('restart');$('#refresh').onclick=refresh;

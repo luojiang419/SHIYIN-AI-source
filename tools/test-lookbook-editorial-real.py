@@ -62,11 +62,14 @@ async def run(app, snapshot, out, report):
     app.canvas_llm = capture
     report["stage"] = "prepare"
     save(out / "results.json", report)
-    value, meta = await asyncio.wait_for(app.prepare_lookbook_creation(snapshot), 900)
+    if report.get("review_image"):
+        value, meta = snapshot, {"status": "reused-for-review", "new_planning_calls": 0}
+    else:
+        value, meta = await asyncio.wait_for(app.prepare_lookbook_creation(snapshot), 900)
     save(out / "prepared.json", {"snapshot": value, "meta": meta})
     if meta.get("failed_stage"):
         raise RuntimeError("preparation_failed: " + json.dumps(meta, ensure_ascii=False))
-    prompts = app.lookbook_generation_prompts(value)
+    prompts = [] if report.get("review_image") else app.lookbook_generation_prompts(value)
     save(out / "prompts.json", prompts)
     report.update(stage="image", prompt_chars=[len(p) for p in prompts])
     save(out / "results.json", report)
@@ -78,6 +81,13 @@ async def run(app, snapshot, out, report):
         batch = {"images": ["/assets/input/" + target.name]}
     else:
         batch = await asyncio.wait_for(app.execute_lookbook_story_batch(value, report["image_route"]), 900)
+    repair_quality = None
+    if report.get("repair_image"):
+        value["options"].update(lookbook_quality_gate=True, lookbook_auto_repair=True, lookbook_max_retries=1)
+        repair_started = time.monotonic()
+        batch, repair_quality = await app.improve_lookbook_batch(batch, value, report["image_route"])
+        report["repair_elapsed_s"] = round(time.monotonic()-repair_started, 2)
+        save(out / "repair.json", repair_quality)
     urls = batch.get("images") or []
     if len(urls) != 1:
         raise RuntimeError("expected_one_generated_grid")
@@ -86,7 +96,7 @@ async def run(app, snapshot, out, report):
     shutil.copy2(source, image_path)
     report.update(stage="quality", image=image_path.name, image_elapsed_s=round(time.monotonic()-started, 2))
     save(out / "results.json", report)
-    quality = await app.analyze_lookbook_outputs(value, urls)
+    quality = repair_quality["final"] if repair_quality else await app.analyze_lookbook_outputs(value, urls)
     save(out / "quality.json", quality)
     report.update(status="generated", stage="done", quality=quality)
     save(out / "results.json", report)
@@ -98,6 +108,9 @@ def main():
     parser.add_argument("--output")
     parser.add_argument("--prepared", help="复用已保存的真实解析响应，经正式缓存校验后测试最新编译/生图；不人工改镜头")
     parser.add_argument("--review-image", help="只复核指定的现有测试图片，不再次生成")
+    parser.add_argument("--instruction", help="本轮真实测试的用户需求")
+    parser.add_argument("--layout", default="grid-3x3", choices=["grid-2x2", "grid-3x3"], help="节点的拼格设置")
+    parser.add_argument("--repair", action="store_true", help="对review-image运行正式质量门，最多一次定向修复")
     args = parser.parse_args()
     out = Path(args.output) if args.output else ROOT / "输出/Lookbook摄影多样性-20260915" / args.case
     out.mkdir(parents=True, exist_ok=True)
@@ -123,6 +136,9 @@ def main():
             raise ValueError("复核图片必须同时指定原始prepared方案")
         report["review_image"] = str(Path(args.review_image).resolve())
         report["method"] = "复用真实已解析方案与已生成原图，仅重新执行正式analyze_lookbook_outputs；不生图、不改镜头、不修图"
+        if args.repair:
+            report["repair_image"] = True
+            report["method"] = "复用真实方案与原图，执行正式improve_lookbook_batch质量门，最多一次API定向修复并复检；不人工修改提示词或图片"
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             import main as app
@@ -131,10 +147,10 @@ def main():
             snapshot = {k: copy.deepcopy(source[k]) for k in ("operation", "inputs", "aspect_ratio", "resolution", "size", "quality", "count")}
             snapshot["options"] = {
                 "prompt_policy": "lookbook", "lookbook_mode": "story-campaign", "lookbook_search": False,
-                "instruction": "棚拍时尚大片，纯色底，影视光效" if args.case == "studio" else "",
+                "instruction": args.instruction if args.instruction is not None else ("棚拍时尚大片，纯色底，影视光效" if args.case == "studio" else ""),
                 "lookbook_style": copy.deepcopy(source["options"]["lookbook_style"]),
                 "lookbook_count": 1, "lookbook_cell_aspect_ratio": "16:9",
-                "lookbook_layout_selection": {"preset_id": "grid-3x3"},
+                "lookbook_layout_selection": {"preset_id": args.layout},
                 "lookbook_manual_overrides": {"count": 1, "aspect_ratio": "16:9", "resolution": "2k", "quality": "high"},
             }
             snapshot.update(count=1, aspect_ratio="16:9", resolution="2k", size="2048x1152", quality="high", prompt="")

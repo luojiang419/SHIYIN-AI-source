@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import sys
 from typing import Any
-from .lookbook_brief import effective_brief
+from .lookbook_brief import effective_brief, STORY_VERSION
 
 STYLE_ID = "fashion-advertising"
 DIRECTOR_VERSION = "fashion-director-1.2-full-2"
@@ -68,17 +68,17 @@ def planning_message(snapshot: dict, layout: dict) -> str:
             "identity": "", "appearance": "", "wardrobe": "",
             "product_direction": {"target": "", "immutable_features": [], "coverage": [], "crop_limits": "", "detail_regions": []},
             "environment": "", "physical_light": "", "photographic_surface": "",
-            "camera_intensity": 3, "performance_amplitude": "", "facial_emotion": "",
+            "camera_intensity": "1至5，按用户要求和时尚张力选择", "performance_amplitude": "", "facial_emotion": "",
             "axis_map": "", "continuity_ledger": [], "hero_indices": [],
         },
         "shot_cards": [{"index": 1, "render_prompt": "Production-ready English image prompt compiled from the complete direction and all assigned panels.", "panel_cards": [{
             "index": 1, "beat": "", "story_purpose": "", "continuity_in": "", "continuity_out": "",
             "scene_region": "", "scene_extension": "", "objective": "", "action_chain": "",
             "micro_expression": "", "weight_and_contact": "", "wardrobe_state": "", "prop_state": "",
-            "camera": {"lens_mm": 35, "shot_size": "", "angle": "", "height": "", "tilt": "", "framing": "", "position": "", "visible_geometry": ""},
+            "camera": {"lens_mm": "数字，按创意选择", "projection": "rectilinear或fisheye", "distance_m": "数字", "height_m": "数字", "perspective_effect": "", "shot_size": "", "angle": "", "height": "", "tilt": "", "framing": "", "position": "", "visible_geometry": ""},
             "wardrobe_focus": "", "wardrobe_visibility": "",
-            "composition": "", "lighting": "", "product_focus": "", "product_visibility": "",
-            "composition_risk": 3, "hero": False,
+            "composition": "", "lighting": "", "product_focus": "", "product_visibility": "", "product_emphasis": "dominant或supporting或none",
+            "composition_risk": "1至5，按实际构图张力选择", "hero": False,
         }]}],
         "logline": "",
     }
@@ -89,7 +89,10 @@ def planning_message(snapshot: dict, layout: dict) -> str:
         + "shot_cards 的 index 按输出编号；每个 panel_cards 内部 index 从 1 连续编号。"
         + "每格必须有自己的动作、机位、景别、构图、产品展示和前后状态；不套固定景别模板。"
         + "每个输出另写 render_prompt：面向图片模型的英文拍摄指令，完整落实该输出的全部 panel_cards。"
-        + "图片模型只收到 render_prompt，不会收到 campaign_bible、panel_cards 或本技能全文。因此 render_prompt 必须自包含，不能写 see shot cards 或引用字段代替具体描述。render_prompt 必须是单个字符串，包含字面标记 PANEL 1 至最后一格。"
+        + ("新版图片请求由panel_cards和共享视觉字段直接编译，每格字段必须自包含实际拍摄决定；render_prompt只为旧接口兼容保留，简短概括同一组镜头，不另写一套不同设计。"
+           if (options.get("lookbook_story") or {}).get("version") == STORY_VERSION else
+           "图片模型只收到render_prompt，必须自包含，不能用see shot cards代替具体描述。")
+        + "render_prompt必须是单个字符串，包含字面标记PANEL 1至最后一格；与panel_cards保持一致。"
         + "开头明确参考图编号与准确服饰/场景事实，之后用 PANEL 1、PANEL 2 等连续标记逐格写出具体表情、动作、实际机位与画面构图；结尾简写物理光。只在用户指定时加入胶片处理。"
         + "render_prompt 不复制技能方法论、JSON字段或分析过程，不能仅写抽象风格词；每格以2–4句说明表情、动作接触、摄影位置和构图，公共身份/衣着/光源只写一次。没有最低字数要求，不用长篇重复保真规则淹没摄影决策；全部输出合计不超过24000字符。"
         + "尤其避免把参考中宽松阔腿版型改成普通修身直筒，准确描述腿围量感和结构线；人物必须有可见重心/肩髋变化，明确失稳构图是照片内部的相机倾斜而非倾斜拼图边框。"

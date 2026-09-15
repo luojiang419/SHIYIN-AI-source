@@ -213,6 +213,7 @@ from canvas_core.lookbook_brief import (
     panel_planning_rules as lookbook_panel_planning_rules, EDITORIAL_QA as LOOKBOOK_EDITORIAL_QA,
     editorial_planning_message as lookbook_editorial_planning_message,
     generation_brief as lookbook_generation_brief,
+    DIRECTING_REVISION as LOOKBOOK_DIRECTING_REVISION,
 )
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
@@ -18801,6 +18802,7 @@ def lookbook_context_signature(snapshot: Dict[str, Any]) -> str:
         })
     payload = {
         "story_version": LOOKBOOK_STORY_VERSION,
+        "directing_revision": LOOKBOOK_DIRECTING_REVISION,
         "instruction": str(options.get("instruction") or "").strip(),
         "fashion_director": fashion_skill_signature() if is_fashion_director(options) else "",
         "style": {
@@ -19908,14 +19910,26 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         provider=route["provider_id"], model=route["model"], images=[*references, *images], image_labels=[*reference_labels, *output_labels], web_search=False, retry_524=0,
     )
     if lookbook_story_handoff(options):
+        geometry = []
+        for index, url in enumerate(images):
+            path = output_file_from_url(url)
+            if path:
+                try:
+                    with Image.open(path) as output_image:
+                        width, height = output_image.size
+                    geometry.append({"output_index": index, "width": width, "height": height,
+                                     "actual_ratio": round(width / height, 4), "requested_ratio": snapshot.get("aspect_ratio")})
+                except (OSError, ValueError):
+                    pass
         request.system_prompt = (
             LOOKBOOK_EDITORIAL_QA + "\n用户原始要求：" + brief
             + "\n明确交付版式：" + json.dumps(layout_intent, ensure_ascii=False)
+            + "\n实际像素尺寸（画幅依据这些数值，不可凭缩略图猜测；1%以内像素对齐偏差允许）：" + json.dumps(geometry, ensure_ascii=False)
             + "\n参考图事实（仅辅助，仍以图片为准）：" + json.dumps((options.get("lookbook_story") or {}).get("reference_facts") or [], ensure_ascii=False)
             + '\n仅输出JSON：{"passed":true,"score":0,"weak_indices":[],"issues":[],"corrections":{},"summary":""}。'
             + "score为0–100，达到82且无弱图才通过；weak_indices使用从0开始的输出图片编号，issues说明内部格号。"
         )
-        request.message = "对照参考和用户要求逐格审查成图。" + layout_check
+        request.message = "对照参考和用户要求逐格审查成图，核对实际格数、排列和光学效果。用户指定等分宫格时，不能因各格等大而判定缺少主次；主次应由格内商品占比、透视、明暗和动作判断。不要要求改变用户指定的格子比例。"
     if is_fashion_director(options) and not lookbook_story_handoff(options):
         geometry = []
         for index, url in enumerate(images):
@@ -19980,6 +19994,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
     images = list(batch.get("images") or [])
     image_items = list(batch.get("image_items") or [])
     original_images, original_image_items = list(images), list(image_items)
+    editorial_mode = is_fashion_director(options) or bool(lookbook_story_handoff(options))
     initial = await analyze_lookbook_outputs(snapshot, images)
     try:
         max_retries = max(0, min(1, int(options.get("lookbook_max_retries", 1)))) if options.get("lookbook_auto_repair") is True else 0
@@ -20008,7 +20023,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
             if index < len(repair_cards):
                 repair_references = lookbook_references_for_card(repair_references, repair_cards[index], max_references=repair_reference_limit)
             scene_package_prompt = lookbook_scene_reference_package_prompt(repair_references)
-            repair_target_added = is_fashion_director(options) and len(repair_references) < repair_reference_limit
+            repair_target_added = editorial_mode and len(repair_references) < repair_reference_limit
             if repair_target_added:
                 repair_references.append({
                     "url": images[index], "role": "style", "reference_type": "style",
@@ -20019,7 +20034,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
                 progress_callback(f"正在修复第 {index + 1}/{len(images)} 张图片（额外生图）…")
             repair_instruction = (
                 f"\nWEAK OUTPUT REPAIR {index}: {correction} Preserve correct identity, product, material, lighting, photographic surface and art direction. Return exactly one output in its originally authorized layout, including every ordered panel for a contact sheet; do not reduce it to a single panel."
-                if is_fashion_director(options) else
+                if editorial_mode else
                 f"\nWEAK FRAME REPAIR {index}: regenerate only this campaign frame. {correction} Preserve all correct identity, product, Logo, material, style, scene-master geography and series-continuity attributes. Apply the same publication-grade series quality anchor and shot-scale lock; output one full-bleed image only."
             )
             if repair_target_added:
@@ -20050,7 +20065,7 @@ async def improve_lookbook_batch(batch: Dict[str, Any], snapshot: Dict[str, Any]
     else:
         final = initial
     repair_candidate_quality = None
-    if is_fashion_director(options) and any(item.get("replaced") for item in retry_details):
+    if editorial_mode and any(item.get("replaced") for item in retry_details):
         if final.get("status") != "succeeded" or int(final.get("score") or 0) < int(initial.get("score") or 0):
             repair_candidate_quality = final
             images, image_items, final = original_images, original_image_items, initial

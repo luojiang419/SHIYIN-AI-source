@@ -36,6 +36,14 @@ def test_semantic_camera_restraint_needs_real_user_evidence():
     assert bold_direction_active(options)
 
 
+def test_trailing_comma_repair_preserves_quoted_content_and_does_not_invent_values():
+    expected = {"text": 'quoted " ,} and ,]', "values": [1, 2]}
+    raw = json.dumps(expected).replace('[1, 2]', '[1, 2,]')[:-1] + ',}'
+    assert main._parse_lookbook_json(raw) == expected
+    with pytest.raises(json.JSONDecodeError):
+        main._parse_lookbook_json('{"missing": }')
+
+
 @pytest.mark.asyncio
 async def test_short_product_request_uses_defaults_and_repairs_conventional_plan():
     source = fixture(count=1, instruction="主推这条牛仔裤", lookbook_layout_selection={"preset_id": "grid-2x2"})

@@ -109,6 +109,29 @@ def _text(value: Any, name: str, limit: int) -> str:
     return value.strip()
 
 
+def remove_json_trailing_commas(value: str) -> str:
+    """仅移除字符串外的尾逗号，不更改字段值或补造缺失数据。"""
+    result = []
+    quoted = escaped = False
+    for index, char in enumerate(value):
+        if quoted:
+            result.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+            result.append(char)
+        elif char == "," and value[index+1:].lstrip().startswith(("}", "]")):
+            continue
+        else:
+            result.append(char)
+    return "".join(result)
+
+
 def normalize_story(data: Any, reference_count: int) -> dict:
     if not isinstance(data, dict):
         raise ValueError("Lookbook 故事必须是对象")

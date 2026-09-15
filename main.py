@@ -217,6 +217,7 @@ from canvas_core.lookbook_brief import (
     workflow_defaults as lookbook_workflow_defaults,
     effective_optics as lookbook_effective_optics,
     bold_direction_active as lookbook_bold_direction_active, DEFAULT_BOLD_DIRECTION as LOOKBOOK_DEFAULT_BOLD_DIRECTION,
+    remove_json_trailing_commas as remove_lookbook_json_trailing_commas,
 )
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
@@ -19435,7 +19436,7 @@ def _parse_lookbook_json(text: str) -> Dict[str, Any]:
         parsed = json.loads(value)
     except Exception:
         match = re.search(r"\{[\s\S]*\}", value)
-        parsed = json.loads(match.group(0)) if match else {}
+        parsed = json.loads(remove_lookbook_json_trailing_commas(match.group(0))) if match else {}
     return parsed if isinstance(parsed, dict) else {}
 
 

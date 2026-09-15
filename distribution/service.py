@@ -193,10 +193,19 @@ class Center:
             releases = [dict(r) for r in db.execute('SELECT id,kind,version,state,created FROM releases ORDER BY created DESC')]
             clients = [dict(r) for r in db.execute('SELECT * FROM clients ORDER BY seen DESC')]
             logs = [dict(r) for r in db.execute('SELECT * FROM logs ORDER BY created DESC LIMIT 100')]
+        target = next((release['version'] for release in releases
+            if release['kind'] == 'hot' and release['state'] == 'published'), '')
+        for client in clients:
+            reported = client['version'].rsplit('/', 1)[-1].strip()
+            installed = reported if re.fullmatch(r'\d{14}', reported) else ''
+            client.update(target_version=target, update_state=
+                'current' if target and installed and installed >= target else
+                'outdated' if target and installed else 'unknown')
         return {'running': bool(self.server), 'url': self.url, 'public_key': self.public_key,
                 'settings': self.config, 'releases': releases, 'clients': clients, 'logs': logs,
                 'job': dict(self.job), 'data': str(self.data), 'uptime': int(time.time() - self.started),
-                'desktop_action': dict(self.desktop_action), 'traffic': self.traffic.snapshot()}
+                'desktop_action': dict(self.desktop_action), 'traffic': self.traffic.snapshot(),
+                'target_version': target}
 
     def launch_job(self, action):
         with self.lock:
@@ -341,12 +350,14 @@ class Center:
             def log_message(self, *_args):
                 pass
 
-            def json(self, value, status=200):
+            def json(self, value, status=200, headers=None):
                 raw = json.dumps(value, ensure_ascii=False).encode()
                 self.send_response(status)
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
                 self.send_header('Content-Length', str(len(raw)))
                 self.send_header('Cache-Control', 'no-store')
+                for name, header_value in (headers or {}).items():
+                    self.send_header(name, str(header_value))
                 self.end_headers()
                 self.wfile.write(raw)
 
@@ -458,7 +469,16 @@ class Center:
                                 candidate = owner.active('hot')
                                 if candidate and json.loads(json.loads(candidate['manifest'])['payload']).get('protocol_version') == 2:
                                     release = candidate
-                        return self.json(json.loads(release['manifest']) if release else {'release': None})
+                        target = owner.active('hot')
+                        target_version = target['version'] if target else release['version'] if release else ''
+                        catalog = json.loads(release['manifest']) if release else {'release': None}
+                        if release:
+                            plan_payload = json.dumps({'protocol_version': 1, 'target_version': target_version},
+                                ensure_ascii=False, separators=(',', ':'))
+                            catalog.update(plan_payload=plan_payload,
+                                plan_signature=owner.key.sign(plan_payload.encode()).hex())
+                        return self.json(catalog,
+                            headers={'X-Shiyin-Plan-Target': target_version})
                     if path.startswith('/v1/blobs/'):
                         sha = path.removeprefix('/v1/blobs/')
                         if not re.fullmatch(r'[0-9a-f]{64}', sha): raise ValueError('哈希无效')

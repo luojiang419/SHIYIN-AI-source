@@ -13,7 +13,7 @@ fn effective_release(applied: &str, baseline: &str) -> String {
         .max().unwrap_or("").to_string()
 }
 
-fn installed_release(data: &Path) -> String {
+pub(super) fn installed_release(data: &Path) -> String {
     let applied = fs::read_to_string(hot_update_state_path(data)).ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v["version"].as_str().map(str::to_string)).unwrap_or_default();
@@ -33,6 +33,8 @@ pub(super) struct Manifest {
     files: Vec<HotUpdateFile>,
     #[serde(default)]
     package: Option<HotUpdatePackage>,
+    #[serde(skip)]
+    pub plan_target: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -43,7 +45,21 @@ struct HotUpdatePackage {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Envelope { payload: String, signature: String, public_key: String }
+struct Envelope {
+    payload: String,
+    signature: String,
+    public_key: String,
+    #[serde(default)]
+    plan_payload: String,
+    #[serde(default)]
+    plan_signature: String,
+}
+
+#[derive(Deserialize)]
+struct PlanPayload {
+    protocol_version: u8,
+    target_version: String,
+}
 
 fn unhex<const N: usize>(s: &str) -> Result<[u8; N], String> {
     if s.len() != N * 2 || !s.is_ascii() { return Err("签名编码无效".into()); }
@@ -70,7 +86,7 @@ fn verify(raw: &str) -> Result<Manifest, String> {
     let key = VerifyingKey::from_bytes(&unhex::<32>(&env.public_key)?).map_err(|_| "公钥无效")?;
     let signature = Signature::from_bytes(&unhex::<64>(&env.signature)?);
     key.verify(env.payload.as_bytes(), &signature).map_err(|_| "更新清单签名校验失败")?;
-    let m: Manifest = serde_json::from_str(&env.payload).map_err(|_| "更新清单格式错误")?;
+    let mut m: Manifest = serde_json::from_str(&env.payload).map_err(|_| "更新清单格式错误")?;
     if !matches!(m.protocol_version, 2 | 3) || m.version.len() != 14 || !m.version.bytes().all(|b| b.is_ascii_digit())
         || normalize_version(&m.min_desktop_version).is_none() || m.files.is_empty() || m.files.len() > 20000 {
         return Err("更新清单版本或文件数量无效".into());
@@ -88,6 +104,18 @@ fn verify(raw: &str) -> Result<Manifest, String> {
             && package.size > 0 && unhex::<32>(&package.sha256).is_ok() => {}
         _ => return Err("热更新单包信息无效".into()),
     }
+    m.plan_target = if env.plan_payload.is_empty() && env.plan_signature.is_empty() {
+        m.version.clone()
+    } else {
+        let plan_signature = Signature::from_bytes(&unhex::<64>(&env.plan_signature)?);
+        key.verify(env.plan_payload.as_bytes(), &plan_signature).map_err(|_| "更新补齐计划签名校验失败")?;
+        let plan: PlanPayload = serde_json::from_str(&env.plan_payload).map_err(|_| "更新补齐计划格式无效")?;
+        if plan.protocol_version != 1 || plan.target_version.len() != 14
+            || !plan.target_version.bytes().all(|byte| byte.is_ascii_digit()) || plan.target_version < m.version {
+            return Err("更新补齐计划目标无效".into());
+        }
+        plan.target_version
+    };
     Ok(m)
 }
 
@@ -126,7 +154,7 @@ pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Ma
     let current=format!("{} / {}",env!("CARGO_PKG_VERSION"),applied);
     let mut base = settings.lan_update_url.clone();
     let raw = match read_small(&small_agent, &format!("{base}/v1/catalog"), &current) {
-        Ok(raw) => raw,
+        Ok(result) => result,
         Err(_) => {
             let Some(found) = discovered() else { return Err("无法连接局域网分发中心，请确认管理员电脑已启动服务。".into()); };
             base = found;
@@ -145,11 +173,12 @@ pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Ma
     Ok(Some((m, raw, base)))
 }
 
-pub(super) fn information(m: &Manifest, downloaded: bool) -> UpdateInfo {
+pub(super) fn information(m: &Manifest, downloaded: bool, continuation: bool) -> UpdateInfo {
     UpdateInfo { current_version: env!("CARGO_PKG_VERSION").into(), latest_version: m.version.clone(),
         available: true, downloaded, asset_name: format!("热更新 {}", m.version),
         asset_size: m.package.as_ref().map(|p| p.size).unwrap_or_else(|| m.files.iter().map(|f| f.size).sum()), release_notes: m.notes.clone(),
-        message: "局域网增量包，安装后自动重启".into(), kind: "hot".into() }
+        message: "局域网增量包，安装后自动重启".into(), kind: "hot".into(),
+        continuation, plan_target: m.plan_target.clone() }
 }
 
 fn matches(path: &Path, f: &HotUpdateFile) -> bool {
@@ -496,7 +525,7 @@ mod tests {
         fs::write(root.join("app/web/a.js"),b"old").unwrap();
         fs::write(root.join("app/web/obsolete.js"),b"old").unwrap();
         let staged=dir.join("files/app/web/a.js");fs::write(&staged,b"new").unwrap();
-        let m=Manifest{protocol_version:2,version:"20260914180000".into(),min_desktop_version:"1.0.446".into(),notes:"".into(),prune_roots:vec!["app/web".into()],files:vec![HotUpdateFile{path:"app/web/a.js".into(),size:3,sha256:sha256(&staged).unwrap()}],package:None};
+        let m=Manifest{protocol_version:2,version:"20260914180000".into(),min_desktop_version:"1.0.446".into(),notes:"".into(),prune_roots:vec!["app/web".into()],files:vec![HotUpdateFile{path:"app/web/a.js".into(),size:3,sha256:sha256(&staged).unwrap()}],package:None,plan_target:String::new()};
         let changes=apply(&root,&dir,&m).unwrap();
         assert_eq!(fs::read(root.join("app/web/a.js")).unwrap(),b"new");
         assert!(!root.join("app/web/obsolete.js").exists());
@@ -550,7 +579,7 @@ mod tests {
         fs::write(&source, &content).unwrap();
         let manifest = Manifest { protocol_version: 2, version: "20260915130000".into(), min_desktop_version: "1.0.447".into(),
             notes: "".into(), prune_roots: vec![], files: vec![HotUpdateFile { path: "app/web/retry.bin".into(),
-                size: content.len() as u64, sha256: sha256(&source).unwrap() }], package: None };
+                size: content.len() as u64, sha256: sha256(&source).unwrap() }], package: None, plan_target: String::new() };
         download(&root, &data, &manifest, "envelope", &format!("http://{address}")).unwrap();
         assert_eq!(fs::read(data.join("update/hot/20260915130000/files/app/web/retry.bin")).unwrap(), content);
         server.join().unwrap();
@@ -572,7 +601,7 @@ mod tests {
             notes: "".into(), prune_roots: vec!["app/web".into()], files: vec![HotUpdateFile { path: "app/web/package.txt".into(),
                 size: content.len() as u64, sha256: sha256(&source).unwrap() }], package: Some(HotUpdatePackage {
                 name: "SHIYIN-Hot-Update-20260915130002.shiyin-update".into(), size: package_path.metadata().unwrap().len(),
-                sha256: sha256(&package_path).unwrap() }) };
+                sha256: sha256(&package_path).unwrap() }), plan_target: String::new() };
         extract_package(&package_path, &dir, &root, &manifest).unwrap();
         assert_eq!(fs::read(dir.join("files/app/web/package.txt")).unwrap(), content);
         fs::remove_file(dir.join("files/app/web/package.txt")).unwrap();

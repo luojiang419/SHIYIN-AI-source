@@ -58,7 +58,7 @@ def get(url,headers=None):
 
 def test_signed_catalog_range_and_legacy_guard(server,tmp_path):
     c,url=server;c.import_release(snapshot(tmp_path/'snapshot'),'hot','说明')
-    with get(url+'/v1/catalog',{'X-Shiyin-Version':'1.0.446'}) as r: env=json.load(r)
+    with get(url+'/v1/catalog',{'X-Shiyin-Version':'1.0.446 / 20260914170000'}) as r: env=json.load(r)
     Ed25519PublicKey.from_public_bytes(bytes.fromhex(env['public_key'])).verify(bytes.fromhex(env['signature']),env['payload'].encode())
     manifest=json.loads(env['payload']);assert manifest['notes']=='说明'
     sha=manifest['files'][0]['sha256']
@@ -68,6 +68,7 @@ def test_signed_catalog_range_and_legacy_guard(server,tmp_path):
     with pytest.raises(urllib.error.HTTPError) as err: get(url+'/hot-update/manifest.json')
     assert err.value.code==409
     assert len(c.status()['clients'])==1
+    assert c.status()['clients'][0]['update_state']=='outdated'
 
 
 def test_package_capability_routes_new_and_legacy_clients(server,tmp_path):
@@ -88,8 +89,14 @@ def test_package_capability_routes_new_and_legacy_clients(server,tmp_path):
     c.import_release(packaged,'hot-updater','更新器修复')
     c.import_release(bootstrap_snapshot(tmp_path/'bootstrap'),'hot-bootstrap','引导')
     with get(url+'/v1/catalog') as response:
-        legacy=json.loads(json.load(response)['payload'])
+        assert response.headers['X-Shiyin-Plan-Target']=='20260915130001'
+        legacy_envelope=json.load(response)
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(legacy_envelope['public_key'])).verify(
+            bytes.fromhex(legacy_envelope['plan_signature']),legacy_envelope['plan_payload'].encode())
+        assert json.loads(legacy_envelope['plan_payload'])['target_version']=='20260915130001'
+        legacy=json.loads(legacy_envelope['payload'])
     with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
+        assert response.headers['X-Shiyin-Plan-Target']=='20260915130001'
         updater=json.loads(json.load(response)['payload'])
     with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as response:
         modern=json.loads(json.load(response)['payload'])

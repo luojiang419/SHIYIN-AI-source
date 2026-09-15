@@ -117,6 +117,9 @@ class DesktopUpdaterContractTests(unittest.TestCase):
         self.assertIn("showStatusModal('检查更新失败'", source)
         self.assertNotIn("if (options.manual) alert(`检查更新失败", source)
         self.assertIn("setTimeout(() => checkAndDownload().catch(() => {}), 1200)", source)
+        self.assertIn("options.continuationOnly && !result.continuation", source)
+        self.assertIn("setTimeout(applyUpdate, 0)", source)
+        self.assertIn('catchup.json', UPDATER.read_text(encoding="utf-8"))
 
     def test_build_and_publish_scripts_share_release_asset_contract(self):
         installer_build = INSTALLER_BUILD_SCRIPT.read_text(encoding="utf-8")

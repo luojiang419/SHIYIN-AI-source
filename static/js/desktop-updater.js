@@ -39,8 +39,11 @@
                 if (info.downloaded) alert(`已安排在下次启动时更新到 ${version}。`);
             } catch (error) { alert(`安排更新失败：${error.message || error}`); }
         });
-        modal.querySelector('[data-action="apply"]').addEventListener('click', async event => {
-            const button = event.currentTarget;
+        const button = modal.querySelector('[data-action="apply"]');
+        let applying = false;
+        const applyUpdate = async () => {
+            if (applying) return;
+            applying = true;
             let activityTimer = 0;
             button.disabled = true;
             button.textContent = '正在启动更新器…';
@@ -57,11 +60,24 @@
                 clearInterval(activityTimer);
                 button.textContent = '正在启动独立更新器…';
                 await invoke('apply_downloaded_update');
-            } catch (error) { button.disabled = false; button.textContent = '重试更新'; alert(`更新失败：${error.message || error}`); }
+            } catch (error) {
+                applying = false;
+                button.disabled = false;
+                button.textContent = '重试更新';
+                modal.querySelector('.studio-modal-close').hidden = false;
+                alert(`更新失败：${error.message || error}`);
+            }
             finally { clearInterval(activityTimer); }
-        });
+        };
+        button.addEventListener('click', applyUpdate);
         document.body.append(modal);
         activeModal = modal;
+        if (info.continuation) {
+            modal.querySelector('.studio-modal-title').textContent = '正在自动补齐更新';
+            modal.querySelector('[data-action="defer"]').hidden = true;
+            modal.querySelector('.studio-modal-close').hidden = true;
+            setTimeout(applyUpdate, 0);
+        }
     }
 
     function showStatusModal(title, message) {
@@ -94,6 +110,7 @@
                 if (options.manual) showStatusModal('当前已是最新版本', `当前版本 v${result.currentVersion} 已是最新版本。`);
                 return result;
             }
+            if (options.continuationOnly && !result.continuation) return result;
             showModal(result);
             return result;
         } catch (error) {
@@ -167,6 +184,8 @@
                         if ((await invoke('get_update_settings')).updatePolicy === 'automatic') await checkAndDownload();
                     } catch (_) {}
                 }, 60000);
+            } else if (settings.updatePolicy !== 'disabled') {
+                setTimeout(() => checkAndDownload({continuationOnly: true}).catch(() => {}), 1200);
             }
         } catch (_) {
             // 浏览器模式不加载桌面更新器，不影响正常使用。

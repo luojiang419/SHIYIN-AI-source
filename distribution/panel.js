@@ -47,8 +47,10 @@ function renderTraffic(data){
   $('#clientList').replaceChildren(...Array.from(clients.values()).map(c=>{
     const stats=t.clients[c.ip]||{},active=t.active.filter(a=>a.ip===c.ip),row=element('article','','client');
     const head=element('div','','client-head'),name=element('div','','client-name');name.append(icon('Monitor'),element('strong',c.ip));
-    head.append(name,element('span',active.length?'下载中':Date.now()/1000-c.seen<300?'近期连接':'暂无活动','badge '+(active.length?'cyan':Date.now()/1000-c.seen<300?'green':'')));row.append(head);
-    const details=element('dl');for(const [label,value] of [['应用版本',c.version||'未报告'],['实时速度',bytes(stats.speed_bps)+'/s'],['今日流量',bytes(stats.today_bytes)],['今日峰值',bytes(stats.peak_bps)+'/s'],['下载请求',String(active.length)],['最近连接',c.seen?new Date(c.seen*1000).toLocaleTimeString():'—']]){const cell=element('div');cell.append(element('dt',label),element('dd',value));details.append(cell);}row.append(details);
+    const status=active.length?'下载中':c.update_state==='outdated'?'待补齐':c.update_state==='current'?'已是最新':Date.now()/1000-c.seen<300?'近期连接':'暂无活动';
+    head.append(name,element('span',status,'badge '+(active.length?'cyan':c.update_state==='outdated'?'orange':c.update_state==='current'?'green':'')));row.append(head);
+    const updateState={current:'已是最新',outdated:'待补齐',unknown:'未报告'}[c.update_state]||'未报告';
+    const details=element('dl');for(const [label,value] of [['应用版本',c.version||'未报告'],['更新状态',updateState],['目标序号',c.target_version||'—'],['实时速度',bytes(stats.speed_bps)+'/s'],['今日流量',bytes(stats.today_bytes)],['今日峰值',bytes(stats.peak_bps)+'/s'],['下载请求',String(active.length)],['最近连接',c.seen?new Date(c.seen*1000).toLocaleTimeString():'—']]){const cell=element('div');cell.append(element('dt',label),element('dd',value));details.append(cell);}row.append(details);
     active.forEach(a=>row.append(transferRow(a)));return row;
   }));
   if(!clients.size)$('#clientList').append(element('p','尚无客户端连接记录','muted'));

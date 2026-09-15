@@ -3,7 +3,8 @@
 <h1>热更新弹窗回归测试</h1><p>使用软件的实际 desktop-updater.js；原生命令由测试桩记录，不更新当前软件。</p><button onclick="openDesktopUpdater()">检查更新</button><p id="calls"></p><p id="result"></p>
 <script>
 const calls=[];
-const candidate={kind:'hot',available:true,downloaded:false,currentVersion:'1.0.446',latestVersion:'20260914154010',assetSize:12582912,releaseNotes:'独立分发服务、签名验证、自动重启与回滚。'};
+const continuation=new URLSearchParams(location.search).get('continuation')==='1';
+const candidate={kind:'hot',available:true,downloaded:false,continuation,currentVersion:'1.0.446',latestVersion:'20260914154010',assetSize:12582912,releaseNotes:'独立分发服务、签名验证、自动重启与回滚。'};
 window.__TAURI__={core:{invoke:async(command)=>{
  calls.push(command);document.getElementById('calls').textContent=calls.join(' → ');
  if(command==='get_update_settings')return{updatePolicy:'manual'};

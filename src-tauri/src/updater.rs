@@ -110,6 +110,15 @@ pub struct UpdateInfo {
     pub asset_size: u64,
     pub release_notes: String,
     pub message: String,
+    pub continuation: bool,
+    pub plan_target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CatchupPlan {
+    target_version: String,
+    #[serde(default)]
+    last_step: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +150,47 @@ fn settings_path(data: &Path) -> PathBuf {
 }
 fn pending_path(data: &Path) -> PathBuf {
     update_dir(data).join("pending.json")
+}
+fn catchup_path(data: &Path) -> PathBuf {
+    update_dir(data).join("catchup.json")
+}
+
+fn valid_release_id(value: &str) -> bool {
+    value.len() == 14 && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn load_catchup(data: &Path) -> Option<CatchupPlan> {
+    fs::read_to_string(catchup_path(data)).ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+}
+
+fn save_catchup(data: &Path, plan: &CatchupPlan) -> Result<(), String> {
+    fs::create_dir_all(update_dir(data)).map_err(|e| e.to_string())?;
+    let target = catchup_path(data);
+    let part = target.with_extension("json.part");
+    fs::write(&part, serde_json::to_string_pretty(plan).map_err(|e| e.to_string())? + "\n")
+        .map_err(|e| e.to_string())?;
+    if target.exists() { fs::remove_file(&target).map_err(|e| e.to_string())?; }
+    fs::rename(part, target).map_err(|e| e.to_string())
+}
+
+fn activate_catchup(data: &Path, target: &str, step: &str) -> Result<(), String> {
+    if !valid_release_id(target) || !valid_release_id(step) || target < step {
+        return Err("更新补齐计划版本无效".into());
+    }
+    let previous = load_catchup(data).filter(|plan| valid_release_id(&plan.target_version));
+    if previous.as_ref().is_some_and(|plan| plan.target_version.as_str() >= target) { return Ok(()); }
+    let target_version = previous.as_ref().map(|plan| plan.target_version.as_str()).unwrap_or("").max(target).to_string();
+    save_catchup(data, &CatchupPlan { target_version, last_step: step.into() })
+}
+
+fn active_catchup_target(data: &Path) -> Option<String> {
+    let Some(plan) = load_catchup(data) else { return None; };
+    if !valid_release_id(&plan.target_version) || plan.target_version <= hot::installed_release(data) {
+        let _ = fs::remove_file(catchup_path(data));
+        return None;
+    }
+    Some(plan.target_version)
 }
 
 fn normalize_proxy(value: &str) -> String {
@@ -593,6 +643,8 @@ fn info(release: &ResolvedRelease, downloaded: bool) -> UpdateInfo {
         asset_size: release.asset.size,
         release_notes: release.notes.clone(),
         message: String::new(),
+        continuation: false,
+        plan_target: release.version.clone(),
     }
 }
 
@@ -710,9 +762,10 @@ pub async fn check_for_update(state: State<'_, DesktopState>) -> Result<UpdateIn
             if settings.update_policy == DISABLED {
                 return Err("自动更新已在设置中关闭。".into());
             }
+            let continuation = active_catchup_target(&data_root).is_some();
             if let Some((manifest, _, _)) = hot::check(&data_root, &settings)? {
                 let downloaded = load_pending(&data_root).is_some_and(|p| p.kind == "hot" && p.version == manifest.version && hot::pending_valid(&data_root, &p));
-                return Ok(hot::information(&manifest, downloaded));
+                return Ok(hot::information(&manifest, downloaded, continuation));
             }
             // 局域网中心是正式更新源；没有发布时不悄悄升级到 GitHub 全量包。
             if settings.lan_update_enabled {
@@ -720,7 +773,8 @@ pub async fn check_for_update(state: State<'_, DesktopState>) -> Result<UpdateIn
                     let downloaded=load_pending(&data_root).is_some_and(|p|p.kind=="full"&&p.version==release.version&&pending_valid(&data_root,&p));
                     return Ok(info(&release,downloaded));
                 }
-                return Ok(UpdateInfo { kind: "hot".into(), current_version: env!("CARGO_PKG_VERSION").into(), latest_version: env!("CARGO_PKG_VERSION").into(), available: false, downloaded: false, asset_name: String::new(), asset_size: 0, release_notes: String::new(), message: "暂无新的局域网热更新".into() });
+                let target = active_catchup_target(&data_root);
+                return Ok(UpdateInfo { kind: "hot".into(), current_version: env!("CARGO_PKG_VERSION").into(), latest_version: env!("CARGO_PKG_VERSION").into(), available: false, downloaded: false, asset_name: String::new(), asset_size: 0, release_notes: String::new(), message: "暂无新的局域网热更新".into(), continuation: target.is_some(), plan_target: target.unwrap_or_default() });
             }
             let release = resolve_release(&data_root, &settings)?;
             let downloaded = load_pending(&data_root)
@@ -753,8 +807,9 @@ pub async fn download_update(state: State<'_, DesktopState>) -> Result<UpdateInf
                 return Err("自动更新已在设置中关闭。".into());
             }
             if let Some((manifest, raw, base)) = hot::check(&data_root, &settings)? {
+                activate_catchup(&data_root, &manifest.plan_target, &manifest.version)?;
                 hot::download(&install_root, &data_root, &manifest, &raw, &base)?;
-                return Ok(hot::information(&manifest, true));
+                return Ok(hot::information(&manifest, true, true));
             }
             if settings.lan_update_enabled {
                 if let Some(release)=published_lan_full(&settings)? {
@@ -1510,5 +1565,21 @@ mod tests {
         assert!(validate_hot_manifest(&manifest).is_ok());
         manifest.files.push(valid_file);
         assert!(validate_hot_manifest(&manifest).is_err());
+    }
+
+    #[test]
+    fn catchup_plan_persists_until_installed_target_is_reached() {
+        let data = std::env::temp_dir().join(format!("shiyin-catchup-test-{}", Uuid::new_v4()));
+        activate_catchup(&data, "20990101000000", "20260915120000").unwrap();
+        assert_eq!(active_catchup_target(&data).as_deref(), Some("20990101000000"));
+        activate_catchup(&data, "20980101000000", "20260915130000").unwrap();
+        assert_eq!(load_catchup(&data).unwrap().target_version, "20990101000000");
+        let applied = data.join("update/hot/applied.json");
+        fs::create_dir_all(applied.parent().unwrap()).unwrap();
+        fs::write(&applied, r#"{"version":"20990101000000"}"#).unwrap();
+        assert!(active_catchup_target(&data).is_none());
+        assert!(!catchup_path(&data).exists());
+        assert!(activate_catchup(&data, "invalid", "20260915130000").is_err());
+        fs::remove_dir_all(data).unwrap();
     }
 }

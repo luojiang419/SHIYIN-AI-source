@@ -13,6 +13,7 @@ import socket
 import sqlite3
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
 
@@ -113,6 +114,9 @@ class Center:
                     manifest = json.loads(json.loads(release['manifest'])['payload'])
                     for item in manifest['files']:
                         labels[item['sha256']] = f"{release['kind']} · {release['version']} · {item['path']}"
+                    package = manifest.get('package')
+                    if package:
+                        labels[package['sha256']] = f"{release['kind']} · {release['version']} · {package['name']}"
                 self.blob_labels = labels
             return self.blob_labels.get(sha, sha)
 
@@ -228,7 +232,7 @@ class Center:
     def import_release(self, source, kind, notes=''):
         source = Path(source).resolve(strict=True)
         files = []
-        if kind == 'hot':
+        if kind in ('hot', 'hot-bootstrap'):
             manifest = json.loads((source / 'manifest.json').read_text('utf-8-sig'))
             version = str(manifest['version'])
             if not re.fullmatch(r'\d{14}', version):
@@ -237,20 +241,55 @@ class Center:
                 raise ValueError('缺少有效的最低桌面基线版本')
             if not isinstance(manifest.get('files'), list) or not 0 < len(manifest['files']) <= 20000:
                 raise ValueError('热更新文件数量无效')
-            manifest['protocol_version'] = 2
+            protocol = manifest.get('protocol_version')
+            if protocol not in (2, 3) or (kind == 'hot-bootstrap' and protocol != 2):
+                raise ValueError('热更新协议版本无效')
+            if protocol == 2 and manifest.get('package') is not None:
+                raise ValueError('旧协议不能包含增量包字段')
             for item in manifest['files']:
                 if not isinstance(item.get('size'), int) or item['size'] < 0 or not re.fullmatch(r'[0-9a-f]{64}', str(item.get('sha256', ''))):
                     raise ValueError('文件大小或 SHA-256 格式无效')
                 rel = relative_path(item['path'], hot=True)
-                path = (source / 'files' / rel).resolve(strict=True)
-                path.relative_to((source / 'files').resolve())
-                if path.stat().st_size != item['size']:
-                    raise ValueError('文件大小不匹配：' + item['path'])
-                self.blob(path, item['sha256'])
                 files.append(dict(item))
             roots = manifest.get('prune_roots', [])
             if any(r not in ALLOWED_ROOTS for r in roots):
                 raise ValueError('清理目录超出应用白名单')
+            if kind == 'hot-bootstrap':
+                if roots or len(files) != 1 or files[0]['path'] != 'SHIYIN AI.exe':
+                    raise ValueError('更新器引导包只能包含桌面主程序')
+            if protocol == 3:
+                package = manifest.get('package')
+                if not isinstance(package, dict) or not re.fullmatch(r'SHIYIN-Hot-Update-\d{14}\.shiyin-update', str(package.get('name', ''))):
+                    raise ValueError('缺少有效的单包信息')
+                if not isinstance(package.get('size'), int) or package['size'] <= 0 or not re.fullmatch(r'[0-9a-f]{64}', str(package.get('sha256', ''))):
+                    raise ValueError('增量包大小或 SHA-256 无效')
+                package_path = (source / package['name']).resolve(strict=True)
+                package_path.relative_to(source)
+                if package_path.stat().st_size != package['size']:
+                    raise ValueError('增量包大小不匹配')
+                self.blob(package_path, package['sha256'])
+                expected = {item['path']: item for item in files}
+                with zipfile.ZipFile(package_path) as archive:
+                    entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+                    if len(entries) != len(files) or len({entry.filename for entry in entries}) != len(entries):
+                        raise ValueError('增量包文件数量或路径重复')
+                    for entry in entries:
+                        relative_path(entry.filename, hot=True)
+                        item = expected.get(entry.filename)
+                        if not item or entry.file_size != item['size']:
+                            raise ValueError('增量包包含清单外文件或大小不匹配：' + entry.filename)
+                        with archive.open(entry) as handle:
+                            sha = hashlib.file_digest(handle, 'sha256').hexdigest()
+                        if sha != item['sha256']:
+                            raise ValueError('增量包文件校验失败：' + entry.filename)
+            else:
+                for item in files:
+                    rel = relative_path(item['path'], hot=True)
+                    path = (source / 'files' / rel).resolve(strict=True)
+                    path.relative_to((source / 'files').resolve())
+                    if path.stat().st_size != item['size']:
+                        raise ValueError('文件大小不匹配：' + item['path'])
+                    self.blob(path, item['sha256'])
         elif kind in ('person-depth', 'video-depth'):
             current = source / 'current.json'
             if current.exists():
@@ -389,7 +428,7 @@ class Center:
                             return self.wfile.write(raw)
                         return self.json({'error': '不存在'}, 404)
                     if path == '/health':
-                        return self.json({'ok': True, 'url': owner.url, 'public_key': owner.public_key, 'protocol': 2})
+                        return self.json({'ok': True, 'url': owner.url, 'public_key': owner.public_key, 'protocol': 3})
                     if path == '/':
                         raw = ('<!doctype html><meta charset="utf-8"><title>SHIYIN 局域网下载</title>'
                                '<body style="background:#12191f;color:#e5eef5;font:16px sans-serif;padding:60px">'
@@ -408,7 +447,15 @@ class Center:
                         return self.json({'error': '请先迁移桌面更新器'}, 409)
                     if path == '/v1/catalog':
                         owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
-                        release = owner.active('hot')
+                        capabilities = {value.strip() for value in self.headers.get('X-Shiyin-Capabilities', '').split(',')}
+                        if 'package-v3' in capabilities:
+                            release = owner.active('hot')
+                        else:
+                            release = owner.active('hot-bootstrap')
+                            if not release:
+                                candidate = owner.active('hot')
+                                if candidate and json.loads(json.loads(candidate['manifest'])['payload']).get('protocol_version') == 2:
+                                    release = candidate
                         return self.json(json.loads(release['manifest']) if release else {'release': None})
                     if path.startswith('/v1/blobs/'):
                         sha = path.removeprefix('/v1/blobs/')
@@ -511,7 +558,13 @@ def main():
     if center.config['auto_start']:
         try: center.start()
         except OSError as exc: center.log('启动失败，请检查端口占用：' + str(exc))
-    try: admin.serve_forever()
+    try:
+        admin.serve_forever()
+    except BaseException as exc:
+        atomic_json(center.data / 'service-error.json', {
+            'error': f'{type(exc).__name__}: {exc}', 'time': time.time()
+        })
+        raise
     finally:
         center.stop()
         admin.server_close()

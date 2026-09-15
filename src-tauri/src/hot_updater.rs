@@ -5,6 +5,7 @@ use std::net::UdpSocket;
 
 const PUBLIC_KEY: &str = include_str!("../distribution-public-key.hex");
 const BASELINE_RELEASE: &str = include_str!("../distribution-baseline.txt");
+const DOWNLOAD_ATTEMPTS: usize = 6;
 
 fn effective_release(applied: &str, baseline: &str) -> String {
     [applied.trim(), baseline.trim()].into_iter()
@@ -30,6 +31,15 @@ pub(super) struct Manifest {
     #[serde(default)]
     prune_roots: Vec<String>,
     files: Vec<HotUpdateFile>,
+    #[serde(default)]
+    package: Option<HotUpdatePackage>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct HotUpdatePackage {
+    name: String,
+    size: u64,
+    sha256: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,7 +71,7 @@ fn verify(raw: &str) -> Result<Manifest, String> {
     let signature = Signature::from_bytes(&unhex::<64>(&env.signature)?);
     key.verify(env.payload.as_bytes(), &signature).map_err(|_| "更新清单签名校验失败")?;
     let m: Manifest = serde_json::from_str(&env.payload).map_err(|_| "更新清单格式错误")?;
-    if m.protocol_version != 2 || m.version.len() != 14 || !m.version.bytes().all(|b| b.is_ascii_digit())
+    if !matches!(m.protocol_version, 2 | 3) || m.version.len() != 14 || !m.version.bytes().all(|b| b.is_ascii_digit())
         || normalize_version(&m.min_desktop_version).is_none() || m.files.is_empty() || m.files.len() > 20000 {
         return Err("更新清单版本或文件数量无效".into());
     }
@@ -72,6 +82,12 @@ fn verify(raw: &str) -> Result<Manifest, String> {
         if !seen.insert(f.path.to_lowercase()) { return Err("清单有重复文件".into()); }
     }
     if m.prune_roots.iter().any(|r| !ROOTS.contains(&r.as_str())) { return Err("清理范围无效".into()); }
+    match (m.protocol_version, &m.package) {
+        (2, None) => {}
+        (3, Some(package)) if package.name == format!("SHIYIN-Hot-Update-{}.shiyin-update", m.version)
+            && package.size > 0 && unhex::<32>(&package.sha256).is_ok() => {}
+        _ => return Err("热更新单包信息无效".into()),
+    }
     Ok(m)
 }
 
@@ -81,7 +97,8 @@ fn agent() -> ureq::Agent {
 }
 
 fn read_small(agent: &ureq::Agent, url: &str, current: &str) -> Result<String, String> {
-    let mut r = agent.get(url).header("X-Shiyin-Version", current).call().map_err(|e| e.to_string())?;
+    let mut r = agent.get(url).header("X-Shiyin-Version", current)
+        .header("X-Shiyin-Capabilities", "package-v3").call().map_err(|e| e.to_string())?;
     let mut s = String::new();
     r.body_mut().as_reader().take(16 * 1024 * 1024).read_to_string(&mut s).map_err(|e| e.to_string())?;
     Ok(s)
@@ -131,39 +148,108 @@ pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Ma
 pub(super) fn information(m: &Manifest, downloaded: bool) -> UpdateInfo {
     UpdateInfo { current_version: env!("CARGO_PKG_VERSION").into(), latest_version: m.version.clone(),
         available: true, downloaded, asset_name: format!("热更新 {}", m.version),
-        asset_size: m.files.iter().map(|f| f.size).sum(), release_notes: m.notes.clone(),
-        message: "局域网热更新，安装后自动重启".into(), kind: "hot".into() }
+        asset_size: m.package.as_ref().map(|p| p.size).unwrap_or_else(|| m.files.iter().map(|f| f.size).sum()), release_notes: m.notes.clone(),
+        message: "局域网增量包，安装后自动重启".into(), kind: "hot".into() }
 }
 
 fn matches(path: &Path, f: &HotUpdateFile) -> bool {
-    path.metadata().is_ok_and(|m| m.len() == f.size) && sha256(path).is_ok_and(|s| s.eq_ignore_ascii_case(&f.sha256))
+    file_matches(path, f.size, &f.sha256)
+}
+
+fn file_matches(path: &Path, size: u64, expected_sha256: &str) -> bool {
+    path.metadata().is_ok_and(|value| value.len() == size)
+        && sha256(path).is_ok_and(|value| value.eq_ignore_ascii_case(expected_sha256))
+}
+
+fn download_blob(agent: &ureq::Agent, url: &str, part: &Path, size: u64, expected_sha256: &str, label: &str) -> Result<(), String> {
+    if file_matches(part, size, expected_sha256) { return Ok(()); }
+    let mut last_error = String::new();
+    for attempt in 0..DOWNLOAD_ATTEMPTS {
+        let stored = part.metadata().map(|value| value.len()).unwrap_or(0);
+        let offset = if stored < size { stored } else { 0 };
+        let result = (|| {
+            let mut request = agent.get(url);
+            let range = format!("bytes={offset}-");
+            if offset > 0 { request = request.header("Range", &range); }
+            let mut response = request.call().map_err(|e| e.to_string())?;
+            let resume = offset > 0 && response.status().as_u16() == 206;
+            let mut file = OpenOptions::new().create(true).write(true).append(resume).truncate(!resume)
+                .open(part).map_err(|e| e.to_string())?;
+            let remaining = size.saturating_sub(if resume { offset } else { 0 });
+            io::copy(&mut response.body_mut().as_reader().take(remaining + 1), &mut file).map_err(|e| e.to_string())?;
+            file.sync_all().map_err(|e| e.to_string())?;
+            if !file_matches(part, size, expected_sha256) { return Err("文件内容或长度校验失败".into()); }
+            Ok::<(), String>(())
+        })();
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error;
+                if part.metadata().is_ok_and(|value| value.len() >= size) { let _ = fs::remove_file(part); }
+                if attempt + 1 < DOWNLOAD_ATTEMPTS {
+                    thread::sleep(Duration::from_millis(500 * (attempt as u64 + 1)));
+                }
+            }
+        }
+    }
+    Err(format!("下载失败（{label}，已自动重试 {} 次）：{last_error}", DOWNLOAD_ATTEMPTS - 1))
+}
+
+fn extract_package(package_path: &Path, dir: &Path, m: &Manifest) -> Result<(), String> {
+    let package_file = File::open(package_path).map_err(|e| format!("无法打开增量包：{e}"))?;
+    let mut archive = zip::ZipArchive::new(package_file).map_err(|e| format!("增量包格式无效：{e}"))?;
+    if archive.len() != m.files.len() { return Err("增量包文件数量与签名清单不一致".into()); }
+    let mut seen = HashSet::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|e| format!("读取增量包失败：{e}"))?;
+        let name = entry.name().to_string();
+        let rel = relative(&name)?;
+        if entry.is_dir() || !seen.insert(name.to_lowercase()) { return Err("增量包包含目录或重复路径".into()); }
+        let file = m.files.iter().find(|item| item.path == name).ok_or_else(|| format!("增量包包含清单外文件：{name}"))?;
+        if entry.size() != file.size { return Err(format!("增量包文件大小不符：{name}")); }
+        let target = dir.join("files").join(rel);
+        if matches(&target, file) { continue; }
+        fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+        let part = target.with_extension("extract-part");
+        let mut output = File::create(&part).map_err(|e| e.to_string())?;
+        io::copy(&mut (&mut entry).take(file.size + 1), &mut output).map_err(|e| format!("解压 {name} 失败：{e}"))?;
+        output.sync_all().map_err(|e| e.to_string())?;
+        drop(output);
+        if !matches(&part, file) { let _ = fs::remove_file(&part); return Err(format!("解压文件校验失败：{name}")); }
+        if target.exists() { fs::remove_file(&target).map_err(|e| e.to_string())?; }
+        fs::rename(&part, &target).map_err(|e| e.to_string())?;
+    }
+    if seen.len() != m.files.len() { return Err("增量包缺少签名清单文件".into()); }
+    Ok(())
 }
 
 pub(super) fn download(root: &Path, data: &Path, m: &Manifest, raw: &str, base: &str) -> Result<(), String> {
     let dir = update_dir(data).join("hot").join(&m.version);
     fs::create_dir_all(dir.join("files")).map_err(|e| e.to_string())?;
     let agent = agent();
-    for f in &m.files {
-        let rel = relative(&f.path)?;
-        let dest = safe_target(root, &rel)?;
-        if matches(&dest, f) { continue; }
-        let target = dir.join("files").join(&rel);
-        if matches(&target, f) { continue; }
-        fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
-        let part = target.with_extension("download-part");
-        let offset = part.metadata().map(|m| m.len()).unwrap_or(0);
-        let offset = if offset < f.size { offset } else { 0 };
-        let mut request = agent.get(&format!("{base}/v1/blobs/{}", f.sha256));
-        let range = format!("bytes={offset}-");
-        if offset > 0 { request = request.header("Range", &range); }
-        let mut response = request.call().map_err(|e| format!("下载失败：{e}"))?;
-        let resume = offset > 0 && response.status().as_u16() == 206;
-        let mut file = OpenOptions::new().create(true).write(true).append(resume).truncate(!resume).open(&part).map_err(|e| e.to_string())?;
-        io::copy(&mut response.body_mut().as_reader().take(f.size + 1), &mut file).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        drop(file);
-        if !matches(&part, f) { let _ = fs::remove_file(part); return Err(format!("文件校验失败：{}", f.path)); }
-        fs::rename(&part, &target).map_err(|e| e.to_string())?;
+    if let Some(package) = &m.package {
+        let target = dir.join(&package.name);
+        if !file_matches(&target, package.size, &package.sha256) {
+            let part = target.with_extension("download-part");
+            download_blob(&agent, &format!("{base}/v1/blobs/{}", package.sha256), &part,
+                package.size, &package.sha256, &package.name)?;
+            if target.exists() { fs::remove_file(&target).map_err(|e| e.to_string())?; }
+            fs::rename(&part, &target).map_err(|e| e.to_string())?;
+        }
+        extract_package(&target, &dir, m)?;
+    } else {
+        for f in &m.files {
+            let rel = relative(&f.path)?;
+            let dest = safe_target(root, &rel)?;
+            if matches(&dest, f) { continue; }
+            let target = dir.join("files").join(&rel);
+            if matches(&target, f) { continue; }
+            fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+            let part = target.with_extension("download-part");
+            download_blob(&agent, &format!("{base}/v1/blobs/{}", f.sha256), &part,
+                f.size, &f.sha256, &f.path)?;
+            fs::rename(&part, &target).map_err(|e| e.to_string())?;
+        }
     }
     let envelope = dir.join("envelope.json");
     fs::write(&envelope, raw).map_err(|e| e.to_string())?;
@@ -387,6 +473,8 @@ pub(super) fn cli(args: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     #[test] fn baseline_prevents_old_updates_on_fresh_or_existing_installs() {
         assert_eq!(effective_release("", "20260914180000"), "20260914180000");
         assert_eq!(effective_release("20260914154010", "20260914180000"), "20260914180000");
@@ -408,7 +496,7 @@ mod tests {
         fs::write(root.join("app/web/a.js"),b"old").unwrap();
         fs::write(root.join("app/web/obsolete.js"),b"old").unwrap();
         let staged=dir.join("files/app/web/a.js");fs::write(&staged,b"new").unwrap();
-        let m=Manifest{protocol_version:2,version:"20260914180000".into(),min_desktop_version:"1.0.446".into(),notes:"".into(),prune_roots:vec!["app/web".into()],files:vec![HotUpdateFile{path:"app/web/a.js".into(),size:3,sha256:sha256(&staged).unwrap()}]};
+        let m=Manifest{protocol_version:2,version:"20260914180000".into(),min_desktop_version:"1.0.446".into(),notes:"".into(),prune_roots:vec!["app/web".into()],files:vec![HotUpdateFile{path:"app/web/a.js".into(),size:3,sha256:sha256(&staged).unwrap()}],package:None};
         let changes=apply(&root,&dir,&m).unwrap();
         assert_eq!(fs::read(root.join("app/web/a.js")).unwrap(),b"new");
         assert!(!root.join("app/web/obsolete.js").exists());
@@ -428,6 +516,73 @@ mod tests {
         recover(&root,&data).unwrap();
         assert_eq!(fs::read(root.join("app/web/a.js")).unwrap(),b"old");
         assert!(!dir.join("journal.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test] fn interrupted_download_resumes_automatically() {
+        let content: Vec<u8> = (0..512 * 1024).map(|value| (value % 251) as u8).collect();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let expected = content.clone();
+        let server = thread::spawn(move || {
+            for request_index in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 2048];
+                let size = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..size]);
+                if request_index == 0 {
+                    assert!(!request.contains("Range:"));
+                    write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", expected.len()).unwrap();
+                    stream.write_all(&expected[..128 * 1024]).unwrap();
+                } else {
+                    let range = request.lines().find(|line| line.to_ascii_lowercase().starts_with("range: bytes="))
+                        .expect("重试请求必须携带 Range");
+                    let offset: usize = range.split('=').nth(1).unwrap().trim_end_matches('-').parse().unwrap();
+                    assert!(offset > 0 && offset < expected.len());
+                    write!(stream, "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nConnection: close\r\n\r\n", expected.len() - offset, offset, expected.len() - 1, expected.len()).unwrap();
+                    stream.write_all(&expected[offset..]).unwrap();
+                }
+            }
+        });
+        let root = std::env::temp_dir().join(format!("shiyin-download-test-{}", Uuid::new_v4()));
+        let data = root.join("data");
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source");
+        fs::write(&source, &content).unwrap();
+        let manifest = Manifest { protocol_version: 2, version: "20260915130000".into(), min_desktop_version: "1.0.447".into(),
+            notes: "".into(), prune_roots: vec![], files: vec![HotUpdateFile { path: "app/web/retry.bin".into(),
+                size: content.len() as u64, sha256: sha256(&source).unwrap() }], package: None };
+        download(&root, &data, &manifest, "envelope", &format!("http://{address}")).unwrap();
+        assert_eq!(fs::read(data.join("update/hot/20260915130000/files/app/web/retry.bin")).unwrap(), content);
+        server.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test] fn package_extraction_verifies_signed_file_list() {
+        let root = std::env::temp_dir().join(format!("shiyin-package-test-{}", Uuid::new_v4()));
+        let dir = root.join("update");
+        fs::create_dir_all(&dir).unwrap();
+        let content = b"verified package content";
+        let source = root.join("source");
+        fs::write(&source, content).unwrap();
+        let package_path = root.join("test.shiyin-update");
+        let mut archive = zip::ZipWriter::new(File::create(&package_path).unwrap());
+        archive.start_file("app/web/package.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        archive.write_all(content).unwrap();
+        archive.finish().unwrap();
+        let manifest = Manifest { protocol_version: 3, version: "20260915130002".into(), min_desktop_version: "1.0.447".into(),
+            notes: "".into(), prune_roots: vec!["app/web".into()], files: vec![HotUpdateFile { path: "app/web/package.txt".into(),
+                size: content.len() as u64, sha256: sha256(&source).unwrap() }], package: Some(HotUpdatePackage {
+                name: "SHIYIN-Hot-Update-20260915130002.shiyin-update".into(), size: package_path.metadata().unwrap().len(),
+                sha256: sha256(&package_path).unwrap() }) };
+        extract_package(&package_path, &dir, &manifest).unwrap();
+        assert_eq!(fs::read(dir.join("files/app/web/package.txt")).unwrap(), content);
+        let extra_path = root.join("extra.shiyin-update");
+        let mut extra = zip::ZipWriter::new(File::create(&extra_path).unwrap());
+        extra.start_file("app/web/package.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        extra.write_all(content).unwrap();
+        extra.start_file("app/web/extra.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        extra.write_all(b"unexpected").unwrap();
+        extra.finish().unwrap();
+        assert!(extract_package(&extra_path, &dir, &manifest).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

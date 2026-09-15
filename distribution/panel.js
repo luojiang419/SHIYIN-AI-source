@@ -19,7 +19,7 @@ async function api(path, body){
   const response=await fetch('/api/'+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
   const data=await response.json(); if(!response.ok)throw new Error(data.error || '请求失败'); return data;
 }
-const names={hot:'应用热更新',full:'全量安装包','person-depth':'人物深度组件','video-depth':'深度视频模型'};
+const names={hot:'应用增量包','hot-bootstrap':'更新器引导包',full:'全量安装包','person-depth':'人物深度组件','video-depth':'深度视频模型'};
 const states={published:'已发布',paused:'已暂停',archived:'历史版本'};
 function element(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
 function bytes(value){let n=Math.max(0,Number(value)||0),i=0;const units=['B','KB','MB','GB','TB'];while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(i?1:0)+' '+units[i];}
@@ -53,9 +53,9 @@ function renderTraffic(data){
   }));
   if(!clients.size)$('#clientList').append(element('p','尚无客户端连接记录','muted'));
 }
-const resourceIcons={hot:'Zap',full:'AppWindow','person-depth':'ScanFace','video-depth':'FileVideo'};
+const resourceIcons={hot:'PackageOpen','hot-bootstrap':'RefreshCw',full:'AppWindow','person-depth':'ScanFace','video-depth':'FileVideo'};
 function releaseRow(item,actions){
-  if(!actions){const row=element('tr'),name=element('td');name.append(element('strong',names[item.kind]||item.kind),element('small',item.kind==='hot'?'Web + Backend':item.kind==='full'?'Windows x64':'模型组件'));row.append(name,element('td',item.version,'version'),element('td',new Date(item.created*1000).toLocaleDateString()));const status=element('td');status.append(element('span',states[item.state],'badge green'));row.append(status);return row;}
+  if(!actions){const row=element('tr'),name=element('td');name.append(element('strong',names[item.kind]||item.kind),element('small',item.kind==='hot'?'单个签名包':item.kind==='hot-bootstrap'?'旧客户端兼容':item.kind==='full'?'Windows x64':'模型组件'));row.append(name,element('td',item.version,'version'),element('td',new Date(item.created*1000).toLocaleDateString()));const status=element('td');status.append(element('span',states[item.state],'badge green'));row.append(status);return row;}
   const row=element('article','','resource-row'),mark=element('span','','resource-icon'),copy=element('div','','resource-main'),version=element('div','','resource-cell'),actionsBox=element('div','','row-actions');mark.append(icon(resourceIcons[item.kind]||'Boxes'));copy.append(element('strong',names[item.kind]||item.kind),element('small','发布于 '+new Date(item.created*1000).toLocaleString()));version.append(element('small','资源版本'),element('strong',item.version));
   actionsBox.append(element('span',states[item.state],'badge '+(item.state==='published'?'green':'orange')));const button=element('button',item.state==='published'?'暂停发布':'发布此版本','button');button.onclick=()=>act('release',{id:item.id,state:item.state==='published'?'paused':'published'});actionsBox.append(button);row.append(mark,copy,version,actionsBox);return row;
 }

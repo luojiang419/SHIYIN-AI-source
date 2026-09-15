@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -33,6 +34,7 @@ def main():
     parser.add_argument('--notes', default='局域网热更新：功能优化与问题修复')
     parser.add_argument('--publish', action='store_true')
     parser.add_argument('--web-only', action='store_true')
+    parser.add_argument('--bootstrap', action='store_true', help='只发布兼容旧客户端的桌面更新器')
     parser.add_argument('--admin-port', type=int, default=3013)
     args=parser.parse_args()
     if len(args.version)!=14 or not args.version.isdigit(): raise ValueError('热更新版本需14位时间戳')
@@ -44,36 +46,55 @@ def main():
     desktop_hash=fingerprint(desktop_files); backend_hash=fingerprint(backend_files)
     desktop=ROOT/'src-tauri/target/release/SHIYIN-AI.exe'
     backend=ROOT/'dist/hot-backend/canvas-backend'
+    if args.bootstrap and args.web_only:
+        raise ValueError('--bootstrap 与 --web-only 不能同时使用')
     if not args.web_only:
         if state.get('desktop')!=desktop_hash or not desktop.exists():
             run(['cargo','build','--release','--manifest-path','src-tauri/Cargo.toml']);state['desktop']=desktop_hash
-        if state.get('backend')!=backend_hash or not (backend/'canvas-backend.exe').exists():
+        if not args.bootstrap and (state.get('backend')!=backend_hash or not (backend/'canvas-backend.exe').exists()):
             # PyInstaller可能把语法错误的main当成不可导入模块而继续产出EXE。
             run([sys.executable,'-m','compileall','-q','main.py','backend_entry.py','canvas_core'])
             run([sys.executable,'-m','PyInstaller','--noconfirm','--distpath','dist/hot-backend','--workpath','.build/hot-backend','canvas-backend.spec']);state['backend']=backend_hash
     snapshot=ROOT/'dist/hot-update'/args.version
     snapshot.mkdir(parents=True,exist_ok=False)
     files=snapshot/'files'
-    shutil.copytree(ROOT/'static',files/'app/web',ignore=shutil.ignore_patterns('prototypes'))
-    # 用发布序号统一静态资源缓存参数，避免重启后 WebView 仍读取旧脚本。
-    for path in (files/'app/web').rglob('*.html'):
-        import re
-        html=path.read_text('utf-8')
-        html=re.sub(r'([?&]v=)[^\s\"\'&<>]+',lambda m:m[1]+args.version,html)
-        path.write_text(html,encoding='utf-8')
-    roots=['app/web']
-    if not args.web_only:
-        shutil.copytree(backend,files/'app/backend/canvas-backend')
+    roots=[]
+    if args.bootstrap:
+        files.mkdir()
         shutil.copy2(desktop,files/'SHIYIN AI.exe')
-        roots.append('app/backend/canvas-backend')
-    manifest={'protocol_version':2,'version':args.version,'min_desktop_version':(ROOT/'VERSION').read_text().strip(),'notes':args.notes,'prune_roots':roots,'files':[]}
+    else:
+        shutil.copytree(ROOT/'static',files/'app/web',ignore=shutil.ignore_patterns('prototypes'))
+        # 用发布序号统一静态资源缓存参数，避免重启后 WebView 仍读取旧脚本。
+        for path in (files/'app/web').rglob('*.html'):
+            import re
+            html=path.read_text('utf-8')
+            html=re.sub(r'([?&]v=)[^\s\"\'&<>]+',lambda m:m[1]+args.version,html)
+            path.write_text(html,encoding='utf-8')
+        roots=['app/web']
+        if not args.web_only:
+            shutil.copytree(backend,files/'app/backend/canvas-backend')
+            shutil.copy2(desktop,files/'SHIYIN AI.exe')
+            roots.append('app/backend/canvas-backend')
+    manifest={'protocol_version':2 if args.bootstrap else 3,'version':args.version,'min_desktop_version':(ROOT/'VERSION').read_text().strip(),'notes':args.notes,'prune_roots':roots,'files':[]}
     for path in sorted(files.rglob('*')):
         if path.is_file():manifest['files'].append({'path':path.relative_to(files).as_posix(),'size':path.stat().st_size,'sha256':digest(path)})
+    if not args.bootstrap:
+        package_name=f'SHIYIN-Hot-Update-{args.version}.shiyin-update'
+        package=snapshot/package_name
+        with zipfile.ZipFile(package,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6,allowZip64=True) as archive:
+            for item in manifest['files']:
+                info=zipfile.ZipInfo(item['path'],date_time=(1980,1,1,0,0,0))
+                info.compress_type=zipfile.ZIP_DEFLATED
+                info.create_system=3
+                info.external_attr=0o100644 << 16
+                with (files/Path(item['path'])).open('rb') as source, archive.open(info,'w',force_zip64=True) as target:
+                    shutil.copyfileobj(source,target,1024*1024)
+        manifest['package']={'name':package_name,'size':package.stat().st_size,'sha256':digest(package)}
     atomic_json(snapshot/'manifest.json',manifest)
     atomic_json(cache,state)
     if args.publish:
         token=(DEFAULT_DATA/'admin-token').read_text('ascii')
-        body=json.dumps({'source':str(snapshot),'kind':'hot','notes':args.notes}).encode()
+        body=json.dumps({'source':str(snapshot),'kind':'hot-bootstrap' if args.bootstrap else 'hot','notes':args.notes}).encode()
         request=urllib.request.Request(f'http://127.0.0.1:{args.admin_port}/api/import',data=body,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request,timeout=15) as response: response.read()
     print(json.dumps({'snapshot':str(snapshot),'files':len(manifest['files']),'version':args.version,'publish_requested':args.publish},ensure_ascii=False))

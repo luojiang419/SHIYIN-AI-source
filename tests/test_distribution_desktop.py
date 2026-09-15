@@ -7,6 +7,7 @@ from http.server import ThreadingHTTPServer
 import pytest
 from distribution.service import Center
 from distribution import desktop_settings
+from distribution.launcher import ServiceWatchdog
 
 
 def test_theme_selection_obeys_system_without_changing_it(monkeypatch):
@@ -16,6 +17,17 @@ def test_theme_selection_obeys_system_without_changing_it(monkeypatch):
     monkeypatch.setattr(desktop_settings, 'system_dark', lambda: False)
     assert not desktop_settings.resolve_dark('system')
     assert desktop_settings.resolve_dark('dark')
+
+
+def test_service_watchdog_restarts_after_consecutive_failures_with_backoff():
+    watchdog = ServiceWatchdog(failure_threshold=3, restart_interval=15)
+    assert not watchdog.failed(0)
+    assert not watchdog.failed(1)
+    assert watchdog.failed(2)
+    assert not watchdog.failed(10)
+    assert watchdog.failed(17)
+    watchdog.succeeded()
+    assert not watchdog.failed(40)
 
 
 def test_preferences_persist_and_startup_is_optional(tmp_path, monkeypatch):

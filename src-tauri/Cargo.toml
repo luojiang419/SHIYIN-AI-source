@@ -30,6 +30,7 @@ tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-single-instance = "2.3.6"
 ureq = { version = "3.1.4", features = ["json"] }
 uuid = { version = "1.18.1", features = ["v4"] }
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 codegen-units = 1

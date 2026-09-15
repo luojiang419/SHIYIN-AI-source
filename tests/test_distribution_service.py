@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 import urllib.request
 import urllib.error
+import zipfile
 from http.server import ThreadingHTTPServer
 
 import pytest
@@ -17,6 +18,28 @@ def snapshot(root, content=b'new', version='20260914180000'):
     path.write_bytes(content)
     atomic_json(root/'manifest.json', {'protocol_version':2,'version':version,'min_desktop_version':'1.0.446',
         'prune_roots':['app/web'],'files':[{'path':'app/web/index.html','size':len(content),'sha256':hashlib.sha256(content).hexdigest()}]})
+    return root
+
+
+def package_snapshot(root, content=b'packaged-update', version='20260915130001'):
+    root.mkdir(parents=True)
+    name=f'SHIYIN-Hot-Update-{version}.shiyin-update'
+    package=root/name
+    path='app/web/index.html'
+    with zipfile.ZipFile(package,'w',compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(path,content)
+    atomic_json(root/'manifest.json', {'protocol_version':3,'version':version,'min_desktop_version':'1.0.447',
+        'prune_roots':['app/web'],'files':[{'path':path,'size':len(content),'sha256':hashlib.sha256(content).hexdigest()}],
+        'package':{'name':name,'size':package.stat().st_size,'sha256':hashlib.sha256(package.read_bytes()).hexdigest()}})
+    return root
+
+
+def bootstrap_snapshot(root, content=b'new-updater', version='20260915130000'):
+    path=root/'files/SHIYIN AI.exe'
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
+    atomic_json(root/'manifest.json', {'protocol_version':2,'version':version,'min_desktop_version':'1.0.447',
+        'prune_roots':[],'files':[{'path':'SHIYIN AI.exe','size':len(content),'sha256':hashlib.sha256(content).hexdigest()}]})
     return root
 
 
@@ -45,6 +68,37 @@ def test_signed_catalog_range_and_legacy_guard(server,tmp_path):
     with pytest.raises(urllib.error.HTTPError) as err: get(url+'/hot-update/manifest.json')
     assert err.value.code==409
     assert len(c.status()['clients'])==1
+
+
+def test_package_capability_routes_new_and_legacy_clients(server,tmp_path):
+    c,url=server
+    packaged=package_snapshot(tmp_path/'package')
+    c.import_release(packaged,'hot','单包')
+    with get(url+'/v1/catalog') as response:
+        assert json.load(response)=={'release':None}
+    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
+        envelope=json.load(response)
+    manifest=json.loads(envelope['payload'])
+    assert manifest['protocol_version']==3 and manifest['package']['name'].endswith('.shiyin-update')
+    package=manifest['package']
+    with get(url+'/v1/blobs/'+package['sha256'],{'Range':'bytes=1-'}) as response:
+        assert response.status==206 and len(response.read())==package['size']-1
+    c.import_release(bootstrap_snapshot(tmp_path/'bootstrap'),'hot-bootstrap','引导')
+    with get(url+'/v1/catalog') as response:
+        legacy=json.loads(json.load(response)['payload'])
+    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
+        modern=json.loads(json.load(response)['payload'])
+    assert legacy['protocol_version']==2 and legacy['files'][0]['path']=='SHIYIN AI.exe'
+    assert modern['protocol_version']==3
+
+
+def test_package_import_rejects_corruption(server,tmp_path):
+    c,_=server
+    source=package_snapshot(tmp_path/'corrupt')
+    package=next(source.glob('*.shiyin-update'))
+    package.write_bytes(package.read_bytes()+b'corrupt')
+    with pytest.raises(ValueError,match='增量包'):
+        c.import_release(source,'hot')
 
 
 def test_public_api_cannot_mutate(server):

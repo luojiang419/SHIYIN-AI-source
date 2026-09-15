@@ -13,6 +13,31 @@ from distribution.service import DEFAULT_DATA, atomic_json
 from distribution.desktop_settings import apply_titlebar, resolve_dark, set_startup, startup_enabled
 
 
+class ServiceWatchdog:
+    def __init__(self, failure_threshold=3, restart_interval=15):
+        self.failure_threshold = failure_threshold
+        self.restart_interval = restart_interval
+        self.failures = 0
+        self.last_restart = float('-inf')
+
+    def succeeded(self):
+        self.failures = 0
+
+    def failed(self, now):
+        self.failures += 1
+        if self.failures < self.failure_threshold or now - self.last_restart < self.restart_interval:
+            return False
+        self.last_restart = now
+        return True
+
+
+def launch_service():
+    cmd = [sys.executable, '--service'] if getattr(sys, 'frozen', False) else [sys.executable, '-m', 'distribution.launcher', '--service']
+    return subprocess.Popen(cmd, cwd=Path(__file__).resolve().parents[1],
+        creationflags=0x08000008 if os.name == 'nt' else 0,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def main():
     if '--sync-startup' in sys.argv:
         path = DEFAULT_DATA / 'settings.json'
@@ -46,9 +71,7 @@ def main():
             return False
 
     if not ready():
-        cmd = [sys.executable, '--service'] if getattr(sys, 'frozen', False) else [sys.executable, '-m', 'distribution.launcher', '--service']
-        subprocess.Popen(cmd, cwd=Path(__file__).resolve().parents[1], creationflags=0x08000008 if os.name == 'nt' else 0,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        launch_service()
         for _ in range(100):
             if ready():
                 break
@@ -129,6 +152,7 @@ def main():
 
     def desktop_loop():
         nonlocal config, tray, theme_status, hwnd
+        watchdog = ServiceWatchdog()
         image = Image.new('RGBA', (64, 64), (20, 35, 30, 255))
         drawing = ImageDraw.Draw(image)
         drawing.polygon([(32, 9), (55, 32), (32, 55), (9, 32)], outline=(128, 226, 168), width=5)
@@ -145,6 +169,7 @@ def main():
             while not quitting.wait(1):
                 try:
                     state = request()
+                    watchdog.succeeded()
                     config = state['settings']
                     if window.native is not None:
                         hwnd = window.native.Handle.ToInt64()
@@ -160,6 +185,11 @@ def main():
                         elif action['action'] == 'background': background()
                         elif action['action'] == 'close': window.destroy()
                 except Exception as exc:
+                    if watchdog.failed(time.monotonic()):
+                        try:
+                            launch_service()
+                        except Exception as restart_exc:
+                            exc = RuntimeError(f'{exc}；自动恢复失败：{restart_exc}')
                     atomic_json(DEFAULT_DATA / 'control-panel-error.json', {'error': str(exc), 'time': time.time()})
         except Exception as exc:
             window.show()

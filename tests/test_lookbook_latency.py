@@ -17,19 +17,12 @@ def snapshot(**options):
 
 
 class LookbookLatencyTests(unittest.IsolatedAsyncioTestCase):
-    async def test_parallel_analysis_merges_only_reference_facts_and_skips_separate_plan(self):
-        entered = asyncio.Event()
-
-        async def reference(value):
-            entered.set()
-            value["options"]["lookbook_reference_analysis"] = "visible-scene-facts"
-            return value, {"status": "succeeded"}
-
+    async def test_story_stage_replaces_parallel_analysis_and_separate_plan(self):
         async def brief(value):
-            await asyncio.wait_for(entered.wait(), 1)
             value.update(count=9, aspect_ratio="9:16")
             value["options"]["lookbook_count"] = 9
             value["options"]["lookbook_layout_intent"] = {"explicit": True}
+            value["options"]["lookbook_reference_analysis"] = "visible-scene-facts"
             return value, {"status": "succeeded"}
 
         async def storyboard(value):
@@ -41,35 +34,26 @@ class LookbookLatencyTests(unittest.IsolatedAsyncioTestCase):
             return value, {"status": "succeeded"}
 
         original = snapshot()
-        with patch.object(main, "enrich_lookbook_brief_settings", new=brief), patch.object(main, "enrich_lookbook_reference_analysis", new=reference), patch.object(main, "enrich_lookbook_plan", new_callable=AsyncMock) as plan, patch.object(main, "enrich_lookbook_storyboard", new=storyboard), patch.object(main, "canvas_llm", new_callable=AsyncMock) as llm:
+        with patch.object(main, "enrich_lookbook_story_brief", new=brief), patch.object(main, "enrich_lookbook_reference_analysis", new_callable=AsyncMock) as reference, patch.object(main, "enrich_lookbook_plan", new_callable=AsyncMock) as plan, patch.object(main, "enrich_lookbook_storyboard", new=storyboard), patch.object(main, "canvas_llm", new_callable=AsyncMock) as llm:
             result, meta = await main.prepare_lookbook_creation(original)
         plan.assert_not_awaited()
+        reference.assert_not_awaited()
         llm.assert_not_awaited()
         self.assertEqual(original, snapshot())
         self.assertEqual(meta["lookbook_research"]["status"], "disabled")
-        self.assertEqual(set(result["lookbook_stage_timings"]), {"brief-parse", "reference-analysis", "web-search", "storyboard", "preparation"})
+        self.assertEqual(set(result["lookbook_stage_timings"]), {"story-writing", "web-search", "storyboard", "preparation"})
 
-    async def test_brief_failure_cancels_pending_reference_analysis(self):
-        entered, cancelled = asyncio.Event(), asyncio.Event()
-
-        async def reference(value):
-            entered.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.set()
-
+    async def test_story_failure_never_starts_second_stage(self):
         async def brief(value):
-            await entered.wait()
             return value, {"status": "failed", "reason": "bad brief"}
 
-        with patch.object(main, "enrich_lookbook_brief_settings", new=brief), patch.object(main, "enrich_lookbook_reference_analysis", new=reference):
+        with patch.object(main, "enrich_lookbook_story_brief", new=brief), patch.object(main, "enrich_lookbook_storyboard", new_callable=AsyncMock) as second:
             result, meta = await asyncio.wait_for(main.prepare_lookbook_creation(snapshot()), 1)
-        self.assertTrue(cancelled.is_set())
-        self.assertEqual(meta["failed_stage"], "brief-parse")
-        self.assertEqual(result["lookbook_stage_timings"]["reference-analysis"]["status"], "cancelled")
+        second.assert_not_awaited()
+        self.assertEqual(meta["failed_stage"], "story-writing")
+        self.assertEqual(result["lookbook_stage_timings"]["story-writing"]["status"], "failed")
 
-    async def test_cancelling_preparation_cleans_both_children(self):
+    async def test_cancelling_preparation_cleans_active_story(self):
         entered, cancelled = [], []
 
         async def waiting(value):
@@ -79,20 +63,17 @@ class LookbookLatencyTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 cancelled.append(True)
 
-        with patch.object(main, "enrich_lookbook_brief_settings", new=waiting), patch.object(main, "enrich_lookbook_reference_analysis", new=waiting):
+        with patch.object(main, "enrich_lookbook_story_brief", new=waiting):
             with self.assertRaises(asyncio.TimeoutError):
                 await asyncio.wait_for(main.prepare_lookbook_creation(snapshot()), .05)
-        self.assertEqual(len(entered), 2)
-        self.assertEqual(len(cancelled), 2)
+        self.assertEqual(len(entered), 1)
+        self.assertEqual(len(cancelled), 1)
 
     async def test_auto_style_still_selects_style_before_storyboard(self):
         order = []
 
-        async def passthrough(value):
-            return value, {"status": "succeeded"}
-
         async def plan(value):
-            order.append("plan")
+            order.append("story-brief")
             value["options"]["lookbook_auto_decision"] = {"selected_style_id": "levis-adaptive-campaign"}
             return value, {"status": "succeeded"}
 
@@ -101,9 +82,10 @@ class LookbookLatencyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(value["options"]["lookbook_auto_decision"]["selected_style_id"], "levis-adaptive-campaign")
             return value, {"status": "succeeded"}
 
-        with patch.object(main, "enrich_lookbook_brief_settings", new=passthrough), patch.object(main, "enrich_lookbook_reference_analysis", new=passthrough), patch.object(main, "enrich_lookbook_plan", new=plan), patch.object(main, "enrich_lookbook_storyboard", new=story):
+        with patch.object(main, "enrich_lookbook_story_brief", new=plan), patch.object(main, "enrich_lookbook_plan", new_callable=AsyncMock) as legacy, patch.object(main, "enrich_lookbook_storyboard", new=story):
             await main.prepare_lookbook_creation(snapshot(lookbook_style={"id": "auto"}))
-        self.assertEqual(order, ["plan", "story"])
+        legacy.assert_not_awaited()
+        self.assertEqual(order, ["story-brief", "story"])
 
     async def test_search_shared_deadline_cancels_fallback_and_preserves_snapshot(self):
         calls, cancelled = [], asyncio.Event()

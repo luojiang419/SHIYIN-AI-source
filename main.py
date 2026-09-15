@@ -205,6 +205,15 @@ from canvas_core.ecommerce import (
     validate_mode as validate_ecommerce_mode,
     validate_operation as validate_ecommerce_operation,
 )
+from canvas_core.lookbook_brief import (
+    STORY_VERSION as LOOKBOOK_STORY_VERSION, REFERENCE_LIMIT as LOOKBOOK_REFERENCE_LIMIT,
+    STORY_SYSTEM as LOOKBOOK_STORY_SYSTEM, normalize_story as normalize_lookbook_story,
+    effective_brief as effective_lookbook_brief, story_handoff as lookbook_story_handoff,
+    validate_story_shots as validate_lookbook_story_shots,
+    panel_planning_rules as lookbook_panel_planning_rules, EDITORIAL_QA as LOOKBOOK_EDITORIAL_QA,
+    editorial_planning_message as lookbook_editorial_planning_message,
+    generation_brief as lookbook_generation_brief,
+)
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
     LOOKBOOK_STORY_MODE,
@@ -18080,7 +18089,7 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         mode = validate_ecommerce_mode(payload.mode)
         options_json = json.dumps(payload.options or {}, ensure_ascii=False)
         # 完整导演计划包含每个分格的拍摄决定，前端再次提交时不能被旧 20KB 限制拒绝。
-        options_limit = 512 * 1024 if is_fashion_director(payload.options or {}) else 20 * 1024
+        options_limit = 512 * 1024 if str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook" else 20 * 1024
         if len(options_json.encode("utf-8")) > options_limit:
             raise ValueError("功能参数过大")
         options = json.loads(options_json)
@@ -18089,12 +18098,18 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
             [item.model_dump() for item in payload.inputs],
             options,
         )
-        if str(options.get("prompt_policy") or "").lower() == "lookbook" and is_fashion_director(options) and len(normalized) != len(payload.inputs):
-            raise ValueError("时尚广告参考图包含无效角色或地址，已停止生成；请使用人物、商品、场景等有效输入类型")
+        if str(options.get("prompt_policy") or "").lower() == "lookbook":
+            if len(payload.inputs) > LOOKBOOK_REFERENCE_LIMIT:
+                raise ValueError(f"Lookbook 最多支持{LOOKBOOK_REFERENCE_LIMIT}张参考图，请减少输入后生成")
+            if len(normalized) != len(payload.inputs):
+                raise ValueError("Lookbook 参考图包含无效角色或地址，已停止生成；请使用人物、商品、场景等有效输入类型")
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
     selected_style = options.get("lookbook_style")
+    if prompt_policy == "lookbook":
+        # 包括旧快速节点和空需求；统一先综合图片创作服装主导的故事。
+        options["lookbook_mode"] = LOOKBOOK_STORY_MODE
     if prompt_policy == "lookbook" and isinstance(selected_style, dict) and selected_style.get("id") == FASHION_EDITORIAL_STYLE_ID:
         options["lookbook_style"] = {**selected_style, **FASHION_EDITORIAL_STYLE}
         # 旧节点可能保留快速模式；选中完整导演风格时统一进入联合规划链路。
@@ -18276,19 +18291,12 @@ def build_lookbook_agent_plan(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     routes = snapshot.get("route_candidates") if isinstance(snapshot.get("route_candidates"), list) else []
     primary_route = routes[0] if routes and isinstance(routes[0], dict) else {}
     stages = [
-        # 自动模式也必须先锁定参考图事实，否则“时尚”语义会诱发模型换装、
-        # 重绘场景文字或把场景里的海报人物误当成真实主体。
-        {"id": "reference-analysis", "label": "人物与素材事实分析", "enabled": bool(inputs)},
+        {"id": "story-writing", "label": "综合参考与服装故事", "enabled": True},
         {"id": "web-search", "label": "联网案例与色彩研究", "enabled": web_search},
-        {"id": "art-direction", "label": "创意总监方案", "enabled": not story_mode or str(style.get("id") or "").lower() == "auto"},
+        {"id": "storyboard", "label": "服装展示与多机位提示词", "enabled": True},
+        {"id": "prompt-compile", "label": "逐镜头提示词", "enabled": True},
         {"id": "generation", "label": "按节点参数生成", "enabled": True},
     ]
-    if story_mode:
-        stages[0:0] = [{"id": "brief-parse", "label": "理解需求与生成参数", "enabled": True}]
-        stages[4:4] = [
-            {"id": "storyboard", "label": "连续故事分镜", "enabled": True},
-            {"id": "prompt-compile", "label": "逐镜头提示词", "enabled": True},
-        ]
     return {
         "version": 1,
         "strategy": "durable-state-machine",
@@ -18756,6 +18764,7 @@ LOOKBOOK_AUTO_STYLE_IDS = {
 }
 
 LOOKBOOK_DERIVED_OPTION_KEYS = {
+    "lookbook_story",
     "lookbook_brief_parse",
     "lookbook_ai_settings",
     "lookbook_reference_analysis",
@@ -18791,6 +18800,7 @@ def lookbook_context_signature(snapshot: Dict[str, Any]) -> str:
             "name": str(item.get("name") or "").strip(),
         })
     payload = {
+        "story_version": LOOKBOOK_STORY_VERSION,
         "instruction": str(options.get("instruction") or "").strip(),
         "fashion_director": fashion_skill_signature() if is_fashion_director(options) else "",
         "style": {
@@ -19043,9 +19053,10 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
     if story_mode:
         count = max(1, min(LOOKBOOK_MAX_COUNT, int(snapshot.get("count") or options.get("lookbook_count") or 1)))
         cards = normalize_lookbook_shot_cards(options.get("lookbook_shot_cards"), count)
+        cards = validate_lookbook_story_shots(cards, options)
         cards = enforce_lookbook_shot_scale_contract(cards, count)
         cards = enforce_lookbook_story_rhythm_contract(cards, count)
-        brief = str(options.get("instruction") or "").strip()
+        brief = lookbook_generation_brief(options).strip()
         bible = options.get("lookbook_bible") or options.get("lookbook_plan") or {}
         style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
         style_id = str(style.get("id") or "").strip().lower()
@@ -19065,6 +19076,7 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
         )
         if is_fashion_director(options):
             bible, cards = normalize_fashion_plan({"campaign_bible": bible, "shot_cards": cards}, count, layout_intent)
+            cards = validate_lookbook_story_shots(cards, options)
             labels = [
                 f"参考 {i} [{item.get('lookbook_role') or item.get('reference_type') or '参考素材'}]: {item.get('label') or item.get('name') or ''}"
                 for i, item in enumerate(snapshot.get("inputs") or [], 1)
@@ -19093,7 +19105,7 @@ def lookbook_generation_prompts(snapshot: Dict[str, Any]) -> List[str]:
             str(item.get("label") or item.get("name") or f"参考素材 {index}")
             for index, item in enumerate(snapshot.get("inputs") or [], 1)
             if isinstance(item, dict) and str(item.get("url") or "").strip()
-        ][:12]
+        ]
         wardrobe_mode = str(options.get("lookbook_wardrobe_mode") or "")
         prompts = []
         for card in cards:
@@ -19418,6 +19430,70 @@ def _parse_lookbook_json(text: str) -> Dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+async def enrich_lookbook_story_brief(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """第一次会话：综合所有参考、服装主导故事、参数建议；保留原始instruction。"""
+    options = dict(snapshot.get("options") or {})
+    snapshot = {**snapshot, "options": options}
+    references = snapshot.get("inputs") or []
+    if len(references) > LOOKBOOK_REFERENCE_LIMIT or any(not isinstance(ref, dict) or not ref.get("url") for ref in references):
+        return snapshot, {"status": "failed", "reason": f"Lookbook 参考图无效或超出{LOOKBOOK_REFERENCE_LIMIT}张限制，未提交解析"}
+    signature = lookbook_context_signature(snapshot)
+    cached = options.get("lookbook_story")
+    if isinstance(cached, dict) and cached.get("version") == LOOKBOOK_STORY_VERSION and cached.get("source_signature") == signature:
+        try:
+            story = normalize_lookbook_story(cached, len(references))
+            options["lookbook_story"] = {**story, "source_signature": signature}
+            return snapshot, {"status": "provided", "story": options["lookbook_story"]}
+        except ValueError:
+            pass
+    # 不允许老镜头在新故事下复用，尤其第一轮已失败/参数变更时。
+    for key in ("lookbook_story", "lookbook_shot_cards", "lookbook_bible", "lookbook_plan"):
+        options.pop(key, None)
+    route = configured_ecommerce_vision_route()
+    if not route:
+        return snapshot, {"status": "failed", "reason": "Lookbook 故事创作需要配置可用的AI助手视觉模型"}
+    request = CanvasLLMRequest(
+        message=("综合全部参考图，为本次Lookbook完成服装主导的简要连续故事。\n"
+                 "用户原始需求：" + str(options.get("instruction") or "（空，请从人物现有穿着或指定商品自然延展）")[:6000]
+                 + "\n节点设置（明确参数优先）：" + json.dumps({
+                     "count": snapshot.get("count"), "aspect_ratio": options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio"),
+                     "resolution": snapshot.get("resolution"), "quality": snapshot.get("quality"),
+                     "manual_overrides": options.get("lookbook_manual_overrides") or {},
+                     "layout": resolve_lookbook_layout_intent(
+                         str(options.get("instruction") or ""), options.get("lookbook_layout_selection"),
+                         str(options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "16:9")),
+                 }, ensure_ascii=False)
+                 + "\n选定风格：" + json.dumps(options.get("lookbook_style") or {}, ensure_ascii=False)
+                 + "\n自动风格可选ID（仅id=auto时使用）：" + json.dumps(sorted(LOOKBOOK_AUTO_STYLE_IDS))),
+        system_prompt=LOOKBOOK_STORY_SYSTEM, provider=route["provider_id"], model=route["model"],
+        images=[str(ref["url"]) for ref in references],
+        image_labels=[f"R{i} [{ref.get('lookbook_role') or ref.get('reference_type') or '商品'}] {ref.get('label') or ref.get('name') or ''}" for i, ref in enumerate(references, 1)],
+        web_search=False, retry_524=1,
+    )
+    try:
+        response = await canvas_llm(request)
+        data = _parse_lookbook_json(str(response.get("text") or ""))
+        story = normalize_lookbook_story(data, len(references))
+        # 复用成熟的参数合并逻辑；填入本轮建议后该函数不再调用API。
+        settings = normalize_ai_lookbook_settings(data.get("settings"))
+        options["lookbook_ai_settings"] = settings or {"count": int(snapshot.get("count") or 4)}
+        options["lookbook_reference_analysis"] = json.dumps(story["reference_facts"], ensure_ascii=False)
+        if (options.get("lookbook_style") or {}).get("id") == "auto":
+            options["lookbook_auto_decision"] = normalize_lookbook_auto_decision(data.get("auto_decision") or {})
+        enriched, parsed = await enrich_lookbook_brief_settings(snapshot)
+        if not parsed or parsed.get("status") == "failed":
+            raise ValueError((parsed or {}).get("reason") or "Lookbook 参数解析失败")
+        enriched_options = dict(enriched.get("options") or {})
+        signature = lookbook_context_signature(enriched)
+        enriched_options["lookbook_story"] = {**story, "source_signature": signature}
+        enriched_options["lookbook_context_signature"] = signature
+        enriched = {**enriched, "options": enriched_options}
+        enriched["prompt"] = build_ecommerce_prompt(enriched["operation"], enriched.get("inputs") or [], enriched_options)
+        return enriched, {"status": "succeeded", "story": enriched_options["lookbook_story"], "settings": parsed}
+    except Exception as exc:
+        return snapshot, {"status": "failed", "reason": str(exc)[:300]}
+
+
 async def enrich_lookbook_brief_settings(snapshot: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """故事模式：让 AI 理解未按固定句式表达的数量和生成参数。"""
     options = dict(snapshot.get("options") or {})
@@ -19549,6 +19625,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
     if existing_cards:
         try:
             cards = normalize_lookbook_shot_cards(existing_cards, count)
+            cards = validate_lookbook_story_shots(cards, options)
             cards = enforce_lookbook_shot_scale_contract(cards, count)
             cards = enforce_lookbook_story_rhythm_contract(cards, count)
             options["lookbook_shot_cards"] = cards
@@ -19559,19 +19636,19 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
     route = configured_ecommerce_vision_route()
     if not route:
         return snapshot, {"status": "failed", "reason": "故事模式需要配置可用的 AI助手视觉模型"}
-    brief = str(options.get("instruction") or "依据参考图创作连续的高级时装广告故事").strip()[:6000]
+    brief = (effective_lookbook_brief(options) or "依据参考图创作连续的高级时装广告故事").strip()[:6000]
     layout_intent = options.get("lookbook_layout_intent") if isinstance(options.get("lookbook_layout_intent"), dict) else parse_lookbook_layout_intent(brief)
     layout_requested = bool(layout_intent.get("explicit"))
     labels = [
         str(item.get("label") or item.get("name") or f"参考素材 {index}")[:160]
         for index, item in enumerate(snapshot.get("inputs") or [], 1)
         if isinstance(item, dict) and str(item.get("url") or "").strip()
-    ][:12]
+    ]
     images = [
         str(item.get("url") or "")
         for item in (snapshot.get("inputs") or [])
         if isinstance(item, dict) and str(item.get("url") or "").strip()
-    ][:12]
+    ]
     style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
     style_id = str(style.get("id") or "").strip().lower()
     auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}
@@ -19588,10 +19665,12 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
         message=(
             "请把下面的用户故事制作成一组连续的时装故事大片分镜。必须严格输出 JSON，不要 Markdown，不要解释过程。"
             f"必须输出恰好 {count} 个 shot_cards，index 从 1 连续到 {count}，不能少卡、重复卡或改数量。"
-            "先建立 campaign_bible，再把故事拆成有因果的开场、发展、转折/揭示和收束；数量较少时也要保留状态变化。"
-            f"以下景别分配是后端强制契约，shot_cards 必须逐项复制对应的 shot_size 和 framing，不能全部规划为大全景或全身照：{json.dumps(lookbook_shot_scale_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
-            f"以下节奏分配也是后端强制契约；每张卡必须执行对应 rhythm_role、story_function、transition_rule 和 energy，不能把它们改成同姿势换角度：{json.dumps(lookbook_story_rhythm_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
-            "每张卡只承担一个清晰叙事功能，并明确上一张结束状态如何成为本张开始状态；不能只写‘换一个角度’。"
+            + ("第一轮故事已经完成。campaign_bible与镜头围绕服装/指定商品的自然展示展开，按人物情境安排动作与机位，不添加道具剧情，不套用固定景别或强行事件转折。"
+               if lookbook_story_handoff(options) else
+               "先建立 campaign_bible，再把故事拆成有因果的开场、发展、转折/揭示和收束；数量较少时也要保留状态变化。"
+               f"以下景别分配是后端强制契约：{json.dumps(lookbook_shot_scale_contract(count), ensure_ascii=False, separators=(',', ':'))}。"
+               f"以下节奏分配也是后端强制契约：{json.dumps(lookbook_story_rhythm_contract(count), ensure_ascii=False, separators=(',', ':'))}。")
+            + "每张卡只承担一个清晰的穿着展示与情境功能，明确上一张结束状态如何成为本张开始状态；不能只写‘换一个角度’。"
             "连接场景参考时，每张卡必须在 scene_region 写明从场景母图中选取的真实可见区域或标志物，在 scene_extension 写明新机位需要如何沿用母图可见的建筑结构、空间拓扑、材质、色彩、植被和光线。"
             "改变机位不等于重新设计地点；不得凭空改变门窗数量与位置、道路/围栏走向、建筑体块、地形、陈设或独特景观。母图没有证据的画外空间应保守、简化并保持非标志性。"
             + (
@@ -19604,9 +19683,10 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             "参考图只用于身份、服装、商品、场景、材质和版式事实；不能把联网案例中的主体、品牌、Logo、文案或地点带入。"
             + selected_style_lock
             + (LOOKBOOK_LEVIS_PERFORMANCE_GUIDANCE if levis_style else "")
-            + "请在同一次输出中完成创意策划与分镜：campaign_bible 必须包含具体色板与比例、光色与肤色处理、面料和产品材质、后期/印刷质感、版式留白、品牌文字约束与反普通化规则。"
+            + "请完成摄影执行与分镜：campaign_bible 必须包含具体色板与比例、光色与肤色处理、面料和产品材质、后期/印刷质感、版式留白、品牌文字约束与反普通化规则。"
             "只有人物输入时以现有穿着为造型基底，保留皮肤、发丝、织物纹理与自然摄影细节，不能无理由换装。"
             "将共同规则写入 campaign_bible，每张卡聚焦本镜头独有的目标、动作、视线、接触与状态变化，避免逐卡重复整段公共规则；必需字段不能省略。"
+            + lookbook_panel_planning_rules(layout_intent)
             + "输出结构必须是："
             '{"logline":"","campaign_bible":{"brand_personality":"","emotion_arc":"",'
             '"performance_rules":[""],"identity":"","wardrobe":"","products":"",'
@@ -19616,7 +19696,8 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             '"time_position":"","location":"","scene_region":"","scene_extension":"","emotion_state":"","objective":"",'
             '"action_chain":"","micro_expression":"","weight_and_contact":"",'
             '"subjects":[{"id":"","action":"","gaze":""}],"wardrobe_state":"","prop_state":"",'
-            '"camera":{"shot_size":"","angle":"","movement":""},"composition":"",'
+            '"wardrobe_focus":"","wardrobe_visibility":"",'
+            '"camera":{"shot_size":"","angle":"","movement":"","position":"","visible_geometry":""},"composition":"",'
             '"lighting":"","continuity_in":"","continuity_out":"",'
             '"reference_ids":[""]}]}\n'
             f"用户原始需求：{brief}\n"
@@ -19632,6 +19713,7 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
             "用户故事是叙事主线，参考图是不可违背的视觉事实。"
             "每张 shot card 必须能单独交给图片模型执行，并与相邻卡片共享人物、服装、空间、道具、光线和动作状态。"
             "作品必须通过人物目标、事件、反差与情绪推进展示品牌形象和理念的最佳状态，不能采用电商目录摄影逻辑。"
+            + lookbook_story_handoff(options)
         ),
         provider=route["provider_id"],
         model=route["model"],
@@ -19640,10 +19722,23 @@ async def enrich_lookbook_storyboard(snapshot: Dict[str, Any]) -> Tuple[Dict[str
         web_search=False,
         retry_524=1,
     )
+    if lookbook_story_handoff(options):
+        request.message = lookbook_editorial_planning_message(snapshot, layout_intent)
+        request.system_prompt = "你是时尚摄影导演。用户要求优先；只输出严格JSON。" + lookbook_story_handoff(options)
     try:
-        result = await canvas_llm(request)
-        data = _parse_lookbook_json(str(result.get("text") or ""))
-        cards = normalize_lookbook_shot_cards(data.get("shot_cards"), count)
+        for attempt in range(2):
+            result = await canvas_llm(request)
+            raw_text = str(result.get("text") or "")
+            try:
+                data = _parse_lookbook_json(raw_text)
+                cards = normalize_lookbook_shot_cards(data.get("shot_cards"), count)
+                cards = validate_lookbook_story_shots(cards, options)
+                break
+            except (ValueError, TypeError) as exc:
+                if attempt:
+                    raise
+                request.messages = [{"role": "assistant", "content": raw_text}]
+                request.message = f"分镜校验失败：{str(exc)[:600]}。仅修复缺失或重复镜头，保留正确参考事实，重新输出完整JSON方案。"
         cards = enforce_lookbook_shot_scale_contract(cards, count)
         cards = enforce_lookbook_story_rhythm_contract(cards, count)
         bible = data.get("campaign_bible")
@@ -19673,6 +19768,7 @@ async def enrich_fashion_director_storyboard(snapshot: Dict[str, Any]) -> Tuple[
     if isinstance(bible, dict) and bible.get("skill_signature") == fashion_skill_signature():
         try:
             bible, cards = normalize_fashion_plan({"campaign_bible": bible, "shot_cards": options.get("lookbook_shot_cards")}, count, layout)
+            cards = validate_lookbook_story_shots(cards, options)
             options.update(lookbook_bible=bible, lookbook_shot_cards=cards, lookbook_layout_intent=layout)
             return {**snapshot, "options": options}, {"status": "provided", "count": count, "shot_cards": cards}
         except ValueError:
@@ -19680,10 +19776,10 @@ async def enrich_fashion_director_storyboard(snapshot: Dict[str, Any]) -> Tuple[
     route = configured_ecommerce_vision_route()
     if not route:
         return snapshot, {"status": "failed", "reason": "时尚广告完整导演需要配置可用的 AI助手视觉模型"}
-    references = [item for item in snapshot.get("inputs") or [] if isinstance(item, dict) and item.get("url")][:ONLINE_IMAGE_REFERENCE_MAX]
+    references = [item for item in snapshot.get("inputs") or [] if isinstance(item, dict) and item.get("url")]
     request = CanvasLLMRequest(
         message="请观察随请求提供的参考图，执行完整导演技能与本次任务方案，输出严格 JSON。",
-        system_prompt=fashion_full_skill() + "\n" + fashion_planning_message(snapshot, layout),
+        system_prompt=fashion_full_skill() + "\n" + fashion_planning_message(snapshot, layout) + lookbook_story_handoff(options),
         provider=route["provider_id"], model=route["model"],
         images=[str(item["url"]) for item in references],
         image_labels=[f"参考 {i} [{item.get('lookbook_role') or item.get('reference_type') or '待判断角色'}]: {item.get('label') or item.get('name') or ''}" for i, item in enumerate(references, 1)],
@@ -19696,6 +19792,7 @@ async def enrich_fashion_director_storyboard(snapshot: Dict[str, Any]) -> Tuple[
             try:
                 data = _parse_lookbook_json(raw_text)
                 bible, cards = normalize_fashion_plan(data, count, layout)
+                cards = validate_lookbook_story_shots(cards, options)
                 break
             except (ValueError, TypeError) as exc:
                 if attempt:
@@ -19810,7 +19907,16 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
         system_prompt="你是严格的高级时尚广告视觉质检总监。只依据所见输出和参考素材判断，不要猜测，不要输出 JSON 以外内容。",
         provider=route["provider_id"], model=route["model"], images=[*references, *images], image_labels=[*reference_labels, *output_labels], web_search=False, retry_524=0,
     )
-    if is_fashion_director(options):
+    if lookbook_story_handoff(options):
+        request.system_prompt = (
+            LOOKBOOK_EDITORIAL_QA + "\n用户原始要求：" + brief
+            + "\n明确交付版式：" + json.dumps(layout_intent, ensure_ascii=False)
+            + "\n参考图事实（仅辅助，仍以图片为准）：" + json.dumps((options.get("lookbook_story") or {}).get("reference_facts") or [], ensure_ascii=False)
+            + '\n仅输出JSON：{"passed":true,"score":0,"weak_indices":[],"issues":[],"corrections":{},"summary":""}。'
+            + "score为0–100，达到82且无弱图才通过；weak_indices使用从0开始的输出图片编号，issues说明内部格号。"
+        )
+        request.message = "对照参考和用户要求逐格审查成图。" + layout_check
+    if is_fashion_director(options) and not lookbook_story_handoff(options):
         geometry = []
         for index, url in enumerate(images):
             path = output_file_from_url(url)
@@ -19823,7 +19929,7 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
                 except (OSError, ValueError):
                     pass
         request.system_prompt = (
-            FASHION_QA + "\n完整用户需求：" + brief
+            FASHION_QA + "\n" + LOOKBOOK_EDITORIAL_QA + "\n完整用户需求：" + brief
             + "\n实际像素元数据（画幅以数值为准，不根据视觉缩略图猜测16:9等比例；上游像素对齐导致的1%以内比例偏差不判为版式失败）："
             + json.dumps(geometry, ensure_ascii=False)
             + "\n联合导演方案：" + json.dumps(options.get("lookbook_bible") or {}, ensure_ascii=False)
@@ -20002,11 +20108,12 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
     return {**batch, "images": refined_images, "image_items": refined_items, "generation_elapsed_seconds": elapsed}
 
 async def prepare_lookbook_creation(snapshot: Dict[str, Any], task_id: Optional[str] = None):
-    """生产与实测共享的前置流程；独立分析并行，合并时不覆盖需求参数。"""
+    """两次独立会话：服装主导故事完成并持久化后，才开始镜头提示词。"""
+    snapshot = json.loads(json.dumps(snapshot))
+    snapshot.setdefault("options", {})["lookbook_mode"] = LOOKBOOK_STORY_MODE
     started = time.monotonic()
     timings = {}
     meta = {}
-    story_mode = str((snapshot.get("options") or {}).get("lookbook_mode") or "").lower() == LOOKBOOK_STORY_MODE
 
     def progress(stage, message, percent):
         if task_id:
@@ -20032,42 +20139,24 @@ async def prepare_lookbook_creation(snapshot: Dict[str, Any], task_id: Optional[
         timings["preparation"] = {"elapsed_seconds": round(time.monotonic() - started, 3)}
         return {**value, "lookbook_stage_timings": timings}, meta
 
-    progress("reference-analysis", "正在并行理解需求与分析参考素材…", 8)
-    reference_task = asyncio.create_task(measured("reference-analysis", enrich_lookbook_reference_analysis, json.loads(json.dumps(snapshot))))
-    brief_task = asyncio.create_task(measured("brief-parse", enrich_lookbook_brief_settings, json.loads(json.dumps(snapshot)))) if story_mode else None
-    try:
-        if brief_task:
-            snapshot, meta["brief_parse"] = await brief_task
-            if not meta["brief_parse"] or meta["brief_parse"].get("status") == "failed":
-                meta["failed_stage"] = "brief-parse"
-                return finish(snapshot)
-        reference_snapshot, meta["lookbook_reference_analysis"] = await reference_task
-    finally:
-        pending = [task for task in (brief_task, reference_task) if task and not task.done()]
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-    options = dict(snapshot.get("options") or {})
-    analysis = (reference_snapshot.get("options") or {}).get("lookbook_reference_analysis")
-    if analysis:
-        options["lookbook_reference_analysis"] = analysis
-    snapshot = {**snapshot, "options": options, "prompt": build_ecommerce_prompt(snapshot["operation"], snapshot.get("inputs") or [], options)}
+    progress("story-writing", "正在综合参考图，构思以服装为主的故事与立意…", 8)
+    snapshot, meta["lookbook_story"] = await measured("story-writing", enrich_lookbook_story_brief, snapshot)
+    if not meta["lookbook_story"] or meta["lookbook_story"].get("status") == "failed":
+        meta["failed_stage"] = "story-writing"
+        return finish(snapshot)
+    options = snapshot.get("options") or {}
+    # 检查点先落盘；前端短轮询无需等待图片或第二次会话完成即可回填。
+    if task_id:
+        update_ecommerce_task(task_id, {"options": options, "request": snapshot, "lookbook_story": meta["lookbook_story"]})
     if options.get("lookbook_search"):
-        progress("web-search", f"正在联网参考（最多 {LOOKBOOK_SEARCH_TIMEOUT_SECONDS} 秒）…", 24)
+        progress("web-search", f"故事已完成，正在联网参考（最多 {LOOKBOOK_SEARCH_TIMEOUT_SECONDS} 秒）…", 36)
     snapshot, meta["lookbook_research"] = await measured("web-search", enrich_lookbook_search, snapshot)
-    style = (snapshot.get("options") or {}).get("lookbook_style")
-    style = style if isinstance(style, dict) else {}
-    if not story_mode or str(style.get("id") or "").lower() == "auto":
-        progress("art-direction", "正在选择视觉风格与创意方案…", 42)
-        snapshot, meta["lookbook_plan"] = await measured("art-direction", enrich_lookbook_plan, snapshot)
-    if story_mode:
-        progress("storyboard", "正在整合创意策划与连续分镜…", 50)
-        snapshot, meta["lookbook_storyboard"] = await measured("storyboard", enrich_lookbook_storyboard, snapshot)
-        if not meta["lookbook_storyboard"] or meta["lookbook_storyboard"].get("status") == "failed":
-            meta["failed_stage"] = "storyboard"
-        else:
-            meta["lookbook_plan"] = {"status": "succeeded", "mode": "storyboard-integrated", "summary": (snapshot.get("options") or {}).get("lookbook_plan", "")}
+    progress("storyboard", "故事已完成，正在编写服装展示与多机位提示词…", 50)
+    snapshot, meta["lookbook_storyboard"] = await measured("storyboard", enrich_lookbook_storyboard, snapshot)
+    if not meta["lookbook_storyboard"] or meta["lookbook_storyboard"].get("status") == "failed":
+        meta["failed_stage"] = "storyboard"
+    else:
+        meta["lookbook_plan"] = {"status": "succeeded", "mode": "storyboard-from-story", "summary": (snapshot.get("options") or {}).get("lookbook_plan", "")}
     return finish(snapshot)
 
 
@@ -20105,7 +20194,7 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
         })
         if preparation_meta.get("failed_stage"):
             failed_stage = preparation_meta["failed_stage"]
-            failed_meta = preparation_meta.get("brief_parse" if failed_stage == "brief-parse" else "lookbook_storyboard") or {}
+            failed_meta = preparation_meta.get("lookbook_story" if failed_stage == "story-writing" else "lookbook_storyboard") or {}
             detail = failed_meta.get("reason") or "Lookbook 前置规划失败"
             update_lookbook_agent_stage(task_id, "failed", "前置规划失败，未提交图片生成。", 100)
             update_ecommerce_task(task_id, {"status": "failed", "stage": "failed", "error": detail, "status_code": 422})

@@ -295,7 +295,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.07.lookbook.37", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.15.lookbook.38", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertRegex(self.html, r"canvas\.css\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")
         self.assertRegex(self.html, r"canvas\.js\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")
@@ -358,8 +358,8 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         start = self.canvas.index("async function runLookbookNode")
         end = self.canvas.index("function bindClassicEcommerceNode", start)
         body = self.canvas[start:end]
-        self.assertIn("const hasBrief = Boolean(String(node.lookbookPrompt || '').trim())", body)
-        self.assertIn("已读取人物与场景参考，准备快速生成生活化随拍系列", body)
+        self.assertIn("sourceInstruction", body)
+        self.assertIn("正在综合参考图，构思以服装为主的故事与立意", body)
         self.assertIn("await pollEcommerceLookbookTask(taskId,{cascadeTargetId})", body)
 
     def test_new_lookbook_defaults_to_four_coordinated_images(self):

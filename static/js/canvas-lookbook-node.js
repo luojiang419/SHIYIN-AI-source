@@ -1,6 +1,7 @@
 (function(){
     'use strict';
     const TYPE = 'lookbook';
+    const composingNodes = new WeakSet();
     const DEFAULT_STYLE_ID = 'fw-cream-cyan-film';
     const DEFAULT_GRAIN_STRENGTH = 0.095;
     const LAYOUT_PRESETS = [
@@ -156,7 +157,35 @@
         return modal;
     }
     function closePicker(){ const modal=document.getElementById('lookbookStyleModal'); if(modal?.open && typeof modal.close === 'function') modal.close(); modal?.classList.remove('open'); if(modal) modal.style.display='none'; modal?.setAttribute('aria-hidden','true'); pickerNode=null; pickerOptions=null; }
-    function resetDerivedResearch(node){ Object.assign(node,{lookbookPlan:'',lookbookResearch:'',lookbookReferenceAnalysis:'',lookbookVisualSystem:{},lookbookAutoDecision:{},lookbookBible:{},lookbookShotCards:[],lookbookStorySummary:'',lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookResearchEvidenceStatus:'',lookbookResearchStatus:'idle',lookbookAgentStage:''}); }
+    function resetDerivedResearch(node){ node.lookbookInputRevision=Number(node.lookbookInputRevision||0)+1; Object.assign(node,{lookbookPlan:'',lookbookResearch:'',lookbookReferenceAnalysis:'',lookbookVisualSystem:{},lookbookAutoDecision:{},lookbookBible:{},lookbookShotCards:[],lookbookStorySummary:'',lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookResearchEvidenceStatus:'',lookbookResearchStatus:'idle',lookbookAgentStage:''}); }
+    function sourceInstruction(node){
+        return node.lookbookStory?.ad_brief === node.lookbookPrompt ? String(node.lookbookStoryInput || '') : String(node.lookbookPrompt || '');
+    }
+    function applyStoryResult(node,taskId,task,pending){
+        const options=task?.options?.lookbook_story ? task.options : (task?.request?.options || {});
+        const story=options.lookbook_story;
+        if(!story?.ad_brief || !story.source_signature || !['lookbook-wardrobe-story-v1','lookbook-editorial-story-v2'].includes(story.version))return false;
+        if(node.lookbookActiveRunId!==pending?.lookbookGroupId || node.ecomTaskId!==taskId)return false;
+        if(node.lookbookStoryAppliedTaskId===taskId || composingNodes.has(node))return false;
+        if(Number(node.lookbookInputRevision||0)!==Number(pending.lookbookInputRevision) || node.lookbookPrompt!==pending.lookbookPromptAtStart){
+            const notice='本次故事已保存在任务中；你已修改输入，当前需求未被覆盖。';
+            if(node.lookbookStoryNotice===notice)return false;
+            node.lookbookStoryNotice=notice; return true;
+        }
+        node.lookbookStory=story;
+        node.lookbookAutoDecision=options.lookbook_auto_decision || {};
+        node.lookbookStoryInput=String(options.instruction||'');
+        node.lookbookPrompt=String(story.ad_brief);
+        node.lookbookContextSignature=String(options.lookbook_context_signature||story.source_signature);
+        node.lookbookStoryAppliedTaskId=taskId;
+        node.lookbookStoryNotice='AI 已根据参考图生成服装展示故事，可继续编辑。';
+        const request=task.request||{};
+        if(Number(request.count)>0)node.count=Number(request.count);
+        if(options.lookbook_cell_aspect_ratio||request.aspect_ratio)node.aspectRatio=String(options.lookbook_cell_aspect_ratio||request.aspect_ratio);
+        if(request.resolution)node.resolution=String(request.resolution);
+        if(request.quality)node.quality=String(request.quality);
+        return true;
+    }
     async function choose(style){
         if(!pickerNode||!style)return;
         resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id,lookbookStyleName:style.name,lookbookStylePrompt:style.prompt||style.description||'',lookbookStyleCover:style.cover||'',lookbookStyleSource:style.source||'builtin'});
@@ -280,6 +309,10 @@
         if(!node||node.type!==TYPE)return node;
         const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0];
         node.lookbookPrompt=String(node.lookbookPrompt||'');
+        node.lookbookInputRevision=Number(node.lookbookInputRevision||0);
+        node.lookbookStory=node.lookbookStory&&typeof node.lookbookStory==='object'&&!Array.isArray(node.lookbookStory)?node.lookbookStory:null;
+        node.lookbookStoryInput=String(node.lookbookStoryInput||'');
+        node.lookbookStoryNotice=String(node.lookbookStoryNotice||'');
         node.lookbookMode=String(node.lookbookMode||'story-campaign');
         node.lookbookManualOverrides=node.lookbookManualOverrides&&typeof node.lookbookManualOverrides==='object'?node.lookbookManualOverrides:{};
         node.lookbookBible=node.lookbookBible&&typeof node.lookbookBible==='object'?node.lookbookBible:{};
@@ -353,7 +386,9 @@
         const ratios=['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9'];
         return `<div class="ecom-node-panel lookbook-node-panel">
             <div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div>
-            <label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="输入故事或广告需求，例如：生成20张16:9、4K的连续时装大片，从地铁站走到书店，最后停在橱窗前">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">AI 会自动识别数量、画幅、分辨率，并拆解为连续独立画面；默认每张独立成片，只有明确写出宫格/拼图/杂志排版才会授权排版</small></label>
+            <label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="可留空：AI 先综合参考图，生成以服装为主的自然情境与立意，再编写多机位提示词">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">先生成故事并回填，再编写服装展示与多机位提示词。支持数量、画幅、分辨率；默认每张独立成片，仅明确选择拼图/版式时组合排版。</small></label>
+            ${node.lookbookStoryNotice?`<p class="lookbook-brief-hint" data-lookbook-story-notice>${esc(node.lookbookStoryNotice)}</p>`:''}
+            ${node.lookbookStory?`<details class="lookbook-brief-hint" data-lookbook-original ${node.lookbookOriginalExpanded?'open':''}><summary>查看原始需求</summary><p style="white-space:pre-wrap">${esc(node.lookbookStoryInput||'未填写，依据参考图创作')}</p><button type="button" data-lookbook-restore-brief>恢复原始需求</button></details>`:''}
             <label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，最多30秒，优先执行已选风格）</span></label>${node.lookbookSearch&&node.lookbookResearchNote?`<p class="lookbook-brief-hint">${esc(node.lookbookResearchNote)}</p>`:''}
             <button type="button" class="lookbook-layout-button" data-lookbook-layout><i data-lucide="layout-grid"></i><span><small>拼图版式</small><strong>${esc(layoutSummary(node))}</strong></span><em>子图 ${esc(node.aspectRatio)} · 输出 ${esc(layoutOutputAspectRatio(node))}</em><i data-lucide="chevron-right"></i></button>
             <section class="lookbook-settings ${node.lookbookGenerationExpanded?'expanded':''}" data-lookbook-settings>
@@ -400,12 +435,14 @@
         };
         root.querySelectorAll('[data-lookbook-field]').forEach(control=>{
             const key=control.dataset.lookbookField;
-            control.addEventListener('compositionstart',()=>composingControls.add(control));
+            control.addEventListener('compositionstart',()=>{composingControls.add(control);if(key==='lookbookPrompt')composingNodes.add(node);});
             control.addEventListener('compositionend',()=>{
                 composingControls.delete(control);
+                if(key==='lookbookPrompt')composingNodes.delete(node);
                 if(key==='lookbookPrompt') commitPromptChange(control);
             });
             control.addEventListener(control.type==='checkbox'?'change':'input',event=>{
+                if(key==='lookbookPrompt')node.lookbookInputRevision=Number(node.lookbookInputRevision||0)+1;
                 node[key]=key==='count'
                     ? clamp(control.value,1,20)
                     : key==='lookbookGrainStrength' ? normalizeGrainStrength(control.value)
@@ -440,6 +477,21 @@
             });
         });
         bindGenerationChoices(root,node,options);
+        const originalDetails=root.querySelector('[data-lookbook-original]');
+        ['pointerdown','mousedown','dblclick'].forEach(type=>originalDetails?.addEventListener(type,event=>event.stopPropagation()));
+        originalDetails?.querySelector('summary')?.addEventListener('click',event=>{
+            event.preventDefault();event.stopPropagation();
+            originalDetails.open=!originalDetails.open;
+            node.lookbookOriginalExpanded=originalDetails.open;
+            options.onChange?.(node,{render:false});
+        });
+        root.querySelector('[data-lookbook-restore-brief]')?.addEventListener('click',event=>{
+            event.preventDefault();event.stopPropagation();
+            node.lookbookPrompt=String(node.lookbookStoryInput||'');node.lookbookStory=null;node.lookbookStoryInput='';node.lookbookStoryNotice='';
+            const promptControl=root.querySelector('[data-lookbook-field="lookbookPrompt"]');
+            if(promptControl)promptControl.value=node.lookbookPrompt;
+            resetDerivedResearch(node);options.onChange?.(node,{render:true});
+        });
         const settingsToggle=root.querySelector('[data-lookbook-settings-toggle]');
         settingsToggle?.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();node.lookbookGenerationExpanded=!node.lookbookGenerationExpanded;const section=root.querySelector('[data-lookbook-settings]');const content=root.querySelector('[data-lookbook-settings-content]');section?.classList.toggle('expanded',node.lookbookGenerationExpanded);if(content)content.hidden=!node.lookbookGenerationExpanded;settingsToggle.setAttribute('aria-expanded',String(node.lookbookGenerationExpanded));options.onChange?.(node,{render:false});});
         const handleAction=event=>{if(event.type !== 'click') return; const button=event.target.closest?.('[data-lookbook-choose],[data-lookbook-layout],[data-lookbook-run]'); if(!button||!root.contains(button)) return; const now=Date.now(); if(now-Number(button.dataset.lookbookLastActionAt||0)<250) return; button.dataset.lookbookLastActionAt=String(now); event.preventDefault(); event.stopPropagation(); if(button.hasAttribute('data-lookbook-choose')) openPicker(node,{onChange:options.onChange}); else if(button.hasAttribute('data-lookbook-layout')) openLayoutPicker(node,{onChange:options.onChange}); else options.run?.(node);};
@@ -461,5 +513,5 @@
     ];
     // 端口查询会在统一画布渲染所有节点时调用；非 Lookbook 节点必须返回空数组，
     // 否则会抢先进入通用多端口分支，覆盖三视图等节点自己的角色端口。
-    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:type=>type===TYPE ? INPUT_PORTS.map(item=>({...item})) : [],title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:type=>type===TYPE ? ({w:430,h:0}) : null,normalize,createNode,bodyHtml,bind,mediaRefs,openPicker,outputAspectRatio:layoutOutputAspectRatio};
+    window.CanvasLookbookNode={TYPE,isType:type=>type===TYPE,isGenerator:type=>type===TYPE,isMediaOutput:type=>type===TYPE,canOutput:type=>type===TYPE,inputPorts:type=>type===TYPE ? INPUT_PORTS.map(item=>({...item})) : [],title:type=>type===TYPE ? 'Lookbook 平面广告' : '',size:type=>type===TYPE ? ({w:430,h:0}) : null,normalize,createNode,bodyHtml,bind,mediaRefs,openPicker,sourceInstruction,applyStoryResult,outputAspectRatio:layoutOutputAspectRatio};
 })();

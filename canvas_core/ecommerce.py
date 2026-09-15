@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 from .lookbook_styles import FASHION_EDITORIAL_STYLE_ID, FASHION_EDITORIAL_PROMPT
 from .fashion_director import full_skill as fashion_full_skill, DIRECTOR_EXECUTION
+from .lookbook_brief import effective_brief
 
 
 OPERATIONS = (
@@ -1456,6 +1457,7 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             raise ValueError("自由创作必须填写提示词")
         return raw_instruction
     if prompt_policy == LOOKBOOK_PROMPT_POLICY:
+        instruction = effective_brief(options).strip()
         style = options.get("lookbook_style") if isinstance(options.get("lookbook_style"), dict) else {}
         style_id = str(style.get("id") or "").strip().lower()
         auto_decision = options.get("lookbook_auto_decision") if isinstance(options.get("lookbook_auto_decision"), dict) else {}

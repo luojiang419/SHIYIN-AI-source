@@ -23,14 +23,14 @@ from canvas_core.lookbook_story import (
 
 
 class LookbookStoryContractTests(unittest.TestCase):
-    def test_story_agent_plan_adds_story_stages_without_changing_legacy_mode(self):
+    def test_story_agent_plan_uses_two_stage_flow_for_legacy_nodes_too(self):
         legacy = main.build_lookbook_agent_plan({
             "operation": "universal",
             "count": 4,
             "options": {"prompt_policy": "lookbook"},
         })
         self.assertEqual([item["id"] for item in legacy["stages"]], [
-            "reference-analysis", "web-search", "art-direction", "generation"
+            "story-writing", "web-search", "storyboard", "prompt-compile", "generation"
         ])
         story = main.build_lookbook_agent_plan({
             "operation": "universal",

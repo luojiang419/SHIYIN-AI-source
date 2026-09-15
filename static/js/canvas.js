@@ -11034,6 +11034,19 @@ function resizeEcommerceLookbookPendingGroup(out, groupId, total, template=null)
     out._pending = (out._pending || []).filter(item => item.lookbookGroupId !== groupId || !ids.has(item.id));
     out._pending.push(...keep);
 }
+function syncEcommerceLookbookStory(taskId,task){
+    const found=findPendingTask(taskId);
+    const node=found && nodes.find(item=>item.id===found.pending.run?.node?.id && item.type==='lookbook');
+    if(node && found.pending.lookbookReferenceSignature!==JSON.stringify(lookbookConnectedInputs(node).map(ref=>[ref.url,ref.lookbook_role])))return false;
+    if(!node || !window.CanvasLookbookNode?.applyStoryResult?.(node,taskId,task,found.pending))return false;
+    // 合法回填先同步当前控件，避免刷新时焦点保护器把旧草稿写回模型。
+    if(node.lookbookStoryAppliedTaskId===taskId){
+        const control=nodesEl.querySelector(`.node[data-id="${CSS.escape(node.id)}"] [data-lookbook-field="lookbookPrompt"]`);
+        if(control)control.value=node.lookbookPrompt;
+    }
+    scheduleSave();
+    return true;
+}
 function syncEcommerceLookbookPartial(taskId, task){
     const found = findPendingTask(taskId);
     const partial = ecommerceLookbookPartialResult(task) || task?.result;
@@ -11114,6 +11127,7 @@ function completeEcommerceLookbookTask(taskId, task){
     const {out,pending} = found;
     const images = ecommerceTaskImages(task);
     const node = nodes.find(item => item.id === pending.run?.node?.id && item.type === 'lookbook');
+    syncEcommerceLookbookStory(taskId,task);
     if(!images.length){
         failEcommerceLookbookTask(pending.id,'Lookbook 任务没有返回图片',node,out);
         return;
@@ -11124,7 +11138,9 @@ function completeEcommerceLookbookTask(taskId, task){
     const groupId = pending.lookbookGroupId || pending.id;
     out._pending = (out._pending || []).filter(item => item.lookbookGroupId !== groupId && item.id !== pending.id);
     appendOutputImagesWithoutDuplicates(out, images, meta.run?.refs?.[0], [meta]);
-    if(node){
+    if(node && (!node.ecomTaskId || node.ecomTaskId===taskId)){
+        const unchangedInput=pending.lookbookInputRevision==null || Number(node.lookbookInputRevision||0)===Number(pending.lookbookInputRevision);
+        if(unchangedInput){
         if(task.agent_stage) node.lookbookAgentStage = String(task.progress_status || task.agent_stage);
         const taskRequest = task.request || task.result?.params || {};
         if(Number(taskRequest.count || task.count) > 0) node.count = Math.max(1, Math.min(20, Number(taskRequest.count || task.count)));
@@ -11161,6 +11177,7 @@ function completeEcommerceLookbookTask(taskId, task){
         node.lookbookResearchNote = ['skipped','failed'].includes(task.lookbook_research?.status) ? String(task.lookbook_research.reason || '联网研究未完成，已按选定风格继续生成') : '';
         node.lookbookStageTimings = task.lookbook_stage_timings || task.result?.lookbook_stage_timings || {};
         if(task.progress_status) node.lookbookAgentStage = String(task.progress_status);
+        }
         mergeGeneratedOutputs(node, images.map((item,index) => ({...((item && typeof item === 'object') ? item : {}), url:outputUrlValue(item), name:`lookbook-${Date.now()}-${index + 1}.png`, kind:'image'})), true);
         node.runStatus = activeEcommerceLookbookRun(node) ? 'running' : 'done';
         node.runError = '';
@@ -11208,8 +11225,9 @@ async function pollEcommerceLookbookTask(taskId, options={}){
             if(!response.ok) throw new Error(await responseErrorMessage(response,'Lookbook 任务查询失败'));
             const task = await response.json();
             const taskNode = nodes.find(item => item.id === found.pending.run?.node?.id && item.type === 'lookbook');
+            if(syncEcommerceLookbookStory(taskId,task))refreshRunNodes(taskNode,found.out);
             if(syncEcommerceLookbookPartial(taskId, task)) refreshRunNodes(taskNode, found.out);
-            if(taskNode && task.progress_status){
+            if(taskNode && taskNode.ecomTaskId===taskId && task.progress_status){
                 taskNode.lookbookAgentStage = String(task.progress_status).slice(0,300);
                 refreshRunNodes(taskNode,found.out);
             }
@@ -11319,15 +11337,17 @@ function lookbookConnectedInputs(node){
         label:`${roleLabels[entry.connection.inputRole] || '商品'} · ${ref.name || `参考 ${refs.length + 1}`}`,
         instruction:`Lookbook 专用输入：${roleLabels[entry.connection.inputRole] || '商品'}`,
     })));
-    return refs.filter(item => item.url).slice(0,14);
+    return refs.filter(item => item.url);
 }
 async function runLookbookNode(nodeId, opts={}){
     const node = nodes.find(item => item.id === nodeId && item.type === 'lookbook');
     if(!node) return;
     window.CanvasLookbookNode?.normalize?.(node);
     const inputs = lookbookConnectedInputs(node);
+    if(inputs.length>14){showErrorModal('Lookbook 最多支持14张参考图，请减少输入后生成','参考图过多');return;}
     const out = outputForNode(node,520,true);
     const pendingGroupId = out ? uid('lookbook-run') : '';
+    node.lookbookActiveRunId=pendingGroupId;
     const count = Math.max(1,Math.min(20,Number(node.count || 4)));
     const pendingIds = out ? Array.from({length:count}, () => uid('p')) : [];
     const style = {id:node.lookbookStyleId,name:node.lookbookStyleName,prompt:node.lookbookStylePrompt,cover:node.lookbookStyleCover,source:node.lookbookStyleSource};
@@ -11340,11 +11360,11 @@ async function runLookbookNode(nodeId, opts={}){
         out._pending = [...(out._pending || []), ...pendingIds.map((id,index) => makePendingForRun(id, run, node, pendingOptions, {
             canvasTaskType:'ecommerce-lookbook', providerId:'', model:'', appendGenerated:true, lookbookCount:count,
             lookbookGroupId:pendingGroupId, lookbookSlotIndex:index + 1, lookbookTotal:count, lookbookCompleted:false,
+            lookbookInputRevision:Number(node.lookbookInputRevision||0), lookbookPromptAtStart:String(node.lookbookPrompt||''),
+            lookbookReferenceSignature:JSON.stringify(inputs.map(ref=>[ref.url,ref.lookbook_role])),
         }))];
     }
-    const hasBrief = Boolean(String(node.lookbookPrompt || '').trim());
-    const storyMode = String(node.lookbookMode || 'story-campaign') === 'story-campaign';
-    node.running = true; node.runError = ''; node.lookbookQualityResult = null; node.lookbookResearchNote = ''; node.lookbookAgentStage = hasBrief ? '智能体任务已提交，准备分析参考图与选定风格…' : '已读取人物与场景参考，准备快速生成生活化随拍系列…'; node.lookbookResearchStatus = (hasBrief && node.lookbookSearch === true) ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
+    node.running = true; node.runError = ''; node.lookbookQualityResult = null; node.lookbookResearchNote = ''; node.lookbookStoryNotice=''; node.lookbookAgentStage = '正在综合参考图，构思以服装为主的故事与立意…'; node.lookbookResearchStatus = node.lookbookSearch === true ? 'running' : 'disabled'; if(!opts.cascade) node.runStatus = 'running';
     refreshRunNodes(node,out);
     if(!opts.cascade) setTimeout(() => { if(nodes.includes(node)) { node.running = false; refreshRunNodes(node,out); } }, 2000);
     const request = {
@@ -11352,6 +11372,9 @@ async function runLookbookNode(nodeId, opts={}){
         options:{instruction:String(node.lookbookPrompt || '').trim(), prompt_policy:'lookbook', lookbook_mode:String(node.lookbookMode || 'story-campaign'), lookbook_manual_overrides:node.lookbookManualOverrides || {}, lookbook_style:style, lookbook_search:node.lookbookSearch === true, lookbook_quality_gate:node.lookbookQualityGate === true, lookbook_auto_repair:node.lookbookQualityGate === true && node.lookbookAutoRepair === true, lookbook_context_signature:String(node.lookbookContextSignature || ''), lookbook_reference_analysis:String(node.lookbookReferenceAnalysis || ''), lookbook_visual_system:node.lookbookVisualSystem || {}, lookbook_research_sources:node.lookbookResearchSources || [], lookbook_research_images:node.lookbookResearchImages || [], lookbook_research_queries:node.lookbookResearchQueries || [], lookbook_research_direction:node.lookbookResearchDirection || {}, lookbook_research_shots:node.lookbookResearchShots || [], lookbook_story_case_patterns:node.lookbookStoryCasePatterns || [], lookbook_narrative_methods:node.lookbookNarrativeMethods || [], lookbook_layout_selection:node.lookbookLayoutSelection || {}, lookbook_layout_intent:node.lookbookLayoutIntent || {}, lookbook_cell_aspect_ratio:String(node.aspectRatio || '16:9'), lookbook_research_evidence_status:String(node.lookbookResearchEvidenceStatus || ''), lookbook_auto_decision:isAutoStyle ? {} : (node.lookbookAutoDecision || {}), search_context:String(node.lookbookResearch || ''), lookbook_plan:isAutoStyle ? '' : String(node.lookbookPlan || ''), lookbook_bible:node.lookbookBible || {}, lookbook_shot_cards:node.lookbookShotCards || [], lookbook_story_summary:String(node.lookbookStorySummary || ''), lookbook_count:count, lookbook_grain_strength:Number(node.lookbookGrainStrength ?? 0.095)},
         provider_id:String(node.apiProvider || ''), model:String(node.model || ''), aspect_ratio:window.CanvasLookbookNode?.outputAspectRatio?.(node) || node.aspectRatio || '16:9', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
     };
+    request.options.instruction=window.CanvasLookbookNode?.sourceInstruction?.(node) ?? String(node.lookbookPrompt||'');
+    request.options.lookbook_story=node.lookbookStory || null;
+    request.options.lookbook_auto_decision=node.lookbookAutoDecision || {};
     try {
         const cascadeTargetId = cascadeTargetIdFromOptions(opts);
         const response = await cascadeFetch('/api/ecommerce/tasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)}, {cascadeTargetId});
@@ -11377,7 +11400,7 @@ async function runLookbookNode(nodeId, opts={}){
             item.providerId = created.provider_id || '';
             if(Number(created.count) > 0){ item.lookbookTotal = Math.max(1, Math.min(20, Number(created.count))); item.lookbookCount = item.lookbookTotal; }
         });
-        node.ecomTaskId = taskId;
+        if(node.lookbookActiveRunId===pendingGroupId)node.ecomTaskId = taskId;
         refreshRunNodes(node,out); scheduleSave(); await saveCanvas();
         // Lookbook 使用专用短轮询，持续把 agent 阶段写回节点；通用 waitEcommerceTask 不会刷新阶段文案。
         await pollEcommerceLookbookTask(taskId,{cascadeTargetId});

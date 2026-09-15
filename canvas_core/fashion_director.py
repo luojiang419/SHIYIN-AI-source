@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sys
 from typing import Any
+from .lookbook_brief import effective_brief
 
 STYLE_ID = "fashion-advertising"
 DIRECTOR_VERSION = "fashion-director-1.2-full-2"
@@ -49,7 +50,7 @@ User intent remains first. Separate subject identity, appearance, wardrobe, prod
 Select camera intensity, performance amplitude and facial emotion INDEPENDENTLY. An elegant relaxed expression does not require timid movement or a level camera.
 Translate each requested style into concrete per-shot decisions: lens, height, tilt, crop, foreground, weight transfer, gaze, contact and fabric response. Do not merely repeat 'high quality' or 'editorial'.
 If a product is named, make that exact product the campaign protagonist: state target, immutable construction, required visible regions, crop limits and each shot's product proof. Product fidelity alone is not product prominence.
-For trousers show waist, hip fit, knee construction, hems and full leg silhouette across the series as appropriate; do not let face portraits displace the product. For other products derive appropriate coverage; never invent denim or a second person.
+Only when the user names a specific product, plan appropriate feature coverage across the series. For an overall outfit, expressive face portraits belong to the fashion story equally with clothing details; do not convert the whole series into a garment inspection; never invent denim or a second person.
 Film, if requested, must specify exposure, shadow density, highlight shoulder, color response, grain scale/density, halation and optical softness. No universal warm filter and no grain-overlay substitute for physical light.
 Build and audit all panel shots jointly. Distinct panels advance the action or provide purposeful product/hero studies; do not demand a dramatic twist in every simple event. Hero poses may pause the action. Avoid generic catalog repetition without banning deliberate editorial poses.
 For bold briefs plan genuinely daring viewpoints and gestures with credible anatomy. For restrained briefs honor restraint. Do not force one fixed nine-shot or two-person template.
@@ -74,7 +75,8 @@ def planning_message(snapshot: dict, layout: dict) -> str:
             "index": 1, "beat": "", "story_purpose": "", "continuity_in": "", "continuity_out": "",
             "scene_region": "", "scene_extension": "", "objective": "", "action_chain": "",
             "micro_expression": "", "weight_and_contact": "", "wardrobe_state": "", "prop_state": "",
-            "camera": {"lens_mm": 35, "shot_size": "", "angle": "", "height": "", "tilt": "", "framing": ""},
+            "camera": {"lens_mm": 35, "shot_size": "", "angle": "", "height": "", "tilt": "", "framing": "", "position": "", "visible_geometry": ""},
+            "wardrobe_focus": "", "wardrobe_visibility": "",
             "composition": "", "lighting": "", "product_focus": "", "product_visibility": "",
             "composition_risk": 3, "hero": False,
         }]}],
@@ -88,13 +90,13 @@ def planning_message(snapshot: dict, layout: dict) -> str:
         + "每格必须有自己的动作、机位、景别、构图、产品展示和前后状态；不套固定景别模板。"
         + "每个输出另写 render_prompt：面向图片模型的英文拍摄指令，完整落实该输出的全部 panel_cards。"
         + "图片模型只收到 render_prompt，不会收到 campaign_bible、panel_cards 或本技能全文。因此 render_prompt 必须自包含，不能写 see shot cards 或引用字段代替具体描述。render_prompt 必须是单个字符串，包含字面标记 PANEL 1 至最后一格。"
-        + "开头明确产品主角、参考图编号与准确服饰/场景事实，之后用 PANEL 1、PANEL 2 等连续标记逐格写出具体动作、焦段、机位高度、倾斜角、裁切与商品可见区域；结尾写物理光和胶片曝光/影调/颗粒。"
-        + "render_prompt 不复制技能方法论、JSON字段或分析过程，不能仅写抽象风格词；一张九宫格建议6000–12000英文字符，单幅建议1200–2500字符；全部输出的 render_prompt 合计不超过24000字符。"
+        + "开头明确参考图编号与准确服饰/场景事实，之后用 PANEL 1、PANEL 2 等连续标记逐格写出具体表情、动作、实际机位与画面构图；结尾简写物理光。只在用户指定时加入胶片处理。"
+        + "render_prompt 不复制技能方法论、JSON字段或分析过程，不能仅写抽象风格词；每格以2–4句说明表情、动作接触、摄影位置和构图，公共身份/衣着/光源只写一次。没有最低字数要求，不用长篇重复保真规则淹没摄影决策；全部输出合计不超过24000字符。"
         + "尤其避免把参考中宽松阔腿版型改成普通修身直筒，准确描述腿围量感和结构线；人物必须有可见重心/肩髋变化，明确失稳构图是照片内部的相机倾斜而非倾斜拼图边框。"
         + "商品有容易丢失的小结构时，在 product_direction.detail_regions 给出最多2个局部放大区域：reference_index 为原始参考图从1开始的编号，box 为[left,top,right,bottom]的0–1归一化坐标，purpose 说明可见结构。只框选确实可见的商品区域，不猜测遮挡细节；无必要时为空列表。这些区域会作为原图派生细节参考补充给生图模型。"
         + "不要输出空字段或示例占位值；未指定产品时 product_direction.target 明确写整体造型。"
         + "构图风险与主视觉比例按原技能和用户需求审核；不得把优雅表情误解为小幅动作。"
-        + "\n用户需求（完整保留）：" + str(options.get("instruction") or "根据提供的参考图创作时尚广告")
+        + "\n用户需求（完整保留）：" + (effective_brief(options) or "根据提供的参考图创作时尚广告")
         + "\n版式与画幅：" + json.dumps({"layout": layout, "aspect_ratio": snapshot.get("aspect_ratio")}, ensure_ascii=False)
         + "\n参考事实：" + str(options.get("lookbook_reference_analysis") or "直接观察随请求提供的参考图")
         + "\n可选研究（仅辅助方法）：" + str(options.get("search_context") or "")[:8000]

@@ -11,6 +11,7 @@ import re
 import math
 from typing import Any, Dict, Iterable, List, Optional
 from .fashion_director import DIRECTOR_VERSION, generation_prompt as fashion_generation_prompt
+from .lookbook_brief import STORY_VERSION, editorial_generation_prompt
 
 
 LOOKBOOK_STORY_MODE = "story-campaign"
@@ -626,7 +627,7 @@ def enforce_lookbook_shot_scale_contract(cards: List[Dict[str, Any]], count: int
     enforced: List[Dict[str, Any]] = []
     for position, source in enumerate(cards):
         card = dict(source)
-        if card.get("director_version") == DIRECTOR_VERSION:
+        if card.get("director_version") == DIRECTOR_VERSION or card.get("lookbook_story_version") == STORY_VERSION:
             enforced.append(card)
             continue
         lock = dict(plan[position])
@@ -645,7 +646,7 @@ def enforce_lookbook_story_rhythm_contract(cards: List[Dict[str, Any]], count: i
     enforced: List[Dict[str, Any]] = []
     for position, source in enumerate(cards):
         card = dict(source)
-        if card.get("director_version") == DIRECTOR_VERSION:
+        if card.get("director_version") == DIRECTOR_VERSION or card.get("lookbook_story_version") == STORY_VERSION:
             enforced.append(card)
             continue
         lock = dict(rhythm[position])
@@ -687,6 +688,8 @@ def build_lookbook_shot_prompt(
     """把全局视觉圣经和当前分镜卡编译成图片请求。"""
     index = int(card.get("index") or 1)
     layout_intent = layout_intent if isinstance(layout_intent, dict) else parse_lookbook_layout_intent(brief)
+    if card.get("lookbook_story_version") == STORY_VERSION:
+        return editorial_generation_prompt(brief, bible, card, list(reference_labels or []), layout_intent)
     if card.get("director_version") == DIRECTOR_VERSION:
         return fashion_generation_prompt(brief, bible, card, list(reference_labels or []), layout_intent)
     references = " ".join(str(item).strip() for item in (reference_labels or []) if str(item).strip())
@@ -716,7 +719,7 @@ def build_lookbook_shot_prompt(
             f"Execute only the requested layout specification ({layout_intent['specification']}) and make it feel art-directed for a top-tier fashion magazine: "
             + structured_layout
             + "precise visual hierarchy, intentional rhythm and scale contrast, coherent gutters/crops, disciplined negative space, seamless color continuity and publication-grade finishing. "
-            "Every panel must advance the same narrative beat; never create a random collage, generic template, contact-sheet dump, repeated near-duplicates or ecommerce catalog tiles. "
+            "Each panel executes its own planned photographic moment in the shared setting; vary expression, tactile detail, perspective and body geometry. Never repeat one shot across cells or create ecommerce catalog tiles. "
             "Return exactly one combined image containing the complete panel layout, never separate image files for its panels. "
         )
         story_text = raw_brief
@@ -790,6 +793,8 @@ def _compact_card(card: Dict[str, Any]) -> str:
             "weight_and_contact",
             "subjects",
             "wardrobe_state",
+            "wardrobe_focus",
+            "wardrobe_visibility",
             "prop_state",
             "camera",
             "composition",

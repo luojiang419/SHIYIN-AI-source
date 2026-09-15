@@ -62,5 +62,7 @@ async def test_short_product_request_uses_defaults_and_repairs_conventional_plan
     assert result["options"]["lookbook_bold_editorial"]
     assert result["options"]["lookbook_quality_gate"]
     assert result["options"]["lookbook_auto_repair"]
+    assert "节点默认创作要求" in llm.call_args_list[0].args[0].message
     assert "近距离广角" in llm.call_args.args[0].message
     assert "fisheye" in main.lookbook_generation_prompts(result)[0]
+    assert "摄影机真正靠近" in main.lookbook_generation_prompts(result)[0]

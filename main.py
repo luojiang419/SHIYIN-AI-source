@@ -218,6 +218,7 @@ from canvas_core.lookbook_brief import (
     effective_optics as lookbook_effective_optics,
     bold_direction_active as lookbook_bold_direction_active, DEFAULT_BOLD_DIRECTION as LOOKBOOK_DEFAULT_BOLD_DIRECTION,
     remove_json_trailing_commas as remove_lookbook_json_trailing_commas,
+    DEFAULT_CREATIVE_BRIEF as LOOKBOOK_DEFAULT_CREATIVE_BRIEF,
 )
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
@@ -19475,7 +19476,8 @@ async def enrich_lookbook_story_brief(snapshot: Dict[str, Any]) -> Tuple[Dict[st
                          str(options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "16:9")),
                  }, ensure_ascii=False)
                  + "\n选定风格：" + json.dumps(options.get("lookbook_style") or {}, ensure_ascii=False)
-                 + "\n自动风格可选ID（仅id=auto时使用）：" + json.dumps(sorted(LOOKBOOK_AUTO_STYLE_IDS))),
+                 + "\n自动风格可选ID（仅id=auto时使用）：" + json.dumps(sorted(LOOKBOOK_AUTO_STYLE_IDS))
+                 + ("\n节点默认创作要求（不是用户原文）：" + LOOKBOOK_DEFAULT_CREATIVE_BRIEF if lookbook_bold_direction_active(options) else "")),
         system_prompt=LOOKBOOK_STORY_SYSTEM, provider=route["provider_id"], model=route["model"],
         images=[str(ref["url"]) for ref in references],
         image_labels=[f"R{i} [{ref.get('lookbook_role') or ref.get('reference_type') or '商品'}] {ref.get('label') or ref.get('name') or ''}" for i, ref in enumerate(references, 1)],

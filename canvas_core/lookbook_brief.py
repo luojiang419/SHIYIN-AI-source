@@ -12,7 +12,7 @@ REFERENCE_LIMIT = 14  # 与现有图片路由及通用参考契约一致；解�
 STORY_SYSTEM = """你是 Lookbook 时尚创意总监。这是第一次独立会话，只综合参考图片并确定故事与立意，下一次会话才编写生图分镜。
 优先级：用户明确要求 > 服装/指定商品的视觉中心 > 人物身份与自然穿着 > 连续生活情境 > 摄影表达 > 辅助道具。
 Lookbook是穿着的人有生活、服装自然成为视觉中心，不是道具主导的短片。先读廓形、面料、剪裁、露肤/开口、层次、搭配与适合的气质，再设计让这些特点自然显现的情境。
-人物可以有赴约、等待、相遇、同行等生活目的，但不要套用固定故事。要有具体情境、行动动机、互动/发现/选择和情绪变化；拒绝“站立→转头→微笑”的空动作串。事件强度适度，优雅自然；不靠抢救物件、劳动、事故、追赶道具或凭空巨大布景制造戏剧。
+用户提供具体故事时保留其人物目的与事件。用户没有提供剧情时，先提出时尚视觉概念和一个拍摄情境，beats可描述互补的视觉研究，不自动编造抵达、等待、走路、离场等过程。构图、轮廓、触感、透视与人物态度本身可以构成内容；不要让自编剧情限制广告主视觉。
 服装展示价值按整组分配，不要求每格证明剪裁或展示完整衣服。脸部表情、手指触摸面料的亲密特写、环境中的身体关系都可以独立成图。未指定商品时以人物现有完整造型为主，指定商品时给该商品合理的关键细节和廓形覆盖，其余画面仍可表现人。
 核心创作任务：根据场景扩展电影感时尚多角度画面，包含有情绪的表情、手摸服装的触感特写和真正切换的摄影角度。先从这张图独有的空间、光线、材质与人物气质提炼一个视觉吸引点，再给一个简洁开放的情境。没有生活剧情也可以是时尚肖像组照，不硬编赴约或试穿故事。
 禁止默认“整理腰线→试走→停步→回身→正面站定”、开拍准备、确认穿着、九次确认等检查式叙事。不要把保守延展衣服背面解释成保守构图；可以近拍、俯拍、偏心、前景切入并保留有意裁切。棚拍也要有表情温差和身体线条，不能默认全程沉静。根据具体图选择情绪，不把全程微笑当作新模板。
@@ -49,6 +49,8 @@ If the user names a product, at least two thirds of frames must visually priorit
 DEFAULT_BOLD_DIRECTION = """DEFAULT BOLD EDITORIAL IS ACTIVE:
 Make the visual tension unmistakable, not slight, gentle or merely a conventional low-angle full-body picture. At least one third of the sequence must put the primary subject/product within 0.7m of a 24mm-or-wider lens. Move the photographer close enough that foreground shape dominates and the rest of the body recedes dramatically. Use intentional crop, opposing diagonals, deep foreshortening, floor-near or plunging views. Do not stand back to fit the whole body in every photograph. Keep one readable product silhouette across the series, not a full-body quota. Other shots provide tactile or emotional contrast. A label such as 21mm without strong visible near/far scale fails this direction. Preserve exact reference construction, not its catalog framing.
 """
+
+DEFAULT_CREATIVE_BRIEF = """大胆时尚是本节点的默认创作方向：摄影机真正靠近本次主角，用近距离超广角、适合场景的鱼眼、贴地或俯冲视点，让关键形体冲入前景，产生强烈近大远小与图形张力。不要退到远处拍完整站姿来表现所谓高级感。用有态度的表情和真实触感作为互补，光线按参考场景重新塑形。若用户指定主推商品，则围绕该商品的轮廓、结构、材质设计画面，人物的脸、其他衣服和道具都作为辅助。未提供具体剧情时，直接设计互补的时尚广告画面，不使用进入→行走→离场的默认顺序。用户明确的镜头限制、剧情、数量与版式优先。"""
 
 
 def product_direction(options: dict) -> dict:
@@ -202,7 +204,8 @@ def story_handoff(options: dict) -> str:
             + "。大胆时尚是节点默认摄影策略，与用户选择的色彩风格分别执行；用户明确摄影限制优先。"
             + "\n明确主推商品：" + json.dumps(product_direction(options), ensure_ascii=False)
             + "\n用户原始要求（优先）：" + str(options.get("instruction") or "（空）")
-            + "\n已完成故事与服装展示依据：" + json.dumps(story, ensure_ascii=False))
+            + "\n已完成故事与服装展示依据：" + json.dumps(story, ensure_ascii=False)
+            + ("\n节点默认创意执行要求：" + DEFAULT_CREATIVE_BRIEF if bold_direction_active(options) else ""))
 
 
 def validate_story_shots(cards: list[dict], options: dict) -> list[dict]:
@@ -347,7 +350,7 @@ def editorial_generation_prompt(brief: str, bible: Any, card: dict, labels: list
         "[" + " | ".join(str(row*columns+col+1) for col in range(columns)) + "]" for row in range(int(layout.get("rows") or 1)))
         if layout.get("explicit") else "")
     return (delivery + layout_map
-            + ("\n" + DEFAULT_BOLD_DIRECTION if card.get("bold_editorial") else "")
+            + ("\n" + DEFAULT_BOLD_DIRECTION + "\n" + DEFAULT_CREATIVE_BRIEF if card.get("bold_editorial") else "")
             + "\nPhotograph cinematic fashion moments from the reference setting: expressive faces, intimate hand-on-fabric contact, and genuinely different camera viewpoints. "
             "WARDROBE-FIRST means preserve the outfit across the series, not show every detail in every frame. "
             "Execute the expressive portraits and intentional crops. Avoid repetitive neutral standing poses. "

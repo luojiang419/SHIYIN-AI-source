@@ -12397,7 +12397,7 @@ function createSmartPoseOutputNode(sourceNode, item){
     }
     output.title = '骨架参考图';
     output.poseReferenceSourceId = sourceNode.id;
-    output.images = [{...item, kind:'image'}];
+    output.images = [{...item, kind:item.kind || 'image'}];
     selectedId = output.id;
     selectedIds = [];
     selectedImage = {nodeId:output.id, index:0};

@@ -9967,6 +9967,14 @@ function classicSpecialInputImage(node, inputRole=''){
     }
     return null;
 }
+function classicSpecialInputVideo(node){
+    const sources = connections.filter(connection => connection.to === node.id).map(connection => nodes.find(item => item.id === connection.from)).filter(Boolean).reverse();
+    for(const source of sources){
+        const ref = mediaRefsFromNode(source).find(item => item?.url && item.kind === 'video');
+        if(ref) return ref;
+    }
+    return null;
+}
 function classicSpecialInputImages(node, inputRole=''){
     if(inputRole !== 'target-image'){
         const single = classicSpecialInputImage(node, inputRole);
@@ -10095,7 +10103,7 @@ function createClassicSpecialOutputNode(sourceNode, item, kind){
     out.specialKind = kind;
     delete out.specialPending;
     out.title = '角度调整结果';
-    out.images = [{...item, kind:'image'}];
+    out.images = [{...item, kind:item.kind || 'image'}];
     out.specialPending = false;
     scheduleClassicRender();
     scheduleSave();
@@ -10934,6 +10942,7 @@ function bindClassicSpecialNode(el, node){
         smart:false,
         canvasKey:`classic:${canvas?.id || ''}`,
         getInputImage:classicSpecialInputImage,
+        getInputVideo:classicSpecialInputVideo,
         getInputImages:classicSpecialInputImages,
         getAngleGeometryReference:classicAngleGeometryReference,
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
@@ -10958,6 +10967,7 @@ function bindClassicSpecialNode(el, node){
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
     if(node.type === 'depthMap') api.bindDepthMap?.(el, node, options);
+    if(node.type === 'depthVideo') api.bindDepthVideo?.(el, node, options);
     if(node.type === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createClassicDirectorOutputNode});
     if(node.type === 'poseReplicate') api.bindPoseReplicate(el, node, options);
     if(node.type === 'angle') api.bindAngle(el, node, options);
@@ -10967,7 +10977,6 @@ function ecommerceConnectedEntries(node){
     if(!api || !node) return [];
     const direct = connections.filter(connection => connection.to === node.id).map(connection => {
         const source = nodes.find(item => item.id === connection.from);
-    if(node.type === 'depthVideo') api.bindDepthVideo?.(el, node, options);
         const refs = source ? mediaRefsFromNode(source) : [];
         return {connection,source,role:connection.inputRole || '',refs};
     }).filter(entry => entry.source);
@@ -12221,6 +12230,7 @@ function renderNode(node){
     if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
     if(node.type === 'depthMap') body.innerHTML = window.CanvasSpecialNodes?.depthMapBodyHtml(node) || '<div class="muted-note">深度图节点加载失败</div>';
+    if(node.type === 'depthVideo') body.innerHTML = window.CanvasSpecialNodes?.depthVideoBodyHtml(node) || '<div class="muted-note">深度视频节点加载失败</div>';
     if(node.type === 'resultCompare') body.innerHTML = resultCompareBodyHtml(node);
     if(node.type === 'director3d') body.innerHTML = window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="muted-note">3D导演台加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageApiProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:allImageModels(provider.id)}))}) || '<div class="muted-note">一键复刻节点加载失败</div>';
@@ -12248,7 +12258,6 @@ function renderNode(node){
         reuseCanvasNodeImages(previous, body);
         body.onwheel = e => {
             e.stopPropagation();
-    if(node.type === 'depthVideo') body.innerHTML = window.CanvasSpecialNodes?.depthVideoBodyHtml(node) || '<div class="muted-note">深度视频节点加载失败</div>';
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
@@ -12597,6 +12606,7 @@ function defaultNodeSize(type){
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
     if(type === 'depthMap') return {w:520, h:560};
+    if(type === 'depthVideo') return {w:620, h:390};
     if(type === 'resultCompare') return {w:520, h:560};
     if(type === 'poseReplicate') return {w:720, h:820};
     if(type === 'angle') return {w:460, h:660};
@@ -12624,7 +12634,6 @@ function resultCompareBodyHtml(node){
             <button class="result-compare-handle" data-compare-handle type="button" role="slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Number(node.compareDivider) || 50)}" aria-label="拖动划像对比"><span>‹</span><span>›</span></button>
             <span class="result-compare-label compare-viewer-label before">源文件</span>
             <span class="result-compare-label compare-viewer-label after">目标文件</span>
-    if(type === 'depthVideo') return {w:620, h:390};
             ${ready ? '' : `<div class="result-compare-empty">${sourceUrl || targetUrl ? '再连接一张图片即可开始划像对比' : '连接“源文件”和“目标文件”两张图片'}</div>`}
             <button class="result-compare-fullscreen" data-result-compare-fullscreen type="button" title="全屏对比" aria-label="全屏对比" ${ready ? '' : 'disabled'}><i data-lucide="maximize-2"></i></button>
         </div>
@@ -23504,6 +23513,8 @@ function canConnect(fromId, toId, inputRole=''){
         return ['video','generator','rh','ecom-video','lookbook'].includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(from.type === 'ecom-video') return to.type === 'output';
+    if(to.type === 'depthVideo') return mediaRefsFromNode(from).some(ref => ref?.url && ref.kind === 'video');
+    if(from.type === 'depthVideo') return to.type === 'output' || to.type === 'topazVideo' || CANVAS_GENERATOR_TYPES.includes(to.type);
     const specialTypes = ['panorama','dwpose','depthMap','angle'];
     if(to.type === 'poseReplicate'){
         if(!['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole)) return false;
@@ -23531,8 +23542,6 @@ function canConnect(fromId, toId, inputRole=''){
         return CANVAS_GENERATOR_TYPES.includes(to.type) || to.type === 'llm';
     }
     if(to.type === 'loop'){
-    if(to.type === 'depthVideo') return mediaRefsFromNode(from).some(ref => ref?.url && ref.kind === 'video');
-    if(from.type === 'depthVideo') return to.type === 'output' || to.type === 'topazVideo' || CANVAS_GENERATOR_TYPES.includes(to.type);
         const allowImage = Boolean(to.imageInput) && ['image','group','output'].includes(from.type);
         const allowPrompt = Boolean(to.showPrompt) && ['prompt','promptGroup','loop','llm'].includes(from.type);
         return allowImage || allowPrompt;

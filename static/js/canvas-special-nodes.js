@@ -497,7 +497,7 @@
             : status === 'failed' ? (node.depthVideoError || '深度视频生成失败')
             : output?.url ? '深度视频已就绪，可从右侧端口连接下游节点'
             : inputUrl ? '输入视频已就绪，正在准备生成' : '连接或手动上传视频后自动生成深度视频';
-        return `<div class="special-node depth-video-special" data-special-node="depth-video">
+        return `<div class="special-node depth-video-special" data-special-node="depth-video" data-depth-video-input-url="${esc(inputUrl)}" data-depth-video-output-url="${esc(output?.url || '')}" data-depth-video-manual="${node.depthVideoManualInput?.url ? '1' : '0'}">
             <input class="special-file-input" type="file" accept="video/*,.mkv,.avi" data-special-file="depth-video" hidden>
             <div class="depth-video-preview-grid">
                 <div class="depth-video-preview-card ${inputUrl ? 'has-video' : ''}" data-depth-video-input-card role="button" tabindex="0" title="点击上传或替换输入视频">
@@ -506,7 +506,7 @@
                 </div>
                 <div class="depth-video-preview-card ${output?.url ? 'has-video' : ''}">
                     <span class="depth-map-preview-label">深度视频</span>${depthVideoPlayer(output?.url || '', '深度视频', 'output')}
-                    ${status === 'running' || status === 'queued' ? `<div class="depth-video-progress"><span style="width:${progress}%"></span><b>${Math.round(progress)}%</b></div>` : ''}
+                    ${status === 'running' || status === 'queued' ? `<div class="depth-video-progress" data-depth-video-progress><span style="width:${progress}%"></span><b>${Math.round(progress)}%</b></div>` : ''}
                 </div>
             </div>
             <div class="special-toolbar depth-map-toolbar">

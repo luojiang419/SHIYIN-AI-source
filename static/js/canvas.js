@@ -10932,8 +10932,42 @@ function queueClassicSpecialRefresh(node){
         const currentNodes = new Set(nodes);
         const ids = [...classicSpecialRefreshes].filter(item => currentNodes.has(item)).map(item => item.id);
         classicSpecialRefreshes.clear();
-        if(ids.length) refreshNodes(ids);
+        const replaceIds = ids.filter(id => {
+            const current = nodes.find(item => item.id === id);
+            return current?.type !== 'depthVideo' || !refreshClassicDepthVideoNode(current);
+        });
+        if(replaceIds.length) refreshNodes(replaceIds);
     });
+}
+function refreshClassicDepthVideoNode(node){
+    const el = canvasNodeDomIndex.get(node.id);
+    const current = el?.querySelector('.depth-video-special');
+    if(!current) return false;
+    const template = document.createElement('template');
+    template.innerHTML = window.CanvasSpecialNodes?.depthVideoBodyHtml(node) || '';
+    const next = template.content.querySelector('.depth-video-special');
+    if(!next || ['depthVideoInputUrl','depthVideoOutputUrl','depthVideoManual'].some(key => current.dataset[key] !== next.dataset[key])) return false;
+    const oldStatus = current.querySelector('.pose-status');
+    const newStatus = next.querySelector('.pose-status');
+    if(oldStatus && newStatus){ oldStatus.className = newStatus.className; oldStatus.lastElementChild.textContent = newStatus.lastElementChild.textContent; }
+    const oldProgress = current.querySelector('[data-depth-video-progress]');
+    const newProgress = next.querySelector('[data-depth-video-progress]');
+    if(oldProgress && newProgress) oldProgress.innerHTML = newProgress.innerHTML;
+    else if(oldProgress) oldProgress.remove();
+    else if(newProgress) current.querySelector('.depth-video-preview-card:last-child')?.appendChild(newProgress);
+    const oldFilter = current.querySelector('.depth-video-filtered');
+    const newFilter = next.querySelector('.depth-video-filtered');
+    if(oldFilter && newFilter) oldFilter.style.filter = newFilter.style.filter;
+    current.querySelectorAll('[data-special-action]').forEach(button => {
+        const fresh = next.querySelector(`[data-special-action="${button.dataset.specialAction}"]`);
+        if(!fresh) return;
+        button.disabled = fresh.disabled;
+        if(button.querySelector('span')?.textContent !== fresh.querySelector('span')?.textContent){ button.innerHTML = fresh.innerHTML; refreshIcons(button); }
+    });
+    const oldOutput = current.querySelector('.special-output-row');
+    const newOutput = next.querySelector('.special-output-row');
+    if(oldOutput && newOutput) oldOutput.innerHTML = newOutput.innerHTML;
+    return true;
 }
 function bindClassicSpecialNode(el, node){
     const api = window.CanvasSpecialNodes;
@@ -17015,7 +17049,10 @@ function refreshGeneratorInputViews(){
             ltxSyncConnectedImagesToTimeline(gen);
             renderComfyImages(el.querySelector('.input-list'), gen, imageInputs);
         }
-        if(gen.type === 'video' || gen.type === 'ecom-video') renderVideoImageInputs(el.querySelector('.video-img-list'), gen, imageInputs);
+        if(gen.type === 'video' || gen.type === 'ecom-video'){
+            const mediaInputs = sources.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
+            renderVideoImageInputs(el.querySelector('.video-img-list'), gen, mediaInputs);
+        }
         if(gen.type === 'topazVideo') renderTopazVideoInputPreview(el.querySelector('.topaz-input-list'), gen);
         if(gen.type === 'rh'){
             const media = rhMediaSources(gen);

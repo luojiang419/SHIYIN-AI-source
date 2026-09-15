@@ -11373,6 +11373,8 @@ async function runLookbookNode(nodeId, opts={}){
         provider_id:String(node.apiProvider || ''), model:String(node.model || ''), aspect_ratio:window.CanvasLookbookNode?.outputAspectRatio?.(node) || node.aspectRatio || '16:9', resolution:node.resolution || '2k', quality:node.quality || 'high', count, parent_task_id:'',
     };
     request.options.instruction=window.CanvasLookbookNode?.sourceInstruction?.(node) ?? String(node.lookbookPrompt||'');
+    request.options.lookbook_bold_editorial=node.lookbookBoldEditorial!==false;
+    request.options.lookbook_workflow_version=node.lookbookWorkflowVersion;
     request.options.lookbook_story=node.lookbookStory || null;
     request.options.lookbook_auto_decision=node.lookbookAutoDecision || {};
     try {

@@ -34,6 +34,16 @@ const path=require('node:path');
     const url=base+'/static/canvas.html?id='+canvas.id;
     await page.goto(url);
     await page.waitForFunction(()=>window.CanvasLookbookNode&&typeof render==='function');
+    const defaults=await page.evaluate(()=>{
+      const fresh=CanvasLookbookNode.createNode({});
+      const old={type:'lookbook',lookbookStyleId:'fw-cream-cyan-film',lookbookStyleSource:'builtin',lookbookQualityGate:false,lookbookAutoRepair:false};
+      CanvasLookbookNode.normalize(old);
+      const migrated={quality:old.lookbookQualityGate,repair:old.lookbookAutoRepair,style:old.lookbookStyleId};
+      old.lookbookQualityGate=false;old.lookbookAutoRepair=false;old.lookbookBoldEditorial=false;
+      CanvasLookbookNode.normalize(old);
+      return {fresh:{style:fresh.lookbookStyleId,bold:fresh.lookbookBoldEditorial,quality:fresh.lookbookQualityGate,repair:fresh.lookbookAutoRepair},migrated,offPreserved:!old.lookbookQualityGate&&!old.lookbookAutoRepair&&!old.lookbookBoldEditorial};
+    });
+    assert.deepEqual(defaults,{fresh:{style:'fashion-advertising',bold:true,quality:true,repair:true},migrated:{quality:true,repair:true,style:'fw-cream-cyan-film'},offPreserved:true});
     await page.evaluate(()=>{
       nodes.splice(0,nodes.length);connections.splice(0,connections.length);
       nodes.push({...CanvasLookbookNode.createNode({x:0,y:0}),id:'wardrobe-lookbook'});
@@ -43,6 +53,9 @@ const path=require('node:path');
     await page.locator('[data-lookbook-run]').click();
     await page.waitForFunction(()=>nodes.find(n=>n.id==='wardrobe-lookbook')?.ecomTaskId==='ui-story-1');
     assert.equal(latest.payload.options.instruction,'');
+    assert.equal(latest.payload.options.lookbook_bold_editorial,true);
+    assert.equal(latest.payload.options.lookbook_quality_gate,true);
+    assert.equal(latest.payload.options.lookbook_auto_repair,true);
     // 未编辑但保持焦点时也应该看到回填，不能被焦点恢复逻辑还原成空值。
     await input().focus();latest.ready=true;
     await page.waitForFunction(()=>document.querySelector('[data-lookbook-field="lookbookPrompt"]')?.value.includes('并肩赴约'));
@@ -86,7 +99,7 @@ const path=require('node:path');
     },story);
     assert.deepEqual(checks,{stale:false,composing:false,applied:true});
     assert.deepEqual(errors,[]);
-    const result={status:'passed',apiCalls:'mocked; no paid generation',realPersistence:true,backfillWhileFocused:true,failedStageRetainsStory:true,reloadRestoresStory:true,originalInstructionPreserved:true,editedInputPreserved:true,restoreOriginal:true,staleTaskBlocked:true,compositionBlocked:true,pageErrors:errors};
+    const result={status:'passed',defaultWorkflow:defaults,apiCalls:'mocked; no paid generation',realPersistence:true,backfillWhileFocused:true,failedStageRetainsStory:true,reloadRestoresStory:true,originalInstructionPreserved:true,editedInputPreserved:true,restoreOriginal:true,staleTaskBlocked:true,compositionBlocked:true,pageErrors:errors};
     fs.writeFileSync(path.join(output,'verification.json'),JSON.stringify(result,null,2));
     console.log(JSON.stringify(result));
   }catch(error){

@@ -214,6 +214,9 @@ from canvas_core.lookbook_brief import (
     editorial_planning_message as lookbook_editorial_planning_message,
     generation_brief as lookbook_generation_brief,
     DIRECTING_REVISION as LOOKBOOK_DIRECTING_REVISION,
+    workflow_defaults as lookbook_workflow_defaults,
+    effective_optics as lookbook_effective_optics,
+    bold_direction_active as lookbook_bold_direction_active, DEFAULT_BOLD_DIRECTION as LOOKBOOK_DEFAULT_BOLD_DIRECTION,
 )
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
@@ -18107,10 +18110,13 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     prompt_policy = str(options.get("prompt_policy") or "").strip().lower()
-    selected_style = options.get("lookbook_style")
     if prompt_policy == "lookbook":
+        options = lookbook_workflow_defaults(options)
+        if not options.get("lookbook_style"):
+            options["lookbook_style"] = dict(FASHION_EDITORIAL_STYLE)
         # 包括旧快速节点和空需求；统一先综合图片创作服装主导的故事。
         options["lookbook_mode"] = LOOKBOOK_STORY_MODE
+    selected_style = options.get("lookbook_style")
     if prompt_policy == "lookbook" and isinstance(selected_style, dict) and selected_style.get("id") == FASHION_EDITORIAL_STYLE_ID:
         options["lookbook_style"] = {**selected_style, **FASHION_EDITORIAL_STYLE}
         # 旧节点可能保留快速模式；选中完整导演风格时统一进入联合规划链路。
@@ -18803,6 +18809,7 @@ def lookbook_context_signature(snapshot: Dict[str, Any]) -> str:
     payload = {
         "story_version": LOOKBOOK_STORY_VERSION,
         "directing_revision": LOOKBOOK_DIRECTING_REVISION,
+        "bold_editorial": options.get("lookbook_bold_editorial", True),
         "instruction": str(options.get("instruction") or "").strip(),
         "fashion_director": fashion_skill_signature() if is_fashion_director(options) else "",
         "style": {
@@ -19461,6 +19468,7 @@ async def enrich_lookbook_story_brief(snapshot: Dict[str, Any]) -> Tuple[Dict[st
                      "count": snapshot.get("count"), "aspect_ratio": options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio"),
                      "resolution": snapshot.get("resolution"), "quality": snapshot.get("quality"),
                      "manual_overrides": options.get("lookbook_manual_overrides") or {},
+                     "bold_editorial": options.get("lookbook_bold_editorial", True),
                      "layout": resolve_lookbook_layout_intent(
                          str(options.get("instruction") or ""), options.get("lookbook_layout_selection"),
                          str(options.get("lookbook_cell_aspect_ratio") or snapshot.get("aspect_ratio") or "16:9")),
@@ -19923,6 +19931,9 @@ async def analyze_lookbook_outputs(snapshot: Dict[str, Any], images: List[str]) 
                     pass
         request.system_prompt = (
             LOOKBOOK_EDITORIAL_QA + "\n用户原始要求：" + brief
+            + ("\n节点的默认大胆摄影验收要求：" + LOOKBOOK_DEFAULT_BOLD_DIRECTION if lookbook_bold_direction_active(options) else "")
+            + "\n节点要求的镜头类型（默认大胆摄影也必须落实，不需要用户重复输入关键词）：" + json.dumps(sorted(lookbook_effective_optics(options)), ensure_ascii=False)
+            + "\n按真实前景尺度、透视和投影检查以上类型，不能仅凭文字标签通过；不要求每格都用相同的鱼眼效果。"
             + "\n明确交付版式：" + json.dumps(layout_intent, ensure_ascii=False)
             + "\n实际像素尺寸（画幅依据这些数值，不可凭缩略图猜测；1%以内像素对齐偏差允许）：" + json.dumps(geometry, ensure_ascii=False)
             + "\n参考图事实（仅辅助，仍以图片为准）：" + json.dumps((options.get("lookbook_story") or {}).get("reference_facts") or [], ensure_ascii=False)
@@ -20125,7 +20136,10 @@ async def apply_selected_studio_background(batch: Dict[str, Any], snapshot: Dict
 async def prepare_lookbook_creation(snapshot: Dict[str, Any], task_id: Optional[str] = None):
     """两次独立会话：服装主导故事完成并持久化后，才开始镜头提示词。"""
     snapshot = json.loads(json.dumps(snapshot))
-    snapshot.setdefault("options", {})["lookbook_mode"] = LOOKBOOK_STORY_MODE
+    snapshot["options"] = lookbook_workflow_defaults(snapshot.get("options") or {})
+    snapshot["options"]["lookbook_mode"] = LOOKBOOK_STORY_MODE
+    if not snapshot["options"].get("lookbook_style"):
+        snapshot["options"]["lookbook_style"] = dict(FASHION_EDITORIAL_STYLE)
     started = time.monotonic()
     timings = {}
     meta = {}

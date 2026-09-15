@@ -60,6 +60,40 @@ async def run(app, snapshot, out, report):
             save(out / "calls.json", calls)
 
     app.canvas_llm = capture
+    if report.get("node_defaults"):
+        payload = app.EcommerceTaskRequest(
+            operation="universal", mode="standard", inputs=snapshot["inputs"], options=snapshot["options"],
+            provider_id="shiying", model="gemini-3-pro-image-preview", count=1,
+            aspect_ratio=snapshot["aspect_ratio"], resolution=snapshot["resolution"], quality=snapshot["quality"],
+        )
+        created = await app.create_ecommerce_task(payload)
+        task_id = created["id"]
+        report.update(stage="node-task", task_id=task_id)
+        save(out / "results.json", report)
+        deadline = time.monotonic() + 1500
+        while time.monotonic() < deadline:
+            task = await app.get_ecommerce_task(task_id)
+            if task["status"] not in {"queued", "running"}:
+                break
+            await asyncio.sleep(1)
+        else:
+            raise TimeoutError("default_node_task_timeout")
+        value = task.get("request") or {}
+        result = task.get("result") or {}
+        save(out / "node-task.json", {k: task.get(k) for k in ("id", "status", "error", "progress_status", "agent_trace", "lookbook_stage_timings", "options")})
+        save(out / "prepared.json", {"snapshot": {k: value.get(k) for k in ("operation", "mode", "inputs", "options", "count", "aspect_ratio", "resolution", "quality", "size")}})
+        if task["status"] != "succeeded" or not result.get("images"):
+            raise RuntimeError(task.get("error") or "default_node_generation_failed")
+        source = Path(app.output_file_from_url(result["images"][0]))
+        image_path = out / ("result" + source.suffix)
+        shutil.copy2(source, image_path)
+        quality = result.get("lookbook_quality") or {}
+        save(out / "quality.json", quality)
+        save(out / "prompts.json", app.lookbook_generation_prompts(value))
+        report.update(status="generated", stage="done", image=image_path.name, quality=quality,
+                      node_options={k: value.get("options", {}).get(k) for k in ("lookbook_bold_editorial", "lookbook_quality_gate", "lookbook_auto_repair")})
+        save(out / "results.json", report)
+        return
     report["stage"] = "prepare"
     save(out / "results.json", report)
     if report.get("review_image"):
@@ -111,6 +145,7 @@ def main():
     parser.add_argument("--instruction", help="本轮真实测试的用户需求")
     parser.add_argument("--layout", default="grid-3x3", choices=["grid-2x2", "grid-3x3"], help="节点的拼格设置")
     parser.add_argument("--repair", action="store_true", help="对review-image运行正式质量门，最多一次定向修复")
+    parser.add_argument("--node-defaults", action="store_true", help="从正式创建任务入口验证默认导演、质检和修复，不手动开启这些选项")
     args = parser.parse_args()
     out = Path(args.output) if args.output else ROOT / "输出/Lookbook摄影多样性-20260915" / args.case
     out.mkdir(parents=True, exist_ok=True)
@@ -131,6 +166,9 @@ def main():
         task = json.loads(db.execute("SELECT payload_json FROM tasks WHERE id=?", (CASES[args.case],)).fetchone()[0])
     report = {"status": "running", "case": args.case, "source_task": CASES[args.case],
               "method": "正式prepare_lookbook_creation、lookbook_generation_prompts、execute_lookbook_story_batch与analyze_lookbook_outputs；不手改返回提示词、不修图"}
+    if args.node_defaults:
+        report["node_defaults"] = True
+        report["method"] = "正式create_ecommerce_task任务入口→默认导演→生图→默认质检/一次修复→任务保存；只填写主推商品，不提供广角提示词"
     if args.review_image:
         if not args.prepared:
             raise ValueError("复核图片必须同时指定原始prepared方案")
@@ -154,6 +192,8 @@ def main():
                 "lookbook_manual_overrides": {"count": 1, "aspect_ratio": "16:9", "resolution": "2k", "quality": "high"},
             }
             snapshot.update(count=1, aspect_ratio="16:9", resolution="2k", size="2048x1152", quality="high", prompt="")
+            if args.node_defaults:
+                snapshot["options"].pop("lookbook_style", None)
             if args.prepared:
                 prepared_path = Path(args.prepared).resolve()
                 snapshot = json.loads(prepared_path.read_text(encoding="utf-8"))["snapshot"]

@@ -2,7 +2,8 @@
     'use strict';
     const TYPE = 'lookbook';
     const composingNodes = new WeakSet();
-    const DEFAULT_STYLE_ID = 'fw-cream-cyan-film';
+    const DEFAULT_STYLE_ID = 'fashion-advertising';
+    const WORKFLOW_VERSION = 'editorial-default-v1';
     const DEFAULT_GRAIN_STRENGTH = 0.095;
     const LAYOUT_PRESETS = [
         {id:'auto',name:'自动识别',rows:1,columns:1},
@@ -331,7 +332,7 @@
             node.lookbookAutoDecision={};
         }
         const selectedStyle=STYLES.find(item=>item.id===node.lookbookStyleId)||defaultStyle;
-        const restoreBuiltinFw=node.lookbookStyleSource==='builtin'&&node.lookbookStyleId===DEFAULT_STYLE_ID&&node.lookbookFwStyleRevision!=='original-v1';
+        const restoreBuiltinFw=node.lookbookStyleSource==='builtin'&&node.lookbookStyleId==='fw-cream-cyan-film'&&node.lookbookFwStyleRevision!=='original-v1';
         if(restoreBuiltinFw){
             node.lookbookStyleName=selectedStyle.name;
             node.lookbookStylePrompt=selectedStyle.prompt;
@@ -345,6 +346,13 @@
         node.lookbookStyleCover=String((serverStyles!==null?savedStyle?.cover:'')||node.lookbookStyleCover||savedStyle?.cover||'');
         // 联网研究是可选增强项；缺省值必须关闭，但保留用户显式勾选的 true。
         node.lookbookSearch=node.lookbookSearch===true;
+        // 将已验证的完整流程一次性迁移到旧节点；之后尊重用户主动关闭。
+        if(node.lookbookWorkflowVersion!==WORKFLOW_VERSION){
+            node.lookbookQualityGate=true;
+            node.lookbookAutoRepair=true;
+            node.lookbookWorkflowVersion=WORKFLOW_VERSION;
+        }
+        node.lookbookBoldEditorial=node.lookbookBoldEditorial!==false;
         node.lookbookQualityGate=node.lookbookQualityGate===true;
         node.lookbookAutoRepair=node.lookbookAutoRepair===true;
         node.lookbookResearchStatus=String(node.lookbookResearchStatus||'idle');
@@ -377,7 +385,7 @@
         node.runError=String(node.runError||'');
         return node;
     }
-    function createNode(point={}){ const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0]; return normalize({id:'',type:TYPE,x:Number(point.x||0),y:Number(point.y||0),w:430,lookbookPrompt:'',lookbookMode:'story-campaign',lookbookManualOverrides:{},lookbookStyleId:DEFAULT_STYLE_ID,lookbookStyleName:defaultStyle.name,lookbookStylePrompt:defaultStyle.prompt,lookbookStyleCover:'',lookbookStyleSource:'builtin',lookbookFwStyleRevision:'original-v1',lookbookSearch:false,lookbookQualityGate:false,lookbookAutoRepair:false,lookbookResearchStatus:'idle',lookbookAgentStage:'',lookbookAutoDecision:{},lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookLayoutSelection:{preset_id:'auto',rows:1,columns:1,gap:1},lookbookGenerationExpanded:false,lookbookResearchEvidenceStatus:'',lookbookGrainStrength:DEFAULT_GRAIN_STRENGTH,aspectRatio:'16:9',resolution:'2k',quality:'high',count:4,generatedOutputs:[],inputs:[],running:false,runError:''}); }
+    function createNode(point={}){ const defaultStyle=STYLES.find(item=>item.id===DEFAULT_STYLE_ID)||STYLES[0]; return normalize({id:'',type:TYPE,x:Number(point.x||0),y:Number(point.y||0),w:430,lookbookPrompt:'',lookbookMode:'story-campaign',lookbookManualOverrides:{},lookbookStyleId:DEFAULT_STYLE_ID,lookbookStyleName:defaultStyle.name,lookbookStylePrompt:defaultStyle.prompt,lookbookStyleCover:'',lookbookStyleSource:'builtin',lookbookFwStyleRevision:'original-v1',lookbookSearch:false,lookbookBoldEditorial:true,lookbookQualityGate:true,lookbookAutoRepair:true,lookbookResearchStatus:'idle',lookbookAgentStage:'',lookbookAutoDecision:{},lookbookContextSignature:'',lookbookResearchSources:[],lookbookResearchImages:[],lookbookResearchQueries:[],lookbookResearchDirection:{},lookbookResearchShots:[],lookbookStoryCasePatterns:[],lookbookNarrativeMethods:[],lookbookLayoutIntent:{},lookbookLayoutSelection:{preset_id:'auto',rows:1,columns:1,gap:1},lookbookGenerationExpanded:false,lookbookResearchEvidenceStatus:'',lookbookGrainStrength:DEFAULT_GRAIN_STRENGTH,aspectRatio:'16:9',resolution:'2k',quality:'high',count:4,generatedOutputs:[],inputs:[],running:false,runError:''}); }
     function bodyHtml(node){
         normalize(node);
         const researchStatus=node.lookbookAgentStage || (node.lookbookResearchStatus==='running'?'正在执行当前 Skill':'等待生成');
@@ -386,14 +394,14 @@
         const ratios=['1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9'];
         return `<div class="ecom-node-panel lookbook-node-panel">
             <div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div>
-            <label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="可留空：AI 先综合参考图，生成以服装为主的自然情境与立意，再编写多机位提示词">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">先生成故事并回填，再编写服装展示与多机位提示词。支持数量、画幅、分辨率；默认每张独立成片，仅明确选择拼图/版式时组合排版。</small></label>
+            <label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="可留空：AI 先综合参考图，生成以服装为主的自然情境与立意，再编写多机位提示词">${esc(node.lookbookPrompt)}</textarea><small class="lookbook-brief-hint">默认先确定主角与情境，再联合设计大胆镜头，并质检、定向修复。填写主推商品即可，无需重复写广角关键词。支持数量、画幅、分辨率；默认每张独立成片，仅明确选择拼图/版式时组合排版。</small></label>
             ${node.lookbookStoryNotice?`<p class="lookbook-brief-hint" data-lookbook-story-notice>${esc(node.lookbookStoryNotice)}</p>`:''}
             ${node.lookbookStory?`<details class="lookbook-brief-hint" data-lookbook-original ${node.lookbookOriginalExpanded?'open':''}><summary>查看原始需求</summary><p style="white-space:pre-wrap">${esc(node.lookbookStoryInput||'未填写，依据参考图创作')}</p><button type="button" data-lookbook-restore-brief>恢复原始需求</button></details>`:''}
             <label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，最多30秒，优先执行已选风格）</span></label>${node.lookbookSearch&&node.lookbookResearchNote?`<p class="lookbook-brief-hint">${esc(node.lookbookResearchNote)}</p>`:''}
             <button type="button" class="lookbook-layout-button" data-lookbook-layout><i data-lucide="layout-grid"></i><span><small>拼图版式</small><strong>${esc(layoutSummary(node))}</strong></span><em>子图 ${esc(node.aspectRatio)} · 输出 ${esc(layoutOutputAspectRatio(node))}</em><i data-lucide="chevron-right"></i></button>
             <section class="lookbook-settings ${node.lookbookGenerationExpanded?'expanded':''}" data-lookbook-settings>
                 <button type="button" class="lookbook-settings-toggle" data-lookbook-settings-toggle aria-expanded="${node.lookbookGenerationExpanded?'true':'false'}"><i data-lucide="settings-2"></i><span><strong>生成参数</strong><small>${esc(generationSummary(node))}</small></span><i data-lucide="chevron-down"></i></button>
-                <div class="lookbook-settings-content" data-lookbook-settings-content ${node.lookbookGenerationExpanded?'':'hidden'}>${generationChoicesHtml(node)}<div class="ecom-node-params"><select data-lookbook-field="aspectRatio">${ratios.map(value=>`<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select><select data-lookbook-field="resolution">${['1k','2k','4k'].map(value=>`<option value="${value}" ${node.resolution===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><select data-lookbook-field="quality">${['auto','medium','high'].map(value=>`<option value="${value}" ${node.quality===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><label class="ecom-count">成品数量<input type="number" min="1" max="20" value="${node.count}" data-lookbook-field="count"></label></div><label class="lookbook-grain-control"><span>颗粒强度 <output data-lookbook-grain-value>${node.lookbookGrainStrength.toFixed(3)}</output></span><input type="range" min="0" max="0.2" step="0.005" value="${node.lookbookGrainStrength}" data-lookbook-field="lookbookGrainStrength" aria-label="颗粒强度"></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookQualityGate" ${node.lookbookQualityGate?'checked':''}><span>生成后质检（增加等待，单次最多60秒）</span></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookAutoRepair" ${node.lookbookAutoRepair?'checked':''} ${node.lookbookQualityGate?'':'disabled'}><span>自动修复弱图（额外生图与费用）</span></label></div>
+                <div class="lookbook-settings-content" data-lookbook-settings-content ${node.lookbookGenerationExpanded?'':'hidden'}>${generationChoicesHtml(node)}<div class="ecom-node-params"><select data-lookbook-field="aspectRatio">${ratios.map(value=>`<option value="${value}" ${node.aspectRatio===value?'selected':''}>${value}</option>`).join('')}</select><select data-lookbook-field="resolution">${['1k','2k','4k'].map(value=>`<option value="${value}" ${node.resolution===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><select data-lookbook-field="quality">${['auto','medium','high'].map(value=>`<option value="${value}" ${node.quality===value?'selected':''}>${value.toUpperCase()}</option>`).join('')}</select><label class="ecom-count">成品数量<input type="number" min="1" max="20" value="${node.count}" data-lookbook-field="count"></label></div><label class="lookbook-grain-control"><span>颗粒强度 <output data-lookbook-grain-value>${node.lookbookGrainStrength.toFixed(3)}</output></span><input type="range" min="0" max="0.2" step="0.005" value="${node.lookbookGrainStrength}" data-lookbook-field="lookbookGrainStrength" aria-label="颗粒强度"></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookBoldEditorial" ${node.lookbookBoldEditorial?'checked':''}><span>大胆时尚镜头（近距离广角与强透视，用户明确要求优先）</span></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookQualityGate" ${node.lookbookQualityGate?'checked':''}><span>时尚张力与商品保真质检（增加等待）</span></label><label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookAutoRepair" ${node.lookbookAutoRepair?'checked':''} ${node.lookbookQualityGate?'':'disabled'}><span>自动修复弱图（最多1次额外生图与费用）</span></label></div>
             </section>
             <button class="ecom-node-run lookbook-run" type="button" data-lookbook-run aria-busy="${node.running?'true':'false'}"><i data-lucide="wand-sparkles"></i>${node.running?'生成中…':'生成 Lookbook'}</button>${node.runError?`<div class="ecom-node-status failed"><span></span>${esc(node.runError)}</div>`:''}<div class="lookbook-research-status"><i data-lucide="sparkles"></i>${esc(researchStatus)}</div>${qualityDetails}
         </div>`;
@@ -469,7 +477,7 @@
                         node.lookbookManualOverrides[optionKey]=node[key];
                         resetDerivedResearch(node);
                     }
-                    if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node);
+                    if(key==='lookbookPrompt'||key==='lookbookSearch'||key==='lookbookBoldEditorial')resetDerivedResearch(node);
                     refreshInlineSummaries(root,node);
                     options.onChange?.(node,{render:false});
                 }

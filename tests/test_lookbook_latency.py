@@ -11,7 +11,7 @@ def snapshot(**options):
         "operation": "universal", "mode": "standard", "count": 2, "aspect_ratio": "16:9",
         "resolution": "2k", "quality": "high", "size": "2048x1152", "parameters": {},
         "inputs": [], "prompt": "base",
-        "options": {"prompt_policy": "lookbook", "lookbook_mode": "story-campaign",
+        "options": {"lookbook_bold_editorial": False, "prompt_policy": "lookbook", "lookbook_mode": "story-campaign",
                     "instruction": "两张连续广告", "lookbook_style": {"id": "standard-advertising", "prompt": "style-lock-token"}, **options},
     }
 
@@ -132,16 +132,16 @@ class LookbookLatencyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cyan", result["options"]["lookbook_plan"])
         self.assertEqual(len(main.lookbook_generation_prompts(result)), 2)
 
-    async def test_quality_is_off_by_default(self):
+    async def test_explicitly_disabled_quality_skips_review(self):
         batch = {"images": ["original"]}
         with patch.object(main, "analyze_lookbook_outputs", new_callable=AsyncMock) as check:
-            result, meta = await main.improve_lookbook_batch(batch, snapshot(), {})
+            result, meta = await main.improve_lookbook_batch(batch, snapshot(lookbook_quality_gate=False), {})
         self.assertIs(result, batch)
         self.assertIsNone(meta)
         check.assert_not_awaited()
 
-    async def test_task_default_delivers_without_quality_or_second_generation(self):
-        value = snapshot()
+    async def test_task_respects_disabled_quality_without_second_generation(self):
+        value = snapshot(lookbook_quality_gate=False, lookbook_auto_repair=False)
         value["route_candidates"] = [{"provider_id": "test", "model": "test"}]
         batch = {"provider": {"id": "test", "name": "Test"}, "model": "test", "images": ["one", "two"],
                  "image_items": [], "raw": {}, "generation_started_at": 1, "generation_completed_at": 2,

@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 STORY_VERSION = "lookbook-editorial-story-v2"
-DIRECTING_REVISION = "editorial-optics-product-v1"
+DIRECTING_REVISION = "editorial-default-workflow-v2"
 REFERENCE_LIMIT = 14  # 与现有图片路由及通用参考契约一致；解析不能静默截为12张。
 
 STORY_SYSTEM = """你是 Lookbook 时尚创意总监。这是第一次独立会话，只综合参考图片并确定故事与立意，下一次会话才编写生图分镜。
@@ -23,8 +23,9 @@ Lookbook是穿着的人有生活、服装自然成为视觉中心，不是道具
 参数与所选风格保持用户优先；settings只建议未明确的值，不让故事中的镜头数字覆盖用户交付数量。无需联网；不要输出生图长提示词。
 指定卖什么就围绕什么创作：用户主推牛仔裤时，wardrobe.focus_mode必须为product，target必须指向参考图的牛仔裤，不能回退成整体造型或黑色上衣。服装细节的触碰也应落在主推商品。人物表情可以服务广告态度，但不能用一堆脸部和上衣特写占掉牛仔裤的主视觉。
 摄影表达默认具有时尚编辑张力，不默认35/50/85mm轮换。允许近距离广角、超广角、鱼眼、贴地仰拍、俯冲视角与强烈透视。用户明确要求广角/鱼眼时将其写进摄影意图；安静表情不等于保守机位。透视可以夸张，商品本身的真实版型和结构不能被替换。
+节点开启大胆时尚时，即使用户只说“主推牛仔裤”或不写需求，也默认规划高张力摄影；无需用户重复填写广角关键词。不要固定同一套动作或每次强加鱼眼。只有用户明确限制镜头/透视/构图时，才在camera_constraints返回restrained与对应原文quote；仅表情安静、优雅不能作为收敛摄影的理由。
 只返回严格JSON（所有图片逐一列reference_index，不遗漏）：
-{"title":"","story":"","intent":"","wardrobe":{"focus_mode":"product或outfit","target":"整体造型或用户明确主推的商品","visible_features":[""],"coverage":[""]},"reference_facts":[{"reference_index":1,"facts":"","preserve":"","not_locked":""}],"creative_extensions":[""],"beats":[{"event":"","motivation":"","garment_value":""}],"camera_intent":"","settings":{"count":4,"aspect_ratio":"16:9","resolution":"2k","quality":"high"},"auto_decision":{"selected_style_id":"仅自动风格时选择给定ID","rationale":"","art_direction":""}}
+{"title":"","story":"","intent":"","wardrobe":{"focus_mode":"product或outfit","target":"整体造型或用户明确主推的商品","visible_features":[""],"coverage":[""]},"reference_facts":[{"reference_index":1,"facts":"","preserve":"","not_locked":""}],"creative_extensions":[""],"beats":[{"event":"","motivation":"","garment_value":""}],"camera_intent":"","camera_constraints":{"mode":"bold或restrained","quote":"用户明确摄影限制原文，没有则空"},"settings":{"count":4,"aspect_ratio":"16:9","resolution":"2k","quality":"high"},"auto_decision":{"selected_style_id":"仅自动风格时选择给定ID","rationale":"","art_direction":""}}
 输出前自查：情节是否自然、服装是否始终是视觉主体、有没有凭空道具抢戏、是否保留原衣物结构、是否给不同机位留出空间。"""
 
 EXECUTION_RULES = """WARDROBE-FIRST LOOKBOOK EXECUTION — EDITORIAL FREEDOM:
@@ -43,6 +44,10 @@ Choose actual optics, proximity and viewpoint, not a menu of conventional focal 
 A focal-length label alone is insufficient: every camera must declare lens_mm, projection (rectilinear or fisheye), distance_m to the emphasized foreground, height_m, and perspective_effect describing visible scale/convergence/curvature. A wide lens used far away is still a conventional image. Fisheye means visible optical curvature and expanded foreground, filling the rectangular photograph without a circular black vignette unless requested. Tilt belongs inside a level grid.
 Honor explicitly requested wide and fisheye lenses: a wide-angle campaign needs at least one third of its shots at 24mm or wider and within 1.5m of the emphasized foreground; a fisheye request needs at least one fisheye shot. Preserve a restrained or no-distortion request. Facial emotion, camera intensity and body amplitude are independent.
 If the user names a product, at least two thirds of frames must visually prioritize that product, with product_emphasis=dominant. Product_focus and product_visibility describe what draws the eye and the visible evidence; supporting garments and the face may support attitude but must not displace the product. For jeans, use the actual denim volume, waistband, pockets, stitching, knee folds and hems as compositional geometry. Place denim near the lens, let legs form strong diagonals or depth planes, touch the denim rather than an unrelated top. At least one view must establish the actual trouser silhouette. Do not invent seams, stretch the garment into another cut, enlarge footwear into the advertised subject, or confuse optical foreshortening with changing the product.
+"""
+
+DEFAULT_BOLD_DIRECTION = """DEFAULT BOLD EDITORIAL IS ACTIVE:
+Make the visual tension unmistakable, not slight, gentle or merely a conventional low-angle full-body picture. At least one third of the sequence must put the primary subject/product within 0.7m of a 24mm-or-wider lens. Move the photographer close enough that foreground shape dominates and the rest of the body recedes dramatically. Use intentional crop, opposing diagonals, deep foreshortening, floor-near or plunging views. Do not stand back to fit the whole body in every photograph. Keep one readable product silhouette across the series, not a full-body quota. Other shots provide tactile or emotional contrast. A label such as 21mm without strong visible near/far scale fails this direction. Preserve exact reference construction, not its catalog framing.
 """
 
 
@@ -67,6 +72,35 @@ def requested_optics(options: dict) -> set[str]:
                 if not re.search(r"不要|不用|禁止|不使用|避免|无畸变|without|\bno\b", prefix, re.I):
                     choices.add(name)
     return choices
+
+
+def workflow_defaults(options: dict) -> dict:
+    result = dict(options)
+    for key in ("lookbook_bold_editorial", "lookbook_quality_gate", "lookbook_auto_repair"):
+        result.setdefault(key, True)
+    result.setdefault("lookbook_max_retries", 1)
+    return result
+
+
+def effective_optics(options: dict) -> set[str]:
+    choices = requested_optics(options)
+    if bold_direction_active(options):
+        choices.add("wide")
+    return choices
+
+
+def bold_direction_active(options: dict) -> bool:
+    if options.get("lookbook_bold_editorial") is not True:
+        return False
+    text = str(options.get("instruction") or "")
+    constraint = (options.get("lookbook_story") or {}).get("camera_constraints") or {}
+    quote = str(constraint.get("quote") or "").strip()
+    explicit_restraint = (constraint.get("mode") == "restrained" and quote and quote in text
+                          and re.search(r"镜头|摄影|机位|焦段|透视|构图|广角|鱼眼|mm|lens|camera|perspective", quote, re.I)
+                          and not re.search(r"(?:不要|拒绝|避免|不用).{0,8}(?:常规|普通|保守|克制)", quote))
+    no_wide = re.search(r"(?:不要|不用|不使用|禁止|避免|without|\bno\b)[^，,。;；\n]{0,12}(?:广角|wide[ -]?angle)", text, re.I)
+    fixed_lens = re.search(r"(?:只|仅|only)[^，,。;；\n]{0,12}\d+\s*mm", text, re.I)
+    return not bool(explicit_restraint or no_wide or fixed_lens)
 
 
 def _text(value: Any, name: str, limit: int) -> str:
@@ -121,6 +155,9 @@ def normalize_story(data: Any, reference_count: int) -> dict:
     if len(result["ad_brief"]) > 6000:
         raise ValueError("Lookbook 广告需求过长，请精简故事与摄影意图")
     result["version"] = STORY_VERSION
+    constraints = data.get("camera_constraints")
+    if isinstance(constraints, dict) and constraints.get("mode") in {"bold", "restrained"}:
+        result["camera_constraints"] = {"mode": constraints["mode"], "quote": str(constraints.get("quote") or "")[:500]}
     return result
 
 
@@ -137,6 +174,9 @@ def story_handoff(options: dict) -> str:
         return ""
     return ("\n第二次独立会话：第一轮故事提供情境与事实依据；保留用户意图，允许重新导演其中雷同的自动动作建议。\n"
             + EXECUTION_RULES + "\n" + OPTICS_DIRECTION
+            + ("\n" + DEFAULT_BOLD_DIRECTION if bold_direction_active(options) else "")
+            + "\n本次必须落实的镜头类型：" + json.dumps(sorted(effective_optics(options)), ensure_ascii=False)
+            + "。大胆时尚是节点默认摄影策略，与用户选择的色彩风格分别执行；用户明确摄影限制优先。"
             + "\n明确主推商品：" + json.dumps(product_direction(options), ensure_ascii=False)
             + "\n用户原始要求（优先）：" + str(options.get("instruction") or "（空）")
             + "\n已完成故事与服装展示依据：" + json.dumps(story, ensure_ascii=False))
@@ -183,7 +223,7 @@ def validate_story_shots(cards: list[dict], options: dict) -> list[dict]:
         if signature in signatures:
             raise ValueError("Lookbook 出现重复动作、表情与构图组合；仅改机位编号不算新镜头")
         signatures.add(signature)
-    optics = requested_optics(options)
+    optics = effective_optics(options)
     if optics:
         wide_count = fisheye_count = 0
         for shot in shots:
@@ -200,10 +240,10 @@ def validate_story_shots(cards: list[dict], options: dict) -> list[dict]:
             if projection not in {"rectilinear", "fisheye"}:
                 raise ValueError("镜头projection必须为rectilinear或fisheye")
             _text(camera.get("perspective_effect"), "camera.perspective_effect", 1500)
-            wide_count += lens <= 24 and distance <= 1.5
+            wide_count += lens <= 24 and distance <= (0.7 if bold_direction_active(options) else 1.5)
             fisheye_count += projection == "fisheye"
         if "wide" in optics and wide_count < max(1, (len(shots)+2)//3):
-            raise ValueError("用户要求广角张力，但近距离广角镜头不足三分之一；请改变焦段与前景距离，不能只写低机位")
+            raise ValueError("本次摄影策略要求广角张力，但近距离广角镜头不足三分之一；默认大胆摄影须24mm以内且距主角前景不超过0.7m。请真正靠近并允许裁切，不能只写低机位")
         if "fisheye" in optics and not fisheye_count:
             raise ValueError("用户明确要求鱼眼，但没有fisheye镜头；请规划真实鱼眼投影与可见曲率")
     product = product_direction(options)
@@ -217,7 +257,8 @@ def validate_story_shots(cards: list[dict], options: dict) -> list[dict]:
             dominant += shot["product_emphasis"] == "dominant"
         if dominant < (2*len(shots)+2)//3:
             raise ValueError("主推商品未成为至少三分之二镜头的构图主体；减少无关脸部/上衣展示")
-    return [{**card, "lookbook_story_version": STORY_VERSION, "product_direction": product} for card in cards]
+    return [{**card, "lookbook_story_version": STORY_VERSION, "product_direction": product,
+             "bold_editorial": bold_direction_active(options)} for card in cards]
 
 
 def panel_planning_rules(layout: dict) -> str:
@@ -283,6 +324,7 @@ def editorial_generation_prompt(brief: str, bible: Any, card: dict, labels: list
         "[" + " | ".join(str(row*columns+col+1) for col in range(columns)) + "]" for row in range(int(layout.get("rows") or 1)))
         if layout.get("explicit") else "")
     return (delivery + layout_map
+            + ("\n" + DEFAULT_BOLD_DIRECTION if card.get("bold_editorial") else "")
             + "\nPhotograph cinematic fashion moments from the reference setting: expressive faces, intimate hand-on-fabric contact, and genuinely different camera viewpoints. "
             "WARDROBE-FIRST means preserve the outfit across the series, not show every detail in every frame. "
             "Execute the expressive portraits and intentional crops. Avoid repetitive neutral standing poses. "

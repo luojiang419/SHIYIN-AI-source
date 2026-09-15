@@ -24,10 +24,10 @@ class LookbookNodeFrontendTests(unittest.TestCase):
         self.assertIn("name:'李维斯广告·环境自适应纪实'", styles)
         self.assertIn("LEVIS_ADAPTIVE_PROMPT", self.lookbook)
 
-    def test_2026_fw_is_the_default_and_removed_builtin_styles_are_migrated(self):
+    def test_fashion_director_is_default_and_removed_styles_are_migrated(self):
         self.assertIn("id:'fw-cream-cyan-film'", self.lookbook)
         self.assertIn("16mm/35mm film grain", self.lookbook)
-        self.assertIn("DEFAULT_STYLE_ID = 'fw-cream-cyan-film'", self.lookbook)
+        self.assertIn("DEFAULT_STYLE_ID = 'fashion-advertising'", self.lookbook)
         self.assertIn("const removedBuiltinStyle=", self.lookbook)
         self.assertIn("node.lookbookStyleName=defaultStyle.name", self.lookbook)
         self.assertIn("node.lookbookStylePrompt=defaultStyle.prompt", self.lookbook)
@@ -138,7 +138,7 @@ if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLa
 
     def test_brief_and_style_changes_clear_derived_research_without_touching_presets(self):
         self.assertIn("function resetDerivedResearch(node)", self.lookbook)
-        self.assertIn("if(key==='lookbookPrompt'||key==='lookbookSearch')resetDerivedResearch(node)", self.lookbook)
+        self.assertIn("if(key==='lookbookPrompt'||key==='lookbookSearch'||key==='lookbookBoldEditorial')resetDerivedResearch(node)", self.lookbook)
         self.assertIn("resetDerivedResearch(pickerNode); Object.assign(pickerNode,{lookbookStyleId:style.id", self.lookbook)
         styles = self.lookbook[self.lookbook.index("const STYLES = ["):self.lookbook.index("];", self.lookbook.index("const STYLES = ["))]
         self.assertEqual(re.findall(r"\{id:'([^']+)'", styles), ["fw-cream-cyan-film", "levis-adaptive-campaign", "standard-advertising", "levis-high-key-color", "levis-black-white", "fashion-advertising"])
@@ -152,8 +152,8 @@ if(window.CanvasLookbookNode.outputAspectRatio(node)!=='9:16' || node.lookbookLa
         self.assertNotIn("lookbookQualityScore", body)
         self.assertIn("lookbookQualityGate", body)
         self.assertIn("lookbookAutoRepair", body)
-        self.assertIn("lookbookQualityGate:false", self.lookbook)
-        self.assertIn("lookbookAutoRepair:false", self.lookbook)
+        self.assertIn("lookbookQualityGate:true", self.lookbook)
+        self.assertIn("lookbookAutoRepair:true", self.lookbook)
 
     def test_lookbook_uses_image_generation_secondary_choice_menus(self):
         self.assertIn("data-lookbook-generation-settings", self.lookbook)
@@ -295,7 +295,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.15.lookbook.38", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.15.lookbook.39", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertRegex(self.html, r"canvas\.css\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")
         self.assertRegex(self.html, r"canvas\.js\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")

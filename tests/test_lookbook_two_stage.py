@@ -12,7 +12,7 @@ def fixture(count=3, reference_count=1, instruction="", **options):
     return {"operation": "universal", "mode": "standard", "count": count, "aspect_ratio": "3:4",
             "resolution": "2k", "quality": "high", "size": "1536x2048", "parameters": {}, "prompt": "base",
             "inputs": [{"url": f"/assets/input/ref-{i}.png", "reference_type": "subject", "lookbook_role": "人物", "label": f"R{i}"} for i in range(1, reference_count+1)],
-            "options": {"prompt_policy": "lookbook", "lookbook_mode": "story-campaign", "instruction": instruction,
+            "options": {"lookbook_bold_editorial": False, "prompt_policy": "lookbook", "lookbook_mode": "story-campaign", "instruction": instruction,
                         "lookbook_style": {"id": "standard-advertising", "prompt": "selected-style"}, **options}}
 
 

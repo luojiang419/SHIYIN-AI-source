@@ -1,0 +1,152 @@
+{
+  "scope": "820-GP 452节点隔离副本；Edge headless 1440x1000，完整工作台入口；未清空OS缓存，未使用正式WebView2数据目录，后端lifespan关闭。",
+  "runs": [
+    {
+      "label": "before",
+      "activatedToInteractiveMs": 2613.5,
+      "longTasks": [
+        {
+          "start": 1366.3999999761581,
+          "duration": 253,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "http://127.0.0.1:13242/static/canvas.html?warm=1"
+            }
+          ]
+        },
+        {
+          "start": 1643.5,
+          "duration": 828,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/ecommerce.html?v=2.0.0.1789348757"
+            }
+          ]
+        },
+        {
+          "start": 2483.899999976158,
+          "duration": 764,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/ecommerce.html?v=2.0.0.1789348757"
+            }
+          ]
+        },
+        {
+          "start": 5760.099999964237,
+          "duration": 143,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "http://127.0.0.1:13242/static/canvas.html?warm=1"
+            }
+          ]
+        },
+        {
+          "start": 6010.199999988079,
+          "duration": 250,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/api-settings.html?v=2.0.0.1789270428"
+            }
+          ]
+        },
+        {
+          "start": 6517.899999976158,
+          "duration": 73,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/ecommerce.html?v=2.0.0.1789348757"
+            }
+          ]
+        },
+        {
+          "start": 6597.399999976158,
+          "duration": 159,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/ecommerce.html?v=2.0.0.1789348757"
+            }
+          ]
+        },
+        {
+          "start": 6780.399999976158,
+          "duration": 122,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/ecommerce.html?v=2.0.0.1789348757"
+            }
+          ]
+        },
+        {
+          "start": 6948.199999988079,
+          "duration": 78,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "/static/ecommerce.html?v=2.0.0.1789348757"
+            }
+          ]
+        }
+      ],
+      "longTaskTotalMs": 2670,
+      "mouseWheelChanges": 24,
+      "mouseWheelAttempts": 24,
+      "scriptErrors": []
+    },
+    {
+      "label": "preload-disabled-control",
+      "activatedToInteractiveMs": 245.6,
+      "longTasks": [
+        {
+          "start": 683.5999999642372,
+          "duration": 129,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "http://127.0.0.1:13242/static/canvas.html?warm=1"
+            }
+          ]
+        }
+      ],
+      "longTaskTotalMs": 129,
+      "mouseWheelChanges": 24,
+      "mouseWheelAttempts": 24,
+      "scriptErrors": []
+    },
+    {
+      "label": "fixed",
+      "activatedToInteractiveMs": 258.2,
+      "longTasks": [
+        {
+          "start": 767.2999999523163,
+          "duration": 124,
+          "attribution": [
+            {
+              "name": "unknown",
+              "src": "http://127.0.0.1:13242/static/canvas.html?warm=1"
+            }
+          ]
+        }
+      ],
+      "longTaskTotalMs": 124,
+      "mouseWheelChanges": 24,
+      "mouseWheelAttempts": 24,
+      "scriptErrors": []
+    }
+  ],
+  "storageFault": {
+    "kind": "IndexedDB.open never settles",
+    "firstMediaRequestMs": 194,
+    "scenarioCompletedMs": 1716,
+    "visibleWhileInert": true,
+    "oldRecoverySlotProtected": true
+  }
+}

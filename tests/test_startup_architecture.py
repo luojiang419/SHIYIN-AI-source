@@ -42,7 +42,7 @@ class VisibleShellStartupTests(unittest.TestCase):
         self.assertIn("function retryStudioBoot()", self.source)
         self.assertIn("finishStudioBoot();", self.source)
 
-    def test_all_pages_are_eager_iframes_for_zero_wait_navigation(self):
+    def test_pages_initialize_on_visit_and_wait_only_for_active_page(self):
         for page_id in (
             "ecommerce",
             "gpt-chat",
@@ -56,25 +56,23 @@ class VisibleShellStartupTests(unittest.TestCase):
                 self.source,
                 rf'<iframe id="frame-{page_id}"[^>]*loading="eager"',
             )
-        self.assertIn("function preloadStudioFrames(activeId)", self.source)
+        self.assertNotIn("function preloadStudioFrames(activeId)", self.source)
         self.assertIn("ensureStudioFrameSource(frame)", self.source)
         self.assertIn("await waitForStudioFrame(activeFrame);", self.source)
-        self.assertIn("preloadStudioFrames(id);", self.source)
+        self.assertNotIn("preloadStudioFrames(id);", self.source)
 
-    def test_preloaded_frames_are_not_evicted(self):
-        self.assertIn("const STUDIO_KEEP_PRELOADED_FRAMES = true;", self.source)
+    def test_visited_frames_are_not_evicted(self):
+        self.assertIn("const STUDIO_KEEP_VISITED_FRAMES = true;", self.source)
         self.assertRegex(
             self.source,
-            re.compile(r"function maybeUnloadIdleFrames\(\)\s*\{\s*if\(STUDIO_KEEP_PRELOADED_FRAMES\) return;", re.S),
+            re.compile(r"function maybeUnloadIdleFrames\(\)\s*\{\s*if\(STUDIO_KEEP_VISITED_FRAMES\) return;", re.S),
         )
 
-    def test_preload_tracks_each_frame_and_completes_with_readiness_event(self):
-        self.assertIn("const STUDIO_FRAME_PRELOAD_CONCURRENCY = 3;", self.source)
-        self.assertIn("studioFramePreloadPromise = Promise.all(", self.source)
+    def test_on_demand_frames_track_readiness(self):
         self.assertIn("function studioFrameDocumentState(frame)", self.source)
         self.assertIn("typeof frame.contentWindow?.loadAll !== 'function'", self.source)
         self.assertIn("studioFrameReadyState[id] = state;", self.source)
-        self.assertIn("studio-all-frames-ready", self.source)
+        self.assertIn("studio-frame-ready", self.source)
 
     def test_versioning_rewrites_iframe_data_src_assets(self):
         # 页面入口使用 data-src 延迟初始化 iframe；它也必须随应用版本换资源键，

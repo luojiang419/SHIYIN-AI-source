@@ -2643,14 +2643,10 @@
         const IFRAME_IDLE_UNLOAD_MS = 15 * 60 * 1000;
         const IFRAME_KEEP_RECENT = 2;
         const IFRAME_PROTECTED_PAGES = new Set(PAGE_IDS);
-        // 页面切换的“无等待”依赖 iframe 文档已经初始化。首屏只等待当前页面，
-        // 其它页面在遮罩解除后分批预加载，避免多个重量级画布脚本同时争用主线程。
+        // 同源 iframe 共用渲染主线程；隐藏页面的初始化同样阻塞画布输入。
+        // 只初始化用户访问的页面，已访问文档继续驻留以保留切换状态。
         const STUDIO_FRAME_READY_TIMEOUT_MS = 1800;
-        const STUDIO_FRAME_PRELOAD_CONCURRENCY = 3;
-        const STUDIO_KEEP_PRELOADED_FRAMES = true;
-        let studioFramePreloadStarted = false;
-        let studioFramePreloadPromise = null;
-        let studioFramePreloadPaused = false;
+        const STUDIO_KEEP_VISITED_FRAMES = true;
         const studioFrameReadyState = Object.create(null);
         let canvasManagerRetryTimer = 0;
 
@@ -2697,12 +2693,6 @@
             return true;
         }
 
-        function pauseStudioFramePreload(reason='navigation') {
-            studioFramePreloadPaused = true;
-            document.documentElement.dataset.studioPreload = 'paused';
-            window.dispatchEvent(new CustomEvent('studio-frame-preload-paused', {detail:{reason}}));
-        }
-
         function touchFrameUsage(id) {
             const frame = document.getElementById('frame-' + id);
             if(frame) frame.dataset.lastActiveAt = String(Date.now());
@@ -2747,41 +2737,8 @@
             });
         }
 
-        function preloadStudioFrames(activeId) {
-            if(studioFramePreloadStarted) return studioFramePreloadPromise || Promise.resolve();
-            studioFramePreloadStarted = true;
-            const queue = PAGE_IDS.filter(id => {
-                if(id === activeId) return false;
-                if(ADMIN_PAGE_IDS.has(id) && !currentStudioAccount?.is_admin) return false;
-                return true;
-            });
-            let cursor = 0;
-            const worker = async () => {
-                while(cursor < queue.length) {
-                    if(studioFramePreloadPaused) break;
-                    const id = queue[cursor++];
-                    const frame = document.getElementById('frame-' + id);
-                    if(!frame) continue;
-                    frame.dataset.preload = '1';
-                    ensureStudioFrameSource(frame);
-                    touchFrameUsage(id);
-                    const ready = await waitForStudioFrame(frame, STUDIO_FRAME_READY_TIMEOUT_MS);
-                    if(!ready && studioFrameDocumentState(frame) !== 'loading') setStudioFrameReady(frame, 'error');
-                }
-            };
-            // 受控并行：同时启动三个页面，既能尽快完成整体预热，也避免多个画布脚本
-            // 一次性抢占主线程。Promise 会在所有可用页面完成 load/超时后结束。
-            studioFramePreloadPromise = Promise.all(
-                Array.from({length:Math.min(STUDIO_FRAME_PRELOAD_CONCURRENCY, queue.length)}, worker)
-            ).then(() => {
-                document.documentElement.dataset.studioPreload = 'ready';
-                window.dispatchEvent(new CustomEvent('studio-all-frames-ready', {detail:{states:{...studioFrameReadyState}}}));
-            });
-            return studioFramePreloadPromise;
-        }
-
         function maybeUnloadIdleFrames() {
-            if(STUDIO_KEEP_PRELOADED_FRAMES) return;
+            if(STUDIO_KEEP_VISITED_FRAMES) return;
             const now = Date.now();
             const frames = [...document.querySelectorAll('iframe')]
                 .filter(frame => frame.src && !frame.classList.contains('active'))
@@ -2888,7 +2845,6 @@
 
         window.addEventListener('message', event => {
             if (event.origin && event.origin !== location.origin) return;
-            if(event.data?.type === 'studio-preload-pause') pauseStudioFramePreload(event.data.reason || 'navigation');
             if(event.data && event.data.type === 'studio-dirty-state') {
                 const pageId = String(event.data.pageId || '').replace(/^frame-/, '');
                 const frame = document.getElementById('frame-' + pageId);
@@ -3021,7 +2977,6 @@
                 const activeFrame = document.getElementById('frame-' + id);
                 await waitForStudioFrame(activeFrame);
                 finishStudioBoot();
-                preloadStudioFrames(id);
                 if(currentStudioAccount.is_admin) {
                     ensureShiyingApiKeyOnboarding();
                     checkForUpdates();

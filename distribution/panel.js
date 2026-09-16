@@ -106,6 +106,46 @@ let refreshing=false;
 async function refresh(){if(refreshing||busy)return;refreshing=true;try{render(await api('status'));if(!state.job.running&&!state.job.error&&$('#notice').classList.contains('error')){$('#notice').hidden=true;$('#notice').classList.remove('error');}}catch(e){message('监控连接失败，当前显示为上次数据：'+e.message,true);}finally{refreshing=false;}}
 async function act(name,body={}){if(busy)return;busy=true;try{render(await api(name,body));message(name==='import'?'导入已开始，可在日志中查看结果':'操作完成');}catch(e){message(e.message,true);}finally{busy=false;}}
 let selectedBugClient='', selectedBugReport='';
+function renderHardware(detail){
+  const root=$('#bugHardware'), machine=detail.machine||{};
+  const labels={system:'操作系统',os:'Windows 系统',cpu:'处理器',memory:'内存',disks:'磁盘',displayAdapters:'显示适配器',nvidiaGpus:'NVIDIA 显卡',name:'名称',Name:'型号',release:'系统版本',version:'版本号',architecture:'架构',caption:'系统名称',build:'内部版本',NumberOfCores:'核心数',NumberOfLogicalProcessors:'逻辑处理器',totalBytes:'总容量',Model:'型号',Size:'容量',InterfaceType:'接口类型',DriverVersion:'驱动版本',driverVersion:'驱动版本',AdapterRAM:'显存（系统报告）',memoryMiB:'显存',computeCapability:'计算能力',windowsDiagnostics:'Windows 诊断'};
+  function valueText(key,value){
+    if(value===null||value===undefined||value==='')return '未提供';
+    if(['totalBytes','Size','AdapterRAM','memoryMiB'].includes(key)&&Number.isFinite(Number(value))&&Number(value)>=0){
+      const bytes=Number(value)*(key==='memoryMiB'?1048576:1);
+      return bytes>=1073741824?(bytes/1073741824).toLocaleString('zh-CN',{maximumFractionDigits:2})+' GB':(bytes/1048576).toLocaleString('zh-CN',{maximumFractionDigits:1})+' MB';
+    }
+    return typeof value==='boolean'?(value?'是':'否'):String(value);
+  }
+  function fields(value){
+    const list=element('dl','','hardware-fields');
+    for(const [key,item] of Object.entries(value)){
+      const row=element('div','','hardware-row');
+      row.append(element('dt',labels[key]||key));
+      const cell=element('dd');
+      if(item&&typeof item==='object')cell.append(fields(item));else cell.textContent=valueText(key,item);
+      row.append(cell);list.append(row);
+    }
+    if(!list.children.length)list.append(element('p','未提供','hardware-empty'));
+    return list;
+  }
+  const stamp=Number(detail.updatedAt);
+  root.replaceChildren(element('div',stamp>0?'更新于 '+new Date(stamp*1000).toLocaleString():'更新时间未知','hardware-updated'));
+  for(const [key,value] of Object.entries(machine)){
+    const section=element('section','','hardware-group'),items=Array.isArray(value)?value:[value];
+    const header=element('div','','hardware-heading');header.append(element('h4',labels[key]||key));
+    if(Array.isArray(value))header.append(element('span',items.length+' 项','badge'));
+    section.append(header);
+    items.forEach((item,index)=>{
+      const block=element('div','','hardware-device');
+      if(items.length>1)block.append(element('div',String(index+1).padStart(2,'0'),'hardware-index'));
+      block.append(item&&typeof item==='object'?fields(item):element('p',valueText(key,item)));section.append(block);
+    });
+    if(!items.length)section.append(element('p','未检测到或未上报','hardware-empty'));
+    root.append(section);
+  }
+  if(!Object.keys(machine).length)root.append(element('p','尚无设备快照','hardware-empty'));
+}
 function renderBugs(data){
   $('#bugRoot').textContent=data.bug_log_root||'';
   const reports=data.bug_reports||[];
@@ -120,9 +160,11 @@ function renderBugs(data){
       selectedBugClient=selectedBugClient===c.clientId?'':c.clientId;renderBugs(state);
       if(!selectedBugClient){$('#bugHardware').textContent='选择客户端查看设备信息';return;}
       const [user,client]=selectedBugClient.split(' / ');
+      const requestedClient=selectedBugClient;
+      $('#bugHardware').textContent='正在加载设备信息…';
       try{const detail=await api('bug-devices/'+encodeURIComponent(user)+'/'+encodeURIComponent(client));
-        $('#bugHardware').textContent='更新于 '+new Date(detail.updatedAt*1000).toLocaleString()+'\n'+JSON.stringify(detail.machine,null,2);
-      }catch(e){$('#bugHardware').textContent='尚无设备快照';}
+        if(selectedBugClient===requestedClient)renderHardware(detail);
+      }catch(e){if(selectedBugClient===requestedClient)$('#bugHardware').textContent='设备信息加载失败：'+e.message;}
     };return b;
   }));
   const shown=reports.filter(r=>!selectedBugClient||(r.user_id||'admin')+' / '+r.client_id===selectedBugClient);

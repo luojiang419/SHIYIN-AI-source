@@ -2652,6 +2652,50 @@
         let studioFramePreloadPromise = null;
         let studioFramePreloadPaused = false;
         const studioFrameReadyState = Object.create(null);
+        let canvasManagerRetryTimer = 0;
+
+        function isCanvasManagerFrame(frame) {
+            try { return new URL(frame?.src || '', location.href).pathname === '/static/canvas-list.html'; }
+            catch(e) { return false; }
+        }
+
+        function studioFrameDocumentState(frame) {
+            if(!frame?.src) return 'loading';
+            try {
+                const document = frame.contentDocument;
+                if(!document || document.readyState !== 'complete'
+                    || new URL(document.URL).pathname !== new URL(frame.src).pathname) return 'loading';
+                if(isCanvasManagerFrame(frame) && typeof frame.contentWindow?.loadAll !== 'function') return 'error';
+                return 'ready';
+            } catch(e) { return 'loading'; }
+        }
+
+        function setStudioFrameReady(frame, state) {
+            const id = String(frame.id || '').replace(/^frame-/, '');
+            frame.dataset.frameReady = state === 'ready' ? '1' : '0';
+            frame.dataset.frameReadyState = state;
+            studioFrameReadyState[id] = state;
+            window.dispatchEvent(new CustomEvent('studio-frame-ready', {detail:{id, ready:state === 'ready'}}));
+        }
+
+        function retryCanvasManagerFrame(frame, manual = false) {
+            if(!isCanvasManagerFrame(frame) || !frame.classList.contains('active')) return false;
+            if(manual) frame.dataset.canvasRetryAttempts = '0';
+            const attempts = Number(frame.dataset.canvasRetryAttempts || 0);
+            if(attempts >= 2 || canvasManagerRetryTimer) return false;
+            frame.dataset.canvasRetryAttempts = String(attempts + 1);
+            setStudioFrameReady(frame, 'loading');
+            const reload = () => {
+                canvasManagerRetryTimer = 0;
+                if(!frame.classList.contains('active')) return;
+                const url = new URL(frame.src);
+                url.searchParams.set('canvasRetry', String(Date.now()));
+                frame.src = url.href;
+            };
+            if(manual) reload();
+            else canvasManagerRetryTimer = window.setTimeout(reload, 300 * (attempts + 1));
+            return true;
+        }
 
         function pauseStudioFramePreload(reason='navigation') {
             studioFramePreloadPaused = true;
@@ -2677,13 +2721,9 @@
         function waitForStudioFrame(frame, timeout = STUDIO_FRAME_READY_TIMEOUT_MS) {
             if(!frame) return Promise.resolve(false);
             ensureStudioFrameSource(frame);
-            if(frame.dataset.frameReady === '1') return Promise.resolve(true);
-            try {
-                if(frame.contentDocument?.readyState === 'complete') {
-                    frame.dataset.frameReady = '1';
-                    return Promise.resolve(true);
-                }
-            } catch(e) {}
+            const currentState = studioFrameDocumentState(frame);
+            if(currentState === 'ready') { setStudioFrameReady(frame, 'ready'); return Promise.resolve(true); }
+            if(currentState === 'error') { setStudioFrameReady(frame, 'error'); return Promise.resolve(false); }
             return new Promise(resolve => {
                 let settled = false;
                 const done = (ready) => {
@@ -2695,12 +2735,14 @@
                     resolve(ready);
                 };
                 const onLoad = () => {
-                    frame.dataset.frameReady = '1';
-                    done(true);
+                    const state = studioFrameDocumentState(frame);
+                    if(state === 'loading') return;
+                    setStudioFrameReady(frame, state);
+                    done(state === 'ready');
                 };
                 const onError = () => done(false);
                 const timer = window.setTimeout(() => done(false), timeout);
-                frame.addEventListener('load', onLoad, {once:true});
+                frame.addEventListener('load', onLoad);
                 frame.addEventListener('error', onError, {once:true});
             });
         }
@@ -2724,9 +2766,7 @@
                     ensureStudioFrameSource(frame);
                     touchFrameUsage(id);
                     const ready = await waitForStudioFrame(frame, STUDIO_FRAME_READY_TIMEOUT_MS);
-                    studioFrameReadyState[id] = ready ? 'ready' : 'error';
-                    frame.dataset.frameReadyState = studioFrameReadyState[id];
-                    window.dispatchEvent(new CustomEvent('studio-frame-ready', {detail:{id, ready}}));
+                    if(!ready && studioFrameDocumentState(frame) !== 'loading') setStudioFrameReady(frame, 'error');
                 }
             };
             // 受控并行：同时启动三个页面，既能尽快完成整体预热，也避免多个画布脚本
@@ -2782,6 +2822,7 @@
             const target = document.getElementById('frame-' + id);
             target.classList.add('active');
             ensureStudioFrameSource(target);
+            if(id === 'canvas' && studioFrameDocumentState(target) === 'error') retryCanvasManagerFrame(target, true);
             window.CanvasSessionHost?.waitForEntry(id === 'canvas' ? target : null);
             touchFrameUsage(id);
             broadcastRouteState();
@@ -3156,11 +3197,11 @@
         // sync theme when iframe loads
         document.querySelectorAll('iframe').forEach(f => {
             f.addEventListener('load', () => {
-                f.dataset.frameReady = '1';
-                const pageId = String(f.id || '').replace(/^frame-/, '');
-                studioFrameReadyState[pageId] = 'ready';
-                f.dataset.frameReadyState = 'ready';
-                window.dispatchEvent(new CustomEvent('studio-frame-ready', {detail:{id:pageId, ready:true}}));
+                const state = studioFrameDocumentState(f);
+                if(state === 'loading') return;
+                setStudioFrameReady(f, state);
+                if(state === 'ready' && isCanvasManagerFrame(f)) f.dataset.canvasRetryAttempts = '0';
+                if(state === 'error' && isCanvasManagerFrame(f) && f.classList.contains('active')) retryCanvasManagerFrame(f);
                 syncThemeToFrame(f);
                 syncLanguageToFrame(f);
                 syncRouteStateToFrame(f);
@@ -3868,7 +3909,7 @@
         }
     </script>
     <script src="/static/js/canvas-entry-progress.js?v=2026.09.10.1&resource-ready=20260910.1&cold-dispatch=20260913.1"></script>
-    <script src="/static/js/canvas-session-host.js?v=2026.09.16.1&state=2026.09.10.1&entry-fixes=20260910.2&runtime-prewarm=1"></script>
+    <script src="/static/js/canvas-session-host.js?v=2026.09.16.1&state=2026.09.10.1&entry-fixes=20260910.2&runtime-prewarm=2"></script>
     <script src="/static/js/desktop-updater.js?v=1.0.74"></script>
 </body>
 

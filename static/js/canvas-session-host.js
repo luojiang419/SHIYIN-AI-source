@@ -8,10 +8,22 @@
     let manager = null;
     let entryWait = null;
     let warmEditor = null;
+    function frameRuntimeReady(frame){
+        try {
+            const url = new URL(frame.src, location.href);
+            if(url.pathname === '/static/canvas-list.html') return typeof frame.contentWindow?.loadAll === 'function';
+            if(url.pathname === '/static/canvas.html') return typeof frame.contentWindow?.CanvasSessionLifecycle?.state === 'function';
+        } catch(e) {}
+        return false;
+    }
     function waitForEntry(frame){
-        if(entryWait) clearTimeout(entryWait.timer);
+        if(entryWait){
+            clearTimeout(entryWait.timer);
+            entryWait.frame.removeEventListener('load', entryWait.onLoad);
+            entryWait.overlay?.remove();
+        }
         entryWait = null;
-        if(!frame || frame.dataset.frameReady === '1') return;
+        if(!frame || (frame.dataset.frameReady === '1' && frameRuntimeReady(frame))) return;
         // 立即切换编辑器文档；正常导航不显示加载层，仅在文档确实无法挂载时提示错误。
         const timer = setTimeout(() => {
             if(entryWait?.frame !== frame) return;
@@ -23,13 +35,15 @@
             });
             entryWait.overlay = overlay;
         }, 20000);
-        entryWait = {frame, timer, overlay:null};
-        frame.addEventListener('load', () => finishEntryWait(frame), {once:true});
+        const onLoad = () => finishEntryWait(frame);
+        entryWait = {frame, timer, overlay:null, onLoad};
+        frame.addEventListener('load', onLoad);
     }
     function finishEntryWait(frame){
-        if(entryWait?.frame !== frame) return;
+        if(entryWait?.frame !== frame || !frameRuntimeReady(frame)) return;
         entryWait.overlay?.remove();
         clearTimeout(entryWait.timer);
+        frame.removeEventListener('load', entryWait.onLoad);
         entryWait = null;
     }
     window.addEventListener('message', event => {
@@ -98,11 +112,19 @@
         frame.title = '无限画布';
         if(!manager) frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:10000;background:var(--bg,#f5f5f5)';
         frame.addEventListener('load', () => {
-            frame.dataset.frameReady = '1';
+            const ready = frameRuntimeReady(frame);
+            frame.dataset.frameReady = ready ? '1' : '0';
             setActive(frame, frame.classList.contains('active'));
             window.syncThemeToFrame?.(frame);
             window.syncLanguageToFrame?.(frame);
-            if(entry.pendingUrl) void openInWarmEditor(entry, entry.pendingUrl);
+            if(entry.pendingUrl){
+                if(ready) void openInWarmEditor(entry, entry.pendingUrl);
+                else {
+                    const pending = entry.pendingUrl;
+                    entry.pendingUrl = null;
+                    frame.src = pending.href;
+                }
+            }
         });
         frame.src = url.href;
         appendEditorFrame(frame);
@@ -111,7 +133,11 @@
     async function openInWarmEditor(entry, url){
         if(!entry?.frame?.isConnected || !url || entry.opening) return;
         const lifecycle = entry.frame.contentWindow?.CanvasSessionLifecycle;
-        if(typeof lifecycle?.openProject !== 'function') return;
+        if(typeof lifecycle?.openProject !== 'function'){
+            entry.pendingUrl = null;
+            entry.frame.src = url.href;
+            return;
+        }
         entry.opening = true;
         try {
             const opened = await lifecycle.openProject(url.searchParams.get('id'), url.href);

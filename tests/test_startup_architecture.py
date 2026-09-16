@@ -71,7 +71,9 @@ class VisibleShellStartupTests(unittest.TestCase):
     def test_preload_tracks_each_frame_and_completes_with_readiness_event(self):
         self.assertIn("const STUDIO_FRAME_PRELOAD_CONCURRENCY = 3;", self.source)
         self.assertIn("studioFramePreloadPromise = Promise.all(", self.source)
-        self.assertIn("studioFrameReadyState[id] = ready ? 'ready' : 'error';", self.source)
+        self.assertIn("function studioFrameDocumentState(frame)", self.source)
+        self.assertIn("typeof frame.contentWindow?.loadAll !== 'function'", self.source)
+        self.assertIn("studioFrameReadyState[id] = state;", self.source)
         self.assertIn("studio-all-frames-ready", self.source)
 
     def test_versioning_rewrites_iframe_data_src_assets(self):

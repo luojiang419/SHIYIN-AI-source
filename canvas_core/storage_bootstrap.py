@@ -46,6 +46,16 @@ VIDEO_DEPTH_MODEL_MANAGER = PersonDepthComponentManager(
     lan_path="video-depth",
     smoke_runner=lambda _command, _root: None,
 )
+VIDEO_DEPTH_RUNTIME_MANAGER = PersonDepthComponentManager(
+    ACCOUNT_STORE.system_root / "components" / "video-depth-runtime",
+    manifest_path=Path(__file__).with_name("video_depth_runtime_manifest.json"),
+    component_name="video-depth-runtime",
+    display_name="深度视频运行时",
+    lan_path="video-depth-runtime",
+    smoke_runner=lambda command, root: __import__(
+        "canvas_core.video_depth", fromlist=["smoke_video_depth_runtime"]
+    ).smoke_video_depth_runtime(command, root),
+)
 ACCOUNT_STORAGE = AccountStorageRegistry(ACCOUNT_STORE, ADMIN_DATA_LAYOUT, ADMIN_DATABASE)
 DATA_LAYOUT = ScopedDataLayoutProxy(ACCOUNT_STORAGE)
 DATABASE = ScopedDatabaseProxy(ACCOUNT_STORAGE)

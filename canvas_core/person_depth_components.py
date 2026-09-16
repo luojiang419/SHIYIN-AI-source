@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
 import requests
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.exceptions import InvalidSignature
 
+from .component_profiles import (
+    RuntimeCapabilities,
+    compatible_variants,
+    probe_runtime_capabilities,
+    select_variant,
+)
 from .data_layout import atomic_write_json
 
 
@@ -78,6 +86,8 @@ class PersonDepthComponentManager:
         "progress",
         "message",
         "updated_at",
+        "selected_variant",
+        "capabilities",
     )
 
     def __init__(
@@ -92,6 +102,7 @@ class PersonDepthComponentManager:
         component_name: str = PERSON_DEPTH_COMPONENT,
         display_name: str = "高精度人物深度组件",
         lan_path: str = "person-depth",
+        capability_provider: Callable[[], RuntimeCapabilities] = probe_runtime_capabilities,
     ) -> None:
         self.component_name = str(component_name or PERSON_DEPTH_COMPONENT)
         self.display_name = str(display_name or "高精度人物深度组件")
@@ -109,6 +120,10 @@ class PersonDepthComponentManager:
             or (self.local_manifest_path if self.local_manifest_path.is_file() else PERSON_DEPTH_BUILTIN_MANIFEST)
         ).expanduser().resolve()
         self.proxy_provider = proxy_provider
+        self.capability_provider = capability_provider
+        self.capabilities = capability_provider()
+        self.selected_variant_id = ""
+        self.selected_package_ids: tuple[str, ...] = ()
         self.smoke_runner = smoke_runner or self._run_smoke
         self.sleep = sleep
         self._state_lock = threading.RLock()
@@ -147,6 +162,12 @@ class PersonDepthComponentManager:
 
     def set_lan_source(self, value: str) -> None:
         self._lan_source_url = str(value or "").strip().rstrip("/")
+        if self._state.get("state") == "unavailable" and self._install_available():
+            self._update_state(
+                state="idle",
+                install_available=True,
+                message=f"{self.display_name}尚未安装",
+            )
 
     @staticmethod
     def _read_manifest(path: Path) -> dict[str, object]:
@@ -169,10 +190,46 @@ class PersonDepthComponentManager:
 
     def _normalize_manifest(self, raw: Mapping[str, object]) -> dict[str, object]:
         payload = dict(raw)
-        if int(payload.get("schema_version") or 0) != 1:
-            raise PersonDepthManifestError("不支持的 person-depth manifest 版本")
+        schema_version = int(payload.get("schema_version") or 0)
+        if schema_version not in (1, 2):
+            raise PersonDepthManifestError("不支持的组件 manifest 版本")
         if str(payload.get("component") or "") != self.component_name:
             raise PersonDepthManifestError("person-depth manifest 组件名称不匹配")
+        if schema_version == 2:
+            variants = payload.get("variants")
+            if not isinstance(variants, list) or not variants:
+                raise PersonDepthManifestError("schema v2 manifest 缺少 variants")
+            try:
+                compatible = compatible_variants(variants, self.capabilities)
+                selected = select_variant(variants, self.capabilities)
+            except ValueError as exc:
+                raise PersonDepthManifestError(str(exc)) from exc
+            current = self._read_current()
+            if str(current.get("version") or "") == str(payload.get("version") or ""):
+                current_variant = str(current.get("variant") or "")
+                selected = next(
+                    (variant for variant in compatible if str(variant.get("id") or "") == current_variant),
+                    selected,
+                )
+            variant_id = str(selected.get("id") or "").strip()
+            if not variant_id:
+                raise PersonDepthManifestError("运行时变体缺少 id")
+            self.selected_variant_id = variant_id
+            for key in ("command", "required_paths", "required_free_bytes"):
+                if key in selected:
+                    payload[key] = selected[key]
+            selected_packages = selected.get("packages") or []
+            if not isinstance(selected_packages, list):
+                raise PersonDepthManifestError("运行时变体 packages 必须是数组")
+            self.selected_package_ids = tuple(str(item) for item in selected_packages)
+            all_packages = payload.get("packages") or []
+            if all_packages and not all(isinstance(item, Mapping) for item in all_packages):
+                raise PersonDepthManifestError("schema v2 顶层 packages 必须是对象数组")
+            payload["packages"] = [
+                item for item in all_packages
+                if str(item.get("id") or "") in self.selected_package_ids
+            ]
+            payload["selected_variant"] = variant_id
         payload["version"] = str(payload.get("version") or "").strip()
         command = payload.get("command")
         if not isinstance(command, list) or any(not str(item).strip() for item in command):
@@ -217,8 +274,10 @@ class PersonDepthComponentManager:
         return bool(
             self.manifest.get("enabled")
             and self.manifest.get("version")
-            and self.specs
-            and any(item.domestic_url or item.official_url for item in self.specs)
+            and (
+                self._lan_source_url
+                or (self.specs and any(item.domestic_url or item.official_url for item in self.specs))
+            )
         )
 
     def _initial_message(self) -> str:
@@ -235,6 +294,8 @@ class PersonDepthComponentManager:
         payload["component_root"] = str(self.component_root)
         payload["manifest_path"] = str(self.manifest_path)
         payload["license_notice"] = str(self.manifest.get("license_notice") or "")
+        payload["selected_variant"] = self.selected_variant_id
+        payload["capabilities"] = self.capabilities.public_dict()
         return payload
 
     def public_status(self) -> dict[str, object]:
@@ -423,9 +484,14 @@ class PersonDepthComponentManager:
             payload = response.json()
         finally:
             session.close()
+        if self.component_name.endswith("-runtime"):
+            payload = self._verify_lan_envelope(payload)
         if not isinstance(payload, dict) or str(payload.get("component") or "") != self.component_name:
             raise PersonDepthComponentUnavailable("局域网清单的组件标识无效")
-        if int(payload.get("protocol_version") or 0) != 1:
+        protocol_version = int(payload.get("protocol_version") or 0)
+        if protocol_version == 2:
+            return self._download_lan_packages(base, payload)
+        if protocol_version != 1:
             raise PersonDepthComponentUnavailable("局域网组件传输协议版本不匹配")
         raw_files = payload.get("files")
         if not isinstance(raw_files, list) or not raw_files or len(raw_files) > 20000:
@@ -474,6 +540,95 @@ class PersonDepthComponentManager:
             return True
         finally:
             shutil.rmtree(staging, ignore_errors=True)
+
+    @staticmethod
+    def _verify_lan_envelope(value: object) -> dict[str, object]:
+        from .distribution_client import trusted_key
+
+        if not isinstance(value, Mapping):
+            raise PersonDepthComponentUnavailable("局域网运行时签名清单无效")
+        raw = value.get("payload")
+        signature = str(value.get("signature") or "")
+        public_key = str(value.get("public_key") or "")
+        if not isinstance(raw, str) or public_key != trusted_key():
+            raise PersonDepthComponentUnavailable("局域网运行时清单公钥不受信任")
+        try:
+            Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key)).verify(
+                bytes.fromhex(signature), raw.encode("utf-8")
+            )
+            payload = json.loads(raw)
+        except (InvalidSignature, ValueError, TypeError) as exc:
+            raise PersonDepthComponentUnavailable("局域网运行时清单签名校验失败") from exc
+        if not isinstance(payload, dict):
+            raise PersonDepthComponentUnavailable("局域网运行时签名载荷无效")
+        return payload
+
+    def _download_lan_packages(self, base: str, payload: Mapping[str, object]) -> bool:
+        variants = payload.get("variants")
+        if not isinstance(variants, list):
+            raise PersonDepthComponentUnavailable("局域网运行时清单缺少 variants")
+        raw_packages = payload.get("packages")
+        if not isinstance(raw_packages, list):
+            raise PersonDepthComponentUnavailable("局域网运行时清单缺少下载包")
+        by_id = {
+            str(item.get("id") or ""): item
+            for item in raw_packages
+            if isinstance(item, Mapping)
+        }
+        candidates = compatible_variants(variants, self.capabilities)
+        candidates.sort(
+            key=lambda item: str(item.get("id") or "") == self.selected_variant_id,
+            reverse=True,
+        )
+        errors: list[str] = []
+        for selected in candidates:
+            variant_id = str(selected.get("id") or "")
+            package_ids = [str(value) for value in selected.get("packages") or []]
+            try:
+                if not package_ids:
+                    raise PersonDepthComponentUnavailable("运行时档位没有下载包")
+                specs: list[PersonDepthPackageSpec] = []
+                for package_id in package_ids:
+                    item = by_id.get(package_id)
+                    if not item:
+                        raise PersonDepthComponentUnavailable(f"局域网运行时缺少下载包：{package_id}")
+                    specs.append(PersonDepthPackageSpec(
+                        package_id=package_id,
+                        size=int(item.get("size") or 0),
+                        sha256=str(item.get("sha256") or "").lower(),
+                        domestic_url=f"{base}/{self.lan_path}/packages/{urllib.parse.quote(package_id, safe='')}",
+                        official_url="",
+                        target_path=str(item.get("target_path") or ""),
+                    ))
+                if any(spec.size <= 0 or not re.fullmatch(r"[0-9a-f]{64}", spec.sha256) for spec in specs):
+                    raise PersonDepthComponentUnavailable("局域网运行时下载包信息无效")
+                total = sum(spec.size for spec in specs)
+                self.selected_variant_id = variant_id
+                self._update_state(
+                    state="downloading", source="lan", source_label=f"局域网服务器 · {variant_id}",
+                    downloaded_bytes=0, total_bytes=total, message=f"正在下载适配本机的{self.display_name}", error="",
+                )
+                version_root = self.download_root / str(payload.get("version") or self.manifest.get("version"))
+                version_root.mkdir(parents=True, exist_ok=True)
+                archives: list[tuple[PersonDepthPackageSpec, Path]] = []
+                completed = 0
+                for spec in specs:
+                    target = version_root / f"lan-{variant_id}-{spec.package_id}.zip"
+                    if not self._valid_archive(target, spec):
+                        self._download_package_with_retries(
+                            spec.domestic_url, target, spec, None, "局域网服务器", completed, total
+                        )
+                    completed += spec.size
+                    archives.append((spec, target))
+                self._install_archives(archives, "lan", f"局域网服务器 · {variant_id}")
+                self._record_attempt(f"局域网服务器 · {variant_id}")
+                self._mark_ready(f"局域网服务器 · {variant_id}")
+                return True
+            except Exception as exc:  # noqa: BLE001
+                message = str(exc) or exc.__class__.__name__
+                errors.append(f"{variant_id}：{message}")
+                self._record_attempt(f"局域网服务器 · {variant_id}", message)
+        raise PersonDepthComponentUnavailable("；".join(errors) or "没有兼容的局域网运行时")
 
     def _check_disk_space(self) -> None:
         self.component_root.mkdir(parents=True, exist_ok=True)
@@ -670,6 +825,7 @@ class PersonDepthComponentManager:
                 {
                     "component": self.component_name,
                     "version": self.manifest["version"],
+                    "variant": self.selected_variant_id,
                     "source": source,
                     "source_label": source_label,
                     "installed_at": int(time.time() * 1000),
@@ -686,6 +842,7 @@ class PersonDepthComponentManager:
                 {
                     "component": self.component_name,
                     "version": self.manifest["version"],
+                    "variant": self.selected_variant_id,
                     "installation": installed.name,
                     "source": source,
                     "source_label": source_label,
@@ -737,6 +894,8 @@ class PersonDepthComponentManager:
     def installation_path(self) -> Optional[Path]:
         current = self._read_current()
         if str(current.get("version") or "") != str(self.manifest.get("version") or ""):
+            return None
+        if self.selected_variant_id and str(current.get("variant") or "") != self.selected_variant_id:
             return None
         name = str(current.get("installation") or "").strip()
         if not name or Path(name).name != name:

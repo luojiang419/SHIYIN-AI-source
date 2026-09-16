@@ -63,6 +63,7 @@ from canvas_core.storage_bootstrap import (
     MIGRATION_REPORT,
     PERSON_DEPTH_COMPONENT_MANAGER,
     VIDEO_DEPTH_MODEL_MANAGER,
+    VIDEO_DEPTH_RUNTIME_MANAGER,
     SECRET_MIGRATION_REPORT,
     SECRET_STORE,
 )
@@ -686,6 +687,7 @@ async def startup_event():
     lan_config = read_app_config(APP_PATHS.data_root)
     PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
     VIDEO_DEPTH_MODEL_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
+    VIDEO_DEPTH_RUNTIME_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
     # 供应商清理、密钥初始化和遗留占位修复都不是服务就绪的必要条件，
     # 与文件扫描一起延后到健康检查之后，避免桌面宿主等待这些磁盘操作。
     # 历史任务恢复可能读取大量持久化记录，同样不阻塞 /api/health 和首屏窗口。
@@ -2426,7 +2428,9 @@ os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
 os.makedirs(LOCAL_UPLOAD_DIR, exist_ok=True)
 BUG_REPORTER = BugReporter(APP_PATHS.data_root)
 logging.getLogger().addHandler(BugLogHandler(BUG_REPORTER))
-VIDEO_DEPTH_TASKS = VideoDepthTaskService(APP_PATHS.app_root, VIDEO_DEPTH_MODEL_MANAGER, BUG_REPORTER)
+VIDEO_DEPTH_TASKS = VideoDepthTaskService(
+    APP_PATHS.app_root, VIDEO_DEPTH_MODEL_MANAGER, BUG_REPORTER, VIDEO_DEPTH_RUNTIME_MANAGER
+)
 # static 和内置 workflows 属于只读程序资源，不在运行时创建或改写。
 
 HTML_CACHE_CONTROL = "no-store, max-age=0, must-revalidate"
@@ -3241,6 +3245,7 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
     VIDEO_DEPTH_MODEL_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
+    VIDEO_DEPTH_RUNTIME_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
     return app_settings_response(config)
 
 

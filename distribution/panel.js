@@ -19,7 +19,7 @@ async function api(path, body){
   const response=await fetch('/api/'+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
   const data=await response.json(); if(!response.ok)throw new Error(data.error || '请求失败'); return data;
 }
-const names={hot:'应用增量包','hot-bootstrap':'更新器引导包','hot-updater':'更新器修复包',full:'全量安装包','person-depth':'人物深度组件','video-depth':'深度视频模型'};
+const names={hot:'应用增量包','hot-bootstrap':'更新器引导包','hot-updater':'更新器修复包',full:'全量安装包','person-depth':'人物深度组件','video-depth':'深度视频模型','video-depth-runtime':'深度视频运行时'};
 const states={published:'已发布',paused:'已暂停',archived:'历史版本'};
 function element(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
 function bytes(value){let n=Math.max(0,Number(value)||0),i=0;const units=['B','KB','MB','GB','TB'];while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(i?1:0)+' '+units[i];}
@@ -55,11 +55,11 @@ function renderTraffic(data){
   }));
   if(!clients.size)$('#clientList').append(element('p','尚无客户端连接记录','muted'));
 }
-const resourceIcons={hot:'PackageOpen','hot-bootstrap':'RefreshCw','hot-updater':'Zap',full:'AppWindow','person-depth':'ScanFace','video-depth':'FileVideo'};
+const resourceIcons={hot:'PackageOpen','hot-bootstrap':'RefreshCw','hot-updater':'Zap',full:'AppWindow','person-depth':'ScanFace','video-depth':'FileVideo','video-depth-runtime':'Cpu'};
 const releaseGroups=[
   {id:'application',title:'应用热更新',description:'面向日常功能发布的应用增量包',kinds:['hot']},
   {id:'updater',title:'更新器与兼容组件',description:'更新器修复包及旧客户端引导包',kinds:['hot-updater','hot-bootstrap']},
-  {id:'models',title:'模型组件',description:'独立分发的人物深度与视频深度模型',kinds:['person-depth','video-depth']},
+  {id:'models',title:'模型与运行时',description:'独立分发的深度模型与设备适配运行时',kinds:['person-depth','video-depth','video-depth-runtime']},
   {id:'installer',title:'全量安装包',description:'仅用于完整安装或明确要求的全量升级',kinds:['full']}
 ];
 function releaseRow(item,actions,index){

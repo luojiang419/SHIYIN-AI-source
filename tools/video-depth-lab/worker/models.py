@@ -173,7 +173,7 @@ def _install_windows_sdpa_compatibility() -> None:
     torch.backends.cuda.enable_math_sdp(True)
 
 
-def _load_gemdepth(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], None]):
+def _load_gemdepth(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], None], device: str):
     import torch
 
     source = _source_root(lab_root) / profile.source_dir
@@ -198,11 +198,11 @@ def _load_gemdepth(lab_root: Path, profile: ModelProfile, emit: Callable[[int, s
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
     model.load_state_dict(state_dict, strict=True)
-    model = model.to("cuda").eval()
+    model = model.to(device).eval()
     return model
 
 
-def _load_vda(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], None]):
+def _load_vda(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], None], device: str):
     import torch
 
     source = _source_root(lab_root) / profile.source_dir
@@ -220,7 +220,7 @@ def _load_vda(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], 
     emit(36, "正在严格加载 VDA Base Relative 官方权重")
     state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state_dict, strict=True)
-    model = model.to("cuda").eval()
+    model = model.to(device).eval()
     return model
 
 
@@ -234,14 +234,14 @@ def infer_depths(
 ) -> tuple[np.ndarray, dict[str, int]]:
     import torch
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("未检测到 CUDA；本技术验证要求 NVIDIA GPU")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     # GemDepth upstream applies stochastic pose masks even in eval mode. A fixed
     # seed keeps repeated parameter/model comparisons reproducible.
     np.random.seed(0)
     torch.manual_seed(0)
-    torch.cuda.manual_seed_all(0)
-    torch.cuda.reset_peak_memory_stats()
+    if device == "cuda":
+        torch.cuda.manual_seed_all(0)
+        torch.cuda.reset_peak_memory_stats()
     profile = get_profile(model_key)
     status = next(row for row in model_status(lab_root) if row["key"] == model_key)
     if not status["ready"]:
@@ -250,25 +250,26 @@ def infer_depths(
     model = None
     try:
         if model_key == "gemdepth_vda_8f":
-            model = _load_gemdepth(lab_root, profile, emit)
+            model = _load_gemdepth(lab_root, profile, emit, device)
         else:
-            model = _load_vda(lab_root, profile, emit)
+            model = _load_vda(lab_root, profile, emit, device)
         emit(45, f"正在执行 {profile.label} 推理")
         depths, _ = model.infer_video_depth(
             frames,
             fps,
             input_size=int(input_size),
-            device="cuda",
-            fp32=False,
+            device=device,
+            fp32=device == "cpu",
         )
         emit(78, "模型推理完成，正在释放显存")
         statistics = {
-            "peakAllocatedBytes": int(torch.cuda.max_memory_allocated()),
-            "peakReservedBytes": int(torch.cuda.max_memory_reserved()),
+            "peakAllocatedBytes": int(torch.cuda.max_memory_allocated()) if device == "cuda" else 0,
+            "peakReservedBytes": int(torch.cuda.max_memory_reserved()) if device == "cuda" else 0,
         }
         return np.asarray(depths, dtype=np.float32), statistics
     finally:
         if model is not None:
             del model
         gc.collect()
-        torch.cuda.empty_cache()
+        if device == "cuda":
+            torch.cuda.empty_cache()

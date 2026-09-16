@@ -19,6 +19,7 @@ a = Analysis(
         ("canvas_core/distribution-public-key.hex", "canvas_core"),
         ("canvas_core/person_depth_manifest.json", "canvas_core"),
         ("canvas_core/video_depth_manifest.json", "canvas_core"),
+        ("canvas_core/video_depth_runtime_manifest.json", "canvas_core"),
         ("skills/fashion-editorial-sequence-director", "skills/fashion-editorial-sequence-director"),
         ("skills/linkfox-expert-aigc-videogen-image-to-video", "skills/linkfox-expert-aigc-videogen-image-to-video"),
     ],

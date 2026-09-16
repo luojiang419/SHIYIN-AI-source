@@ -14,13 +14,41 @@ class VideoDepthUnavailable(RuntimeError):
     pass
 
 
+def smoke_video_depth_runtime(command: list[str], component_root: Path) -> None:
+    env = os.environ.copy()
+    runtime_root = component_root / "runtime"
+    env["SHIYIN_VIDEO_DEPTH_SOURCE_ROOT"] = str(runtime_root / "sources")
+    env["PATH"] = str(runtime_root / "bin") + os.pathsep + env.get("PATH", "")
+    result = subprocess.run(
+        [*command, "status"], cwd=component_root, env=env, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "深度视频运行时验证失败").strip()
+        raise VideoDepthUnavailable(detail[-1200:])
+    events = []
+    for line in result.stdout.splitlines():
+        try:
+            events.append(json.loads(line))
+        except ValueError:
+            continue
+    status = next((item.get("result") for item in events if item.get("type") == "result"), None)
+    if not isinstance(status, dict) or not status.get("runtimeReady", True):
+        raise VideoDepthUnavailable("深度视频运行时自检未通过")
+
+
 class VideoDepthTaskService:
     """Run the validated video-depth worker without coupling it to FastAPI."""
 
-    def __init__(self, project_root: str | Path, model_manager: Any = None, bug_reporter: Any = None):
+    def __init__(
+        self, project_root: str | Path, model_manager: Any = None,
+        bug_reporter: Any = None, runtime_manager: Any = None,
+    ):
         self.project_root = Path(project_root).resolve()
         self.model_manager = model_manager
         self.bug_reporter = bug_reporter
+        self.runtime_manager = runtime_manager
         self.lab_root = self.project_root / "tools" / "video-depth-lab"
         self.worker = self.lab_root / "worker" / "main.py"
         self.python = self.lab_root / "runtime" / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -45,9 +73,11 @@ class VideoDepthTaskService:
         return {"mode": "source", "command": [str(self.python), str(self.worker)], "cwd": self.lab_root, "env": None, "modelReady": True}
 
     def _packaged_runtime(self) -> dict[str, Any] | None:
-        worker = self.packaged_runtime / "video-depth-worker" / "video-depth-worker.exe"
-        sources = self.packaged_runtime / "sources"
-        tools = self.packaged_runtime / "bin"
+        managed = self.runtime_manager.installation_path() if self.runtime_manager else None
+        runtime_root = managed / "runtime" if managed else self.packaged_runtime
+        worker = runtime_root / "video-depth-worker" / "video-depth-worker.exe"
+        sources = runtime_root / "sources"
+        tools = runtime_root / "bin"
         if not worker.is_file() or not (sources / "video-depth-anything" / "video_depth_anything" / "video_depth.py").is_file():
             return None
         installation = self.model_manager.installation_path() if self.model_manager else None
@@ -57,7 +87,11 @@ class VideoDepthTaskService:
         if model_root:
             env["SHIYIN_VIDEO_DEPTH_MODEL_ROOT"] = str(model_root)
         env["PATH"] = str(tools) + os.pathsep + env.get("PATH", "")
-        return {"mode": "packaged", "command": [str(worker)], "cwd": self.packaged_runtime, "env": env, "modelReady": bool(model_root)}
+        return {
+            "mode": "managed" if managed else "packaged",
+            "command": [str(worker)], "cwd": runtime_root, "env": env,
+            "modelReady": bool(model_root),
+        }
 
     def _runtime(self) -> dict[str, Any] | None:
         return self._source_runtime() or self._packaged_runtime()
@@ -65,16 +99,20 @@ class VideoDepthTaskService:
     def status(self) -> dict[str, Any]:
         runtime = self._runtime()
         model_status = self.model_manager.public_status() if self.model_manager else {}
+        runtime_status = self.runtime_manager.public_status() if self.runtime_manager else {}
         ready = bool(runtime and (runtime["modelReady"] or model_status.get("ready")))
         message = "深度视频模型已就绪" if ready else (
             str(model_status.get("message") or "深度视频模型将在首次生成时自动下载")
-            if runtime else "深度视频运行时缺失，请重新安装软件"
+            if runtime else str(runtime_status.get("message") or "深度视频运行时将在首次生成时自动安装")
         )
         return {
             "ready": ready,
             "runtimeReady": bool(runtime),
-            "installAvailable": bool(model_status.get("install_available")),
-            "progress": model_status.get("progress", 1 if ready else 0),
+            "installAvailable": bool(model_status.get("install_available")) and bool(
+                runtime or runtime_status.get("install_available")
+            ),
+            "progress": runtime_status.get("progress", model_status.get("progress", 1 if ready else 0)),
+            "runtimeVariant": runtime_status.get("selected_variant", "bundled" if runtime else ""),
             "model": "vda_base_fp16_relative",
             "label": "Video Depth Anything Base · FP16 · Relative",
             "message": message,
@@ -82,7 +120,7 @@ class VideoDepthTaskService:
 
     def create(self, input_path: str | Path, output_root: str | Path, url_for_path: Callable[[str], str | None], user_id: str = 'admin') -> dict[str, Any]:
         state = self.status()
-        if not state["runtimeReady"]:
+        if not state["runtimeReady"] and not state["installAvailable"]:
             raise VideoDepthUnavailable(state["message"])
         source = Path(input_path).resolve()
         if not source.is_file():
@@ -129,8 +167,11 @@ class VideoDepthTaskService:
         output_dir.mkdir(parents=True, exist_ok=True)
         runtime = self._runtime()
         if not runtime:
-            self._update(task_id, status="failed", error="深度视频运行时缺失，请重新安装软件", message="深度视频运行时缺失")
-            return
+            self._ensure_runtime(task_id)
+            runtime = self._runtime()
+            if not runtime:
+                self._update(task_id, status="failed", error="深度视频运行时安装后仍不可用", message="深度视频运行时安装失败")
+                return
         if not runtime["modelReady"]:
             self._ensure_model(task_id)
             runtime = self._packaged_runtime()
@@ -237,4 +278,27 @@ class VideoDepthTaskService:
                 return
             if state in {"failed", "unavailable"}:
                 raise VideoDepthUnavailable(str(status.get("message") or "深度视频模型安装失败"))
+            time.sleep(0.5)
+
+    def _ensure_runtime(self, task_id: str) -> None:
+        if not self.runtime_manager:
+            raise VideoDepthUnavailable("深度视频运行时管理器不可用")
+        status = self.runtime_manager.public_status()
+        if status.get("ready"):
+            return
+        if not status.get("install_available"):
+            raise VideoDepthUnavailable(str(status.get("message") or "深度视频运行时暂不可下载"))
+        self.runtime_manager.start_background()
+        while True:
+            status = self.runtime_manager.public_status()
+            state = str(status.get("state") or "")
+            progress = float(status.get("progress") or 0)
+            self._update(
+                task_id, status="running", progress=min(12, max(1, int(progress * 12))),
+                message=str(status.get("message") or "正在安装深度视频运行时"),
+            )
+            if status.get("ready"):
+                return
+            if state in {"failed", "unavailable"}:
+                raise VideoDepthUnavailable(str(status.get("message") or "深度视频运行时安装失败"))
             time.sleep(0.5)

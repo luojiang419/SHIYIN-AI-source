@@ -286,7 +286,9 @@ def run_status() -> dict[str, Any]:
     ffmpeg = shutil.which("ffmpeg")
     models = model_status(LAB_ROOT)
     return {
-        "ready": bool(ffmpeg and torch.cuda.is_available() and all(row["ready"] for row in models)),
+        "ready": bool(ffmpeg and all(row["ready"] for row in models)),
+        "runtimeReady": bool(ffmpeg),
+        "device": "cuda" if torch.cuda.is_available() else "cpu",
         "python": sys.executable,
         "pythonVersion": sys.version.split()[0],
         "torchVersion": torch.__version__,

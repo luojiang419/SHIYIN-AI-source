@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "component": "video-depth-runtime",
+  "version": "1.0.0",
+  "enabled": true,
+  "release_status": "released",
+  "message": "深度视频运行时将在首次生成时按本机配置自动安装",
+  "license_notice": "运行时包含 PyTorch、TorchVision、FFmpeg 与 Video Depth Anything 推理源码；模型权重独立分发。",
+  "packages": [],
+  "variants": [
+    {
+      "id": "windows-x86_64-cuda128",
+      "priority": 110,
+      "constraints": {
+        "os": "windows",
+        "arch": "x86_64",
+        "accelerator": "cuda",
+        "min_compute_capability": 12.0,
+        "min_gpu_memory_bytes": 4294967296,
+        "min_driver_version": "570.65"
+      },
+      "command": ["runtime/video-depth-worker/video-depth-worker.exe"],
+      "required_paths": [
+        "runtime/video-depth-worker/video-depth-worker.exe",
+        "runtime/sources/video-depth-anything/video_depth_anything/video_depth.py",
+        "runtime/bin/ffmpeg.exe",
+        "runtime/bin/ffprobe.exe"
+      ],
+      "packages": ["runtime-windows-x86_64-cuda128"]
+    },
+    {
+      "id": "windows-x86_64-cuda126",
+      "priority": 100,
+      "constraints": {
+        "os": "windows",
+        "arch": "x86_64",
+        "accelerator": "cuda",
+        "min_compute_capability": 7.0,
+        "max_compute_capability": 9.9,
+        "min_gpu_memory_bytes": 4294967296,
+        "min_driver_version": "560.76"
+      },
+      "command": ["runtime/video-depth-worker/video-depth-worker.exe"],
+      "required_paths": [
+        "runtime/video-depth-worker/video-depth-worker.exe",
+        "runtime/sources/video-depth-anything/video_depth_anything/video_depth.py",
+        "runtime/bin/ffmpeg.exe",
+        "runtime/bin/ffprobe.exe"
+      ],
+      "packages": ["runtime-windows-x86_64-cuda126"]
+    },
+    {
+      "id": "windows-x86_64-cpu",
+      "priority": 10,
+      "constraints": {
+        "os": "windows",
+        "arch": "x86_64",
+        "accelerator": "cpu"
+      },
+      "command": ["runtime/video-depth-worker/video-depth-worker.exe"],
+      "required_paths": [
+        "runtime/video-depth-worker/video-depth-worker.exe",
+        "runtime/sources/video-depth-anything/video_depth_anything/video_depth.py",
+        "runtime/bin/ffmpeg.exe",
+        "runtime/bin/ffprobe.exe"
+      ],
+      "packages": ["runtime-windows-x86_64-cpu"]
+    }
+  ]
+}

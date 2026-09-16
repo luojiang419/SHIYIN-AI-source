@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -37,8 +38,15 @@ def main():
     parser.add_argument('--bootstrap', action='store_true', help='只发布兼容旧客户端的桌面更新器')
     parser.add_argument('--updater-only', action='store_true', help='发布新版客户端可用的更新器修复小包')
     parser.add_argument('--admin-port', type=int, default=3013)
+    parser.add_argument(
+        '--min-desktop-version',
+        default=(ROOT/'VERSION').read_text().strip(),
+        help='可应用此热更新的最低桌面宿主版本',
+    )
     args=parser.parse_args()
     if len(args.version)!=14 or not args.version.isdigit(): raise ValueError('热更新版本需14位时间戳')
+    if not re.fullmatch(r'\d+\.\d+\.\d+', args.min_desktop_version):
+        raise ValueError('最低桌面宿主版本格式无效')
     cache=ROOT/'.build/hot-build.json'
     state=json.loads(cache.read_text('utf-8')) if cache.exists() else {}
     desktop_files=list((ROOT/'src-tauri/src').rglob('*.rs'))+list((ROOT/'src-tauri').glob('*.toml'))+list((ROOT/'src-tauri').glob('*.json'))+list((ROOT/'desktop-placeholder').rglob('*'))+[ROOT/'src-tauri/distribution-public-key.hex',ROOT/'src-tauri/build.rs']
@@ -72,7 +80,6 @@ def main():
         for path in (ROOT/'static').rglob('*.html'):
             target=files/'app/web'/path.relative_to(ROOT/'static')
             target.parent.mkdir(parents=True,exist_ok=True)
-            import re
             html=path.read_text('utf-8')
             html=re.sub(r'([?&]v=)[^\s\"\'&<>]+',lambda m:m[1]+args.version,html)
             target.write_text(html,encoding='utf-8')
@@ -80,7 +87,6 @@ def main():
         shutil.copytree(ROOT/'static',files/'app/web',ignore=shutil.ignore_patterns('prototypes'))
         # 用发布序号统一静态资源缓存参数，避免重启后 WebView 仍读取旧脚本。
         for path in (files/'app/web').rglob('*.html'):
-            import re
             html=path.read_text('utf-8')
             html=re.sub(r'([?&]v=)[^\s\"\'&<>]+',lambda m:m[1]+args.version,html)
             path.write_text(html,encoding='utf-8')
@@ -89,7 +95,7 @@ def main():
             shutil.copytree(backend,files/'app/backend/canvas-backend')
             shutil.copy2(desktop,files/'SHIYIN AI.exe')
             roots.append('app/backend/canvas-backend')
-    manifest={'protocol_version':2 if args.bootstrap else 3,'version':args.version,'min_desktop_version':(ROOT/'VERSION').read_text().strip(),'notes':args.notes,'prune_roots':roots,'files':[]}
+    manifest={'protocol_version':2 if args.bootstrap else 3,'version':args.version,'min_desktop_version':args.min_desktop_version,'notes':args.notes,'prune_roots':roots,'files':[]}
     for path in sorted(files.rglob('*')):
         if path.is_file():manifest['files'].append({'path':path.relative_to(files).as_posix(),'size':path.stat().st_size,'sha256':digest(path)})
     if not args.bootstrap:

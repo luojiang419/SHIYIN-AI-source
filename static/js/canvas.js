@@ -4131,7 +4131,11 @@ async function prepareCanvasEntry(session){
             const result=await window.CanvasResourceReady.wait({
                 root:nodesEl,isCurrent:session.isCurrent,
                 include:canvasEntryResourceVisible,
-                budgetMs:800,
+                // The upstream viewport engine can be interactive before every visible
+                // thumbnail is decoded. Keep the legacy gate for the old renderer, but
+                // let the new engine enter promptly while its media queue continues in
+                // the background.
+                budgetMs:window.CanvasEngine?.active ? 120 : 800,
                 active:()=>!canvasSessionSuspended,
                 drain:()=>ensureClassicMediaQueue()?.drainNow(),
                 progress:(done,total)=>window.canvasEntryOverlay?.update(35+60*(total?done/total:1), `正在准备节点资源 ${done} / ${total}`)

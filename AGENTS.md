@@ -1,5 +1,7 @@
 # 项目发布约定
 
+- 自2026-09-16起以2.0.0为新的分发基线。1.0.x用户通过2.0.0全量安装包覆盖升级；不再恢复hot-bootstrap/hot-updater旧引导链或旧迁移工具入口。2.0.0及后续客户端使用正常局域网热更新。
+
 - 自 2026-09-14 起，后续更新默认通过独立局域网分发中心发布热更新。
 - 只有用户明确要求“全量编译/全量安装包”时，才运行 `installer:build`、`release-installer.ps1` 或其他全量安装器构建流程。
 - 默认入口：`npm run update:publish`，或 `python tools/build-hot-update.py --publish --notes "更新说明"`。

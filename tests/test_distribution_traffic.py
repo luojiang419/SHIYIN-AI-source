@@ -74,14 +74,14 @@ def test_speed_idle_daily_rollover_and_restart(tmp_path):
 
 def test_socket_disconnect_cleans_active_and_does_not_count_whole_file(server):
     center, url = server
-    path = center.data/'bootstrap'/'SHIYIN-Hot-Update.exe'
-    path.parent.mkdir()
+    path = center.data/'blobs'/('a'*64)
+    path.parent.mkdir(exist_ok=True)
     with path.open('wb') as handle:
         handle.truncate(64 * 1024 * 1024)
     port = int(url.rsplit(':', 1)[1])
     sock = socket.create_connection(('127.0.0.1', port))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-    sock.sendall(b'GET /SHIYIN-Hot-Update.exe HTTP/1.1\r\nHost: localhost\r\n\r\n')
+    sock.sendall(('GET /v1/blobs/'+path.name+' HTTP/1.1\r\nHost: localhost\r\n\r\n').encode())
     assert sock.recv(1024)
     deadline = time.monotonic()+3
     while not center.traffic.snapshot()['active_count'] and time.monotonic()<deadline:
@@ -96,11 +96,11 @@ def test_socket_disconnect_cleans_active_and_does_not_count_whole_file(server):
 
 def test_invalid_range_does_not_count_and_monitor_is_admin_only(server):
     center, url = server
-    path = center.data/'bootstrap'/'SHIYIN-Hot-Update.exe'
-    path.parent.mkdir();path.write_bytes(b'abc')
+    path = center.data/'blobs'/('a'*64)
+    path.parent.mkdir(exist_ok=True);path.write_bytes(b'abc')
     import urllib.error
     with pytest.raises(urllib.error.HTTPError):
-        get(url+'/SHIYIN-Hot-Update.exe', {'Range': 'bytes=99-'})
+        get(url+'/v1/blobs/'+path.name, {'Range': 'bytes=99-'})
     with pytest.raises(urllib.error.HTTPError):
         get(url+'/api/status')
     assert center.traffic.snapshot()['today_bytes'] == 0

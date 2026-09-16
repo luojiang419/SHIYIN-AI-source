@@ -324,6 +324,8 @@ class Center:
         return sha
 
     def import_release(self, source, kind, notes=''):
+        if kind in ('hot-bootstrap', 'hot-updater'):
+            raise ValueError('旧更新器发布路线已停用，请发布2.0.0或更高版本的全量基准包')
         source = Path(source).resolve(strict=True)
         files = []
         if kind in ('hot', 'hot-bootstrap', 'hot-updater'):
@@ -588,33 +590,33 @@ class Center:
                     if path == '/health':
                         return self.json({'ok': True, 'url': owner.url, 'public_key': owner.public_key, 'protocol': 3})
                     if path == '/':
+                        full = owner.active('full')
+                        download = ('<p><a style="color:#8fe0b4" href="/update/files/SHIYIN-AI-Setup-'
+                                    + full['version'] + '.exe">下载 SHIYIN AI ' + full['version'] + ' 基准安装包</a></p>') if full else '<p>基准安装包正在准备，请稍后再试。</p>'
                         raw = ('<!doctype html><meta charset="utf-8"><title>SHIYIN 局域网下载</title>'
                                '<body style="background:#12191f;color:#e5eef5;font:16px sans-serif;padding:60px">'
-                               '<h1>SHIYIN 局域网下载</h1><p>旧版本首次接入：保存并退出软件，下载并运行迁移工具，选择软件安装目录。</p>'
-                               '<p><a style="color:#8fe0b4" href="/SHIYIN-Hot-Update.exe">下载热更新迁移工具</a></p>'
-                               '<p>完成这一次迁移后，后续更新会直接在软件内弹出提示，点击即可更新并自动重启。</p>').encode('utf-8')
+                               '<h1>SHIYIN 局域网下载</h1><p>首次安装或从1.0.x升级：保存并退出软件，下载基准安装包，选择原安装目录覆盖安装。</p>'
+                               + download + '<p>2.0.0及后续版本使用软件内的局域网热更新。原工程和媒体保留在数据目录中。</p>').encode('utf-8')
                         self.send_response(200)
                         self.send_header('Content-Type','text/html; charset=utf-8')
                         self.send_header('Content-Length',str(len(raw)))
                         self.end_headers()
                         return self.wfile.write(raw)
                     if path == '/SHIYIN-Hot-Update.exe':
-                        return self.file(owner.data / 'bootstrap' / 'SHIYIN-Hot-Update.exe')
+                        return self.json({'error': '旧迁移工具已停用，请从首页下载2.0.0基准安装包'}, 410)
                     if path == '/hot-update/manifest.json':
-                        # 旧客户端不得静默套用新发布；迁移更新器后才能检查协议 v2。
-                        return self.json({'error': '请先迁移桌面更新器'}, 409)
+                        return self.json({'error': '请从首页下载2.0.0基准安装包覆盖升级'}, 409)
                     if path == '/v1/catalog':
                         owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
                         capabilities = {value.strip() for value in self.headers.get('X-Shiyin-Capabilities', '').split(',')}
-                        if 'fast-extract-v1' in capabilities:
-                            release = owner.active('hot')
-                        elif 'package-v3' in capabilities:
-                            release = owner.active('hot-updater')
-                        else:
-                            release = owner.active('hot-bootstrap')
-                            if not release:
-                                candidate = owner.active('hot')
-                                if candidate and json.loads(json.loads(candidate['manifest'])['payload']).get('protocol_version') == 2:
+                        release = None
+                        desktop = self.headers.get('X-Shiyin-Version', '').split('/')[0].strip()
+                        if re.fullmatch(r'\d+\.\d+\.\d+', desktop) and {'package-v3', 'fast-extract-v1'} <= capabilities:
+                            candidate = owner.active('hot')
+                            if candidate:
+                                manifest = json.loads(json.loads(candidate['manifest'])['payload'])
+                                minimum = max((2, 0, 0), tuple(map(int, manifest['min_desktop_version'].split('.'))))
+                                if manifest.get('protocol_version') == 3 and tuple(map(int, desktop.split('.'))) >= minimum:
                                     release = candidate
                         target = owner.active('hot')
                         target_version = target['version'] if target else release['version'] if release else ''

@@ -28,7 +28,7 @@ def package_snapshot(root, content=b'packaged-update', version='20260915130001')
     path='app/web/index.html'
     with zipfile.ZipFile(package,'w',compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(path,content)
-    atomic_json(root/'manifest.json', {'protocol_version':3,'version':version,'min_desktop_version':'1.0.447',
+    atomic_json(root/'manifest.json', {'protocol_version':3,'version':version,'min_desktop_version':'2.0.0',
         'prune_roots':['app/web'],'files':[{'path':path,'size':len(content),'sha256':hashlib.sha256(content).hexdigest()}],
         'package':{'name':name,'size':package.stat().st_size,'sha256':hashlib.sha256(package.read_bytes()).hexdigest()}})
     return root
@@ -57,51 +57,45 @@ def get(url,headers=None):
 
 
 def test_signed_catalog_range_and_legacy_guard(server,tmp_path):
-    c,url=server;c.import_release(snapshot(tmp_path/'snapshot'),'hot','说明')
-    with get(url+'/v1/catalog',{'X-Shiyin-Version':'1.0.446 / 20260914170000'}) as r: env=json.load(r)
+    c,url=server;c.import_release(package_snapshot(tmp_path/'snapshot',b'new'),'hot','说明')
+    with get(url+'/v1/catalog',{'X-Shiyin-Version':'2.0.0 / 20260914170000','X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as r: env=json.load(r)
     Ed25519PublicKey.from_public_bytes(bytes.fromhex(env['public_key'])).verify(bytes.fromhex(env['signature']),env['payload'].encode())
     manifest=json.loads(env['payload']);assert manifest['notes']=='说明'
-    sha=manifest['files'][0]['sha256']
+    sha=manifest['package']['sha256']
+    package=(tmp_path/'snapshot'/manifest['package']['name']).read_bytes()
     with get(url+'/v1/blobs/'+sha,{'Range':'bytes=1-2'}) as r:
-        assert r.status==206 and r.read()==b'ew'
-        assert r.headers['Content-Range']=='bytes 1-2/3'
+        assert r.status==206 and r.read()==package[1:3]
+        assert r.headers['Content-Range']==f'bytes 1-2/{len(package)}'
     with pytest.raises(urllib.error.HTTPError) as err: get(url+'/hot-update/manifest.json')
     assert err.value.code==409
     assert len(c.status()['clients'])==1
     assert c.status()['clients'][0]['update_state']=='outdated'
 
 
-def test_package_capability_routes_new_and_legacy_clients(server,tmp_path):
+def test_v2_baseline_replaces_legacy_upgrade_chain(server,tmp_path):
     c,url=server
-    packaged=package_snapshot(tmp_path/'package')
-    c.import_release(packaged,'hot','单包')
-    with get(url+'/v1/catalog') as response:
-        assert json.load(response)=={'release':None}
-    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
-        assert json.load(response)=={'release':None}
-    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as response:
-        envelope=json.load(response)
-    manifest=json.loads(envelope['payload'])
-    assert manifest['protocol_version']==3 and manifest['package']['name'].endswith('.shiyin-update')
-    package=manifest['package']
-    with get(url+'/v1/blobs/'+package['sha256'],{'Range':'bytes=1-'}) as response:
-        assert response.status==206 and len(response.read())==package['size']-1
-    c.import_release(packaged,'hot-updater','更新器修复')
-    c.import_release(bootstrap_snapshot(tmp_path/'bootstrap'),'hot-bootstrap','引导')
-    with get(url+'/v1/catalog') as response:
-        assert response.headers['X-Shiyin-Plan-Target']=='20260915130001'
-        legacy_envelope=json.load(response)
-        Ed25519PublicKey.from_public_bytes(bytes.fromhex(legacy_envelope['public_key'])).verify(
-            bytes.fromhex(legacy_envelope['plan_signature']),legacy_envelope['plan_payload'].encode())
-        assert json.loads(legacy_envelope['plan_payload'])['target_version']=='20260915130001'
-        legacy=json.loads(legacy_envelope['payload'])
-    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3'}) as response:
-        assert response.headers['X-Shiyin-Plan-Target']=='20260915130001'
-        updater=json.loads(json.load(response)['payload'])
-    with get(url+'/v1/catalog',{'X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as response:
-        modern=json.loads(json.load(response)['payload'])
-    assert legacy['protocol_version']==2 and legacy['files'][0]['path']=='SHIYIN AI.exe'
-    assert updater['notes']=='更新器修复' and modern['notes']=='单包'
+    c.import_release(package_snapshot(tmp_path/'package'),'hot','2.0完整更新')
+    exe=tmp_path/'SHIYIN-AI-Setup-2.0.0.exe';exe.write_bytes(b'installer-fixture');c.import_release(exe,'full')
+    for desktop,capability in [('', ''),('1.0.447','package-v3,fast-extract-v1'),('2.0.0','package-v3'),('bad','package-v3,fast-extract-v1')]:
+        with get(url+'/v1/catalog',{'X-Shiyin-Version':desktop,'X-Shiyin-Capabilities':capability}) as r:
+            assert json.load(r)=={'release':None}
+    with get(url+'/update/manifest.json') as r:
+        assert json.load(r)['tag_name']=='v2.0.0'
+    with get(url+'/') as r:
+        html=r.read().decode();assert exe.name in html and '/SHIYIN-Hot-Update.exe' not in html
+    with pytest.raises(urllib.error.HTTPError) as error:get(url+'/SHIYIN-Hot-Update.exe')
+    assert error.value.code==410
+    with get(url+'/v1/catalog',{'X-Shiyin-Version':'2.0.0 / 20260914170000','X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as r:
+        env=json.load(r)
+    key=Ed25519PublicKey.from_public_bytes(bytes.fromhex(env['public_key']))
+    key.verify(bytes.fromhex(env['signature']),env['payload'].encode())
+    key.verify(bytes.fromhex(env['plan_signature']),env['plan_payload'].encode())
+    manifest=json.loads(env['payload']);assert manifest['min_desktop_version']=='2.0.0'
+    assert json.loads(env['plan_payload'])['target_version']==manifest['version']
+    with get(url+'/v1/blobs/'+manifest['package']['sha256'],{'Range':'bytes=1-'}) as r:
+        assert r.status==206 and len(r.read())==manifest['package']['size']-1
+    for kind in ('hot-bootstrap','hot-updater'):
+        with pytest.raises(ValueError,match='旧更新器发布路线已停用'):c.import_release(tmp_path/'package',kind)
 
 
 def test_package_import_rejects_corruption(server,tmp_path):

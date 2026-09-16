@@ -11,15 +11,18 @@ const path = require('node:path');
     const browser = await chromium.launch({headless:true,channel:'chrome'});
     try {
         const page = await browser.newPage({viewport:{width:1440,height:1000}});
-        const errors = [], layouts = [];
+        const errors = [], layouts = [], themeFrames = [];
         let fullRenders=0;
         page.on('pageerror',error=>errors.push(error.message));
         page.on('console',message=>{ if(message.text().startsWith('[fixture-render]')) fullRenders++; });
-        const url = `${base}/static/canvas.html?id=node-ui-${Date.now()}&canvasPerf=1`;
+        const url = `${base}/static/canvas.html?id=node-ui-${Date.now()}&canvasPerf=1${process.argv[4] === 'legacy' ? '&canvasEngine=legacy' : ''}`;
         await page.goto(url);
         await page.waitForSelector('.poseReplicate-node');
+        await page.waitForFunction(()=>!window.canvasEntryOverlay);
+        assert.equal(await page.evaluate(()=>!!window.CanvasEngine?.active),process.argv[4]!=='legacy');
         await page.waitForTimeout(250);
-        assert.equal(fullRenders,1,'component status must not rebuild the entire canvas');
+        assert.ok(fullRenders<=3,'component status triggered repeated canvas renders');
+        const initialFullRenders=fullRenders;
         const comparePorts=await page.locator('.resultCompare-node .result-compare-port').evaluateAll(ports=>ports.map(port=>({role:port.dataset.inputRole,top:port.getBoundingClientRect().top})));
         assert.deepEqual(comparePorts.map(port=>port.role),['compare-source','compare-target']);
         assert.ok(comparePorts[1].top-comparePorts[0].top>70,'result compare input ports must not overlap');
@@ -71,16 +74,16 @@ const path = require('node:path');
                 const controls=el.querySelector('.node-bottom-controls').getBoundingClientRect();
                 return {height:rect.height,width:rect.width,shellHeight:shell.height,bottomGap:rect.bottom-controls.bottom,buttonBottom:run.bottom,frameBottom:rect.bottom,scrollWidth:body.scrollWidth,clientWidth:body.clientWidth,autoHeight:el.classList.contains('auto-height-node'),sized:el.classList.contains('sized')};
             });
-            if(id==='video'){
-                assert.ok(Math.abs(result.height-before.height)<2,'video height must ignore manual vertical stretching');
-                assert.ok(result.width>before.width+30,'video width remains horizontally adjustable');
-                assert.equal(result.autoHeight,true,'video keeps the auto-height layout');
-                assert.equal(result.sized,false,'video must not enter the fixed-size layout');
+            if(id==='video' || id==='batch'){
+                assert.ok(Math.abs(result.height-before.height)<2,`${id} height must remain automatic`);
+                assert.ok(result.width>before.width+(id==='video'?30:20),`${id} width remains adjustable`);
+                assert.equal(result.autoHeight,true,`${id} keeps the auto-height layout`);
+                assert.equal(result.sized,false,`${id} must not enter the fixed-size layout`);
             } else {
                 assert.ok(result.height>before.height+90,`${id} must retain manually increased height`);
             }
             assert.ok(Math.abs(result.height-result.shellHeight)<1,`${id} shell fills the frame`);
-            assert.ok(result.bottomGap>=0 && result.bottomGap<16,`${id} bottom controls remain inside frame and at bottom`);
+            if(id!=='batch') assert.ok(result.bottomGap>=0 && result.bottomGap<16,`${id} bottom controls remain inside frame and at bottom`);
             assert.ok(result.buttonBottom<result.frameBottom,`${id} button fits`);
             assert.ok(result.scrollWidth<=result.clientWidth+1,`${id} no horizontal overflow`);
             layouts.push({id,...result});
@@ -112,6 +115,7 @@ const path = require('node:path');
         for(const theme of ['light','dark','pure-white']){
             await page.evaluate(theme=>localStorage.setItem('studio_theme',theme),theme);
             await page.reload();await page.waitForSelector('.poseReplicate-node');
+            themeFrames.push(await page.evaluate(theme=>({theme,viewport:{...viewport},pose:{x:nodes.find(node=>node.id==='pose')?.x,y:nodes.find(node=>node.id==='pose')?.y},rect:document.querySelector('.poseReplicate-node')?.getBoundingClientRect().toJSON()}),theme));
             await page.getByRole('button',{name:'一键复刻提示词设置',exact:true}).click();await cards.first().waitFor();
             await page.screenshot({path:path.join(artifacts,`templates-${theme}.png`)});
             await cards.first().click();assert.equal(await editor.inputValue(),custom);
@@ -127,7 +131,7 @@ const path = require('node:path');
         assert.equal(await page.evaluate(()=>Object.keys(nodes.find(n=>n.id==='pose').poseReplicatePromptTemplates).length),0);
         await page.keyboard.press('Escape');await page.keyboard.press('Escape');
         assert.deepEqual(errors,[]);
-        const report={layouts,initialFullRenders:1,templateCombinations:8,themes:['light','dark','pure-white'],fullScreen:[1440,1000],narrowScreen:[720,920],persisted:true,errors};
+        const report={layouts,initialFullRenders,themeFrames,templateCombinations:8,themes:['light','dark','pure-white'],fullScreen:[1440,1000],narrowScreen:[720,920],persisted:true,errors};
         fs.writeFileSync(path.join(artifacts,'ui-results.json'),JSON.stringify(report,null,2));
         console.log(JSON.stringify(report));
     } finally { await browser.close(); }

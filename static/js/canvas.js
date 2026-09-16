@@ -938,6 +938,7 @@ function syncCanvasToolUi(){
 }
 function setCanvasToolMode(mode){
     canvasToolMode = mode === 'pan' ? 'pan' : 'select';
+    window.CanvasEngine?.updateTool?.(canvasToolMode);
     syncCanvasToolUi();
 }
 syncCanvasToolUi();
@@ -2351,7 +2352,8 @@ function refreshGateViewControls(){
 function setCanvasMode(open){
     shell.classList.toggle('no-canvas', !open);
     if(!open){
-        nodesEl.innerHTML = '';
+        if(window.CanvasEngine?.active) window.CanvasEngine.clear();
+        else nodesEl.innerHTML = '';
         linksEl.innerHTML = '';
         linkControlsEl.innerHTML = '';
         classicLinkDom.clear();
@@ -2529,7 +2531,8 @@ function classicMediaElementsInWindow(){
     return [...new Set([...foreground,...pending])];
 }
 function applyViewport(){
-    world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
+    if(window.CanvasEngine?.active) window.CanvasEngine.updateViewport({x:viewport.x, y:viewport.y, k:viewport.scale});
+    else world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
     classicMediaRestoreAfter = performance.now() + CLASSIC_MEDIA_RESTORE_IDLE_MS;
     scheduleClassicSafeLod();
     scheduleMinimapViewportUpdate();
@@ -4119,8 +4122,12 @@ async function prepareCanvasEntry(session){
                 if(session.isCurrent()) refreshNodes([node.dataset.id]);
             }});
         while(session.isCurrent()){
-            const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
-            if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
+            if(window.CanvasEngine?.active){
+                if(window.CanvasEngine.visibleIds().some(id=>!canvasNodeDomIndex.get(id)?.isConnected)) throw new Error('可见节点尚未完成构建，请重试');
+            } else {
+                const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
+                if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
+            }
             const result=await window.CanvasResourceReady.wait({
                 root:nodesEl,isCurrent:session.isCurrent,
                 include:canvasEntryResourceVisible,
@@ -9579,6 +9586,27 @@ function render(){
         window.StudioFocusGuard.deferDomUpdate('canvas-render', render);
         return;
     }
+    if(window.CanvasEngine?.active){
+        classicRenderMutation = null;
+        const perfEnd = window.CanvasPerformance?.start?.('classic.upstream-render', {nodes:nodes.length, connections:connections.length});
+        canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
+        board?.classList.toggle('selection-multiple', Boolean(canvas && selected.size > 1));
+        updateCanvasStats();
+        window.CanvasEngine.render(nodes, {x:viewport.x, y:viewport.y, k:viewport.scale});
+        rebuildCanvasDomIndexes();
+        refreshGeometry();
+        refreshGeometryAfterLayout();
+        scheduleClassicIdleIconRefresh(nodesEl);
+        hydrateClassicVisibleIconRoots(nodesEl);
+        bindCanvasPreviewImageFallbacks(nodesEl);
+        syncCanvasSelectedImageResolution(nodesEl);
+        measureCanvasOriginalImageNodes(nodesEl);
+        scheduleClassicMediaQueue();
+        scheduleMinimapRender();
+        refreshOutputTimer();
+        perfEnd?.();
+        return;
+    }
     if(classicRenderMutation){
         const mutation = classicRenderMutation;
         classicRenderMutation = null;
@@ -9641,6 +9669,56 @@ function render(){
     scheduleMinimapRender();
     perfEnd?.();
 }
+const classicEngineVisibilityDirtyIds = new Set();
+let classicEngineVisibilityRaf = 0;
+function markClassicEngineVisibilityChanged(id){
+    if(!id) return;
+    classicEngineVisibilityDirtyIds.add(id);
+    if(classicEngineVisibilityRaf) return;
+    classicEngineVisibilityRaf = requestAnimationFrame(() => {
+        classicEngineVisibilityRaf = 0;
+        const ids = [...classicEngineVisibilityDirtyIds];
+        classicEngineVisibilityDirtyIds.clear();
+        if(!canvas || !window.CanvasEngine?.active) return;
+        markClassicConnectionsDirtyForNodes(ids);
+        if(classicConnectionDirtyIds.size) scheduleLinksRender();
+        if(ids.some(nodeId => selected.has(nodeId))) scheduleSelectionHubPosition();
+    });
+}
+window.CanvasEngineBridge = {
+    renderNode,
+    nodeSize(node){
+        const size = defaultNodeSize(node.type);
+        return {w:Number(node.w) || Number(size.w) || 260, h:Number(node.h) || Number(size.h) || 160};
+    },
+    keepMounted(node){
+        const el = canvasNodeDomIndex.get(node.id);
+        return Boolean(dragNode?.node?.id === node.id || resizeNode?.node?.id === node.id
+            || el?.contains(document.activeElement) || [...(el?.querySelectorAll('video') || [])].some(video=>!video.paused));
+    },
+    onViewportChange(next){
+        viewport.x = next.x;
+        viewport.y = next.y;
+        viewport.scale = next.k;
+        applyViewport();
+        scheduleViewportSave();
+    },
+    onNodeMount(node, element){
+        indexClassicNodeDom(element, node, {measure:false});
+        refreshIcons(element);
+        bindCanvasPreviewImageFallbacks(element);
+        measureCanvasOriginalImageNodes(element);
+        scheduleClassicNodeRectMeasure([node.id]);
+        markClassicEngineVisibilityChanged(node.id);
+    },
+    onNodeUnmount(node){
+        const current = canvasNodeDomIndex.get(node.id);
+        if(current && node.type === 'panorama') window.CanvasSpecialNodes?.disposePanoramasIn?.(current);
+        removeClassicNodeDomIndex(node.id);
+        markClassicEngineVisibilityChanged(node.id);
+    },
+    onNodeReplace(node, previous, fresh){ if(nodeHasLiveMedia(node)) transplantNodeMediaElement(previous, fresh); }
+};
 function registerClassicCanvasPerfFixture(){
     window.CanvasPerformance?.registerFixtureFactory?.('classic', options => {
         if(!window.CanvasPerformance.enabled) throw new Error('请使用 ?canvasPerf=1 打开性能观测');
@@ -9685,6 +9763,7 @@ function registerClassicCanvasPerfFixture(){
 }
 registerClassicCanvasPerfFixture();
 function patchCanvasNodeCreates(createdNodes=[], refreshIds=[]){
+    if(window.CanvasEngine?.active){ render(); return true; }
     const created = (createdNodes || []).filter(Boolean);
     if(!created.length && !(refreshIds || []).length){
         refreshGeometryAfterLayout();
@@ -24614,6 +24693,7 @@ function startBoardPan(e, opts={}){
 
 board.onmousedown = e => {
     if(!canvas) return;
+    if(window.CanvasEngine?.active && (e.button === 1 || activeCanvasTool(e) === 'pan')) return;
     if(e.button === 1){
         startBoardPan(e);
         return;
@@ -24622,7 +24702,8 @@ board.onmousedown = e => {
     if(startKnifeDrag(e)) return;
     // Dismiss any open native select dropdown
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-    if(e.target !== board && e.target !== world && e.target !== nodesEl && e.target !== linksEl) return;
+    const engineBackground = window.CanvasEngine?.active && e.target.closest?.('#canvasEngineRoot') && !e.target.closest?.('.node, .link-hit, .link-delete');
+    if(e.target !== board && e.target !== world && e.target !== nodesEl && e.target !== linksEl && !engineBackground) return;
     closeCreateMenu();
     if(isRKeyDown){
         e.preventDefault();
@@ -24669,7 +24750,8 @@ board.oncontextmenu = e => {
         openCreateMenu(e.clientX, e.clientY);
         return;
     }
-    if(e.target !== board && e.target !== world && e.target !== nodesEl && e.target !== linksEl) return;
+    const engineBackground = window.CanvasEngine?.active && e.target.closest?.('#canvasEngineRoot') && !e.target.closest?.('.node, .link-hit, .link-delete');
+    if(e.target !== board && e.target !== world && e.target !== nodesEl && e.target !== linksEl && !engineBackground) return;
     e.preventDefault();
     e.stopPropagation();
     openCreateMenu(e.clientX, e.clientY);
@@ -24680,6 +24762,7 @@ board.addEventListener('mousedown', e => {
 });
 board.onwheel = e => {
     if(!canvas) return;
+    if(window.CanvasEngine?.active) return;
     e.preventDefault();
     if(!window.CanvasPerformance?.isInteractionActive?.('classic.zoom')) window.CanvasPerformance?.beginInteraction?.('classic.zoom', {nodes:nodes.length, connections:connections.length});
     const before = screenToWorld(e.clientX, e.clientY);

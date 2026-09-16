@@ -498,16 +498,16 @@ function setCanvasRouteActive(active){
         return;
     }
     if(wasSuspended && canvas && !canvasEntryPreparing){
-        const id=canvas.id;
-        const session={id,isCurrent:()=>canvas?.id===id,entryDependenciesReady:true};
-        showCanvasStartupNotice(id);
-        void (async()=>{
-            if(canvasSessionConfigDirty){canvasSessionConfigDirty=false;await refreshCanvasConfigFromSettings();}
-            await checkRemoteCanvasVersion();
-            if(!session.isCurrent()) return;
-            await prepareCanvasEntry(session);
-            if(session.isCurrent()){startCanvasRemotePolling();refreshOutputTimer();}
-        })().catch(error=>{if(session.isCurrent()) showCanvasStartupNotice(id,error);});
+        if(canvasSessionConfigDirty){
+            canvasSessionConfigDirty=false;
+            void refreshCanvasConfigFromSettings();
+        }
+        hideCanvasStartupNotice();
+        scheduleClassicMediaQueue();
+        scheduleClassicMediaResidency();
+        startCanvasRemotePolling();
+        refreshOutputTimer();
+        void checkRemoteCanvasVersion().catch(error=>console.warn('canvas background version check failed',error));
         return;
     }
     if(wasSuspended) scheduleClassicMediaQueue();
@@ -4121,21 +4121,21 @@ async function prepareCanvasEntry(session){
                 await refreshMissingCanvasAssets(session.id,session.signal);
                 if(session.isCurrent()) refreshNodes([node.dataset.id]);
             }});
+        if(window.CanvasEngine?.active){
+            const missingVisible=window.CanvasEngine.visibleIds().filter(id=>!canvasNodeDomIndex.get(id)?.isConnected);
+            if(missingVisible.length) throw new Error('可见节点尚未完成构建，请重试');
+            window.CanvasPerformance?.record?.('classic.entry-structure-ready',performance.now()-entryStarted,
+                {visible:window.CanvasEngine.visibleIds().length});
+            hideCanvasStartupNotice();
+            return;
+        }
         while(session.isCurrent()){
-            if(window.CanvasEngine?.active){
-                if(window.CanvasEngine.visibleIds().some(id=>!canvasNodeDomIndex.get(id)?.isConnected)) throw new Error('可见节点尚未完成构建，请重试');
-            } else {
-                const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
-                if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
-            }
+            const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
+            if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
             const result=await window.CanvasResourceReady.wait({
                 root:nodesEl,isCurrent:session.isCurrent,
                 include:canvasEntryResourceVisible,
-                // The upstream viewport engine can be interactive before every visible
-                // thumbnail is decoded. Keep the legacy gate for the old renderer, but
-                // let the new engine enter promptly while its media queue continues in
-                // the background.
-                budgetMs:window.CanvasEngine?.active ? 120 : 800,
+                budgetMs:800,
                 active:()=>!canvasSessionSuspended,
                 drain:()=>ensureClassicMediaQueue()?.drainNow(),
                 progress:(done,total)=>window.canvasEntryOverlay?.update(35+60*(total?done/total:1), `正在准备节点资源 ${done} / ${total}`)
@@ -4157,15 +4157,14 @@ async function prepareCanvasEntry(session){
 
 function showCanvasStartupNotice(id, error=null){
     canvasEntryPreparing = !error;
-    if(error || window.canvasEntryOverlay?.el.querySelector('button')){
+    if(window.canvasEntryOverlay?.el.querySelector('button')){
         window.canvasEntryOverlay?.remove();
         window.canvasEntryOverlay = null;
     }
-    window.canvasEntryOverlay ||= window.CanvasEntryProgress.create();
-    window.canvasEntryOverlay.setReturn?.(()=>returnToCanvasManager());
     document.getElementById('shell').inert = true;
-    window.canvasEntryOverlay.update(8, '正在读取工程与配置');
-    if(error) window.canvasEntryOverlay.error(error.message || '画布加载失败，请重试。', () => openCanvas(id),()=>returnToCanvasManager(),'返回列表');
+    if(!error) return;
+    window.canvasEntryOverlay ||= window.CanvasEntryProgress.create();
+    window.canvasEntryOverlay.error(error.message || '画布加载失败，请重试。', () => openCanvas(id),()=>returnToCanvasManager(),'返回列表');
 }
 function hideCanvasStartupNotice(){
     window.canvasEntryOverlay?.remove();
@@ -25387,11 +25386,6 @@ window.CanvasSessionLifecycle = {
 
 async function initializeCanvasPage(){
     window.CanvasPerformance?.record?.('classic.editor-ready', performance.now());
-    let preferenceTimer;
-    try {
-        await Promise.race([(window.RuntimeSync || window.top?.RuntimeSync)?.ready?.(),
-            new Promise(resolve => {preferenceTimer=setTimeout(resolve,6000);})]);
-    } finally {clearTimeout(preferenceTimer);}
     renderQuickToolbarItems();
     startCanvasStatsLoop();
     updateCanvasStats();
@@ -25411,6 +25405,12 @@ async function initializeCanvasPage(){
     } else {
         window.location.replace(canvasListUrlForProject(rememberedCanvasListProject()));
     }
+    Promise.resolve((window.RuntimeSync || window.top?.RuntimeSync)?.ready?.()).then(()=>{
+        if(!canvas) return;
+        renderQuickToolbarItems();
+        applyQuickToolbarState();
+        void loadClassicShortcutSettings();
+    }).catch(error=>console.warn('canvas runtime preferences unavailable',error));
 }
 
 // 不等待图片/媒体等 load 资源；defer 脚本已按顺序注册全部节点能力。

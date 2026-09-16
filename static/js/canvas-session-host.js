@@ -8,25 +8,26 @@
     let manager = null;
     let entryWait = null;
     function waitForEntry(frame){
-        entryWait?.overlay.remove();
         if(entryWait) clearTimeout(entryWait.timer);
         entryWait = null;
         if(!frame || frame.dataset.frameReady === '1') return;
-        const overlay = window.CanvasEntryProgress.create(frame.parentElement);
-        overlay.update(4, '正在加载画布页面');
+        // 立即切换编辑器文档；正常导航不显示加载层，仅在文档确实无法挂载时提示错误。
         const timer = setTimeout(() => {
             if(entryWait?.frame !== frame) return;
-            overlay.error('页面加载较慢，请检查连接或重试。', () => {
+            const overlay = window.CanvasEntryProgress.create(frame.parentElement);
+            overlay.error('画布页面未能打开，请检查连接或重试。', () => {
+                overlay.remove();
                 frame.src = frame.src;
                 waitForEntry(frame);
             });
+            entryWait.overlay = overlay;
         }, 20000);
-        entryWait = {frame, overlay, timer};
+        entryWait = {frame, timer, overlay:null};
         frame.addEventListener('load', () => finishEntryWait(frame), {once:true});
     }
     function finishEntryWait(frame){
         if(entryWait?.frame !== frame) return;
-        entryWait.overlay.remove();
+        entryWait.overlay?.remove();
         clearTimeout(entryWait.timer);
         entryWait = null;
     }

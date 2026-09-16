@@ -56,8 +56,6 @@
 </head>
 <body>
     <script>
-        window.canvasEntryOverlay = CanvasEntryProgress.create();
-        window.canvasEntryOverlay.update(4, '正在准备画布');
         if(parent !== window) parent.postMessage({type:'canvas-entry-mounted'}, location.origin);
     </script>
     <div id="canvasStartupNotice" class="canvas-startup-notice" role="status" aria-live="polite" hidden>

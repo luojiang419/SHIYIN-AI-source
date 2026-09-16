@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CANVAS_JS = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+CANVAS_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 SMART_CANVAS_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
 
 
@@ -15,6 +16,22 @@ def function_body(source: str, signature: str, next_marker: str) -> str:
 
 
 class CanvasInitialLoadPerformanceTests(unittest.TestCase):
+    def test_editor_does_not_create_a_normal_entry_overlay(self):
+        body_start = CANVAS_HTML.split("<body>", 1)[1].split('<div id="canvasStartupNotice"', 1)[0]
+        self.assertNotIn("CanvasEntryProgress.create", body_start)
+        self.assertIn("canvas-entry-mounted", body_start)
+
+    def test_upstream_engine_skips_media_readiness_gate(self):
+        body = function_body(CANVAS_JS, "async function prepareCanvasEntry(session)", "function showCanvasStartupNotice")
+        fast_path = body.split("if(window.CanvasEngine?.active){", 1)[1].split("while(session.isCurrent())", 1)[0]
+        self.assertIn("hideCanvasStartupNotice()", fast_path)
+        self.assertNotIn("CanvasResourceReady.wait", fast_path)
+
+    def test_runtime_preferences_do_not_block_opening(self):
+        body = function_body(CANVAS_JS, "async function initializeCanvasPage()", "// 不等待图片/媒体等 load 资源")
+        self.assertLess(body.index("await openCanvas(openId)"), body.index("RuntimeSync"))
+        self.assertNotIn("preferenceTimer", body)
+
     def test_classic_canvas_schedules_secondary_work_after_both_render_paths(self):
         body = function_body(CANVAS_JS, "async function openCanvas(id)", "function canvasEntryResourceVisible")
         # 磁盘恢复和首次打开是两个分支，不能把后一个分支的 render 与前一个分支比较。

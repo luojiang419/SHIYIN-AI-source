@@ -9737,12 +9737,16 @@ window.CanvasEngineBridge = {
         bindCanvasPreviewImageFallbacks(element);
         measureCanvasOriginalImageNodes(element);
         scheduleClassicNodeRectMeasure([node.id]);
+        classicMediaSpatialGridEpoch = -1;
+        scheduleClassicMediaQueue();
         markClassicEngineVisibilityChanged(node.id);
     },
     onNodeUnmount(node){
         const current = canvasNodeDomIndex.get(node.id);
         if(current && node.type === 'panorama') window.CanvasSpecialNodes?.disposePanoramasIn?.(current);
         removeClassicNodeDomIndex(node.id);
+        classicMediaSpatialGridEpoch = -1;
+        scheduleClassicMediaQueue();
         markClassicEngineVisibilityChanged(node.id);
     },
     onNodeReplace(node, previous, fresh){ if(nodeHasLiveMedia(node)) transplantNodeMediaElement(previous, fresh); }

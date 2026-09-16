@@ -58,6 +58,15 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
         self.assertIn("window.canvasPreviewImgHtml(item.url, 256", CANVAS_FILM_NODES_JS)
         self.assertIn("window.canvasPreviewImgHtml(state.url, 256", CANVAS_FILM_NODES_JS)
 
+    def test_upstream_node_mount_wakes_media_queue(self):
+        bridge = function_body(CANVAS_JS, "window.CanvasEngineBridge = {", "function registerClassicCanvasPerfFixture")
+        mount = bridge[bridge.index("onNodeMount(node, element)"):bridge.index("onNodeUnmount(node)", bridge.index("onNodeMount(node, element)"))]
+        unmount = bridge[bridge.index("onNodeUnmount(node)"):bridge.index("onNodeReplace(node", bridge.index("onNodeUnmount(node)"))]
+        self.assertIn("classicMediaSpatialGridEpoch = -1", mount)
+        self.assertIn("scheduleClassicMediaQueue()", mount)
+        self.assertIn("classicMediaSpatialGridEpoch = -1", unmount)
+        self.assertIn("scheduleClassicMediaQueue()", unmount)
+
     def test_inactive_eager_canvas_manager_does_not_start_editor_prewarm(self):
         self.assertIn("sourceFrame.classList.contains('active')", CANVAS_SESSION_HOST_JS)
         self.assertIn("target.src.includes('/static/canvas-list.html')", INDEX_HTML)

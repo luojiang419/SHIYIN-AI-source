@@ -5,7 +5,7 @@
   "scripts": {
     "canvas:engine-build": "esbuild src/canvas-engine-upstream/bridge.tsx --bundle --minify --format=iife --target=chrome110 --outfile=static/vendor/js/infinite-canvas-engine.js",
     "css:build": "node ./node_modules/tailwindcss/lib/cli.js -c tailwind.config.cjs -i ./static/css/tailwind-input.css -o ./static/vendor/css/tailwind.generated.css --minify",
-    "desktop:dev": "npm run css:build && npm run canvas:engine-build && tauri dev",
+    "desktop:dev": "powershell -ExecutionPolicy Bypass -File tools/start-desktop-dev.ps1",
     "desktop:host-build": "npm run css:build && tauri build --no-bundle",
     "desktop:build": "npm run update:publish",
     "original:installer": "powershell -ExecutionPolicy Bypass -File tools/build-original-installer.ps1",

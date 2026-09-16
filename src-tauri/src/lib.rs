@@ -525,22 +525,58 @@ fn ensure_port_available(port: u16, config_path: &Path) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn source_python_executable(
+    root: &Path,
+    configured: Option<&std::ffi::OsStr>,
+    path_env: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf, String> {
+    let bundled = root.join("python").join("python.exe");
+    if bundled.is_file() {
+        return Ok(bundled);
+    }
+    if let Some(value) = configured.filter(|value| !value.is_empty()) {
+        let candidate = PathBuf::from(value);
+        if candidate.is_file() {
+            return candidate.canonicalize().map_err(|error| error.to_string());
+        }
+        return Err(format!(
+            "CANVAS_PYTHON_EXECUTABLE 指向的 Python 不存在：{}",
+            candidate.display()
+        ));
+    }
+    if let Some(value) = path_env {
+        for directory in std::env::split_paths(value) {
+            let candidate = directory.join("python.exe");
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    Err("源码运行缺少 Python；请安装 Python 并加入 PATH，或设置 CANVAS_PYTHON_EXECUTABLE".to_string())
+}
+
 fn spawn_backend(
     root: &Path,
     data_root: &Path,
     config: &AppConfig,
     token: &str,
 ) -> Result<Child, String> {
-    let app_root = root.join("app");
+    let packaged_app_root = root.join("app");
     let packaged_name = if cfg!(target_os = "windows") {
         "canvas-backend.exe"
     } else {
         "canvas-backend"
     };
-    let packaged = app_root
+    let packaged = packaged_app_root
         .join("backend")
         .join("canvas-backend")
         .join(packaged_name);
+    let app_root = if packaged.is_file() {
+        packaged_app_root
+    } else {
+        root.to_path_buf()
+    };
     let parent_pid = std::process::id().to_string();
     let common = [
         "--data-dir".to_string(),
@@ -587,11 +623,15 @@ fn spawn_backend(
     } else {
         let entry = root.join("backend_entry.py");
         #[cfg(target_os = "windows")]
-        let python = root.join("python").join("python.exe");
+        let python = source_python_executable(
+            root,
+            std::env::var_os("CANVAS_PYTHON_EXECUTABLE").as_deref(),
+            std::env::var_os("PATH").as_deref(),
+        )?;
         #[cfg(not(target_os = "windows"))]
         let python = PathBuf::from("python3");
-        if (cfg!(target_os = "windows") && !python.is_file()) || !entry.is_file() {
-            return Err("未找到 app/backend Sidecar，也未找到源码开发运行时".to_string());
+        if !entry.is_file() {
+            return Err(format!("源码后端入口不存在：{}", entry.display()));
         }
         command = Command::new(python);
         command
@@ -961,6 +1001,58 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use tauri_plugin_global_shortcut::{Code, Shortcut, ShortcutState};
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn source_python_uses_bundled_then_configured_then_path() {
+        use super::source_python_executable;
+        let root = std::env::temp_dir().join(format!(
+            "shiyin-source-python-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let path_dir = root.join("path-python");
+        let bundled_dir = root.join("python");
+        fs::create_dir_all(&path_dir).expect("create PATH fixture");
+        fs::create_dir_all(&bundled_dir).expect("create bundled fixture");
+        let path_python = path_dir.join("python.exe");
+        let bundled_python = bundled_dir.join("python.exe");
+        let configured_python = root.join("configured-python.exe");
+        fs::write(&path_python, b"path").expect("write PATH fixture");
+        fs::write(&configured_python, b"configured").expect("write configured fixture");
+        let path_env = std::env::join_paths([path_dir.as_path()]).expect("valid PATH fixture");
+
+        assert!(source_python_executable(&root, None, None).is_err());
+        assert_eq!(
+            source_python_executable(&root, None, Some(path_env.as_os_str())).unwrap(),
+            path_python
+        );
+        assert_eq!(
+            source_python_executable(
+                &root,
+                Some(configured_python.as_os_str()),
+                Some(path_env.as_os_str())
+            )
+            .unwrap(),
+            configured_python.canonicalize().unwrap()
+        );
+        fs::write(&bundled_python, b"bundled").expect("write bundled fixture");
+        assert_eq!(
+            source_python_executable(
+                &root,
+                Some(configured_python.as_os_str()),
+                Some(path_env.as_os_str())
+            )
+            .unwrap(),
+            bundled_python
+        );
+
+        for file in [&bundled_python, &configured_python, &path_python] {
+            fs::remove_file(file).expect("remove fixture file");
+        }
+        fs::remove_dir(bundled_dir).expect("remove bundled fixture directory");
+        fs::remove_dir(path_dir).expect("remove PATH fixture directory");
+        fs::remove_dir(root).expect("remove fixture root");
+    }
 
     #[test]
     fn download_name_prefers_query_name_and_sanitizes_windows_characters() {

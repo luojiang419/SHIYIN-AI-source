@@ -111,6 +111,53 @@ def test_domestic_archive_is_verified_smoked_and_atomically_activated():
         assert manager.public_status()["progress"] == 1.0
 
 
+def test_domestic_parts_reassemble_original_archive():
+    archive = make_archive()
+    pieces = (archive[:len(archive) // 2], archive[len(archive) // 2:])
+    manifest = make_manifest(archive)
+    manifest["packages"][0]["domestic_url"] = ""
+    manifest["packages"][0]["domestic_parts"] = [
+        {"id": f"part-{index}", "size": len(content), "sha256": hashlib.sha256(content).hexdigest(),
+         "domestic_url": f"domestic://part-{index}"}
+        for index, content in enumerate(pieces, start=1)
+    ]
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root), manifest=manifest, proxy_provider=lambda: {},
+            smoke_runner=lambda _command, _root: None,
+        )
+        def fake_download(url, target, *_args):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(pieces[int(url[-1]) - 1])
+        with patch.object(manager, "_download_url", side_effect=fake_download):
+            assert manager.ensure_now() is True
+        assert manager.installation_path().joinpath("runtime/person-depth-worker.exe").read_bytes() == b"worker"
+        assert manager.status()["source_label"] == "国内源直连"
+        assert not list(manager.download_root.rglob("*.bin"))
+
+
+def test_invalid_domestic_parts_fall_back_to_original_official_archive():
+    archive = make_archive()
+    manifest = make_manifest(archive)
+    manifest["packages"][0]["domestic_url"] = ""
+    manifest["packages"][0]["domestic_parts"] = [{
+        "id": "part-1", "size": len(archive), "sha256": hashlib.sha256(archive).hexdigest(),
+        "domestic_url": "domestic://part-1",
+    }]
+    with tempfile.TemporaryDirectory() as temp_root:
+        manager = PersonDepthComponentManager(
+            Path(temp_root), manifest=manifest, proxy_provider=lambda: {},
+            smoke_runner=lambda _command, _root: None, sleep=lambda _delay: None,
+        )
+        def fake_download(url, target, *_args):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"invalid" if url.startswith("domestic:") else archive)
+        with patch.object(manager, "_download_url", side_effect=fake_download):
+            assert manager.ensure_now() is True
+        assert manager.status()["source_label"] == "官方源直连"
+        assert manager.installation_path() is not None
+
+
 def test_local_candidate_install_persists_manifest_and_survives_reload():
     archive = make_archive()
     smoke_calls = []

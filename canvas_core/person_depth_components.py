@@ -62,6 +62,7 @@ class PersonDepthPackageSpec:
     official_url: str
     target_path: str = ""
     mirror_url: str = ""
+    domestic_parts: tuple[PersonDepthPackageSpec, ...] = ()
 
 
 class PersonDepthManifestError(ValueError):
@@ -269,6 +270,9 @@ class PersonDepthComponentManager:
                     official_url=str(raw.get("official_url") or "").strip(),
                     target_path=target_path,
                     mirror_url=str(raw.get("mirror_url") or "").strip(),
+                    domestic_parts=tuple(PersonDepthComponentManager._package_specs(
+                        {"packages": raw.get("domestic_parts") or []}
+                    )),
                 )
             )
         return specs
@@ -279,7 +283,7 @@ class PersonDepthComponentManager:
             and self.manifest.get("version")
             and (
                 self._lan_source_url
-                or (self.specs and any(item.domestic_url or item.mirror_url or item.official_url for item in self.specs))
+                or (self.specs and any(item.domestic_url or item.domestic_parts or item.mirror_url or item.official_url for item in self.specs))
             )
         )
 
@@ -491,7 +495,10 @@ class PersonDepthComponentManager:
             if variant is not None:
                 self._select_public_variant(variant)
             for source, label, proxy_map in attempts:
-                if not self.specs or not all(self._url_for(spec, source) for spec in self.specs):
+                if not self.specs or not all(
+                    (spec.domestic_parts if source == "domestic" else False) or self._url_for(spec, source)
+                    for spec in self.specs
+                ):
                     continue
                 source_label = f"{label} · {self.selected_variant_id}" if variant is not None else label
                 self._update_state(
@@ -721,16 +728,57 @@ class PersonDepthComponentManager:
         for spec in self.specs:
             target = version_download_root / f"{source}-{spec.package_id}.zip"
             if not self._valid_archive(target, spec):
-                self._download_package_with_retries(
-                    self._url_for(spec, source), target, spec, proxies,
-                    source_label, progress_base, total,
-                )
+                if source == "domestic" and spec.domestic_parts:
+                    self._download_domestic_parts(spec, target, proxies, source_label, progress_base, total)
+                else:
+                    self._download_package_with_retries(
+                        self._url_for(spec, source), target, spec, proxies,
+                        source_label, progress_base, total,
+                    )
             if not self._valid_archive(target, spec):
                 raise PersonDepthComponentUnavailable(f"{spec.package_id} 下载包校验失败")
             progress_base += spec.size
             self._update_state(downloaded_bytes=progress_base, total_bytes=total)
             archives.append((spec, target))
         return archives
+
+    def _download_domestic_parts(
+        self, spec: PersonDepthPackageSpec, target: Path,
+        proxies: Optional[Mapping[str, str]], source_label: str,
+        progress_base: int, progress_total: int,
+    ) -> None:
+        parts: list[Path] = []
+        completed = 0
+        for part in spec.domestic_parts:
+            path = target.with_name(f"{target.stem}-{part.package_id}.bin")
+            if not self._valid_archive(path, part):
+                self._download_package_with_retries(
+                    part.domestic_url, path, part, proxies,
+                    source_label, progress_base + completed, progress_total,
+                )
+            completed += part.size
+            parts.append(path)
+        assembled = target.with_name(target.name + ".assembling")
+        digest = hashlib.sha256()
+        written = 0
+        try:
+            with assembled.open("wb") as output:
+                for part in parts:
+                    with part.open("rb") as source_file:
+                        while chunk := source_file.read(4 * 1024 * 1024):
+                            output.write(chunk)
+                            digest.update(chunk)
+                            written += len(chunk)
+            if written != spec.size or digest.hexdigest() != spec.sha256:
+                raise PersonDepthComponentUnavailable(f"{spec.package_id} 国内源重组校验失败")
+            os.replace(assembled, target)
+            for part in parts:
+                try:
+                    part.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        finally:
+            assembled.unlink(missing_ok=True)
 
     def _download_package_with_retries(
         self,

@@ -1,70 +1,156 @@
 {
-    "schema_version":  1,
-    "component":  "person-depth",
-    "version":  "1.0.0",
-    "enabled":  true,
-    "release_status":  "released",
-    "message":  "高精度人物深度组件尚未安装，将在需要时自动下载",
-    "license_notice":  "Depth Anything V2 Large: CC-BY-NC-4.0; BiRefNet: MIT. This optional component is for noncommercial use only; model weights are redistributed unchanged.",
-    "required_free_bytes":  13166840562,
-    "command":  [
-                    "runtime/person-depth-worker.exe"
-                ],
-    "required_paths":  [
-                           "runtime/person-depth-worker.exe",
-                           "models/depth-anything-v2-large/config.json",
-                           "models/depth-anything-v2-large/model.safetensors",
-                           "models/birefnet/config.json",
-                           "models/birefnet/model.safetensors",
-                           "models/birefnet/BiRefNet_config.py",
-                           "models/birefnet/birefnet.py",
-                           "models/model-sources.json"
-                       ],
-    "model_sources":  {
-                          "depth":  {
-                                        "id":  "depth-anything/Depth-Anything-V2-Large-hf",
-                                        "revision":  "7581137eff8d4e94f6e796d3baea0e9fa79b22d2",
-                                        "license":  "CC-BY-NC-4.0"
-                                    },
-                          "segmentation":  {
-                                               "id":  "ZhengPeng7/BiRefNet",
-                                               "revision":  "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
-                                               "license":  "MIT",
-                                               "trusted_files":  {
-                                                                     "BiRefNet_config.py":  "e7b8c2a74f6cea6a59553d517f71d47f2c1d90e670a13416af17c25fe2f3dc52",
-                                                                     "birefnet.py":  "208771ae626f653d64128fbf2d6ac9f8e645c5cc5e286258a73ec3322bbfe5ef",
-                                                                     "config.json":  "c97ea21569daf66b205491a4635147dd3bc42c7c168b89d7d75b53f67ef548ae"
-                                                                 }
-                                           }
-                      },
-    "packages":  [
-                     {
-                         "id":  "runtime-windows-x64-001",
-                         "size":  1900311129,
-                         "sha256":  "eeb99a3b46e1e3d9e694fef78158cfdf5bcbc9fe44329b9e9d7009a99102cd82",
-                         "domestic_url":  "",
-                         "official_url":  "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-runtime-1.0.0-windows-x64-part-001.zip"
-                     },
-                     {
-                         "id":  "runtime-windows-x64-002",
-                         "size":  1900292498,
-                         "sha256":  "59d86c826089fd9e25d69ef588af9ff8f4c18848bf71670736e991dad0679e0e",
-                         "domestic_url":  "",
-                         "official_url":  "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-runtime-1.0.0-windows-x64-part-002.zip"
-                     },
-                     {
-                         "id":  "runtime-windows-x64-003",
-                         "size":  398157881,
-                         "sha256":  "ad57eab4922d8cad362d63e38721d6238031e3dc9772bf150f25945daf59adb3",
-                         "domestic_url":  "",
-                         "official_url":  "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-runtime-1.0.0-windows-x64-part-003.zip"
-                     },
-                     {
-                         "id":  "models",
-                         "size":  1786166020,
-                         "sha256":  "aefa9e93b2283ed4bd10204e23245d225ba79f46eeb704e06e28cca376d82779",
-                         "domestic_url":  "",
-                         "official_url":  "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-models-1.0.0.zip"
-                     }
-                 ]
+  "schema_version": 1,
+  "component": "person-depth",
+  "version": "1.0.0",
+  "enabled": true,
+  "release_status": "released",
+  "message": "高精度人物深度组件尚未安装，将在需要时自动下载",
+  "license_notice": "Depth Anything V2 Large: CC-BY-NC-4.0; BiRefNet: MIT. This optional component is for noncommercial use only; model weights are redistributed unchanged.",
+  "required_free_bytes": 13166840562,
+  "command": [
+    "runtime/person-depth-worker.exe"
+  ],
+  "required_paths": [
+    "runtime/person-depth-worker.exe",
+    "models/depth-anything-v2-large/config.json",
+    "models/depth-anything-v2-large/model.safetensors",
+    "models/birefnet/config.json",
+    "models/birefnet/model.safetensors",
+    "models/birefnet/BiRefNet_config.py",
+    "models/birefnet/birefnet.py",
+    "models/model-sources.json"
+  ],
+  "model_sources": {
+    "depth": {
+      "id": "depth-anything/Depth-Anything-V2-Large-hf",
+      "revision": "7581137eff8d4e94f6e796d3baea0e9fa79b22d2",
+      "license": "CC-BY-NC-4.0"
+    },
+    "segmentation": {
+      "id": "ZhengPeng7/BiRefNet",
+      "revision": "e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4",
+      "license": "MIT",
+      "trusted_files": {
+        "BiRefNet_config.py": "e7b8c2a74f6cea6a59553d517f71d47f2c1d90e670a13416af17c25fe2f3dc52",
+        "birefnet.py": "208771ae626f653d64128fbf2d6ac9f8e645c5cc5e286258a73ec3322bbfe5ef",
+        "config.json": "c97ea21569daf66b205491a4635147dd3bc42c7c168b89d7d75b53f67ef548ae"
+      }
+    }
+  },
+  "packages": [
+    {
+      "id": "runtime-windows-x64-001",
+      "size": 1900311129,
+      "sha256": "eeb99a3b46e1e3d9e694fef78158cfdf5bcbc9fe44329b9e9d7009a99102cd82",
+      "domestic_url": "",
+      "official_url": "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-runtime-1.0.0-windows-x64-part-001.zip",
+      "domestic_parts": [
+        {
+          "id": "runtime-windows-x64-001-chunk-001",
+          "size": 500000000,
+          "sha256": "0fc73c64e6d815cdd1e3184f0393e64f41b60a98e77ab2b2aba8727655d0b624",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-001-chunk-001.bin"
+        },
+        {
+          "id": "runtime-windows-x64-001-chunk-002",
+          "size": 500000000,
+          "sha256": "c0d1ee9bf96ef181d43ddac5fb7651a8611f47ec57f9dcbbb784deeab0a19a0d",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-001-chunk-002.bin"
+        },
+        {
+          "id": "runtime-windows-x64-001-chunk-003",
+          "size": 500000000,
+          "sha256": "7c7196131fad5c87ae3bb48f0bebad34babde7785fbf29118eb069bd86a35d94",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-001-chunk-003.bin"
+        },
+        {
+          "id": "runtime-windows-x64-001-chunk-004",
+          "size": 400311129,
+          "sha256": "40341521080bfd0073d7cc56289d00db239989bed2f38e64bd2a304a30822817",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-001-chunk-004.bin"
+        }
+      ]
+    },
+    {
+      "id": "runtime-windows-x64-002",
+      "size": 1900292498,
+      "sha256": "59d86c826089fd9e25d69ef588af9ff8f4c18848bf71670736e991dad0679e0e",
+      "domestic_url": "",
+      "official_url": "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-runtime-1.0.0-windows-x64-part-002.zip",
+      "domestic_parts": [
+        {
+          "id": "runtime-windows-x64-002-chunk-001",
+          "size": 500000000,
+          "sha256": "51c229b8d5552b934b4b2d935172191078b06d471ebfc3b6e5e6e00e4edaf89e",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-002-chunk-001.bin"
+        },
+        {
+          "id": "runtime-windows-x64-002-chunk-002",
+          "size": 500000000,
+          "sha256": "573456b4bf3f8751fb7b0f2b6620b81fe500834ef3b694e7fa44e6da5082d3f8",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-002-chunk-002.bin"
+        },
+        {
+          "id": "runtime-windows-x64-002-chunk-003",
+          "size": 500000000,
+          "sha256": "d61ac4ef02db34b679f773060af98abd4fc99ab7e0913571e4e6bbceb71f1a9e",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-002-chunk-003.bin"
+        },
+        {
+          "id": "runtime-windows-x64-002-chunk-004",
+          "size": 400292498,
+          "sha256": "7364a68e5d40451c9292d3a935601084e12ef03e5922418522c7fd7430f41a74",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-002-chunk-004.bin"
+        }
+      ]
+    },
+    {
+      "id": "runtime-windows-x64-003",
+      "size": 398157881,
+      "sha256": "ad57eab4922d8cad362d63e38721d6238031e3dc9772bf150f25945daf59adb3",
+      "domestic_url": "",
+      "official_url": "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-runtime-1.0.0-windows-x64-part-003.zip",
+      "domestic_parts": [
+        {
+          "id": "runtime-windows-x64-003-chunk-001",
+          "size": 398157881,
+          "sha256": "ad57eab4922d8cad362d63e38721d6238031e3dc9772bf150f25945daf59adb3",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-runtime-windows-x64-003-chunk-001.bin"
+        }
+      ]
+    },
+    {
+      "id": "models",
+      "size": 1786166020,
+      "sha256": "aefa9e93b2283ed4bd10204e23245d225ba79f46eeb704e06e28cca376d82779",
+      "domestic_url": "",
+      "official_url": "https://github.com/luojiang419/SHIYIN-AI-source/releases/download/person-depth-v1.0.0/person-depth-models-1.0.0.zip",
+      "domestic_parts": [
+        {
+          "id": "models-chunk-001",
+          "size": 500000000,
+          "sha256": "219d967bd68425663871c3e5f2457a49c462b9dea31bba168226b431710bb4c6",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-models-chunk-001.bin"
+        },
+        {
+          "id": "models-chunk-002",
+          "size": 500000000,
+          "sha256": "35243b2d5fe4c4e1da5a12313de1eddfe96f6cc6b881f1f3f11e32d5d0b69c18",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-models-chunk-002.bin"
+        },
+        {
+          "id": "models-chunk-003",
+          "size": 500000000,
+          "sha256": "f1e6538c0325c01dd5f80bb2b0576d4b6888c75eacf43dea579256fca7bf8c52",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-models-chunk-003.bin"
+        },
+        {
+          "id": "models-chunk-004",
+          "size": 286166020,
+          "sha256": "13f2913cd5b9b2f51f0f0f56d5ca42c4b9defb24852dcf37cff9969e5184db57",
+          "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-person-depth-component/resolve/master/person-depth-models-chunk-004.bin"
+        }
+      ]
+    }
+  ]
 }

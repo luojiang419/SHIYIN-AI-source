@@ -38,12 +38,15 @@ const assert=require('node:assert/strict');
   }
   assert(frame,'画布工程 iframe 未打开');
   await frame.waitForFunction(()=>window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay,{},{timeout:30000});
+  const entryMs=Date.now()-started;
+  await frame.waitForFunction(()=>[...document.querySelectorAll('#nodes img')].some(x=>x.complete&&x.naturalWidth>0),{},{timeout:30000});
+  const firstMediaMs=Date.now()-started;
   const state=await frame.evaluate(()=>({count:nodes.length,id:canvas.id,
    pixels:[...document.querySelectorAll('img')].filter(x=>x.naturalWidth>0).length}));
   assert.equal(state.count,301);assert.equal(state.id,input.id);assert(state.pixels>0);
   assert.deepEqual(errors,[]);
   await page.screenshot({path:input.screenshot});
-  console.log(JSON.stringify({list_ms:listMs,entry_ms:Date.now()-started,...state,page_errors:errors}));
+  console.log(JSON.stringify({list_ms:listMs,entry_ms:entryMs,first_media_ms:firstMediaMs,...state,page_errors:errors}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
 """

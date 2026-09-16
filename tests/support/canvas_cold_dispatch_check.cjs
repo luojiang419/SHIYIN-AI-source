@@ -80,8 +80,9 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
    });
    await page.goto(base+(scenario==='shell-cache'?'/static/index.html':scenario.startsWith('list-')?'/static/canvas-list.html':'/static/canvas.html?id=cold'),{waitUntil:'domcontentloaded'});
    if(scenario==='list-timeout'){
-    await page.getByText('画布列表加载失败，请重试。',{exact:true}).waitFor({timeout:1500});
-    assert.equal(await page.evaluate(()=>window.__listCalls),2,'整体预算到期后不再发起重试请求');
+    await page.waitForFunction(()=>window.__listCalls>=4,null,{timeout:2500});
+    assert.equal(await page.getByText('画布列表加载失败，请重试。',{exact:true}).count(),0,'暂时超时不应显示错误');
+    assert(await page.getByText('本地服务正在启动，画布列表将自动恢复',{exact:true}).count());
    }else if(scenario==='shell-cache'){
     await page.waitForFunction(()=>document.getElementById('frame-canvas')?.contentWindow?.canvasListEntryOverlay===null);
     assert(requests.some(r=>r.url.endsWith('/api/canvases')),'工作台快照不能阻塞目标页请求');

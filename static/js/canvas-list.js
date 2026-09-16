@@ -183,6 +183,12 @@ function canvasesInProject(pid){ return canvases.filter(c => (c.project || 'defa
 
 let canvasListLoadSequence=0;
 let canvasListRequest=null;
+let canvasListRetryTimer=0;
+let canvasListRetryAttempt=0;
+function canvasListFailureIsTemporary(error){
+    return error?.name === 'AbortError' || error?.networkFailure === true
+        || error?.status === 429 || error?.status >= 500;
+}
 async function fetchCanvasListData(url,isCurrent,signal){
     for(let attempt=0;attempt<3;attempt++){
         try {
@@ -190,6 +196,7 @@ async function fetchCanvasListData(url,isCurrent,signal){
             if(!response.ok){const error=new Error(`Canvas list HTTP ${response.status}`);error.status=response.status;throw error;}
             return await response.json();
         } catch(error){
+            if(error instanceof TypeError) error.networkFailure=true;
             if(signal.aborted || !isCurrent() || attempt===2 || (error.status && error.status<500 && error.status!==429)) throw error;
             window.canvasListEntryOverlay?.update(12,'正在等待服务就绪，自动重试中…');
             await new Promise(resolve=>setTimeout(resolve,500*(attempt+1)));
@@ -198,6 +205,8 @@ async function fetchCanvasListData(url,isCurrent,signal){
     }
 }
 async function loadAll({preserveViewport = false} = {}){
+    clearTimeout(canvasListRetryTimer);
+    canvasListRetryTimer=0;
     const sequence=++canvasListLoadSequence;
     canvasListRequest?.abort();
     const request=new AbortController();
@@ -229,10 +238,22 @@ async function loadAll({preserveViewport = false} = {}){
         if(!(typeof preserveViewport==='function' ? preserveViewport() : preserveViewport)) resetView();
         listPageSession?.checkpoint();
         refreshTrashCount();
+        canvasListRetryAttempt=0;
         window.canvasListEntryOverlay?.remove();
         window.canvasListEntryOverlay = null;
     } catch(e){
         if(!isCurrent()) return;
+        if(canvasListFailureIsTemporary(e)){
+            canvasListRetryAttempt+=1;
+            const delay=Math.min(5000,500*2**Math.min(canvasListRetryAttempt-1,4));
+            window.canvasListEntryOverlay?.update(12,'本地服务正在启动，画布列表将自动恢复');
+            setStatus(L('正在等待画布列表','Waiting for canvases'));
+            canvasListRetryTimer=setTimeout(()=>{
+                canvasListRetryTimer=0;
+                if(isCurrent()) void loadAll({preserveViewport});
+            },delay);
+            return;
+        }
         console.error(e);
         setStatus(L('加载失败','Load failed'));
         window.canvasListEntryOverlay?.error('画布列表加载失败，请重试。', () => loadAll());

@@ -81,6 +81,39 @@ const base = process.argv[2] || 'http://127.0.0.1:13158';
         assert.equal(editorScriptAttempts, 2);
         console.log(JSON.stringify({ scenario: 'warm-editor-fallback', attempts: editorScriptAttempts, recovered: true }));
         await warmPage.close();
+
+        const apiPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+        let projectReads = 0;
+        await apiPage.addInitScript(() => {
+            window.__listFailureShown = false;
+            new MutationObserver(() => {
+                if (document.body?.textContent?.includes('画布列表加载失败，请重试。')) window.__listFailureShown = true;
+            }).observe(document, { childList: true, subtree: true, characterData: true });
+        });
+        await apiPage.route('**/api/projects', route => {
+            projectReads += 1;
+            if (projectReads <= 5) return route.fulfill({ status: 503, json: { detail: 'starting' } });
+            return route.fulfill({ json: { projects: [{ id: 'default', name: 'Default', order: 0 }] } });
+        });
+        await apiPage.route('**/api/canvases', route => route.fulfill({ json: { canvases: [{ id: 'api-recovered', title: 'api-recovered', project: 'default' }] } }));
+        await apiPage.goto(`${base}/static/canvas-list.html`);
+        await apiPage.waitForFunction(() => !window.canvasListEntryOverlay && document.querySelector('.ws-card[data-canvas-id="api-recovered"]'), null, { timeout: 15000 });
+        assert.equal(projectReads, 6);
+        assert.equal(await apiPage.evaluate(() => window.__listFailureShown), false);
+        console.log(JSON.stringify({ scenario: 'temporary-api-failure', attempts: projectReads, recovered: true }));
+        await apiPage.close();
+
+        const deniedPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+        let deniedReads = 0;
+        await deniedPage.route('**/api/projects', route => {
+            deniedReads += 1;
+            return route.fulfill({ status: 403, json: { detail: 'denied' } });
+        });
+        await deniedPage.goto(`${base}/static/canvas-list.html`);
+        await deniedPage.getByText('画布列表加载失败，请重试。', { exact: true }).waitFor();
+        assert.equal(deniedReads, 1);
+        console.log(JSON.stringify({ scenario: 'permanent-api-failure', attempts: deniedReads, errorVisible: true }));
+        await deniedPage.close();
     } finally {
         await browser.close();
     }

@@ -7,6 +7,7 @@
     let current = null;
     let manager = null;
     let entryWait = null;
+    let warmEditor = null;
     function waitForEntry(frame){
         if(entryWait) clearTimeout(entryWait.timer);
         entryWait = null;
@@ -76,9 +77,80 @@
             try { frame.contentWindow.focus(); } catch(e) {}
         }
     }
+    function editorUrl(rawUrl){
+        const url = new URL(rawUrl || '/static/canvas.html', location.href);
+        return url.origin === location.origin && url.pathname === '/static/canvas.html' ? url : null;
+    }
+    function appendEditorFrame(frame){
+        if(!manager && !document.getElementById('canvas-session-style')){
+            const style = document.createElement('style');
+            style.id = 'canvas-session-style';
+            style.textContent = '[data-canvas-session-resident]:not(.active){visibility:hidden;pointer-events:none}';
+            document.head.appendChild(style);
+        }
+        (manager?.parentElement || document.body).appendChild(frame);
+    }
+    function createEditorFrame(url, entry){
+        const frame = document.createElement('iframe');
+        frame.dataset.canvasSessionSlot = `frame-canvas-session-${++sequence}`;
+        frame.dataset.canvasSessionResident = '1';
+        frame.id = frame.dataset.canvasSessionSlot;
+        frame.title = '无限画布';
+        if(!manager) frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:10000;background:var(--bg,#f5f5f5)';
+        frame.addEventListener('load', () => {
+            frame.dataset.frameReady = '1';
+            setActive(frame, frame.classList.contains('active'));
+            window.syncThemeToFrame?.(frame);
+            window.syncLanguageToFrame?.(frame);
+            if(entry.pendingUrl) void openInWarmEditor(entry, entry.pendingUrl);
+        });
+        frame.src = url.href;
+        appendEditorFrame(frame);
+        return frame;
+    }
+    async function openInWarmEditor(entry, url){
+        if(!entry?.frame?.isConnected || !url || entry.opening) return;
+        const lifecycle = entry.frame.contentWindow?.CanvasSessionLifecycle;
+        if(typeof lifecycle?.openProject !== 'function') return;
+        entry.opening = true;
+        try {
+            const opened = await lifecycle.openProject(url.searchParams.get('id'), url.href);
+            if(!opened) throw new Error('warm canvas runtime rejected project');
+            entry.pendingUrl = null;
+            entry.frame.dataset.frameReady = '1';
+            finishEntryWait(entry.frame);
+        } catch(error) {
+            console.warn('warm canvas runtime failed, falling back to navigation', error);
+            entry.pendingUrl = null;
+            entry.frame.dataset.frameReady = '0';
+            entry.frame.src = url.href;
+        } finally {
+            entry.opening = false;
+        }
+    }
+    function prewarm(){
+        if(warmEditor?.frame?.isConnected) return warmEditor.frame;
+        if(editors.length >= MAX_RESIDENT_EDITORS) return null;
+        if(!manager && studio()){
+            manager = document.getElementById('frame-canvas');
+            manager.dataset.canvasSessionSlot = 'frame-canvas-manager';
+            manager.dataset.canvasSessionResident = '1';
+        }
+        const url = editorUrl('/static/canvas.html?warm=1');
+        if(!url) return null;
+        const entry = {frame:null, id:'', used:0, pendingUrl:null, opening:false};
+        entry.frame = createEditorFrame(url, entry);
+        warmEditor = entry;
+        return entry.frame;
+    }
+    function schedulePrewarm(){
+        const run = () => prewarm();
+        if(window.requestIdleCallback) window.requestIdleCallback(run, {timeout:800});
+        else window.setTimeout(run, 0);
+    }
     function open(rawUrl){
-        const url = new URL(rawUrl, location.href);
-        if(url.origin !== location.origin || url.pathname !== '/static/canvas.html') return false;
+        const url = editorUrl(rawUrl);
+        if(!url) return false;
         const id = url.searchParams.get('id');
         if(!id) return false;
         if(!manager && studio()){
@@ -88,36 +160,23 @@
         }
         let entry = editors.find(item => (editorState(item)?.id || item.id) === id);
         if(!entry){
-            const frame = document.createElement('iframe');
-            frame.dataset.canvasSessionSlot = `frame-canvas-session-${++sequence}`;
-            frame.dataset.canvasSessionResident = '1';
-            frame.id = frame.dataset.canvasSessionSlot;
-            frame.title = '无限画布';
-            // 独立列表也能作为宿主。固定尺寸和 visibility 保留媒体与布局状态。
-            if(!manager){
-                frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:10000;background:var(--bg,#f5f5f5)';
-                if(!document.getElementById('canvas-session-style')){
-                    const style = document.createElement('style');
-                    style.id = 'canvas-session-style';
-                    style.textContent = '[data-canvas-session-resident]:not(.active){visibility:hidden;pointer-events:none}';
-                    document.head.appendChild(style);
-                }
+            entry = warmEditor?.frame?.isConnected ? warmEditor : null;
+            if(entry){
+                warmEditor = null;
+                entry.id = id;
+                entry.pendingUrl = url;
+                entry.frame.dataset.frameReady = '0';
+            } else {
+                entry = {frame:null, id, used:0, pendingUrl:null, opening:false};
+                entry.frame = createEditorFrame(url, entry);
             }
-            entry = {frame, id, used:0};
             editors.push(entry);
-            frame.addEventListener('load', () => {
-                frame.dataset.frameReady = '1';
-                setActive(frame, frame.classList.contains('active'));
-                window.syncThemeToFrame?.(frame);
-                window.syncLanguageToFrame?.(frame);
-            });
-            frame.src = url.href;
-            (manager?.parentElement || document.body).appendChild(frame);
         }
         current = entry;
         entry.used = ++sequence;
         activate(entry.frame);
         waitForEntry(entry.frame);
+        if(entry.pendingUrl && entry.frame.dataset.frameReady === '0') void openInWarmEditor(entry, entry.pendingUrl);
         window.StudioPageState?.session('shell').checkpoint();
         prune();
         return true;
@@ -133,12 +192,15 @@
         const target = manager?.contentWindow || window;
         target.postMessage({type:'canvas-session-manager', project}, location.origin);
         prune();
+        if(manager || !studio()) schedulePrewarm();
         return true;
     }
     function clear(){
         waitForEntry(null);
         if(current && manager) activate(manager);
         current = null;
+        warmEditor?.frame?.remove();
+        warmEditor = null;
         for(const entry of editors) entry.frame.remove();
         editors.length = 0;
     }
@@ -154,7 +216,12 @@
             if(index >= 0) editors.splice(index, 1);
         }
     }
-    window.CanvasSessionHost = {open, back, prune, clear, invalidate, waitForEntry};
+    window.addEventListener('message', event => {
+        if(event.origin !== location.origin || event.data?.type !== 'canvas-manager-ready') return;
+        const sourceFrame = manager || document.getElementById('frame-canvas');
+        if((sourceFrame?.contentWindow === event.source && sourceFrame.classList.contains('active')) || window === event.source) prewarm();
+    });
+    window.CanvasSessionHost = {open, back, prune, clear, invalidate, waitForEntry, prewarm};
     // 未保存/运行中会话暂时越过上限，完成后自动收敛。
     window.setInterval(prune, 30000);
 })();

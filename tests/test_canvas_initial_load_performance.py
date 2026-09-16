@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CANVAS_JS = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
 CANVAS_HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 SMART_CANVAS_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+CANVAS_LIST_JS = (ROOT / "static" / "js" / "canvas-list.js").read_text(encoding="utf-8")
+CANVAS_SESSION_HOST_JS = (ROOT / "static" / "js" / "canvas-session-host.js").read_text(encoding="utf-8")
+INDEX_HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
 
 def function_body(source: str, signature: str, next_marker: str) -> str:
@@ -31,6 +34,18 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
         body = function_body(CANVAS_JS, "async function initializeCanvasPage()", "// 不等待图片/媒体等 load 资源")
         self.assertLess(body.index("await openCanvas(openId)"), body.index("RuntimeSync"))
         self.assertNotIn("preferenceTimer", body)
+
+    def test_canvas_manager_prewarms_a_reusable_editor_runtime(self):
+        self.assertIn("CanvasSessionHost?.prewarm()", CANVAS_LIST_JS)
+        self.assertIn("/static/canvas.html?warm=1", CANVAS_SESSION_HOST_JS)
+        self.assertIn("warmEditor?.frame?.isConnected ? warmEditor", CANVAS_SESSION_HOST_JS)
+        self.assertIn("openProject(url.searchParams.get('id'), url.href)", CANVAS_SESSION_HOST_JS)
+        self.assertIn("async openProject(id, url)", CANVAS_JS)
+
+    def test_inactive_eager_canvas_manager_does_not_start_editor_prewarm(self):
+        self.assertIn("sourceFrame.classList.contains('active')", CANVAS_SESSION_HOST_JS)
+        self.assertIn("target.src.includes('/static/canvas-list.html')", INDEX_HTML)
+        self.assertIn("requestIdleCallback(prewarmCanvasEditor", INDEX_HTML)
 
     def test_classic_canvas_schedules_secondary_work_after_both_render_paths(self):
         body = function_body(CANVAS_JS, "async function openCanvas(id)", "function canvasEntryResourceVisible")

@@ -74,13 +74,18 @@ async function waitUntil(predicate){
             const list = mode==='studio'
                 ? await (await page.locator('#frame-canvas').elementHandle()).contentFrame() : page.mainFrame();
             await list.waitForFunction(() => typeof openCanvas === 'function');
+            const residentFrame = async id => {
+                for(const frame of page.frames().filter(item=>item.url().includes('/static/canvas.html'))){
+                    if(await frame.evaluate(target=>window.CanvasSessionLifecycle?.state().id===target,id).catch(()=>false)) return frame;
+                }
+                return null;
+            };
             const open = async id => {
                 await list.evaluate(id => openCanvas({id,project:'default'}),id);
-                const frame = page.frames().find(f => f.url().includes(`/static/canvas.html?id=${id}&`));
+                const frame = await residentFrame(id);
                 if(frame){ await frame.waitForFunction(() => window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay); return frame; }
-                await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some(f => f.src.includes('/static/canvas.html')));
-                await sleep(50);
-                const loaded=page.frames().find(f => f.url().includes(`canvas.html?id=${id}&`));
+                await page.waitForFunction(target => [...document.querySelectorAll('iframe')].some(f => f.contentWindow?.CanvasSessionLifecycle?.state().id===target),id);
+                const loaded=await residentFrame(id);
                 await loaded.waitForFunction(() => window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay);
                 return loaded;
             };

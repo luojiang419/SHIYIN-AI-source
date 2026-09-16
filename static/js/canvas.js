@@ -25370,6 +25370,27 @@ function escapeAttr(str){ return escapeHtml(str); }
 
 window.CanvasSessionLifecycle = {
     setActive:setCanvasRouteActive,
+    async openProject(id, url){
+        const targetId=String(id || '');
+        if(!targetId) return false;
+        if(canvas?.id === targetId){ hideCanvasStartupNotice();return true; }
+        if(canvas && !window.CanvasSessionLifecycle.state().evictable) return false;
+        checkpointCanvasPage(true);
+        stopCanvasRemotePolling();
+        canvasResourceMonitor?.stop();
+        canvasResourceMonitor=null;
+        window.CanvasStartup?.cancel();
+        window.CanvasEngine?.clear();
+        canvas=null;nodes=[];connections=[];selected.clear();
+        clearClassicHistory();
+        missingAssetUrls.clear();
+        setCanvasMode(false);
+        if(url) history.replaceState(null,'',url);
+        await openCanvas(targetId);
+        if(canvas?.id !== targetId) return false;
+        window.parent?.postMessage?.({type:'canvas-entry-mounted',canvasId:targetId},location.origin);
+        return true;
+    },
     checkpoint:checkpointCanvasPage,
     forgetCheckpoint:()=>canvasPageSession?.remove(),
     state:() => ({
@@ -25402,6 +25423,9 @@ async function initializeCanvasPage(){
     const openId = new URLSearchParams(window.location.search).get('id');
     if(openId){
         await openCanvas(openId);
+    } else if(new URLSearchParams(window.location.search).get('warm') === '1'){
+        setCanvasMode(false);
+        setStatus('Ready');
     } else {
         window.location.replace(canvasListUrlForProject(rememberedCanvasListProject()));
     }

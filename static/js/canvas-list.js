@@ -1122,5 +1122,9 @@ void (async()=>{
     // 缓存恢复与数据请求同时开始；取值时读取恢复状态，保留已恢复的视口。
     await loadAll({preserveViewport:()=>restored});
     await recovery;
+    try {
+        if(window.parent === window) window.CanvasSessionHost?.prewarm();
+        else window.parent.postMessage({type:'canvas-manager-ready'}, location.origin);
+    } catch(error) { console.warn('canvas editor prewarm failed', error); }
 })();
 refreshIcons();

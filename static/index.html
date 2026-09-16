@@ -2792,6 +2792,15 @@
             syncLanguageToFrame(target);
             if (id === 'canvas' && target.src) {
                 try { target.contentWindow?.postMessage({ type: 'canvas-focus' }, '*'); } catch(e) {}
+                if(target.src.includes('/static/canvas-list.html')){
+                    const prewarmCanvasEditor = () => window.CanvasSessionHost?.prewarm();
+                    if(target.contentDocument?.readyState === 'complete'){
+                        if(window.requestIdleCallback) requestIdleCallback(prewarmCanvasEditor, {timeout:800});
+                        else setTimeout(prewarmCanvasEditor, 0);
+                    } else {
+                        target.addEventListener('load', prewarmCanvasEditor, {once:true});
+                    }
+                }
             }
             if(id==='canvas' && studioRestoredCanvasUrl){
                 const url=studioRestoredCanvasUrl;studioRestoredCanvasUrl='';window.CanvasSessionHost?.open(url);
@@ -3859,7 +3868,7 @@
         }
     </script>
     <script src="/static/js/canvas-entry-progress.js?v=2026.09.10.1&resource-ready=20260910.1&cold-dispatch=20260913.1"></script>
-    <script src="/static/js/canvas-session-host.js?v=2026.09.10.1&state=2026.09.10.1&entry-fixes=20260910.2"></script>
+    <script src="/static/js/canvas-session-host.js?v=2026.09.16.1&state=2026.09.10.1&entry-fixes=20260910.2&runtime-prewarm=1"></script>
     <script src="/static/js/desktop-updater.js?v=1.0.74"></script>
 </body>
 

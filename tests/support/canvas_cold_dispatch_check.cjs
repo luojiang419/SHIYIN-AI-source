@@ -112,7 +112,7 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
    }else if(scenario==='cache-error'){
     await page.waitForFunction(()=>!window.canvasEntryOverlay);
     assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false,'可选缓存失败不再阻止进入');
-    await page.locator('#canvasRecoveryNotice').waitFor();
+    assert.equal(await page.locator('#canvasRecoveryNotice').count(),0,'缓存失败不弹出恢复记录提示');
     await page.evaluate(async()=>{nodes.find(n=>n.id==='text').prompt='new server edit';scheduleSave();await saveCanvas();});
     assert(saves.some(s=>s.nodes.find(n=>n.id==='text').prompt==='new server edit'));
     const pointer=await page.evaluate(()=>JSON.parse(localStorage.getItem('shiyin-page-recovery-v1:cold-test:canvas:cold')));
@@ -121,11 +121,13 @@ const project={id:'cold',title:'冷启动验证',updated_at:1,connections:[],vie
     storageFailure=false;await page.reload();
     await page.waitForFunction(()=>!window.canvasEntryOverlay);
     assert.equal(await page.evaluate(()=>nodes.find(n=>n.id==='text').prompt),'new server edit','重启不得重新应用旧脏快照');
-    const downloadPromise=page.waitForEvent('download');
-    await page.getByRole('button',{name:'导出旧恢复记录',exact:true}).click();
-    const downloaded=await downloadPromise;
-    const recovery=JSON.parse(require('node:fs').readFileSync(await downloaded.path(),'utf8'));
-    assert.equal(recovery.records[0].value.canvas.nodes.find(n=>n.id==='text').prompt,'local unsynced text','旧记录仍完整保留且可导出');
+    assert.equal(await page.locator('#canvasRecoveryNotice').count(),0,'重启后不弹出旧恢复记录提示');
+    const recovery=await page.evaluate(key=>new Promise((resolve,reject)=>{
+     const req=indexedDB.open('shiyin-page-state-v1',1);
+     req.onerror=()=>reject(req.error);
+     req.onsuccess=()=>{const db=req.result,tx=db.transaction('pages','readonly'),read=tx.objectStore('pages').get(key);tx.oncomplete=()=>{db.close();resolve(read.result);};tx.onerror=()=>reject(tx.error);};
+    }),pointer.archived[0]);
+    assert.equal(recovery.value.canvas.nodes.find(n=>n.id==='text').prompt,'local unsynced text','移除提示后旧记录仍完整保留');
    }else{
     await page.waitForFunction(()=>!window.canvasEntryOverlay,{},{timeout:3500});
     assert.equal(await page.locator('#shell').evaluate(el=>el.inert),false);

@@ -110,34 +110,6 @@
             return attempt;
         };
         let initial=readInitial();
-        function showRecoveryNotice(degraded=false){
-            if(!name.startsWith('canvas:') || document.getElementById('canvasRecoveryNotice')) return;
-            const notice=document.createElement('div');notice.id='canvasRecoveryNotice';notice.setAttribute('role','status');
-            notice.style.cssText='position:fixed;right:16px;top:16px;z-index:10900;max-width:340px;padding:12px 14px;border-radius:10px;border:1px solid var(--line,#777);background:var(--card-solid,#282828);color:var(--text,#eee);font:12px/1.6 system-ui;box-shadow:0 4px 18px #0002';
-            const message=document.createElement('div');message.textContent=degraded ? '恢复缓存暂不可用，已打开已保存的工程。旧缓存已保留，可稍后导出。' : '有保留的旧恢复记录，当前工程可正常使用，可按需导出。';
-            const exportButton=document.createElement('button');exportButton.type='button';exportButton.textContent='导出旧恢复记录';
-            exportButton.style.cssText='margin-top:8px;padding:4px 8px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit';
-            exportButton.onclick=async()=>{
-                exportButton.disabled=true;
-                try {
-                    let failed=false;
-                    const records=[];
-                    for(const key of recoveryKeys){
-                        const record=await transact(key,undefined,false,()=>{failed=true;});
-                        if(record) records.push(record);
-                    }
-                    if(failed) throw new Error('旧缓存仍暂时不可读，请稍后再试。');
-                    if(!records.length){message.textContent='未找到旧的恢复记录；当前工程可继续正常使用。';return;}
-                    const url=URL.createObjectURL(new Blob([JSON.stringify({schema:1,records},null,2)],{type:'application/json'}));
-                    const link=document.createElement('a');link.href=url;link.download=`canvas-recovery-${Date.now()}.json`;link.click();
-                    setTimeout(()=>URL.revokeObjectURL(url),30000);
-                    message.textContent='旧恢复记录已导出，原缓存仍保留。';
-                }catch(error){message.textContent=error.message;}
-                finally{exportButton.disabled=false;}
-            };
-            const close=document.createElement('button');close.type='button';close.textContent='关闭';close.style.cssText=exportButton.style.cssText+';margin-left:8px';close.onclick=()=>notice.remove();
-            notice.append(message,exportButton,close);document.body.appendChild(notice);
-        }
         function flush(){
             if(flushing) return flushing;
             flushing=(async()=>{
@@ -198,10 +170,8 @@
                         // 新槽位由本会话创建，可确定不存在旧快照，无需再次等待故障存储。
                         initial={unavailable:false,promise:Promise.resolve(null)};
                     }
-                    showRecoveryNotice(true);
                     return latest?.schema===1 ? structuredClone(latest.value) : null;
                 }
-                if(recoveryKeys.length) showRecoveryNotice();
                 return !discarded && ownerEpoch===epoch && (latest || record)?.schema===1 ? structuredClone((latest || record).value) : null;
             },
             async remove(){

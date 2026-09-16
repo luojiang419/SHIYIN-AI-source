@@ -21,7 +21,7 @@ helpers = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helpers)
 
 
-def run(rounds, port, engine=False, node_count=301, direct=False, interactions=False):
+def run(rounds, port, engine=False, node_count=301, direct=False, interactions=False, render_chain=False):
     with socket.socket() as probe:
         probe.bind(('127.0.0.1',port))
     work = Path(tempfile.mkdtemp(prefix='canvas-cold-source-'))
@@ -80,7 +80,7 @@ def run(rounds, port, engine=False, node_count=301, direct=False, interactions=F
             if engine or node_count > 500:
                 browser = browser.replace("page.on('pageerror',e=>errors.push(e.message));", "page.on('pageerror',e=>{errors.push(e.message);console.error('[pageerror]',e.message)});")
                 browser = browser.replace("await frame.waitForFunction(()=>window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay,{},{timeout:30000});", "try{await frame.waitForFunction(()=>window.CanvasSessionLifecycle?.state().id && !window.canvasEntryOverlay,{},{timeout:120000})}catch(error){console.error('[canvas-state]',JSON.stringify(await frame.evaluate(()=>({engine:!!window.CanvasEngine,bridge:!!window.CanvasEngineBridge,world:!!document.getElementById('world'),nodes:document.querySelectorAll('.node').length,notice:document.getElementById('canvasStartupNotice')?.textContent,overlay:!!window.canvasEntryOverlay}))));throw error}")
-            browser = browser.replace('const state=await frame.evaluate', 'const entryMs=Date.now()-started-listMs;\n  const state=await frame.evaluate')
+            browser = browser.replace('const entryMs=Date.now()-started;', 'const entryMs=Date.now()-started-listMs;')
             browser = browser.replace('pixels:[...document.querySelectorAll', 'engine_active:!!window.CanvasEngine?.active,pixels:[...document.querySelectorAll')
             browser = browser.replace('assert.equal(state.count,301)', 'assert.equal(state.count,input.nodes)')
             browser = browser.replace('assert.equal(state.id,input.id);', 'assert.equal(state.id,input.id);assert.equal(state.engine_active,input.engine);')
@@ -149,6 +149,12 @@ def run(rounds, port, engine=False, node_count=301, direct=False, interactions=F
                 raise RuntimeError(checked.stdout+checked.stderr)
             result = dict(json.loads(checked.stdout),startup_ms=startup_ms,round=turn+1,video_verified=True)
             results.append(result);print(json.dumps(result),flush=True)
+            if render_chain:
+                checked_chain = subprocess.run(['node',str(ROOT/'tests/support/upstream_render_chain.cjs'),str(input_file)],
+                    cwd=ROOT,capture_output=True,text=True,encoding='utf-8',timeout=160)
+                if checked_chain.returncode:
+                    raise RuntimeError(checked_chain.stdout+checked_chain.stderr)
+                print(checked_chain.stdout,flush=True)
             helpers.stop(process);process=None
         (work/'result.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
         print(f'报告与截图：{work}',flush=True)
@@ -164,5 +170,6 @@ if __name__ == '__main__':
     parser.add_argument('--nodes',type=int,default=301)
     parser.add_argument('--direct',action='store_true')
     parser.add_argument('--interactions',action='store_true')
+    parser.add_argument('--render-chain',action='store_true')
     args=parser.parse_args()
-    run(args.rounds,args.port,args.engine,args.nodes,args.direct,args.interactions)
+    run(args.rounds,args.port,args.engine,args.nodes,args.direct,args.interactions,args.render_chain)

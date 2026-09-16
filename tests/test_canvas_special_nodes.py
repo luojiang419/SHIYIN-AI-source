@@ -68,7 +68,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "state.gl?.isContextLost?.()",
         ):
             self.assertIn(marker, self.shared)
-        self.assertIn("disposePanoramasIn?.(nodesEl)", self.classic)
+        self.assertIn("onNodeDispose(node, element)", self.classic)
+        self.assertIn("disposePanoramasIn?.(element)", self.classic)
         self.assertIn("disposePanoramasIn?.(world)", self.smart)
 
     def test_smart_canvas_blank_click_does_not_rebuild_live_panorama(self):

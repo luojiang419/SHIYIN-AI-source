@@ -168,11 +168,10 @@ class FakeImage {
 """
         self.assertEqual(run_node(script), {"ok": True})
 
-    def test_both_canvas_pages_load_runtime_before_canvas_code(self):
+    def test_only_legacy_smart_page_loads_queue_runtime(self):
         runtime_src = "/static/js/canvas-media-queue.js?v=2026.09.02.media-queue-runtime.5"
-        self.assertIn(runtime_src, CANVAS_HTML)
+        self.assertNotIn(runtime_src, CANVAS_HTML)
         self.assertIn(runtime_src, SMART_HTML)
-        self.assertLess(CANVAS_HTML.index(runtime_src), CANVAS_HTML.index("/static/js/canvas.js"))
         self.assertLess(SMART_HTML.index(runtime_src), SMART_HTML.index("/static/js/smart-canvas.js"))
 
     def test_host_callback_failures_do_not_break_queue_or_leak_slots(self):
@@ -469,54 +468,33 @@ console.log(JSON.stringify({ok:true}));
 """
         self.assertEqual(run_node(script), {"ok": True})
 
-    def test_classic_and_smart_canvases_use_shared_queue_controller(self):
-        for source, name in ((CANVAS_JS, "classic"), (SMART_JS, "smart")):
+    def test_legacy_smart_canvas_uses_shared_queue_controller(self):
+        for source, name in ((SMART_JS, "smart"),):
             self.assertIn("window.CanvasMediaQueue.createMediaQueue", source, name)
             self.assertIn("cancelIneligible()", source, name)
             self.assertIn("maxVideoActive", source, name)
             self.assertNotIn("MediaQueueActive += 1", source, name)
-        self.assertIn("onStart:() => recordClassicFirstPreviewStart()", CANVAS_JS)
-        self.assertIn("window.CanvasMediaQueue.createMediaResidency", CANVAS_JS)
         self.assertIn("window.CanvasMediaQueue.createMediaResidency", SMART_JS)
-        self.assertIn("mediaResidentReason === 'budget'", CANVAS_JS)
         self.assertIn("mediaResidentReason === 'budget'", SMART_JS)
-        self.assertIn("maxResidentPixels", CANVAS_JS)
         self.assertIn("maxResidentPixels", SMART_JS)
-        self.assertIn("imageLowResSource:preparedClassicLowResSource", CANVAS_JS)
         self.assertIn("imageLowResSource:img", SMART_JS)
-        self.assertIn('loading="eager" decoding="async"', CANVAS_JS)
         self.assertIn('loading="eager" decoding="async"', SMART_JS)
-        self.assertIn("const CLASSIC_MEDIA_RESIDENCY_IDLE_MS = 600", CANVAS_JS)
         self.assertIn("const SMART_MEDIA_RESIDENCY_IDLE_MS = 600", SMART_JS)
-        self.assertIn("const CLASSIC_MEDIA_RESTORE_IDLE_MS = 250", CANVAS_JS)
         self.assertIn("const SMART_MEDIA_RESTORE_IDLE_MS = 250", SMART_JS)
-        self.assertIn("performance.now() < classicMediaRestoreAfter", CANVAS_JS)
         self.assertIn("performance.now() < smartMediaRestoreAfter", SMART_JS)
-        self.assertIn("const hasVisibleFallback = Boolean(currentSource && currentSource !== preview)", CANVAS_JS)
         self.assertIn("const hasVisibleFallback = Boolean(currentSource && currentSource !== preview)", SMART_JS)
-        self.assertIn('data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"', CANVAS_JS)
         self.assertIn('data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"', SMART_JS)
-        self.assertIn("function scheduleClassicMediaResidency", CANVAS_JS)
         self.assertIn("function scheduleSmartMediaResidency", SMART_JS)
-        self.assertIn("onRecord:entry => {\n            scheduleClassicMediaResidency();", CANVAS_JS)
         self.assertIn("onRecord:entry => {\n            scheduleSmartMediaResidency();", SMART_JS)
-        classic_schedule = CANVAS_JS[CANVAS_JS.index("function scheduleClassicMediaQueue"):CANVAS_JS.index("function cancelClassicOffscreenPreviewTasks")]
         smart_schedule = SMART_JS[SMART_JS.index("function scheduleSmartMediaQueue"):SMART_JS.index("function cancelSmartOffscreenPreviewTasks")]
-        self.assertNotIn("ensureClassicMediaResidency()?.schedule()", classic_schedule)
         self.assertNotIn("ensureSmartMediaResidency()?.schedule()", smart_schedule)
-        self.assertNotIn("data-media-resident-placeholder", CANVAS_JS)
         self.assertNotIn("data-media-resident-placeholder", SMART_JS)
         self.assertNotIn("detachImage", RUNTIME.read_text(encoding="utf-8"))
         self.assertIn("createSpatialGridIndex", RUNTIME.read_text(encoding="utf-8"))
-        self.assertIn("function classicMediaElementsInWindow", CANVAS_JS)
         self.assertIn("function smartMediaElementsInWindow", SMART_JS)
-        self.assertIn("classicMediaElementsInWindow().map", CANVAS_JS)
         self.assertIn("smartMediaElementsInWindow().map", SMART_JS)
-        self.assertIn("hasPending:() =>", CANVAS_JS)
         self.assertIn("hasPending:() =>", SMART_JS)
-        self.assertIn("isViewportReady:() =>", CANVAS_JS)
         self.assertIn("isViewportReady:() =>", SMART_JS)
-        self.assertNotIn("nodesEl.querySelectorAll('.node.canvas-lod-safe')", CANVAS_JS)
         self.assertNotIn("world.querySelectorAll('.image-node.smart-lod-safe')", SMART_JS)
 
 

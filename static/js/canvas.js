@@ -70,229 +70,43 @@ function canvasEagerMediaAttrs(attrs=''){
         .replace(/\sloading\s*=\s*(['"])[^'"]*\1/ig, '')
         .replace(/\sdecoding\s*=\s*(['"])[^'"]*\1/ig, '');
 }
-const CLASSIC_MEDIA_QUEUE_MAX = 6;
-const CLASSIC_MEDIA_IMAGE_MAX = 6;
-const CLASSIC_MEDIA_VIDEO_MAX = 2;
-const CLASSIC_MEDIA_QUEUE_MARGIN = 720;
-const CLASSIC_MEDIA_RESIDENCY_MAX = 72;
-const CLASSIC_MEDIA_RESIDENCY_PIXELS = 32 * 1024 * 1024;
-const CLASSIC_MEDIA_RESIDENCY_GRACE_MS = 3000;
-const CLASSIC_MEDIA_RESIDENCY_IDLE_MS = 600;
-const CLASSIC_MEDIA_RESTORE_IDLE_MS = 250;
-let classicMediaQueueController = null;
 let canvasEntryPreparing = false;
 let canvasSnapshotPending = false;
 let canvasResourceMonitor = null;
-const classicLowResPrepared = new Map();
-const classicLowResByImage = new WeakMap();
-let classicLowResPreparing = 0;
-function preparedClassicLowResSource(img){
-    const source=canvasMediaPreviewUrl(img.dataset?.originalSrc || img.dataset?.url || '',96);
-    if(!source) return '';
-    if(img.getAttribute('src')===source) return source;
-    const own=classicLowResByImage.get(img);
-    if(own?.source===source) return own.ready ? source : '';
-    const cached=classicLowResPrepared.get(source);
-    if(cached){classicLowResByImage.set(img,cached);return cached.ready ? source : '';}
-    if(classicLowResPreparing>=4) return '';
-    if(classicLowResPrepared.size>=512){
-        const oldest=[...classicLowResPrepared].find(([,item])=>!item.pending);
-        if(oldest) classicLowResPrepared.delete(oldest[0]);
-    }
-    const probe=new Image(),record={source,probe,ready:false,pending:true};
-    classicLowResPrepared.set(source,record);classicLowResPreparing++;
-    classicLowResByImage.set(img,record);
-    let finished=false;
-    const finish=ready=>{
-        if(finished) return;finished=true;clearTimeout(timer);
-        probe.onload=probe.onerror=null;record.ready=ready;record.pending=false;classicLowResPreparing--;
-        scheduleClassicMediaResidency();
-    };
-    const timer=setTimeout(()=>finish(false),20000);
-    probe.onload=()=>Promise.resolve().then(()=>probe.decode()).then(()=>finish(true),()=>finish(false));
-    probe.onerror=()=>finish(false);
-    probe.src=source;
-    // 降采样图片未完成前保留节点已有像素，避免进入后内存整理再次制造空白。
-    return '';
-}
-let classicMediaResidencyController = null;
-let classicMediaResidencyTimer = 0;
-let classicMediaRestoreAfter = 0;
-function canvasPreviewNeedsQueue(preview=''){
-    const value = String(preview || '');
-    return /^\/api\/(?:media-preview|download-output)(?:\?|$)/i.test(value)
-        || /^https?:\/\//i.test(value);
-}
 function canvasPreviewImgHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
     const safeAttrs = canvasEagerMediaAttrs(attrs);
-    const immediate = !canvasPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
-    const srcAttr = immediate ? ` src="${escapeAttr(preview)}"` : '';
-    return `<img loading="eager" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    const srcAttr = ` src="${escapeAttr(preview)}"`;
+    return `<img loading="eager" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-state="loading"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+}
+let engineMediaActivationFrame = 0;
+function scheduleEngineMediaActivation(){
+    if(engineMediaActivationFrame || canvasSessionSuspended) return;
+    engineMediaActivationFrame = requestAnimationFrame(() => {
+        engineMediaActivationFrame = 0;
+        if(!canvasSessionSuspended) activateEngineMedia(nodesEl);
+    });
+}
+function activateEngineMedia(root){
+    root?.querySelectorAll('img[data-preview-src]:not([data-engine-media]),img[data-engine-media][data-preview-state="queued"]').forEach(img => {
+        const retry = img.dataset.engineMedia === '1';
+        const loaded = () => { img.dataset.previewState = 'loaded'; };
+        if(!retry){
+            img.dataset.engineMedia = '1';
+            img.addEventListener('load', loaded);
+            img.addEventListener('error', () => { img.dataset.previewState = 'failed'; });
+        }
+        img.dataset.previewState = 'loading';
+        if(retry) img.removeAttribute('src');
+        if(!img.getAttribute('src')) img.src = img.dataset.previewSrc;
+        if(img.complete && img.naturalWidth > 0) loaded();
+    });
 }
 function classicPreviewNodeForImage(img){
     const nodeEl = img?.closest?.('.node[data-id]');
     if(!nodeEl) return null;
     return canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(node => node.id === nodeEl.dataset.id) || null;
-}
-function classicMediaViewportEntry(element){
-    if(!element?.isConnected) return null;
-    const nodeEl = element.closest?.('.node[data-id]');
-    const node = nodeEl ? (canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id)) : null;
-    if(!node) return null;
-    const view = currentWorldViewRect();
-    const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
-    const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
-    const nodeVisible = rect.x < view.x + view.w && rect.x + rect.w > view.x && rect.y < view.y + view.h && rect.y + rect.h > view.y;
-    const nodeNear = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
-    const boardRect = board?.getBoundingClientRect?.();
-    const mediaRect = element.getBoundingClientRect?.();
-    const hasMediaRect = Boolean(boardRect && mediaRect && mediaRect.width > 0 && mediaRect.height > 0);
-    const visible = hasMediaRect
-        ? mediaRect.right > boardRect.left && mediaRect.left < boardRect.right && mediaRect.bottom > boardRect.top && mediaRect.top < boardRect.bottom
-        : nodeVisible;
-    const screenMargin = CLASSIC_MEDIA_QUEUE_MARGIN;
-    const near = hasMediaRect
-        ? mediaRect.right > boardRect.left - screenMargin && mediaRect.left < boardRect.right + screenMargin
-            && mediaRect.bottom > boardRect.top - screenMargin && mediaRect.top < boardRect.bottom + screenMargin
-        : nodeNear;
-    const pinned = selected.has(node.id)
-        || Boolean(node.running || node.pending || node.jimengPending || ['queued', 'running'].includes(node.runStatus))
-        || Boolean(document.activeElement && nodeEl?.contains(document.activeElement));
-    return {
-        element,
-        node,
-        visible,
-        eligible:visible || (!canvasEntryPreparing && near) || pinned,
-        pinned,
-        distance:hasMediaRect
-            ? Math.abs((mediaRect.left + mediaRect.right) / 2 - (boardRect.left + boardRect.right) / 2)
-                + Math.abs((mediaRect.top + mediaRect.bottom) / 2 - (boardRect.top + boardRect.bottom) / 2)
-            : Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))
-    };
-}
-function classicPreviewCandidate(img, allowLoading=false){
-    if(canvasSessionSuspended) return null;
-    const preview = img?.dataset?.previewSrc || '';
-    if(!img?.isConnected || !preview || (!allowLoading && img.dataset.previewState === 'loading') || img.dataset.previewState === 'loaded' || img.dataset.previewState === 'failed') return null;
-    if(Number(img.dataset.previewRetryAt || 0) > Date.now()) return null;
-    const entry = classicMediaViewportEntry(img);
-    if(!entry) return null;
-    if(!entry.eligible){
-        if(canvasEntryPreparing || !['queued','loading'].includes(img.dataset.previewState)) return null;
-        return {img,priority:100,distance:entry.distance};
-    }
-    if(canvasEntryPreparing){
-        if(!canvasEntryResourceVisible(img)) return null;
-        if(img.dataset.previewState==='evicted' && img.complete && img.naturalWidth>0) return null;
-        return {img, priority:entry.visible ? 0 : 10, distance:entry.distance};
-    }
-    const currentSource = String(img.getAttribute?.('src') || '');
-    const hasVisibleFallback = Boolean(currentSource && currentSource !== preview);
-    if((img.dataset.previewState === 'evicted' || hasVisibleFallback) && !entry.pinned && performance.now() < classicMediaRestoreAfter) return null;
-    if(img.dataset.previewState === 'evicted' && img.dataset.mediaResidentReason === 'budget' && !entry.visible && !entry.pinned) return null;
-    const kind = img.dataset.previewKind === 'video' ? 1 : 0;
-    return {img, priority:entry.pinned ? -20 : (entry.visible ? kind : 10 + kind), distance:entry.distance};
-}
-function ensureClassicMediaQueue(){
-    if(classicMediaQueueController) return classicMediaQueueController;
-    if(!window.CanvasMediaQueue?.createMediaQueue) return null;
-    classicMediaQueueController = window.CanvasMediaQueue.createMediaQueue({
-        name:'classic',
-        maxActive:CLASSIC_MEDIA_QUEUE_MAX,
-        maxImageActive:CLASSIC_MEDIA_IMAGE_MAX,
-        maxVideoActive:CLASSIC_MEDIA_VIDEO_MAX,
-        imageTimeoutMs:20000,
-        videoTimeoutMs:45000,
-        maxAttempts:2,
-        hasPending:() => !canvasSessionSuspended && Boolean(nodesEl?.querySelector?.('img[data-preview-src][data-preview-state="queued"],img[data-preview-src][data-preview-state="evicted"]')),
-        collectCandidates:() => classicMediaElementsInWindow().map(img => classicPreviewCandidate(img)).filter(Boolean),
-        isEligible:img => Boolean(classicPreviewCandidate(img, true)),
-        canStart:(img, queue) => {
-            const entry=classicMediaViewportEntry(img);
-            return Boolean(entry && (entry.eligible || queue.activeTotal < 2));
-        },
-        fallbackSource:img => {
-            if(img.dataset.previewKind === 'video') return '';
-            const original = img.dataset.originalSrc || img.dataset.url || '';
-            // 本地预览与原文件共享存在性；预览 404 后再请求原文件只会制造第二次 404。
-            return /^\/(?:assets|output)\//i.test(original) ? '' : original;
-        },
-        replaceVideoFallback:img => replaceCanvasVideoPreviewWithFallback(img),
-        onStart:() => recordClassicFirstPreviewStart(),
-        onRecord:entry => {
-            scheduleClassicMediaResidency();
-            if(entry.outcome === 'loaded' && canvas?.id && classicNavigationStartedAt !== null && classicFirstPreviewLoadedCanvasId !== canvas.id){
-                classicFirstPreviewLoadedCanvasId = canvas.id;
-                window.CanvasPerformance?.record?.('classic.navigation-to-first-preview-loaded', performance.now() - classicNavigationStartedAt, {kind:entry.kind});
-            }
-            window.CanvasPerformance?.record?.('classic.media-preview', entry.duration, {
-                kind:entry.kind,
-                ok:entry.outcome === 'loaded',
-                outcome:entry.outcome,
-                reason:entry.reason,
-                attempt:entry.attempt,
-                queued:entry.activeTotal
-            });
-        }
-    });
-    return classicMediaQueueController;
-}
-function ensureClassicMediaResidency(){
-    if(classicMediaResidencyController) return classicMediaResidencyController;
-    if(!window.CanvasMediaQueue?.createMediaResidency) return null;
-    classicMediaResidencyController = window.CanvasMediaQueue.createMediaResidency({
-        name:'classic',
-        graceMs:CLASSIC_MEDIA_RESIDENCY_GRACE_MS,
-        maxResident:CLASSIC_MEDIA_RESIDENCY_MAX,
-        maxResidentPixels:CLASSIC_MEDIA_RESIDENCY_PIXELS,
-        isViewportReady:() => {
-            const rect = board?.getBoundingClientRect?.();
-            return !canvasEntryPreparing && !canvasSessionSuspended && Boolean(rect && rect.width > 1 && rect.height > 1 && Number.isFinite(viewport.scale) && viewport.scale > 0);
-        },
-        collectEntries:() => [...(nodesEl?.querySelectorAll?.('img[data-preview-src],video[data-url],audio[data-url]') || [])]
-            .map(classicMediaViewportEntry).filter(Boolean),
-        imageLowResSource:preparedClassicLowResSource,
-        onChange:() => ensureClassicMediaQueue()?.schedule(),
-        onRecord:entry => window.CanvasPerformance?.record?.('classic.media-residency', 0, {
-            action:entry.action,
-            reason:entry.reason,
-            kind:entry.kind,
-            resident:entry.residentTotal,
-            pixels:entry.residentPixels
-        })
-    });
-    return classicMediaResidencyController;
-}
-function recordClassicFirstPreviewStart(){
-    if(canvas?.id && classicNavigationStartedAt !== null && classicFirstPreviewCanvasId !== canvas.id){
-        classicFirstPreviewCanvasId = canvas.id;
-        window.CanvasPerformance?.record?.('classic.navigation-to-first-preview', performance.now() - classicNavigationStartedAt, {nodes:nodes.length});
-    }
-}
-function startClassicPreviewImage(img){ return ensureClassicMediaQueue()?.start(img) || false; }
-function drainClassicPreviewQueue(){
-    if(classicMediaResidencyTimer) clearTimeout(classicMediaResidencyTimer);
-    classicMediaResidencyTimer = 0;
-    ensureClassicMediaResidency()?.reconcileNow();
-    return ensureClassicMediaQueue()?.drainNow();
-}
-function scheduleClassicMediaResidency(){
-    if(classicMediaResidencyTimer) clearTimeout(classicMediaResidencyTimer);
-    classicMediaResidencyTimer = setTimeout(() => {
-        classicMediaResidencyTimer = 0;
-        ensureClassicMediaResidency()?.reconcileNow();
-    }, CLASSIC_MEDIA_RESIDENCY_IDLE_MS);
-}
-function scheduleClassicMediaQueue(){
-    scheduleClassicMediaResidency();
-    ensureClassicMediaQueue()?.schedule();
-}
-function cancelClassicOffscreenPreviewTasks(){
-    ensureClassicMediaQueue()?.cancelIneligible();
-    ensureClassicMediaResidency()?.reconcileNow();
-    scheduleClassicMediaQueue();
 }
 function loadCanvasOriginalImageDimensions(url){
     const src = String(url || '');
@@ -308,9 +122,8 @@ function canvasVideoPreviewHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
     const preview = canvasMediaPreviewUrl(original, size);
     const safeAttrs = canvasEagerMediaAttrs(attrs);
-    const immediate = !canvasPreviewNeedsQueue(preview) || /^data:|^blob:/i.test(preview);
-    const srcAttr = immediate ? ` src="${escapeAttr(preview)}"` : '';
-    return `<img loading="eager" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video" data-preview-state="${immediate ? 'ready' : 'queued'}"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
+    const srcAttr = ` src="${escapeAttr(preview)}"`;
+    return `<img loading="eager" decoding="async"${srcAttr} data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}" data-preview-kind="video" data-preview-state="loading"${safeAttrs ? ` ${safeAttrs}` : ''}>`;
 }
 function canvasVideoFallbackHtml(url, attrs=''){
     const original = canvasOriginalMediaUrl(url);
@@ -369,7 +182,7 @@ function bindCanvasPreviewImageFallbacks(root=document){
                 replaceCanvasVideoPreviewWithFallback(img);
                 return;
             }
-            if(original && img.getAttribute('src') !== original) img.src = original;
+            if(original && !/^\/(?:assets|output)\//i.test(original) && img.getAttribute('src') !== original) img.src = original;
         });
     });
 }
@@ -454,7 +267,7 @@ function syncCanvasSelectedImageResolution(root=nodesEl, affectedNodeIds=null){
             if(canvasSelectedHighResLoaded.has(target) && img.getAttribute('src') !== target) img.src = target;
         });
     }, CANVAS_SELECTED_HIGH_RES_DELAY);
-    scheduleClassicMediaQueue();
+    scheduleEngineMediaActivation();
 }
 function applyLanguage(lang){
     if(lang && window.StudioI18n) StudioI18n.set(lang);
@@ -531,14 +344,14 @@ function setCanvasRouteActive(active){
             void refreshCanvasConfigFromSettings();
         }
         hideCanvasStartupNotice();
-        scheduleClassicMediaQueue();
-        scheduleClassicMediaResidency();
+        scheduleEngineMediaActivation();
+
         startCanvasRemotePolling();
         refreshOutputTimer();
         void checkRemoteCanvasVersion().catch(error=>console.warn('canvas background version check failed',error));
         return;
     }
-    if(wasSuspended) scheduleClassicMediaQueue();
+    if(wasSuspended) scheduleEngineMediaActivation();
     if(canvasSessionConfigDirty){
         canvasSessionConfigDirty = false;
         void refreshCanvasConfigFromSettings();
@@ -807,8 +620,6 @@ const canvasNodeDomIndex = new Map();
 const canvasPortDomIndex = new Map();
 const canvasNodeRectIndex = new Map();
 const canvasPortGeometryIndex = new Map();
-let classicMediaSpatialGrid = null;
-let classicMediaSpatialGridEpoch = -1;
 let canvasGeometryEpoch = 0;
 let videoClipEditor = null;
 let videoClipHandleDrag = '';
@@ -820,20 +631,13 @@ let videoFramePollTimer = null;
 let viewport = {x: -1800, y: -1000, scale: 1};
 let dragNode = null;
 // 安全视口 LOD 只作用于普通节点视觉壳；节点模型和端口始终保留。
-const CLASSIC_SAFE_LOD_ENABLED = true;
-const CLASSIC_SAFE_LOD_MARGIN = 480;
 // 框选优先复用节点矩形索引；关闭时回退结束阶段的逐节点尺寸读取。
 const CLASSIC_MARQUEE_RECT_CACHE_ENABLED = true;
 // 选择反馈只更新旧/新选择集合；关闭或索引失效时回退原全量 DOM 同步。
 const CLASSIC_SELECTION_FEEDBACK_INCREMENTAL_ENABLED = true;
 // 节点拖动优先复用已有 DOM 索引；索引缺失或关闭时回退选择器查询。
 const CLASSIC_DRAG_DOM_INDEX_ENABLED = true;
-let classicSafeLodRaf = 0;
-let classicSafeLodFullRefreshPending = false;
-const classicSafeLodNodeIds = new Set();
-let classicLodVisibleIds = null;
 // 交互型变更（复制/粘贴/删除）只更新受影响的 DOM，避免按键时重建整张画布。
-let classicRenderMutation = null;
 let canvasMutationBatchDepth = 0;
 let canvasMutationBatchDirty = false;
 const canvasMutationBatchCreatedIds = new Set();
@@ -983,8 +787,6 @@ const CLASSIC_SAVE_QUEUE_ENABLED = true;
 const CLASSIC_IDLE_MEDIA_ENABLED = true;
 let classicIdleMediaMeasureHandle = 0;
 const classicIdleMediaMeasureRoots = new Set();
-let classicIdleIconHandle = 0;
-const classicIdleIconRoots = new Set();
 let classicIdleNodeRectMeasureHandle = 0;
 const classicIdleNodeRectMeasureIds = new Set();
 let flushingVideoClipDeletions = false;
@@ -2428,7 +2230,6 @@ function canvasPortIndexKey(nodeId, kind, inputRole=''){
     return `${nodeId}:${kind}:${inputRole || ''}`;
 }
 function invalidateCanvasGeometry(ids=[]){
-    classicMediaSpatialGridEpoch = -1;
     const list = (ids || []).filter(Boolean);
     if(!list.length){
         canvasGeometryEpoch += 1;
@@ -2532,37 +2333,11 @@ function rebuildCanvasDomIndexes(){
         const node = canvasNodeIndex.get(id) || nodes.find(item => item.id === id);
         indexClassicNodeDom(el, node);
     });
-    rebuildClassicMediaSpatialGrid();
-    classicLodVisibleIds = null;
-}
-function rebuildClassicMediaSpatialGrid(){
-    if(!window.CanvasMediaQueue?.createSpatialGridIndex) return null;
-    classicMediaSpatialGrid = classicMediaSpatialGrid || window.CanvasMediaQueue.createSpatialGridIndex({cellSize:640});
-    classicMediaSpatialGrid.clear();
-    canvasNodeDomIndex.forEach((el, id) => {
-        const rect = canvasNodeRectIndex.get(id) || estimatedNodeRect(canvasNodeIndex.get(id) || nodes.find(item => item.id === id));
-        if(rect) classicMediaSpatialGrid.upsert(id, rect, el);
-    });
-    classicMediaSpatialGridEpoch = canvasGeometryEpoch;
-    return classicMediaSpatialGrid;
-}
-function classicMediaElementsInWindow(){
-    const view = currentWorldViewRect();
-    const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
-    const query = {x:view.x - margin, y:view.y - margin, w:view.w + margin * 2, h:view.h + margin * 2};
-    const grid = classicMediaSpatialGridEpoch === canvasGeometryEpoch ? classicMediaSpatialGrid : rebuildClassicMediaSpatialGrid();
-    const roots = grid?.search(query) || [];
-    if(!roots.length) return [];
-    return [...new Set(roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]))];
 }
 function applyViewport(){
-    if(window.CanvasEngine?.active) window.CanvasEngine.updateViewport({x:viewport.x, y:viewport.y, k:viewport.scale});
-    else world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
-    classicMediaRestoreAfter = performance.now() + CLASSIC_MEDIA_RESTORE_IDLE_MS;
-    scheduleClassicSafeLod();
+    window.CanvasEngine.updateViewport({x:viewport.x, y:viewport.y, k:viewport.scale});
     scheduleMinimapViewportUpdate();
     scheduleSelectionHubPosition();
-    scheduleClassicMediaQueue();
 }
 function estimatedNodeRect(n){
     const cached = canvasNodeRectIndex.get(n.id);
@@ -2578,81 +2353,6 @@ function estimatedNodeRect(n){
     const rect = {x:n.x || 0, y:n.y || 0, w, h};
     canvasNodeRectIndex.set(n.id, rect);
     return rect;
-}
-function scheduleClassicSafeLod(ids=null){
-    if(!nodesEl) return;
-    if(ids == null){
-        classicSafeLodFullRefreshPending = true;
-        classicSafeLodNodeIds.clear();
-    } else if(!classicSafeLodFullRefreshPending){
-        const targetIds = Array.isArray(ids) || ids instanceof Set ? ids : [ids];
-        targetIds.forEach(id => { if(id) classicSafeLodNodeIds.add(id); });
-    }
-    if(classicSafeLodRaf) return;
-    classicSafeLodRaf = requestAnimationFrame(() => {
-        classicSafeLodRaf = 0;
-        const pendingIds = classicSafeLodFullRefreshPending ? null : [...classicSafeLodNodeIds];
-        classicSafeLodFullRefreshPending = false;
-        classicSafeLodNodeIds.clear();
-        updateClassicSafeLod(pendingIds);
-    });
-}
-function updateClassicSafeLod(affectedIds=null){
-    if(!nodesEl) return;
-    const largeScene = CLASSIC_SAFE_LOD_ENABLED && nodes.length > 200;
-    const largeSceneChanged = nodesEl.classList.contains('canvas-lod-active') !== largeScene;
-    nodesEl.classList.toggle('canvas-lod-active', largeScene);
-    const view = currentWorldViewRect();
-    const margin = CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
-    const minX = view.x - margin, minY = view.y - margin;
-    const maxX = view.x + view.w + margin, maxY = view.y + view.h + margin;
-    const keepIds = new Set(selected);
-    if(dragNode){
-        keepIds.add(dragNode.node?.id);
-        (dragNode.children || []).forEach(item => keepIds.add(item.node?.id));
-    }
-    if(resizeNode?.node?.id) keepIds.add(resizeNode.node.id);
-    if(tempLink?.from && !String(tempLink.from).startsWith('selection:')) keepIds.add(tempLink.from);
-    if(linkCreateState?.originId) keepIds.add(linkCreateState.originId);
-    const applyElement = el => {
-        if(!el?.classList?.contains('canvas-lod-safe')) return;
-        const node = canvasNodeIndex.get(el.dataset.id) || nodes.find(item => item.id === el.dataset.id);
-        if(!node){ el.classList.remove('canvas-lod-outside'); return; }
-        const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
-        const intersects = rect.x < maxX && rect.x + rect.w > minX && rect.y < maxY && rect.y + rect.h > minY;
-        const outside = largeScene && !intersects && !keepIds.has(node.id);
-        const nextState = outside ? 'deferred' : 'full';
-        if(el.dataset.lodState !== nextState){
-            const previousState = el.dataset.lodState || '';
-            el.classList.toggle('canvas-lod-outside', outside);
-            el.dataset.lodState = nextState;
-            if(previousState === 'deferred' && nextState === 'full') requestAnimationFrame(() => refreshIcons(el));
-        }
-    };
-    if(!largeScene){
-        classicLodVisibleIds = null;
-        canvasNodeDomIndex.forEach(applyElement);
-        return;
-    }
-    if(affectedIds != null && !largeSceneChanged){
-        [...new Set(affectedIds)].map(id => canvasNodeDomIndex.get(id)).filter(Boolean).forEach(applyElement);
-        return;
-    }
-    if(classicLodVisibleIds == null){
-        canvasNodeDomIndex.forEach(applyElement);
-    }
-    const visibleIds = new Set((classicMediaSpatialGrid?.search({x:minX, y:minY, w:maxX - minX, h:maxY - minY}) || []).map(el => el?.dataset?.id).filter(Boolean));
-    keepIds.forEach(id => visibleIds.add(id));
-    visibleIds.forEach(id => {
-        const el = canvasNodeDomIndex.get(id);
-        if(el) applyElement(el);
-    });
-    (classicLodVisibleIds || []).forEach(id => {
-        if(visibleIds.has(id)) return;
-        const el = canvasNodeDomIndex.get(id);
-        if(el) applyElement(el);
-    });
-    classicLodVisibleIds = visibleIds;
 }
 function currentWorldViewRect(){
     const rect = board.getBoundingClientRect();
@@ -3227,83 +2927,7 @@ function endCanvasMutationBatch(options={}){
     scheduleSave();
 }
 function queueClassicRenderMutation(mutation={}){
-    const merge = (key) => new Set([...(classicRenderMutation?.[key] || []), ...(mutation[key] || [])].filter(Boolean));
-    classicRenderMutation = {
-        createdIds:merge('createdIds'),
-        removeIds:merge('removeIds'),
-        replaceIds:merge('replaceIds'),
-        createdConnectionIds:merge('createdConnectionIds'),
-        removedConnectionIds:merge('removedConnectionIds'),
-        affectedConnectionIds:merge('affectedConnectionIds')
-    };
-}
-function fallbackClassicRenderMutation(reason, error=null){
-    console.warn('[canvas] 增量渲染失败，回退完整 render：', reason, error || '');
-    classicRenderMutation = null;
-    render();
-    return false;
-}
-function hydrateClassicMutationNodeRoots(roots=[]){
-    (roots || []).filter(root => root?.isConnected).forEach(root => {
-        bindCanvasPreviewImageFallbacks(root);
-    });
-}
-function renderClassicMutation(mutation){
-    const createdIds = mutation?.createdIds || new Set();
-    const removeIds = mutation?.removeIds || new Set();
-    const replaceIds = mutation?.replaceIds || new Set();
-    const affectedNodeIds = new Set([...createdIds, ...removeIds, ...replaceIds]);
-    const patchedNodeRoots = [];
-    const modelById = new Map();
-    nodes.forEach(node => {
-        if(createdIds.has(node.id) || replaceIds.has(node.id)) modelById.set(node.id, node);
-    });
-    try {
-        removeIds.forEach(id => {
-            const current = canvasNodeDomIndex.get(id);
-            if(current) window.CanvasSpecialNodes?.disposePanoramasIn?.(current), current.remove();
-            removeClassicNodeDomIndex(id);
-            canvasNodeIndex.delete(id);
-        });
-        createdIds.forEach(id => {
-            const node = modelById.get(id);
-            if(!node) throw new Error(`新增节点模型不存在：${id}`);
-            const current = canvasNodeDomIndex.get(id);
-            if(current) current.remove();
-            removeClassicNodeDomIndex(id);
-            canvasNodeIndex.set(id, node);
-            const fresh = renderNode(node);
-            refreshIcons(fresh);
-            nodesEl.appendChild(fresh);
-            indexClassicNodeDom(fresh, node, {measure:false});
-            scheduleClassicNodeRectMeasure([id]);
-            patchedNodeRoots.push(fresh);
-        });
-        replaceIds.forEach(id => {
-            if(createdIds.has(id)) return;
-            const node = modelById.get(id);
-            const current = canvasNodeDomIndex.get(id);
-            if(!node || !current) throw new Error(`替换节点无法解析：${id}`);
-            const fresh = renderNode(node);
-            refreshIcons(fresh);
-            if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
-            current.replaceWith(fresh);
-            canvasNodeIndex.set(id, node);
-            indexClassicNodeDom(fresh, node, {measure:false});
-            scheduleClassicNodeRectMeasure([id]);
-            patchedNodeRoots.push(fresh);
-        });
-    } catch(error){
-        return fallbackClassicRenderMutation('node-dom-index-patch', error);
-    }
-    if(!patchClassicMutationConnections(mutation, affectedNodeIds)) return fallbackClassicRenderMutation('connection-structure-patch');
-    updateCanvasStats();
-    nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
-    refreshSelectionVisuals({affectedNodeIds, syncResolution:false, deferHubPosition:true});
-    hydrateClassicMutationNodeRoots(patchedNodeRoots);
-    syncCanvasSelectedImageResolution(nodesEl, affectedNodeIds);
-    scheduleClassicMediaQueue();
-    scheduleMinimapNodeUpdate([...affectedNodeIds]);
+    window.CanvasEngine.invalidate([...(mutation.replaceIds || [])]);
 }
 function serializableCanvasNodes(list=nodes){
     return (list || []).map(serializableCanvasNode);
@@ -4128,12 +3752,10 @@ async function openCanvas(id){
     }
 }
 function canvasEntryResourceVisible(element){
-    const entry = classicMediaViewportEntry(element);
-    if(!entry || (!entry.visible && !entry.pinned)) return false;
-    // 大批量节点可能跨越多屏，只等待其中实际出现在视口内的缩略图。
-    const rect=element.getBoundingClientRect(),view=board.getBoundingClientRect();
-    if(rect.width>0 && rect.height>0) return rect.right>view.left && rect.left<view.right && rect.bottom>view.top && rect.top<view.bottom;
-    return true;
+    if(!element?.isConnected) return false;
+    const rect = element.getBoundingClientRect(), view = board.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.right > view.left && rect.left < view.right
+        && rect.bottom > view.top && rect.top < view.bottom;
 }
 async function prepareCanvasEntry(session){
     canvasEntryPreparing = true;
@@ -4141,42 +3763,18 @@ async function prepareCanvasEntry(session){
     try {
         canvasResourceMonitor?.stop();
         canvasResourceMonitor=window.CanvasResourceReady.monitor?.({root:nodesEl,
-            isCurrent:session.isCurrent,drain:()=>ensureClassicMediaQueue()?.drainNow(),
+            isCurrent:session.isCurrent,drain:()=>activateEngineMedia(nodesEl),
             retryMissing:async node=>{
                 await refreshMissingCanvasAssets(session.id,session.signal);
                 if(session.isCurrent()) refreshNodes([node.dataset.id]);
             }});
-        if(window.CanvasEngine?.active){
-            const missingVisible=window.CanvasEngine.visibleIds().filter(id=>!canvasNodeDomIndex.get(id)?.isConnected);
-            if(missingVisible.length) throw new Error('可见节点尚未完成构建，请重试');
-            window.CanvasPerformance?.record?.('classic.entry-structure-ready',performance.now()-entryStarted,
-                {visible:window.CanvasEngine.visibleIds().length});
-            hideCanvasStartupNotice();
-            return;
-        }
-        while(session.isCurrent()){
-            const renderedIds=new Set([...nodesEl.children].map(el=>el.dataset.id));
-            if(nodes.some(node=>!renderedIds.has(node.id))) throw new Error('部分节点尚未完成构建，请重试');
-            const result=await window.CanvasResourceReady.wait({
-                root:nodesEl,isCurrent:session.isCurrent,
-                include:canvasEntryResourceVisible,
-                budgetMs:800,
-                active:()=>!canvasSessionSuspended,
-                drain:()=>ensureClassicMediaQueue()?.drainNow(),
-                progress:(done,total)=>window.canvasEntryOverlay?.update(35+60*(total?done/total:1), `正在准备节点资源 ${done} / ${total}`)
-            });
-            if(!session.isCurrent() || result.cancelled) return;
-            // 当前视口完成即可进入；低清预热由驻留控制器空闲执行，完成前保留原像素。
-            // 节点局部提示与重试继续工作，不让一项媒体挡住整个工程。
-            window.CanvasPerformance?.record?.('classic.entry-media-wait',performance.now()-entryStarted,
-                {failed:result.failed.length,pending:result.pending?.length || 0});
-            break;
-        }
-        window.canvasEntryOverlay?.update(100, '准备完成');
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const missingVisible=window.CanvasEngine.visibleIds().filter(id=>!canvasNodeDomIndex.get(id)?.isConnected);
+        if(missingVisible.length) throw new Error('可见节点尚未完成构建，请重试');
+        window.CanvasPerformance?.record?.('classic.entry-structure-ready',performance.now()-entryStarted,
+            {visible:window.CanvasEngine.visibleIds().length});
         if(session.isCurrent()) hideCanvasStartupNotice();
     } finally {
-        if(session.isCurrent()) {canvasEntryPreparing = false;scheduleClassicMediaQueue();scheduleClassicMediaResidency();}
+        if(session.isCurrent()) {canvasEntryPreparing = false;scheduleEngineMediaActivation();}
     }
 }
 
@@ -9400,73 +8998,6 @@ function transplantNodeMediaElement(oldNodeEl, newNodeEl){
     restoreMediaPlaybackState(oldMedia, state);
     requestAnimationFrame(() => restoreMediaPlaybackState(oldMedia, state));
 }
-function captureMediaPlaybackStates(){
-    const states = new Map();
-    nodesEl.querySelectorAll('video[data-url], audio[data-url]').forEach(media => {
-        const tag = media.tagName.toLowerCase();
-        const url = media.dataset.url || media.getAttribute('src') || '';
-        if(url) states.set(`${tag}:${url}`, captureMediaPlaybackState(media));
-    });
-    return states;
-}
-function restoreMediaPlaybackStates(states){
-    if(!states?.size) return;
-    nodesEl.querySelectorAll('video[data-url], audio[data-url]').forEach(media => {
-        const tag = media.tagName.toLowerCase();
-        const url = media.dataset.url || media.getAttribute('src') || '';
-        restoreMediaPlaybackState(media, states.get(`${tag}:${url}`));
-    });
-}
-function scheduleClassicIdleIconRefresh(root=nodesEl){
-    if(!root) return;
-    if(!CLASSIC_IDLE_MEDIA_ENABLED){ refreshIcons(root); return; }
-    classicIdleIconRoots.add(root);
-    if(classicIdleIconHandle) return;
-    const run = () => {
-        classicIdleIconHandle = 0;
-        const roots = [...classicIdleIconRoots];
-        classicIdleIconRoots.clear();
-        roots.forEach(item => {
-            if(item?.isConnected === false) return;
-            if(item === nodesEl && nodes.length > 200){
-                const view = currentWorldViewRect();
-                const margin = CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1);
-                nodesEl.querySelectorAll('.node[data-id]').forEach(nodeEl => {
-                    const node = canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id);
-                    if(!node) return;
-                    const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
-                    const visible = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin
-                        && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
-                    if(visible || selected.has(node.id)) refreshIcons(nodeEl);
-                });
-                return;
-            }
-            refreshIcons(item);
-        });
-    };
-    if('requestIdleCallback' in window) classicIdleIconHandle = window.requestIdleCallback(run, {timeout:900});
-    else classicIdleIconHandle = window.setTimeout(run, 0);
-}
-// 完整重绘后，当前视口内的节点图标必须在本帧完成 hydration。
-// 视口外节点仍交给 idle 队列，避免大画布一次性扫描全部图标导致卡顿。
-function hydrateClassicVisibleIconRoots(root=nodesEl){
-    if(!root || !window.lucide) return;
-    const largeScene = nodes.length > 200;
-    const view = largeScene ? currentWorldViewRect() : null;
-    const margin = largeScene ? CLASSIC_SAFE_LOD_MARGIN / Math.max(0.05, viewport.scale || 1) : 0;
-    const minX = view ? view.x - margin : 0;
-    const minY = view ? view.y - margin : 0;
-    const maxX = view ? view.x + view.w + margin : 0;
-    const maxY = view ? view.y + view.h + margin : 0;
-    root.querySelectorAll('.node[data-id]').forEach(nodeEl => {
-        if(!largeScene){ refreshIcons(nodeEl); return; }
-        const node = canvasNodeIndex.get(nodeEl.dataset.id) || nodes.find(item => item.id === nodeEl.dataset.id);
-        if(!node) return;
-        const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
-        const visible = rect.x < maxX && rect.x + rect.w > minX && rect.y < maxY && rect.y + rect.h > minY;
-        if(visible || selected.has(node.id)) refreshIcons(nodeEl);
-    });
-}
 function measureCanvasOriginalImageNodesNow(root=nodesEl){
     root.querySelectorAll?.('.image-node img[data-original-src]').forEach(imgEl => {
         if(imgEl.dataset.previewKind === 'video') return;
@@ -9567,7 +9098,7 @@ function syncClassicFilmWorkflow(){
         depth:ref=>window.CanvasSpecialNodes.generateReferenceDepth(ref,{resolveUrl:url=>canvasDisplayMediaUrl(url)}),
         generate:runClassicLocalWorkflowShot,
         connectionsChanged:()=>markClassicConnectionStructureDirty(),
-        invalidate:ids=>{if(classicRenderMutation) queueClassicRenderMutation({replaceIds:ids});},
+        invalidate:ids=>window.CanvasEngine.invalidate(ids),
         changed:ids=>{queueClassicRenderMutation({replaceIds:ids});scheduleClassicRender();scheduleSave();},
         upload:async file=>{const uploaded=await uploadCroppedBlob(file,file.name);if(!uploaded?.url)throw new Error('资产上传失败');return uploaded.url;}
     });
@@ -9611,90 +9142,22 @@ async function runClassicLocalWorkflowShot({node,shot,assets,parameters,depth,vi
 function render(){
     syncClassicFilmWorkflow();
     if(window.StudioFocusGuard?.shouldDeferDomUpdate?.(nodesEl)) {
-        window.StudioFocusGuard.deferDomUpdate('canvas-render', render);
-        return;
+    window.StudioFocusGuard.deferDomUpdate('canvas-render', render);
+    return;
     }
-    if(window.CanvasEngine?.active){
-        classicRenderMutation = null;
-        const perfEnd = window.CanvasPerformance?.start?.('classic.upstream-render', {nodes:nodes.length, connections:connections.length});
-        canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
-        board?.classList.toggle('selection-multiple', Boolean(canvas && selected.size > 1));
-        updateCanvasStats();
-        window.CanvasEngine.render(nodes, {x:viewport.x, y:viewport.y, k:viewport.scale});
-        rebuildCanvasDomIndexes();
-        refreshGeometry();
-        refreshGeometryAfterLayout();
-        scheduleClassicIdleIconRefresh(nodesEl);
-        hydrateClassicVisibleIconRoots(nodesEl);
-        bindCanvasPreviewImageFallbacks(nodesEl);
-        syncCanvasSelectedImageResolution(nodesEl);
-        measureCanvasOriginalImageNodes(nodesEl);
-        scheduleClassicMediaQueue();
-        scheduleMinimapRender();
-        refreshOutputTimer();
-        perfEnd?.();
-        return;
-    }
-    if(classicRenderMutation){
-        const mutation = classicRenderMutation;
-        classicRenderMutation = null;
-        renderClassicMutation(mutation);
-        return;
-    }
-    const perfEnd = window.CanvasPerformance?.start?.('classic.render', {nodes:nodes.length, connections:connections.length});
-    // 多选时节点自身的悬浮操作层必须统一收起；render() 也会被“全选”等快捷键直接调用，
-    // 因此不能只依赖 refreshSelectionVisuals() 更新这个状态。
-    board?.classList.toggle('selection-multiple', Boolean(canvas && selected.size > 1));
+    const perfEnd = window.CanvasPerformance?.start?.('classic.upstream-render', {nodes:nodes.length, connections:connections.length});
     canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
+    board?.classList.toggle('selection-multiple', Boolean(canvas && selected.size > 1));
     updateCanvasStats();
-    nodesEl.classList.toggle('canvas-large-scene', nodes.length > 200);
-    const focusSnapshot = window.StudioFocusGuard?.capture?.();
-    window.CanvasSpecialNodes?.disposePanoramasIn?.(nodesEl);
-    const outputScrolls = captureOutputScrolls();
-    const mediaStates = captureMediaPlaybackStates();
-    syncClassicFilmAutoReuse();
-    const reusableMediaNodes = new Map();
-    nodesEl.querySelectorAll('.node').forEach(el => {
-        const node = canvasNodeIndex.get(el.dataset.id);
-        if(node && ['image','output'].includes(node.type)) reusableMediaNodes.set(node.id, el);
-    });
-    applyViewport();
-    [...nodesEl.children].forEach(child => {
-        if(!reusableMediaNodes.has(child.dataset?.id)) child.remove();
-    });
-    nodes.forEach(node => {
-        // 单个节点渲染异常不能中断整个循环，否则它后面的节点（含新建节点，通常排在末尾）都不会被
-        // 追加进 DOM，连带这些节点的连线也会因找不到 DOM 而画到 (0,0) 变成“消失”。
-        try {
-            const fresh = renderNode(node);
-            const old = reusableMediaNodes.get(node.id);
-            nodesEl.appendChild(fresh);
-            if(old){
-                transplantNodeMediaElement(old, fresh);
-                if(old !== fresh) old.remove();
-            }
-        } catch(err){
-            console.error('[canvas] renderNode 失败，已跳过该节点：', node?.id, node?.type, err);
-        }
-    });
+    prepareEngineNodeRevisions();
+    window.CanvasEngine.render(nodes, {x:viewport.x, y:viewport.y, k:viewport.scale});
     rebuildCanvasDomIndexes();
-    restoreMediaPlaybackStates(mediaStates);
-    restoreOutputScrolls(outputScrolls);
     refreshGeometry();
     refreshGeometryAfterLayout();
-    if(canvas?.id && classicNavigationStartedAt !== null && classicFirstRenderCanvasId !== canvas.id){
-        classicFirstRenderCanvasId = canvas.id;
-        window.CanvasPerformance?.record?.('classic.navigation-to-first-render', performance.now() - classicNavigationStartedAt, {nodes:nodes.length, connections:connections.length});
-    }
-    scheduleClassicIdleIconRefresh(nodesEl);
-    hydrateClassicVisibleIconRoots(nodesEl);
-    bindCanvasPreviewImageFallbacks(nodesEl);
     syncCanvasSelectedImageResolution(nodesEl);
-    measureCanvasOriginalImageNodes(nodesEl);
-    scheduleClassicMediaQueue();
-    if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
-    refreshOutputTimer();
+    refreshSelectionVisuals({syncResolution:false});
     scheduleMinimapRender();
+    refreshOutputTimer();
     perfEnd?.();
 }
 const classicEngineVisibilityDirtyIds = new Set();
@@ -9713,16 +9176,50 @@ function markClassicEngineVisibilityChanged(id){
         if(ids.some(nodeId => selected.has(nodeId))) scheduleSelectionHubPosition();
     });
 }
+let engineNodeDependencies = new Map();
+const engineNodeScrolls = new WeakMap();
+function engineNodeContentRevision(node){
+    const seen = new WeakSet();
+    return JSON.stringify(node, function(key, value) {
+        if(this === node && ['x','y'].includes(key)) return undefined;
+        if(['_ltxEditor','_activeLoopCtx','_blenderState'].includes(key)) return undefined;
+        if(value && typeof value === 'object'){
+            if(value instanceof Element || seen.has(value)) return undefined;
+            seen.add(value);
+        }
+        return value;
+    });
+}
+function prepareEngineNodeRevisions(){
+    const content = new Map(nodes.map(node => [node.id, engineNodeContentRevision(node)]));
+    engineNodeDependencies = new Map();
+    for(const edge of connections){
+        for(const id of [edge.from, edge.to]){
+            const list = engineNodeDependencies.get(id) || [];
+            list.push(JSON.stringify(edge), content.get(edge.from) || '');
+            engineNodeDependencies.set(id, list);
+        }
+    }
+}
 window.CanvasEngineBridge = {
     renderNode,
+    cacheDetached(node){ return node.type !== 'panorama'; },
+    nodeRevision(node){ return engineNodeContentRevision(node) + JSON.stringify(engineNodeDependencies.get(node.id) || []) + ':' + canvasConfigRevision; },
+    syncNode(node, element){
+        element.style.left = `${node.x}px`;
+        element.style.top = `${node.y}px`;
+        element.classList.toggle('selected', selected.has(node.id));
+    },
+    onNodeDispose(node, element){ window.CanvasSpecialNodes?.disposePanoramasIn?.(element); },
     nodeSize(node){
         const size = defaultNodeSize(node.type);
         return {w:Number(node.w) || Number(size.w) || 260, h:Number(node.h) || Number(size.h) || 160};
     },
     keepMounted(node){
         const el = canvasNodeDomIndex.get(node.id);
-        return Boolean(dragNode?.node?.id === node.id || resizeNode?.node?.id === node.id
-            || el?.contains(document.activeElement) || [...(el?.querySelectorAll('video') || [])].some(video=>!video.paused));
+        return Boolean(dragNode?.node?.id === node.id || (dragNode?.children || []).some(item => item.node?.id === node.id)
+            || resizeNode?.node?.id === node.id || tempLink?.from === node.id || linkCreateState?.originId === node.id
+            || el?.contains(document.activeElement) || [...(el?.querySelectorAll('video,audio') || [])].some(media=>!media.paused));
     },
     onViewportChange(next){
         viewport.x = next.x;
@@ -9735,21 +9232,31 @@ window.CanvasEngineBridge = {
         indexClassicNodeDom(element, node, {measure:false});
         refreshIcons(element);
         bindCanvasPreviewImageFallbacks(element);
+        activateEngineMedia(element);
+        const scroll = engineNodeScrolls.get(element);
+        if(scroll) requestAnimationFrame(() => {
+            if(!element.isConnected) return;
+            const target = element.querySelector(scroll.selector);
+            if(target){ target.scrollTop = scroll.bottom ? target.scrollHeight : scroll.top; target.scrollLeft = scroll.left; }
+        });
         measureCanvasOriginalImageNodes(element);
         scheduleClassicNodeRectMeasure([node.id]);
-        classicMediaSpatialGridEpoch = -1;
-        scheduleClassicMediaQueue();
         markClassicEngineVisibilityChanged(node.id);
     },
     onNodeUnmount(node){
-        const current = canvasNodeDomIndex.get(node.id);
-        if(current && node.type === 'panorama') window.CanvasSpecialNodes?.disposePanoramasIn?.(current);
+        const element = canvasNodeDomIndex.get(node.id);
+        const selector = node.type === 'output' ? '.node-body' : node.type === 'llm' ? '.llm-chat-log' : '';
+        const target = selector && element?.querySelector(selector);
+        if(target) engineNodeScrolls.set(element, {selector,top:target.scrollTop,left:target.scrollLeft,
+            bottom:node.type === 'llm' && target.scrollHeight-target.scrollTop-target.clientHeight<12});
         removeClassicNodeDomIndex(node.id);
-        classicMediaSpatialGridEpoch = -1;
-        scheduleClassicMediaQueue();
         markClassicEngineVisibilityChanged(node.id);
     },
-    onNodeReplace(node, previous, fresh){ if(nodeHasLiveMedia(node)) transplantNodeMediaElement(previous, fresh); }
+    onNodeReplace(node, previous, fresh){
+        if(nodeHasLiveMedia(node)) transplantNodeMediaElement(previous, fresh);
+        const scroll = engineNodeScrolls.get(previous);
+        if(scroll) engineNodeScrolls.set(fresh, scroll);
+    }
 };
 function registerClassicCanvasPerfFixture(){
     window.CanvasPerformance?.registerFixtureFactory?.('classic', options => {
@@ -9795,32 +9302,9 @@ function registerClassicCanvasPerfFixture(){
 }
 registerClassicCanvasPerfFixture();
 function patchCanvasNodeCreates(createdNodes=[], refreshIds=[]){
-    if(window.CanvasEngine?.active){ render(); return true; }
-    const created = (createdNodes || []).filter(Boolean);
-    if(!created.length && !(refreshIds || []).length){
-        refreshGeometryAfterLayout();
-        return true;
-    }
-    try {
-        created.forEach(node => {
-            if(!node?.id || canvasNodeDomIndex.has(node.id)) return;
-            nodesEl.appendChild(renderNode(node));
-        });
-        rebuildCanvasDomIndexes();
-        if((refreshIds || []).length) refreshNodes(refreshIds);
-        else {
-            refreshGeometryAfterLayout();
-            scheduleSelectionHubPosition();
-            scheduleMinimapRender();
-            scheduleClassicMediaQueue();
-            if(window.lucide) lucide.createIcons();
-        }
-        return true;
-    } catch(error){
-        console.error('[canvas] patchCanvasNodeCreates 失败，回退到全量渲染：', error);
-        render();
-        return false;
-    }
+    window.CanvasEngine.invalidate(refreshIds);
+    render();
+    return true;
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -9829,49 +9313,10 @@ function refreshNodes(ids=[]){
         window.StudioFocusGuard.deferDomUpdate(`canvas-refresh-${uniqueIds.join(',')}`, () => refreshNodes(uniqueIds));
         return;
     }
-    const perfEnd = window.CanvasPerformance?.start?.('classic.refreshNodes', {count:uniqueIds.length});
-    canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
-    const focusSnapshot = window.StudioFocusGuard?.capture?.();
-    const outputScrolls = captureOutputScrolls();
-    const iconRoots = [];
-    applyViewport();
-    for(const id of uniqueIds){
-        const node = canvasNodeIndex.get(id);
-        if(!node) continue;
-        if(node.type === 'output' && refreshOutputNodeContent(node)){
-            const current = canvasNodeDomIndex.get(id);
-            if(current) iconRoots.push(current);
-            continue;
-        }
-        const current = canvasNodeDomIndex.get(id);
-        if(!current){
-            render();
-            return;
-        }
-        try {
-            if(node.type === 'panorama') window.CanvasSpecialNodes?.disposePanoramasIn?.(current);
-            const fresh = renderNode(node);
-            if(nodeHasLiveMedia(node)) transplantNodeMediaElement(current, fresh);
-            current.replaceWith(fresh);
-            iconRoots.push(fresh);
-        } catch(err){
-            console.error('[canvas] refreshNode 失败，已跳过该节点：', id, err);
-        }
-    }
-    rebuildCanvasDomIndexes();
-    restoreOutputScrolls(outputScrolls);
-    refreshGeometry();
-    refreshGeometryAfterLayout();
-    // 节点运行/聊天结果只替换受影响节点；全局扫描会让大画布上的 LLM 操作出现明显延迟。
-    iconRoots.forEach(root => refreshIcons(root));
-    bindCanvasPreviewImageFallbacks(nodesEl);
-    syncCanvasSelectedImageResolution(nodesEl);
-    measureCanvasOriginalImageNodes(nodesEl);
-    scheduleClassicMediaQueue();
-    if(focusSnapshot) window.StudioFocusGuard?.restore?.(focusSnapshot);
-    refreshOutputTimer();
-    perfEnd?.();
+    window.CanvasEngine.invalidate(uniqueIds);
+    render();
 }
+
 function refreshRunNodes(node, out=null){
     refreshNodes([node?.id, out?.id]);
 }
@@ -9996,40 +9441,6 @@ async function downloadSelectedCanvasNodes(){
         alert(err.message || tr('canvas.outputDownloadEmpty'));
         return false;
     }
-}
-function captureOutputScrolls(){
-    const state = new Map();
-    // output 节点滚动位置
-    nodesEl.querySelectorAll('.output-node').forEach(el => {
-        const body = el.querySelector('.node-body');
-        if(body) state.set('out:' + el.dataset.id, { top:body.scrollTop, left:body.scrollLeft });
-    });
-    // LLM 聊天日志滚动位置（记录是否在底部，以便恢复时保持底部）
-    nodesEl.querySelectorAll('.llm-node').forEach(el => {
-        const log = el.querySelector('.llm-chat-log');
-        if(!log) return;
-        const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 12;
-        state.set('llm:' + el.dataset.id, { top:log.scrollTop, atBottom });
-    });
-    return state;
-}
-function restoreOutputScrolls(state){
-    requestAnimationFrame(() => {
-        state.forEach((pos, key) => {
-            if(key.startsWith('out:')){
-                const id = key.slice(4);
-                const body = nodesEl.querySelector(`.output-node[data-id="${CSS.escape(id)}"] .node-body`);
-                if(body){ body.scrollTop = pos.top || 0; body.scrollLeft = pos.left || 0; }
-            } else if(key.startsWith('llm:')){
-                const id = key.slice(4);
-                const log = nodesEl.querySelector(`.llm-node[data-id="${CSS.escape(id)}"] .llm-chat-log`);
-                if(log){
-                    // 之前在底部 → 保持底部（显示最新消息）；否则恢复原位
-                    log.scrollTop = pos.atBottom ? log.scrollHeight : (pos.top || 0);
-                }
-            }
-        });
-    });
 }
 function isNodeControl(target){
     return !!target.closest('textarea, input, select, option, button, audio, video, [contenteditable="true"], .seg, .gen-btn, .comfy-run, .input-item, .blank-image, .mode-tabs, .ms-model-tabs, .llm-provider, .llm-output, .llm-chat-log, .llm-bubble, .llm-pane-resizer, .loop-preview, .blender-preview, .blender-addon-link, .blender-camera-settings, .ltx-director-timeline-host, .pr-wrapper, .pr-toolbar, .pr-viewport, .pr-canvas, .pr-player-controls, .pr-prompt-area, .lookbook-quality-result');
@@ -12121,20 +11532,12 @@ function renderNode(node){
     const portraitMedia = classicMediaNodeIsPortrait(node);
     const autoMultiViewOutput = isMultiViewOutputNode(node);
     const hasFixedSize = !layoutLimits.autoHeight && Boolean((!autoMultiViewOutput && node.h) || size.h);
-    // 特殊/扩展节点的 body 可能主动溢出（舞台、角色端口标签等），不要对其启用内部 LOD。
-    const canvasLodSafe = ![
-        'panorama','multiView','dwpose','depthMap','depthVideo','resultCompare','director3d','poseReplicate','angle','group','promptGroup'
-    ].includes(node.type)
-        && !window.CanvasEcommerceNodes?.isType?.(node.type)
-        && !window.CanvasLookbookNode?.isType?.(node.type)
-        && !window.CanvasFilmNodes?.isType?.(node.type)
-        && !window.CanvasFilmWorkflow?.handles(node);
     const nodeTypeClass = node.type === 'batchGenerator'
         ? 'batchGenerator-node batch-generator-node generator-node'
         : node.type === 'prompt'
             ? 'prompt-node prompt-text-node'
             : `${node.type}-node`;
-    el.className = `node ${nodeTypeClass} ${layoutLimits.autoHeight ? 'auto-height-node' : ''} ${portraitMedia ? 'portrait-media-node' : ''} ${canvasLodSafe ? 'canvas-lod-safe' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.className = `node ${nodeTypeClass} ${layoutLimits.autoHeight ? 'auto-height-node' : ''} ${portraitMedia ? 'portrait-media-node' : ''} ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
     el.classList.toggle('workflow-function-group', Boolean(node.workflowFunctionGroup));
     el.style.left = `${node.x}px`;
     el.style.top = `${node.y}px`;
@@ -23423,7 +22826,6 @@ function startNodeDrag(e, node){
         ox:dragTarget.x,
         oy:dragTarget.y
     };
-    scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
     window.onmouseup = endDrag;
@@ -23469,7 +22871,6 @@ function startNodeResize(e, node){
         sw:(rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w),
         sh:(rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160)
     };
-    scheduleClassicSafeLod();
     document.body.classList.add('canvas-node-resize');
     window.onmousemove = onNodeResize;
     window.onmouseup = endDrag;
@@ -23510,7 +22911,6 @@ function startLink(e, originId, originKind, originRole=''){
     const source = nodes.find(n => n.id === originId);
     window.CanvasPerformance?.beginInteraction?.('classic.port-link', {nodes:nodes.length, connections:connections.length, originKind});
     tempLink = {from:originId, originKind, originRole, x1:src.x, y1:src.y, x2:src.x, y2:src.y};
-    scheduleClassicSafeLod();
     window.onmousemove = e2 => {
         const p = screenToWorld(e2.clientX, e2.clientY);
         tempLink.x2 = p.x;
@@ -23756,7 +23156,6 @@ function endDrag(event=null){
     dragNode = null;
     dragBoard = null;
     resizeNode = null;
-    scheduleClassicSafeLod();
     llmPaneDrag = null;
     knifeActive = false;
     knifePoint = null;
@@ -24333,33 +23732,6 @@ function removeClassicConnectionModelIndex(connectionId){
     classicConnectionModelIndex.delete(connectionId);
     return true;
 }
-function patchClassicMutationConnections(mutation, affectedNodeIds=new Set()){
-    const createdConnectionIds = mutation?.createdConnectionIds || new Set();
-    const removedConnectionIds = mutation?.removedConnectionIds || new Set();
-    const affectedConnectionIds = mutation?.affectedConnectionIds || new Set();
-    if(classicConnectionStructureDirty) return false;
-    for(const connectionId of removedConnectionIds){
-        const entry = classicLinkDom.get(connectionId);
-        entry?.path?.remove();
-        entry?.hit?.remove();
-        classicLinkDom.delete(connectionId);
-        classicLinkControlDom.get(connectionId)?.remove();
-        classicLinkControlDom.delete(connectionId);
-        if(!removeClassicConnectionModelIndex(connectionId)) return false;
-    }
-    for(const connectionId of createdConnectionIds){
-        if(!classicConnectionModelIndex.has(connectionId)) return false;
-    }
-    if(createdConnectionIds.size && !renderClassicConnectionPatch([...createdConnectionIds], {preferEstimated:true})) return false;
-    const affectedExistingIds = [...affectedConnectionIds].filter(id => !createdConnectionIds.has(id));
-    if(affectedExistingIds.length && !renderClassicConnectionPatch(affectedExistingIds)) return false;
-    classicClipboardConnectionSource = connections;
-    classicClipboardConnectionCount = connections.length;
-    affectedNodeIds.forEach(id => canvasPortGeometryIndex.delete(canvasPortIndexKey(id, 'in', '')));
-    classicConnectionDirtyIds.clear();
-    classicConnectionStructureDirty = false;
-    return true;
-}
 function rebuildClassicConnectionModelIndexes(){
     classicConnectionSelectionIndex.clear();
     classicConnectionModelIndex.clear();
@@ -24481,7 +23853,6 @@ function refreshSelectionVisuals(options={}){
     syncClassicImageNodeChromeForSelection(nextSelected);
     syncConnectionSelectionVisuals();
     classicSelectionFeedbackState = {ids:nextSelected};
-    scheduleClassicSafeLod([...affectedNodeIds]);
     renderSelectionHub({deferPosition:options?.deferHubPosition});
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
     canvasArrangeBtn?.classList.toggle('visible', nextSelected.size > 0);

@@ -28,9 +28,8 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
 
     def test_upstream_engine_skips_media_readiness_gate(self):
         body = function_body(CANVAS_JS, "async function prepareCanvasEntry(session)", "function showCanvasStartupNotice")
-        fast_path = body.split("if(window.CanvasEngine?.active){", 1)[1].split("while(session.isCurrent())", 1)[0]
-        self.assertIn("hideCanvasStartupNotice()", fast_path)
-        self.assertNotIn("CanvasResourceReady.wait", fast_path)
+        self.assertIn("hideCanvasStartupNotice()", body)
+        self.assertNotIn("CanvasResourceReady.wait", body)
 
     def test_runtime_preferences_do_not_block_opening(self):
         body = function_body(CANVAS_JS, "async function initializeCanvasPage()", "// 不等待图片/媒体等 load 资源")
@@ -46,26 +45,26 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
 
     def test_first_view_media_uses_stable_cache_urls_and_element_visibility(self):
         preview = function_body(CANVAS_JS, "function canvasMediaPreviewUrl(url, size=512)", "// 过滤调用方传入")
-        viewport = function_body(CANVAS_JS, "function classicMediaViewportEntry(element)", "function classicPreviewCandidate")
-        window = function_body(CANVAS_JS, "function classicMediaElementsInWindow()", "function applyViewport")
+        viewport = function_body(CANVAS_JS, "function canvasEntryResourceVisible(element)", "async function prepareCanvasEntry")
+        image = function_body(CANVAS_JS, "function canvasPreviewImgHtml", "let engineMediaActivationFrame")
         self.assertIn("rev=${canvasMediaCacheRevision(raw)}", preview)
         self.assertIn("element.getBoundingClientRect", viewport)
-        self.assertIn("visible || (!canvasEntryPreparing && near) || pinned", viewport)
-        self.assertNotIn("if(canvasEntryPreparing)", window)
-        self.assertNotIn("data-preview-state=\"queued\"", window)
-        self.assertIn("/^\\/(?:assets|output)\\//i.test(original) ? '' : original", CANVAS_JS)
+        self.assertIn('src="${escapeAttr(preview)}"', image)
+        self.assertNotIn("createMediaResidency", CANVAS_JS)
+        self.assertNotIn("createMediaQueue", CANVAS_JS)
+        self.assertNotIn("canvas-lod", CANVAS_JS)
+        self.assertNotIn("canvas-media-queue.js", CANVAS_HTML)
         self.assertIn("window.canvasPreviewImgHtml(url, 256, attrs)", CANVAS_SPECIAL_NODES_JS)
         self.assertIn("window.canvasPreviewImgHtml(item.url, 256", CANVAS_FILM_NODES_JS)
         self.assertIn("window.canvasPreviewImgHtml(state.url, 256", CANVAS_FILM_NODES_JS)
 
-    def test_upstream_node_mount_wakes_media_queue(self):
+    def test_upstream_node_mount_activates_media_without_legacy_queue(self):
         bridge = function_body(CANVAS_JS, "window.CanvasEngineBridge = {", "function registerClassicCanvasPerfFixture")
         mount = bridge[bridge.index("onNodeMount(node, element)"):bridge.index("onNodeUnmount(node)", bridge.index("onNodeMount(node, element)"))]
         unmount = bridge[bridge.index("onNodeUnmount(node)"):bridge.index("onNodeReplace(node", bridge.index("onNodeUnmount(node)"))]
-        self.assertIn("classicMediaSpatialGridEpoch = -1", mount)
-        self.assertIn("scheduleClassicMediaQueue()", mount)
-        self.assertIn("classicMediaSpatialGridEpoch = -1", unmount)
-        self.assertIn("scheduleClassicMediaQueue()", unmount)
+        self.assertIn("activateEngineMedia(element)", mount)
+        self.assertNotIn("scheduleClassicMediaQueue()", mount)
+        self.assertNotIn("scheduleClassicMediaQueue()", unmount)
 
     def test_inactive_eager_canvas_manager_does_not_start_editor_prewarm(self):
         self.assertIn("sourceFrame.classList.contains('active')", CANVAS_SESSION_HOST_JS)

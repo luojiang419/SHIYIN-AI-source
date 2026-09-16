@@ -1,0 +1,637 @@
+{
+  "environment": {
+    "browser": "Edge headless 1440x1000",
+    "backend": "same isolated source backend for both frontend versions",
+    "production_database": "read-only snapshot; test writes isolated",
+    "media": "original files, read-only API guard",
+    "installed_frontend": "old queue/LOD path; unified=false",
+    "new_frontend": "6e4aa56 / release 20260916163603",
+    "note": "Not a WebView2 desktop measurement; first pass not physical disk cold. First/second/third entry wall times include Playwright pre-click waiting. Corrected click-event measurements in fourth pass."
+  },
+  "first_pass": [
+    {
+      "mode": "installed",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 330,
+          "firstImageMs": 878,
+          "readyMs": 1519,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 6
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 421,
+          "firstImageMs": 438,
+          "readyMs": 438,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "samples": 0,
+        "avgFps": null,
+        "framesOver50": 0,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 19,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "installed",
+      "title": "GP01",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 674,
+          "firstImageMs": 933,
+          "readyMs": 4773,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 44
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 722,
+          "firstImageMs": 723,
+          "readyMs": 1605,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 46
+        }
+      ],
+      "movement": {
+        "samples": 283,
+        "avgFps": 55.13022811836448,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 17,
+        "maxMs": 200.30000000000018,
+        "framesOver50": 4,
+        "longTasks": 2,
+        "longTaskMaxMs": 120,
+        "blankImages": 0,
+        "mounted": 26
+      },
+      "previewRequestCount": 96,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "new",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 374,
+          "firstImageMs": 598,
+          "readyMs": 923,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 508,
+          "firstImageMs": 514,
+          "readyMs": 514,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "samples": 0,
+        "avgFps": null,
+        "framesOver50": 0,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "cache": {
+          "cached": 18,
+          "mounted": 13
+        },
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 22,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "new",
+      "title": "GP01",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 626,
+          "firstImageMs": 652,
+          "readyMs": 1838,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 46
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 714,
+          "firstImageMs": 930,
+          "readyMs": 930,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 46
+        }
+      ],
+      "movement": {
+        "samples": 278,
+        "avgFps": 55.60111202224049,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 16.90000000000009,
+        "maxMs": 183.19999999999982,
+        "framesOver50": 3,
+        "longTasks": 2,
+        "longTaskMaxMs": 98,
+        "cache": {
+          "cached": 56,
+          "mounted": 26
+        },
+        "blankImages": 0,
+        "mounted": 26
+      },
+      "previewRequestCount": 110,
+      "failedPreviews": 0,
+      "errors": []
+    }
+  ],
+  "second_pass": [
+    {
+      "mode": "installed",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 386,
+          "firstImageMs": 394,
+          "readyMs": 498,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 6
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 14215,
+          "firstImageMs": 14302,
+          "readyMs": 14302,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 302,
+        "avgFps": 59.603694639895195,
+        "p50Ms": 16.69999999999891,
+        "p95Ms": 17,
+        "maxMs": 33.69999999999891,
+        "framesOver50": 0,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 22,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "installed",
+      "title": "GP01",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 551,
+          "firstImageMs": 693,
+          "readyMs": 1124,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 46
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 710,
+          "firstImageMs": 928,
+          "readyMs": 1056,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 46
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 291,
+        "avgFps": 57.464454976168135,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 16.900000000000546,
+        "maxMs": 100.19999999999982,
+        "framesOver50": 2,
+        "longTasks": 1,
+        "longTaskMaxMs": 70,
+        "blankImages": 0,
+        "mounted": 26
+      },
+      "previewRequestCount": 116,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "new",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 372,
+          "firstImageMs": 377,
+          "readyMs": 377,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 4498,
+          "firstImageMs": 4508,
+          "readyMs": 4508,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 304,
+        "avgFps": 58.937572702461686,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 16.900000000001455,
+        "maxMs": 50,
+        "framesOver50": 0,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "cache": {
+          "cached": 18,
+          "mounted": 13
+        },
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 22,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "new",
+      "title": "GP01",
+      "opened": [
+        {
+          "round": "cold",
+          "interactiveMs": 586,
+          "firstImageMs": 610,
+          "readyMs": 610,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 46
+        },
+        {
+          "round": "warm",
+          "interactiveMs": 753,
+          "firstImageMs": 981,
+          "readyMs": 981,
+          "nodes": 328,
+          "mounted": 26,
+          "visibleImages": 35,
+          "loaded": 35,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 46
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 309,
+        "avgFps": 57.73434726543083,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 16.900000000000546,
+        "maxMs": 116.59999999999945,
+        "framesOver50": 2,
+        "longTasks": 2,
+        "longTaskMaxMs": 68,
+        "cache": {
+          "cached": 56,
+          "mounted": 26
+        },
+        "blankImages": 0,
+        "mounted": 26
+      },
+      "previewRequestCount": 123,
+      "failedPreviews": 0,
+      "errors": []
+    }
+  ],
+  "third_pass": [
+    {
+      "mode": "installed",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "automationWaitMs": 101,
+          "interactiveMs": 226,
+          "firstImageMs": 231,
+          "readyMs": 231,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 6
+        },
+        {
+          "round": "warm",
+          "automationWaitMs": 0,
+          "interactiveMs": 12500,
+          "firstImageMs": 12639,
+          "readyMs": 12639,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": false,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 310,
+        "avgFps": 57.00415578671626,
+        "p50Ms": 16.69999999999891,
+        "p95Ms": 17,
+        "maxMs": 83.70000000000073,
+        "framesOver50": 5,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 22,
+      "failedPreviews": 0,
+      "errors": []
+    },
+    {
+      "mode": "new",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "automationWaitMs": 78,
+          "interactiveMs": 206,
+          "firstImageMs": 212,
+          "readyMs": 317,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        },
+        {
+          "round": "warm",
+          "automationWaitMs": 0,
+          "interactiveMs": 5440,
+          "firstImageMs": 5441,
+          "readyMs": 5441,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 306,
+        "avgFps": 59.109874826011314,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 16.900000000000546,
+        "maxMs": 49.79999999999927,
+        "framesOver50": 0,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "cache": {
+          "cached": 18,
+          "mounted": 13
+        },
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 22,
+      "failedPreviews": 0,
+      "errors": []
+    }
+  ],
+  "corrected_click_pass": [
+    {
+      "mode": "new",
+      "title": "820-GP",
+      "opened": [
+        {
+          "round": "cold",
+          "actualReadyMs": 110,
+          "actualFirstMs": 121,
+          "automationWaitMs": 155,
+          "interactiveMs": 104,
+          "firstImageMs": 216,
+          "readyMs": 216,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        },
+        {
+          "round": "warm",
+          "actualReadyMs": 141,
+          "actualFirstMs": 141,
+          "automationWaitMs": 4930,
+          "interactiveMs": 178,
+          "firstImageMs": 264,
+          "readyMs": 264,
+          "nodes": 452,
+          "mounted": 13,
+          "visibleImages": 6,
+          "loaded": 6,
+          "failed": 0,
+          "pending": 0,
+          "engine": true,
+          "unified": true,
+          "missing": 0,
+          "previewRequests": 9
+        }
+      ],
+      "movement": {
+        "visibility": "visible",
+        "samples": 293,
+        "avgFps": 59.15487270598211,
+        "p50Ms": 16.699999999999818,
+        "p95Ms": 16.900000000000546,
+        "maxMs": 50,
+        "framesOver50": 0,
+        "longTasks": 0,
+        "longTaskMaxMs": 0,
+        "cache": {
+          "cached": 18,
+          "mounted": 13
+        },
+        "blankImages": 0,
+        "mounted": 13
+      },
+      "previewRequestCount": 22,
+      "failedPreviews": 0,
+      "errors": []
+    }
+  ]
+}

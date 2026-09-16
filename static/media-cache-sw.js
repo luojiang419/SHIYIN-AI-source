@@ -12,6 +12,30 @@ let authEpoch = 0;
 let accountMutation = null;
 let trimPending = null;
 let lastTrim = 0;
+// CacheStorage 是可选加速层，磁盘忙或数据库锁不能阻塞页面脚本和首屏媒体。
+const CACHE_READ_BUDGET_MS = 250;
+let cacheUnavailableUntil = 0;
+async function readCachedResponse(name, key) {
+    if (Date.now() < cacheUnavailableUntil) return {cache:null, cached:null};
+    let timer;
+    try {
+        return await Promise.race([
+            (async () => {
+                const cache = await caches.open(name);
+                return {cache, cached:await cache.match(key)};
+            })(),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error('CacheStorage read timeout')), CACHE_READ_BUDGET_MS);
+            }),
+        ]);
+    } catch (_) {
+        // 同一轮媒体不反复等待同一个故障缓存；不清空用户已有数据。
+        cacheUnavailableUntil = Date.now() + 30000;
+        return {cache:null, cached:null};
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 function isCacheableRequest(request) {
     const url = new URL(request.url);
@@ -29,12 +53,11 @@ function isVersionedStaticAssetRequest(request) {
         && url.pathname.startsWith('/static/') && !url.pathname.startsWith('/static/assets/')
         && ['script', 'style', 'font', 'image'].includes(request.destination) && hasContentRevision(url);
 }
-async function handleStaticAssetRequest(request) {
-    const cache = await caches.open(STATIC_CACHE_NAME);
-    const cached = await cache.match(request);
+async function handleStaticAssetRequest(request, event) {
+    const {cache, cached} = await readCachedResponse(STATIC_CACHE_NAME, request);
     if (cached) return cached;
     const response = await fetch(request);
-    if (response.ok) await cache.put(request, response.clone());
+    if (response.ok && cache) event.waitUntil(cache.put(request, response.clone()).catch(() => {}));
     return response;
 }
 async function authenticatedScope() {
@@ -105,9 +128,8 @@ async function handleImageRequest(request, event) {
     const scope = await authenticatedScope();
     const epoch = authEpoch;
     if (!scope) return fetch(new Request(request, {cache:'no-store'}));
-    const cache = await caches.open(CACHE_NAME);
     const key = scopedKey(request, scope);
-    const cached = await cache.match(key);
+    const {cache, cached} = await readCachedResponse(CACHE_NAME, key);
     if (epoch !== authEpoch) return handleImageRequest(request, event);
     const url = new URL(request.url);
     const age = Date.now() - Number(cached?.headers.get('X-Cache-Time') || 0);
@@ -117,12 +139,12 @@ async function handleImageRequest(request, event) {
         pending = fetch(new Request(request, {cache:'no-cache'})).then(response => {
             // 鉴权和媒体请求之间若发生账号切换，不返回另一账号的数据。
             if (epoch !== authEpoch || (response.ok && response.headers.get('X-Media-Account') !== scope)) return Response.error();
-            event.waitUntil(cacheResponse(cache, key, response, scope).catch(() => {}));
+            if (cache) event.waitUntil(cacheResponse(cache, key, response, scope).catch(() => {}));
             return response;
         }).finally(() => inflight.delete(key.url));
         inflight.set(key.url, pending);
     }
-    scheduleTrimCache(cache, event);
+    if (cache) scheduleTrimCache(cache, event);
     return (await pending).clone();
 }
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
@@ -139,7 +161,7 @@ self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
     if (url.origin === self.location.origin && event.request.method === 'POST'
         && ['/api/account/login','/api/account/logout','/api/account/register'].includes(url.pathname)) event.respondWith(handleAccountMutation(event.request));
-    else if (isVersionedStaticAssetRequest(event.request)) event.respondWith(handleStaticAssetRequest(event.request));
+    else if (isVersionedStaticAssetRequest(event.request)) event.respondWith(handleStaticAssetRequest(event.request, event));
     else if (isCacheableRequest(event.request)) event.respondWith(handleImageRequest(event.request, event));
 });
 self.addEventListener('message', event => {

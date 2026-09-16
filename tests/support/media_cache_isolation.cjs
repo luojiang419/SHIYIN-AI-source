@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const stores=new Map();
 let scope='account-a', mediaRequests=0, authRequests=0, unauthorized=false;
 const tasks=[];
-const context={URL, Request, Response, Headers, Map, Date, console,
+const context={URL, Request, Response, Headers, Map, Date, console, setTimeout, clearTimeout,
   self:{location:{origin:'http://fixture'},addEventListener(){}},
   caches:{async open(name){
     if(!stores.has(name))stores.set(name,new Map());const store=stores.get(name);

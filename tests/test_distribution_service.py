@@ -193,3 +193,35 @@ def test_admin_requires_token_and_restart_preserves_data(tmp_path):
         c.import_release(snapshot(tmp_path/'snapshot'),'hot')
         restored=Center(tmp_path/'data');assert restored.public_key==c.public_key and restored.active('hot')
     finally:http.shutdown();http.server_close();thread.join()
+
+
+def test_computer_identity_and_heartbeat_preserve_hardware(tmp_path):
+    center = Center(tmp_path/'data')
+    payload = {'clientId': 'client_identity01', 'userId': 'admin', 'kind': 'heartbeat',
+               'computerUser': '江同学', 'computerName': 'OFFICE-PC',
+               'machine': {'memory': {'totalBytes': 1024}}}
+    center.receive_bug_report(payload, '192.168.0.24')
+    first = center.bug_devices()[0]['updated']
+    center.receive_bug_report({'clientId': 'client_identity01', 'kind': 'heartbeat'}, '192.168.0.25')
+    row = center.bug_devices()[0]
+    assert row['computer_user'] == '江同学'
+    assert row['computer_name'] == 'OFFICE-PC'
+    assert row['ip'] == '192.168.0.25'
+    assert row['updated'] >= first
+    assert center.bug_device('admin', 'client_identity01')['machine']['memory']['totalBytes'] == 1024
+    # New installation IDs remain available for historical logs; the UI groups them.
+    center.receive_bug_report(dict(payload, clientId='client_identity02'), '192.168.0.25')
+    assert len(center.bug_devices()) == 2
+
+
+def test_legacy_device_table_migrates_without_losing_records(tmp_path):
+    import sqlite3
+    root = tmp_path/'data'
+    root.mkdir()
+    with sqlite3.connect(root/'index.db') as db:
+        db.execute('CREATE TABLE bug_devices (user_id TEXT,client_id TEXT,updated REAL,ip TEXT,file TEXT,PRIMARY KEY(user_id,client_id))')
+        db.execute("INSERT INTO bug_devices VALUES ('admin','old_client_id',123,'192.168.0.53','old.json')")
+    center = Center(root)
+    row = center.bug_devices()[0]
+    assert row['client_id'] == 'old_client_id'
+    assert row['computer_user'] == row['computer_name'] == ''

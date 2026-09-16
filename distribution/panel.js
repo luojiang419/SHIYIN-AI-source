@@ -146,28 +146,55 @@ function renderHardware(detail){
   }
   if(!Object.keys(machine).length)root.append(element('p','尚无设备快照','hardware-empty'));
 }
+function bugClientGroups(data){
+  const records=new Map();
+  const memberKey=(user,client)=>JSON.stringify([user||'admin',client]);
+  for(const d of data.bug_devices||[]){
+    records.set(memberKey(d.user_id,d.client_id),{user:d.user_id||'admin',client:d.client_id,ip:d.ip,seen:Number(d.updated)||0,username:d.computer_user||'',hostname:d.computer_name||''});
+  }
+  for(const r of data.bug_reports||[]){
+    const key=memberKey(r.user_id,r.client_id),previous=records.get(key);
+    if(!previous)records.set(key,{user:r.user_id||'admin',client:r.client_id,ip:r.ip,seen:Number(r.created)||0,username:'',hostname:''});
+    else if(Number(r.created)>previous.seen){previous.seen=Number(r.created);previous.ip=r.ip;}
+  }
+  const identity=r=>JSON.stringify([r.hostname.toLowerCase()||r.ip,r.username.toLowerCase()]);
+  const knownByIp=new Map();
+  for(const r of records.values())if(r.username){if(!knownByIp.has(r.ip))knownByIp.set(r.ip,new Set());knownByIp.get(r.ip).add(identity(r));}
+  const groups=new Map();
+  for(const [member,r] of records){
+    const matches=knownByIp.get(r.ip);
+    const key=r.username?identity(r):matches?.size===1?[...matches][0]:JSON.stringify(['legacy',r.ip]);
+    let group=groups.get(key);
+    if(!group){group={key,members:[],seen:-1,username:'',hostname:''};groups.set(key,group);}
+    group.members.push(member);
+    if(r.username){group.username=r.username;group.hostname=r.hostname;}
+    if(r.seen>group.seen)Object.assign(group,{user:r.user,client:r.client,ip:r.ip,seen:r.seen});
+  }
+  return [...groups.values()].sort((a,b)=>b.seen-a.seen);
+}
 function renderBugs(data){
   $('#bugRoot').textContent=data.bug_log_root||'';
-  const reports=data.bug_reports||[];
-  const devices=data.bug_devices||[];
-  const clients=new Map();
-  for(const c of data.clients)clients.set(c.ip,{ip:c.ip,seen:c.seen,clientId:''});
-  for(const r of reports){const key=(r.user_id||'admin')+' / '+r.client_id;if(!clients.has(key))clients.set(key,{ip:r.ip,seen:r.created,clientId:key});}
-  for(const d of devices){const key=d.user_id+' / '+d.client_id;if(!clients.has(key))clients.set(key,{ip:d.ip,seen:d.updated,clientId:key});}
-  $('#bugClients').replaceChildren(...Array.from(clients.values()).filter(c=>c.clientId).map(c=>{
-    const b=element('button',c.clientId+' · '+c.ip+' · '+(Date.now()/1000-c.seen<300?'在线':'离线'),'bug-item');
-    b.classList.toggle('active',selectedBugClient===c.clientId);b.onclick=async()=>{
-      selectedBugClient=selectedBugClient===c.clientId?'':c.clientId;renderBugs(state);
+  const reports=data.bug_reports||[],clients=bugClientGroups(data);
+  const selected=clients.find(c=>c.key===selectedBugClient||c.members.includes(selectedBugClient));
+  if(selected)selectedBugClient=selected.key;
+  $('#bugClients').replaceChildren(...clients.map(c=>{
+    const b=element('button','','bug-item');
+    const top=element('div','','bug-client-heading'),online=Date.now()/1000-c.seen<300;
+    top.append(element('strong',c.username||'未上报用户名'),element('span',online?'在线':'离线','badge '+(online?'green':'')));
+    b.append(top,element('span',c.ip+(c.hostname?' · '+c.hostname:'')),element('small','最近活跃 '+new Date(c.seen*1000).toLocaleString()));
+    b.classList.toggle('active',selectedBugClient===c.key);b.onclick=async()=>{
+      selectedBugClient=selectedBugClient===c.key?'':c.key;renderBugs(state);
       if(!selectedBugClient){$('#bugHardware').textContent='选择客户端查看设备信息';return;}
-      const [user,client]=selectedBugClient.split(' / ');
       const requestedClient=selectedBugClient;
       $('#bugHardware').textContent='正在加载设备信息…';
-      try{const detail=await api('bug-devices/'+encodeURIComponent(user)+'/'+encodeURIComponent(client));
+      try{const detail=await api('bug-devices/'+encodeURIComponent(c.user)+'/'+encodeURIComponent(c.client));
         if(selectedBugClient===requestedClient)renderHardware(detail);
       }catch(e){if(selectedBugClient===requestedClient)$('#bugHardware').textContent='设备信息加载失败：'+e.message;}
     };return b;
   }));
-  const shown=reports.filter(r=>!selectedBugClient||(r.user_id||'admin')+' / '+r.client_id===selectedBugClient);
+  if(!clients.length)$('#bugClients').append(element('p','暂无客户端记录','empty'));
+  const members=new Set(selected?.members||[]);
+  const shown=reports.filter(r=>!selectedBugClient||members.has(JSON.stringify([r.user_id||'admin',r.client_id])));
   $('#bugReports').replaceChildren(...shown.map(r=>{
     const b=element('button','','bug-item');
     b.append(element('strong',r.kind==='error'?'错误':r.kind==='heartbeat'?'运行状态':'运行日志'),element('span',r.summary||r.client_id),element('small',new Date(r.created*1000).toLocaleString()));

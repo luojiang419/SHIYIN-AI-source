@@ -102,6 +102,10 @@ class Center:
             ''')
             if 'user_id' not in [row['name'] for row in db.execute('PRAGMA table_info(bug_reports)')]:
                 db.execute('ALTER TABLE bug_reports ADD COLUMN user_id TEXT')
+            device_columns = {row['name'] for row in db.execute('PRAGMA table_info(bug_devices)')}
+            for column in ('computer_user', 'computer_name'):
+                if column not in device_columns:
+                    db.execute(f"ALTER TABLE bug_devices ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         self.traffic = Traffic(self.db)
         self.blob_labels = None
 
@@ -167,13 +171,25 @@ class Center:
         if machine is not None:
             if not isinstance(machine, dict) or len(json.dumps(machine, ensure_ascii=False)) > 40000:
                 raise ValueError('设备信息格式无效或过大')
-            device_file = folder / 'device.json'
+        def identity_text(key):
+            value = body.get(key)
+            return ''.join(c for c in value.strip() if c.isprintable())[:128] if isinstance(value, str) else ''
+        computer_user, computer_name = identity_text('computerUser'), identity_text('computerName')
+        device_file = folder / 'device.json'
+        with self.lock:
+            previous = json.loads(device_file.read_text('utf-8')) if device_file.exists() else {}
             atomic_json(device_file, {'userId': user_id, 'clientId': client_id,
-                'ip': ip, 'updatedAt': report['receivedAt'], 'machine': machine})
+                'computerUser': computer_user or previous.get('computerUser', ''),
+                'computerName': computer_name or previous.get('computerName', ''),
+                'ip': ip, 'updatedAt': report['receivedAt'],
+                'machine': machine if machine is not None else previous.get('machine', {})})
             with self.db() as db:
-                db.execute('INSERT INTO bug_devices VALUES (?,?,?,?,?) ON CONFLICT(user_id,client_id) '
-                    'DO UPDATE SET updated=excluded.updated,ip=excluded.ip,file=excluded.file',
-                    (user_id, client_id, report['receivedAt'], ip, str(device_file)))
+                db.execute('INSERT INTO bug_devices (user_id,client_id,updated,ip,file,computer_user,computer_name) '
+                    'VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id,client_id) '
+                    'DO UPDATE SET updated=excluded.updated,ip=excluded.ip,file=excluded.file,'
+                    "computer_user=CASE WHEN excluded.computer_user!='' THEN excluded.computer_user ELSE bug_devices.computer_user END,"
+                    "computer_name=CASE WHEN excluded.computer_name!='' THEN excluded.computer_name ELSE bug_devices.computer_name END",
+                    (user_id, client_id, report['receivedAt'], ip, str(device_file), computer_user, computer_name))
         file = folder / f'{report_id}.json'
         atomic_json(file, report)
         with self.db() as db:
@@ -201,7 +217,7 @@ class Center:
 
     def bug_devices(self):
         with self.db() as db:
-            return [dict(row) for row in db.execute('SELECT user_id,client_id,updated,ip '
+            return [dict(row) for row in db.execute('SELECT user_id,client_id,updated,ip,computer_user,computer_name '
                 'FROM bug_devices ORDER BY updated DESC')]
 
     def bug_device(self, user_id, client_id):

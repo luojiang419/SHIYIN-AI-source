@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import getpass
 import logging
 import os
 from pathlib import Path
@@ -84,6 +85,7 @@ class BugReporter:
             return
         payload = {'clientId': self.client_id, 'kind': kind, 'summary': str(summary)[:240],
                    'userId': str(user_id)[:64],
+                   'computerUser': getpass.getuser(), 'computerName': platform.node(),
                    'version': os.getenv('SHIYIN_HOT_UPDATE_VERSION', ''),
                    'details': details or {}}
         if machine is not None:

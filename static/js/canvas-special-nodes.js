@@ -534,7 +534,7 @@
             </div>
             <div class="special-toolbar depth-map-toolbar">
                 <button type="button" data-special-action="upload-depth-video"><i data-lucide="upload"></i><span>导入视频</span></button>
-                <button type="button" data-special-action="import-depth-video-runtime" title="从本机文件夹安装深度视频运行时"><i data-lucide="folder-input"></i><span>导入运行时</span></button>
+                <button type="button" data-special-action="import-depth-video-runtime" title="公网下载不可用时，从本机文件夹安装深度视频运行时"><i data-lucide="folder-input"></i><span>离线导入</span></button>
                 <button type="button" data-special-action="retry-depth-video" ${!inputUrl || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
                 <button type="button" data-special-action="open-depth-video-controls" ${!output?.url || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>进阶控制</span></button>
                 <button type="button" data-special-action="export-depth-video" ${!output?.url || status === 'running' || status === 'queued' || node.depthVideoExporting ? 'disabled' : ''}><i data-lucide="${node.depthVideoExporting ? 'loader-2' : 'external-link'}"></i><span>${node.depthVideoExporting ? '导出中' : '导出深度视频'}</span></button>

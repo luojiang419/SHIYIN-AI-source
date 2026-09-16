@@ -61,6 +61,7 @@ class PersonDepthPackageSpec:
     domestic_url: str
     official_url: str
     target_path: str = ""
+    mirror_url: str = ""
 
 
 class PersonDepthManifestError(ValueError):
@@ -215,16 +216,17 @@ class PersonDepthComponentManager:
             if not variant_id:
                 raise PersonDepthManifestError("运行时变体缺少 id")
             self.selected_variant_id = variant_id
-            for key in ("command", "required_paths", "required_free_bytes"):
+            for key in ("command", "required_paths", "required_free_bytes", "assemble_archive"):
                 if key in selected:
                     payload[key] = selected[key]
             selected_packages = selected.get("packages") or []
             if not isinstance(selected_packages, list):
                 raise PersonDepthManifestError("运行时变体 packages 必须是数组")
             self.selected_package_ids = tuple(str(item) for item in selected_packages)
-            all_packages = payload.get("packages") or []
+            all_packages = payload.get("all_packages") or payload.get("packages") or []
             if all_packages and not all(isinstance(item, Mapping) for item in all_packages):
                 raise PersonDepthManifestError("schema v2 顶层 packages 必须是对象数组")
+            payload["all_packages"] = all_packages
             payload["packages"] = [
                 item for item in all_packages
                 if str(item.get("id") or "") in self.selected_package_ids
@@ -266,6 +268,7 @@ class PersonDepthComponentManager:
                     domestic_url=str(raw.get("domestic_url") or "").strip(),
                     official_url=str(raw.get("official_url") or "").strip(),
                     target_path=target_path,
+                    mirror_url=str(raw.get("mirror_url") or "").strip(),
                 )
             )
         return specs
@@ -276,7 +279,7 @@ class PersonDepthComponentManager:
             and self.manifest.get("version")
             and (
                 self._lan_source_url
-                or (self.specs and any(item.domestic_url or item.official_url for item in self.specs))
+                or (self.specs and any(item.domestic_url or item.mirror_url or item.official_url for item in self.specs))
             )
         )
 
@@ -429,6 +432,24 @@ class PersonDepthComponentManager:
         folder = Path(directory).expanduser().resolve()
         if not folder.is_dir():
             raise PersonDepthComponentUnavailable("运行时目录不存在")
+        legacy = (self.manifest.get("legacy_offline_packages") or {}).get(self.selected_variant_id)
+        if isinstance(legacy, Mapping):
+            filename = str(legacy.get("file") or "")
+            if not filename or Path(filename).name != filename:
+                raise PersonDepthComponentUnavailable("旧版运行时包文件名无效")
+            archive = folder / filename
+            if archive.is_file():
+                spec = PersonDepthPackageSpec(
+                    f"legacy-{self.selected_variant_id}", int(legacy.get("size") or 0),
+                    str(legacy.get("sha256") or ""), "", "",
+                )
+                with self._ensure_lock:
+                    self._check_disk_space()
+                    if not self._valid_archive(archive, spec):
+                        raise PersonDepthComponentUnavailable("旧版运行时包校验失败")
+                    self._install_archives([(spec, archive)], "local", "本地导入运行时")
+                    self._mark_ready("本地导入运行时")
+                    return True
         packages = {str(item.get("id") or ""): item for item in self.manifest.get("packages") or []}
         paths: dict[str, Path] = {}
         for spec in self.specs:
@@ -450,40 +471,60 @@ class PersonDepthComponentManager:
                 self._record_attempt("局域网服务器", str(exc) or exc.__class__.__name__)
         proxies = dict(self.proxy_provider() or {})
         attempts: list[tuple[str, str, Optional[Mapping[str, str]]]] = [
-            ("domestic", "国内镜像直连", None),
+            ("domestic", "国内源直连", None),
+            ("mirror", "国内镜像直连", None),
         ]
         if proxies:
             attempts.extend(
                 [
-                    ("domestic", "国内镜像（系统代理）", proxies),
+                    ("domestic", "国内源（系统代理）", proxies),
+                    ("mirror", "国内镜像（系统代理）", proxies),
                     ("official", "官方源（系统代理）", proxies),
                 ]
             )
         attempts.append(("official", "官方源直连", None))
+        variants = self.manifest.get("variants") if self.component_name.endswith("-runtime") else None
+        candidates = compatible_variants(variants, self.capabilities) if isinstance(variants, list) else [None]
+        candidates.sort(key=lambda item: bool(item and item.get("id") == self.selected_variant_id), reverse=True)
         errors: list[str] = []
-        for source, label, proxy_map in attempts:
-            if not all(self._url_for(spec, source) for spec in self.specs):
-                continue
-            self._update_state(
-                state="downloading",
-                source=source,
-                source_label=label,
-                downloaded_bytes=0,
-                total_bytes=sum(item.size for item in self.specs),
-                message=f"正在通过{label}下载{self.display_name}",
-                error="",
-            )
-            try:
-                archives = self._download_packages(source, label, proxy_map)
-                self._install_archives(archives, source, label)
-                self._record_attempt(label)
-                self._mark_ready(label)
-                return True
-            except Exception as exc:  # noqa: BLE001
-                message = str(exc) or exc.__class__.__name__
-                errors.append(f"{label}：{message}")
-                self._record_attempt(label, message)
+        for variant in candidates:
+            if variant is not None:
+                self._select_public_variant(variant)
+            for source, label, proxy_map in attempts:
+                if not self.specs or not all(self._url_for(spec, source) for spec in self.specs):
+                    continue
+                source_label = f"{label} · {self.selected_variant_id}" if variant is not None else label
+                self._update_state(
+                    state="downloading", source=source, source_label=source_label,
+                    downloaded_bytes=0, total_bytes=sum(item.size for item in self.specs),
+                    message=f"正在通过{source_label}下载{self.display_name}", error="",
+                )
+                try:
+                    archives = self._download_packages(source, source_label, proxy_map)
+                    self._install_archives(archives, source, source_label)
+                    self._record_attempt(source_label)
+                    self._mark_ready(source_label)
+                    return True
+                except Exception as exc:  # noqa: BLE001
+                    message = str(exc) or exc.__class__.__name__
+                    errors.append(f"{source_label}：{message}")
+                    self._record_attempt(source_label, message)
         raise PersonDepthComponentUnavailable("；".join(errors) or "发布清单没有可用下载源")
+
+    def _select_public_variant(self, variant: Mapping[str, object]) -> None:
+        self.selected_variant_id = str(variant.get("id") or "")
+        self.selected_package_ids = tuple(str(item) for item in variant.get("packages") or [])
+        for key in ("command", "required_paths", "required_free_bytes", "assemble_archive"):
+            if key in variant:
+                self.manifest[key] = variant[key]
+            else:
+                self.manifest.pop(key, None)
+        self.manifest["packages"] = [
+            item for item in self.manifest.get("all_packages") or []
+            if str(item.get("id") or "") in self.selected_package_ids
+        ]
+        self.manifest["selected_variant"] = self.selected_variant_id
+        self.specs = tuple(self._package_specs(self.manifest))
 
     def _download_lan_files(self) -> bool:
         from .distribution_client import discover_source
@@ -662,7 +703,8 @@ class PersonDepthComponentManager:
 
     @staticmethod
     def _url_for(spec: PersonDepthPackageSpec, source: str) -> str:
-        return spec.domestic_url if source == "domestic" else spec.official_url
+        return {"domestic": spec.domestic_url, "mirror": spec.mirror_url,
+                "official": spec.official_url}[source]
 
     def _download_packages(
         self,
@@ -817,13 +859,33 @@ class PersonDepthComponentManager:
         staging.mkdir(parents=True, exist_ok=False)
         try:
             self._update_state(state="installing", message=f"正在安装{self.display_name}")
-            for spec, archive in archives:
-                if spec.target_path:
-                    target = staging / Path(spec.target_path)
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(archive, target)
-                else:
-                    self._safe_extract(archive, staging)
+            assembly = self.manifest.get("assemble_archive")
+            selected_ids = set(self.selected_package_ids)
+            if isinstance(assembly, Mapping) and selected_ids == {spec.package_id for spec, _ in archives}:
+                expected_size = int(assembly.get("size") or 0)
+                expected_hash = str(assembly.get("sha256") or "").lower()
+                assembled = staging / "__assembled_runtime.zip"
+                digest = hashlib.sha256()
+                written = 0
+                with assembled.open("wb") as output:
+                    for _spec, archive in archives:
+                        with archive.open("rb") as source_file:
+                            while chunk := source_file.read(4 * 1024 * 1024):
+                                output.write(chunk)
+                                digest.update(chunk)
+                                written += len(chunk)
+                if written != expected_size or digest.hexdigest() != expected_hash:
+                    raise PersonDepthComponentUnavailable("运行时分片合并后校验失败")
+                self._safe_extract(assembled, staging)
+                assembled.unlink()
+            else:
+                for spec, archive in archives:
+                    if spec.target_path:
+                        target = staging / Path(spec.target_path)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(archive, target)
+                    else:
+                        self._safe_extract(archive, staging)
             self._activate_staging(staging, source, source_label, [
                 {"id": spec.package_id, "size": spec.size, "sha256": spec.sha256}
                 for spec, _archive in archives

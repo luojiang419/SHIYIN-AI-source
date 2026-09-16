@@ -21,6 +21,8 @@ $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Tr
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid VERSION: $version" }
 & (Join-Path $PSScriptRoot 'assert-version-sync.ps1') -Root $projectRoot
 if (-not $?) { throw 'Version synchronization check failed.' }
+& npm run canvas:engine-build
+if ($LASTEXITCODE -ne 0) { throw 'Canvas engine build failed.' }
 
 $buildRoot = Join-Path $projectRoot '.build\installer'
 $backendDist = Join-Path $buildRoot 'backend-dist'
@@ -45,13 +47,14 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     $canvasPath = Join-Path $Root 'app\web\canvas.html'
     $canvasListPath = Join-Path $Root 'app\web\js\canvas-list.js'
     $specialNodesPath = Join-Path $Root 'app\web\js\canvas-special-nodes.js'
+    $canvasEnginePath = Join-Path $Root 'app\web\vendor\js\infinite-canvas-engine.js'
     $topazPath = Join-Path $Root 'app\web\js\canvas-topaz-node.js'
     $personDepthManifestPath = Join-Path $Root 'app\backend\canvas-backend\_internal\canvas_core\person_depth_manifest.json'
     $videoDepthManifestPath = Join-Path $Root 'app\backend\canvas-backend\_internal\canvas_core\video_depth_manifest.json'
     $videoDepthWorkerPath = Join-Path $Root 'app\runtime\video-depth\video-depth-worker\video-depth-worker.exe'
     $videoDepthSourcePath = Join-Path $Root 'app\runtime\video-depth\sources\video-depth-anything\video_depth_anything\video_depth.py'
     $videoDepthFfmpegPath = Join-Path $Root 'app\runtime\video-depth\bin\ffmpeg.exe'
-    foreach ($requiredPath in @($canvasPath, $canvasListPath, $specialNodesPath, $topazPath, $personDepthManifestPath, $videoDepthManifestPath, $videoDepthWorkerPath, $videoDepthSourcePath, $videoDepthFfmpegPath)) {
+    foreach ($requiredPath in @($canvasPath, $canvasListPath, $specialNodesPath, $canvasEnginePath, $topazPath, $personDepthManifestPath, $videoDepthManifestPath, $videoDepthWorkerPath, $videoDepthSourcePath, $videoDepthFfmpegPath)) {
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
             throw "Staged web asset is missing: $requiredPath"
         }
@@ -61,6 +64,9 @@ function Assert-StagedWebAssets([string]$Root, [string]$ExpectedVersion) {
     }
     $canvasHtml = [IO.File]::ReadAllText($canvasPath)
     $specialNodesJs = [IO.File]::ReadAllText($specialNodesPath)
+    if (-not $canvasHtml.Contains('/static/vendor/js/infinite-canvas-engine.js')) {
+        throw 'Staged canvas is missing the new engine entry.'
+    }
     if (-not $canvasHtml.Contains("menuAdd('topazVideo')")) {
         throw 'Staged canvas is missing the Topaz create-menu entry.'
     }

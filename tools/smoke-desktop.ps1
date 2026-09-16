@@ -12,6 +12,8 @@ if (-not $Stage) {
     $Stage = Join-Path $projectRoot "dist\SHIYIN-AI-$version-windows-x64"
 }
 $stageRoot = (Resolve-Path $Stage).Path
+$expectedVersion = (Get-Content -LiteralPath (Join-Path $stageRoot 'app\VERSION') -Raw).Trim()
+if ($expectedVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid staged version: $expectedVersion" }
 $runningDesktop = @(Get-Process -Name "SHIYIN AI" -ErrorAction SilentlyContinue)
 if ($runningDesktop.Count -gt 0) {
     $runningPids = ($runningDesktop | ForEach-Object { $_.Id }) -join ", "
@@ -54,6 +56,9 @@ try {
         }
     }
     if (-not $health) { throw "Desktop backend health check timed out" }
+    if ([string]$health.version -ne $expectedVersion) {
+        throw "Packaged backend version mismatch: expected $expectedVersion, got $($health.version)"
+    }
     $watch.Stop()
     $stateFile = Join-Path $smokeRoot "data\run\backend.json"
     if (-not (Test-Path -LiteralPath $stateFile)) { throw "Desktop runtime state file was not created" }
@@ -94,6 +99,8 @@ try {
     }
     [ordered]@{
         health = $health.status
+        health_version = $health.version
+        expected_version = $expectedVersion
         startup_ms = $watch.ElapsedMilliseconds
         desktop_exit_code = $process.ExitCode
         backend_pid = $backendState.pid

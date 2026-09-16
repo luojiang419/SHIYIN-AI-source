@@ -46,13 +46,22 @@ function canvasDisplayMediaUrl(url, name=''){
     const raw = canvasOriginalMediaUrl(url);
     return /^https?:\/\//i.test(raw) ? canvasProxiedMediaUrl(raw, name) : raw;
 }
+function canvasMediaCacheRevision(url){
+    const value = String(url || '');
+    let hash = 2166136261;
+    for(let index=0;index<value.length;index++){
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+}
 function canvasMediaPreviewUrl(url, size=512){
     const raw = canvasOriginalMediaUrl(url);
     if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
     if(!raw.startsWith('/output/') && !raw.startsWith('/assets/')) return canvasDisplayMediaUrl(raw);
     if(!/\.(png|jpe?g|webp|gif|bmp|avif|tiff?|mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/i.test(raw)) return raw;
     const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
-    return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
+    return `/api/media-preview?w=${width}&rev=${canvasMediaCacheRevision(raw)}&url=${encodeURIComponent(raw)}`;
 }
 // 过滤调用方传入的 loading/decoding，预览由显式视口队列统一调度。
 // 保留旧函数名是为了兼容扩展脚本，但不再把所有媒体标记为 eager。
@@ -135,8 +144,19 @@ function classicMediaViewportEntry(element){
     const view = currentWorldViewRect();
     const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
     const rect = canvasNodeRectIndex.get(node.id) || estimatedNodeRect(node);
-    const visible = rect.x < view.x + view.w && rect.x + rect.w > view.x && rect.y < view.y + view.h && rect.y + rect.h > view.y;
-    const near = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
+    const nodeVisible = rect.x < view.x + view.w && rect.x + rect.w > view.x && rect.y < view.y + view.h && rect.y + rect.h > view.y;
+    const nodeNear = rect.x < view.x + view.w + margin && rect.x + rect.w > view.x - margin && rect.y < view.y + view.h + margin && rect.y + rect.h > view.y - margin;
+    const boardRect = board?.getBoundingClientRect?.();
+    const mediaRect = element.getBoundingClientRect?.();
+    const hasMediaRect = Boolean(boardRect && mediaRect && mediaRect.width > 0 && mediaRect.height > 0);
+    const visible = hasMediaRect
+        ? mediaRect.right > boardRect.left && mediaRect.left < boardRect.right && mediaRect.bottom > boardRect.top && mediaRect.top < boardRect.bottom
+        : nodeVisible;
+    const screenMargin = CLASSIC_MEDIA_QUEUE_MARGIN;
+    const near = hasMediaRect
+        ? mediaRect.right > boardRect.left - screenMargin && mediaRect.left < boardRect.right + screenMargin
+            && mediaRect.bottom > boardRect.top - screenMargin && mediaRect.top < boardRect.bottom + screenMargin
+        : nodeNear;
     const pinned = selected.has(node.id)
         || Boolean(node.running || node.pending || node.jimengPending || ['queued', 'running'].includes(node.runStatus))
         || Boolean(document.activeElement && nodeEl?.contains(document.activeElement));
@@ -144,9 +164,12 @@ function classicMediaViewportEntry(element){
         element,
         node,
         visible,
-        eligible:canvasEntryPreparing || visible || near || pinned,
+        eligible:visible || (!canvasEntryPreparing && near) || pinned,
         pinned,
-        distance:Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))
+        distance:hasMediaRect
+            ? Math.abs((mediaRect.left + mediaRect.right) / 2 - (boardRect.left + boardRect.right) / 2)
+                + Math.abs((mediaRect.top + mediaRect.bottom) / 2 - (boardRect.top + boardRect.bottom) / 2)
+            : Math.abs((rect.x + rect.w / 2) - (view.x + view.w / 2)) + Math.abs((rect.y + rect.h / 2) - (view.y + view.h / 2))
     };
 }
 function classicPreviewCandidate(img, allowLoading=false){
@@ -190,7 +213,12 @@ function ensureClassicMediaQueue(){
             const entry=classicMediaViewportEntry(img);
             return Boolean(entry && (entry.eligible || queue.activeTotal < 2));
         },
-        fallbackSource:img => img.dataset.previewKind === 'video' ? '' : (img.dataset.originalSrc || img.dataset.url || ''),
+        fallbackSource:img => {
+            if(img.dataset.previewKind === 'video') return '';
+            const original = img.dataset.originalSrc || img.dataset.url || '';
+            // 本地预览与原文件共享存在性；预览 404 后再请求原文件只会制造第二次 404。
+            return /^\/(?:assets|output)\//i.test(original) ? '' : original;
+        },
         replaceVideoFallback:img => replaceCanvasVideoPreviewWithFallback(img),
         onStart:() => recordClassicFirstPreviewStart(),
         onRecord:entry => {
@@ -2519,16 +2547,13 @@ function rebuildClassicMediaSpatialGrid(){
     return classicMediaSpatialGrid;
 }
 function classicMediaElementsInWindow(){
-    if(canvasEntryPreparing) return [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])];
     const view = currentWorldViewRect();
     const margin = CLASSIC_MEDIA_QUEUE_MARGIN / Math.max(0.05, viewport.scale || 1);
     const query = {x:view.x - margin, y:view.y - margin, w:view.w + margin * 2, h:view.h + margin * 2};
     const grid = classicMediaSpatialGridEpoch === canvasGeometryEpoch ? classicMediaSpatialGrid : rebuildClassicMediaSpatialGrid();
     const roots = grid?.search(query) || [];
-    if(!roots.length) return [...(nodesEl?.querySelectorAll?.('img[data-preview-src]') || [])];
-    const foreground=roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]);
-    const pending=[...(nodesEl?.querySelectorAll?.('img[data-preview-src][data-preview-state="queued"]') || [])];
-    return [...new Set([...foreground,...pending])];
+    if(!roots.length) return [];
+    return [...new Set(roots.flatMap(root => [...(root.querySelectorAll?.('img[data-preview-src]') || [])]))];
 }
 function applyViewport(){
     if(window.CanvasEngine?.active) window.CanvasEngine.updateViewport({x:viewport.x, y:viewport.y, k:viewport.scale});

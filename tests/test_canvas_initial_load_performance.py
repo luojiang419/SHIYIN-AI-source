@@ -10,6 +10,8 @@ SMART_CANVAS_JS = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encodin
 CANVAS_LIST_JS = (ROOT / "static" / "js" / "canvas-list.js").read_text(encoding="utf-8")
 CANVAS_SESSION_HOST_JS = (ROOT / "static" / "js" / "canvas-session-host.js").read_text(encoding="utf-8")
 INDEX_HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+CANVAS_SPECIAL_NODES_JS = (ROOT / "static" / "js" / "canvas-special-nodes.js").read_text(encoding="utf-8")
+CANVAS_FILM_NODES_JS = (ROOT / "static" / "js" / "canvas-film-nodes.js").read_text(encoding="utf-8")
 
 
 def function_body(source: str, signature: str, next_marker: str) -> str:
@@ -41,6 +43,20 @@ class CanvasInitialLoadPerformanceTests(unittest.TestCase):
         self.assertIn("warmEditor?.frame?.isConnected ? warmEditor", CANVAS_SESSION_HOST_JS)
         self.assertIn("openProject(url.searchParams.get('id'), url.href)", CANVAS_SESSION_HOST_JS)
         self.assertIn("async openProject(id, url)", CANVAS_JS)
+
+    def test_first_view_media_uses_stable_cache_urls_and_element_visibility(self):
+        preview = function_body(CANVAS_JS, "function canvasMediaPreviewUrl(url, size=512)", "// 过滤调用方传入")
+        viewport = function_body(CANVAS_JS, "function classicMediaViewportEntry(element)", "function classicPreviewCandidate")
+        window = function_body(CANVAS_JS, "function classicMediaElementsInWindow()", "function applyViewport")
+        self.assertIn("rev=${canvasMediaCacheRevision(raw)}", preview)
+        self.assertIn("element.getBoundingClientRect", viewport)
+        self.assertIn("visible || (!canvasEntryPreparing && near) || pinned", viewport)
+        self.assertNotIn("if(canvasEntryPreparing)", window)
+        self.assertNotIn("data-preview-state=\"queued\"", window)
+        self.assertIn("/^\\/(?:assets|output)\\//i.test(original) ? '' : original", CANVAS_JS)
+        self.assertIn("window.canvasPreviewImgHtml(url, 256, attrs)", CANVAS_SPECIAL_NODES_JS)
+        self.assertIn("window.canvasPreviewImgHtml(item.url, 256", CANVAS_FILM_NODES_JS)
+        self.assertIn("window.canvasPreviewImgHtml(state.url, 256", CANVAS_FILM_NODES_JS)
 
     def test_inactive_eager_canvas_manager_does_not_start_editor_prewarm(self):
         self.assertIn("sourceFrame.classList.contains('active')", CANVAS_SESSION_HOST_JS)

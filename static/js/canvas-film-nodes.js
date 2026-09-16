@@ -310,15 +310,18 @@
     }
     function itemPreview(item){
         if(!item?.url) return '<i data-lucide="image"></i>';
-        const url = esc(item.url);
-        return `<img src="${url}" alt="" loading="lazy">`;
+        if(typeof window.canvasPreviewImgHtml === 'function') return window.canvasPreviewImgHtml(item.url, 256, 'alt=""');
+        return `<img src="${esc(item.url)}" alt="" loading="lazy">`;
     }
     function depthPreviewHtml(node,ref){
         if(ref.inputRole!=='reference') return '';
         const state=(node.storyboardDepthPreviews || []).find(item=>item.sourceUrl===ref.url);
         if(!state) return '';
         if(state.status==='ready' && state.url){
-            return `<span class="film-depth-preview is-ready" title="参考图对应深度图已提取"><img src="${esc(state.url)}" alt="对应深度图" loading="lazy"><small>深度</small></span>`;
+            const preview = typeof window.canvasPreviewImgHtml === 'function'
+                ? window.canvasPreviewImgHtml(state.url, 256, 'alt="对应深度图"')
+                : `<img src="${esc(state.url)}" alt="对应深度图" loading="lazy">`;
+            return `<span class="film-depth-preview is-ready" title="参考图对应深度图已提取">${preview}<small>深度</small></span>`;
         }
         const failed=state.status==='error';
         return `<span class="film-depth-preview is-${failed ? 'error' : state.status}" title="${esc(failed ? (state.error || '深度图提取失败') : state.status==='running' ? (state.message || '正在提取深度图') : '等待提取深度图')}"><i data-lucide="${failed ? 'circle-alert' : 'loader-circle'}"></i><small>${failed ? '失败' : state.status==='running' ? '提取中' : '等待'}</small></span>`;

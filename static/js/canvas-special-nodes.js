@@ -334,6 +334,10 @@
             createDirectorOutputNode: options.createDirectorOutputNode,
         });
     }
+    function poseReplicatePreviewHtml(url, attrs=''){
+        if(typeof window.canvasPreviewImgHtml === 'function') return window.canvasPreviewImgHtml(url, 256, attrs);
+        return `<img src="${esc(url)}" ${attrs}>`;
+    }
     function poseReplicateImageCard(item, role, label, emptyIcon, emptyText, hint='点击上传，或从对应端口连接图片', options={}){
         const url = item?.url || '';
         const editable = Boolean(options.editable);
@@ -343,7 +347,7 @@
         return `<div class="pose-replicate-column">
             <div class="pose-replicate-column-title">${esc(label)}</div>
             <div class="pose-replicate-input-card ${url ? 'has-image' : ''} ${editable ? 'is-editable' : ''} ${manual ? 'is-manual' : ''}" data-pose-replicate-slot="${role}" ${editable ? `data-pose-replicate-upload-role="${role}" role="button" tabindex="0" title="${esc(title)}"` : ''}>
-                ${url ? `<img src="${esc(url)}" alt="${esc(label)}" draggable="false">` : `<i data-lucide="${emptyIcon}"></i><strong>${esc(emptyText)}</strong><span>${esc(hint)}</span>`}
+                ${url ? poseReplicatePreviewHtml(url, `alt="${esc(label)}" draggable="false"`) : `<i data-lucide="${emptyIcon}"></i><strong>${esc(emptyText)}</strong><span>${esc(hint)}</span>`}
                 ${sourceLabel ? `<span class="pose-replicate-source-badge">${sourceLabel}</span>` : ''}
                 ${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="${role}" title="移除手动${esc(label)}" aria-label="移除手动${esc(label)}"><i data-lucide="trash-2"></i></button>` : ''}
             </div>
@@ -357,7 +361,7 @@
         return `<div class="pose-replicate-column">
             <div class="pose-replicate-column-title">服装参考${targets.length ? ` · ${targets.length} 张` : ''}</div>
             <div class="pose-replicate-input-card pose-replicate-target-grid ${targets.length ? 'has-image' : ''} is-editable ${manual ? 'is-manual' : ''}" data-pose-replicate-slot="target-image" data-pose-replicate-upload-role="target-image" role="button" tabindex="0" title="点击继续添加服装参考">
-                ${targets.length ? `<div class="pose-replicate-target-thumbs">${targets.map((item, index) => `<div class="pose-replicate-target-thumb" title="${esc(item.name || `服装参考 ${index + 1}`)}"><img src="${esc(item.url)}" alt="服装参考 ${index + 1}" draggable="false"><span>${index + 1}</span>${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="target-image" data-pose-replicate-remove-index="${index}" title="移除第 ${index + 1} 张服装参考" aria-label="移除第 ${index + 1} 张服装参考"><i data-lucide="trash-2"></i></button>` : ''}</div>`).join('')}</div>` : '<i data-lucide="shirt"></i><strong>上传服装参考</strong><span>可一次选择多张，最多 20 张</span>'}
+                ${targets.length ? `<div class="pose-replicate-target-thumbs">${targets.map((item, index) => `<div class="pose-replicate-target-thumb" title="${esc(item.name || `服装参考 ${index + 1}`)}">${poseReplicatePreviewHtml(item.url, `alt="服装参考 ${index + 1}" draggable="false"`)}<span>${index + 1}</span>${manual ? `<button type="button" class="pose-replicate-remove-input" data-pose-replicate-remove-role="target-image" data-pose-replicate-remove-index="${index}" title="移除第 ${index + 1} 张服装参考" aria-label="移除第 ${index + 1} 张服装参考"><i data-lucide="trash-2"></i></button>` : ''}</div>`).join('')}</div>` : '<i data-lucide="shirt"></i><strong>上传服装参考</strong><span>可一次选择多张，最多 20 张</span>'}
                 ${sourceLabel ? `<span class="pose-replicate-source-badge">${sourceLabel} · ${targets.length}</span>` : ''}
             </div>
             <input class="pose-replicate-file-input" type="file" accept="image/*" data-pose-replicate-file="target-image" tabindex="-1" multiple>

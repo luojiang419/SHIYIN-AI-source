@@ -2,12 +2,41 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any, Callable
+
+from canvas_core.account_storage import account_scope
+
+
+def decode_worker_output(value: bytes | str) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return value.decode('utf-8')
+    except UnicodeDecodeError:
+        # Existing frozen workers inherit the Chinese Windows pipe encoding.
+        return value.decode('gb18030', errors='replace')
+
+
+def output_url_mapper(output_root: str | Path, url_for_path: Callable[[str], str | None]):
+    """Map resolved worker paths back through the configured (possibly junction) root."""
+    configured = Path(os.path.abspath(output_root))
+    resolved = configured.resolve()
+
+    def map_output(path: str) -> str | None:
+        try:
+            relative = Path(path).resolve().relative_to(resolved)
+        except (OSError, ValueError):
+            return None
+        return url_for_path(str(configured / relative))
+
+    return map_output
 
 
 class VideoDepthUnavailable(RuntimeError):
@@ -142,16 +171,77 @@ class VideoDepthTaskService:
             self._tasks[task_id] = task
         threading.Thread(
             target=self._run,
-            args=(task_id, source, output_dir, url_for_path),
+            args=(task_id, source, output_dir, output_url_mapper(output_root, url_for_path)),
             name=f"video-depth-{task_id[:8]}",
             daemon=True,
         ).start()
         return dict(task)
 
-    def get(self, task_id: str) -> dict[str, Any] | None:
+    def get(self, task_id: str, output_root: str | Path | None = None,
+            url_for_path: Callable[[str], str | None] | None = None,
+            user_id: str | None = None) -> dict[str, Any] | None:
         with self._lock:
             task = self._tasks.get(str(task_id))
-            return dict(task) if task else None
+            task = dict(task) if task else None
+        if task and user_id is not None and task.get('userId', 'admin') != user_id:
+            return None
+        if task and task.get('status') != 'failed':
+            return task
+        # The worker writes metadata only after encoding completes. It is also the
+        # durable completion record for older clients whose registration failed.
+        if output_root is None or url_for_path is None or not re.fullmatch(r'[0-9a-f]{32}', str(task_id)):
+            return task
+        root = Path(output_root).resolve()
+        directory = (root / f'depth_video_{task_id}').resolve()
+        metadata_path = directory / 'run-metadata.json'
+        try:
+            directory.relative_to(root)
+            metadata_path.resolve().relative_to(directory)
+            if not metadata_path.is_file() or metadata_path.stat().st_size > 1024 * 1024:
+                return task
+            result = json.loads(metadata_path.read_text(encoding='utf-8'))
+            if not isinstance(result, dict) or result.get('schema') != 'shiyin.video-depth-lab/v1':
+                return task
+            patch = self._output_result(directory, result, output_url_mapper(output_root, url_for_path))
+        except (OSError, ValueError, TypeError, RuntimeError):
+            return task
+        recovered = {**(task or {}), 'id': task_id, 'userId': user_id or 'admin', **patch}
+        # Do not cache recovered records across accounts: the directory is scoped
+        # to the requesting account and is cheap to read on a completion lookup.
+        return recovered
+
+    @staticmethod
+    def _output_result(output_dir: Path, result: dict[str, Any], url_for_path) -> dict[str, Any]:
+        directory = output_dir.resolve()
+        reported = str(result.get('outputVideoPath') or '')
+        candidate = Path(reported) if reported else directory / 'depth-preview.mp4'
+        if not candidate.is_absolute():
+            candidate = directory / candidate
+        candidates = [candidate, directory / 'depth-preview.mp4']
+        output_path = None
+        for candidate in candidates:
+            try:
+                candidate = candidate.resolve()
+                candidate.relative_to(directory)
+            except (OSError, ValueError):
+                continue
+            if candidate.suffix.lower() == '.mp4' and candidate.is_file() and candidate.stat().st_size > 0:
+                output_path = candidate
+                break
+        if output_path is None:
+            raise RuntimeError(f'深度视频输出文件缺失、为空或不在任务目录：{directory}；worker返回：{reported}')
+        output_url = url_for_path(str(output_path))
+        if not output_url:
+            raise RuntimeError(f'深度视频媒体地址映射失败：{output_path}')
+        meta = result.get('input') if isinstance(result.get('input'), dict) else {}
+        return {
+            'status': 'done', 'progress': 100, 'message': '深度视频已生成', 'error': '',
+            'outputUrl': output_url, 'outputName': output_path.name,
+            'width': int(meta.get('processedWidth') or meta.get('width') or 0),
+            'height': int(meta.get('processedHeight') or meta.get('height') or 0),
+            'fps': float(meta.get('processedFps') or meta.get('fps') or 0),
+            'frameCount': int(meta.get('processedFrames') or meta.get('frameCount') or 0),
+        }
 
     def _update(self, task_id: str, **patch: Any) -> None:
         with self._lock:
@@ -160,8 +250,11 @@ class VideoDepthTaskService:
 
     def _run(self, task_id: str, source: Path, output_dir: Path, url_for_path: Callable[[str], str | None]) -> None:
         self._update(task_id, status="queued", progress=0, message="等待其他深度视频任务完成")
-        with self._run_lock:
-            self._run_worker(task_id, source, output_dir, url_for_path)
+        with account_scope((self.get(task_id) or {}).get('userId', 'admin')), self._run_lock:
+            try:
+                self._run_worker(task_id, source, output_dir, url_for_path)
+            except Exception as error:
+                self._update(task_id, status='failed', error=str(error)[:1000], message=str(error)[:240])
 
     def _run_worker(self, task_id: str, source: Path, output_dir: Path, url_for_path: Callable[[str], str | None]) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -197,46 +290,47 @@ class VideoDepthTaskService:
                 cwd=runtime["cwd"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                text=False,
                 creationflags=flags,
                 env=runtime["env"],
             )
             result: dict[str, Any] | None = None
+            worker_error = ''
+            stderr_chunks = deque(maxlen=64)
+
+            def drain_stderr():
+                if process.stderr:
+                    while True:
+                        chunk = process.stderr.read(4096)
+                        if not chunk:
+                            break
+                        stderr_chunks.append(chunk)
+
+            stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
+            stderr_thread.start()
             assert process.stdout is not None
             for line in process.stdout:
                 try:
-                    event = json.loads(line)
+                    event = json.loads(decode_worker_output(line))
                 except ValueError:
+                    continue
+                if not isinstance(event, dict):
                     continue
                 if event.get("type") == "progress":
                     self._update(task_id, progress=max(1, min(99, int(event.get("percent") or 0))), message=str(event.get("message") or "正在生成深度视频"))
                 elif event.get("type") == "result":
                     result = event.get("result") if isinstance(event.get("result"), dict) else {}
                 elif event.get("type") == "error":
-                    raise RuntimeError(str(event.get("error") or "深度视频生成失败"))
-            stderr = process.stderr.read() if process.stderr else ""
+                    worker_error = str(event.get("error") or "深度视频生成失败")
             code = process.wait()
+            stderr_thread.join()
+            stderr = (decode_worker_output(b''.join(stderr_chunks)) if stderr_chunks and isinstance(stderr_chunks[0], bytes)
+                      else ''.join(stderr_chunks))
+            if worker_error:
+                raise RuntimeError(worker_error)
             if code != 0:
                 raise RuntimeError(stderr.strip().splitlines()[-1] if stderr.strip() else f"深度视频 worker 退出码 {code}")
-            output_path = Path(str((result or {}).get("outputVideoPath") or output_dir / "depth-preview.mp4")).resolve()
-            output_url = url_for_path(str(output_path))
-            if not output_path.is_file() or not output_url:
-                raise RuntimeError("深度视频已生成，但无法注册输出文件")
-            input_meta = (result or {}).get("input") or {}
-            self._update(
-                task_id,
-                status="done",
-                progress=100,
-                message="深度视频已生成",
-                outputUrl=output_url,
-                outputName=output_path.name,
-                width=int(input_meta.get("processedWidth") or input_meta.get("width") or 0),
-                height=int(input_meta.get("processedHeight") or input_meta.get("height") or 0),
-                fps=float(input_meta.get("processedFps") or input_meta.get("fps") or 0),
-                frameCount=int(input_meta.get("processedFrames") or input_meta.get("frameCount") or 0),
-            )
+            self._update(task_id, **self._output_result(output_dir, result or {}, url_for_path))
         except BaseException as error:
             self._update(task_id, status="failed", error=str(error)[:1000], message=str(error)[:240])
             if self.bug_reporter:
@@ -257,6 +351,8 @@ class VideoDepthTaskService:
                 self.bug_reporter.report('error', '深度视频生成失败', {
                     'taskId': task_id, 'error': str(error)[:3000],
                     'runtimeMode': runtime['mode'], 'workerStderr': stderr[-6000:] if 'stderr' in locals() else '',
+                    'outputDirectory': str(output_dir),
+                    'reportedOutputPath': str((result or {}).get('outputVideoPath') or '') if 'result' in locals() else '',
                     'gpu': gpu_diagnostics(), 'worker': worker_status, 'inputSuffix': source.suffix,
                 }, user_id=self.get(task_id).get('userId', 'admin'))
 

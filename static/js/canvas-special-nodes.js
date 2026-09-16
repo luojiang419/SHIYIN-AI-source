@@ -606,17 +606,31 @@
         return {...data.file, kind:'video'};
     }
 
+    const depthVideoRecoveryAttempts = new WeakMap();
     async function pollDepthVideo(node, options, taskId){
         if(depthVideoTasks.has(taskId)) return depthVideoTasks.get(taskId);
         const task = (async () => {
+            let failures = 0;
             while(node.depthVideoTaskId === taskId){
-                const response = await fetch(`/api/video-depth/tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
+                let response;
+                try {
+                    response = await fetch(`/api/video-depth/tasks/${encodeURIComponent(taskId)}`, {cache:'no-store'});
+                    if(response.status >= 500) throw new Error('深度视频服务暂时不可用');
+                    failures = 0;
+                } catch(error) {
+                    if(++failures >= 5) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 1000 * failures));
+                    continue;
+                }
                 if(!response.ok) throw new Error(await responseError(response, '深度视频任务查询失败'));
                 const state = await response.json();
+                if(node.depthVideoTaskId !== taskId) return null;
                 node.depthVideoStatus = state.status;
                 node.depthVideoProgress = state.progress || 0;
                 node.depthVideoMessage = state.message || '';
                 if(state.status === 'done'){
+                    if(!state.outputUrl) throw new Error('深度视频结果缺少播放地址，请重新打开工程恢复结果');
+                    node.depthVideoError = '';
                     const item = {url:state.outputUrl, name:state.outputName || 'depth-preview.mp4', kind:'video', natural_w:state.width || 0, natural_h:state.height || 0};
                     node.depthVideoWidth = state.width || 0; node.depthVideoHeight = state.height || 0;
                     node.depthVideoGeneratedSignature = node.depthVideoInputSignature;
@@ -679,7 +693,10 @@
             video.addEventListener('pause', () => { button?.classList.remove('is-playing'); if(button) button.innerHTML = '<i data-lucide="play"></i>'; window.lucide?.createIcons?.({nodes:[button]}); });
             video.addEventListener('ended', () => video.pause());
         });
-        if(node.depthVideoTaskId && ['queued','running'].includes(node.depthVideoStatus)) pollDepthVideo(node, options, node.depthVideoTaskId).catch(error => options.toast?.(error.message));
+        if(node.depthVideoTaskId && (['queued','running'].includes(node.depthVideoStatus) || (!outputItem(node)?.url && depthVideoRecoveryAttempts.get(node) !== node.depthVideoTaskId))){
+            depthVideoRecoveryAttempts.set(node, node.depthVideoTaskId);
+            pollDepthVideo(node, options, node.depthVideoTaskId).catch(error => options.toast?.(error.message));
+        }
         else if(source?.url && !outputItem(node)?.url && (!node.depthVideoStatus || node.depthVideoStatus === 'idle')) runDepthVideo(node, options).catch(error => options.toast?.(error.message));
     }
 

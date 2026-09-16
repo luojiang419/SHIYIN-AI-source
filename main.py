@@ -28450,7 +28450,7 @@ def create_video_depth_task(payload: VideoDepthTaskRequest, request: Request):
 @app.get("/api/video-depth/tasks/{task_id}")
 def get_video_depth_task(task_id: str, request: Request):
     request_identity(request)
-    task = VIDEO_DEPTH_TASKS.get(task_id)
+    task = VIDEO_DEPTH_TASKS.get(task_id, os.fspath(OUTPUT_OUTPUT_DIR), media_url_from_path, current_account_id())
     if not task:
         raise HTTPException(status_code=404, detail="深度视频任务不存在或服务已重启")
     return task

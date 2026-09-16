@@ -534,6 +534,7 @@
             </div>
             <div class="special-toolbar depth-map-toolbar">
                 <button type="button" data-special-action="upload-depth-video"><i data-lucide="upload"></i><span>导入视频</span></button>
+                <button type="button" data-special-action="import-depth-video-runtime" title="从本机文件夹安装深度视频运行时"><i data-lucide="folder-input"></i><span>导入运行时</span></button>
                 <button type="button" data-special-action="retry-depth-video" ${!inputUrl || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
                 <button type="button" data-special-action="open-depth-video-controls" ${!output?.url || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>进阶控制</span></button>
                 <button type="button" data-special-action="export-depth-video" ${!output?.url || status === 'running' || status === 'queued' || node.depthVideoExporting ? 'disabled' : ''}><i data-lucide="${node.depthVideoExporting ? 'loader-2' : 'external-link'}"></i><span>${node.depthVideoExporting ? '导出中' : '导出深度视频'}</span></button>
@@ -672,6 +673,18 @@
         card?.addEventListener('click', choose);
         card?.addEventListener('keydown', event => { if(event.key === 'Enter' || event.key === ' ') choose(event); });
         root.querySelector('[data-special-action="upload-depth-video"]')?.addEventListener('click', choose);
+        root.querySelector('[data-special-action="import-depth-video-runtime"]')?.addEventListener('click', async event => {
+            event.preventDefault(); event.stopPropagation();
+            const directory = window.prompt('输入包含深度视频运行时 ZIP 的本机文件夹路径');
+            if(!directory?.trim()) return;
+            try {
+                options.toast?.('正在校验并安装运行时，请稍候');
+                const response = await fetch('/api/video-depth/runtime/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({directory:directory.trim()})});
+                if(!response.ok) throw new Error(await responseError(response, '运行时导入失败'));
+                options.toast?.('深度视频运行时已就绪');
+                if(source?.url) runDepthVideo(node, options, true).catch(error => options.toast?.(error.message));
+            } catch(error) { options.toast?.(error.message || '运行时导入失败'); }
+        });
         if(input) input.onchange = async () => {
             try { node.depthVideoManualInput = await uploadDepthVideo(input.files?.[0]); source = depthVideoInput(node, options); syncDepthVideoInput(node, source); clearDepthVideoResult(node, options); notify(options, node, true); runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); }
             catch(error){ options.toast?.(error.message || '视频导入失败'); } finally { input.value = ''; }

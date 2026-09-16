@@ -354,6 +354,9 @@ class PersonDepthComponentManager:
 
     def ensure_now(self) -> bool:
         with self._ensure_lock:
+            if self.verify_installed(run_smoke=True):
+                self._mark_ready(self._current_source_label() or "已安装组件")
+                return True
             if not self._install_available():
                 self._update_state(
                     state="unavailable",
@@ -363,9 +366,6 @@ class PersonDepthComponentManager:
                     message=self._initial_message(),
                 )
                 return False
-            if self.verify_installed(run_smoke=True):
-                self._mark_ready(self._current_source_label() or "已安装组件")
-                return True
             try:
                 self._check_disk_space()
                 return self._download_and_install()
@@ -421,6 +421,25 @@ class PersonDepthComponentManager:
                     error=(str(exc) or exc.__class__.__name__)[:2000],
                 )
                 raise
+
+    def install_local_directory(self, directory: Path) -> bool:
+        """Install the selected runtime from a user-supplied portable package directory."""
+        if self.component_name != "video-depth-runtime":
+            raise PersonDepthComponentUnavailable("此组件不支持目录导入")
+        folder = Path(directory).expanduser().resolve()
+        if not folder.is_dir():
+            raise PersonDepthComponentUnavailable("运行时目录不存在")
+        packages = {str(item.get("id") or ""): item for item in self.manifest.get("packages") or []}
+        paths: dict[str, Path] = {}
+        for spec in self.specs:
+            filename = str(packages[spec.package_id].get("file") or "")
+            if not filename or Path(filename).name != filename:
+                raise PersonDepthComponentUnavailable(f"运行时包文件名无效：{spec.package_id}")
+            candidate = folder / filename
+            if not candidate.is_file():
+                raise PersonDepthComponentUnavailable(f"缺少适用于本机的运行时包：{filename}")
+            paths[spec.package_id] = candidate
+        return self.install_local_archives(paths, source_label="本地导入运行时")
 
     def _download_and_install(self) -> bool:
         if self._lan_source_url:

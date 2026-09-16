@@ -4,8 +4,13 @@ import hashlib
 import json
 import socket
 import urllib.request
+import zipfile
 from pathlib import Path
 
+import pytest
+
+from canvas_core.component_profiles import RuntimeCapabilities
+from canvas_core.person_depth_components import PersonDepthComponentUnavailable
 from canvas_core.person_depth_components import PersonDepthComponentManager
 from canvas_core.person_depth_lan import PersonDepthLanServer
 
@@ -85,3 +90,52 @@ def test_shared_lan_server_serves_and_transfers_video_depth_model(tmp_path):
         assert client.status()["source_label"] == "局域网服务器"
     finally:
         server.stop()
+
+
+def test_runtime_import_from_directory_without_lan(tmp_path):
+    folder = tmp_path / "portable"
+    folder.mkdir()
+    archive = folder / "runtime-cpu.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("runtime/worker.exe", b"worker")
+    manifest = {
+        "schema_version": 2, "component": "video-depth-runtime", "version": "test-1", "enabled": True,
+        "packages": [{"id": "runtime-cpu", "file": archive.name, "size": archive.stat().st_size,
+                      "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}],
+        "variants": [{"id": "windows-cpu", "priority": 1,
+                      "constraints": {"os": "windows", "arch": "x86_64", "accelerator": "cpu"},
+                      "command": ["runtime/worker.exe"], "required_paths": ["runtime/worker.exe"],
+                      "packages": ["runtime-cpu"]}],
+    }
+    component = PersonDepthComponentManager(
+        tmp_path / "component", manifest=manifest, component_name="video-depth-runtime",
+        capability_provider=lambda: RuntimeCapabilities("windows", "x86_64", "cpu"),
+        smoke_runner=lambda _command, _root: None,
+    )
+    assert component.public_status()["install_available"] is False
+    assert component.install_local_directory(folder) is True
+    assert component.ensure_now() is True
+    assert component.installation_path().joinpath("runtime/worker.exe").read_bytes() == b"worker"
+
+
+def test_runtime_import_rejects_modified_archive(tmp_path):
+    folder = tmp_path / "portable"
+    folder.mkdir()
+    archive = folder / "runtime-cpu.zip"
+    archive.write_bytes(b"untrusted")
+    manifest = {
+        "schema_version": 2, "component": "video-depth-runtime", "version": "test-1", "enabled": True,
+        "packages": [{"id": "runtime-cpu", "file": archive.name, "size": len(b"original"),
+                      "sha256": hashlib.sha256(b"original").hexdigest()}],
+        "variants": [{"id": "windows-cpu", "constraints": {"os": "windows", "arch": "x86_64"},
+                      "command": ["runtime/worker.exe"], "required_paths": ["runtime/worker.exe"],
+                      "packages": ["runtime-cpu"]}],
+    }
+    component = PersonDepthComponentManager(
+        tmp_path / "component", manifest=manifest, component_name="video-depth-runtime",
+        capability_provider=lambda: RuntimeCapabilities("windows", "x86_64", "cpu"),
+        smoke_runner=lambda _command, _root: None,
+    )
+    with pytest.raises(PersonDepthComponentUnavailable, match="校验失败"):
+        component.install_local_directory(folder)
+    assert component.installation_path() is None

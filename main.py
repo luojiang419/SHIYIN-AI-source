@@ -28397,6 +28397,20 @@ def video_depth_status(request: Request):
     return VIDEO_DEPTH_TASKS.status()
 
 
+class VideoDepthRuntimeImportRequest(BaseModel):
+    directory: str
+
+
+@app.post("/api/video-depth/runtime/import")
+def import_video_depth_runtime(payload: VideoDepthRuntimeImportRequest, request: Request):
+    require_admin(request)
+    try:
+        VIDEO_DEPTH_RUNTIME_MANAGER.install_local_directory(Path(payload.directory))
+    except PersonDepthComponentUnavailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": VIDEO_DEPTH_RUNTIME_MANAGER.public_status()}
+
+
 @app.post("/api/video-depth/upload")
 async def upload_video_depth_input(request: Request, file: UploadFile = File(...)):
     request_identity(request)

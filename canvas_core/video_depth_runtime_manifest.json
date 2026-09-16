@@ -6,7 +6,11 @@
   "release_status": "released",
   "message": "深度视频运行时将在首次生成时按本机配置自动安装",
   "license_notice": "运行时包含 PyTorch、TorchVision、FFmpeg 与 Video Depth Anything 推理源码；模型权重独立分发。",
-  "packages": [],
+  "packages": [
+    {"id": "runtime-windows-x86_64-cuda128", "size": 5306028174, "sha256": "58f0e2ae71e134ecbe13abe3bd24e281d2dd5216f047b7fdb86e7893f1514d57", "file": "video-depth-runtime-1.0.0-windows-x86_64-cuda128.zip"},
+    {"id": "runtime-windows-x86_64-cuda126", "size": 4317250474, "sha256": "77466d39c1f90ab0cb8e7b190b8658030dcaa87169abefc819601118314f424f", "file": "video-depth-runtime-1.0.0-windows-x86_64-cuda126.zip"},
+    {"id": "runtime-windows-x86_64-cpu", "size": 736484777, "sha256": "626e1af8333fb25c191126ab81cfe7e5a3e0534a7ddf18f47c8a7d14457ae231", "file": "video-depth-runtime-1.0.0-windows-x86_64-cpu.zip"}
+  ],
   "variants": [
     {
       "id": "windows-x86_64-cuda128",

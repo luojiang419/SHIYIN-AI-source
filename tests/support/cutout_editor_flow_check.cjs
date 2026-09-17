@@ -11,7 +11,10 @@ const fs=require('node:fs');
     const pixels=fs.readFileSync('generated-images/20260830-open-mannequin-refs/ref-01.png');
     const preview='data:image/png;base64,'+pixels.toString('base64');
     let failSegment=true,failExport=true,closed=0;
-    await page.route('**/__cutout_host',route=>route.fulfill({contentType:'text/html',body:'<body style="margin:0"><aside>应用侧栏</aside><iframe src="/__cutout_canvas" style="width:900px;height:600px"></iframe></body>'}));
+    const shell=fs.readFileSync('static/index.html','utf8');
+    const frameStyles=[...shell.matchAll(/^\s*iframe(?:\.active)?\s*\{[^}]+\}/gm)].map(match=>match[0]).join('\n');
+    const routeLifecycle=shell.slice(shell.indexOf('        function syncRouteStateToFrame('),shell.indexOf('        const IFRAME_IDLE_UNLOAD_MS'));
+    await page.route('**/__cutout_host',route=>route.fulfill({contentType:'text/html',body:`<style>${frameStyles}</style><body style="margin:0"><aside>应用侧栏</aside><iframe class="active" src="/__cutout_canvas" style="position:relative;width:900px;height:600px"></iframe><script>${routeLifecycle}</script></body>`}));
     await page.route('**/__cutout_canvas',route=>route.fulfill({contentType:'text/html',body:`<div id="node"></div><script src="/static/js/canvas-cutout-node.js"></script><script>
       const node={};const root=document.querySelector('#node');root.innerHTML=CanvasCutoutNode.bodyHtml(node);
       CanvasCutoutNode.bind(root,node,{getInputImage:()=>({url:'/__cutout_source'}),onSaved:()=>window.saved=node,toast:()=>{}});
@@ -34,6 +37,9 @@ const fs=require('node:fs');
       assert.deepEqual(box,{x:0,y:0,width:1440,height:900});
       assert.equal(await editor.locator('#saveNode').innerText(),'保存并返回');
       assert(await editor.locator('#returnNode').isVisible());
+      await page.evaluate(()=>broadcastRouteState());
+      const interactive=await page.locator(frameSelector).evaluate(frame=>({opacity:getComputedStyle(frame).opacity,pointerEvents:getComputedStyle(frame).pointerEvents,inert:frame.inert}));
+      assert.deepEqual(interactive,{opacity:'1',pointerEvents:'auto',inert:false});
     }
     await open();
     await editor.locator('#maskCanvas').click();
@@ -62,6 +68,14 @@ const fs=require('node:fs');
     assert.equal(await canvas.locator('body').evaluate(()=>saved.outputUrl),'/saved.png');
     await page.waitForTimeout(200);
     assert.equal(closed,3);
-    console.log('PASS: nested fullscreen, return button, Escape, segmentation failure, export error, save-and-return, session cleanup');
+    await page.route('**/static/cutout-editor/index.html',route=>route.fulfill({status:500,contentType:'text/html',body:'编辑器加载失败'}));
+    await canvas.locator('[data-cutout-open]').click();
+    await page.getByRole('dialog',{name:'自动抠像编辑器'}).getByRole('button',{name:'返回画布（Esc）'}).click();
+    await page.locator(frameSelector).waitFor({state:'detached'});
+    await canvas.locator('[data-cutout-open]').click();
+    await canvas.locator('[data-cutout-open]').evaluate(button=>button.focus());
+    await canvas.locator('[data-cutout-open]').press('Escape');
+    await page.locator(frameSelector).waitFor({state:'detached'});
+    console.log('PASS: real studio shell fullscreen and routing, return button, Escape, segmentation/export failures, save-and-return, cleanup, failed editor load escape');
   }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

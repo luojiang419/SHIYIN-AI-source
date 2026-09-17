@@ -311,6 +311,7 @@ function resumeCanvasRouteMedia(){
 function setCanvasRouteActive(active){
     const wasSuspended = canvasSessionSuspended;
     canvasRouteActive = Boolean(active);
+    if(!canvasRouteActive && document.getElementById('imageEditModal')?.classList.contains('open'))closeImageEditor();
     canvasSessionSuspended = !canvasRouteActive || document.hidden;
     window.CanvasStartup?.setVisible(canvasRouteActive && !document.hidden);
     document.documentElement.classList.toggle('studio-route-inactive', !canvasRouteActive);
@@ -378,6 +379,7 @@ window.addEventListener('message', event => {
     }
 });
 window.addEventListener('pagehide', () => {
+    if(document.getElementById('imageEditModal')?.classList.contains('open'))closeImageEditor();
     window.CanvasStartup?.cancel();
     detachClassicParentShortcutListeners();
     stopCanvasRemotePolling();
@@ -7526,6 +7528,69 @@ function resizeEditDrawCanvas(){
         refreshGridRulers();
     }
 }
+let imageCutoutSession = null;
+let imageCutoutState = {canSave:false,busy:false};
+let imageEditorFrames = [];
+function imageEditorEscape(event){
+    if(event.key === 'Escape'){event.preventDefault();event.stopImmediatePropagation();closeImageEditor();}
+}
+function expandImageEditorViewport(){
+    if(imageEditorFrames.length) return;
+    try {
+        let current = window;
+        while(current !== current.parent && current.frameElement){
+            const frame = current.frameElement;
+            imageEditorFrames.push({frame,style:frame.getAttribute('style')});
+            frame.style.cssText += ';position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;z-index:100001!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important;';
+            current = current.parent;
+        }
+    } catch(_error) {}
+    window.addEventListener('keydown',imageEditorEscape,true);
+}
+function syncImageCutoutControls(state=imageCutoutState){
+    imageCutoutState=state;
+    if(imageEditMode !== 'cutout') return;
+    document.getElementById('imageEditApplyBtn').disabled=!state.canSave || state.busy;
+    document.querySelectorAll('[data-image-edit-mode]').forEach(button=>button.disabled=!!state.busy);
+    document.getElementById('imageEditSub').textContent=state.error || (state.busy?'正在处理抠像，请稍候…':'点击选择主体；Ctrl 加选，Alt 减选。保存后输出透明 PNG');
+}
+function ensureImageCutoutEditor(){
+    if(imageCutoutSession){imageCutoutSession.fit();syncImageCutoutControls();return;}
+    const node=nodes.find(item=>item.id===cropState?.nodeId);
+    if(!node) return;
+    const sourceUrl=node.type==='autoCutout' ? (classicSpecialInputImage(node)?.url || node.cutoutSourceUrl) : node.url;
+    if(!sourceUrl){syncImageCutoutControls({canSave:false,busy:false,error:'请先连接一张图片'});return;}
+    imageCutoutState={canSave:false,busy:true};syncImageCutoutControls();
+    imageCutoutSession=window.CanvasCutoutNode.mountEditor(document.getElementById('imageCutoutStage'),{
+        sourceUrl,settings:node.cutoutSourceUrl===sourceUrl?node.cutoutSettings:null,
+        onClose:closeImageEditor,onState:syncImageCutoutControls,
+        onSaved:({file,settings})=>{
+            const currentSource=node.type==='autoCutout' ? (classicSpecialInputImage(node)?.url || node.cutoutSourceUrl) : node.url;
+            if(currentSource!==sourceUrl){syncImageCutoutControls({canSave:false,busy:false,error:'原图已改变，请返回画布后重新编辑'});return;}
+            let target=node;
+            if(node.type!=='autoCutout'){
+                target=addAutoCutoutNode(imageEditorOutputPoint(node));
+                connections.push({id:uid('c'),from:node.id,to:target.id});
+            }
+            const {session_id,...savedSettings}=settings||{};
+            target.cutoutSourceUrl=sourceUrl;target.cutoutSettings=savedSettings;
+            target.outputUrl=file.url;target.outputName='自动抠像.png';target.outputKind='image';
+            target.outputWidth=file.width;target.outputHeight=file.height;
+            syncCutoutDownstream(target);closeImageEditor();render();scheduleSave();
+            setStatus('抠像已保存，已返回画布');
+        }
+    });
+}
+function saveImageEditorFile(node,file,width,height){
+    if(node.type==='autoCutout'){
+        node.outputUrl=file.url;node.outputName=file.name;node.outputKind='image';
+        node.outputWidth=width||file.width;node.outputHeight=height||file.height;
+        syncCutoutDownstream(node);
+    }else{
+        node.url=file.url;node.name=file.name;
+        if(width && height){node.natural_w=width;node.natural_h=height;}
+    }
+}
 function setImageEditMode(mode, userTouched=false){
     const editorImage = document.getElementById('cropImage');
     if(mode !== 'preview' && editorImage?.dataset.editorLoadState !== 'ready'){
@@ -7537,7 +7602,12 @@ function setImageEditMode(mode, userTouched=false){
     if(userTouched) imageEditModeTouched = true;
     const prevImageEditMode = imageEditMode;
     if(mode !== 'brush') removeEditTextInlineEditor(true);
-    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid'].includes(mode) ? mode : 'crop';
+    imageEditMode = ['preview','crop','outpaint','mask','brush','resize','grid','cutout'].includes(mode) ? mode : 'crop';
+    const isCutout=imageEditMode==='cutout';
+    document.getElementById('imageEditStage').style.display=isCutout?'none':'';
+    document.getElementById('imageCutoutStage').style.display=isCutout?'block':'none';
+    document.querySelector('#imageEditModal .image-edit-actions').style.display=isCutout?'none':'';
+    document.querySelectorAll('[data-image-edit-mode]').forEach(button=>button.disabled=false);
     const isPreview = imageEditMode === 'preview';
     const cropCanvasEl = document.getElementById('cropCanvas');
     cropCanvasEl.classList.toggle('preview-mode', isPreview);
@@ -7558,6 +7628,11 @@ function setImageEditMode(mode, userTouched=false){
     const title = document.getElementById('imageEditTitle');
     const sub = document.getElementById('imageEditSub');
     const apply = document.getElementById('imageEditApplyBtn');
+    apply.disabled=false;
+    if(isCutout){
+        title.textContent='图片编辑 · 抠像';apply.style.display='';apply.textContent='保存并返回';
+        ensureImageCutoutEditor();return;
+    }
     if(isPreview){
         apply.style.display = 'none';
         title.textContent = tr('canvas.previewImage');
@@ -7578,6 +7653,7 @@ function setImageEditMode(mode, userTouched=false){
             apply.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4"></i><span>${tr(labelKey)}</span>`;
         }
     }
+    if(!isPreview)apply.innerHTML='<i data-lucide="check" class="w-4 h-4"></i><span>保存并返回</span>';
     resizeEditDrawCanvas();
     if(isPreview) clearEditDrawing(true);
     else if(imageEditMode === 'grid'){
@@ -8066,14 +8142,15 @@ function addGridCustomLine(type, pos){
 async function autoDetectGridLines(force=false){
     if(imageEditMode !== 'grid' || !cropState || gridAutoDetecting) return;
     const node = nodes.find(item => item.id === cropState.nodeId);
-    if(!node?.url || (!force && gridAutoDetectedNodeId === node.id)) return;
+    const sourceUrl=cropState.sourceUrl || node?.url;
+    if(!sourceUrl || (!force && gridAutoDetectedNodeId === node.id)) return;
     const button = document.getElementById('gridAutoDetectBtn');
     const status = document.getElementById('gridDetectStatus');
     gridAutoDetecting = true;
     if(button) button.disabled = true;
     if(status) status.textContent = '正在识别裁切线…';
     try {
-        const source = await fetch(canvasDisplayMediaUrl(node.url, node.name || ''));
+        const source = await fetch(canvasDisplayMediaUrl(sourceUrl, node.name || ''));
         if(!source.ok) throw new Error('图片读取失败');
         const blob = await source.blob();
         const form = new FormData();
@@ -8529,11 +8606,14 @@ function resetCropBox(){
 }
 function openImageEditor(nodeId, initialMode='crop'){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node?.url) return;
-    if(mediaKindForNode(node) !== 'image') return;
-    if(!['preview','crop','outpaint','mask','brush','resize','grid'].includes(initialMode)) initialMode = 'crop';
-    if(cropState?.nodeId === nodeId && document.getElementById('imageEditModal').classList.contains('open')) return;
-    cropState = {nodeId, x:0, y:0, w:0, h:0};
+    const sourceUrl=node?.type==='autoCutout' ? (node.outputUrl || classicSpecialInputImage(node)?.url || node.cutoutSourceUrl) : node?.url;
+    if(!sourceUrl) return;
+    if(node.type!=='autoCutout' && mediaKindForNode(node) !== 'image') return;
+    if(!['preview','crop','outpaint','mask','brush','resize','grid','cutout'].includes(initialMode)) initialMode = 'crop';
+    if(cropState?.nodeId === nodeId && document.getElementById('imageEditModal').classList.contains('open')){setImageEditMode(initialMode,true);return;}
+    if(document.getElementById('imageEditModal').classList.contains('open'))closeImageEditor();
+    expandImageEditorViewport();
+    cropState = {nodeId, sourceUrl, x:0, y:0, w:0, h:0};
     // 重置自定义宫格状态
     gridCustomMode = false;
     gridCustomLines = [];
@@ -8581,9 +8661,9 @@ function openImageEditor(nodeId, initialMode='crop'){
     window.CanvasImagePreview.open({
         img,
         stage:document.getElementById('imageEditStage'),
-        sourceImage:sourceImage?.dataset.originalSrc === canvasOriginalMediaUrl(node.url) ? sourceImage : null,
-        previewSrc:canvasMediaPreviewUrl(node.url, 512),
-        originalSrc:canvasDisplayMediaUrl(node.url, node.name || ''),
+        sourceImage:sourceImage?.dataset.originalSrc === canvasOriginalMediaUrl(sourceUrl) ? sourceImage : null,
+        previewSrc:canvasMediaPreviewUrl(sourceUrl, 512),
+        originalSrc:canvasDisplayMediaUrl(sourceUrl, node.name || ''),
         onReady:() => {
             // 原图只交接一次，编辑初始化不会被缩略图/原图两次 load 反复清空。
             imageEditBaseW = img.clientWidth;
@@ -8604,6 +8684,11 @@ function openImageEditor(nodeId, initialMode='crop'){
     refreshIcons(modal);
 }
 function closeImageEditor(){
+    imageCutoutSession?.destroy();imageCutoutSession=null;imageCutoutState={canSave:false,busy:false};
+    window.removeEventListener('keydown',imageEditorEscape,true);
+    for(const {frame,style} of imageEditorFrames){if(style===null)frame.removeAttribute('style');else frame.setAttribute('style',style);}
+    imageEditorFrames=[];
+    document.querySelectorAll('[data-image-edit-mode]').forEach(button=>button.disabled=false);
     document.getElementById('imageEditModal').classList.remove('open');
     const img = document.getElementById('cropImage');
     window.CanvasImagePreview.cancel(img);
@@ -8815,8 +8900,7 @@ async function applyImageCrop(){
     const base = (node.name || 'image').replace(/\.[^.]+$/, '');
     const file = await uploadCroppedBlob(blob, `${base}_crop.png`);
     if(file){
-        node.url = file.url;
-        node.name = file.name;
+        saveImageEditorFile(node,file,sw,sh);
         closeImageEditor();
         render();
         scheduleSave();
@@ -8846,8 +8930,7 @@ async function applyImageOutpaint(){
     const base = (node.name || 'image').replace(/\.[^.]+$/, '');
     const file = await uploadCroppedBlob(blob, `${base}_outpaint.png`);
     if(file){
-        node.url = file.url;
-        node.name = file.name;
+        saveImageEditorFile(node,file,outW,outH);
         node.mediaKind = 'image';
         node.natural_w = outW;
         node.natural_h = outH;
@@ -8909,8 +8992,7 @@ async function applyImageBrush(){
     const base = (node.name || 'image').replace(/\.[^.]+$/, '');
     const file = await uploadCroppedBlob(blob, `${base}_paint.png`);
     if(file){
-        node.url = file.url;
-        node.name = file.name;
+        saveImageEditorFile(node,file,canvasEl.width,canvasEl.height);
         closeImageEditor();
         render();
         scheduleSave();
@@ -8939,9 +9021,9 @@ async function applyImageGridSplit(){
         const out = imageEditorOutputNode(node);
         const urls = files.map(file => file.url).filter(Boolean);
         const layout = gridLayoutFromRects(rects);
-        appendOutputImages(out, urls, {url:node.url, name:node.name || 'source image'}, urls.map((url, i) => ({
+        appendOutputImages(out, urls, {url:cropState.sourceUrl, name:node.name || 'source image'}, urls.map((url, i) => ({
             runMs:0,
-            run:{prompt:'宫格切分', refs:[{url:node.url, name:node.name || 'source image'}]},
+            run:{prompt:'宫格切分', refs:[{url:cropState.sourceUrl, name:node.name || 'source image'}]},
             grid:{...layout, row:rects[i]?.row || 0, col:rects[i]?.col || 0, rowSpan:1, colSpan:1, ratioW:rects[i]?.w || 1, ratioH:rects[i]?.h || 1}
         })), layout);
         closeImageEditor();
@@ -8966,8 +9048,7 @@ async function applyImageResize(){
     const suffix = `${Math.round(resized.scale * 100)}pct`;
     const file = await uploadCroppedBlob(resized.blob, `${base}_resize_${suffix}.png`);
     if(!file) return;
-    node.url = file.url;
-    node.name = file.name;
+    saveImageEditorFile(node,file,resized.targetW,resized.targetH);
     node.mediaKind = 'image';
     node.natural_w = resized.targetW;
     node.natural_h = resized.targetH;
@@ -8976,6 +9057,7 @@ async function applyImageResize(){
     scheduleSave();
 }
 function applyImageEdit(){
+    if(imageEditMode==='cutout'){if(imageCutoutState.canSave&&!imageCutoutState.busy)imageCutoutSession?.save();return;}
     if(document.getElementById('cropImage')?.dataset.editorLoadState !== 'ready') return;
     if(imageEditMode === 'outpaint') return applyImageOutpaint();
     if(imageEditMode === 'mask') return applyImageMask();
@@ -10585,7 +10667,7 @@ function bindClassicSpecialNode(el, node){
     };
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
-    if(node.type === 'autoCutout') window.CanvasCutoutNode.bind(el,node,{...options,getInputImage:()=>classicSpecialInputImage(node),onSaved:()=>{syncCutoutDownstream(node);scheduleSave();queueClassicSpecialRefresh(node);}});
+    if(node.type === 'autoCutout') window.CanvasCutoutNode.bind(el,node,{...options,openEditor:()=>openImageEditor(node.id,'cutout'),getInputImage:()=>classicSpecialInputImage(node),onSaved:()=>{syncCutoutDownstream(node);scheduleSave();queueClassicSpecialRefresh(node);}});
     if(node.type === 'depthMap') api.bindDepthMap?.(el, node, options);
     if(node.type === 'depthVideo') api.bindDepthVideo?.(el, node, options);
     if(node.type === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createClassicDirectorOutputNode});

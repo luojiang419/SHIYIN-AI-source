@@ -2621,7 +2621,7 @@
         }
 
         function syncRouteStateToFrame(iframe) {
-            if(!iframe) return;
+            if(!iframe || iframe.dataset.studioOverlay) return;
             const active = iframe.classList.contains('active');
             iframe.dataset.routeActive = active ? '1' : '0';
             iframe.inert = !active;

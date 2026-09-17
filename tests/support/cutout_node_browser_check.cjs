@@ -27,7 +27,7 @@ await editor.locator('#maskCanvas').waitFor({state:'visible'});
 await editor.locator('#busy').waitFor({state:'hidden'});
 await editor.locator('#maskCanvas').click();
 await editor.locator('#busy').waitFor({state:'hidden',timeout:180000});
-await editor.locator('#saveNode').click();
+await page.locator('#imageEditApplyBtn').click();
 await page.waitForFunction(()=>nodes.find(n=>n.id===cutoutTest.cutout).outputUrl,{},{timeout:180000});
 console.log('SAVED',await page.evaluate(()=>{
  const n=nodes.find(n=>n.id===cutoutTest.cutout),out=nodes.find(n=>n.id===cutoutTest.out);
@@ -46,7 +46,7 @@ for(const theme of ['dark','light']){
  const colors=await page.evaluate(()=>({text:getComputedStyle(document.body).getPropertyValue('--text').trim()}));
  const frame=page.frames().find(f=>f.url().includes('/static/cutout-editor/index.html'));
  await frame.waitForFunction(expected=>document.documentElement.style.getPropertyValue('--text')===expected,colors.text);
- for(const id of ['threshold','feather','edgeShift','zoomSlider','saveNode']){
+ for(const id of ['threshold','feather','edgeShift','zoomSlider']){
    const control=again.locator('#'+id);
    await control.scrollIntoViewIfNeeded();
    if(!await control.isVisible())throw Error('全屏控件不可见: '+id);
@@ -57,7 +57,7 @@ for(const theme of ['dark','light']){
 console.log('PASS full-screen controls and live light/dark theme');
 await again.locator('#edgeShift').fill('2');
 await again.locator('#busy').waitFor({state:'hidden',timeout:180000});
-await again.locator('#saveNode').click();
+await page.locator('#imageEditApplyBtn').click();
 await page.waitForFunction(old=>nodes.find(n=>n.id===cutoutTest.cutout).outputUrl!==old,firstUrl,{timeout:180000});
 console.log('RESAVED',await page.evaluate(()=>{
 const node=nodes.find(n=>n.id===cutoutTest.cutout),out=nodes.find(n=>n.id===cutoutTest.out);

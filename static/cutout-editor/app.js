@@ -5,7 +5,7 @@
   const controls=['exportButton','undoButton','clearButton','maskExportButton','cutoutExportButton'];
   function toast(message){state.error=message;const node=$('toast');node.textContent=message;node.hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.hidden=true,6000)}
   function setBusy(value){state.busy=value;if(value){state.error=null;$('toast').hidden=true;}$('busy').hidden=!value;$('busy').querySelector('b').textContent=state.sessionId?'正在处理选区，请稍候…':'正在加载原图，请稍候…';$('modelStatus').textContent=value?'模型运行中':state.error?'处理失败':'模型就绪';$('modelStatus').title=state.error||'';$('liveStatus').classList.toggle('working',value)}
-  function updateControls(){const selected=state.points.length>0,valid=!!state.mask&&state.maskKey===JSON.stringify(requestBody());$('saveNode').disabled=state.busy||!valid;$('undoButton').disabled=state.busy||!selected;$('clearButton').disabled=state.busy||!selected;['threshold','feather','edgeShift'].forEach(id=>$(id).disabled=state.busy);['exportButton','maskExportButton','cutoutExportButton'].forEach(id=>$(id).disabled=!valid||state.busy)}
+  function updateControls(){const selected=state.points.length>0,valid=!!state.mask&&state.maskKey===JSON.stringify(requestBody());$('saveNode').disabled=state.busy||!valid;$('undoButton').disabled=state.busy||!selected;$('clearButton').disabled=state.busy||!selected;['threshold','feather','edgeShift'].forEach(id=>$(id).disabled=state.busy);['exportButton','maskExportButton','cutoutExportButton'].forEach(id=>$(id).disabled=!valid||state.busy);parent.postMessage({type:'cutout:controls',canSave:!$('saveNode').disabled,busy:state.busy,error:state.error||''},location.origin)}
   async function responseError(response,fallback){const data=await response.json().catch(()=>null);const detail=data?.detail;return new Error(typeof detail==='string'?detail:`${fallback}（HTTP ${response.status}）`)}
   const viewport={zoom:1,x:0,y:0,space:false,drag:null};
   function positionCanvas(){
@@ -104,6 +104,8 @@ if(state.view==='overlay'){ctx.globalCompositeOperation='source-in';ctx.fillStyl
   let editingSource=null;
   window.addEventListener('message',async event=>{
     if(event.origin!==location.origin||(event.source!==parent&&event.source!==window.frameElement?.cutoutOwnerWindow))return;
+    if(event.data?.type==='cutout:save'){$('saveNode').click();return;}
+    if(event.data?.type==='cutout:fit'){requestAnimationFrame(fit);return;}
     if(event.data?.type==='cutout:theme'){
       const root=document.documentElement;
       root.style.colorScheme=event.data.dark?'dark':'light';
@@ -119,6 +121,7 @@ if(state.view==='overlay'){ctx.globalCompositeOperation='source-in';ctx.fillStyl
       return;
     }
     if(event.data?.type!=='cutout:load')return;
+    if(event.data.embedded)document.querySelector('.topbar').style.display='none';
     editingSource=event.data.sourceUrl;
     try{
       const response=await fetch(editingSource);if(!response.ok)throw Error('原图读取失败');

@@ -345,6 +345,7 @@
                     <div class="image-edit-mode">
                         <button type="button" data-image-edit-mode="preview" class="active"><i data-lucide="eye" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modePreview">预览</span></button>
                         <button type="button" data-image-edit-mode="crop"><i data-lucide="crop" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeCrop">裁剪</span></button>
+                        <button type="button" data-image-edit-mode="cutout"><i data-lucide="scissors" class="w-3.5 h-3.5"></i><span>抠像</span></button>
                         <button type="button" data-image-edit-mode="outpaint"><i data-lucide="expand" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeOutpaint">扩展</span></button>
                         <button type="button" data-image-edit-mode="mask"><i data-lucide="brush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeMask">遮罩</span></button>
                         <button type="button" data-image-edit-mode="brush"><i data-lucide="paintbrush" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeBrush">画笔</span></button>
@@ -352,7 +353,8 @@
                         <button type="button" data-image-edit-mode="grid"><i data-lucide="grid-3x3" class="w-3.5 h-3.5"></i><span data-i18n="canvas.modeGrid">宫格切分</span></button>
                     </div>
                     <div class="image-edit-head-end">
-                        <button class="preview-icon-btn" type="button" onclick="closeImageEditor()" title="关闭" data-i18n-title="common.close"><i data-lucide="x" class="w-4 h-4"></i></button>
+                        <button id="imageEditApplyBtn" class="image-edit-btn primary" type="button" onclick="applyImageEdit()">保存并返回</button>
+                        <button class="image-edit-btn secondary" data-image-editor-close type="button" onclick="closeImageEditor()" title="返回画布（Esc）">返回画布</button>
                     </div>
                 </div>
                 <div id="imageCropTools" class="image-edit-tools crop-ratio-tools">
@@ -426,6 +428,7 @@
                     <span id="gridSplitCount" class="image-edit-sub"></span>
                     <span id="gridDetectStatus" class="image-edit-sub"></span>
                 </div>
+                <div id="imageCutoutStage" style="display:none;flex:1;min-height:0"></div>
                 <div id="imageEditStage" class="image-edit-stage">
                     <div class="image-edit-stage-inner">
                         <div id="cropCanvas" class="crop-canvas">
@@ -460,8 +463,7 @@
                 <div class="image-edit-actions">
                     <span id="imageEditZoomLabel" style="color:var(--faint);font-size:11px;font-weight:800;padding:0 4px;margin-right:auto;cursor:pointer;user-select:none" title="双击重置缩放" ondblclick="resetImageEditZoom()">100%</span>
                     <button class="image-edit-btn secondary" type="button" onclick="resetCropBox()"><i data-lucide="rotate-ccw" class="w-4 h-4"></i><span data-i18n="canvas.reset">重置</span></button>
-                    <button class="image-edit-btn secondary" type="button" onclick="closeImageEditor()" data-i18n="common.cancel">取消</button>
-                    <button id="imageEditApplyBtn" class="image-edit-btn primary" type="button" onclick="applyImageEdit()"><i data-lucide="crop" class="w-4 h-4"></i><span data-i18n="canvas.applyCrop">应用裁剪</span></button>
+                    <button class="image-edit-btn secondary" type="button" onclick="closeImageEditor()">返回画布（Esc）</button>
                 </div>
             </div>
         </div>
@@ -605,7 +607,7 @@
     <script defer src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>
     <script defer src="/static/js/director-3d.js?v=2026.08.28.director-3d.1"></script>
     <script defer src="/static/js/pose-replicate-settings.js?garment-material=20260911.4&v=20260906.shared-prompts.1"></script>
-    <script defer src="/static/js/canvas-cutout-node.js?v=3"></script>
+    <script defer src="/static/js/canvas-cutout-node.js?v=4"></script>
     <script defer src="/static/js/canvas-special-nodes.js?v=2026.09.17.depth-video-compare.1&feature=pose-replicate-v3.5&feature=pose-replicate-batch.1&feature=pose-replicate-top-ports.1&feature=pose-replicate-auto-ratio.1&feature=depth-map-node.1&feature=depth-mode.1&storyboard-batch=20260909&scene-match=1&fabric-detail=1"></script>
     <script defer src="/static/js/canvas-building-multi-view.js?v=2026.08.22.building-mode.3"></script>
     <script defer src="/static/js/canvas-ecommerce-nodes.js?v=2026.08.18.ecommerce-workflow.1&feature=image-ratio-4x5.1"></script>

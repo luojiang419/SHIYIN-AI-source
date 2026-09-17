@@ -81,7 +81,12 @@ def test_depth_mode_settings_and_integrated_tuner_are_available():
         'value="person"',
         'value="professional"',
         'id="openDepthMapTuner"',
+        'id="depthModelPreference"',
+        'value="auto"',
+        'value="quality"',
+        'value="lite"',
         "depth_map_mode:mode",
+        "depth_model_preference:preference",
         "studio-open-depth-map-tuner",
     ):
         assert marker in SETTINGS_HTML + SETTINGS_JS

@@ -17,6 +17,8 @@ DEFAULT_QUICK_SAVE_DIR = ""
 DEFAULT_TOPAZ_VIDEO_INSTALL_DIR = ""
 DEFAULT_DEPTH_MAP_MODE = "person"
 DEPTH_MAP_MODES = frozenset({DEFAULT_DEPTH_MAP_MODE, "professional"})
+DEFAULT_DEPTH_MODEL_PREFERENCE = "auto"
+DEPTH_MODEL_PREFERENCES = frozenset({DEFAULT_DEPTH_MODEL_PREFERENCE, "quality", "lite"})
 DEFAULT_DEPTH_MAP_CONTROLS: dict[str, Any] = {
     "farPoint": 0,
     "nearPoint": 100,
@@ -125,6 +127,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
                 "quick_save_dir": DEFAULT_QUICK_SAVE_DIR,
                 "topaz_video_install_dir": DEFAULT_TOPAZ_VIDEO_INSTALL_DIR,
                 "depth_map_mode": DEFAULT_DEPTH_MAP_MODE,
+                "depth_model_preference": DEFAULT_DEPTH_MODEL_PREFERENCE,
                 "depth_map_controls": DEFAULT_DEPTH_MAP_CONTROLS.copy(),
                 "shortcut_bindings": DEFAULT_SHORTCUT_BINDINGS.copy(),
                 "person_depth_lan_server_enabled": DEFAULT_PERSON_DEPTH_LAN_SERVER_ENABLED,
@@ -152,6 +155,11 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
         value["topaz_video_install_dir"] = str(value.get("topaz_video_install_dir") or "").strip()
         depth_map_mode = str(value.get("depth_map_mode") or DEFAULT_DEPTH_MAP_MODE).strip()
         value["depth_map_mode"] = depth_map_mode if depth_map_mode in DEPTH_MAP_MODES else DEFAULT_DEPTH_MAP_MODE
+        depth_model_preference = str(value.get("depth_model_preference") or DEFAULT_DEPTH_MODEL_PREFERENCE).strip()
+        value["depth_model_preference"] = (
+            depth_model_preference if depth_model_preference in DEPTH_MODEL_PREFERENCES
+            else DEFAULT_DEPTH_MODEL_PREFERENCE
+        )
         value["depth_map_controls"] = _normalize_depth_map_controls(value.get("depth_map_controls"))
         value["shortcut_bindings"] = _normalize_shortcut_bindings(value.get("shortcut_bindings"))
         value["person_depth_lan_server_enabled"] = bool(value.get("person_depth_lan_server_enabled", False))
@@ -179,6 +187,7 @@ def update_app_settings(
     quick_save_dir: str | None = None,
     topaz_video_install_dir: str | None = None,
     depth_map_mode: str | None = None,
+    depth_model_preference: str | None = None,
     depth_map_controls: dict[str, Any] | None = None,
     shortcut_bindings: dict[str, str] | None = None,
     canvas_arrange_spacing: int | None = None,
@@ -188,7 +197,7 @@ def update_app_settings(
     person_depth_lan_port: int | None = None,
     person_depth_lan_source: str | None = None,
 ) -> dict[str, Any]:
-    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and depth_map_mode is None and depth_map_controls is None and shortcut_bindings is None and canvas_arrange_spacing is None and canvas_group_arrange_spacing is None and person_depth_lan_server_enabled is None and person_depth_lan_host is None and person_depth_lan_port is None and person_depth_lan_source is None:
+    if close_behavior is None and generated_output_dir is None and batch_outfit_output_dir is None and quick_save_mode is None and quick_save_dir is None and topaz_video_install_dir is None and depth_map_mode is None and depth_model_preference is None and depth_map_controls is None and shortcut_bindings is None and canvas_arrange_spacing is None and canvas_group_arrange_spacing is None and person_depth_lan_server_enabled is None and person_depth_lan_host is None and person_depth_lan_port is None and person_depth_lan_source is None:
         raise ValueError("没有可保存的软件设置")
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -239,6 +248,11 @@ def update_app_settings(
             if mode not in DEPTH_MAP_MODES:
                 raise ValueError("深度图处理模式必须是 person 或 professional")
             value["depth_map_mode"] = mode
+        if depth_model_preference is not None:
+            preference = str(depth_model_preference or "").strip()
+            if preference not in DEPTH_MODEL_PREFERENCES:
+                raise ValueError("深度模型选择必须是 auto、quality 或 lite")
+            value["depth_model_preference"] = preference
         if depth_map_controls is not None:
             value["depth_map_controls"] = _normalize_depth_map_controls(depth_map_controls)
         if shortcut_bindings is not None:

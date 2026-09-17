@@ -59,3 +59,20 @@ def test_video_depth_service_passes_selected_model_to_worker(tmp_path):
     assert "Small" in service._model_label()
     Manager.selected_variant_id = "quality"
     assert service._model_key() == "vda_base_fp16_relative"
+
+
+def test_video_model_manager_can_switch_manual_variants(tmp_path):
+    manifest = json.loads(Path("canvas_core/video_depth_manifest.json").read_text(encoding="utf-8"))
+    manager = PersonDepthComponentManager(
+        tmp_path / "models", manifest=manifest, component_name="video-depth",
+        capability_provider=lambda: RuntimeCapabilities(
+            "windows", "x86_64", "cuda", gpu_memory_bytes=QUALITY_MIN_GPU_MEMORY_BYTES
+        ),
+        smoke_runner=lambda _command, _root: None,
+    )
+    assert manager.selected_variant_id == "quality"
+    assert manager.select_variant_id("lite") is True
+    assert manager.selected_variant_id == "lite"
+    assert [spec.package_id for spec in manager.specs] == ["vda-small-model"]
+    assert manager.select_variant_id("quality") is True
+    assert manager.selected_variant_id == "quality"

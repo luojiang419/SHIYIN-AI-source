@@ -1503,7 +1503,7 @@
     function activeDepthMapStatus(){ return activeDepthMapMode() === 'professional' ? professionalDepthStatus : personDepthStatus; }
     function activeDepthMapModeLabel(){ return activeDepthMapMode() === 'professional' ? '专业模式' : '人物模式'; }
     function isDepthMapNode(node){ return node?.type === 'depthMap' || node?.specialType === 'depth-map'; }
-    function depthMapSettingsSignature(){ return `${activeDepthMapMode()}|${depthMapControlSignature(depthMapSettings.controls)}`; }
+    function depthMapSettingsSignature(){ return `${activeDepthMapMode()}|${depthMapSettings.modelPreference || 'auto'}|${depthMapControlSignature(depthMapSettings.controls)}`; }
     function notifyDepthMapBindings(options={}){
         personDepthBindings.forEach(binding => {
             const node = binding.node;
@@ -1555,6 +1555,7 @@
                 const previousMode = activeDepthMapMode();
                 depthMapSettings = {
                     mode:data.depth_map_mode === 'professional' ? 'professional' : 'person',
+                    modelPreference:['quality','lite'].includes(data.depth_model_preference) ? data.depth_model_preference : 'auto',
                     controls:normalizeDepthMapControls(data.depth_map_controls || DEFAULT_DEPTH_MAP_CONTROLS)
                 };
                 depthMapSettingsLoaded = true;
@@ -1571,6 +1572,7 @@
         const previousMode = activeDepthMapMode();
         depthMapSettings = {
             mode:data?.mode === 'professional' ? 'professional' : 'person',
+            modelPreference:['quality','lite'].includes(data?.modelPreference) ? data.modelPreference : 'auto',
             controls:normalizeDepthMapControls(data?.controls || DEFAULT_DEPTH_MAP_CONTROLS)
         };
         depthMapSettingsLoaded = true;

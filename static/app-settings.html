@@ -197,7 +197,16 @@
                 </select>
                 <button id="openDepthMapTuner" type="button">深度图参数调整</button>
             </div>
+            <div class="app-settings-depth-row">
+                <label for="depthModelPreference">模型选择</label>
+                <select id="depthModelPreference" disabled>
+                    <option value="auto">自动（按显存选择）</option>
+                    <option value="quality">大模型（质量优先）</option>
+                    <option value="lite">小模型（速度优先）</option>
+                </select>
+            </div>
             <p id="depthMapModeHint" class="app-settings-note">人物模式只提取画面人物；专业模式提取完整画面的相对深度。进入调参时会自动沿用当前模式。</p>
+            <p class="app-settings-note">模型选择同时应用于深度图、深度视频和一键复刻。自动档在 NVIDIA 显存达到 8GB 时使用大模型，否则使用小模型。</p>
         </section>
 
         <section class="app-settings-card" aria-labelledby="personDepthLanTitle">

@@ -679,6 +679,14 @@ async def run_deferred_task_recovery():
         raise
 
 
+def sync_depth_model_preference(config: Optional[Dict[str, Any]] = None):
+    config = config or read_app_config(APP_PATHS.data_root)
+    preference = str(config.get("depth_model_preference") or "auto")
+    selection = select_depth_model_tier(override=preference)
+    VIDEO_DEPTH_MODEL_MANAGER.select_variant_id(selection.tier)
+    return selection
+
+
 async def startup_event():
     global GLOBAL_LOOP, STARTUP_MAINTENANCE_TASK, STARTUP_RECOVERY_TASK
     GLOBAL_LOOP = asyncio.get_running_loop()
@@ -687,6 +695,7 @@ async def startup_event():
     if DEPTH_AUTO_DOWNLOAD_ENABLED:
         DEPTH_MODEL_MANAGER.start_background()
     lan_config = read_app_config(APP_PATHS.data_root)
+    sync_depth_model_preference(lan_config)
     PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
     VIDEO_DEPTH_MODEL_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
     VIDEO_DEPTH_RUNTIME_MANAGER.set_lan_source(str(lan_config.get("person_depth_lan_source") or ""))
@@ -2870,6 +2879,7 @@ class AppSettingsUpdateRequest(BaseModel):
     quick_save_dir: Optional[str] = None
     topaz_video_install_dir: Optional[str] = None
     depth_map_mode: Optional[str] = None
+    depth_model_preference: Optional[str] = None
     depth_map_controls: Optional[Dict[str, Any]] = None
     shortcut_bindings: Optional[Dict[str, str]] = None
     canvas_arrange_spacing: Optional[int] = Field(default=None, ge=0, le=240, strict=True)
@@ -3171,6 +3181,7 @@ def app_settings_response(config: Dict[str, Any]) -> Dict[str, Any]:
         "quick_save_dir": str(config.get("quick_save_dir") or "").strip(),
         "topaz_video_install_dir": str(config.get("topaz_video_install_dir") or "").strip(),
         "depth_map_mode": str(config.get("depth_map_mode") or "person"),
+        "depth_model_preference": str(config.get("depth_model_preference") or "auto"),
         "depth_map_controls": dict(config.get("depth_map_controls") or {}),
         "shortcut_bindings": dict(config.get("shortcut_bindings") or {}),
         "canvas_arrange_spacing": config.get("canvas_arrange_spacing", 56),
@@ -3235,6 +3246,7 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
             quick_save_dir=payload.quick_save_dir,
             topaz_video_install_dir=payload.topaz_video_install_dir,
             depth_map_mode=payload.depth_map_mode,
+            depth_model_preference=payload.depth_model_preference,
             depth_map_controls=payload.depth_map_controls,
             shortcut_bindings=payload.shortcut_bindings,
             canvas_arrange_spacing=payload.canvas_arrange_spacing,
@@ -3249,6 +3261,7 @@ def save_app_settings(payload: AppSettingsUpdateRequest):
     PERSON_DEPTH_COMPONENT_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
     VIDEO_DEPTH_MODEL_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
     VIDEO_DEPTH_RUNTIME_MANAGER.set_lan_source(str(config.get("person_depth_lan_source") or ""))
+    sync_depth_model_preference(config)
     return app_settings_response(config)
 
 
@@ -28401,7 +28414,7 @@ def admin_person_depth_component_status(request: Request):
 @app.get("/api/person-depth/component/status")
 def person_depth_component_status(request: Request):
     request_identity(request)
-    selection = select_depth_model_tier()
+    selection = sync_depth_model_preference()
     if selection.quality:
         status = PERSON_DEPTH_COMPONENT_MANAGER.public_status()
         return {**status, "model_tier": selection.tier, "selection_reason": selection.reason,
@@ -28415,7 +28428,7 @@ def person_depth_component_status(request: Request):
 @app.post("/api/person-depth/component/install", status_code=202)
 def install_person_depth_component(request: Request):
     require_admin(request)
-    selection = select_depth_model_tier()
+    selection = sync_depth_model_preference()
     manager = PERSON_DEPTH_COMPONENT_MANAGER if selection.quality else DEPTH_MODEL_MANAGER
     started = manager.start_background()
     status = person_depth_component_status(request)
@@ -28432,6 +28445,7 @@ def retry_person_depth_component(request: Request):
 @app.get("/api/video-depth/status")
 def video_depth_status(request: Request):
     request_identity(request)
+    sync_depth_model_preference()
     return VIDEO_DEPTH_TASKS.status()
 
 
@@ -28494,6 +28508,7 @@ def create_video_depth_task(payload: VideoDepthTaskRequest, request: Request):
     if not source:
         raise HTTPException(status_code=400, detail="深度视频输入必须是主应用中的本地视频")
     try:
+        sync_depth_model_preference()
         return VIDEO_DEPTH_TASKS.create(source, os.fspath(OUTPUT_OUTPUT_DIR), media_url_from_path, current_account_id())
     except VideoDepthUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -28566,7 +28581,7 @@ async def estimate_person_depth(
         raise HTTPException(status_code=400, detail="高精度人物深度输入图片无法读取") from exc
     if width * height > 60_000_000:
         raise HTTPException(status_code=413, detail="高精度人物深度输入图片像素不能超过 6000 万")
-    selection = select_depth_model_tier()
+    selection = sync_depth_model_preference()
     status = (PERSON_DEPTH_COMPONENT_MANAGER.public_status() if selection.quality
               else DEPTH_MODEL_MANAGER.public_status())
     if not status.get("ready"):

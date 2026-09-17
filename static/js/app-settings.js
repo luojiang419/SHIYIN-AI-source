@@ -22,6 +22,7 @@
     const chooseQuickSaveDirectory = document.getElementById('chooseQuickSaveDirectory');
     const quickSaveHint = document.getElementById('quickSaveHint');
     const depthMapMode = document.getElementById('depthMapMode');
+    const depthModelPreference = document.getElementById('depthModelPreference');
     const depthMapStatus = document.getElementById('depthMapStatus');
     const openDepthMapTuner = document.getElementById('openDepthMapTuner');
     const personDepthLanServerEnabled = document.getElementById('personDepthLanServerEnabled');
@@ -72,6 +73,7 @@
     let currentQuickSaveMode = 'manual';
     let currentQuickSaveDirectory = '';
     let currentDepthMapMode = 'person';
+    let currentDepthModelPreference = 'auto';
     let currentDepthMapControls = {};
     let quickSaveStatusTimer = null;
     let statusTimer = null;
@@ -469,15 +471,17 @@
     }
 
     function broadcastDepthMapSettings(){
-        const message = {type:'depth-map-settings:changed', mode:currentDepthMapMode, controls:{...currentDepthMapControls}, updatedAt:Date.now()};
+        const message = {type:'depth-map-settings:changed', mode:currentDepthMapMode, modelPreference:currentDepthModelPreference, controls:{...currentDepthMapControls}, updatedAt:Date.now()};
         try { window.parent?.postMessage(message, location.origin); } catch(error) {}
         try { window.dispatchEvent(new CustomEvent('depth-map-settings:changed', {detail:message})); } catch(error) {}
     }
 
     function applyDepthMapSettings(data){
         currentDepthMapMode = data?.depth_map_mode === 'professional' ? 'professional' : 'person';
+        currentDepthModelPreference = ['quality','lite'].includes(data?.depth_model_preference) ? data.depth_model_preference : 'auto';
         currentDepthMapControls = data?.depth_map_controls && typeof data.depth_map_controls === 'object' ? {...data.depth_map_controls} : {};
         if(depthMapMode) depthMapMode.value = currentDepthMapMode;
+        if(depthModelPreference) depthModelPreference.value = currentDepthModelPreference;
         broadcastDepthMapSettings();
     }
 
@@ -684,6 +688,7 @@
             setBatchOutfitOutputBusy(false);
             setQuickSaveBusy(false);
             if(depthMapMode) depthMapMode.disabled = false;
+            if(depthModelPreference) depthModelPreference.disabled = false;
         }
     }
 
@@ -808,6 +813,22 @@
         }
     }
 
+    async function saveDepthModelPreference(preference){
+        const previous = currentDepthModelPreference;
+        if(depthModelPreference) depthModelPreference.disabled = true;
+        try {
+            const data = await saveSettings({depth_model_preference:preference});
+            applyDepthMapSettings(data);
+            showDepthMapStatus('模型选择已保存并立即生效');
+        } catch(error) {
+            currentDepthModelPreference = previous;
+            if(depthModelPreference) depthModelPreference.value = previous;
+            showDepthMapStatus(`保存失败：${error.message}`, true);
+        } finally {
+            if(depthModelPreference) depthModelPreference.disabled = false;
+        }
+    }
+
     function openIntegratedDepthMapTuner(){
         const message = {type:'studio-open-depth-map-tuner', mode:currentDepthMapMode};
         if(window.parent && window.parent !== window){
@@ -892,6 +913,7 @@
         else selectQuickSaveMode(currentQuickSaveMode);
     });
     depthMapMode?.addEventListener('change', () => saveDepthMapMode(depthMapMode.value));
+    depthModelPreference?.addEventListener('change', () => saveDepthModelPreference(depthModelPreference.value));
     openDepthMapTuner?.addEventListener('click', openIntegratedDepthMapTuner);
     savePersonDepthLan?.addEventListener('click', savePersonDepthLanSettings);
     chooseQuickSaveDirectory?.addEventListener('click', chooseQuickSaveFolder);

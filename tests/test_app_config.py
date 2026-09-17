@@ -19,6 +19,7 @@ class AppConfigTests(unittest.TestCase):
             self.assertEqual(settings["quick_save_dir"], "")
             self.assertEqual(settings["topaz_video_install_dir"], "")
             self.assertEqual(settings["depth_map_mode"], "person")
+            self.assertEqual(settings["depth_model_preference"], "auto")
             self.assertEqual(settings["depth_map_controls"]["contrast"], 100)
             self.assertEqual(settings["shortcut_bindings"], {})
 
@@ -155,6 +156,16 @@ class AppConfigTests(unittest.TestCase):
                 update_app_settings(data_root, depth_map_mode="scene")
             with self.assertRaisesRegex(ValueError, "必须是数字"):
                 update_app_settings(data_root, depth_map_controls={"contrast": "high"})
+
+    def test_depth_model_preference_is_persisted_and_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            self.assertEqual(update_app_settings(data_root, depth_model_preference="lite")["depth_model_preference"], "lite")
+            self.assertEqual(read_app_config(data_root)["depth_model_preference"], "lite")
+            self.assertEqual(update_app_settings(data_root, depth_model_preference="quality")["depth_model_preference"], "quality")
+            self.assertEqual(update_app_settings(data_root, depth_model_preference="auto")["depth_model_preference"], "auto")
+            with self.assertRaisesRegex(ValueError, "auto、quality 或 lite"):
+                update_app_settings(data_root, depth_model_preference="fast")
 
     def test_person_depth_lan_settings_are_persisted_and_validated(self):
         with tempfile.TemporaryDirectory() as tmp:

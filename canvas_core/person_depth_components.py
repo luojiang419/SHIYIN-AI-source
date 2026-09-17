@@ -171,6 +171,37 @@ class PersonDepthComponentManager:
                 message=f"{self.display_name}尚未安装",
             )
 
+    def select_variant_id(self, variant_id: str) -> bool:
+        """Switch a schema v2 component to an explicit variant for subsequent installs."""
+        variants = self.manifest.get("variants")
+        if int(self.manifest.get("schema_version") or 1) != 2 or not isinstance(variants, list):
+            return False
+        selected = next(
+            (item for item in variants if isinstance(item, Mapping) and str(item.get("id") or "") == variant_id),
+            None,
+        )
+        if selected is None:
+            raise PersonDepthManifestError(f"组件不存在模型变体：{variant_id}")
+        with self._state_lock:
+            if self._thread and self._thread.is_alive():
+                return False
+            if self.selected_variant_id == variant_id:
+                return True
+            self._select_public_variant(selected)
+            ready = self.verify_installed(run_smoke=False)
+            total = sum(item.size for item in self.specs)
+            self._state.update(
+                state="ready" if ready else "idle",
+                ready=ready,
+                install_available=self._install_available(),
+                downloaded_bytes=total if ready else 0,
+                total_bytes=total,
+                message=f"{self.display_name}已就绪" if ready else f"{self.display_name}尚未安装",
+                error="",
+                updated_at=int(time.time() * 1000),
+            )
+        return True
+
     @staticmethod
     def _read_manifest(path: Path) -> dict[str, object]:
         payload = json.loads(path.read_text(encoding="utf-8"))

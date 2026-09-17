@@ -1044,7 +1044,7 @@ const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'film-storyboard', label:'分镜合成', icon:'panels-top-left', action:() => addFilmNode('film-storyboard')},
     {id:'storyboardMerge', label:'拼图', icon:'columns-3', action:() => addStoryboardMergeNode()},
     {id:'film-video', label:'影视视频', icon:'clapperboard', action:() => addFilmNode('film-video')},
-    {id:'topazVideo', label:'Topaz 高清', icon:'scan-line', action:() => addTopazVideoNode()},
+    {id:'topazVideo', label:'Topaz 视频超分', icon:'scan-line', action:() => addTopazVideoNode()},
     {id:'panorama', label:'720°取景器', icon:'scan-line', action:() => addPanoramaNode()},
     {id:'director3d', label:'3D导演台', icon:'clapperboard', action:() => addDirector3dNode()},
     {id:'dwpose', label:'动作提取', icon:'person-standing', action:() => addDWPoseNode()},
@@ -5449,6 +5449,23 @@ function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
     if(!node) return [];
     if(state.originKind === 'out'){
+        if(node.type === 'video') return [
+            {type:'video-clip', label:'视频截取', icon:'scissors'},
+            {type:'video-frames', label:'视频抽帧', icon:'images'},
+            {type:'depthVideo', label:'深度视频', icon:'scan'},
+            {type:'video-screenshot', label:'截图', icon:'camera'},
+            {type:'topazVideo', label:'TOPAZ 视频超分', icon:'scan-line'}
+        ];
+        if(node.type === 'generator') return [
+            {type:'generator', label:'图片生成', icon:'wand-sparkles'},
+            {type:'video', label:'视频生成', icon:'clapperboard'},
+            {type:'lookbook', label:'lookbook', icon:'book-open', inputRole:'lookbook-person'},
+            {type:'depthMap', label:'深度图', icon:'scan'},
+            {type:'poseReplicate', label:'一键复刻', icon:'refresh-cw', inputRole:'pose-reference'},
+            {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
+            {type:'batchGenerator', label:'批量处理', icon:'layers-3'},
+            {type:'llm', label:'AI助手', icon:'message-square-text'}
+        ];
         if(node.type === 'film-prepare-assets') return [{type:'film-confirm-shots',label:'确认镜头',icon:'list-checks'}];
         if(node.type === 'film-confirm-shots') return [{type:'film-video',label:'视频生成',icon:'clapperboard'}];
         if(node.type === 'poseReplicate'){
@@ -5467,7 +5484,7 @@ function linkCreateOptions(state){
             {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
             {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler'},
                 {type:'film-video', label:'影视视频', icon:'clapperboard'},
-                {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'},
+                {type:'topazVideo', label:'Topaz 视频超分', icon:'scan-line'},
                 ...(node.type === 'output' ? [] : [{type:'llm', label:'AI助手', icon:'message-square-text'}])
             ];
         }
@@ -5515,7 +5532,20 @@ function linkAdvertisingAllowsFilm(){
 }
 function imageLinkAdvertisingGroups(state){
     const origin = nodes.find(node => node.id === state.originId);
-    if(state.originKind !== 'out' || origin?.type !== 'image' || (origin.url && mediaKindForNode(origin) !== 'image')) return [];
+    if(state.originKind !== 'out' || !['image','generator'].includes(origin?.type) || (origin.type === 'image' && origin.url && mediaKindForNode(origin) !== 'image')) return [];
+    if(origin.type === 'generator') return linkAdvertisingAllowsFilm() ? [{label:'影视制作', icon:'clapperboard', items:[
+        {type:'film-workflow', label:'创建影视工作流', icon:'workflow'},
+        {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left', inputRole:'actor-0'},
+        {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
+        {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler', inputRole:'source'},
+        {type:'film-video', label:'生成视频', icon:'clapperboard', inputRole:'storyboard'},
+        {type:'linkfox-video', label:'LinkFox视频生成', icon:'sparkles', inputRole:'reference-image'},
+        {type:'dwpose', label:'动作提取', icon:'person-standing'},
+        {type:'depthMap', label:'深度图', icon:'scan'},
+        {type:'poseReplicate', label:'一键复刻', icon:'refresh-cw', inputRole:'pose-reference'},
+        {type:'multiView', label:'创建三视图', icon:'panels-top-left', inputRole:'model-front'},
+        {type:'panorama', label:'720°取景器', icon:'scan-line'}
+    ]}] : [];
     return [
         {label:'平面广告', icon:'book-open', items:[
             {type:'lookbook', label:'Lookbook 平面广告', icon:'book-open', inputRole:'lookbook-person'}
@@ -5596,7 +5626,9 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY, inputRole=''
     linkCreateMenu.querySelectorAll('[data-link-create]').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
-            createLinkedNode(btn.dataset.linkCreate, btn.dataset.linkInputRole || '');
+            if(['video-clip','video-frames','video-screenshot'].includes(btn.dataset.linkCreate)){
+                openLinkedVideoTool(btn.dataset.linkCreate);
+            } else createLinkedNode(btn.dataset.linkCreate, btn.dataset.linkInputRole || '');
         };
     });
     refreshIcons(linkCreateMenu);
@@ -5612,7 +5644,7 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
     const outputOptions = filterCanvasWorkModeItems([
         {type:'output', label:'Output', icon:'circle-dot'},
         ...(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type) ? [
-            {type:'topazVideo', label:'Topaz 高清放大', icon:'scan-line'}
+            {type:'topazVideo', label:'Topaz 视频超分', icon:'scan-line'}
         ] : []),
         ...(CANVAS_IMAGE_OUTPUT_TYPES.includes(node.type) ? [
             {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
@@ -6180,6 +6212,19 @@ function createLinkedNode(type, targetInputRole=''){
         });
         commitClassicHistoryTransaction(historyTx);
     }
+}
+function openLinkedVideoTool(type){
+    const sourceId = linkCreateState?.originId;
+    closeLinkCreateMenu();
+    if(!sourceId) return;
+    const source = nodes.find(node => node.id === sourceId);
+    if(!mediaRefsFromNode(source).some(ref => ref.url && mediaKindForRef(ref) === 'video')){
+        showErrorModal('请先生成视频，再使用此操作。', '视频输出');
+        return;
+    }
+    if(type === 'video-clip') openVideoClipEditor(sourceId);
+    else if(type === 'video-frames') openVideoFrameExtractor(sourceId);
+    else if(type === 'video-screenshot') openVideoScreenshotEditor(sourceId);
 }
 function createNodeByType(type, point){
     if(window.CanvasFilmWorkflow?.isStep(type)) return addNode({id:uid('film'),type,...(point || defaultPoint()),w:960});
@@ -11564,7 +11609,7 @@ function renderNode(node){
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmWorkflow?.title(node.type) || window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
-    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 高清放大' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 视频超分' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
@@ -12306,13 +12351,17 @@ function createResultCompareFromImage(sourceNode){
 
 function storyboardMergeEntries(node){
     if(!node) return [];
-    return connections.filter(connection => connection.to === node.id).map((connection, index) => {
+    return connections.filter(connection => connection.to === node.id).flatMap((connection, index) => {
         const source = nodes.find(item => item.id === connection.from);
-        const ref = source?.type === 'image' && source.url && mediaKindForNode(source) === 'image'
-            ? {url:source.url, name:source.name || `图片 ${index + 1}`, sourceId:source.id}
-            : null;
-        return {connection, source, ref, index};
-    }).filter(entry => entry.source?.type === 'image');
+        if(source?.type === 'image'){
+            const ref = source.url && mediaKindForNode(source) === 'image'
+                ? {url:source.url, name:source.name || `图片 ${index + 1}`, sourceId:source.id} : null;
+            return [{connection, source, ref, index}];
+        }
+        if(source?.type !== 'generator') return [];
+        return mediaRefsFromNode(source).filter(ref => ref?.url && mediaKindForRef(ref) === 'image')
+            .map(ref => ({connection, source, ref:{...ref, sourceId:source.id}, index}));
+    });
 }
 
 function storyboardMergeBodyHtml(node){
@@ -14305,6 +14354,7 @@ function llmInputImages(node){
     const urls = [];
     connections.filter(c => c.to === node.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean).forEach(n => {
         if(n.type === 'image' && n.url && mediaKindForNode(n) === 'image') urls.push(n.url);
+        if(n.type === 'generator') mediaRefsFromNode(n).filter(ref => ref?.url && mediaKindForRef(ref) === 'image').forEach(ref => urls.push(ref.url));
         if(n.type === 'output' && (n.images||[]).length){
             const last = [...n.images].reverse().map(outputUrlValue).find(url => url && !isVideoUrl(url) && !isAudioUrl(url));
             if(last) urls.push(last);
@@ -20764,9 +20814,15 @@ function bindVideoClipEditorControls(){
 function openVideoClipEditor(nodeId){
     return openVideoClipEditorMode(nodeId, 'clip');
 }
+function videoToolSource(node){
+    if(!node) return null;
+    if(node.type === 'image' && mediaKindForNode(node) === 'video' && node.url) return node;
+    const ref = mediaRefsFromNode(node).find(item => item?.url && mediaKindForRef(item) === 'video');
+    return ref ? {...node, url:ref.url, name:ref.name || node.name || '视频'} : null;
+}
 async function openVideoClipEditorMode(nodeId, mode='clip'){
-    const node = nodes.find(item => item.id === nodeId);
-    if(!node || node.type !== 'image' || mediaKindForNode(node) !== 'video' || !node.url) return;
+    const node = videoToolSource(nodes.find(item => item.id === nodeId));
+    if(!node) return;
     const sequence = ++videoClipOpenSequence;
     const screenshot = mode === 'screenshot';
     videoClipEditor = {nodeId:node.id, sourceUrl:node.url, duration:0, width:0, height:0, fps:0, audio:false, start:0, end:0, busy:false, mode:screenshot ? 'screenshot' : 'clip'};
@@ -20872,6 +20928,7 @@ function createVideoFrameGroupFromResult(result, sourceNode){
     };
     nodes.push(group);
     connections.push({id:uid('c'), from:sourceNode.id, to:group.id, kind:'derived', derivedOperation:'video-frame-extraction'});
+    markClassicConnectionStructureDirty();
     selected.clear();
     selected.add(group.id);
     return group;
@@ -21140,9 +21197,12 @@ function addVideoClipNodeFromResult(result, sourceNode){
         clipSourceUrl:result.source_url || sourceNode.url,
         clipStart:Number(result.start || 0), clipEnd:Number(result.end || 0),
         duration:Number(result.duration || 0), natural_w:Number(result.width || 0), natural_h:Number(result.height || 0),
-        clipResolution:result.resolution || '1080p'
+        clipResolution:result.resolution || '1080p',
+        sourceVideoNodeId:sourceNode.id, derivedOperation:'video-clip'
     };
     nodes.push(clip);
+    connections.push({id:uid('c'), from:sourceNode.id, to:clip.id, kind:'derived', derivedOperation:'video-clip'});
+    markClassicConnectionStructureDirty();
     selected.clear();
     selected.add(clip.id);
     render();
@@ -21174,6 +21234,8 @@ async function captureVideoScreenshot(state, sourceNode){
         screenshotTimestampMs:Math.round(Number(video.currentTime || 0) * 1000), derivedOperation:'video-screenshot'
     };
     nodes.push(image);
+    connections.push({id:uid('c'), from:sourceNode.id, to:image.id, kind:'derived', derivedOperation:'video-screenshot'});
+    markClassicConnectionStructureDirty();
     selected.clear();
     selected.add(image.id);
     render();
@@ -21182,7 +21244,8 @@ async function captureVideoScreenshot(state, sourceNode){
 }
 async function submitVideoClip(){
     const state = videoClipEditor;
-    const sourceNode = nodes.find(item => item.id === state?.nodeId);
+    const currentSource = videoToolSource(nodes.find(item => item.id === state?.nodeId));
+    const sourceNode = currentSource && {...currentSource, url:state.sourceUrl};
     if(!state || !sourceNode || state.busy || !canvas?.id) return;
     if(state.mode === 'screenshot'){
         try {
@@ -21264,8 +21327,8 @@ function closeVideoFrameExtractor(force=false){
     setVideoFrameStatus('');
 }
 async function openVideoFrameExtractor(nodeId){
-    const node = nodes.find(item => item.id === nodeId);
-    if(!node || mediaKindForNode(node) !== 'video' || !node.url || !canvas?.id) return;
+    const node = videoToolSource(nodes.find(item => item.id === nodeId));
+    if(!node || !canvas?.id) return;
     closeVideoClipEditor();
     videoFrameOpenSequence += 1;
     const sequence = videoFrameOpenSequence;
@@ -21319,7 +21382,8 @@ async function pollVideoFrameTask(taskId, sequence){
         if(task.status === 'succeeded'){
             videoFrameEditor.busy = false;
             videoFrameEditor.result = task.result || null;
-            const sourceNode = nodes.find(item => item.id === videoFrameEditor.nodeId);
+            const currentSource = videoToolSource(nodes.find(item => item.id === videoFrameEditor.nodeId));
+            const sourceNode = currentSource && {...currentSource, url:videoFrameEditor.sourceUrl};
             if(sourceNode && task.result?.frames?.length){
                 createVideoFrameGroupFromResult(task.result, sourceNode);
                 render();
@@ -22939,7 +23003,7 @@ function startLink(e, originId, originKind, originRole=''){
                 patchCanvasNodeCreates([], [toId]);
             }
         } else if(originKind === 'out'){
-            if(source && CANVAS_GENERATOR_TYPES.includes(source.type)){
+            if(source && CANVAS_GENERATOR_TYPES.includes(source.type) && !['generator','video'].includes(source.type)){
                 const p = screenToWorld(e2.clientX, e2.clientY);
                 pushUndo();
                 const out = {id:uid('out'), type:'output', x:p.x, y:p.y - 63, images:[]};
@@ -23014,9 +23078,11 @@ function canConnect(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    if(['video-clip','video-screenshot','video-frame-extraction'].includes(to.derivedOperation)
+        && (to.sourceVideoNodeId === from.id || to.derivedFromNodeId === from.id)) return true;
     if(to.type === 'linkfox-video'){
         return ['', 'reference-image', 'last-frame'].includes(inputRole)
-            && mediaRefsFromNode(from).some(ref=>ref?.url && mediaKindForRef(ref)==='image')
+            && (from.type === 'generator' || mediaRefsFromNode(from).some(ref=>ref?.url && mediaKindForRef(ref)==='image'))
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     const workflowConnection = window.CanvasFilmWorkflow?.canConnect(from,to,inputRole,nodes,connections);
@@ -23053,7 +23119,7 @@ function canConnect(fromId, toId, inputRole=''){
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'storyboardMerge'){
-        return from.type === 'image' && (mediaKindForNode(from) === 'image' || !from.url) && !wouldCreateGeneratorCycle(fromId,toId);
+        return (from.type === 'generator' || (from.type === 'image' && (mediaKindForNode(from) === 'image' || !from.url))) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(from.type === 'film-storyboard' || from.type === 'film-video' || from.type === 'film-line-art'){
         if(to.type === 'output') return true;
@@ -23096,12 +23162,12 @@ function canConnect(fromId, toId, inputRole=''){
         return ['video','generator','rh','ecom-video','lookbook'].includes(to.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(from.type === 'ecom-video') return to.type === 'output';
-    if(to.type === 'depthVideo') return mediaRefsFromNode(from).some(ref => ref?.url && ref.kind === 'video');
+    if(to.type === 'depthVideo') return from.type === 'video' || mediaRefsFromNode(from).some(ref => ref?.url && ref.kind === 'video');
     if(from.type === 'depthVideo') return to.type === 'output' || to.type === 'topazVideo' || CANVAS_GENERATOR_TYPES.includes(to.type);
     const specialTypes = ['panorama','dwpose','depthMap','angle'];
     if(to.type === 'poseReplicate'){
         if(!['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole)) return false;
-        return ['image','group','output','panorama','dwpose','depthMap','angle'].includes(from.type);
+        return ['image','group','output','panorama','dwpose','depthMap','angle','generator'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';
     if(from.type === 'director3d') { if(to.type === 'output') return true; if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId); return false; }
@@ -23112,6 +23178,7 @@ function canConnect(fromId, toId, inputRole=''){
     }
     if(CANVAS_GENERATOR_TYPES.includes(from.type)){
         if(to.type === 'output') return true;
+        if(from.type === 'generator' && to.type === 'llm') return !wouldCreateGeneratorCycle(fromId,toId);
         if(specialTypes.includes(to.type) && CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type)) return true;
         if(CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type) && CANVAS_GENERATOR_TYPES.includes(to.type)){
             return !wouldCreateGeneratorCycle(fromId, toId);

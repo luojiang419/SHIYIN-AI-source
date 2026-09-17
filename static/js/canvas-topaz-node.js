@@ -206,7 +206,7 @@ function renderTopazVideoBody(node){
         ${node.running ? `<div class="topaz-progress"><span style="width:${progress}%"></span></div>` : ''}
         <div class="topaz-status ${node.runStatus === 'failed' ? 'failed' : ''}">${escapeHtml(statusText)}</div>
         <div class="topaz-node-actions">
-            <button type="button" class="gen-btn ${node.running ? 'running' : ''}" data-topaz-run ${node.running || !ready ? 'disabled' : ''}><i data-lucide="sparkles"></i><span>${node.running ? topazText('处理中','Processing') : topazText('高清放大','Upscale')}</span></button>
+            <button type="button" class="gen-btn ${node.running ? 'running' : ''}" data-topaz-run ${node.running || !ready ? 'disabled' : ''}><i data-lucide="sparkles"></i><span>${node.running ? topazText('处理中','Processing') : topazText('视频超分','Upscale')}</span></button>
             ${node.running ? `<button type="button" class="tool-btn topaz-cancel" data-topaz-cancel><i data-lucide="square"></i><span>${topazText('取消','Cancel')}</span></button>` : ''}
             <button type="button" class="tool-btn topaz-advanced-trigger" data-topaz-advanced-open><i data-lucide="sliders-horizontal"></i><span>${topazText('高级设置','Advanced')}</span></button>
         </div>`;
@@ -328,7 +328,7 @@ async function runTopazVideoNode(nodeId, options={}){
     normalizeTopazVideoNode(node);
     const input = topazVideoRefs(node)[0];
     if(!input?.url){
-        if(options.cascade) throw new Error(topazText('Topaz 高清放大需要一个视频输入','Topaz upscaling requires one video input'));
+        if(options.cascade) throw new Error(topazText('Topaz 视频超分需要一个视频输入','Topaz upscaling requires one video input'));
         showErrorModal(topazText('请先连接一个视频节点或视频素材。','Connect a video node or video asset first.'), topazText('缺少视频输入','Missing video input'));
         return;
     }
@@ -362,7 +362,7 @@ async function runTopazVideoNode(nodeId, options={}){
         refreshNodes([node.id]);
         scheduleSave();
         if(options.cascade) throw error;
-        showErrorModal(node.runError, topazText('Topaz 高清放大失败','Topaz upscale failed'));
+        showErrorModal(node.runError, topazText('Topaz 视频超分失败','Topaz upscale failed'));
         return 'failed';
     }
 }

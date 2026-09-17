@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>输出端口拉线快捷菜单 · 示意图</title>
+  <style>
+    :root { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #252b30; background: #f3f5f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button { font: inherit; cursor: pointer; }
+    .topbar { height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e0e5e4; }
+    .topbar strong { font-size: 15px; }
+    .topbar span { color: #73807d; font-size: 12px; }
+    .mode { display: flex; gap: 3px; padding: 4px; background: #e7eceb; border-radius: 8px; }
+    .mode button { border: 0; border-radius: 5px; padding: 8px 15px; background: transparent; color: #66736f; font-size: 12px; font-weight: 700; }
+    .mode button.active { background: #fff; color: #202c2b; box-shadow: 0 1px 4px #1b39301c; }
+    .workspace { position: relative; min-height: calc(100vh - 58px); overflow: hidden; background-color: #f7f8f7; background-image: radial-gradient(#cfd7d4 0.8px, transparent 0.8px); background-size: 20px 20px; }
+    .stage { position: relative; width: min(1100px, 100%); height: 680px; margin: 0 auto; }
+    .label { position: absolute; left: 28px; top: 26px; color: #7c8985; font-size: 11px; font-weight: 700; }
+    .node { position: absolute; top: 178px; left: 65px; width: 262px; height: 222px; border: 1px solid #dce4e1; border-radius: 7px; background: #fff; box-shadow: 0 10px 30px #1f3d321a; }
+    .node-head { height: 43px; display: flex; align-items: center; gap: 9px; padding: 0 14px; border-bottom: 1px solid #e8edeb; font-size: 12px; font-weight: 800; }
+    .node-head .node-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; background: #dcf2e9; color: #287c5e; font-size: 13px; }
+    .preview { height: 135px; margin: 13px; display: grid; place-items: center; border-radius: 5px; border: 1px solid #e1e8e5; background: linear-gradient(130deg, #d7e3e0, #a4bcb5 48%, #e5ddc8); color: #415b53; font-size: 12px; font-weight: 700; }
+    .node.video .preview { background: linear-gradient(140deg, #273b3e, #557476 52%, #a8aa91); color: #fff; }
+    .port { position: absolute; top: 103px; right: -8px; width: 16px; height: 16px; border-radius: 50%; background: #2e9e70; border: 3px solid #fff; box-shadow: 0 0 0 2px #2e9e70; }
+    .wire { position: absolute; left: 327px; top: 289px; width: 88px; height: 2px; background: #389d73; }
+    .wire::after { content: ""; position: absolute; right: -3px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: #389d73; }
+    .menu { position: absolute; top: 148px; left: 414px; width: 218px; padding: 8px; border: 1px solid #dfe5e2; border-radius: 8px; background: #fff; box-shadow: 0 16px 42px #1b3d3129; }
+    .menu-title { padding: 8px 9px 10px; color: #87938e; font-size: 10px; font-weight: 800; }
+    .item { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 0; border-radius: 5px; background: transparent; color: #3c4844; text-align: left; font-size: 12px; font-weight: 700; }
+    .item:hover, .item.active { background: #eaf5ef; color: #147651; }
+    .item .glyph { width: 22px; height: 22px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 5px; background: #edf1ef; color: #647a70; font-size: 12px; }
+    .item:hover .glyph, .item.active .glyph { background: #d7eddf; color: #147651; }
+    .item .arrow { margin-left: auto; font-size: 16px; color: #8c9b95; }
+    .submenu { position: absolute; top: 16px; left: calc(100% + 8px); width: 216px; max-height: 470px; overflow-y: auto; padding: 8px; border: 1px solid #dfe5e2; border-radius: 8px; background: #fff; box-shadow: 0 16px 42px #1b3d3129; display: none; }
+    .submenu.open { display: block; }
+    .result { position: absolute; left: 785px; top: 211px; width: 245px; border: 1px solid #cae2d4; border-radius: 7px; background: #fff; box-shadow: 0 10px 30px #1f3d3212; display: none; }
+    .result.visible { display: block; }
+    .result::before { content: ""; position: absolute; top: 63px; left: -34px; width: 33px; height: 2px; background: #389d73; }
+    .result::after { content: ""; position: absolute; top: 57px; left: -7px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #389d73; background: white; }
+    .result .node-head { border-bottom: 0; }
+    .result-body { padding: 3px 14px 16px; color: #788781; font-size: 11px; line-height: 1.6; }
+    .foot { position: absolute; left: 28px; bottom: 22px; color: #83918a; font-size: 11px; }
+    @media (max-width: 850px) { .topbar { padding: 0 12px; } .topbar span { display: none; } .stage { width: 850px; transform: scale(.76); transform-origin: top left; } .workspace { overflow-x: auto; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div><strong>输出端口拉线快捷菜单</strong> <span>交互示意 · 仅用于确认，不改动实际画布</span></div>
+    <div class="mode" role="tablist" aria-label="节点类型">
+      <button type="button" class="active" data-mode="video" role="tab" aria-selected="true">视频生成节点</button>
+      <button type="button" data-mode="image" role="tab" aria-selected="false">图片生成节点</button>
+    </div>
+  </header>
+  <main class="workspace"><div class="stage">
+    <div class="label">画布 / 输出端口拖线后松开</div>
+    <div class="node video" id="source"><div class="node-head"><span class="node-icon" id="sourceIcon">▶</span><span id="sourceName">视频生成</span></div><div class="preview" id="sourcePreview">生成的视频</div><span class="port" aria-label="输出端口"></span></div>
+    <div class="wire" aria-hidden="true"></div>
+    <div class="menu" id="menu" role="menu" aria-label="输出端口快捷菜单"><div class="menu-title" id="menuTitle">视频输出 · 添加并连接</div><div id="items"></div>
+      <div class="submenu" id="submenu" role="menu" aria-label="影视制作二级菜单"></div>
+    </div>
+    <div class="result" id="result" aria-live="polite"><div class="node-head"><span class="node-icon">✓</span><span id="resultName"></span></div><div class="result-body">选择后自动创建对应节点，并连接当前输出端口。</div></div>
+    <div class="foot">点击菜单项查看连接预览；切换到图片生成节点并悬停或点击“影视制作”查看二级菜单。</div>
+  </div></main>
+  <script>
+    const videoItems = [
+      ['视频截取', '✂'], ['视频抽帧', '▤'], ['深度视频', '◩'], ['截图', '▣'], ['TOPAZ 视频超分', '↗']
+    ];
+    const imageItems = [
+      ['图片生成', '▧'], ['视频生成', '▶'], ['lookbook', '▤'], ['深度图', '◩'],
+      ['一键复刻', '↺'], ['拼图', '▦'], ['批量处理', '≡'], ['AI助手', '✦'], ['影视制作', '▷']
+    ];
+    const filmItems = [
+      ['创建影视工作流', '◇'], ['分镜合成', '▦'], ['拼图', '▤'], ['生成线稿分镜', '✎'],
+      ['生成视频', '▶'], ['LinkFox视频生成', '✦'], ['动作提取', '♙'], ['深度图', '◩'],
+      ['一键复刻', '↺'], ['创建三视图', '▧'], ['720°取景器', '◎']
+    ];
+    let currentMode = 'video';
+    const items = document.getElementById('items');
+    const submenu = document.getElementById('submenu');
+    const result = document.getElementById('result');
+    function button(label, icon, film = false) {
+      const el = document.createElement('button');
+      el.type = 'button'; el.className = 'item'; el.setAttribute('role', 'menuitem');
+      el.innerHTML = `<span class="glyph">${icon}</span><span>${label}</span>${film ? '<span class="arrow">›</span>' : ''}`;
+      if (film) {
+        el.setAttribute('aria-haspopup', 'menu'); el.setAttribute('aria-expanded', 'false');
+        el.addEventListener('mouseenter', () => openFilm(el));
+        el.addEventListener('focus', () => openFilm(el));
+        el.addEventListener('click', () => openFilm(el));
+      } else el.addEventListener('click', () => {
+        document.querySelectorAll('.item.active').forEach(item => item.classList.remove('active'));
+        el.classList.add('active');
+        submenu.classList.remove('open');
+        result.classList.add('visible');
+        document.getElementById('resultName').textContent = label;
+      });
+      return el;
+    }
+    function openFilm(trigger) {
+      submenu.classList.add('open'); trigger.setAttribute('aria-expanded', 'true');
+      submenu.replaceChildren(...filmItems.map(([label, icon]) => button(label, icon)));
+    }
+    function render(mode) {
+      currentMode = mode;
+      document.querySelectorAll('[data-mode]').forEach(tab => {
+        const selected = tab.dataset.mode === mode;
+        tab.classList.toggle('active', selected); tab.setAttribute('aria-selected', String(selected));
+      });
+      document.getElementById('source').classList.toggle('video', mode === 'video');
+      document.getElementById('sourceIcon').textContent = mode === 'video' ? '▶' : '▧';
+      document.getElementById('sourceName').textContent = mode === 'video' ? '视频生成' : '图片生成';
+      document.getElementById('sourcePreview').textContent = mode === 'video' ? '生成的视频' : '生成的图片';
+      document.getElementById('menuTitle').textContent = mode === 'video' ? '视频输出 · 添加并连接' : '图片输出 · 添加并连接';
+      items.replaceChildren(...(mode === 'video' ? videoItems : imageItems).map(([label, icon]) => button(label, icon, label === '影视制作')));
+      submenu.classList.remove('open'); result.classList.remove('visible');
+    }
+    document.querySelectorAll('[data-mode]').forEach(tab => tab.addEventListener('click', () => render(tab.dataset.mode)));
+    document.getElementById('menu').addEventListener('mouseleave', () => submenu.classList.remove('open'));
+    render(currentMode);
+  </script>
+</body>
+</html>

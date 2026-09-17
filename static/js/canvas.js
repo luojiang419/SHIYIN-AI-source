@@ -23185,7 +23185,11 @@ function canConnect(fromId, toId, inputRole=''){
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
     if(to.type==='autoCutout')return !wouldCreateGeneratorCycle(fromId,toId) && mediaRefsFromNode(from).some(ref=>ref.url&&(ref.kind||'image')==='image');
-    if(from.type==='autoCutout')return !wouldCreateGeneratorCycle(fromId,toId) && (to.type==='output'||CANVAS_GENERATOR_TYPES.includes(to.type)||['autoCutout','depthMap','dwpose','angle','llm'].includes(to.type));
+    if(from.type==='autoCutout'){
+        if(wouldCreateGeneratorCycle(fromId,toId)) return false;
+        if(to.type==='poseReplicate') return ['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole);
+        return to.type==='output'||CANVAS_GENERATOR_TYPES.includes(to.type)||['autoCutout','depthMap','dwpose','angle','llm'].includes(to.type);
+    }
 
     if(['video-clip','video-screenshot','video-frame-extraction'].includes(to.derivedOperation)
         && (to.sourceVideoNodeId === from.id || to.derivedFromNodeId === from.id)) return true;

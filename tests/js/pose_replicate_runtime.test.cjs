@@ -37,6 +37,25 @@ function harness(){
     return {ctx,node,inputs,requests,frames};
 }
 async function run(){
+    // 抠像输出可连接复刻参考端口，并在重新保存后读取最新透明 PNG。
+    const cutout = {id:'cutout',type:'autoCutout',outputUrl:'cutout-v1.png'};
+    const replica = {id:'replica',type:'poseReplicate'};
+    const wiring = {nodes:[cutout,replica],connections:[],CANVAS_GENERATOR_TYPES:['generator'],
+        CANVAS_MEDIA_OUTPUT_TYPES:[],window:{CanvasSpecialNodes:{outputItem:node=>({url:node.outputUrl})}}};
+    vm.createContext(wiring);
+    vm.runInContext(['wouldCreateGeneratorCycle','canConnect','mediaRefsFromNode','classicSpecialInputImage','classicSpecialInputImages'].map(fn).join('\n'),wiring);
+    for(const role of ['pose-reference','target-image','model-subject','scene','fabric-detail']){
+        assert.equal(wiring.canConnect(cutout.id,replica.id,role),true);
+    }
+    assert.equal(wiring.canConnect(cutout.id,replica.id,''),false);
+    assert.equal(wiring.canConnect(cutout.id,replica.id,'invalid'),false);
+    wiring.connections.push({from:cutout.id,to:replica.id,inputRole:'target-image'});
+    assert.equal(wiring.classicSpecialInputImages(replica,'target-image')[0].url,'cutout-v1.png');
+    cutout.outputUrl='cutout-v2.png';
+    assert.equal(wiring.classicSpecialInputImages(replica,'target-image')[0].url,'cutout-v2.png');
+    wiring.connections.push({from:replica.id,to:cutout.id});
+    assert.equal(wiring.canConnect(cutout.id,replica.id,'target-image'),false);
+
     const batchHarness=harness();
     batchHarness.inputs.targets=[
         {url:'red',name:'red.png'},

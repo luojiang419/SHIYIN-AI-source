@@ -27,6 +27,7 @@ class DepthModelSpec:
     size: int
     sha256: str
     official_url: str
+    domestic_url: str = ""
 
 
 DEPTH_MODEL_SPECS = (
@@ -34,11 +35,13 @@ DEPTH_MODEL_SPECS = (
         name=DEPTH_MODEL_NAME, size=180_471,
         sha256="3f220770bf259ef0cc1a8253f4f29419d4d15092902d78ded851669291d876e2",
         official_url=DEPTH_MODEL_BASE_URL + DEPTH_MODEL_NAME,
+        domestic_url="https://modelscope.cn/models/jiangjiang419/shiyin-depth-lite-models/resolve/a1a14f2b20152dd7f2978d32bea5cad74a5a6e02/image-depth/model_fp16.onnx",
     ),
     DepthModelSpec(
         name=DEPTH_MODEL_DATA_NAME, size=50_392_064,
         sha256="4c3b600a87aa247593ceaafb11cd1f40568dc391cd1305d6ad01075079297ddd",
         official_url=DEPTH_MODEL_BASE_URL + DEPTH_MODEL_DATA_NAME,
+        domestic_url="https://modelscope.cn/models/jiangjiang419/shiyin-depth-lite-models/resolve/a1a14f2b20152dd7f2978d32bea5cad74a5a6e02/image-depth/model_fp16.onnx_data",
     ),
 )
 
@@ -153,21 +156,23 @@ class DepthModelManager:
                 self._mark_ready(self._manifest_source() or "existing", "已安装深度模型")
                 return True
             proxies = dict(self.proxy_provider() or {})
-            attempts = [("Hugging Face 官方源（系统代理）", proxies)] if proxies else []
-            attempts.append(("Hugging Face 官方源直连", None))
+            attempts = [("ModelScope 国内源", None, True)]
+            if proxies:
+                attempts.append(("Hugging Face 官方源（系统代理）", proxies, False))
+            attempts.append(("Hugging Face 官方源直连", None, False))
             errors: list[str] = []
-            for label, proxy_map in attempts:
+            for label, proxy_map, domestic in attempts:
                 self._update_state(
                     state="downloading", ready=False, source="official", source_label=label,
                     downloaded_bytes=0, total_bytes=sum(item.size for item in self.specs),
                     message=f"正在通过{label}补齐深度模型", error="",
                 )
                 try:
-                    self._install_from_official(proxy_map, label)
+                    self._install_from_source(proxy_map, label, domestic=domestic)
                     if not self.verify_installed():
                         raise RuntimeError("下载完成后深度模型校验未通过")
                     self._record_attempt(label)
-                    self._mark_ready("official", label)
+                    self._mark_ready("domestic" if domestic else "official", label)
                     return True
                 except Exception as exc:  # noqa: BLE001
                     message = str(exc) or exc.__class__.__name__
@@ -204,11 +209,20 @@ class DepthModelManager:
             session.proxies.update({str(key): str(value) for key, value in proxies.items() if value})
         return session
 
-    def _install_from_official(self, proxies: Optional[Mapping[str, str]], source_label: str) -> None:
+    def _install_from_source(
+        self,
+        proxies: Optional[Mapping[str, str]],
+        source_label: str,
+        *,
+        domestic: bool,
+    ) -> None:
         for index, spec in enumerate(self.specs):
-            candidate = self.download_root / f"official-{spec.name}"
+            url = spec.domestic_url if domestic else spec.official_url
+            if not url:
+                raise RuntimeError(f"{source_label}未配置 {spec.name}")
+            candidate = self.download_root / f"{'domestic' if domestic else 'official'}-{spec.name}"
             if not self._valid_candidate(candidate, spec):
-                self._download_url(spec.official_url, candidate, spec, proxies, source_label, index)
+                self._download_url(url, candidate, spec, proxies, source_label, index)
             if not self._valid_candidate(candidate, spec):
                 raise RuntimeError(f"{spec.name} 校验失败")
             os.replace(candidate, self.model_path(spec.name))

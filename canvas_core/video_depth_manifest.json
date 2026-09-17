@@ -12,7 +12,7 @@
       "size": 116440756,
       "sha256": "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609",
       "target_path": "models/video-depth-anything-small/video_depth_anything_vits.pth",
-      "domestic_url": "https://modelscope.cn/models/depth-anything/Video-Depth-Anything-Small/resolve/8dd3558f4d407363cc1a113b81e89f16a0d51e5c/video_depth_anything_vits.pth",
+      "domestic_url": "https://modelscope.cn/models/jiangjiang419/shiyin-depth-lite-models/resolve/a1a14f2b20152dd7f2978d32bea5cad74a5a6e02/video-depth/video_depth_anything_vits.pth",
       "mirror_url": "",
       "official_url": "https://modelscope.cn/models/depth-anything/Video-Depth-Anything-Small/resolve/8dd3558f4d407363cc1a113b81e89f16a0d51e5c/video_depth_anything_vits.pth"
     },

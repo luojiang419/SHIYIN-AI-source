@@ -31,6 +31,7 @@ class SegmentRequest(BaseModel):
     points: list[Point] = Field(min_length=1, max_length=64)
     threshold: float = Field(default=0.5, ge=0.05, le=0.95)
     feather: float = Field(default=1.5, ge=0, le=16)
+    edge_shift: int = Field(default=0, ge=-20, le=20)
 
 
 app = FastAPI(title="SHIYIN 点击抠图技术验证")
@@ -70,7 +71,7 @@ def build_alpha(request: SegmentRequest) -> tuple[SegmentationSession, np.ndarra
     except Exception as exc:
         raise HTTPException(500, f"分割失败：{exc}") from exc
     positive = [(round(point.x), round(point.y)) for point in request.points if point.label == 1]
-    alpha = refine_alpha(mask, request.threshold, request.feather, positive)
+    alpha = refine_alpha(mask, request.threshold, request.feather, positive, request.edge_shift)
     return session, alpha
 
 

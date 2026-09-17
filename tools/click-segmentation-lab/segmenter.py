@@ -29,7 +29,7 @@ def decode_image(payload: bytes) -> Image.Image:
     return image
 
 
-def refine_alpha(mask: np.ndarray, threshold: float, feather: float, positive_points: list[tuple[int, int]]) -> np.ndarray:
+def refine_alpha(mask: np.ndarray, threshold: float, feather: float, positive_points: list[tuple[int, int]], edge_shift: int = 0) -> np.ndarray:
     probability = np.clip(mask.astype(np.float32), 0.0, 1.0)
     binary = (probability >= threshold).astype(np.uint8)
     count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
@@ -49,6 +49,11 @@ def refine_alpha(mask: np.ndarray, threshold: float, feather: float, positive_po
     contours, _ = cv2.findContours(binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
         cv2.drawContours(binary, contours, -1, 1, thickness=cv2.FILLED)
+    if edge_shift:
+        radius_px = abs(int(edge_shift))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius_px + 1, 2 * radius_px + 1))
+        operation = cv2.dilate if edge_shift > 0 else cv2.erode
+        binary = operation(binary, kernel)
     radius = max(0.0, float(feather))
     if radius == 0:
         return binary.astype(np.float32)

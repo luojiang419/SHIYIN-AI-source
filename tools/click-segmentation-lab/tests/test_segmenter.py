@@ -66,3 +66,15 @@ def test_choose_mask_strongly_respects_negative_point() -> None:
     scores = np.array([0.98, 0.82], dtype=np.float32)
     points = [{"x": 35, "y": 35, "label": 1}, {"x": 70, "y": 70, "label": 0}]
     assert choose_mask(masks, scores, points) == 1
+
+
+def test_edge_shift_expands_and_contracts_original_pixel_boundary():
+    mask = np.zeros((80, 80), dtype=np.float32)
+    mask[20:60, 20:60] = 1
+    base = refine_alpha(mask, 0.5, 0, [(40, 40)])
+    expanded = refine_alpha(mask, 0.5, 0, [(40, 40)], 3)
+    contracted = refine_alpha(mask, 0.5, 0, [(40, 40)], -3)
+    assert expanded.sum() > base.sum() > contracted.sum()
+    assert expanded[18, 40] == 1 and base[18, 40] == 0
+    assert contracted[21, 40] == 0 and base[21, 40] == 1
+    assert expanded.shape == contracted.shape == mask.shape

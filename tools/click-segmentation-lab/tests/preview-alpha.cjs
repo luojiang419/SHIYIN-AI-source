@@ -29,6 +29,11 @@ if(dark<75||dark>90||bright!==239)throw Error('背景未压暗或前景被变暗
 return {dark,bright,background:x.getImageData(5,5,1,1).data[3],foreground:x.getImageData(c.width*.4,c.height*.4,1,1).data[3],base:document.querySelector('#imageCanvas').getContext('2d').getImageData(5,5,1,1).data[3]};
 });
 if(pixels.background!==0||pixels.foreground!==255||pixels.base!==255||exports)throw Error(JSON.stringify({pixels,exports}));
-console.log(JSON.stringify({before,pixels,exports,result:'PASS'}));
+const nextRequest=page.waitForRequest(r=>r.url().includes('/api/segment'));
+await page.locator('#edgeShift').evaluate(el=>{el.value='-4';el.dispatchEvent(new Event('input',{bubbles:true}))});
+const sent=(await nextRequest).postDataJSON();
+if(sent.edge_shift!==-4)throw Error('边缘参数未传到后端');
+if(await page.locator('#edgeShiftValue').textContent()!=='-4 px')throw Error('边缘数值未更新');
+console.log(JSON.stringify({before,pixels,exports,edge_shift:sent.edge_shift,result:'PASS'}));
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

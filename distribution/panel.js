@@ -23,10 +23,14 @@ const names={hot:'应用增量包','hot-bootstrap':'更新器引导包','hot-upd
 const states={published:'已发布',paused:'已暂停',archived:'历史版本'};
 function element(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
 function bytes(value){let n=Math.max(0,Number(value)||0),i=0;const units=['B','KB','MB','GB','TB'];while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(i?1:0)+' '+units[i];}
-function transferRow(t){
+function clientLabel(ip,usernames){
+  const known=usernames.get(ip),username=known?.size===1?[...known][0]:'';
+  return username?username+' · '+ip:ip;
+}
+function transferRow(t,usernames){
   const row=element('div','','transfer');
   const state={downloading:'正在发送',completed:'发送完成',interrupted:'连接中断 / 未完成'}[t.state]||t.state;
-  row.append(element('strong',t.ip+' · '+state),element('p',t.resource,'resource'));
+  row.append(element('strong',clientLabel(t.ip,usernames)+' · '+state),element('p',t.resource,'resource'));
   const progress=element('progress');progress.max=t.total||1;progress.value=t.sent;progress.setAttribute('aria-label','当前文件/断点请求发送进度');
   row.append(progress,element('small',bytes(t.sent)+' / '+bytes(t.total)+' · 当前请求 '+(t.total?Math.min(100,t.sent/t.total*100).toFixed(1):'100')+'%'+(t.offset?' · 断点偏移 '+bytes(t.offset):'')+' · '+new Date(t.started*1000).toLocaleTimeString(),'muted'));
   return row;
@@ -46,20 +50,19 @@ function renderTraffic(data){
   $('#trafficLine').setAttribute('points',t.history.map((p,i)=>(i*720/59).toFixed(1)+','+(116-p.speed_bps/max*108).toFixed(1)).join(' '));
   $('#trafficCaption').textContent=t.day+' · 曲线上限 '+bytes(max)+'/s · 每秒刷新'+(t.persistence_error?' · 流量保存暂时失败，正在重试':'');
   for(const [selector,items,empty] of [['#activeDownloads',t.active,'当前没有下载请求'],['#recentDownloads',t.recent,'暂无下载记录']]){
-    $(selector).replaceChildren(...items.map(transferRow));if(!items.length)$(selector).append(element('p',empty,'empty'));
+    $(selector).replaceChildren(...items.map(item=>transferRow(item,usernames)));if(!items.length)$(selector).append(element('p',empty,'empty'));
   }
   const clients=new Map(data.clients.map(c=>[c.ip,c]));
   for(const ip of Object.keys(t.clients))if(!clients.has(ip))clients.set(ip,{ip,seen:0,version:''});
   $('#clientList').replaceChildren(...Array.from(clients.values()).map(c=>{
     const stats=t.clients[c.ip]||{},active=t.active.filter(a=>a.ip===c.ip),row=element('article','','client');
     const head=element('div','','client-head'),name=element('div','','client-name');
-    const known=usernames.get(c.ip),username=known?.size===1?[...known][0]:'';
-    name.append(icon('Monitor'),element('strong',username?username+' · '+c.ip:c.ip));
+    name.append(icon('Monitor'),element('strong',clientLabel(c.ip,usernames)));
     const status=active.length?'下载中':c.update_state==='outdated'?'待补齐':c.update_state==='current'?'已是最新':Date.now()/1000-c.seen<300?'近期连接':'暂无活动';
     head.append(name,element('span',status,'badge '+(active.length?'cyan':c.update_state==='outdated'?'orange':c.update_state==='current'?'green':'')));row.append(head);
     const updateState={current:'已是最新',outdated:'待补齐',unknown:'未报告'}[c.update_state]||'未报告';
     const details=element('dl');for(const [label,value] of [['应用版本',c.version||'未报告'],['更新状态',updateState],['目标序号',c.target_version||'—'],['实时速度',bytes(stats.speed_bps)+'/s'],['今日流量',bytes(stats.today_bytes)],['今日峰值',bytes(stats.peak_bps)+'/s'],['下载请求',String(active.length)],['最近连接',c.seen?new Date(c.seen*1000).toLocaleTimeString():'—']]){const cell=element('div');cell.append(element('dt',label),element('dd',value));details.append(cell);}row.append(details);
-    active.forEach(a=>row.append(transferRow(a)));return row;
+    active.forEach(a=>row.append(transferRow(a,usernames)));return row;
   }));
   if(!clients.size)$('#clientList').append(element('p','尚无客户端连接记录','muted'));
 }

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>点击抠图实验室</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">S</span><div><strong>点击抠图实验室</strong><small>Interactive Segmentation Lab</small></div></div>
+    <div class="top-actions">
+      <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+      <button id="openButton" class="button secondary"><span>＋</span>导入图片</button>
+      <button id="exportButton" class="button primary" disabled><span>↓</span>导出透明 PNG</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="stage-panel">
+      <div class="stage-toolbar">
+        <div class="segmented" role="tablist">
+          <button class="view-tab active" data-view="overlay">叠加</button>
+          <button class="view-tab" data-view="cutout">透明结果</button>
+          <button class="view-tab" data-view="original">原图</button>
+        </div>
+        <div class="stage-actions">
+          <button id="undoButton" class="icon-button" title="撤销最后一个点" disabled>↶</button>
+          <button id="clearButton" class="icon-button" title="清空选择" disabled>⌫</button>
+          <span id="imageMeta">尚未导入图片</span>
+        </div>
+      </div>
+      <div id="stage" class="stage empty">
+        <div id="emptyState" class="empty-state">
+          <div class="upload-icon">＋</div>
+          <h1>导入图片开始精细抠图</h1>
+          <p>支持 JPEG、PNG、WebP，拖入文件也可以</p>
+          <button id="emptyOpenButton" class="button primary">选择图片</button>
+        </div>
+        <div id="canvasWrap" class="canvas-wrap" hidden>
+          <canvas id="imageCanvas"></canvas>
+          <canvas id="maskCanvas"></canvas>
+          <div id="busy" class="busy" hidden><span></span><b>正在识别目标…</b></div>
+        </div>
+      </div>
+      <div class="hintbar">
+        <span><kbd>左键</kbd> 选择新元素</span>
+        <span><kbd>Ctrl</kbd> + 左键 加选</span>
+        <span><kbd>Alt</kbd> + 左键 减选</span>
+        <span class="legend positive"></span><span>保留</span>
+        <span class="legend negative"></span><span>排除</span>
+      </div>
+    </section>
+
+    <aside class="inspector">
+      <div class="inspector-head"><div><span class="eyebrow">MASK CONTROL</span><h2>边缘与输出</h2></div><span id="modelStatus" class="status">模型待命</span></div>
+      <div class="control-block">
+        <div class="label-row"><label for="threshold">蒙版阈值</label><output id="thresholdValue">50%</output></div>
+        <input id="threshold" type="range" min="5" max="95" value="50">
+        <p>提高可收紧选择边界，降低可保留薄纱和发丝。</p>
+      </div>
+      <div class="control-block">
+        <div class="label-row"><label for="feather">边缘羽化</label><output id="featherValue">1.5 px</output></div>
+        <input id="feather" type="range" min="0" max="16" value="1.5" step="0.5">
+        <p>只处理 alpha 边缘，不缩放或重采样原始 RGB。</p>
+      </div>
+      <div class="control-block quality">
+        <div class="quality-title"><span class="quality-dot"></span><strong>原图质量输出</strong></div>
+        <dl><div><dt>输出尺寸</dt><dd id="outputSize">—</dd></div><div><dt>透明通道</dt><dd>8-bit Alpha</dd></div><div><dt>色彩内容</dt><dd>原图像素</dd></div></dl>
+      </div>
+      <div class="tip"><strong>精修建议</strong><p>先点击目标中心。缺少区域时按住 Ctrl 补点；粘连背景时按住 Alt 点击误选处。</p></div>
+      <div class="export-stack">
+        <button id="maskExportButton" class="button secondary wide" disabled>下载蒙版 PNG</button>
+        <button id="cutoutExportButton" class="button primary wide" disabled>下载透明 PNG</button>
+      </div>
+    </aside>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

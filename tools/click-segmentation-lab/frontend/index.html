@@ -25,6 +25,7 @@
           <button class="view-tab" data-view="original">原图</button>
         </div>
         <div class="stage-actions">
+          <span id="zoomValue">100%</span><button id="fitButton" class="button secondary" title="重置缩放和平移">适应窗口</button>
           <button id="undoButton" class="icon-button" title="撤销最后一个点" disabled>↶</button>
           <button id="clearButton" class="icon-button" title="清空选择" disabled>⌫</button>
           <span id="liveStatus" class="live-status"><i></i>实时预览</span>
@@ -45,6 +46,7 @@
         </div>
       </div>
       <div class="hintbar">
+        <span>滚轮缩放 · 空格拖动 / 中键平移</span>
         <span><kbd>左键</kbd> 选择新元素</span>
         <span><kbd>Ctrl</kbd> + 左键 加选</span>
         <span><kbd>Alt</kbd> + 左键 减选</span>
@@ -82,6 +84,6 @@
     </aside>
   </main>
   <div id="toast" class="toast" hidden></div>
-  <script src="/app.js?v=edge-shift-4"></script>
+  <script src="/app.js?v=zoom-pan-5"></script>
 </body>
 </html>

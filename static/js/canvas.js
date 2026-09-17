@@ -7558,13 +7558,24 @@ function resizeEditDrawCanvas(){
 let imageCutoutSession = null;
 let imageCutoutState = {canSave:false,busy:false};
 let imageEditorFrames = [];
+let imageEditorEscapeWindows = [];
 function imageEditorEscape(event){
-    if(event.key === 'Escape'){event.preventDefault();event.stopImmediatePropagation();closeImageEditor();}
+    if(event.key !== 'Escape' || !document.getElementById('imageEditModal')?.classList.contains('open')) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeImageEditor();
 }
 function expandImageEditorViewport(){
     if(imageEditorFrames.length) return;
     try {
         let current = window;
+        while(current){
+            current.addEventListener('keydown',imageEditorEscape,true);
+            imageEditorEscapeWindows.push(current);
+            if(current === current.parent) break;
+            current = current.parent;
+        }
+        current = window;
         while(current !== current.parent && current.frameElement){
             const frame = current.frameElement;
             imageEditorFrames.push({frame,style:frame.getAttribute('style')});
@@ -7572,7 +7583,10 @@ function expandImageEditorViewport(){
             current = current.parent;
         }
     } catch(_error) {}
-    window.addEventListener('keydown',imageEditorEscape,true);
+    if(!imageEditorEscapeWindows.length){
+        window.addEventListener('keydown',imageEditorEscape,true);
+        imageEditorEscapeWindows.push(window);
+    }
 }
 function syncImageCutoutControls(state=imageCutoutState){
     imageCutoutState=state;
@@ -8716,7 +8730,10 @@ function openImageEditor(nodeId, initialMode='crop'){
 function closeImageEditor(){
     stopImagePreviewPan();
     imageCutoutSession?.destroy();imageCutoutSession=null;imageCutoutState={canSave:false,busy:false};
-    window.removeEventListener('keydown',imageEditorEscape,true);
+    for(const targetWindow of imageEditorEscapeWindows){
+        try { targetWindow.removeEventListener('keydown',imageEditorEscape,true); } catch(_error) {}
+    }
+    imageEditorEscapeWindows=[];
     for(const {frame,style} of imageEditorFrames){if(style===null)frame.removeAttribute('style');else frame.setAttribute('style',style);}
     imageEditorFrames=[];
     document.querySelectorAll('[data-image-edit-mode]').forEach(button=>button.disabled=false);

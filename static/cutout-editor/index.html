@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>点击抠图实验室</title>
+  <link rel="stylesheet" href="/static/cutout-editor/styles.css?v=visible-controls-6">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">S</span><div><strong>点击抠图实验室</strong><small>Interactive Segmentation Lab</small></div></div>
+    <div class="top-actions"><button id="fullscreenNode" class="button secondary">全屏操作</button><button id="saveNode" class="button primary">保存到节点</button>
+      <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+      <button id="openButton" class="button secondary"><span>＋</span>导入图片</button>
+      <button id="exportButton" class="button primary" disabled><span>↓</span>导出透明 PNG</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="stage-panel">
+      <div class="stage-toolbar">
+        <div class="segmented" role="tablist">
+          <button class="view-tab" data-view="overlay">叠加</button>
+          <button class="view-tab active" data-view="cutout" title="选中区域正常显示，背景压暗以便加减选">选区预览</button>
+          <button class="view-tab" data-view="original">原图</button>
+        </div>
+        <div class="stage-actions">
+          <label for="zoomSlider" class="zoom-label">缩放</label><input id="zoomSlider" type="range" min="10" max="1200" value="100" step="1" aria-label="缩放比例">
+          <span id="zoomValue">100%</span><button id="fitButton" class="button secondary" title="重置缩放和平移">适应窗口</button>
+          <button id="undoButton" class="icon-button" title="撤销最后一个点" disabled>↶</button>
+          <button id="clearButton" class="icon-button" title="清空选择" disabled>⌫</button>
+          <span id="liveStatus" class="live-status"><i></i>实时预览</span>
+          <span id="imageMeta">尚未导入图片</span>
+        </div>
+      </div>
+      <div id="stage" class="stage empty">
+        <div id="emptyState" class="empty-state">
+          <div class="upload-icon">＋</div>
+          <h1>导入图片开始精细抠图</h1>
+          <p>支持 JPEG、PNG、WebP，拖入文件也可以</p>
+          <button id="emptyOpenButton" class="button primary">选择图片</button>
+        </div>
+        <div id="canvasWrap" class="canvas-wrap" hidden>
+          <canvas id="imageCanvas"></canvas>
+          <canvas id="maskCanvas"></canvas>
+          <div id="busy" class="busy" hidden><span></span><b>正在识别目标…</b><progress aria-label="抠像处理进度"></progress></div>
+        </div>
+      </div>
+      <div class="hintbar">
+        <span>滚轮缩放 · 空格拖动 / 中键平移</span>
+        <span><kbd>左键</kbd> 选择新元素</span>
+        <span><kbd>Ctrl</kbd> + 左键 加选</span>
+        <span><kbd>Alt</kbd> + 左键 减选</span>
+        <span class="legend positive"></span><span>保留</span>
+        <span class="legend negative"></span><span>排除</span>
+      </div>
+    </section>
+
+    <aside class="inspector">
+      <div class="inspector-head"><div><span class="eyebrow">MASK CONTROL</span><h2>边缘与输出</h2></div><span id="modelStatus" class="status">模型待命</span></div>
+      <div class="control-block">
+        <div class="label-row"><label for="threshold">蒙版阈值</label><output id="thresholdValue">50%</output></div>
+        <input id="threshold" type="range" min="5" max="95" value="50">
+        <p>提高可收紧选择边界，降低可保留薄纱和发丝。</p>
+      </div>
+      <div class="control-block">
+        <div class="label-row"><label for="feather">边缘羽化</label><output id="featherValue">1.5 px</output></div>
+        <input id="feather" type="range" min="0" max="16" value="1.5" step="0.5">
+        <p>只处理 alpha 边缘，不缩放或重采样原始 RGB。</p>
+      </div>
+      <div class="control-block">
+        <div class="label-row"><label for="edgeShift">边缘扩展 / 收缩</label><output id="edgeShiftValue">0 px</output></div>
+        <input id="edgeShift" type="range" min="-20" max="20" step="1" value="0">
+        <p>向左收缩去杂边，向右扩展补边缘。按原图像素调整，0 为原始边界。</p>
+      </div>
+      <div class="control-block quality">
+        <div class="quality-title"><span class="quality-dot"></span><strong>原图质量输出</strong></div>
+        <dl><div><dt>输出尺寸</dt><dd id="outputSize">—</dd></div><div><dt>透明通道</dt><dd>8-bit Alpha</dd></div><div><dt>色彩内容</dt><dd>原图像素</dd></div></dl>
+      </div>
+      <div class="tip"><strong>精修建议</strong><p>先点击目标中心。缺少区域时按住 Ctrl 补点；粘连背景时按住 Alt 点击误选处。</p></div>
+      <div class="export-stack">
+        <button id="maskExportButton" class="button secondary wide" disabled>下载蒙版 PNG</button>
+        <button id="cutoutExportButton" class="button primary wide" disabled>下载透明 PNG</button>
+      </div>
+    </aside>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/cutout-editor/app.js?v=visible-controls-6"></script>
+</body>
+</html>

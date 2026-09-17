@@ -1071,6 +1071,7 @@ const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'multi-view', label:'三视图', icon:'panels-top-left'},
     {id:'storyboardMerge', label:'拼图', icon:'columns-3'},
     {id:'dwpose', label:'动作提取', icon:'person-standing'},
+    {id:'autoCutout', label:'自动抠像', icon:'scissors'},
     {id:'depthMap', label:'深度图', icon:'scan'},
     {id:'resultCompare', label:'结果对比', icon:'columns-2'},
     {id:'addAsset', label:'添加为素材', icon:'library-big'},
@@ -1078,7 +1079,7 @@ const CLASSIC_MEDIA_TOOLBAR_DEFS = [
     {id:'run', label:'运行', icon:'play'},
     {id:'connect', label:'连接', icon:'workflow'}
 ];
-const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','depthMap','addAsset','download'];
+const CLASSIC_MEDIA_TOOLBAR_DEFAULT = ['preview','edit','grid','replace','generator','autoCutout','depthMap','addAsset','download'];
 const CANVAS_SESSION_VIEWPORTS_KEY = 'canvas_session_viewports_v1';
 let canvasSessionViewportFallback = {};
 const DEFAULT_VIDEO_MODELS = [
@@ -4542,6 +4543,9 @@ function addDWPoseNode(point){
     const p = point || defaultPoint(100, 20);
     return addNode({id:uid('pose'), type:'dwpose', x:p.x, y:p.y, w:380, h:390, poseStatus:'idle'});
 }
+function addAutoCutoutNode(point){
+ const p=point||defaultPoint(110,30);return addNode({id:uid('cutout'),type:'autoCutout',x:p.x,y:p.y,w:440,h:460});
+}
 function addDepthMapNode(point){
     const p = point || defaultPoint(110, 30);
     return addNode({id:uid('depth'), type:'depthMap', x:p.x, y:p.y, w:520, h:560, depthMapStatus:'idle'});
@@ -5475,7 +5479,7 @@ function linkCreateOptions(state){
         if(node.type === 'storyboardMerge'){
             return [{type:'output', label:'Output', icon:'circle-dot'}];
         }
-        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
+        if(['image','prompt','loop','group','promptGroup','llm','output','panorama','dwpose','autoCutout','depthMap','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type)){
             return [
                 ...(['group','image'].includes(node.type) ? [{type:'film-prepare-assets',label:'准备资产',icon:'boxes'}] : []),
                 {type:'generator', label:tr('canvas.apiGenerate'), icon:'wand-sparkles'},
@@ -5510,7 +5514,7 @@ function linkCreateOptions(state){
             {type:'group', label:tr('canvas.group'), icon:'group'}
         ];
     }
-    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','depthMap','angle'].includes(node.type)){
+    if(CANVAS_GENERATOR_TYPES.includes(node.type) || ['llm','panorama','dwpose','autoCutout','depthMap','angle'].includes(node.type)){
         return [
             {type:'image', label:tr('canvas.imageCard'), icon:'image-plus'},
             {type:'prompt', label:tr('canvas.prompt'), icon:'text-cursor-input'},
@@ -5554,7 +5558,7 @@ function linkCreateButtonHtml(option){
 function linkFilmStageMenuHtml(items){
     const phases = [
         {title:'01 资产筹备', description:'建立可复用的角色与造型参考。', types:['multiView']},
-        {title:'02 镜头预演', description:'规划机位、动作与画面结构参考。', types:['panorama','dwpose','depthMap','poseReplicate']},
+        {title:'02 镜头预演', description:'规划机位、动作与画面结构参考。', types:['panorama','dwpose','autoCutout','depthMap','poseReplicate']},
         {title:'03 分镜定稿', description:'从草图到正式分镜并整理画面。', types:['film-line-art','film-storyboard','storyboardMerge']},
         {title:'04 镜头生成', description:'使用已确认的分镜生成动态镜头。', types:['film-video','linkfox-video']},
         {title:'05 后期处理', description:'处理空间信息并完成画质增强。', types:['depthVideo','topazVideo']}
@@ -5706,10 +5710,11 @@ function mediaToolbarItemsForNode(node){
     }
     if(kind === 'image') available.add('generator');
     if(hasUsableUrl && kind === 'image'){
-        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','depthMap','storyboardMerge','download']
+        ['edit','grid','batchGenerator','video','panorama','angle','multi-view','dwpose','autoCutout','depthMap','storyboardMerge','download']
             .forEach(id => available.add(id));
         available.add('resultCompare');
     }
+    if(available.has('autoCutout')&&!selectedIds.includes('autoCutout'))selectedIds.push('autoCutout');
     const items = filterCanvasWorkModeItems(selectedIds.map(id => definitions.get(id)).filter(item => item && available.has(item.id)));
     // “添加为素材”是媒体节点的固定能力；旧版用户已保存的自定义菜单中没有该 id，
     // 仍需主动补入，避免只有新用户能看到入口。
@@ -5737,6 +5742,11 @@ function classicMediaToolbarHtml(node){
 function runClassicMediaToolbarAction(nodeId, action){
     const node = nodes.find(item => item.id === nodeId);
     if(!node) return;
+    if(action === 'autoCutout'){
+        linkCreateState={originId:node.id,originKind:'out',point:{x:node.x+(node.w||380)+80,y:node.y}};
+        createLinkedNode('autoCutout');
+        return;
+    }
     if(action === 'more'){ openCanvasSettings('media'); return; }
     if(node.type === 'video'){
         if(action === 'run') runCanvasGenerate(node.id);
@@ -6245,6 +6255,7 @@ function createNodeByType(type, point){
     if(type === 'multiView' || type === 'multi-view') return addMultiViewNode(point);
     if(type === 'director3d') return addDirector3dNode(point);
     if(type === 'dwpose') return addDWPoseNode(point);
+    if(type === 'autoCutout') return addAutoCutoutNode(point);
     if(type === 'depthMap') return addDepthMapNode(point);
     if(type === 'depthVideo') return addDepthVideoNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
@@ -6280,6 +6291,7 @@ function menuAdd(type){
         else if(type === 'multiView') created = addMultiViewNode(point);
         else if(type === 'director3d') created = addDirector3dNode(point);
         else if(type === 'dwpose') created = addDWPoseNode(point);
+        else if(type === 'autoCutout') created = addAutoCutoutNode(point);
         else if(type === 'depthMap') created = addDepthMapNode(point);
         else if(type === 'depthVideo') created = addDepthVideoNode(point);
         else if(type === 'poseReplicate') created = addPoseReplicateNode(point);
@@ -10573,6 +10585,7 @@ function bindClassicSpecialNode(el, node){
     };
     if(node.type === 'panorama') api.bindPanorama(el, node, options);
     if(node.type === 'dwpose') api.bindPose(el, node, options);
+    if(node.type === 'autoCutout') window.CanvasCutoutNode.bind(el,node,{...options,getInputImage:()=>classicSpecialInputImage(node),onSaved:()=>{syncCutoutDownstream(node);scheduleSave();queueClassicSpecialRefresh(node);}});
     if(node.type === 'depthMap') api.bindDepthMap?.(el, node, options);
     if(node.type === 'depthVideo') api.bindDepthVideo?.(el, node, options);
     if(node.type === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createClassicDirectorOutputNode});
@@ -11615,7 +11628,7 @@ function renderNode(node){
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmWorkflow?.title(node.type) || window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
-    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 视频超分' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'autoCutout' ? '自动抠像' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 视频超分' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' ? (node.url ? nodeTitleForMedia(node) : (langIsEn() ? 'Upload' : '上传')) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
@@ -11828,6 +11841,7 @@ function renderNode(node){
     if(node.type === 'panorama') body.innerHTML = window.CanvasSpecialNodes?.panoramaBodyHtml(node) || '<div class="muted-note">720°取景器加载失败</div>';
     if(node.type === 'multiView') body.innerHTML = classicMultiViewBodyHtml(node);
     if(node.type === 'dwpose') body.innerHTML = window.CanvasSpecialNodes?.poseBodyHtml(node) || '<div class="muted-note">动作提取节点加载失败</div>';
+    if(node.type === 'autoCutout') body.innerHTML = window.CanvasCutoutNode.bodyHtml(node);
     if(node.type === 'depthMap') body.innerHTML = window.CanvasSpecialNodes?.depthMapBodyHtml(node) || '<div class="muted-note">深度图节点加载失败</div>';
     if(node.type === 'depthVideo') body.innerHTML = window.CanvasSpecialNodes?.depthVideoBodyHtml(node) || '<div class="muted-note">深度视频节点加载失败</div>';
     if(node.type === 'resultCompare') body.innerHTML = resultCompareBodyHtml(node);
@@ -11893,8 +11907,8 @@ function renderNode(node){
     const rolePorts = filmPorts.length ? filmPorts : ecommercePorts;
     const inputPorts = filmPorts.length ? filmPorts : (lookbookPorts.length ? lookbookPorts : ecommercePorts);
     const rolePortClass = `pose-role-port${filmPorts.length ? ' film-role-port' : ''}`;
-    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','depthMap','depthVideo','resultCompare','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = window.CanvasFilmWorkflow?.isStep(node.type) || window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','depthMap','depthVideo','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
+    const canInput = inputPorts.length > 0 || ['generator','batchGenerator','comfy','ltxDirector','output','llm','msgen','video','linkfox-video','topazVideo','rh','panorama','multiView','dwpose','autoCutout','depthMap','depthVideo','resultCompare','angle','storyboardMerge','lookbook'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = window.CanvasFilmWorkflow?.isStep(node.type) || window.CanvasLookbookNode?.canOutput?.(node.type) || window.CanvasEcommerceNodes?.canOutput?.(node.type) || window.CanvasFilmNodes?.canOutput?.(node.type) || ['image','prompt','loop','group','promptGroup','generator','batchGenerator','comfy','ltxDirector','llm','msgen','video','linkfox-video','topazVideo','rh','blenderDirector','director3d','output','panorama','multiView','dwpose','autoCutout','depthMap','depthVideo','director3d','poseReplicate','angle','storyboardMerge'].includes(node.type);
     if(node.type === 'linkfox-video'){
         const ports=window.CanvasLinkfoxVideo.inputPorts(node);
         el.insertAdjacentHTML('beforeend',ports.map((port,index)=>`<div class="port in pose-role-port" data-input-role="${escapeAttr(port.role)}" data-role-label="${escapeAttr(port.label)}" style="top:${(index+1)*100/(ports.length+1)}%;" title="${escapeAttr(port.title)}"></div>`).join(''));
@@ -11991,7 +12005,7 @@ function renderNode(node){
     multiViewModel?.addEventListener('change', event => { event.stopPropagation(); node.model = event.target.value; scheduleSave(); });
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
-    if(['panorama','dwpose','depthMap','depthVideo','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    if(['panorama','dwpose','autoCutout','depthMap','depthVideo','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
     if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmWorkflow?.handles(node)) window.CanvasFilmWorkflow.bind(el,node);
@@ -12225,6 +12239,7 @@ function defaultNodeSize(type){
     if(type === 'panorama') return {w:520, h:520};
     if(type === 'multiView') return {w:700, h:780};
     if(type === 'dwpose') return {w:380, h:390};
+    if(type === 'autoCutout') return {w:440,h:460};
     if(type === 'depthMap') return {w:520, h:560};
     if(type === 'depthVideo') return {w:620, h:390};
     if(type === 'resultCompare') return {w:520, h:560};
@@ -16479,7 +16494,7 @@ function mediaRefsFromNode(node, context={}){
         }).filter(Boolean);
     }
     if(node.type === 'director3d') return (node.directorCaptures || []).filter(item => item?.url).map((item, i) => ({...item, kind:'image', nodeId:node.id, outputIndex:i}));
-    if(['panorama','dwpose','depthMap','depthVideo','angle'].includes(node.type)){
+    if(['panorama','dwpose','autoCutout','depthMap','depthVideo','angle'].includes(node.type)){
         const item = window.CanvasSpecialNodes?.outputItem(node);
         const kind = node.type === 'depthVideo' ? 'video' : 'image';
         return item?.url ? [{url:item.url, name:item.name || `${node.type}.${kind === 'video' ? 'mp4' : 'png'}`, kind}] : [];
@@ -16518,9 +16533,9 @@ function generatorSources(gen){
                 }));
             }
         }
-        if(['panorama','dwpose','depthMap','depthVideo','angle'].includes(n.type)){
+        if(['panorama','dwpose','autoCutout','depthMap','depthVideo','angle'].includes(n.type)){
             const refs = mediaRefsFromNode(n);
-            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'depthMap' ? '深度图' : n.type === 'depthVideo' ? '深度视频' : '新视角结果';
+            const label = n.type === 'panorama' ? '720°位置参考' : n.type === 'dwpose' ? 'DWPose 姿势参考' : n.type === 'autoCutout' ? '自动抠像' : n.type === 'depthMap' ? '深度图' : n.type === 'depthVideo' ? '深度视频' : '新视角结果';
             if(refs.length) return {id:n.id, type:n.type, label, preview:refs[0].url, refs, prompt:''};
         }
         if(n.type === 'image' && n.url) {
@@ -16603,6 +16618,7 @@ function reorderInput(gen, movedId, targetId){
     scheduleSave();
 }
 function syncGeneratorInputs(targetIds=null){
+    nodes.filter(n=>n.type==="autoCutout").forEach(n=>syncCutoutDownstream(n,false));
     syncClassicFilmWorkflow();
     const targets = targetIds ? (targetIds instanceof Set ? targetIds : new Set(targetIds)) : null;
     if(targets && [...targets].some(id => !canvasNodeIndex.has(id))) canvasNodeIndex = new Map(nodes.map(node => [node.id, node]));
@@ -23086,6 +23102,9 @@ function canConnect(fromId, toId, inputRole=''){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    if(to.type==='autoCutout')return !wouldCreateGeneratorCycle(fromId,toId) && mediaRefsFromNode(from).some(ref=>ref.url&&(ref.kind||'image')==='image');
+    if(from.type==='autoCutout')return !wouldCreateGeneratorCycle(fromId,toId) && (to.type==='output'||CANVAS_GENERATOR_TYPES.includes(to.type)||['autoCutout','depthMap','dwpose','angle','llm'].includes(to.type));
+
     if(['video-clip','video-screenshot','video-frame-extraction'].includes(to.derivedOperation)
         && (to.sourceVideoNodeId === from.id || to.derivedFromNodeId === from.id)) return true;
     if(to.type === 'linkfox-video'){
@@ -23107,7 +23126,7 @@ function canConnect(fromId, toId, inputRole=''){
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
             return ['prompt','promptGroup','llm'].includes(from.type) && !wouldCreateGeneratorCycle(fromId, toId);
         }
-        return ['image','group','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','multiView'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','autoCutout','depthMap','director3d','poseReplicate','angle','generator','rh','multiView'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId, toId);
     }
     if(from.type === 'multiView'){
@@ -23123,7 +23142,7 @@ function canConnect(fromId, toId, inputRole=''){
             return ['prompt','promptGroup','loop','llm','group'].includes(from.type)
                 && !wouldCreateGeneratorCycle(fromId,toId);
         }
-        return ['image','group','output','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','film-line-art','batchGenerator','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
+        return ['image','group','output','panorama','dwpose','autoCutout','depthMap','director3d','poseReplicate','angle','generator','rh','multiView','film-storyboard','film-line-art','batchGenerator','ecom-model','ecom-product','ecom-scene','ecom-compose'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'storyboardMerge'){
@@ -23137,18 +23156,18 @@ function canConnect(fromId, toId, inputRole=''){
     if(['ecom-model','ecom-product','ecom-scene'].includes(to.type)){
         const valid = (window.CanvasEcommerceNodes?.inputPorts?.(to.type) || []).some(port => port.role === inputRole);
         if(!valid) return false;
-        return ['image','group','output','generator','batchGenerator','rh','panorama','dwpose','depthMap','director3d','poseReplicate','angle'].includes(from.type)
+        return ['image','group','output','generator','batchGenerator','rh','panorama','dwpose','autoCutout','depthMap','director3d','poseReplicate','angle'].includes(from.type)
             && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-compose'){
         if(!['ecom-model','ecom-product','ecom-scene','ecom-pose'].includes(inputRole)) return false;
-        const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh'];
+        const allowed = ['image','group','output','ecom-model','ecom-product','ecom-scene','panorama','dwpose','autoCutout','depthMap','director3d','poseReplicate','angle','generator','rh'];
         return allowed.includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'lookbook'){
         const lookbookRoles = new Set(['lookbook-person','lookbook-product','lookbook-scene','lookbook-material','lookbook-logo','lookbook-pose','lookbook-layout']);
         if(inputRole && !lookbookRoles.has(inputRole)) return false;
-        return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','depthMap','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
+        return ['image','group','output','ecom-model','ecom-product','ecom-scene','ecom-compose','panorama','dwpose','autoCutout','depthMap','director3d','poseReplicate','angle','generator','rh','lookbook'].includes(from.type) && !wouldCreateGeneratorCycle(fromId,toId);
     }
     if(to.type === 'ecom-video'){
         if(inputRole && inputRole !== 'video-input') return false;
@@ -23172,10 +23191,10 @@ function canConnect(fromId, toId, inputRole=''){
     if(from.type === 'ecom-video') return to.type === 'output';
     if(to.type === 'depthVideo') return from.type === 'video' || mediaRefsFromNode(from).some(ref => ref?.url && ref.kind === 'video');
     if(from.type === 'depthVideo') return to.type === 'output' || to.type === 'topazVideo' || CANVAS_GENERATOR_TYPES.includes(to.type);
-    const specialTypes = ['panorama','dwpose','depthMap','angle'];
+    const specialTypes = ['panorama','dwpose','autoCutout','depthMap','angle'];
     if(to.type === 'poseReplicate'){
         if(!['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole)) return false;
-        return ['image','group','output','panorama','dwpose','depthMap','angle','generator'].includes(from.type);
+        return ['image','group','output','panorama','dwpose','autoCutout','depthMap','angle','generator'].includes(from.type);
     }
     if(from.type === 'poseReplicate') return to.type === 'output';
     if(from.type === 'director3d') { if(to.type === 'output') return true; if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId); return false; }
@@ -23206,7 +23225,7 @@ function canConnect(fromId, toId, inputRole=''){
     }
     if(to.type === 'llm') return ['prompt','loop','promptGroup','llm','image','group','output'].includes(from.type);
     if(from.type === 'llm') return CANVAS_GENERATOR_TYPES.includes(to.type);
-    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','depthMap','angle'].includes(from.type);
+    return CANVAS_GENERATOR_TYPES.includes(to.type) && ['image','prompt','loop','group','promptGroup','output','llm','panorama','dwpose','autoCutout','depthMap','angle'].includes(from.type);
 }
 function sanitizeConnections(){
     const source = connections || [];
@@ -24916,4 +24935,23 @@ if(document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', initializeCanvasPage, {once:true});
 } else {
     void initializeCanvasPage();
+}
+
+
+function syncCutoutDownstream(node, refresh=true){
+    const input=classicSpecialInputImage(node);
+    if(input?.url && node.cutoutSourceUrl && input.url!==node.cutoutSourceUrl){
+        node.outputUrl='';node.cutoutSettings=null;
+    }
+    const changed=[];
+    for(const c of connections.filter(c=>c.from===node.id)){
+        const target=nodes.find(n=>n.id===c.to);if(!target)continue;
+        if(target.type==='output'){
+            const old=target.images||[];
+            const retained=old.filter(item=>item.cutoutSourceId!==node.id);
+            const next=node.outputUrl?[...retained,{url:node.outputUrl,name:'自动抠像.png',kind:'image',cutoutSourceId:node.id}]:retained;
+            if(JSON.stringify(old)!==JSON.stringify(next)){target.images=next;changed.push(target.id);}
+        }
+    }
+    if(refresh){syncGeneratorInputs();refreshGeneratorInputViews();if(changed.length)refreshNodes(changed);}
 }

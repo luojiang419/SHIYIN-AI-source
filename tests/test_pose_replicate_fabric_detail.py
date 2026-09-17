@@ -23,7 +23,7 @@ def test_fabric_appends_role_without_renumbering(mode, model, scene, custom):
     assert '衣服必须独立匹配服装参考的白平衡' in fabric.final_prompt
 
 
-@pytest.mark.parametrize('batch_size,batch_outfit,enabled', [(1, None, True), (2, None, False), (1, {'group_id':'test', 'style_name':'test'}, False)])
+@pytest.mark.parametrize('batch_size,batch_outfit,enabled', [(1, None, True), (2, None, True), (1, {'group_id':'test', 'style_name':'test'}, True)])
 def test_endpoint_only_includes_fabric_in_single_image(batch_size, batch_outfit, enabled):
     ref = lambda name: main.AIReference(url=f'/assets/{name}.png', kind='image')
     payload = main.PoseReplicateTaskRequest(

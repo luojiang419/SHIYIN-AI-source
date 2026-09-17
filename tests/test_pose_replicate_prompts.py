@@ -522,6 +522,8 @@ def test_garment_fidelity_owns_structure_material_and_pattern(mode, has_model, h
     if mode == "depth" and not has_model and not has_scene:
         for rule in ("只取图3", "微观肌理", "无翻领时不新增领片", "扣式门襟不改成拉链", "不能共享旧衣表面"):
             assert rule in result.final_prompt
+        assert "织线的方向、疏密和细度" in result.final_prompt
+        assert "目标衣物胸口和袖子" not in result.final_prompt
         assert "豹纹" not in result.final_prompt
         return
     assert f"图{garment}是待换衣物结构、面料和纹样的唯一来源" in result.final_prompt

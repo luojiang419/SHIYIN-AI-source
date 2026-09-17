@@ -1207,7 +1207,7 @@
             <div class="pose-replicate-inputs">
                 ${poseReplicateImageCard(action, 'pose-reference', '目标图片', 'person-standing', '上传目标图片', '将以此图生成深度图或骨架图', {editable:true, manual:Boolean(manualInputs['pose-reference'])})}
                 ${poseReplicateTargetGrid(targets, Boolean(manualInputs['target-image']))}
-                ${poseReplicateImageCard(fabricDetail, 'fabric-detail', targets.length > 1 ? '面料细节 · 批量不生效' : '面料细节 · 可选', 'layers', '上传面料细节', '仅单图生效，参考绒毛、纤维与面料质感', {editable:true, manual:Boolean(manualInputs['fabric-detail'])})}
+                ${poseReplicateImageCard(fabricDetail, 'fabric-detail', targets.length > 1 ? '面料细节 · 批量不生效' : '面料细节 · 可选', 'layers', '上传面料细节', '单图基础深度换装：清晰有色织纹自动增强；无法可靠识别时保留原图。批量请到批量换款逐款绑定细节。', {editable:true, manual:Boolean(manualInputs['fabric-detail'])})}
                 ${poseReplicateImageCard(modelSubject, 'model-subject', '模特主体 · 可选', 'user-round', '上传模特主体', undefined, {editable:true, manual:Boolean(manualInputs['model-subject'])})}
                 ${poseReplicateImageCard(scene, 'scene', '场景 · 可选', 'image', '上传场景', undefined, {editable:true, manual:Boolean(manualInputs.scene)})}
             </div>

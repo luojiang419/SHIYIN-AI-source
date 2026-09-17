@@ -39,7 +39,7 @@ def test_batch_outfit_layout_and_work_actions_are_explicit():
         "batchOutfitWorks", "batchOutfitDialog", "batchOutfitStyleName", "batchOutfitFileInput",
     ):
         assert f'id="{element_id}"' in ECOMMERCE_HTML
-    assert "grid-template-columns:repeat(5,minmax(0,1fr))" in BATCH_CSS
+    assert "grid-template-columns:repeat(6,minmax(0,1fr))" in BATCH_CSS
     assert "aspect-ratio:var(--ec-batch-card-aspect)" in BATCH_CSS
     assert "object-fit:contain" in BATCH_CSS
     assert "--ec-batch-shadow-card" in BATCH_CSS

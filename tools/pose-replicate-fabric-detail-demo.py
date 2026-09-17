@@ -75,10 +75,25 @@ async def generate(app, report):
         return part
 
     app.gemini_reference_part = audit_part
+    prompt_file = os.environ.get('POSE_FABRIC_CASE_PROMPT')
+    full_prompt_file = os.environ.get('POSE_FABRIC_FULL_PROMPT')
+    prompt_policy = app.PoseReplicatePromptPolicy()
+    if full_prompt_file:
+        prompt_policy = app.PoseReplicatePromptPolicy(
+            custom_template=Path(full_prompt_file).read_text(encoding='utf-8'),
+            custom_template_key='depth:base-wardrobe',
+        )
+    elif prompt_file:
+        from canvas_core.pose_replicate_templates_v3 import DEPTH_BASE_WARDROBE
+        prompt_policy = app.PoseReplicatePromptPolicy(
+            custom_template=DEPTH_BASE_WARDROBE + '\n\n' + Path(prompt_file).read_text(encoding='utf-8'),
+            custom_template_key='depth:base-wardrobe',
+        )
     payload = app.PoseReplicateTaskRequest(
         mode='depth', inputs=app.PoseReplicateInputs(**refs),
+        prompt_policy=prompt_policy,
         generation=app.PoseReplicateGeneration(provider_id='shiying', model='gemini-3-pro-image-preview',
-                                              resolution='2k', aspect_ratio='3:4', count=1),
+                                              resolution=os.environ.get('POSE_FABRIC_RESOLUTION', '2k'), aspect_ratio='3:4', count=1),
         control_signature='fresh-depth-sha256:' + hashlib.sha256((OUT / 'depth.png').read_bytes()).hexdigest(),
     )
     save('request-audit.json', payload.model_dump())
@@ -124,13 +139,18 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     if (OUT / 'submission.json').exists() or (OUT / 'result.png').exists():
         raise RuntimeError('existing_attempt_retained_do_not_duplicate')
-    for source, name in [('目标图.jpg', 'target.png'), ('服装参考.jpg', 'garment.png'), ('纹理细节.jpg', 'fabric.png')]:
-        with Image.open(Path('D:/data/图片') / source) as image:
+    sources = [
+        ('POSE_FABRIC_TARGET', '目标图.jpg', 'target.png'),
+        ('POSE_FABRIC_GARMENT', '服装参考.jpg', 'garment.png'),
+        ('POSE_FABRIC_DETAIL', '纹理细节.jpg', 'fabric.png'),
+    ]
+    for variable, default, name in sources:
+        with Image.open(Path(os.environ.get(variable) or Path('D:/data/图片') / default)) as image:
             image.save(OUT / name, format='PNG')
     report = {'status': 'running', 'active_stage': 'depth', 'method': 'current source task entry + fabric detail port + original-size lossless garment and fabric; single generation'}
     save('report.json', report)
     print('Starting isolated image test; inspect report.json for the active stage.', flush=True)
-    runtime = ROOT / '.codex-artifacts/pose-fabric-detail-runtime'
+    runtime = Path(os.environ.get('POSE_FABRIC_TEST_RUNTIME') or ROOT / '.codex-artifacts/pose-fabric-detail-runtime')
     os.environ.update(CANVAS_DATA_DIR=str(runtime/'data'), CANVAS_PORTABLE_ROOT=str(runtime), CANVAS_APP_ROOT=str(ROOT),
                       CANVAS_DWPOSE_AUTO_DOWNLOAD='0', CANVAS_DEPTH_AUTO_DOWNLOAD='0')
     from canvas_core.secrets import DpapiProtector

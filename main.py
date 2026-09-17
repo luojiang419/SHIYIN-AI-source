@@ -311,6 +311,8 @@ class QuietAccessLogFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(QuietAccessLogFilter())
 
 app = FastAPI()
+from canvas_core.cutout_api import app as cutout_api_app
+app.mount("/api/cutout", cutout_api_app)
 
 @app.exception_handler(Exception)
 async def report_unhandled_error(request: Request, error: Exception):
@@ -11612,7 +11614,7 @@ GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "target_image": "这是当前任务的服装参考，只提供最终服装设计、材质、版型、颜色、图案与结构细节，不提供最终人物身份、姿势或场景，也不得混入同批其他款式。",
     "model_subject": "只提供最终人物身份、面部、肤色、发型与身体比例，不提供最终服装、姿势或场景。",
     "scene": "只提供最终环境、背景结构、透视与环境光，不提供最终人物身份、服装或姿势。",
-    "fabric_detail": "这是服装面料的局部放大细节，仅提供纤维、绒毛、织物组织和表面质感；不能将放大倍率用于成衣图案尺度，款式、配色与纹样仍以完整服装参考为准。",
+    "fabric_detail": "这是服装面料的局部放大细节，提供实际可见的织物组织、织线方向与尺度和表面质感；只有图中确有绒毛时才参考绒毛。不能将放大倍率用于成衣图案尺度，款式、配色与纹样仍以完整服装参考为准。",
 }
 
 
@@ -17066,6 +17068,38 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
     return batch
 
 
+async def apply_pose_fabric_enhancement(payload, batch):
+    context = payload.prompt_context or {}
+    if payload.operation != 'pose_replicate' or not context.get('fabric_enhancement'):
+        return batch
+    from canvas_core.fabric_enhancement import enhance_fabric_image
+    by_role = {ref.role: ref for ref in payload.reference_images}
+    detail_ref = by_role.get('fabric_detail')
+    control_ref = by_role.get('control_map')
+    detail = output_file_from_url(detail_ref.url) if detail_ref else None
+    control = output_file_from_url(control_ref.url) if control_ref else None
+    audit = []
+    originals = list(batch['images'])
+    for index, url in enumerate(originals):
+        source = output_file_from_url(url)
+        entry = {'status': 'skipped', 'reason': 'reference_unavailable', 'original_url': url}
+        if source and detail and control and context.get('control_mode') == 'depth' and context.get('scenario_id') == 'base-wardrobe':
+            destination = os.path.join(OUTPUT_OUTPUT_DIR, f'fabric_{uuid.uuid4().hex}.png')
+            try:
+                entry.update(await asyncio.to_thread(enhance_fabric_image, source, detail, destination, control))
+                if entry['status'] == 'applied':
+                    entry.pop('reason', None)
+                    enhanced = media_url_from_path(destination)
+                    batch['images'][index] = enhanced
+                    batch['image_items'][index] = image_output_meta(enhanced)
+            except Exception as exc:
+                entry.update(status='skipped', reason='processing_failed', error_type=type(exc).__name__)
+        audit.append(entry)
+    batch['fabric_enhancement'] = audit
+    batch['original_images'] = originals
+    return batch
+
+
 async def build_online_image_result(payload: OnlineImageRequest):
     selection = resolve_image_generation_selection(payload.provider_id, payload.model)
     prompt_result = await prepare_image_generation_prompt(payload, selection)
@@ -17080,6 +17114,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         count=payload.n,
         prefix="online_",
     )
+    batch = await apply_pose_fabric_enhancement(payload, batch)
     provider = batch["provider"]
     model = batch["model"]
     refs = batch["references"]
@@ -17112,6 +17147,9 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "params": {"provider_id": provider["id"], "model": model, "size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs, "operation": payload.operation, "style_reference_url": style_reference_url, "style_calibrated": style_calibrated, "generation_elapsed_seconds": generation_elapsed_seconds, "prompt_original": prompt_result.get("original_prompt") or payload.prompt, "prompt_optimization": prompt_result.get("metadata") or {}, "prompt_context": dict(payload.prompt_context or {})},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
+    if 'fabric_enhancement' in batch:
+        result['fabric_enhancement'] = batch['fabric_enhancement']
+        result['original_images'] = batch['original_images']
     batch_outfit_context = payload.prompt_context.get("batch_outfit") if isinstance(payload.prompt_context, dict) else None
     if isinstance(batch_outfit_context, dict):
         result["id"] = f"batch_outfit_{uuid.uuid4().hex}"
@@ -21186,7 +21224,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         "target_image": payload.inputs.target_image,
         "model_subject": payload.inputs.model_subject,
         "scene": payload.inputs.scene,
-        "fabric_detail": payload.inputs.fabric_detail if payload.batch_size == 1 and payload.batch_outfit is None else None,
+        "fabric_detail": payload.inputs.fabric_detail,
     }
     missing = [role for role in ("pose_reference", "control_map", "target_image") if not input_items[role].url]
     if missing:
@@ -21267,6 +21305,7 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         "normalized_instruction": compiled.normalized_instruction,
         "reference_order": [dict(item) for item in compiled.reference_order],
     }
+    prompt_context['fabric_enhancement'] = bool(input_items['fabric_detail'] and input_items['fabric_detail'].url)
     if batch_outfit_context:
         prompt_context["batch_outfit"] = batch_outfit_context
     image_payload = OnlineImageRequest(

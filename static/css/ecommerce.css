@@ -3062,7 +3062,7 @@ html.theme-pure-white:not(.studio-theme-dark):not(.theme-dark) .ec-compare-handl
 .ec-batch-group-slots {
     min-width:0;
     display:grid;
-    grid-template-columns:repeat(5,minmax(0,1fr));
+    grid-template-columns:repeat(6,minmax(0,1fr));
     gap:8px;
     align-items:start;
 }

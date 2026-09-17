@@ -9,6 +9,7 @@
     const INPUTS = [
         {role:'pose_reference', label:'目标图', required:true, hint:'人物、姿势与画幅基准'},
         {role:'target_image', label:'服装参考', required:true, hint:'当前款式或色号'},
+        {role:'fabric_detail', label:'面料细节', required:false, hint:'绑定当前服装 · 深度基础换装自动增强'},
         {role:'model_subject', label:'模特主体', required:false, hint:'可选 · 替换人物身份'},
         {role:'scene', label:'场景', required:false, hint:'可选 · 指定生成环境'},
     ];
@@ -41,6 +42,11 @@
     const selectedGroup = () => groupById(state.selectedGroupId) || state.groups[0] || null;
     const uniqueId = () => `outfit_${global.crypto?.randomUUID?.().replaceAll('-','') || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
     const inputImages = (group, role) => {
+        if(role === 'fabric_detail') {
+            const targets = inputImages(group, 'target_image');
+            const image = group?.fabricDetails?.[targets[group.targetImageIndex || 0]?.url];
+            return image?.url ? [image] : [];
+        }
         const value = group?.inputs?.[role];
         return (Array.isArray(value) ? value : value?.url ? [value] : []).filter(item => item?.url);
     };
@@ -116,6 +122,7 @@
             id,
             styleName,
             inputs,
+            fabricDetails:Object.fromEntries(Object.entries(value.fabricDetails || value.fabric_details || {}).map(([key,image]) => [key,cleanImage(image)]).filter(([,image])=>image)),
             controlMap,
             baseControlMap,
             depthControls:normalizeDepthControls(value.depthControls || value.depth_controls),
@@ -143,6 +150,7 @@
                 id:group.id,
                 style_name:group.styleName,
                 inputs:group.inputs,
+                fabric_details:group.fabricDetails,
                 control_map:group.controlMap,
                 base_control_map:group.baseControlMap,
                 depth_controls:group.depthControls,
@@ -325,7 +333,7 @@
         el.groups.classList.toggle('is-single', state.groups.length === 1);
         el.groups.innerHTML = state.groups.length
             ? state.groups.map(groupHtml).join('')
-            : `<div class="ec-batch-empty"><span>＋</span><h3>添加第一个换款任务</h3><p>每组固定包含目标图、服装参考、模特主体、场景和查看。</p><button type="button" data-batch-empty-add>添加换款</button></div>`;
+            : `<div class="ec-batch-empty"><span>＋</span><h3>添加第一个换款任务</h3><p>添加目标图和服装参考，可为每张服装绑定面料细节。清晰有色织纹在基础深度换装后尝试增强，无法可靠识别时保留原图。</p><button type="button" data-batch-empty-add>添加换款</button></div>`;
         if(el.runAll) {
             const runnable = state.groups.filter(group => hasRequiredInputs(group) && !ACTIVE_STATUSES.has(group.status));
             el.runAll.disabled = !runnable.length;
@@ -588,7 +596,10 @@
 
     function chooseUpload(groupId, role){
         if(!groupById(groupId) || !INPUTS.some(item => item.role === role)) return;
-        state.uploadTarget = {groupId, role};
+        const group = groupById(groupId);
+        const garmentUrl = inputImages(group, 'target_image')[group.targetImageIndex || 0]?.url;
+        if(role === 'fabric_detail' && !garmentUrl) return showToast('请先添加并选中服装参考', true);
+        state.uploadTarget = {groupId, role, garmentUrl};
         el.fileInput.multiple = role === 'target_image';
         el.fileInput.click();
     }
@@ -614,6 +625,7 @@
             return;
         }
         const currentTargets = inputImages(group, 'target_image');
+        const detailGarmentUrl = target.garmentUrl || currentTargets[group.targetImageIndex || 0]?.url;
         const accepted = target.role === 'target_image'
             ? selected.slice(0, Math.max(0, TARGET_IMAGE_MAX - currentTargets.length))
             : selected.slice(0, 1);
@@ -630,6 +642,10 @@
                 group.inputs.target_image = [...currentTargets, ...images].slice(0, TARGET_IMAGE_MAX);
                 group.targetImageIndex = currentTargets.length;
                 if(accepted.length < selected.length) showToast(`已达到 ${TARGET_IMAGE_MAX} 张服装参考上限`, true);
+            } else if(target.role === 'fabric_detail') {
+                const garmentUrl = detailGarmentUrl;
+                if(!garmentUrl) throw new Error('请先选择对应的服装参考');
+                (group.fabricDetails ||= {})[garmentUrl] = images[0];
             } else group.inputs[target.role] = images[0];
             if(target.role === 'pose_reference') {
                 group.controlMap = null;
@@ -652,11 +668,18 @@
 
     function removeInput(groupId, role, index=-1){
         const group = groupById(groupId);
-        if(!group || !group.inputs[role]) return;
+        if(!group) return;
+        if(role === 'fabric_detail') {
+            const target = inputImages(group, 'target_image')[group.targetImageIndex || 0];
+            if(target && group.fabricDetails) delete group.fabricDetails[target.url];
+            persist(); render(); return;
+        }
+        if(!group.inputs[role]) return;
         if(role === 'target_image') {
             const images = inputImages(group, role);
             const removeIndex = Math.max(0, Math.min(images.length - 1, Number(index >= 0 ? index : group.targetImageIndex || 0)));
-            images.splice(removeIndex, 1);
+            const removed = images.splice(removeIndex, 1)[0];
+            if(removed && group.fabricDetails) delete group.fabricDetails[removed.url];
             if(images.length) group.inputs[role] = images;
             else delete group.inputs[role];
             group.targetImageIndex = Math.max(0, Math.min(removeIndex, images.length - 1));
@@ -851,6 +874,7 @@
             existing.add(url);
         });
         if(result.batch_outfit_save_error) group.error = `图片已生成，但按款号归档失败：${result.batch_outfit_save_error}`;
+        if(result.fabric_enhancement?.some(item=>item.status === 'skipped')) group.error = [group.error,'部分图片未能可靠增强面料，已保留原生成图。'].filter(Boolean).join('；');
     }
 
     function refreshRunStatus(group){
@@ -954,6 +978,7 @@
                         pose_reference:group.inputs.pose_reference,
                         control_map:controlMap,
                         target_image:targetImage,
+                        fabric_detail:group.fabricDetails?.[targetImage.url] || null,
                         model_subject:group.inputs.model_subject || null,
                         scene:group.inputs.scene || null,
                     },

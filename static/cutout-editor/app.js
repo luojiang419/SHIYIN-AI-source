@@ -87,6 +87,16 @@ if(state.view==='overlay'){ctx.globalCompositeOperation='source-in';ctx.fillStyl
   let editingSource=null;
   window.addEventListener('message',async event=>{
     if(event.origin!==location.origin||event.source!==parent)return;
+    if(event.data?.type==='cutout:theme'){
+      const root=document.documentElement;
+      root.style.colorScheme=event.data.dark?'dark':'light';
+      const names={page:'bg',panel:'panel','card-solid':'card',soft:'soft','soft-2':'soft-2',line:'line','line-2':'line-2',text:'text',muted:'muted',strong:'lime','strong-text':'on-accent'};
+      for(const [key,name] of Object.entries(names)){
+        const value=event.data.colors?.[key];
+        if(value&&CSS.supports('color',value))root.style.setProperty('--'+name,value);
+      }
+      return;
+    }
     if(event.data?.type==='cutout:close'){
       if(state.sessionId)fetch('/api/cutout/api/images/'+state.sessionId,{method:'DELETE',keepalive:true});
       return;

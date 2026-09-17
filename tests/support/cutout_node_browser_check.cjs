@@ -40,6 +40,21 @@ await page.locator('.node[data-id="'+id+'"] [data-cutout-fullscreen]').click();
 const again=page.frameLocator('iframe[src="/static/cutout-editor/index.html"]');
 await again.locator('#maskCanvas').waitFor({state:'visible'});
 await again.locator('#busy').waitFor({state:'hidden',timeout:180000});
+for(const theme of ['dark','light']){
+ await page.evaluate(theme=>applyTheme(theme),theme);
+ await again.locator('body').evaluate(async ()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+ const colors=await page.evaluate(()=>({text:getComputedStyle(document.body).getPropertyValue('--text').trim()}));
+ const frame=page.frames().find(f=>f.url().includes('/static/cutout-editor/index.html'));
+ await frame.waitForFunction(expected=>document.documentElement.style.getPropertyValue('--text')===expected,colors.text);
+ for(const id of ['threshold','feather','edgeShift','zoomSlider','saveNode']){
+   const control=again.locator('#'+id);
+   await control.scrollIntoViewIfNeeded();
+   if(!await control.isVisible())throw Error('全屏控件不可见: '+id);
+   const bounds=await control.boundingBox();
+   if(!bounds||bounds.y<0||bounds.y+bounds.height>1000)throw Error('全屏控件越界: '+id);
+ }
+}
+console.log('PASS full-screen controls and live light/dark theme');
 await again.locator('#edgeShift').fill('2');
 await again.locator('#busy').waitFor({state:'hidden',timeout:180000});
 await again.locator('#saveNode').click();

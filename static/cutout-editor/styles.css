@@ -19,3 +19,26 @@
 
 .busy{z-index:20;flex-wrap:wrap;min-width:280px}.busy progress{width:100%;height:8px;accent-color:var(--lime)}
 #openButton,#emptyOpenButton,#exportButton,.export-stack{display:none}
+
+/* 编辑器跟随宿主主题；缩放与参数区属于布局流，不被全屏画布覆盖。 */
+:root{--card:#202326;--soft:#292d30;--soft-2:#34393d;--line-2:#444a4e;--on-accent:#151813}
+html,body{height:100%;min-height:0}
+body{display:flex;flex-direction:column}
+.topbar{flex:0 0 auto;background:var(--panel)}
+.workspace{flex:1 1 0%;height:auto;min-height:0}
+.topbar,.button,.view-tab,.icon-button,.tip,.busy,.hintbar kbd{color:var(--text);border-color:var(--line-2)}
+.button,.view-tab,.icon-button,.tip,.hintbar kbd{background:var(--soft)}
+.button.primary,.brand-mark{background:var(--lime);color:var(--on-accent)}
+.view-tab.active{background:var(--soft-2);color:var(--text)}
+.stage{background-color:var(--card);background-image:repeating-conic-gradient(var(--soft) 0% 25%,var(--soft-2) 0% 50%);background-size:24px 24px;background-position:0 0}
+.stage.empty,.busy{background:var(--panel)}
+.segmented,.view-tab,.status{border-color:var(--line-2)}
+.brand small,.stage-actions span,.control-block p,.tip p,.hintbar,.quality dt,.status{color:var(--muted)}
+.quality dd{color:var(--text)}
+.inspector{display:block;overflow-y:auto;min-height:0;padding:14px 18px}
+.inspector-head{padding-bottom:10px}
+.control-block{padding:12px 0}
+@media(max-width:900px){
+ .workspace{grid-template-rows:minmax(150px,1fr) minmax(150px,40%)}
+ .topbar{height:auto;min-height:60px;flex-wrap:wrap;gap:6px;padding:8px 12px}
+}

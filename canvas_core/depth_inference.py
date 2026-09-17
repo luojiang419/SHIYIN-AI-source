@@ -47,7 +47,7 @@ class DepthInference:
                 raise DepthUnavailableError(f"深度模型加载失败：{exc}") from exc
             return self._session
 
-    def render(self, image_rgb: np.ndarray) -> DepthResult:
+    def render(self, image_rgb: np.ndarray, *, mask=None) -> DepthResult:
         import cv2
         import numpy as np
 
@@ -72,12 +72,17 @@ class DepthInference:
             raise DepthUnavailableError("深度模型输出为空")
         depth = np.nan_to_num(depth, copy=False)
         depth = cv2.resize(depth, (width, height), interpolation=cv2.INTER_CUBIC)
-        low, high = float(np.percentile(depth, 1)), float(np.percentile(depth, 99))
+        foreground = depth if mask is None else depth[mask > 0.5]
+        if foreground.size < 16:
+            raise DepthUnavailableError("未识别到有效人物区域")
+        low, high = float(np.percentile(foreground, 1)), float(np.percentile(foreground, 99))
         if high <= low:
-            low, high = float(depth.min()), float(depth.max())
+            low, high = float(foreground.min()), float(foreground.max())
         if high <= low:
             gray = np.full((height, width), 127, dtype=np.uint8)
         else:
             gray = np.clip((depth - low) / (high - low), 0.0, 1.0)
             gray = np.round(gray * 255.0).astype(np.uint8)
+        if mask is not None:
+            gray = np.round(gray.astype(np.float32) * mask).astype(np.uint8)
         return DepthResult(image_gray=gray, width=width, height=height)

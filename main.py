@@ -274,13 +274,20 @@ def render_dwpose_image(image: Image.Image):
     return DWPOSE_INFERENCE.render(np.asarray(image, dtype=np.uint8))
 
 
-def render_depth_image(image: Image.Image):
+def render_depth_image(image: Image.Image, *, person_only=False):
     global DEPTH_INFERENCE
     import numpy as np
     with DEPTH_INFERENCE_LOCK:
         if DEPTH_INFERENCE is None:
             DEPTH_INFERENCE = DepthInference(DEPTH_MODEL_MANAGER)
-    return DEPTH_INFERENCE.render(np.asarray(image, dtype=np.uint8))
+    rgb = np.asarray(image, dtype=np.uint8)
+    if person_only:
+        from canvas_core.person_depth_lite import PersonDepthLite
+        with DEPTH_INFERENCE_LOCK:
+            if not hasattr(DEPTH_INFERENCE, "person_segmenter"):
+                DEPTH_INFERENCE.person_segmenter = PersonDepthLite(DEPTH_MODEL_MANAGER)
+        return DEPTH_INFERENCE.render(rgb, mask=DEPTH_INFERENCE.person_segmenter.mask(rgb))
+    return DEPTH_INFERENCE.render(rgb)
 
 QUIET_ACCESS_PATHS = {
     "/api/canvases",
@@ -28632,7 +28639,7 @@ async def estimate_person_depth(
                 inference_max_pixels=DWPOSE_INFERENCE_MAX_PIXELS,
                 inference_max_edge=DWPOSE_INFERENCE_MAX_EDGE,
             )
-            lite_result = await asyncio.to_thread(render_depth_image, image)
+            lite_result = await asyncio.to_thread(render_depth_image, image, person_only=True)
             gray = lite_result.image_gray
             output = BytesIO()
             if bit_depth == 16:
@@ -28644,7 +28651,7 @@ async def estimate_person_depth(
                 "X-Person-Depth-Width": str(lite_result.width),
                 "X-Person-Depth-Height": str(lite_result.height),
                 "X-Person-Depth-Bit-Depth": str(bit_depth),
-                "X-Person-Depth-Model": "depth-anything-v2-small-onnx",
+                "X-Person-Depth-Model": "depth-anything-v2-small-onnx+pphumanseg",
                 "X-Depth-Model-Tier": "lite", "Cache-Control": "no-store",
             })
         except (ValueError, DepthUnavailableError) as exc:

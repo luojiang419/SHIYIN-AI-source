@@ -33,6 +33,12 @@ function transferRow(t){
 }
 function renderTraffic(data){
   const t=data.traffic;if(!t)return;
+  const usernames=new Map();
+  for(const group of bugClientGroups(data)){
+    if(!group.username||!group.ip)continue;
+    if(!usernames.has(group.ip))usernames.set(group.ip,new Set());
+    usernames.get(group.ip).add(group.username);
+  }
   $('#downloadCount').textContent=t.active_count;$('#downloadClients').textContent=t.downloading_clients+' 台客户端下载中';
   $('#downloadSpeed').textContent=bytes(t.speed_bps)+'/s';$('#todayTraffic').textContent=bytes(t.today_bytes);
   $('#peakSpeed').textContent='今日峰值 '+bytes(t.peak_bps)+'/s（1秒采样）';
@@ -46,7 +52,9 @@ function renderTraffic(data){
   for(const ip of Object.keys(t.clients))if(!clients.has(ip))clients.set(ip,{ip,seen:0,version:''});
   $('#clientList').replaceChildren(...Array.from(clients.values()).map(c=>{
     const stats=t.clients[c.ip]||{},active=t.active.filter(a=>a.ip===c.ip),row=element('article','','client');
-    const head=element('div','','client-head'),name=element('div','','client-name');name.append(icon('Monitor'),element('strong',c.ip));
+    const head=element('div','','client-head'),name=element('div','','client-name');
+    const known=usernames.get(c.ip),username=known?.size===1?[...known][0]:'';
+    name.append(icon('Monitor'),element('strong',username?username+' · '+c.ip:c.ip));
     const status=active.length?'下载中':c.update_state==='outdated'?'待补齐':c.update_state==='current'?'已是最新':Date.now()/1000-c.seen<300?'近期连接':'暂无活动';
     head.append(name,element('span',status,'badge '+(active.length?'cyan':c.update_state==='outdated'?'orange':c.update_state==='current'?'green':'')));row.append(head);
     const updateState={current:'已是最新',outdated:'待补齐',unknown:'未报告'}[c.update_state]||'未报告';

@@ -48,12 +48,16 @@ const path = require('node:path');
                 compareTime:dialog.querySelector('[data-depth-compare-time]').textContent,
                 playing:compare.map(video=>!video.paused)
             };
-            dialog.querySelector('[data-depth-video-compare-close]').click();
-            state.closed=!document.querySelector('.depth-video-compare-modal');
-            state.stopped=compare.every(video=>video.paused);
             return state;
         });
-        assert.deepEqual(result,{nodeSeeks:2,nodeTime:'0:05 / 0:20',sourceClip:'inset(0px 50% 0px 0px)',divider:'50%',compareTimes:[14.4,14.4],compareTime:'0:14 / 0:20',playing:[true,true],closed:true,stopped:true});
+        assert.deepEqual(result,{nodeSeeks:2,nodeTime:'0:05 / 0:20',sourceClip:'inset(0px 50% 0px 0px)',divider:'50%',compareTimes:[14.4,14.4],compareTime:'0:14 / 0:20',playing:[true,true]});
+        await page.keyboard.press('Space');
+        assert.deepEqual(await page.locator('[data-depth-compare-video]').evaluateAll(videos=>videos.map(video=>video.paused)),[true,true]);
+        await page.locator('[data-depth-compare-seek]').focus();
+        await page.keyboard.press('Space');
+        assert.deepEqual(await page.locator('[data-depth-compare-video]').evaluateAll(videos=>videos.map(video=>video.paused)),[false,false]);
+        await page.locator('[data-depth-video-compare-close]').click();
+        assert.equal(await page.locator('.depth-video-compare-modal').count(),0);
         assert.deepEqual(errors,[]);
         console.log(JSON.stringify(result));
     } finally { await browser.close(); }

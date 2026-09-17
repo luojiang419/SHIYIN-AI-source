@@ -558,6 +558,11 @@
         const applyWipe = () => { const value=Number(wipe.value); sourceLayer.style.clipPath=`inset(0 ${100-value}% 0 0)`; divider.style.left=`${value}%`; };
         wipe.addEventListener('input', applyWipe); applyWipe();
         play.addEventListener('click', () => { if(depth.paused){ source.currentTime=depth.currentTime; Promise.allSettled([depth.play(),source.play()]); } else { depth.pause(); source.pause(); } });
+        dialog.addEventListener('keydown', event => {
+            if(event.code !== 'Space' && event.key !== ' ') return;
+            event.preventDefault(); event.stopPropagation();
+            if(!event.repeat) play.click();
+        });
         seek.addEventListener('pointerdown', () => { seeking=true; });
         seek.addEventListener('input', () => { const duration=depth.duration || source.duration || 0; const target=duration * Number(seek.value) / 1000; depth.currentTime=target; source.currentTime=Math.min(target,source.duration || target); syncFrame(); });
         seek.addEventListener('change', () => { seeking=false; syncFrame(); });
@@ -567,6 +572,7 @@
         dialog.querySelector('[data-depth-video-compare-close]').onclick=closeDepthVideoCompare;
         dialog.addEventListener('mousedown', event => { if(event.target === dialog) closeDepthVideoCompare(); });
         window.lucide?.createIcons?.({nodes:[dialog]});
+        play.focus();
     }
 
     function depthVideoBodyHtml(node){

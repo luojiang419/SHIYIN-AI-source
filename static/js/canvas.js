@@ -5552,10 +5552,11 @@ function linkCreateButtonHtml(option){
 }
 function linkFilmStageMenuHtml(items){
     const phases = [
-        {title:'01 前期准备', description:'确定取景、形体和动作参考。', types:['panorama','multiView','dwpose','depthMap','poseReplicate']},
-        {title:'02 分镜预演', description:'明确构图并整理分镜画面。', types:['film-line-art','film-storyboard','storyboardMerge']},
-        {title:'03 镜头生成', description:'根据分镜选择视频生成路径。', types:['film-video','linkfox-video']},
-        {title:'04 后期处理', description:'处理已生成镜头的画面。', types:['depthVideo','topazVideo']}
+        {title:'01 资产筹备', description:'建立可复用的角色与造型参考。', types:['multiView']},
+        {title:'02 镜头预演', description:'规划机位、动作与画面结构参考。', types:['panorama','dwpose','depthMap','poseReplicate']},
+        {title:'03 分镜定稿', description:'从草图到正式分镜并整理画面。', types:['film-line-art','film-storyboard','storyboardMerge']},
+        {title:'04 镜头生成', description:'使用已确认的分镜生成动态镜头。', types:['film-video','linkfox-video']},
+        {title:'05 后期处理', description:'处理空间信息并完成画质增强。', types:['depthVideo','topazVideo']}
     ];
     const workflow = items.find(item => item.type === 'film-workflow');
     return (workflow ? linkCreateButtonHtml(workflow) : '') + phases.map(phase => {

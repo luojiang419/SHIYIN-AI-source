@@ -90,6 +90,19 @@ class VideoDepthTaskService:
         self._worker_runtime_key = ""
         self._worker_stderr = deque(maxlen=64)
 
+    def _model_key(self) -> str:
+        if self.model_manager is None:
+            return "vda_base_fp16_relative"
+        variant = str(getattr(self.model_manager, "selected_variant_id", "") or "")
+        return "vda_base_fp16_relative" if variant == "quality" else "vda_small_fp16_relative"
+
+    def _model_label(self) -> str:
+        return (
+            "Video Depth Anything Base · FP16 · Relative"
+            if self._model_key() == "vda_base_fp16_relative"
+            else "Video Depth Anything Small · FP16 · Relative"
+        )
+
     def close(self) -> None:
         process = self._worker_process
         self._worker_process = None
@@ -110,7 +123,7 @@ class VideoDepthTaskService:
             except (OSError, ValueError):
                 details = {}
         models = {str(item.get("key")): item for item in details.get("models", []) if isinstance(item, dict)}
-        model = models.get("vda_base_fp16_relative", {})
+        model = models.get(self._model_key(), {})
         ready = self.python.is_file() and self.worker.is_file() and bool(model.get("ready"))
         if not ready:
             return None
@@ -157,8 +170,9 @@ class VideoDepthTaskService:
             ),
             "progress": runtime_status.get("progress", model_status.get("progress", 1 if ready else 0)),
             "runtimeVariant": runtime_status.get("selected_variant", "bundled" if runtime else ""),
-            "model": "vda_base_fp16_relative",
-            "label": "Video Depth Anything Base · FP16 · Relative",
+            "model": self._model_key(),
+            "label": self._model_label(),
+            "modelTier": "quality" if self._model_key() == "vda_base_fp16_relative" else "lite",
             "message": message,
         }
 
@@ -179,6 +193,8 @@ class VideoDepthTaskService:
             "inputName": source.name,
             "outputUrl": "",
             "outputName": "depth-preview.mp4",
+            "model": state["model"],
+            "modelLabel": state["label"],
             "error": "",
             "userId": user_id,
         }
@@ -286,9 +302,10 @@ class VideoDepthTaskService:
             if not runtime or not runtime["modelReady"]:
                 self._update(task_id, status="failed", error="深度视频模型安装后仍不可用", message="深度视频模型安装失败")
                 return
+        model_key = self._model_key()
         command = [
             *runtime["command"], "serve",
-            "--model", "vda_base_fp16_relative",
+            "--model", model_key,
             "--input", str(source),
             "--output-dir", str(output_dir),
             "--input-size", "322",
@@ -328,7 +345,7 @@ class VideoDepthTaskService:
             process_stdin = getattr(process, "stdin", None)
             if process_stdin is not None:
                 request = {
-                    "id": request_id, "op": "infer", "model": "vda_base_fp16_relative",
+                    "id": request_id, "op": "infer", "model": model_key,
                     "input": str(source), "output_dir": str(output_dir), "input_size": 322,
                     "target_fps": -1, "max_frames": -1, "max_resolution": -1, "params": {},
                 }

@@ -487,7 +487,7 @@ class PersonDepthComponentManager:
                 ]
             )
         attempts.append(("official", "官方源直连", None))
-        variants = self.manifest.get("variants") if self.component_name.endswith("-runtime") else None
+        variants = self.manifest.get("variants") if int(self.manifest.get("schema_version") or 1) == 2 else None
         candidates = compatible_variants(variants, self.capabilities) if isinstance(variants, list) else [None]
         candidates.sort(key=lambda item: bool(item and item.get("id") == self.selected_variant_id), reverse=True)
         errors: list[str] = []
@@ -551,7 +551,7 @@ class PersonDepthComponentManager:
             payload = response.json()
         finally:
             session.close()
-        if self.component_name.endswith("-runtime"):
+        if int(self.manifest.get("schema_version") or 1) == 2:
             payload = self._verify_lan_envelope(payload)
         if not isinstance(payload, dict) or str(payload.get("component") or "") != self.component_name:
             raise PersonDepthComponentUnavailable("局域网清单的组件标识无效")

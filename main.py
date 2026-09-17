@@ -96,6 +96,7 @@ from canvas_core.fashion_director import (
 from canvas_core.account_resources import AccountResourceService
 from canvas_core.dwpose_input import DWPoseInputTooLarge, prepare_dwpose_input
 from canvas_core.depth_inference import DepthInference, DepthUnavailableError
+from canvas_core.depth_model_policy import select_depth_model_tier
 from canvas_core.person_depth_client import PersonDepthWorkerClient, PersonDepthWorkerError
 from canvas_core.person_depth_components import PersonDepthComponentUnavailable
 from canvas_core.distribution_client import distribution_status
@@ -28400,14 +28401,24 @@ def admin_person_depth_component_status(request: Request):
 @app.get("/api/person-depth/component/status")
 def person_depth_component_status(request: Request):
     request_identity(request)
-    return PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+    selection = select_depth_model_tier()
+    if selection.quality:
+        status = PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+        return {**status, "model_tier": selection.tier, "selection_reason": selection.reason,
+                "model_label": "Depth Anything V2 Large + BiRefNet"}
+    status = DEPTH_MODEL_MANAGER.public_status()
+    return {**status, "install_available": True, "consent_required": False,
+            "model_tier": selection.tier, "selection_reason": selection.reason,
+            "model_label": "Depth Anything V2 Small ONNX"}
 
 
 @app.post("/api/person-depth/component/install", status_code=202)
 def install_person_depth_component(request: Request):
     require_admin(request)
-    started = PERSON_DEPTH_COMPONENT_MANAGER.start_background()
-    status = PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+    selection = select_depth_model_tier()
+    manager = PERSON_DEPTH_COMPONENT_MANAGER if selection.quality else DEPTH_MODEL_MANAGER
+    started = manager.start_background()
+    status = person_depth_component_status(request)
     if not started and not status.get("ready") and not status.get("install_available"):
         raise HTTPException(status_code=409, detail=str(status.get("message") or "高精度人物深度组件暂不可安装"))
     return {"started": started, "status": status}
@@ -28555,9 +28566,35 @@ async def estimate_person_depth(
         raise HTTPException(status_code=400, detail="高精度人物深度输入图片无法读取") from exc
     if width * height > 60_000_000:
         raise HTTPException(status_code=413, detail="高精度人物深度输入图片像素不能超过 6000 万")
-    status = PERSON_DEPTH_COMPONENT_MANAGER.public_status()
+    selection = select_depth_model_tier()
+    status = (PERSON_DEPTH_COMPONENT_MANAGER.public_status() if selection.quality
+              else DEPTH_MODEL_MANAGER.public_status())
     if not status.get("ready"):
-        raise HTTPException(status_code=503, detail=str(status.get("message") or "高精度人物深度组件尚未就绪"))
+        raise HTTPException(status_code=503, detail=str(status.get("message") or "深度模型尚未就绪"))
+    if not selection.quality:
+        try:
+            image = prepare_dwpose_input(
+                content, decode_max_pixels=DWPOSE_INPUT_MAX_PIXELS,
+                inference_max_pixels=DWPOSE_INFERENCE_MAX_PIXELS,
+                inference_max_edge=DWPOSE_INFERENCE_MAX_EDGE,
+            )
+            lite_result = await asyncio.to_thread(render_depth_image, image)
+            gray = lite_result.image_gray
+            output = BytesIO()
+            if bit_depth == 16:
+                gray = gray.astype("uint16") * 257
+                Image.fromarray(gray, mode="I;16").save(output, format="PNG", compress_level=4)
+            else:
+                Image.fromarray(gray, mode="L").save(output, format="PNG", compress_level=4)
+            return Response(output.getvalue(), media_type="image/png", headers={
+                "X-Person-Depth-Width": str(lite_result.width),
+                "X-Person-Depth-Height": str(lite_result.height),
+                "X-Person-Depth-Bit-Depth": str(bit_depth),
+                "X-Person-Depth-Model": "depth-anything-v2-small-onnx",
+                "X-Depth-Model-Tier": "lite", "Cache-Control": "no-store",
+            })
+        except (ValueError, DepthUnavailableError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         result = await asyncio.to_thread(PERSON_DEPTH_WORKER.estimate, content, bit_depth=bit_depth)
     except PersonDepthComponentUnavailable as exc:
@@ -28572,6 +28609,7 @@ async def estimate_person_depth(
             "X-Person-Depth-Height": str(result.height),
             "X-Person-Depth-Bit-Depth": str(result.bit_depth),
             "X-Person-Depth-Model": "depth-anything-v2-large+birefnet",
+            "X-Depth-Model-Tier": "quality",
             "Cache-Control": "no-store",
         },
     )

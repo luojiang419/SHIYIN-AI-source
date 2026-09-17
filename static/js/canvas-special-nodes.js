@@ -475,7 +475,7 @@
                 <button type="button" data-special-action="export-depth-map" ${!output?.url || status === 'running' ? 'disabled' : ''}><i data-lucide="external-link"></i><span>导出深度图</span></button>
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
-            <div class="special-output-row"><span>${output?.url ? `${esc(output.name || 'depth-map.png')}${depthMapControlsAreDefault(node.depthMapControls) ? '' : ' · 已调校'}` : `输出：${modeLabel} · 8-bit PNG 相对深度图`}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
+            <div class="special-output-row"><span>${output?.url ? `${esc(output.name || 'depth-map.png')}${output.model_label ? ` · ${esc(output.model_label)}` : ''}${depthMapControlsAreDefault(node.depthMapControls) ? '' : ' · 已调校'}` : `输出：${modeLabel} · ${esc(depthStatus?.model_label || '自动选择模型')} · 8-bit PNG`}</span><b>${output?.natural_w && output?.natural_h ? `${output.natural_w}×${output.natural_h}` : ''}</b></div>
         </div>`;
     }
 
@@ -607,7 +607,7 @@
                 <button type="button" data-special-action="export-depth-video" ${!output?.url || status === 'running' || status === 'queued' || node.depthVideoExporting ? 'disabled' : ''}><i data-lucide="${node.depthVideoExporting ? 'loader-2' : 'external-link'}"></i><span>${node.depthVideoExporting ? '导出中' : '导出深度视频'}</span></button>
             </div>
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
-            <div class="special-output-row"><span>${output?.url ? esc(output.name || 'depth-preview.mp4') : '输出：VDA Base · FP16 · Relative Depth'}</span><b>${node.depthVideoWidth && node.depthVideoHeight ? `${node.depthVideoWidth}×${node.depthVideoHeight}` : ''}</b></div>
+            <div class="special-output-row"><span>${output?.url ? esc(output.name || 'depth-preview.mp4') : `输出：${esc(node.depthVideoModelLabel || '自动选择 VDA Small / Base')}`}</span><b>${node.depthVideoWidth && node.depthVideoHeight ? `${node.depthVideoWidth}×${node.depthVideoHeight}` : ''}</b></div>
         </div>`;
     }
 
@@ -696,6 +696,7 @@
                 node.depthVideoStatus = state.status;
                 node.depthVideoProgress = state.progress || 0;
                 node.depthVideoMessage = state.message || '';
+                if(state.modelLabel) node.depthVideoModelLabel = state.modelLabel;
                 if(state.status === 'done'){
                     if(!state.outputUrl) throw new Error('深度视频结果缺少播放地址，请重新打开工程恢复结果');
                     node.depthVideoError = '';
@@ -2313,6 +2314,11 @@
         const file = await uploadBlob(await response.blob(), filename);
         file.natural_w = width || file.natural_w || file.width || source.natural_w || 0;
         file.natural_h = height || file.natural_h || file.height || source.natural_h || 0;
+        file.model_label = professional
+            ? 'Depth Anything V2 Small ONNX'
+            : (response.headers.get('X-Person-Depth-Model') === 'depth-anything-v2-large+birefnet'
+                ? 'Depth Anything V2 Large + BiRefNet'
+                : 'Depth Anything V2 Small ONNX');
         return file;
     }
     async function adjustDepthFile(file, controls, options, filename='depth-map-adjusted.png'){

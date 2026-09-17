@@ -317,7 +317,7 @@ def run_stdio() -> int:
             if operation != "infer":
                 raise ValueError("不支持的 worker 操作")
             args = argparse.Namespace(
-                model=str(request.get("model") or "vda_base_fp16_relative"),
+                model=str(request.get("model") or "vda_small_fp16_relative"),
                 input=str(request.get("input") or ""),
                 output_dir=str(request.get("output_dir") or ""),
                 input_size=int(request.get("input_size") or 322),

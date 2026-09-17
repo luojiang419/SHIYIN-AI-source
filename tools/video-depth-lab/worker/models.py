@@ -103,6 +103,23 @@ MODEL_PROFILES = {
         source_revision="4f5ae23172ba60fd7bc11ef671cca678842c7072",
         checkpoint_sha256="775E578E8F9431EC0496514AA466BD0A1F67C28D0F518267809F35A43C04329B",
     ),
+    "vda_small_fp16_relative": ModelProfile(
+        key="vda_small_fp16_relative",
+        label="Video Depth Anything Small · FP16 · Relative",
+        source_dir="video-depth-anything",
+        checkpoint="video-depth-anything-small/video_depth_anything_vits.pth",
+        encoder="vits",
+        precision="FP16 autocast",
+        depth_type="Relative Depth",
+        default_input_size=322,
+        infer_len=32,
+        overlap=10,
+        keyframes=(0, 12, 24, 25, 26, 27, 28, 29, 30, 31),
+        interp_len=8,
+        license_notice="Video Depth Anything Small: Apache-2.0。",
+        source_revision="8dd3558f4d407363cc1a113b81e89f16a0d51e5c",
+        checkpoint_sha256="13379300B739E659F076A59D52E9801BD8D38C541A7E71F73BBCA4DCFB013609",
+    ),
 }
 
 
@@ -248,14 +265,19 @@ def _load_vda(lab_root: Path, profile: ModelProfile, emit: Callable[[int, str], 
     _clear_conflicting_modules()
     sys.path.insert(0, str(source))
     module = importlib.import_module("video_depth_anything.video_depth")
-    emit(30, "正在构建 Video Depth Anything Base")
+    emit(30, f"正在构建 {profile.label}")
+    configurations = {
+        "vits": (64, [48, 96, 192, 384]),
+        "vitb": (128, [96, 192, 384, 768]),
+    }
+    features, out_channels = configurations[profile.encoder]
     model = module.VideoDepthAnything(
-        encoder="vitb",
-        features=128,
-        out_channels=[96, 192, 384, 768],
+        encoder=profile.encoder,
+        features=features,
+        out_channels=out_channels,
         metric=False,
     )
-    emit(36, "正在严格加载 VDA Base Relative 官方权重")
+    emit(36, f"正在严格加载 {profile.label} 官方权重")
     state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state_dict, strict=True)
     model = model.to(device).eval()

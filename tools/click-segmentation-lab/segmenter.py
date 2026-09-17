@@ -80,19 +80,19 @@ def choose_mask(masks: np.ndarray, scores: np.ndarray, points: list[dict[str, fl
     for index, candidate in enumerate(masks):
         binary = candidate >= 0.5
         area_ratio = float(binary.mean())
-        positive_hits = 0
-        negative_hits = 0
+        positive_confidence = 0.0
+        negative_confidence = 0.0
         for point in points:
             x = min(max(round(float(point["x"])), 0), width - 1)
             y = min(max(round(float(point["y"])), 0), height - 1)
-            hit = bool(binary[y, x])
+            confidence = float(candidate[y, x])
             if int(point["label"]) == 1:
-                positive_hits += int(hit)
+                positive_confidence += confidence
             else:
-                negative_hits += int(hit)
-        utility = float(scores[index]) + positive_hits * 0.35 - negative_hits * 0.8
+                negative_confidence += confidence
+        utility = float(scores[index]) + positive_confidence * 1.5 - negative_confidence * 3.0
         if area_ratio > 0.9:
-            utility -= 2.0 + area_ratio
+            utility -= 4.0 + area_ratio
         ranked.append((utility, index))
     return max(ranked)[1]
 
@@ -168,9 +168,12 @@ class SamSegmenter:
                 outputs = self._model(**model_inputs)
             scores = outputs.iou_scores[0, 0].float().cpu().numpy()
             masks = self._processor.image_processor.post_process_masks(
-                outputs.pred_masks.cpu(), inputs["original_sizes"], inputs["reshaped_input_sizes"]
+                outputs.pred_masks.cpu(),
+                inputs["original_sizes"],
+                inputs["reshaped_input_sizes"],
+                binarize=False,
             )[0]
-            candidates = masks[0].float().cpu().numpy()
+            candidates = torch.sigmoid(masks[0]).float().cpu().numpy()
             best = choose_mask(candidates, scores, points)
             session.last_mask = candidates[best]
             session.last_points = point_key

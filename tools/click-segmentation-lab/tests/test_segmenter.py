@@ -57,3 +57,12 @@ def test_choose_mask_rejects_full_frame_candidate() -> None:
     scores = np.array([0.99, 0.91, 0.7], dtype=np.float32)
     point = [{"x": 50, "y": 50, "label": 1}]
     assert choose_mask(masks, scores, point) == 1
+
+
+def test_choose_mask_strongly_respects_negative_point() -> None:
+    masks = np.full((2, 100, 100), 0.05, dtype=np.float32)
+    masks[0, 20:80, 20:80] = 0.95
+    masks[1, 20:60, 20:60] = 0.88
+    scores = np.array([0.98, 0.82], dtype=np.float32)
+    points = [{"x": 35, "y": 35, "label": 1}, {"x": 70, "y": 70, "label": 0}]
+    assert choose_mask(masks, scores, points) == 1

@@ -15,6 +15,7 @@ await page.route('**/api/segment',r=>r.fulfill({json:{mask:fixtures.mask}}));
 page.on('request',r=>{if(r.url().includes('/api/export/'))exports++});
 await page.locator('#fileInput').setInputFiles({name:'fixture.png',mimeType:'image/png',buffer:Buffer.from(fixtures.preview.split(',')[1],'base64')});
 await page.waitForFunction(()=>document.querySelector('#imageCanvas').width>100);
+if(await page.locator('#emptyState').isVisible())throw Error('导入后空白页提示仍显示');
 const before=await page.locator('#imageCanvas').evaluate(c=>c.getContext('2d').getImageData(5,5,1,1).data[3]);
 if(before!==255)throw Error('导入后原图不可见');
 await page.locator('#maskCanvas').click();

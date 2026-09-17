@@ -154,7 +154,9 @@ def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, mo
             self.stderr = io.BytesIO(b"")
             self.returncode = 0
 
-        def poll(self): return 2 if self.stdin else 0
+        # Windows may report the process as running briefly after stdout reaches
+        # EOF. The fallback must not depend on poll() observing the exit yet.
+        def poll(self): return None if self.stdin else 0
         def wait(self, timeout=None): return self.poll()
         def communicate(self):
             output_dir = Path(launches[-1][launches[-1].index("--output-dir") + 1])

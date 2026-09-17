@@ -352,11 +352,11 @@ class VideoDepthTaskService:
                 elif event.get("type") == "error":
                     worker_error = str(event.get("error") or "深度视频生成失败")
                     break
-            if result is None and not worker_error and process_stdin is not None and process.poll() is not None:
+            if result is None and not worker_error and process_stdin is not None:
                 # During a staged rollout an installed v1 worker may not support
-                # the persistent `serve` command yet. Keep generation available
-                # until the external runtime resource is upgraded.
-                self._worker_process = None
+                # the persistent `serve` command yet. EOF is sufficient evidence:
+                # on Windows poll() can briefly remain None after stdout closes.
+                self.close()
                 legacy_command = list(command)
                 legacy_command[len(runtime["command"])] = "infer"
                 legacy = subprocess.Popen(

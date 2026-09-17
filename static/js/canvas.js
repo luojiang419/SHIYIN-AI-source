@@ -5535,16 +5535,16 @@ function imageLinkAdvertisingGroups(state){
     if(state.originKind !== 'out' || !['image','generator'].includes(origin?.type) || (origin.type === 'image' && origin.url && mediaKindForNode(origin) !== 'image')) return [];
     return linkAdvertisingAllowsFilm() ? [{label:'影视制作', icon:'clapperboard', items:[
         {type:'film-workflow', label:'创建影视工作流', icon:'workflow'},
-        {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left', inputRole:'actor-0'},
-        {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
-        {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler', inputRole:'source'},
-        {type:'film-video', label:'生成视频', icon:'clapperboard', inputRole:'storyboard'},
-        {type:'linkfox-video', label:'LinkFox视频生成', icon:'sparkles', inputRole:'reference-image'},
+        {type:'panorama', label:'720°取景器', icon:'scan-line'},
+        {type:'multiView', label:'创建三视图', icon:'panels-top-left', inputRole:'model-front'},
         {type:'dwpose', label:'动作提取', icon:'person-standing'},
         {type:'depthMap', label:'深度图', icon:'scan'},
         {type:'poseReplicate', label:'一键复刻', icon:'refresh-cw', inputRole:'pose-reference'},
-        {type:'multiView', label:'创建三视图', icon:'panels-top-left', inputRole:'model-front'},
-        {type:'panorama', label:'720°取景器', icon:'scan-line'}
+        {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler', inputRole:'source'},
+        {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left', inputRole:'actor-0'},
+        {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
+        {type:'film-video', label:'生成视频', icon:'clapperboard', inputRole:'storyboard'},
+        {type:'linkfox-video', label:'LinkFox视频生成', icon:'sparkles', inputRole:'reference-image'}
     ]}] : [];
 }
 function linkCreateButtonHtml(option){

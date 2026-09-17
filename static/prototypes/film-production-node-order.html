@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>影视制作节点顺序演示</title>
+<style>
+  :root{font-family:system-ui,"Microsoft YaHei",sans-serif;color:#e8edef;background:#101519;letter-spacing:0}
+  *{box-sizing:border-box}body{margin:0;min-height:100vh}main{max-width:1100px;margin:auto;padding:36px 24px 60px}
+  header{border-bottom:1px solid #344047;padding-bottom:22px;margin-bottom:28px}h1{font-size:25px;margin:0 0 8px}header p{margin:0;color:#aab8bc;font-size:14px}
+  .layout{display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr);gap:32px;align-items:start}
+  .menu{border:1px solid #354248;background:#1c252a;border-radius:7px;padding:8px;max-height:690px;overflow:auto}
+  .menu-title{padding:10px 12px;color:#96abb0;font-size:12px;font-weight:700}.menu-row{display:flex;gap:12px;align-items:center;min-height:38px;padding:8px 12px;border-radius:5px;font-size:13px}
+  .menu-row:hover{background:#30413f}.menu-row b{width:19px;text-align:center;color:#78c8a6;font:600 11px Consolas,monospace}.menu-row.primary{color:#9be0b7;font-weight:700}.divider{height:1px;background:#354248;margin:6px 8px}
+  .phases{display:grid;gap:22px}.phase{border-top:1px solid #3b494d;padding-top:14px;display:grid;grid-template-columns:135px 1fr;gap:14px}.phase h2{margin:0;color:#86d3ae;font-size:15px}.phase p{margin:0 0 10px;color:#aab8bc;font-size:13px;line-height:1.6}.phase ol{margin:0;padding-left:20px;font-size:13px;line-height:1.85}.phase li::marker{color:#86d3ae}
+  .note{margin-top:24px;padding:12px 14px;border-left:3px solid #d8a46b;background:#242621;color:#c8ceca;font-size:12px;line-height:1.6}
+  @media(max-width:730px){main{padding:24px 16px}.layout{grid-template-columns:1fr;gap:24px}.menu{max-height:none}.phase{grid-template-columns:1fr;gap:7px}}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>影视制作节点顺序</h1><p>“创建节点 → 影视制作”的完整菜单演示。左侧顺序与正式菜单一致。</p></header>
+  <div class="layout">
+    <section class="menu" aria-label="影视制作节点菜单">
+      <div class="menu-title">影视制作</div>
+      <div class="menu-row primary"><b>00</b>创建影视工作流</div><div class="divider"></div>
+      <div class="menu-row"><b>01</b>准备资产</div>
+      <div class="menu-row"><b>02</b>720°取景器</div>
+      <div class="menu-row"><b>03</b>3D导演台</div>
+      <div class="menu-row"><b>04</b>外部导演台</div>
+      <div class="menu-row"><b>05</b>创建三视图</div>
+      <div class="menu-row"><b>06</b>动作提取</div>
+      <div class="menu-row"><b>07</b>深度图</div>
+      <div class="menu-row"><b>08</b>一键复刻</div>
+      <div class="menu-row"><b>09</b>确认镜头</div>
+      <div class="menu-row"><b>10</b>生成线稿分镜</div>
+      <div class="menu-row"><b>11</b>分镜合成</div>
+      <div class="menu-row"><b>12</b>生成视频</div>
+      <div class="menu-row"><b>13</b>LinkFox视频生成</div>
+      <div class="menu-row"><b>14</b>深度视频</div>
+      <div class="menu-row"><b>15</b>Topaz 高清放大</div>
+    </section>
+    <div>
+      <div class="phases">
+        <section class="phase"><h2>01 前期准备</h2><div><p>先确定可复用资产、取景和表演参考，再锁定镜头。</p><ol><li>准备资产</li><li>720°取景器、3D导演台、外部导演台</li><li>创建三视图、动作提取、深度图、一键复刻</li><li>确认镜头</li></ol></div></section>
+        <section class="phase"><h2>02 分镜预演</h2><div><p>用线稿明确构图，再合成正式分镜图。</p><ol><li>生成线稿分镜</li><li>分镜合成</li></ol></div></section>
+        <section class="phase"><h2>03 镜头生成</h2><div><p>根据确认的分镜生成镜头；两种视频生成节点为可选路径。</p><ol><li>生成视频</li><li>LinkFox视频生成</li></ol></div></section>
+        <section class="phase"><h2>04 后期处理</h2><div><p>在视频成片后处理深度效果与清晰度。</p><ol><li>深度视频</li><li>Topaz 高清放大</li></ol></div></section>
+      </div>
+      <div class="note">从图片输出端口打开的“影视制作”子菜单只展示可从图片直接连接的节点，保留相同的相对顺序；不会出现无法直接连接的节点。</div>
+    </div>
+  </div>
+</main>
+</body>
+</html>

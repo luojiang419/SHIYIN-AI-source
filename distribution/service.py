@@ -414,31 +414,33 @@ class Center:
                     if path.stat().st_size != item['size']:
                         raise ValueError('文件大小不匹配：' + item['path'])
                     self.blob(path, item['sha256'])
-        elif kind == 'video-depth-runtime':
+        elif kind in ('video-depth-runtime', 'video-depth') and (source / 'manifest.json').is_file() and json.loads(
+            (source / 'manifest.json').read_text('utf-8-sig')
+        ).get('schema_version') == 2:
             manifest = json.loads((source / 'manifest.json').read_text('utf-8-sig'))
             if manifest.get('schema_version') != 2 or manifest.get('component') != kind:
-                raise ValueError('运行时清单版本或组件名称无效')
+                raise ValueError('组件清单版本或名称无效')
             version = str(manifest.get('version') or '')
             if not re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', version):
-                raise ValueError('运行时版本无效')
+                raise ValueError('组件版本无效')
             variants = manifest.get('variants')
             packages = manifest.get('packages')
             if not isinstance(variants, list) or not variants or not isinstance(packages, list) or not packages:
-                raise ValueError('运行时清单缺少 variants 或 packages')
+                raise ValueError('组件清单缺少 variants 或 packages')
             package_ids = set()
             public_packages = []
             for item in packages:
                 package_id = str(item.get('id') or '') if isinstance(item, dict) else ''
                 file_name = str(item.get('file') or '') if isinstance(item, dict) else ''
                 if not re.fullmatch(r'[0-9A-Za-z._-]+', package_id) or package_id in package_ids:
-                    raise ValueError('运行时下载包 id 无效或重复')
+                    raise ValueError('组件下载包 id 无效或重复')
                 rel = relative_path(file_name)
                 package_path = (source / rel).resolve(strict=True)
                 package_path.relative_to(source)
                 size = package_path.stat().st_size
                 sha = digest(package_path)
                 if int(item.get('size') or 0) != size or str(item.get('sha256') or '').lower() != sha:
-                    raise ValueError('运行时下载包大小或 SHA-256 不匹配：' + package_id)
+                    raise ValueError('组件下载包大小或 SHA-256 不匹配：' + package_id)
                 self.blob(package_path, sha)
                 package_ids.add(package_id)
                 public_packages.append({
@@ -449,7 +451,7 @@ class Center:
             for variant in variants:
                 ids = variant.get('packages') if isinstance(variant, dict) else None
                 if not isinstance(ids, list) or not ids or any(str(value) not in package_ids for value in ids):
-                    raise ValueError('运行时变体引用了未知下载包')
+                    raise ValueError('组件变体引用了未知下载包')
             manifest = {
                 key: manifest[key] for key in (
                     'schema_version', 'component', 'version', 'license_notice', 'variants'
@@ -667,10 +669,10 @@ class Center:
                             manifest = json.loads(json.loads(release['manifest'])['payload'])
                             if path == '/' + kind + '/manifest.json':
                                 owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
-                                if kind == 'video-depth-runtime':
+                                if manifest.get('protocol_version') == 2:
                                     return self.json(json.loads(release['manifest']))
                                 return self.json(manifest)
-                            if kind == 'video-depth-runtime' and path.startswith('/' + kind + '/packages/'):
+                            if manifest.get('protocol_version') == 2 and path.startswith('/' + kind + '/packages/'):
                                 package_id = path.removeprefix('/' + kind + '/packages/')
                                 item = next((p for p in manifest.get('packages', []) if p['id'] == package_id), None)
                                 if not item: return self.json({'error': '下载包不在发布清单'}, 404)

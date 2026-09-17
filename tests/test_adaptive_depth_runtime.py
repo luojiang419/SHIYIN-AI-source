@@ -172,3 +172,48 @@ def test_distribution_imports_and_serves_runtime_package(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_distribution_imports_and_serves_adaptive_video_model(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    package = source / "vda-small.pth"
+    package.write_bytes(b"small-model")
+    digest = hashlib.sha256(package.read_bytes()).hexdigest()
+    manifest = {
+        "schema_version": 2,
+        "component": "video-depth",
+        "version": "2.0.0",
+        "packages": [{
+            "id": "vda-small", "file": package.name, "size": package.stat().st_size,
+            "sha256": digest, "target_path": "models/vda-small.pth",
+        }],
+        "variants": [{
+            "id": "lite", "priority": 1, "constraints": {"accelerator": "cpu"},
+            "command": ["models/vda-small.pth"], "required_paths": ["models/vda-small.pth"],
+            "packages": ["vda-small"],
+        }],
+    }
+    (source / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    center = Center(tmp_path / "data", 0, 0)
+    center.import_release(source, "video-depth")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = __import__("http.server", fromlist=["ThreadingHTTPServer"]).ThreadingHTTPServer(
+        ("127.0.0.1", port), center.handler(False)
+    )
+    import threading
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/video-depth/manifest.json") as response:
+            envelope = json.load(response)
+        payload = json.loads(envelope["payload"])
+        assert payload["protocol_version"] == 2
+        assert payload["variants"][0]["packages"] == ["vda-small"]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/video-depth/packages/vda-small") as response:
+            assert response.read() == package.read_bytes()
+    finally:
+        server.shutdown()
+        server.server_close()

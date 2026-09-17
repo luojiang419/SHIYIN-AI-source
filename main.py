@@ -708,6 +708,7 @@ async def shutdown_startup_maintenance():
         except asyncio.CancelledError:
             pass
     await asyncio.to_thread(PERSON_DEPTH_WORKER.close)
+    await asyncio.to_thread(VIDEO_DEPTH_TASKS.close)
     task = STARTUP_MAINTENANCE_TASK
     STARTUP_MAINTENANCE_TASK = None
     if task and not task.done():

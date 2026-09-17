@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from person_depth_worker.worker import install_birefnet_inference_compat, validate_trusted_birefnet_code
+from person_depth_worker.worker import PersonDepthEngine, install_birefnet_inference_compat, validate_trusted_birefnet_code
 
 
 def digest(content: bytes) -> str:
@@ -80,6 +80,23 @@ def test_birefnet_inference_compat_replaces_training_only_kornia_import():
             sys.modules["kornia"] = previous_package
         if previous_filters is not None:
             sys.modules["kornia.filters"] = previous_filters
+
+
+def test_person_depth_idle_unload_clears_cpu_model_cache(tmp_path):
+    engine = PersonDepthEngine(tmp_path)
+    engine._depth_processor = object()
+    engine._depth_model = object()
+    engine._mask_model = object()
+    engine._device = "cpu"
+    engine._dtype = "float32"
+
+    engine._unload_if_idle()
+
+    assert engine._depth_processor is None
+    assert engine._depth_model is None
+    assert engine._mask_model is None
+    assert engine._device is None
+    assert engine._dtype is None
 
 
 def test_release_smoke_uses_component_manager_download_install_and_worker_smoke():

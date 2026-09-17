@@ -24,10 +24,12 @@ else:
 
 
 LAB_ROOT = Path(__file__).resolve().parents[1]
+ACTIVE_REQUEST_ID = ""
 
 
 def emit(event_type: str, **payload: Any) -> None:
-    print(json.dumps({"type": event_type, **payload}, ensure_ascii=False), flush=True)
+    request = {"requestId": ACTIVE_REQUEST_ID} if ACTIVE_REQUEST_ID else {}
+    print(json.dumps({"type": event_type, **request, **payload}, ensure_ascii=False), flush=True)
 
 
 def progress(percent: int, message: str) -> None:
@@ -303,6 +305,36 @@ def run_status() -> dict[str, Any]:
     }
 
 
+def run_stdio() -> int:
+    global ACTIVE_REQUEST_ID
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            ACTIVE_REQUEST_ID = str(request.get("id") or "")
+            operation = str(request.get("op") or "")
+            if operation == "shutdown":
+                return 0
+            if operation != "infer":
+                raise ValueError("不支持的 worker 操作")
+            args = argparse.Namespace(
+                model=str(request.get("model") or "vda_base_fp16_relative"),
+                input=str(request.get("input") or ""),
+                output_dir=str(request.get("output_dir") or ""),
+                input_size=int(request.get("input_size") or 322),
+                target_fps=float(request.get("target_fps", -1)),
+                max_frames=int(request.get("max_frames", -1)),
+                max_resolution=int(request.get("max_resolution", -1)),
+                params_json=json.dumps(request.get("params") or {}, ensure_ascii=False),
+            )
+            emit("result", result=run_infer(args))
+        except BaseException as error:
+            emit("error", error=str(error), errorType=type(error).__name__)
+            traceback.print_exc(file=sys.stderr)
+        finally:
+            ACTIVE_REQUEST_ID = ""
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SHIYIN 视频深度统一推理 worker")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -324,12 +356,24 @@ def build_parser() -> argparse.ArgumentParser:
     post.add_argument("--raw", required=True)
     post.add_argument("--output", required=True)
     post.add_argument("--params-json", default="{}")
+    serve = subparsers.add_parser("serve")
+    # Keep infer-shaped arguments for older launch wrappers that inspect the command.
+    serve.add_argument("--model")
+    serve.add_argument("--input")
+    serve.add_argument("--output-dir")
+    serve.add_argument("--input-size")
+    serve.add_argument("--target-fps")
+    serve.add_argument("--max-frames")
+    serve.add_argument("--max-resolution")
+    serve.add_argument("--params-json")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     try:
+        if args.command == "serve":
+            return run_stdio()
         if args.command == "status":
             result = run_status()
         elif args.command == "probe":

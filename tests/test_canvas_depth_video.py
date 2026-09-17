@@ -93,3 +93,38 @@ def test_service_runs_validated_full_video_profile(tmp_path, monkeypatch):
     assert command[command.index("--target-fps") + 1] == "-1"
     assert command[command.index("--max-frames") + 1] == "-1"
     assert command[command.index("--max-resolution") + 1] == "-1"
+
+
+def test_video_depth_service_closes_persistent_worker(tmp_path):
+    service = VideoDepthTaskService(tmp_path)
+
+    class FakeInput:
+        def __init__(self):
+            self.content = b""
+
+        def write(self, content):
+            self.content += content
+
+        def flush(self):
+            pass
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdin = FakeInput()
+            self.killed = False
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            self.killed = True
+
+    process = FakeProcess()
+    service._worker_process = process
+    service.close()
+
+    assert json.loads(process.stdin.content.decode("utf-8"))["op"] == "shutdown"
+    assert service._worker_process is None

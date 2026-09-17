@@ -4,11 +4,49 @@ import gc
 import importlib
 import os
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
+
+
+MODEL_IDLE_TIMEOUT_SECONDS = 300.0
+_MODEL_CACHE: dict[str, object] = {}
+_MODEL_CACHE_LOCK = threading.RLock()
+_MODEL_IDLE_TIMER: threading.Timer | None = None
+_MODEL_CACHE_GENERATION = 0
+
+
+def _cancel_idle_unload() -> None:
+    global _MODEL_IDLE_TIMER, _MODEL_CACHE_GENERATION
+    _MODEL_CACHE_GENERATION += 1
+    if _MODEL_IDLE_TIMER is not None:
+        _MODEL_IDLE_TIMER.cancel()
+        _MODEL_IDLE_TIMER = None
+
+
+def unload_cached_models(generation: int | None = None) -> None:
+    global _MODEL_IDLE_TIMER
+    with _MODEL_CACHE_LOCK:
+        if generation is not None and generation != _MODEL_CACHE_GENERATION:
+            return
+        _MODEL_IDLE_TIMER = None
+        _MODEL_CACHE.clear()
+    gc.collect()
+
+
+def _schedule_idle_unload() -> None:
+    global _MODEL_IDLE_TIMER
+    with _MODEL_CACHE_LOCK:
+        _cancel_idle_unload()
+        generation = _MODEL_CACHE_GENERATION
+        _MODEL_IDLE_TIMER = threading.Timer(
+            MODEL_IDLE_TIMEOUT_SECONDS, unload_cached_models, args=(generation,)
+        )
+        _MODEL_IDLE_TIMER.daemon = True
+        _MODEL_IDLE_TIMER.start()
 
 
 @dataclass(frozen=True)
@@ -248,11 +286,18 @@ def infer_depths(
         raise FileNotFoundError(f"{profile.label} 尚未部署完成，请先运行 setup.ps1")
 
     model = None
+    statistics: dict[str, int] = {}
     try:
-        if model_key == "gemdepth_vda_8f":
-            model = _load_gemdepth(lab_root, profile, emit, device)
-        else:
-            model = _load_vda(lab_root, profile, emit, device)
+        with _MODEL_CACHE_LOCK:
+            _cancel_idle_unload()
+            model = _MODEL_CACHE.get(model_key)
+            if model is None:
+                if model_key == "gemdepth_vda_8f":
+                    model = _load_gemdepth(lab_root, profile, emit, "cpu")
+                else:
+                    model = _load_vda(lab_root, profile, emit, "cpu")
+                _MODEL_CACHE[model_key] = model
+            model.to(device).eval()
         emit(45, f"正在执行 {profile.label} 推理")
         depths, _ = model.infer_video_depth(
             frames,
@@ -262,14 +307,20 @@ def infer_depths(
             fp32=device == "cpu",
         )
         emit(78, "模型推理完成，正在释放显存")
-        statistics = {
+        statistics.update({
             "peakAllocatedBytes": int(torch.cuda.max_memory_allocated()) if device == "cuda" else 0,
             "peakReservedBytes": int(torch.cuda.max_memory_reserved()) if device == "cuda" else 0,
-        }
+        })
         return np.asarray(depths, dtype=np.float32), statistics
     finally:
         if model is not None:
-            del model
+            model.to("cpu")
+        model = None
         gc.collect()
         if device == "cuda":
             torch.cuda.empty_cache()
+            statistics.update({
+                "allocatedAfterReleaseBytes": int(torch.cuda.memory_allocated()),
+                "reservedAfterReleaseBytes": int(torch.cuda.memory_reserved()),
+            })
+        _schedule_idle_unload()

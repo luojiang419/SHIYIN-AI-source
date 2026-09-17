@@ -6,6 +6,7 @@ import hmac
 import json
 import sys
 import tempfile
+import threading
 import traceback
 import types
 from pathlib import Path
@@ -16,6 +17,7 @@ WORKER_VERSION = "1.0.0"
 PROTOCOL_VERSION = 1
 DEPTH_INPUT_SIZE = 1078
 MASK_INPUT_SIZE = 1024
+MODEL_IDLE_TIMEOUT_SECONDS = 300.0
 TRUSTED_BIREFNET_FILES = {
     "BiRefNet_config.py": "e7b8c2a74f6cea6a59553d517f71d47f2c1d90e670a13416af17c25fe2f3dc52",
     "birefnet.py": "208771ae626f653d64128fbf2d6ac9f8e645c5cc5e286258a73ec3322bbfe5ef",
@@ -69,9 +71,59 @@ class PersonDepthEngine:
         self._mask_model = None
         self._device = None
         self._dtype = None
+        self._model_lock = threading.RLock()
+        self._idle_timer = None
+        self._cache_generation = 0
+
+    def _cancel_idle_unload(self) -> None:
+        self._cache_generation += 1
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _unload_if_idle(self, generation: int | None = None) -> None:
+        with self._model_lock:
+            if generation is not None and generation != self._cache_generation:
+                return
+            self._idle_timer = None
+            self._depth_processor = None
+            self._depth_model = None
+            self._mask_model = None
+            self._device = None
+            self._dtype = None
+        import gc
+        gc.collect()
+
+    def _release_gpu_and_schedule_unload(self) -> None:
+        import gc
+        import torch
+
+        with self._model_lock:
+            for model in (self._depth_model, self._mask_model):
+                if model is not None:
+                    model.to("cpu")
+            self._device = torch.device("cpu")
+            self._dtype = torch.float32
+            self._cancel_idle_unload()
+            generation = self._cache_generation
+            self._idle_timer = threading.Timer(
+                MODEL_IDLE_TIMEOUT_SECONDS, self._unload_if_idle, args=(generation,)
+            )
+            self._idle_timer.daemon = True
+            self._idle_timer.start()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _load(self) -> None:
+        self._cancel_idle_unload()
         if self._depth_model is not None:
+            import torch
+            target = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            dtype = torch.float16 if target.type == "cuda" else torch.float32
+            self._depth_model.to(device=target, dtype=dtype)
+            self._mask_model.to(device=target, dtype=dtype)
+            self._device, self._dtype = target, dtype
             return
         import torch
         from transformers import AutoImageProcessor, AutoModelForDepthEstimation, AutoModelForImageSegmentation
@@ -118,57 +170,51 @@ class PersonDepthEngine:
 
         if bit_depth not in {8, 16}:
             raise ValueError("bit_depth 只支持 8 或 16")
-        self._load()
-        with Image.open(input_path) as source:
-            image = ImageOps.exif_transpose(source).convert("RGB")
-            image.load()
-        inputs = self._depth_processor(images=image, return_tensors="pt")
-        pixel_values = inputs["pixel_values"].to(device=self._device, dtype=self._dtype)
-        with torch.inference_mode():
-            if self._device.type == "cuda":
-                with torch.autocast(device_type="cuda", dtype=torch.float16):
+        with self._model_lock:
+            self._load()
+        inputs = pixel_values = prediction = tensor = logits = None
+        try:
+            with Image.open(input_path) as source:
+                image = ImageOps.exif_transpose(source).convert("RGB")
+                image.load()
+            inputs = self._depth_processor(images=image, return_tensors="pt")
+            pixel_values = inputs["pixel_values"].to(device=self._device, dtype=self._dtype)
+            with torch.inference_mode():
+                if self._device.type == "cuda":
+                    with torch.autocast(device_type="cuda", dtype=torch.float16):
+                        prediction = self._depth_model(pixel_values=pixel_values).predicted_depth
+                else:
                     prediction = self._depth_model(pixel_values=pixel_values).predicted_depth
-            else:
-                prediction = self._depth_model(pixel_values=pixel_values).predicted_depth
-        depth = torch.nn.functional.interpolate(
-            prediction.unsqueeze(1),
-            size=(image.height, image.width),
-            mode="bicubic",
-            align_corners=False,
-        ).squeeze().float().cpu().numpy()
+            depth = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1), size=(image.height, image.width), mode="bicubic", align_corners=False,
+            ).squeeze().float().cpu().numpy()
 
-        transform = Compose(
-            [
-                Resize((MASK_INPUT_SIZE, MASK_INPUT_SIZE)),
-                ToTensor(),
+            transform = Compose([
+                Resize((MASK_INPUT_SIZE, MASK_INPUT_SIZE)), ToTensor(),
                 Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]
-        )
-        tensor = transform(image).unsqueeze(0).to(device=self._device, dtype=self._dtype)
-        with torch.inference_mode():
-            if self._device.type == "cuda":
-                with torch.autocast(device_type="cuda", dtype=torch.float16):
+            ])
+            tensor = transform(image).unsqueeze(0).to(device=self._device, dtype=self._dtype)
+            with torch.inference_mode():
+                if self._device.type == "cuda":
+                    with torch.autocast(device_type="cuda", dtype=torch.float16):
+                        logits = self._mask_model(tensor)[-1]
+                else:
                     logits = self._mask_model(tensor)[-1]
-            else:
-                logits = self._mask_model(tensor)[-1]
-        mask = torch.sigmoid(logits)[0, 0].float().cpu().numpy()
-        mask = np.clip(
-            cv2.resize(mask, (image.width, image.height), interpolation=cv2.INTER_CUBIC),
-            0.0,
-            1.0,
-        )
-        normalized = self._normalize_foreground_depth(depth, mask)
-        alpha = np.clip((mask - 0.03) / 0.92, 0.0, 1.0)
-        person_depth = normalized * alpha
-        maximum = 65535 if bit_depth == 16 else 255
-        dtype = np.uint16 if bit_depth == 16 else np.uint8
-        encoded_data = np.round(person_depth * maximum).astype(dtype)
-        success, encoded = cv2.imencode(".png", encoded_data)
-        if not success:
-            raise RuntimeError("高精度人物深度 PNG 编码失败")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        encoded.tofile(output_path)
-        return {"width": image.width, "height": image.height, "bit_depth": bit_depth}
+            mask = torch.sigmoid(logits)[0, 0].float().cpu().numpy()
+            mask = np.clip(cv2.resize(mask, (image.width, image.height), interpolation=cv2.INTER_CUBIC), 0.0, 1.0)
+            normalized = self._normalize_foreground_depth(depth, mask)
+            person_depth = normalized * np.clip((mask - 0.03) / 0.92, 0.0, 1.0)
+            maximum = 65535 if bit_depth == 16 else 255
+            encoded_data = np.round(person_depth * maximum).astype(np.uint16 if bit_depth == 16 else np.uint8)
+            success, encoded = cv2.imencode(".png", encoded_data)
+            if not success:
+                raise RuntimeError("高精度人物深度 PNG 编码失败")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            encoded.tofile(output_path)
+            return {"width": image.width, "height": image.height, "bit_depth": bit_depth}
+        finally:
+            inputs = pixel_values = prediction = tensor = logits = None
+            self._release_gpu_and_schedule_unload()
 
     def smoke(self) -> None:
         from PIL import Image

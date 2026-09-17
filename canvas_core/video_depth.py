@@ -86,6 +86,21 @@ class VideoDepthTaskService:
         self._tasks: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._run_lock = threading.Lock()
+        self._worker_process: subprocess.Popen | None = None
+        self._worker_runtime_key = ""
+        self._worker_stderr = deque(maxlen=64)
+
+    def close(self) -> None:
+        process = self._worker_process
+        self._worker_process = None
+        if process and process.poll() is None:
+            try:
+                if process.stdin:
+                    process.stdin.write((json.dumps({"op": "shutdown"}) + "\n").encode("utf-8"))
+                    process.stdin.flush()
+                process.wait(timeout=3)
+            except Exception:
+                process.kill()
 
     def _source_runtime(self) -> dict[str, Any] | None:
         details: dict[str, Any] = {}
@@ -272,7 +287,7 @@ class VideoDepthTaskService:
                 self._update(task_id, status="failed", error="深度视频模型安装后仍不可用", message="深度视频模型安装失败")
                 return
         command = [
-            *runtime["command"], "infer",
+            *runtime["command"], "serve",
             "--model", "vda_base_fp16_relative",
             "--input", str(source),
             "--output-dir", str(output_dir),
@@ -285,29 +300,40 @@ class VideoDepthTaskService:
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         self._update(task_id, status="running", progress=1, message="正在启动深度视频模型")
         try:
-            process = subprocess.Popen(
-                command,
-                cwd=runtime["cwd"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=False,
-                creationflags=flags,
-                env=runtime["env"],
-            )
+            runtime_key = json.dumps([runtime["command"], runtime["cwd"]], default=str)
+            process = self._worker_process
+            if process is None or getattr(process, "poll", lambda: 0)() is not None or self._worker_runtime_key != runtime_key:
+                if process is not None:
+                    self.close()
+                process = subprocess.Popen(
+                    command, cwd=runtime["cwd"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=False, creationflags=flags, env=runtime["env"],
+                )
+                self._worker_process = process
+                self._worker_runtime_key = runtime_key
+                self._worker_stderr.clear()
+
+                def drain_stderr():
+                    if process.stderr:
+                        while True:
+                            chunk = process.stderr.read(4096)
+                            if not chunk:
+                                break
+                            self._worker_stderr.append(chunk)
+
+                threading.Thread(target=drain_stderr, daemon=True).start()
             result: dict[str, Any] | None = None
             worker_error = ''
-            stderr_chunks = deque(maxlen=64)
-
-            def drain_stderr():
-                if process.stderr:
-                    while True:
-                        chunk = process.stderr.read(4096)
-                        if not chunk:
-                            break
-                        stderr_chunks.append(chunk)
-
-            stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
-            stderr_thread.start()
+            request_id = uuid.uuid4().hex
+            process_stdin = getattr(process, "stdin", None)
+            if process_stdin is not None:
+                request = {
+                    "id": request_id, "op": "infer", "model": "vda_base_fp16_relative",
+                    "input": str(source), "output_dir": str(output_dir), "input_size": 322,
+                    "target_fps": -1, "max_frames": -1, "max_resolution": -1, "params": {},
+                }
+                process_stdin.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
+                process_stdin.flush()
             assert process.stdout is not None
             for line in process.stdout:
                 try:
@@ -316,16 +342,20 @@ class VideoDepthTaskService:
                     continue
                 if not isinstance(event, dict):
                     continue
+                if event.get("requestId") and event.get("requestId") != request_id:
+                    continue
                 if event.get("type") == "progress":
                     self._update(task_id, progress=max(1, min(99, int(event.get("percent") or 0))), message=str(event.get("message") or "正在生成深度视频"))
                 elif event.get("type") == "result":
                     result = event.get("result") if isinstance(event.get("result"), dict) else {}
+                    break
                 elif event.get("type") == "error":
                     worker_error = str(event.get("error") or "深度视频生成失败")
-            code = process.wait()
-            stderr_thread.join()
-            stderr = (decode_worker_output(b''.join(stderr_chunks)) if stderr_chunks and isinstance(stderr_chunks[0], bytes)
-                      else ''.join(stderr_chunks))
+                    break
+            persistent = process_stdin is not None
+            code = 0 if persistent else process.wait()
+            stderr = (decode_worker_output(b''.join(self._worker_stderr)) if self._worker_stderr and isinstance(self._worker_stderr[0], bytes)
+                      else ''.join(self._worker_stderr))
             if worker_error:
                 raise RuntimeError(worker_error)
             if code != 0:

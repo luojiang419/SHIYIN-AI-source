@@ -1218,9 +1218,8 @@
             <div class="pose-status ${status}"><span class="pose-dot"></span><span>${esc(statusText)}</span></div>
             <textarea class="special-prompt pose-replicate-prompt" data-pose-replicate-field="poseReplicatePrompt" rows="3" placeholder="可选补充要求；留空使用固定模板，不调用 AI 助手">${esc(node.poseReplicatePrompt)}</textarea>
             <div class="pose-replicate-controls">
-                <label><span>模式</span><select data-pose-replicate-field="poseReplicateMode"><option value="depth" ${mode === 'depth' ? 'selected' : ''}>深度图</option><option value="skeleton" ${mode === 'skeleton' ? 'selected' : ''}>骨架图</option></select></label>
-                <label><span>平台</span><select data-pose-replicate-field="poseReplicateProvider">${poseReplicateProviderOptions(providers, node.poseReplicateProvider)}</select></label>
-                <label class="pose-replicate-model-control"><span>模型</span><select data-pose-replicate-field="poseReplicateModel">${poseReplicateModelOptions(providers, node.poseReplicateProvider, node.poseReplicateModel)}</select></label>
+                <div class="pose-replicate-mode-group"><label><span>模式</span><select data-pose-replicate-field="poseReplicateMode"><option value="depth" ${mode === 'depth' ? 'selected' : ''}>深度图</option><option value="skeleton" ${mode === 'skeleton' ? 'selected' : ''}>骨架图</option></select></label><button type="button" class="pose-replicate-compact-button" data-special-action="pose-depth-controls" ${mode !== 'depth' || !control?.url || status === 'running' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>深度控制</span></button></div>
+                <button type="button" class="pose-replicate-compact-button" data-pose-platform-trigger data-pose-providers="${esc(JSON.stringify(providers))}" aria-haspopup="dialog" aria-expanded="false" title="${esc(`${provider?.name || node.poseReplicateProvider} / ${node.poseReplicateModel}`)}"><span class="pose-replicate-platform-label">平台</span><span>${esc(provider?.name || node.poseReplicateProvider || '选择平台')}</span><i data-lucide="chevron-down"></i></button>
                 <label><span>画幅</span><select data-pose-replicate-field="poseReplicateRatio">${ratios.map(value => `<option value="${value}" ${node.poseReplicateRatio === value ? 'selected' : ''}>${value === 'source' ? '自动（跟随原图）' : value}</option>`).join('')}</select></label>
                 <label><span>分辨率</span><select data-pose-replicate-field="poseReplicateResolution">${resolutions.map(value => `<option value="${value}" ${node.poseReplicateResolution === value ? 'selected' : ''}>${value.toUpperCase()}</option>`).join('')}</select></label>
             </div>
@@ -2214,6 +2213,14 @@
         return previous !== next;
     }
     function clearPoseReplicateControls(node){
+        const editor = poseDepthEditors.get(node);
+        if(editor){
+            const state = depthMapControlState(editor);
+            state.revision += 1;
+            clearTimeout(state.timer);
+            closeDepthMapControls(editor);
+            poseDepthEditors.delete(node);
+        }
         node.poseSkeletonUrl = '';
         node.poseSkeletonName = '';
         node.poseSkeletonWidth = 0;
@@ -2335,9 +2342,46 @@
         adjusted.natural_h = canvas.height;
         return adjusted;
     }
+    function poseDepthControls(node){
+        return normalizeDepthMapControls(node.poseDepthControls || depthMapSettings.controls);
+    }
+    const poseDepthEditors = new WeakMap();
+    function openPoseDepthControls(node, options, trigger){
+        if(node.poseReplicateMode !== 'depth' || !node.poseDepthUrl || node.poseDepthStatus === 'running') return;
+        const baseUrl = node.poseDepthBaseUrl || node.poseDepthUrl;
+        let editor = poseDepthEditors.get(node);
+        if(!editor || editor.depthMapBaseOutputUrl !== baseUrl){
+            editor = {type:'depthMap', outputUrl:node.poseDepthUrl, depthMapControls:poseDepthControls(node)};
+            setDepthMapBaseOutput(editor, {url:baseUrl, natural_w:node.poseDepthBaseWidth || node.poseDepthWidth, natural_h:node.poseDepthBaseHeight || node.poseDepthHeight});
+            poseDepthEditors.set(node, editor);
+        }
+        editor.depthMapControls = poseDepthControls(node);
+        const current = () => poseDepthEditors.get(node) === editor && (node.poseDepthBaseUrl || node.poseDepthUrl) === baseUrl;
+        openDepthMapControls(editor, {
+            resolveUrl:options.resolveUrl, toast:options.toast,
+            getInputImage:() => poseReplicateInput(node, options, 'pose-reference'),
+            onChange:(_editor, meta) => {
+                if(!current()) return;
+                node.poseDepthControls = normalizeDepthMapControls(editor);
+                notify(options, node, Boolean(meta?.render));
+            },
+            onOutput:(_editor, file) => {
+                if(!current()) return;
+                node.poseDepthBaseUrl = baseUrl;
+                node.poseDepthBaseWidth = editor.depthMapBaseOutputWidth;
+                node.poseDepthBaseHeight = editor.depthMapBaseOutputHeight;
+                node.poseDepthUrl = file.url;
+                node.poseDepthName = file.name || 'pose-depth.png';
+                node.poseDepthWidth = file.natural_w || file.width || node.poseDepthBaseWidth;
+                node.poseDepthHeight = file.natural_h || file.height || node.poseDepthBaseHeight;
+                node.poseDepthAppliedControlSignature = `${baseUrl}|${depthMapControlSignature(editor.depthMapControls)}`;
+            }
+        }, trigger);
+    }
     async function applyPoseDepthGlobalControls(node, options){
         if(!node?.poseDepthBaseUrl) return null;
-        const signature = `${node.poseDepthBaseUrl}|${depthMapControlSignature(depthMapSettings.controls)}`;
+        const controls = poseDepthControls(node);
+        const signature = `${node.poseDepthBaseUrl}|${depthMapControlSignature(controls)}`;
         if(node.poseDepthAppliedControlSignature === signature && node.poseDepthUrl) return poseReplicateControlItem(node);
         const baseFile = {
             url:node.poseDepthBaseUrl,
@@ -2346,7 +2390,8 @@
             natural_h:node.poseDepthBaseHeight || 0,
             kind:'image'
         };
-        const file = await adjustDepthFile(baseFile, depthMapSettings.controls, options, `pose-depth-adjusted-${Date.now()}.png`);
+        const file = await adjustDepthFile(baseFile, controls, options, `pose-depth-adjusted-${Date.now()}.png`);
+        if(signature !== `${node.poseDepthBaseUrl}|${depthMapControlSignature(poseDepthControls(node))}`) return null;
         node.poseDepthUrl = file.url || '';
         node.poseDepthName = file.name || 'pose-depth.png';
         node.poseDepthWidth = file.natural_w || file.width || baseFile.natural_w || 0;
@@ -2374,12 +2419,13 @@
                 node.poseDepthBaseName = baseFile.name || 'depth-base.png';
                 node.poseDepthBaseWidth = baseFile.natural_w || baseFile.width || 0;
                 node.poseDepthBaseHeight = baseFile.natural_h || baseFile.height || 0;
-                const file = await adjustDepthFile(baseFile, depthMapSettings.controls, options, `pose-depth-adjusted-${Date.now()}.png`);
+                const controls = poseDepthControls(node);
+                const file = await adjustDepthFile(baseFile, controls, options, `pose-depth-adjusted-${Date.now()}.png`);
                 node.poseDepthUrl = file.url || '';
                 node.poseDepthName = file.name || 'person-depth.png';
                 node.poseDepthWidth = file.natural_w || file.width || source.natural_w || 0;
                 node.poseDepthHeight = file.natural_h || file.height || source.natural_h || 0;
-                node.poseDepthAppliedControlSignature = `${baseFile.url}|${depthMapControlSignature(depthMapSettings.controls)}`;
+                node.poseDepthAppliedControlSignature = `${baseFile.url}|${depthMapControlSignature(controls)}`;
                 node.poseDepthSourceSignature = signature;
                 delete node.poseDepthFailedSignature;
                 node.poseDepthStatus = 'done'; node.poseDepthError = '';
@@ -2527,6 +2573,72 @@
             runDepthMap(node, options, false).catch(() => {});
         }
     }
+    let activePosePlatformMenu = null;
+    function openPosePlatformMenu(trigger, node, options){
+        const wasOpen = trigger.getAttribute('aria-expanded') === 'true';
+        activePosePlatformMenu?.();
+        if(wasOpen) return;
+        const providers = JSON.parse(trigger.dataset.poseProviders || '[]');
+        const menu = document.createElement('div');
+        menu.className = 'pose-replicate-platform-menu';
+        menu.setAttribute('role', 'dialog');
+        menu.setAttribute('aria-label', '选择平台和模型');
+        menu.innerHTML = '<section class="pose-platform-list" aria-label="平台"><small>平台</small><div data-platform-list></div></section><section class="pose-model-list" aria-label="模型"><small data-model-heading>模型</small><div data-model-list></div></section>';
+        document.body.append(menu);
+        trigger.setAttribute('aria-expanded', 'true');
+        const listeners = new AbortController();
+        const close = (focus=false) => {
+            listeners.abort(); observer.disconnect(); menu.remove();
+            trigger.setAttribute('aria-expanded', 'false');
+            if(activePosePlatformMenu === close) activePosePlatformMenu = null;
+            if(focus && trigger.isConnected) trigger.focus();
+        };
+        const observer = new MutationObserver(() => { if(!trigger.isConnected) close(); });
+        observer.observe(document.body, {childList:true, subtree:true});
+        activePosePlatformMenu = close;
+        const position = () => {
+            const rect = trigger.getBoundingClientRect();
+            const bounds = menu.getBoundingClientRect();
+            menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - bounds.width - 8))}px`;
+            menu.style.top = `${Math.max(8, rect.bottom + bounds.height + 8 <= window.innerHeight ? rect.bottom + 6 : rect.top - bounds.height - 6)}px`;
+        };
+        const showModels = provider => {
+            menu.querySelectorAll('[data-provider-id]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.providerId === provider.id)));
+            menu.querySelector('[data-model-heading]').textContent = `${provider.name || provider.id} / 模型`;
+            const list = menu.querySelector('[data-model-list]');
+            list.replaceChildren();
+            (provider.models || []).forEach(model => {
+                const button = document.createElement('button'); button.type = 'button';
+                const selected = node.poseReplicateProvider === provider.id && node.poseReplicateModel === model;
+                button.textContent = `${model}${selected ? ' ✓' : ''}`;
+                button.setAttribute('aria-pressed', String(selected));
+                button.onclick = event => {
+                    event.stopPropagation();
+                    node.poseReplicateProvider = provider.id; node.poseReplicateModel = model;
+                    close(true); notify(options, node, true);
+                };
+                list.append(button);
+            });
+            if(!list.children.length) list.textContent = '该平台尚未配置模型';
+            position();
+        };
+        providers.forEach(provider => {
+            const button = document.createElement('button'); button.type = 'button';
+            button.dataset.providerId = provider.id; button.textContent = `${provider.name || provider.id} ›`;
+            button.onclick = () => showModels(provider);
+            button.onpointerenter = () => showModels(provider);
+            button.onkeydown = event => { if(event.key === 'ArrowRight'){ event.preventDefault(); showModels(provider); menu.querySelector('[data-model-list] button')?.focus(); } };
+            menu.querySelector('[data-platform-list]').append(button);
+        });
+        if(providers.length) showModels(providers.find(provider => provider.id === node.poseReplicateProvider) || providers[0]);
+        else menu.querySelector('[data-model-list]').textContent = '请先在 API 设置中配置图片平台和模型';
+        menu.addEventListener('pointerdown', event => event.stopPropagation());
+        document.addEventListener('pointerdown', event => { if(!menu.contains(event.target) && !trigger.contains(event.target)) close(); }, {signal:listeners.signal});
+        document.addEventListener('keydown', event => { if(event.key === 'Escape'){event.stopPropagation();close(true);} }, {signal:listeners.signal});
+        window.addEventListener('resize', () => close(), {signal:listeners.signal});
+        window.addEventListener('pagehide', () => close(), {signal:listeners.signal});
+        position(); menu.querySelector('[data-provider-id][aria-pressed="true"]')?.focus();
+    }
     function bindPoseReplicate(root, node, options={}){
         if(!root || !node) return;
         poseReplicateManualInputs(node);
@@ -2630,6 +2742,12 @@
                 notify(options, node, field === 'poseReplicateProvider' || field === 'poseReplicateMode');
             });
         });
+        root.querySelector('[data-pose-platform-trigger]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); openPosePlatformMenu(event.currentTarget, node, options);
+        });
+        root.querySelector('[data-special-action="pose-depth-controls"]')?.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation(); openPoseDepthControls(node, options, event.currentTarget);
+        });
         root.querySelector('[data-special-action="install-person-depth"]')?.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             openPersonDepthDialog(options, false);
@@ -2641,8 +2759,14 @@
             event.preventDefault(); event.stopPropagation();
             openPersonDepthDialog(options, true);
         });
-        root.querySelector('[data-special-action="run-pose-replicate"]')?.addEventListener('click', event => {
+        root.querySelector('[data-special-action="run-pose-replicate"]')?.addEventListener('click', async event => {
             event.preventDefault(); event.stopPropagation();
+            if(node.poseReplicateMode === 'depth' && node.poseDepthBaseUrl){
+                try {
+                    const prepared = await applyPoseDepthGlobalControls(node, options);
+                    if(!prepared){ options.toast?.('深度参数已变化，请等待同步后再生成'); return; }
+                } catch(error){ options.toast?.(error.message || '深度参数同步失败'); return; }
+            }
             const currentAction = poseReplicateInput(node, options, 'pose-reference');
             const currentTargets = poseReplicateInputs(node, options, 'target-image');
             const currentModel = poseReplicateInput(node, options, 'model-subject');

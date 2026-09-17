@@ -181,8 +181,20 @@
 .pose-replicate-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 5px 7px; border: 1px solid var(--line, #ddd); border-radius: 7px; background: var(--soft, #f7f7f7); }
 .pose-replicate-controls label > span { color: var(--faint, #777); font-size: 9px; font-weight: 800; }
 .pose-replicate-controls select { min-width: 0; max-width: 190px; border: 0; outline: 0; background: transparent; color: var(--text, #222); font-size: 10px; }
-.pose-replicate-model-control { flex: 1 1 230px; }
-.pose-replicate-model-control select { width: 100%; max-width: none; }
+.pose-replicate-mode-group { display:flex; align-items:center; gap:7px; flex-wrap:nowrap; }
+.pose-replicate-compact-button { display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:5px 7px; min-height:28px; border:1px solid var(--line, #ddd); border-radius:7px; background:var(--soft, #f7f7f7); color:var(--text, #222); font:inherit; font-size:10px; white-space:nowrap; cursor:pointer; }
+.pose-replicate-compact-button svg { width:13px; height:13px; }
+.pose-replicate-compact-button:disabled { opacity:.45; cursor:not-allowed; }
+.pose-replicate-platform-label { color:var(--faint, #777); font-size:9px; font-weight:800; }
+.pose-replicate-platform-menu { position:fixed; z-index:100010; display:grid; grid-template-columns:minmax(100px, 140px) minmax(0, 1fr); width:440px; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); padding:6px; border:1px solid var(--line, #ddd); border-radius:10px; background:var(--card-solid, #fff); color:var(--text, #222); box-shadow:0 12px 36px #0004; font:12px/1.5 'Segoe UI',sans-serif; }
+.pose-replicate-platform-menu, .pose-replicate-platform-menu * { box-sizing:border-box; }
+.pose-replicate-platform-menu section { min-width:0; max-height:min(360px, calc(100vh - 30px)); overflow:auto; }
+.pose-replicate-platform-menu .pose-platform-list { padding-right:6px; border-right:1px solid var(--line, #ddd); }
+.pose-replicate-platform-menu .pose-model-list { padding-left:6px; }
+.pose-replicate-platform-menu small { display:block; padding:6px 8px; color:var(--muted, #777); font-size:11px; }
+.pose-replicate-platform-menu button { display:block; width:100%; padding:9px 8px; border:0; border-radius:5px; background:transparent; color:inherit; font:inherit; text-align:left; overflow-wrap:anywhere; cursor:pointer; }
+.pose-replicate-platform-menu button:hover, .pose-replicate-platform-menu button[aria-pressed="true"] { background:var(--soft, #eee); }
+.pose-replicate-platform-menu button:focus-visible, .pose-replicate-compact-button:focus-visible { outline:2px solid var(--muted, #888); outline-offset:-2px; }
 .pose-replicate-model-hint { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; color: var(--faint, #777); font-size: 9px; }
 .pose-replicate-model-hint svg { width: 13px; height: 13px; }
 .pose-replicate-run-row button { min-width: 116px; }

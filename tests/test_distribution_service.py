@@ -75,6 +75,8 @@ def test_service_logs_are_bounded_and_trimmed_on_startup(tmp_path):
 
 def test_signed_catalog_range_and_legacy_guard(server,tmp_path):
     c,url=server;c.import_release(package_snapshot(tmp_path/'snapshot',b'new'),'hot','说明')
+    assert c.status()['releases'][0]['notes'] == '说明'
+    assert 'manifest' not in c.status()['releases'][0]
     with get(url+'/v1/catalog',{'X-Shiyin-Version':'2.0.0 / 20260914170000','X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}) as r: env=json.load(r)
     Ed25519PublicKey.from_public_bytes(bytes.fromhex(env['public_key'])).verify(bytes.fromhex(env['signature']),env['payload'].encode())
     manifest=json.loads(env['payload']);assert manifest['notes']=='说明'
@@ -87,6 +89,15 @@ def test_signed_catalog_range_and_legacy_guard(server,tmp_path):
     assert err.value.code==409
     assert len(c.status()['clients'])==1
     assert c.status()['clients'][0]['update_state']=='outdated'
+
+
+def test_status_includes_notes_for_archived_releases(tmp_path):
+    center = Center(tmp_path/'data')
+    center.import_release(package_snapshot(tmp_path/'first', version='20260914180000'), 'hot', '首版说明')
+    center.import_release(package_snapshot(tmp_path/'second', version='20260914190000'), 'hot', '新版说明')
+    releases = center.status()['releases']
+    assert [(item['state'], item['notes']) for item in releases] == [
+        ('published', '新版说明'), ('archived', '首版说明')]
 
 
 def test_v2_baseline_replaces_legacy_upgrade_chain(server,tmp_path):

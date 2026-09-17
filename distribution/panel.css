@@ -120,6 +120,8 @@
     .resource-icon svg { width: 18px; }
     .resource-main strong, .resource-cell strong { display: block; font-size: 13px; }
     .resource-main small, .resource-cell small { color: var(--muted); font-size: 11px; }
+    .release-notes { margin: 8px 0 0; color: var(--text); font-size: 12px; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+    .release-notes span { color: var(--muted); }
     .row-actions { display: flex; gap: 6px; }
     .clients-grid { display: grid; grid-template-columns: repeat(3, minmax(240px, 1fr)); gap: 12px; }
     .client { padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }

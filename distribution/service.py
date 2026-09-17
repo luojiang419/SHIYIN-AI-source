@@ -298,9 +298,12 @@ class Center:
 
     def status(self):
         with self.db() as db:
-            releases = [dict(r) for r in db.execute('SELECT id,kind,version,state,created FROM releases ORDER BY created DESC')]
+            releases = [dict(r) for r in db.execute('SELECT id,kind,version,state,created,manifest FROM releases ORDER BY created DESC')]
             clients = [dict(r) for r in db.execute('SELECT * FROM clients ORDER BY seen DESC')]
             logs = [dict(r) for r in db.execute('SELECT * FROM logs ORDER BY created DESC LIMIT 100')]
+        for release in releases:
+            envelope = json.loads(release.pop('manifest'))
+            release['notes'] = str(json.loads(envelope['payload']).get('notes') or '')
         target = next((release['version'] for release in releases
             if release['kind'] == 'hot' and release['state'] == 'published'), '')
         for client in clients:

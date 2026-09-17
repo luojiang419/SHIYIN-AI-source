@@ -7,7 +7,8 @@
   function setBusy(value){state.busy=value;$('busy').hidden=!value;$('modelStatus').textContent=value?'模型运行中':'模型就绪';$('liveStatus').classList.toggle('working',value)}
   function updateControls(){const ready=!!state.sessionId, selected=state.points.length>0;$('undoButton').disabled=!selected;$('clearButton').disabled=!selected;['exportButton','maskExportButton','cutoutExportButton'].forEach(id=>$(id).disabled=!selected||state.busy)}
   function fit(){if(!state.image)return;const wrap=$('canvasWrap'),r=wrap.getBoundingClientRect(),scale=Math.min(r.width/state.width,r.height/state.height);const w=Math.max(1,Math.round(state.width*scale)),h=Math.max(1,Math.round(state.height*scale));[imageCanvas,maskCanvas].forEach(c=>{c.width=w;c.height=h;c.style.width=w+'px';c.style.height=h+'px';c.style.left=Math.round((r.width-w)/2)+'px';c.style.top=Math.round((r.height-h)/2)+'px'});draw()}
-  function draw(){if(!state.image)return;const w=imageCanvas.width,h=imageCanvas.height;imageCtx.clearRect(0,0,w,h);imageCtx.globalAlpha=state.view==='cutout'&&state.mask?0:1;imageCtx.drawImage(state.image,0,0,w,h);imageCtx.globalAlpha=1;maskCtx.clearRect(0,0,w,h);if(state.mask&&state.view!=='original'){const temp=document.createElement('canvas');temp.width=w;temp.height=h;const ctx=temp.getContext('2d');ctx.drawImage(state.mask,0,0,w,h);
+  function draw(){if(!state.image)return;const w=imageCanvas.width,h=imageCanvas.height;imageCtx.clearRect(0,0,w,h);imageCtx.globalAlpha=1;imageCtx.drawImage(state.image,0,0,w,h);
+if(state.view==='cutout'&&state.mask){imageCtx.fillStyle='rgba(0,0,0,0.65)';imageCtx.fillRect(0,0,w,h);}maskCtx.clearRect(0,0,w,h);if(state.mask&&state.view!=='original'){const temp=document.createElement('canvas');temp.width=w;temp.height=h;const ctx=temp.getContext('2d');ctx.drawImage(state.mask,0,0,w,h);
 const pixels=ctx.getImageData(0,0,w,h);
 for(let i=0;i<pixels.data.length;i+=4){
   pixels.data[i+3]=pixels.data[i];

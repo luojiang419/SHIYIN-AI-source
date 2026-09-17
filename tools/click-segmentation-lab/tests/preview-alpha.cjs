@@ -21,9 +21,13 @@ await page.locator('#maskCanvas').click();
 await page.waitForFunction(()=>!document.querySelector('#cutoutExportButton').disabled);
 const pixels=await page.evaluate(()=>{
 const c=document.querySelector('#maskCanvas'),x=c.getContext('2d');
-return {background:x.getImageData(5,5,1,1).data[3],foreground:x.getImageData(c.width*.4,c.height*.4,1,1).data[3],base:document.querySelector('#imageCanvas').getContext('2d').getImageData(5,5,1,1).data[3]};
+const composite=document.createElement('canvas');composite.width=c.width;composite.height=c.height;
+const ctx=composite.getContext('2d');ctx.drawImage(document.querySelector('#imageCanvas'),0,0);ctx.drawImage(c,0,0);
+const dark=ctx.getImageData(5,5,1,1).data[0],bright=ctx.getImageData(c.width*.4,c.height*.4,1,1).data[0];
+if(dark<75||dark>90||bright!==239)throw Error('背景未压暗或前景被变暗: '+dark+','+bright);
+return {dark,bright,background:x.getImageData(5,5,1,1).data[3],foreground:x.getImageData(c.width*.4,c.height*.4,1,1).data[3],base:document.querySelector('#imageCanvas').getContext('2d').getImageData(5,5,1,1).data[3]};
 });
-if(pixels.background!==0||pixels.foreground!==255||pixels.base!==0||exports)throw Error(JSON.stringify({pixels,exports}));
+if(pixels.background!==0||pixels.foreground!==255||pixels.base!==255||exports)throw Error(JSON.stringify({pixels,exports}));
 console.log(JSON.stringify({before,pixels,exports,result:'PASS'}));
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

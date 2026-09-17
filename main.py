@@ -222,6 +222,7 @@ from canvas_core.lookbook_brief import (
     remove_json_trailing_commas as remove_lookbook_json_trailing_commas,
     DEFAULT_CREATIVE_BRIEF as LOOKBOOK_DEFAULT_CREATIVE_BRIEF,
 )
+from canvas_core.video_upload import VIDEO_EXTENSIONS, browser_playback_proxy
 from canvas_core.lookbook_story import (
     LOOKBOOK_MAX_COUNT,
     LOOKBOOK_STORY_MODE,
@@ -8127,7 +8128,7 @@ def media_url_from_path(path: str):
 MEDIA_REFERENCE_URL_RE = re.compile(r"(?P<url>/(?:assets/(?:input|output|uploads)|output)/[^\s\"'<>),;]+)")
 MEDIA_FILE_KIND_EXTS = {
     "image": {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"},
-    "video": {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv", ".flv"},
+    "video": VIDEO_EXTENSIONS,
     "audio": {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"},
 }
 
@@ -13614,16 +13615,11 @@ def download_output(request: Request, url: str, name: str = "", inline: bool = F
 async def upload_ai_reference(files: List[UploadFile] = File(...)):
     uploaded = []
     image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-    video_exts = {".mp4", ".webm", ".mov", ".m4v", ".flv"}
+    video_exts = VIDEO_EXTENSIONS
     audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
     doc_exts = {".pdf", ".txt", ".md", ".markdown", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".json", ".zip", ".yaml", ".yml", ".log"}
     max_upload_bytes = 50 * 1024 * 1024
     for file in files:
-        content = await file.read()
-        if not content:
-            continue
-        if len(content) > max_upload_bytes:
-            raise HTTPException(status_code=413, detail=f"{file.filename or '文件'} 超过 50MB，无法上传")
         ext = os.path.splitext(file.filename or "")[1].lower()
         content_type = (file.content_type or "").lower()
         kind = "image"
@@ -13647,6 +13643,38 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             kind = "file"
             if not ext:
                 ext = ".bin"
+        filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
+        path = output_path_for(filename, "input")
+        if kind == "video":
+            size = 0
+            try:
+                with open(path, "wb") as target:
+                    while chunk := await file.read(1024 * 1024):
+                        target.write(chunk)
+                        size += len(chunk)
+                if not size:
+                    os.remove(path)
+                    continue
+                proxy_name = f"{os.path.splitext(filename)[0]}_playback.mp4"
+                proxy_path = output_path_for(proxy_name, "input")
+                has_proxy = await asyncio.to_thread(browser_playback_proxy, path, proxy_path)
+            except (ValueError, RuntimeError, OSError) as exc:
+                if os.path.exists(path):
+                    os.remove(path)
+                raise HTTPException(status_code=422, detail=f"{file.filename or '视频'} 无法导入：{exc}") from exc
+            url = output_url_for(filename, "input")
+            register_internal_media_object(url, "input", "video", "ai-upload")
+            item = {"url": url, "name": file.filename or filename, "kind": "video", "mime": content_type}
+            if has_proxy:
+                item["preview_url"] = output_url_for(proxy_name, "input")
+                register_internal_media_object(item["preview_url"], "input", "video", "ai-upload-preview")
+            uploaded.append(item)
+            continue
+        content = await file.read()
+        if not content:
+            continue
+        if len(content) > max_upload_bytes:
+            raise HTTPException(status_code=413, detail=f"{file.filename or '文件'} 超过 50MB，无法上传")
         image_width = 0
         image_height = 0
         orientation_normalized = False
@@ -13657,8 +13685,6 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
                 raise HTTPException(status_code=400, detail=f"{file.filename or '图片'} 无法读取：{exc}") from exc
             if len(content) > max_upload_bytes:
                 raise HTTPException(status_code=413, detail=f"{file.filename or '图片'} 方向校正后超过 50MB，无法上传")
-        filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
-        path = output_path_for(filename, "input")
         with open(path, "wb") as f:
             f.write(content)
         url = output_url_for(filename, "input")

@@ -1035,7 +1035,7 @@ const CANVAS_VIDEO_ONLY_NODE_TYPES = new Set([
 const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'film-prepare-assets', label:'准备资产', icon:'boxes', action:() => createNodeByType('film-prepare-assets')},
     {id:'film-confirm-shots', label:'确认镜头', icon:'list-checks', action:() => createNodeByType('film-confirm-shots')},
-    {id:'image', label:'图片', icon:'image-plus', action:() => addImageNode()},
+    {id:'image', label:'上传', icon:'upload', action:() => addImageNode()},
     {id:'prompt', label:'提示词', icon:'text-cursor-input', action:() => addPromptNode()},
     {id:'llm', label:'AI助手', icon:'message-square-text', action:() => addLLMNode()},
     {id:'generator', label:'图片生成', icon:'wand-sparkles', action:() => addGeneratorNode()},
@@ -4312,7 +4312,7 @@ function defaultPoint(dx=0, dy=0){
 }
 function addImageNode(point){
     const p = point || defaultPoint(-120, 0);
-    return addNode({id:uid('img'), type:'image', x:p.x, y:p.y, url:'', name:'空白图片'});
+    return addNode({id:uid('img'), type:'image', x:p.x, y:p.y, url:'', name:'上传'});
 }
 function addPromptNode(point){
     const p = point || defaultPoint(0, 0);
@@ -4344,10 +4344,11 @@ function addGroupNode(point){
 function pickMediaForNode(nodeId){
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*,video/*,audio/*';
+    input.accept = 'image/*,video/*,audio/*,.mxf,.mts,.m2ts,.ts,.mpg,.mpeg,.wmv,.vob,.avi,.mkv,.flv,.3gp';
     input.multiple = true;
     input.onchange = () => {
-        if(input.files?.length) fillImageNode(nodeId, input.files, {group:input.files.length > 1});
+        if(input.files?.length) fillImageNode(nodeId, input.files, {group:input.files.length > 1})
+            .catch(error => showErrorModal(error.message || '媒体上传失败', '媒体上传失败'));
     };
     input.click();
 }
@@ -5867,7 +5868,7 @@ function openImageNodePreview(nodeId){
     if(!node?.url || isMissingAssetUrl(node.url)) return;
     const kind = mediaKindForNode(node);
     if(!['image','video'].includes(kind)) return;
-    openOutputLightbox(node.url, node);
+    openOutputLightbox(kind === 'video' ? (node.previewUrl || node.url) : node.url, node);
 }
 function openOutputNodeMenu(nodeId, clientX, clientY){
     if(outputLightbox?.classList.contains('open')){
@@ -6388,7 +6389,7 @@ if(lookbookMenuTrigger){
 function mediaKindForUpload(file){
     const type = String(file?.type || '').toLowerCase();
     const name = String(file?.name || '').toLowerCase();
-    if(type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/.test(name)) return 'video';
+    if(type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv|flv|mxf|mts|m2ts|ts|mpg|mpeg|wmv|vob|3gp)(\?|$)/.test(name)) return 'video';
     if(type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name)) return 'audio';
     return 'image';
 }
@@ -6396,7 +6397,7 @@ function isSupportedUploadFile(file){
     const type = String(file?.type || '').toLowerCase();
     const name = String(file?.name || '').toLowerCase();
     return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/')
-        || /\.(png|jpe?g|webp|gif|bmp|avif|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
+        || /\.(png|jpe?g|webp|gif|bmp|avif|mp4|webm|mov|m4v|avi|mkv|flv|mxf|mts|m2ts|ts|mpg|mpeg|wmv|vob|3gp|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
 }
 const CANVAS_MEDIA_FILENAME_COLLATOR = new Intl.Collator('zh-CN', {numeric:true, sensitivity:'base'});
 function sortCanvasMediaByFilename(items, nameOf=item => item?.name || item?.webkitRelativePath || item?.url || item || ''){
@@ -6635,9 +6636,9 @@ function mediaKindForNode(node){
 }
 function nodeTitleForMedia(node){
     const kind = mediaKindForNode(node);
-    if(kind === 'video') return 'Video';
-    if(kind === 'audio') return 'Audio';
-    return 'Image';
+    if(kind === 'video') return langIsEn() ? 'Video' : '视频';
+    if(kind === 'audio') return langIsEn() ? 'Audio' : '音频';
+    return langIsEn() ? 'Image' : '图片';
 }
 const CANVAS_OUTPUT_MEDIA_DRAG_TYPE = 'application/x-canvas-output-media';
 const IMAGE_DROP_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
@@ -6852,7 +6853,9 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
     if(!supported.length) return [];
     const form = new FormData();
     supported.forEach(file => form.append('files', file));
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const response = await fetch('/api/ai/upload', {method:'POST', body:form});
+    if(!response.ok) throw new Error(await responseErrorMessage(response, '媒体上传失败'));
+    const data = await response.json();
     const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     const created = [];
     const uploaded = sortCanvasMediaByFilename((data.files || []).map((file, index) => ({file, source:supported[index]})), entry => entry.source?.name || entry.file?.name || '');
@@ -6864,6 +6867,7 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
             x:base.x + i * 36,
             y:base.y + i * 36,
             url:file.url,
+            previewUrl:file.preview_url || '',
             name:file.name,
             mediaKind:kind,
             natural_w:Number(file.natural_w || file.width || 0),
@@ -7090,11 +7094,14 @@ async function fillImageNode(nodeId, files, opts={}){
     }
     const form = new FormData();
     form.append('files', imgs[0]);
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const response = await fetch('/api/ai/upload', {method:'POST', body:form});
+    if(!response.ok) throw new Error(await responseErrorMessage(response, '媒体上传失败'));
+    const data = await response.json();
     const file = data.files?.[0];
     const node = nodes.find(n => n.id === nodeId);
     if(file && node){
         node.url = file.url;
+        node.previewUrl = file.preview_url || '';
         node.name = file.name;
         node.mediaKind = file.kind || mediaKindForUpload(imgs[0]);
         node.natural_w = Number(file.natural_w || file.width || 0);
@@ -7110,6 +7117,7 @@ function setImageNodeFromOutput(nodeId, url){
     node.url = url;
     node.name = outputImageName(url);
     node.mediaKind = 'image';
+    node.previewUrl = '';
     delete node.natural_w;
     delete node.natural_h;
     classicPortraitMediaNodeIds.delete(node.id);
@@ -7127,7 +7135,8 @@ function clearImageNode(nodeId, event=null){
     pushUndo();
     node.url = '';
     node.mediaKind = 'image';
-    node.name = '空白图片';
+    node.name = '上传';
+    node.previewUrl = '';
     delete node.natural_w;
     delete node.natural_h;
     classicPortraitMediaNodeIds.delete(node.id);
@@ -11607,7 +11616,7 @@ function renderNode(node){
     const filmTitle = window.CanvasFilmWorkflow?.title(node.type) || window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
     const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 视频超分' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
-    const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' && node.url ? nodeTitleForMedia(node) : title);
+    const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' ? (node.url ? nodeTitleForMedia(node) : (langIsEn() ? 'Upload' : '上传')) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
         : 0;
@@ -11645,7 +11654,7 @@ function renderNode(node){
             body.innerHTML = `<div class="image-preview-wrap">${missing ? missingAssetHtml(node.url) : canvasPreviewImgHtml(node.url, 512, 'draggable="false"')}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || 'image')}${missing ? ` · ${langIsEn() ? 'missing' : '文件缺失'}` : ''}</div>`;
             if(!missing && mediaKind !== 'image'){
                 const mediaHtml = mediaKind === 'video'
-                    ? `<div class="media-card video-card">${canvasVideoPreviewHtml(node.url, 512, 'draggable="false" data-video-fallback-attrs="controls"')}<button class="canvas-video-play" type="button" title="播放"><i data-lucide="play"></i></button></div>`
+                    ? `<div class="media-card video-card">${canvasVideoPreviewHtml(node.previewUrl || node.url, 512, 'draggable="false" data-video-fallback-attrs="controls"')}<button class="canvas-video-play" type="button" title="播放"><i data-lucide="play"></i></button></div>`
                     : `<div class="media-card audio-card"><i data-lucide="file-audio" class="w-8 h-8"></i><div class="audio-title">${escapeHtml(node.name || 'Audio')}</div><div class="audio-sub">AUDIO</div><audio src="${escapeAttr(node.url)}" data-url="${escapeAttr(node.url)}" controls preload="metadata"></audio></div>`;
                 body.innerHTML = `<div class="image-preview-wrap">${mediaHtml}</div><div class="image-caption text-[11px] text-gray-400 truncate">${escapeHtml(node.name || nodeTitleForMedia(node))}</div>`;
             }
@@ -11729,7 +11738,7 @@ function renderNode(node){
                 scheduleClassicNodeRectMeasure([node.id]);
             }
         } else {
-        body.innerHTML = `<div class="blank-image"><i data-lucide="image-plus" class="w-7 h-7"></i><div class="text-[11px] font-bold">${tr('canvas.clickDragPasteImage')}</div></div>`;
+            body.innerHTML = `<div class="blank-image"><i data-lucide="upload" class="w-7 h-7"></i><div class="text-[11px] font-bold">${tr('canvas.clickDragPasteImage')}</div></div>`;
             const blank = body.querySelector('.blank-image');
             blank.onclick = () => pickImageForNode(node.id);
             blank.ondragover = e => allowImageNodeDropEvent(e, blank);
@@ -18461,6 +18470,7 @@ function clearNodeContentBeforeDelete(id){
         node.url = '';
         node.mediaKind = 'image';
         node.name = tr('canvas.imageCard');
+        node.previewUrl = '';
         render();
         scheduleSave();
         return true;
@@ -18504,7 +18514,7 @@ function outputDownloadName(url){
 }
 function isVideoUrl(url){
     const clean = canvasOriginalMediaUrl(url).split('?')[0].toLowerCase();
-    return /\.(mp4|webm|mov|m4v|avi|mkv|flv)$/.test(clean);
+    return /\.(mp4|webm|mov|m4v|avi|mkv|flv|mxf|mts|m2ts|ts|mpg|mpeg|wmv|vob|3gp)$/.test(clean);
 }
 function mediaKindForOutputItem(item){
     const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
@@ -20281,7 +20291,8 @@ function openOutputLightbox(url, out){
         outputPreview.ondblclick = null;
         outputDownloadBtn.onclick = e => {
             e.stopPropagation();
-            downloadUrl(url, outputDownloadName(url)).catch(err => alert(err.message || '下载失败'));
+            const source = out?.type === 'image' && out.previewUrl === url ? out.url : url;
+            downloadUrl(source, out?.name || outputDownloadName(source)).catch(err => alert(err.message || '下载失败'));
         };
         outputLightbox.classList.add('open');
         refreshIcons();
@@ -20849,7 +20860,7 @@ async function openVideoClipEditorMode(nodeId, mode='clip'){
         const metadata = await response.json();
         if(sequence !== videoClipOpenSequence || !videoClipEditor || videoClipEditor.nodeId !== node.id) return;
         Object.assign(videoClipEditor, metadata, {sourceUrl:node.url, start:0, end:Number(metadata.duration || 0)});
-        videoClipPreview.src = canvasDisplayMediaUrl(node.url, node.name || 'video.mp4');
+        videoClipPreview.src = canvasDisplayMediaUrl(node.previewUrl || node.url, 'video.mp4');
         videoClipPreview.currentTime = 0;
         videoClipLoading?.classList.add('hidden');
         syncVideoClipEditorUi();
@@ -21331,7 +21342,7 @@ async function openVideoFrameExtractor(nodeId){
     const sequence = videoFrameOpenSequence;
     videoFrameEditor = {nodeId:node.id, sourceUrl:node.url, busy:false, taskId:'', result:null};
     if(videoFrameSourceName) videoFrameSourceName.textContent = node.name || outputImageName(node.url) || '视频';
-    if(videoFramePreview){ videoFramePreview.src = canvasDisplayMediaUrl(node.url, node.name || 'video.mp4'); videoFramePreview.load(); }
+    if(videoFramePreview){ videoFramePreview.src = canvasDisplayMediaUrl(node.previewUrl || node.url, 'video.mp4'); videoFramePreview.load(); }
     if(videoFrameLoading) videoFrameLoading.classList.remove('hidden');
     if(videoFrameProgress) videoFrameProgress.hidden = true;
     if(videoFrameSubmit) videoFrameSubmit.disabled = false;
@@ -24343,9 +24354,8 @@ function handleClassicClipboardPaste(e){
         cancelClassicNodePasteFallback();
         lastImagePasteAt = Date.now();
         const blank = [...selected].map(id => canvasNodeIndex.get(id)).find(node => node?.type === 'image' && !node.url);
-        if(blank) fillImageNode(blank.id, files);
-        else if(files.length > 1) uploadImageGroup(files);
-        else uploadImages(files);
+        const upload = blank ? fillImageNode(blank.id, files) : files.length > 1 ? uploadImageGroup(files) : uploadImages(files);
+        upload.catch(error => showErrorModal(error.message || '媒体上传失败', '媒体上传失败'));
         return;
     }
     if(isEditableTarget(e.target) || !clipboardNodeCount()) return;

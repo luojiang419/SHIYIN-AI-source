@@ -103,7 +103,7 @@
         "canvas.newCanvasPlaceholder": { zh: "新画布名称（可留空使用默认）", en: "New canvas name (optional)" },
         "canvas.trashNote": { zh: "回收站中的画布会在 30 天后自动清理。", en: "Canvases in Trash are automatically cleaned after 30 days." },
         "canvas.dropImage": { zh: "拖放素材到画布", en: "Drop media onto the canvas" },
-        "canvas.imageCard": { zh: "上传节点", en: "Upload Node" },
+        "canvas.imageCard": { zh: "上传", en: "Upload" },
         "canvas.imageCardHint": { zh: "支持图片/音频/视频/批量上传", en: "Images, audio, video, batch upload" },
         "canvas.llmNode": { zh: "AI助手", en: "AI Assistant" },
         "canvas.modelscopeGenerate": { zh: "Modelscope生成", en: "Modelscope Generate" },

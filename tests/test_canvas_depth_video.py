@@ -128,3 +128,46 @@ def test_video_depth_service_closes_persistent_worker(tmp_path):
 
     assert json.loads(process.stdin.content.decode("utf-8"))["op"] == "shutdown"
     assert service._worker_process is None
+
+
+def test_service_falls_back_to_legacy_worker_during_runtime_rollout(tmp_path, monkeypatch):
+    service = VideoDepthTaskService(tmp_path)
+    service.worker.parent.mkdir(parents=True)
+    service.worker.write_text("# worker", encoding="utf-8")
+    service.python.parent.mkdir(parents=True)
+    service.python.write_text("", encoding="utf-8")
+    service.deployment.parent.mkdir(parents=True, exist_ok=True)
+    service.deployment.write_text(json.dumps({"models": [{"key": "vda_base_fp16_relative", "ready": True}]}), encoding="utf-8")
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"video")
+    launches = []
+
+    class Input:
+        def write(self, _content): pass
+        def flush(self): pass
+
+    class Process:
+        def __init__(self, command, **_kwargs):
+            launches.append(command)
+            self.stdin = Input() if "serve" in command else None
+            self.stdout = io.BytesIO(b"")
+            self.stderr = io.BytesIO(b"")
+            self.returncode = 0
+
+        def poll(self): return 2 if self.stdin else 0
+        def wait(self, timeout=None): return self.poll()
+        def communicate(self):
+            output_dir = Path(launches[-1][launches[-1].index("--output-dir") + 1])
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output = output_dir / "depth-preview.mp4"
+            output.write_bytes(b"depth")
+            payload = {"type": "result", "result": {"outputVideoPath": str(output)}}
+            return (json.dumps(payload).encode() + b"\n", b"")
+
+    monkeypatch.setattr(video_depth.subprocess, "Popen", Process)
+    service._tasks["task"] = {"id": "task"}
+    service._run("task", source, tmp_path / "output", lambda path: "/" + Path(path).name)
+
+    assert "serve" in launches[0]
+    assert "infer" in launches[1]
+    assert service.get("task")["status"] == "done"

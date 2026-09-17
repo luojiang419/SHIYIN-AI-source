@@ -352,6 +352,30 @@ class VideoDepthTaskService:
                 elif event.get("type") == "error":
                     worker_error = str(event.get("error") or "深度视频生成失败")
                     break
+            if result is None and not worker_error and process_stdin is not None and process.poll() is not None:
+                # During a staged rollout an installed v1 worker may not support
+                # the persistent `serve` command yet. Keep generation available
+                # until the external runtime resource is upgraded.
+                self._worker_process = None
+                legacy_command = list(command)
+                legacy_command[len(runtime["command"])] = "infer"
+                legacy = subprocess.Popen(
+                    legacy_command, cwd=runtime["cwd"], stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=False, creationflags=flags, env=runtime["env"],
+                )
+                legacy_stdout, legacy_stderr = legacy.communicate()
+                for line in decode_worker_output(legacy_stdout).splitlines():
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if event.get("type") == "result" and isinstance(event.get("result"), dict):
+                        result = event["result"]
+                    elif event.get("type") == "error":
+                        worker_error = str(event.get("error") or "深度视频生成失败")
+                if legacy.returncode != 0 and not worker_error:
+                    detail = decode_worker_output(legacy_stderr).strip()
+                    worker_error = detail.splitlines()[-1] if detail else f"深度视频 worker 退出码 {legacy.returncode}"
             persistent = process_stdin is not None
             code = 0 if persistent else process.wait()
             stderr = (decode_worker_output(b''.join(self._worker_stderr)) if self._worker_stderr and isinstance(self._worker_stderr[0], bytes)

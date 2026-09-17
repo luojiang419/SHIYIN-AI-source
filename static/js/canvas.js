@@ -961,6 +961,7 @@ const cascadeSerialIds = new Set(); // 记录以串行循环模式启动的运�
 const cascadeContexts = new Map();
 let cropState = null;
 let cropDrag = null;
+let imagePreviewPanDrag = null;
 let cropAspectPreset = 'free';
 let cropAspectRatio = null;
 let imageEditMode = 'crop';
@@ -4251,6 +4252,32 @@ document.querySelectorAll('[data-brush-color]').forEach(button => {
     document.getElementById(id)?.addEventListener('input', event => setImageResizeScale(event.target.value));
 });
 // 图片编辑区滚轮缩放
+document.getElementById('imageEditStage').addEventListener('mousedown', event => {
+    if(event.button !== 0 || imageEditMode !== 'preview' || !cropState) return;
+    const stage = event.currentTarget;
+    if(stage.scrollWidth <= stage.clientWidth && stage.scrollHeight <= stage.clientHeight) return;
+    const rect = stage.getBoundingClientRect();
+    if(event.clientX >= rect.left + stage.clientLeft + stage.clientWidth ||
+       event.clientY >= rect.top + stage.clientTop + stage.clientHeight) return;
+    event.preventDefault();
+    imagePreviewPanDrag = {
+        x:event.clientX, y:event.clientY,
+        left:stage.scrollLeft, top:stage.scrollTop
+    };
+    stage.classList.add('panning');
+});
+window.addEventListener('mousemove', event => {
+    if(!imagePreviewPanDrag) return;
+    const stage = document.getElementById('imageEditStage');
+    stage.scrollLeft = imagePreviewPanDrag.left - (event.clientX - imagePreviewPanDrag.x);
+    stage.scrollTop = imagePreviewPanDrag.top - (event.clientY - imagePreviewPanDrag.y);
+});
+function stopImagePreviewPan(){
+    imagePreviewPanDrag = null;
+    document.getElementById('imageEditStage')?.classList.remove('panning');
+}
+window.addEventListener('mouseup', stopImagePreviewPan);
+window.addEventListener('blur', stopImagePreviewPan);
 document.getElementById('imageEditStage').addEventListener('wheel', event => {
     if(!cropState || document.getElementById('cropImage')?.dataset.editorLoadState !== 'ready') return;
     event.preventDefault();
@@ -7611,6 +7638,9 @@ function setImageEditMode(mode, userTouched=false){
     const isPreview = imageEditMode === 'preview';
     const cropCanvasEl = document.getElementById('cropCanvas');
     cropCanvasEl.classList.toggle('preview-mode', isPreview);
+    const editStage = document.getElementById('imageEditStage');
+    editStage.classList.toggle('preview-mode', isPreview);
+    if(!isPreview) stopImagePreviewPan();
     cropCanvasEl.classList.toggle('mask-mode', imageEditMode === 'mask');
     cropCanvasEl.classList.toggle('brush-mode', imageEditMode === 'brush');
     cropCanvasEl.classList.toggle('resize-mode', imageEditMode === 'resize');
@@ -8684,6 +8714,7 @@ function openImageEditor(nodeId, initialMode='crop'){
     refreshIcons(modal);
 }
 function closeImageEditor(){
+    stopImagePreviewPan();
     imageCutoutSession?.destroy();imageCutoutSession=null;imageCutoutState={canSave:false,busy:false};
     window.removeEventListener('keydown',imageEditorEscape,true);
     for(const {frame,style} of imageEditorFrames){if(style===null)frame.removeAttribute('style');else frame.setAttribute('style',style);}

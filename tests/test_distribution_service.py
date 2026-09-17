@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from distribution.service import Center, atomic_json, relative_path
+from distribution.service import Center, MAX_SERVICE_LOGS, atomic_json, relative_path
 
 
 def snapshot(root, content=b'new', version='20260914180000'):
@@ -54,6 +54,23 @@ def server(tmp_path):
 
 def get(url,headers=None):
     return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(urllib.request.Request(url,headers=headers or {}))
+
+
+def test_service_logs_are_bounded_and_trimmed_on_startup(tmp_path):
+    data = tmp_path / 'data'
+    center = Center(data)
+    for index in range(MAX_SERVICE_LOGS + 25):
+        center.log(f'entry-{index}')
+    with center.db() as db:
+        assert db.execute('SELECT COUNT(*) FROM logs').fetchone()[0] == MAX_SERVICE_LOGS
+        assert db.execute('SELECT message FROM logs ORDER BY created ASC LIMIT 1').fetchone()[0] == 'entry-25'
+
+    # Simulate an older build that left excess rows behind; startup trims them.
+    with center.db() as db:
+        db.executemany('INSERT INTO logs VALUES (?, ?)', [(0, f'old-{i}') for i in range(30)])
+    restarted = Center(data)
+    with restarted.db() as db:
+        assert db.execute('SELECT COUNT(*) FROM logs').fetchone()[0] == MAX_SERVICE_LOGS
 
 
 def test_signed_catalog_range_and_legacy_guard(server,tmp_path):

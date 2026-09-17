@@ -25,6 +25,7 @@ from distribution.traffic import Traffic
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA = Path(os.environ.get('SHIYIN_DISTRIBUTION_DATA', 'D:/SHIYIN-Distribution'))
 ALLOWED_ROOTS = ('app/web', 'app/backend/canvas-backend', 'app/skills')
+MAX_SERVICE_LOGS = 1000
 
 
 def digest(path):
@@ -106,6 +107,11 @@ class Center:
             for column in ('computer_user', 'computer_name'):
                 if column not in device_columns:
                     db.execute(f"ALTER TABLE bug_devices ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+            # Keep the service log bounded so long-running installations cannot
+            # exhaust disk space. This also trims logs accumulated by older builds.
+            db.execute('DELETE FROM logs WHERE rowid NOT IN '
+                       '(SELECT rowid FROM logs ORDER BY created DESC, rowid DESC LIMIT ?)',
+                       (MAX_SERVICE_LOGS,))
         self.traffic = Traffic(self.db)
         self.blob_labels = None
 
@@ -139,6 +145,9 @@ class Center:
     def log(self, message):
         with self.db() as db:
             db.execute('INSERT INTO logs VALUES (?, ?)', (time.time(), str(message)))
+            db.execute('DELETE FROM logs WHERE rowid NOT IN '
+                       '(SELECT rowid FROM logs ORDER BY created DESC, rowid DESC LIMIT ?)',
+                       (MAX_SERVICE_LOGS,))
 
     def receive_bug_report(self, body, ip):
         if not isinstance(body, dict):

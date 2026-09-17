@@ -5456,7 +5456,7 @@ function linkCreateOptions(state){
             {type:'video-screenshot', label:'截图', icon:'camera'},
             {type:'topazVideo', label:'TOPAZ 视频超分', icon:'scan-line'}
         ];
-        if(node.type === 'generator') return [
+        if(node.type === 'generator' || (node.type === 'image' && (!node.url || mediaKindForNode(node) === 'image'))) return [
             {type:'generator', label:'图片生成', icon:'wand-sparkles'},
             {type:'video', label:'视频生成', icon:'clapperboard'},
             {type:'lookbook', label:'lookbook', icon:'book-open', inputRole:'lookbook-person'},
@@ -5533,7 +5533,7 @@ function linkAdvertisingAllowsFilm(){
 function imageLinkAdvertisingGroups(state){
     const origin = nodes.find(node => node.id === state.originId);
     if(state.originKind !== 'out' || !['image','generator'].includes(origin?.type) || (origin.type === 'image' && origin.url && mediaKindForNode(origin) !== 'image')) return [];
-    if(origin.type === 'generator') return linkAdvertisingAllowsFilm() ? [{label:'影视制作', icon:'clapperboard', items:[
+    return linkAdvertisingAllowsFilm() ? [{label:'影视制作', icon:'clapperboard', items:[
         {type:'film-workflow', label:'创建影视工作流', icon:'workflow'},
         {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left', inputRole:'actor-0'},
         {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
@@ -5546,24 +5546,6 @@ function imageLinkAdvertisingGroups(state){
         {type:'multiView', label:'创建三视图', icon:'panels-top-left', inputRole:'model-front'},
         {type:'panorama', label:'720°取景器', icon:'scan-line'}
     ]}] : [];
-    return [
-        {label:'平面广告', icon:'book-open', items:[
-            {type:'lookbook', label:'Lookbook 平面广告', icon:'book-open', inputRole:'lookbook-person'}
-        ]},
-        ...(linkAdvertisingAllowsFilm() ? [{label:'影视广告', icon:'clapperboard', items:[
-            {type:'film-workflow', label:'创建影视工作流', icon:'workflow'},
-            {type:'film-storyboard', label:'分镜合成', icon:'panels-top-left', inputRole:'actor-0'},
-            {type:'storyboardMerge', label:'拼图', icon:'columns-3'},
-            {type:'film-line-art', label:'生成线稿分镜', icon:'pencil-ruler', inputRole:'source'},
-            {type:'film-video', label:'生成视频', icon:'clapperboard', inputRole:'storyboard'},
-            {type:'linkfox-video', label:'LinkFox视频生成', icon:'sparkles', inputRole:'reference-image'},
-            {type:'dwpose', label:'动作提取', icon:'person-standing'},
-            {type:'depthMap', label:'深度图', icon:'scan'},
-            {type:'poseReplicate', label:'一键复刻', icon:'refresh-cw', inputRole:'pose-reference'},
-            {type:'multiView', label:'创建三视图', icon:'panels-top-left', inputRole:'model-front'},
-            {type:'panorama', label:'720°取景器', icon:'scan-line'}
-        ]}] : [])
-    ];
 }
 function linkCreateButtonHtml(option){
     return `<button type="button" class="menu-btn" data-link-create="${escapeAttr(option.type)}" data-link-input-role="${escapeAttr(option.inputRole || '')}"><i data-lucide="${escapeAttr(option.icon)}" class="w-4 h-4"></i><span>${escapeHtml(option.label)}</span></button>`;

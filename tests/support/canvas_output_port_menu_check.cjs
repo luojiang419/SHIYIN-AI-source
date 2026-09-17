@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
             render();
         });
 
-        for(const id of ['generator','video','video-media']){
+        for(const id of ['generator','image','video','video-media']){
             const port = await page.locator(`.node[data-id="${id}"] .port.out`).boundingBox();
             assert.ok(port,`${id}: output port`);
             await page.mouse.move(port.x + port.width / 2,port.y + port.height / 2);
@@ -23,37 +23,46 @@ const assert = require('node:assert/strict');
             await page.mouse.move(1200,820,{steps:8});
             await page.mouse.up();
             await page.waitForSelector('#linkCreateMenu.open');
-            assert.equal(await page.locator('#linkCreateMenu [data-link-create]').count(),id === 'generator' ? 19 : 5);
+            assert.equal(await page.locator('#linkCreateMenu [data-link-create]').count(),['generator','image'].includes(id) ? 19 : 5);
             await page.evaluate(() => closeLinkCreateMenu());
         }
 
         const imageTypes = ['generator','video','lookbook','depthMap','poseReplicate','storyboardMerge','batchGenerator','llm'];
         const videoTypes = ['video-clip','video-frames','depthVideo','video-screenshot','topazVideo'];
         assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'generator',originKind:'out'}).map(item => item.type)), imageTypes);
+        assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'image',originKind:'out'}).map(item => item.type)), imageTypes);
         assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'video',originKind:'out'}).map(item => item.type)), videoTypes);
         assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'video-media',originKind:'out'}).map(item => item.type)), videoTypes);
+        await page.evaluate(() => openLinkCreateMenu('image','out',600,120));
+        assert.deepEqual(await page.locator('#linkCreateMenu > [data-link-create]').allInnerTexts(),
+            ['图片生成','视频生成','lookbook','深度图','一键复刻','拼图','批量处理','AI助手']);
+        await page.evaluate(() => closeLinkCreateMenu());
 
-        for(const type of imageTypes){
-            const before = await page.evaluate(() => ({ids:nodes.map(node => node.id), edges:connections.length}));
-            await page.evaluate(() => openLinkCreateMenu('generator','out',600,120));
-            await page.locator(`#linkCreateMenu > [data-link-create="${type}"]`).click();
-            const result = await page.evaluate(({type,before}) => {
-                const created = nodes.find(node => !before.ids.includes(node.id) && node.type === type);
-                const link = connections.find(edge => edge.from === 'generator' && edge.to === created?.id);
-                return {created:!!created, connected:!!link, valid:link && canConnect(link.from,link.to,link.inputRole || '')};
-            }, {type,before});
-            assert.deepEqual(result,{created:true,connected:true,valid:true},type);
-            await page.evaluate(() => performUndo());
+        for(const source of ['generator','image']){
+            for(const type of imageTypes){
+                const before = await page.evaluate(() => ({ids:nodes.map(node => node.id), edges:connections.length}));
+                await page.evaluate(sourceId => openLinkCreateMenu(sourceId,'out',600,120),source);
+                await page.locator(`#linkCreateMenu > [data-link-create="${type}"]`).click();
+                const result = await page.evaluate(({type,before,source}) => {
+                    const created = nodes.find(node => !before.ids.includes(node.id) && node.type === type);
+                    const link = connections.find(edge => edge.from === source && edge.to === created?.id);
+                    return {created:!!created, connected:!!link, valid:link && canConnect(link.from,link.to,link.inputRole || '')};
+                }, {type,before,source});
+                assert.deepEqual(result,{created:true,connected:true,valid:true},`${source} -> ${type}`);
+                await page.evaluate(() => performUndo());
+            }
         }
 
-        await page.evaluate(() => openLinkCreateMenu('generator','out',600,120));
-        const film = page.locator('#linkCreateMenu [data-link-ad-group]');
-        assert.equal(await film.count(),1);
-        assert.equal(await film.locator('.menu-submenu-trigger').innerText(),'影视制作');
-        await film.locator('.menu-submenu-trigger').click();
-        assert.equal(await film.locator('.create-submenu').isVisible(),true);
-        await film.locator('[data-link-create="film-storyboard"]').click();
-        assert.equal(await page.evaluate(() => connections.some(edge => edge.from === 'generator' && nodes.find(node => node.id === edge.to)?.type === 'film-storyboard' && canConnect(edge.from,edge.to,edge.inputRole || ''))),true);
+        for(const source of ['generator','image']){
+            await page.evaluate(sourceId => openLinkCreateMenu(sourceId,'out',600,120),source);
+            const film = page.locator('#linkCreateMenu [data-link-ad-group]');
+            assert.equal(await film.count(),1);
+            assert.equal(await film.locator('.menu-submenu-trigger').innerText(),'影视制作');
+            await film.locator('.menu-submenu-trigger').click();
+            assert.equal(await film.locator('.create-submenu').isVisible(),true);
+            await film.locator('[data-link-create="film-storyboard"]').click();
+            assert.equal(await page.evaluate(sourceId => connections.some(edge => edge.from === sourceId && nodes.find(node => node.id === edge.to)?.type === 'film-storyboard' && canConnect(edge.from,edge.to,edge.inputRole || '')),source),true);
+        }
 
         for(const source of ['video','video-media']){
             for(const type of ['depthVideo','topazVideo']){

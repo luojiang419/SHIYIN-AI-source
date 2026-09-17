@@ -2,3 +2,17 @@
 .stage-actions .live-status{display:flex;align-items:center;gap:5px;color:#aeb4b0}.live-status i{width:6px;height:6px;border-radius:50%;background:var(--lime);box-shadow:0 0 8px #c7f36b}.live-status.working i{animation:pulse .8s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.25}}
 
 .empty-state[hidden]{display:none}
+
+.stage-panel{grid-template-rows:auto minmax(0,1fr) auto;min-height:0}
+.stage-toolbar{flex-wrap:wrap;gap:8px;padding:10px 14px}
+.stage-actions{flex-wrap:wrap}
+.stage-actions #zoomSlider{width:120px;margin:0;flex:none}
+.zoom-label{font-size:12px}
+.hintbar{flex-wrap:wrap;padding:8px}
+.inspector{min-height:0}
+@media(max-width:900px){
+ .workspace{grid-template-rows:minmax(260px,1fr) minmax(180px,35%);}
+ .inspector{display:block;border-left:0;border-top:1px solid var(--line);padding:12px 18px}
+ .inspector-head{padding-bottom:8px}.control-block{padding:10px 0}
+ .stage-actions #imageMeta,.stage-actions #liveStatus{display:none}
+}

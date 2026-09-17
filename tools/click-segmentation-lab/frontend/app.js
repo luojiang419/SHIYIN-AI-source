@@ -14,7 +14,7 @@
       c.style.top=((r.height-c.height*viewport.zoom)/2+viewport.y)+'px';
       c.style.transformOrigin='0 0';c.style.transform='scale('+viewport.zoom+')';
     }
-    $('zoomValue').textContent=Math.round(viewport.zoom*100)+'%';
+    $('zoomValue').textContent=Math.round(viewport.zoom*100)+'%';$('zoomSlider').value=Math.round(viewport.zoom*100);
   }
   function resetView(){viewport.zoom=1;viewport.x=viewport.y=0;positionCanvas()}
   function fit(){
@@ -59,6 +59,11 @@
   window.addEventListener('keyup',e=>{if(e.code==='Space'){viewport.space=false;cursor()}});
   window.addEventListener('blur',()=>{viewport.space=false;stopPan()});
   $('fitButton').onclick=resetView;
+  $('zoomSlider').oninput=()=>{
+    if(!state.image)return;
+    const next=Number($('zoomSlider').value)/100,ratio=next/viewport.zoom;
+    viewport.x*=ratio;viewport.y*=ratio;viewport.zoom=next;positionCanvas();
+  };
   function draw(){if(!state.image)return;const w=imageCanvas.width,h=imageCanvas.height;imageCtx.clearRect(0,0,w,h);imageCtx.globalAlpha=1;imageCtx.drawImage(state.image,0,0,w,h);
 if(state.view==='cutout'&&state.mask){imageCtx.fillStyle='rgba(0,0,0,0.65)';imageCtx.fillRect(0,0,w,h);}maskCtx.clearRect(0,0,w,h);if(state.mask&&state.view!=='original'){const temp=document.createElement('canvas');temp.width=w;temp.height=h;const ctx=temp.getContext('2d');ctx.drawImage(state.mask,0,0,w,h);
 const pixels=ctx.getImageData(0,0,w,h);

@@ -54,5 +54,13 @@ if(Math.abs(moved.x-enlarged.x-60)>1||Math.abs(moved.y-enlarged.y-35)>1||panRequ
 await page.locator('#fitButton').click();
 if(await page.locator('#zoomValue').textContent()!=='100%')throw Error('重置失败');
 console.log(JSON.stringify({pixels,point,panRequests,result:'PASS zoom/pan'}));
+await page.locator('#zoomSlider').evaluate(el=>{el.value='200';el.dispatchEvent(new Event('input',{bubbles:true}))});
+if(await page.locator('#zoomValue').textContent()!=='200%')throw Error('缩放滑块无效');
+await page.setViewportSize({width:760,height:700});
+for(const id of ['zoomSlider','edgeShift']){
+ await page.locator('#'+id).scrollIntoViewIfNeeded();
+ if(!await page.locator('#'+id).isVisible())throw Error('窄窗口滑块隐藏: '+id);
+}
+console.log('PASS visible controls at 760x700, slider 200%');
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

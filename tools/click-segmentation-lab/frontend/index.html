@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>点击抠图实验室</title>
-  <link rel="stylesheet" href="/styles.css?v=hide-empty-1">
+  <link rel="stylesheet" href="/styles.css?v=visible-controls-6">
 </head>
 <body>
   <header class="topbar">
@@ -25,6 +25,7 @@
           <button class="view-tab" data-view="original">原图</button>
         </div>
         <div class="stage-actions">
+          <label for="zoomSlider" class="zoom-label">缩放</label><input id="zoomSlider" type="range" min="10" max="1200" value="100" step="1" aria-label="缩放比例">
           <span id="zoomValue">100%</span><button id="fitButton" class="button secondary" title="重置缩放和平移">适应窗口</button>
           <button id="undoButton" class="icon-button" title="撤销最后一个点" disabled>↶</button>
           <button id="clearButton" class="icon-button" title="清空选择" disabled>⌫</button>
@@ -84,6 +85,6 @@
     </aside>
   </main>
   <div id="toast" class="toast" hidden></div>
-  <script src="/app.js?v=zoom-pan-5"></script>
+  <script src="/app.js?v=visible-controls-6"></script>
 </body>
 </html>

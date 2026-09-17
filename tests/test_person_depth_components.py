@@ -63,6 +63,27 @@ def make_manifest(archive: bytes, *, enabled: bool = True) -> dict[str, object]:
     }
 
 
+def test_configured_lan_is_tried_before_public_fallback():
+    with tempfile.TemporaryDirectory() as tmp:
+        manager = PersonDepthComponentManager(Path(tmp), manifest=make_manifest(make_archive()))
+        manager.set_lan_source("http://127.0.0.1:3011")
+        attempts = []
+
+        def lan_failure():
+            attempts.append("lan")
+            raise RuntimeError("连接失败")
+
+        def public_download(*_args):
+            attempts.append("public")
+            return []
+        with patch.object(manager, "_download_lan_files", side_effect=lan_failure), \
+                patch.object(manager, "_download_packages", side_effect=public_download), \
+                patch.object(manager, "_install_archives"), patch.object(manager, "_mark_ready"):
+            assert manager._download_and_install() is True
+        assert attempts == ["lan", "public"]
+        assert manager.status()["attempts"][0]["source"] == "局域网服务器"
+
+
 def test_pending_manifest_never_starts_network_install():
     with tempfile.TemporaryDirectory() as temp_root:
         manager = PersonDepthComponentManager(

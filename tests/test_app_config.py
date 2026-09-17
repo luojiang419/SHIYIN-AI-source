@@ -169,10 +169,35 @@ class AppConfigTests(unittest.TestCase):
             self.assertTrue(saved["person_depth_lan_server_enabled"])
             self.assertEqual(saved["person_depth_lan_source"], "http://192.168.0.24:3011")
             self.assertEqual(read_app_config(data_root)["person_depth_lan_port"], 3011)
+            (data_root / "config" / "update.json").write_text(json.dumps({
+                "lanUpdateEnabled": True, "lanUpdateUrl": "http://192.168.1.50:3011"
+            }), encoding="utf-8")
+            self.assertEqual(read_app_config(data_root)["person_depth_lan_source"], "http://192.168.1.50:3011")
+            update_app_settings(data_root, person_depth_lan_source="http://192.168.1.60:3011")
+            self.assertEqual(read_app_config(data_root)["person_depth_lan_source"], "http://192.168.1.60:3011")
             with self.assertRaisesRegex(ValueError, "1024"):
                 update_app_settings(data_root, person_depth_lan_port=80)
             with self.assertRaisesRegex(ValueError, "http://"):
                 update_app_settings(data_root, person_depth_lan_source="https://192.168.0.24:3011")
+
+    def test_empty_legacy_lan_source_uses_distribution_center(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_root = Path(tmp)
+            config_dir = data_root / "config"
+            config_dir.mkdir()
+            (config_dir / "update.json").write_text(json.dumps({
+                "lanUpdateEnabled": True, "lanUpdateUrl": "http://192.168.1.50:3011"
+            }), encoding="utf-8")
+            saved = update_app_settings(data_root, person_depth_lan_source="")
+            self.assertEqual(saved["person_depth_lan_source"], "http://192.168.1.50:3011")
+            self.assertEqual(read_app_config(data_root)["person_depth_lan_source"], "http://192.168.1.50:3011")
+            (config_dir / "update.json").write_text(json.dumps({
+                "lanUpdateEnabled": True, "lanUpdateUrl": "http://192.168.1.51:3011"
+            }), encoding="utf-8")
+            self.assertEqual(json.loads((config_dir / "app.json").read_text(encoding="utf-8"))["person_depth_lan_source"], "")
+            self.assertEqual(read_app_config(data_root)["person_depth_lan_source"], "http://192.168.1.51:3011")
+            (config_dir / "update.json").write_text(json.dumps({"lanUpdateEnabled": False}), encoding="utf-8")
+            self.assertEqual(read_app_config(data_root)["person_depth_lan_source"], "")
 
     def test_generated_files_use_persistent_sequence_and_date(self):
         with tempfile.TemporaryDirectory() as tmp:

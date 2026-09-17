@@ -93,6 +93,26 @@ def _config_path(data_root: str | Path) -> Path:
     return Path(data_root) / "config" / "app.json"
 
 
+def _desktop_lan_source(data_root: str | Path) -> str:
+    try:
+        settings = json.loads((Path(data_root) / "config" / "update.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return DEFAULT_PERSON_DEPTH_LAN_SOURCE
+    if not isinstance(settings, dict):
+        return DEFAULT_PERSON_DEPTH_LAN_SOURCE
+    if settings.get("lanUpdateEnabled") is False:
+        return ""
+    source = str(settings.get("lanUpdateUrl") or "").strip().rstrip("/")
+    return source if source.startswith("http://") else DEFAULT_PERSON_DEPTH_LAN_SOURCE
+
+
+def _component_lan_source(data_root: str | Path, value: object) -> str:
+    source = str(value or "").strip().rstrip("/")
+    if source and source != DEFAULT_PERSON_DEPTH_LAN_SOURCE:
+        return source
+    return _desktop_lan_source(data_root)
+
+
 def read_app_config(data_root: str | Path) -> dict[str, Any]:
     path = _config_path(data_root)
     with _CONFIG_LOCK:
@@ -110,7 +130,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
                 "person_depth_lan_server_enabled": DEFAULT_PERSON_DEPTH_LAN_SERVER_ENABLED,
                 "person_depth_lan_host": DEFAULT_PERSON_DEPTH_LAN_HOST,
                 "person_depth_lan_port": DEFAULT_PERSON_DEPTH_LAN_PORT,
-                "person_depth_lan_source": DEFAULT_PERSON_DEPTH_LAN_SOURCE,
+                "person_depth_lan_source": _desktop_lan_source(data_root),
                 "canvas_arrange_spacing": 56,
                 "canvas_group_arrange_spacing": 28,
             }
@@ -140,7 +160,7 @@ def read_app_config(data_root: str | Path) -> dict[str, Any]:
             value["person_depth_lan_port"] = int(value.get("person_depth_lan_port") or DEFAULT_PERSON_DEPTH_LAN_PORT)
         except (TypeError, ValueError):
             value["person_depth_lan_port"] = DEFAULT_PERSON_DEPTH_LAN_PORT
-        value["person_depth_lan_source"] = str(value.get("person_depth_lan_source") or "").strip().rstrip("/")
+        value["person_depth_lan_source"] = _component_lan_source(data_root, value.get("person_depth_lan_source"))
         for key, default in (("canvas_arrange_spacing", 56), ("canvas_group_arrange_spacing", 28)):
             try:
                 value[key] = _normalize_canvas_arrange_spacing(value.get(key, default))
@@ -173,6 +193,11 @@ def update_app_settings(
     path = _config_path(data_root)
     with _CONFIG_LOCK:
         value = read_app_config(data_root)
+        stored_source = (
+            json.loads(path.read_text(encoding="utf-8")).get("person_depth_lan_source", DEFAULT_PERSON_DEPTH_LAN_SOURCE)
+            if path.exists() else DEFAULT_PERSON_DEPTH_LAN_SOURCE
+        )
+        value["person_depth_lan_source"] = stored_source
         if canvas_group_arrange_spacing is not None:
             value["canvas_group_arrange_spacing"] = _normalize_canvas_arrange_spacing(canvas_group_arrange_spacing)
         if canvas_arrange_spacing is not None:
@@ -231,7 +256,7 @@ def update_app_settings(
                 raise ValueError("局域网服务器端口必须为 1024～65535")
             value["person_depth_lan_port"] = port
         if person_depth_lan_source is not None:
-            source = str(person_depth_lan_source or "").strip().rstrip("/")
+            source = str(person_depth_lan_source).strip().rstrip("/")
             if source and not source.startswith("http://"):
                 raise ValueError("局域网下载地址必须使用 http://")
             value["person_depth_lan_source"] = source
@@ -239,7 +264,7 @@ def update_app_settings(
         temporary = path.with_name(f".{path.name}.tmp")
         temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, path)
-        return value
+        return read_app_config(data_root)
 
 
 def update_close_behavior(data_root: str | Path, close_behavior: str) -> dict[str, Any]:

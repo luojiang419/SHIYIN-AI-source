@@ -623,7 +623,7 @@
         state = state || {};
         if(personDepthLanStatus) personDepthLanStatus.textContent = state.connected ? '已连接分发中心' : '客户端模式';
         if(personDepthLanHint) personDepthLanHint.textContent = state.connected
-            ? `${state.url} · 应用热更新与模型从独立分发中心下载`
+            ? `${state.url} · 应用热更新与模型优先从独立分发中心下载`
             : (state.error || '已内置管理员电脑下载地址，正在等待分发中心连接。');
     }
 

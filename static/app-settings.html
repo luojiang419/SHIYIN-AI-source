@@ -210,7 +210,7 @@
                 <input id="personDepthLanSource" type="url" value="http://192.168.0.24:3011" spellcheck="false">
             </label>
             <button id="savePersonDepthLan" type="button">保存下载地址</button>
-            <p id="personDepthLanHint" class="app-settings-note">客户端优先使用此地址，连接失败时自动回退到原有公网下载源。</p>
+            <p id="personDepthLanHint" class="app-settings-note">组件先使用此地址；局域网下载失败后可切换公网下载源。</p>
         </section>
 
         <section class="app-settings-card app-settings-shortcuts-card" aria-labelledby="shortcutSettingsTitle">
@@ -334,7 +334,7 @@
                 </label>
                 <button id="checkDesktopUpdate" type="button">检查更新</button>
             </div>
-            <p class="app-settings-note">启用后先从局域网下载安装包；连接失败、没有可用版本或校验失败时自动回退 GitHub Release。</p>
+            <p class="app-settings-note">软件热更新从局域网分发中心获取；关闭局域网更新后使用 GitHub Release。组件下载失败时会尝试公网源。</p>
         </section>
     </main>
     <script src="/static/js/shortcut-actions.js?v=2026.08.23.shortcuts-runtime.2"></script>

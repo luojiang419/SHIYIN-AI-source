@@ -9,9 +9,9 @@
   *{box-sizing:border-box}body{margin:0;min-height:100vh}main{max-width:780px;margin:auto;padding:34px 18px 54px}
   h1{margin:0 0 8px;font-size:23px}header p{margin:0 0 24px;color:#a9b8bb;font-size:13px;line-height:1.6}
   .surface{border:1px solid #3a474b;border-radius:7px;background:#1b2428;box-shadow:0 18px 44px #0005;padding:12px 18px}
-  .menu-caption{font-size:12px;color:#a0b3b3;padding:5px 4px 12px}.workflow{display:flex;align-items:center;gap:10px;min-height:38px;padding:0 12px;color:#97e3bf;font-size:13px;font-weight:700;border-radius:5px}.workflow:hover,.action:hover{background:#30413f}.workflow span{color:#79cfa8}
+  .menu-caption{font-size:12px;color:#a0b3b3;padding:5px 4px 12px}.workflow,.action{display:flex;align-items:center;gap:9px;min-width:0;min-height:38px;padding:7px 10px;border:1px solid #3b474b;border-radius:8px;background:#222b2f;color:#e9eeee;font-family:inherit;font-size:12px;font-weight:700;line-height:1.3;text-align:left;cursor:default}.workflow{width:100%;margin-bottom:9px;color:#97e3bf}.workflow:hover,.action:hover{background:#30413f;border-color:#78c8a6}.workflow svg,.action svg{width:16px;height:16px;flex-shrink:0}
   .phase{display:grid;grid-template-columns:122px minmax(0,1fr);gap:16px;padding:17px 4px;border-top:1px solid #3c494c}.phase h2{margin:2px 0 0;font-size:13px;line-height:1.5;color:#86d9ae}.phase p{margin:0 0 10px;color:#b7c5c4;font-size:12px;line-height:1.5}
-  .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 8px}.action{display:flex;align-items:center;min-width:0;min-height:34px;padding:5px 7px;border-radius:5px;font-size:12px;line-height:1.3}.action b{flex:0 0 25px;color:#77c99f;font:600 11px Consolas,monospace}.action span{overflow-wrap:anywhere}
+  .actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.action span{overflow-wrap:anywhere}
   .note{margin-top:16px;padding:11px 13px;border-left:3px solid #d2ab77;background:#292c28;color:#d2d8d3;font-size:12px;line-height:1.6}
   @media(max-width:560px){main{padding:22px 12px 36px}.surface{padding:8px 12px}.phase{grid-template-columns:1fr;gap:5px;padding:14px 3px}.actions{grid-template-columns:1fr}}
 </style>
@@ -21,25 +21,27 @@
   <header><h1>影视制作二级菜单</h1><p>按制作阶段组织节点。下面模拟“创建节点 → 影视制作”展开后的正式布局。</p></header>
   <div class="surface" role="group" aria-label="影视制作二级菜单">
     <div class="menu-caption">影视制作</div>
-    <div class="workflow"><span>00</span>创建影视工作流</div>
+    <button class="workflow" type="button"><i data-lucide="workflow"></i><span>创建影视工作流</span></button>
     <section class="phase"><h2>01 前期准备</h2><div><p>确定可复用资产、取景和表演参考，再锁定镜头。</p><div class="actions">
-      <div class="action"><b>01</b><span>准备资产</span></div><div class="action"><b>02</b><span>720°取景器</span></div>
-      <div class="action"><b>03</b><span>3D导演台</span></div><div class="action"><b>04</b><span>外部导演台</span></div>
-      <div class="action"><b>05</b><span>创建三视图</span></div><div class="action"><b>06</b><span>动作提取</span></div>
-      <div class="action"><b>07</b><span>深度图</span></div><div class="action"><b>08</b><span>一键复刻</span></div>
-      <div class="action"><b>09</b><span>确认镜头</span></div>
+      <button class="action" type="button"><i data-lucide="boxes"></i><span>准备资产</span></button><button class="action" type="button"><i data-lucide="scan-line"></i><span>720°取景器</span></button>
+      <button class="action" type="button"><i data-lucide="clapperboard"></i><span>3D导演台</span></button><button class="action" type="button"><i data-lucide="box"></i><span>外部导演台</span></button>
+      <button class="action" type="button"><i data-lucide="panels-top-left"></i><span>创建三视图</span></button><button class="action" type="button"><i data-lucide="person-standing"></i><span>动作提取</span></button>
+      <button class="action" type="button"><i data-lucide="scan"></i><span>深度图</span></button><button class="action" type="button"><i data-lucide="refresh-cw"></i><span>一键复刻</span></button>
+      <button class="action" type="button"><i data-lucide="list-checks"></i><span>确认镜头</span></button>
     </div></div></section>
     <section class="phase"><h2>02 分镜预演</h2><div><p>用线稿明确构图，再合成正式分镜图。</p><div class="actions">
-      <div class="action"><b>10</b><span>生成线稿分镜</span></div><div class="action"><b>11</b><span>分镜合成</span></div>
+      <button class="action" type="button"><i data-lucide="pencil-ruler"></i><span>生成线稿分镜</span></button><button class="action" type="button"><i data-lucide="panels-top-left"></i><span>分镜合成</span></button>
     </div></div></section>
     <section class="phase"><h2>03 镜头生成</h2><div><p>根据分镜生成镜头，选择合适的视频生成路径。</p><div class="actions">
-      <div class="action"><b>12</b><span>生成视频</span></div><div class="action"><b>13</b><span>LinkFox视频生成</span></div>
+      <button class="action" type="button"><i data-lucide="clapperboard"></i><span>生成视频</span></button><button class="action" type="button"><i data-lucide="sparkles"></i><span>LinkFox视频生成</span></button>
     </div></div></section>
     <section class="phase"><h2>04 后期处理</h2><div><p>处理视频深度效果与清晰度。</p><div class="actions">
-      <div class="action"><b>14</b><span>深度视频</span></div><div class="action"><b>15</b><span>Topaz 高清放大</span></div>
+      <button class="action" type="button"><i data-lucide="video"></i><span>深度视频</span></button><button class="action" type="button"><i data-lucide="scan-line"></i><span>Topaz 高清放大</span></button>
     </div></div></section>
   </div>
   <div class="note">从图片输出端口打开时，同样按阶段布局，只显示可直接连接的节点。</div>
 </main>
+<script src="../vendor/js/lucide.js"></script>
+<script>lucide.createIcons();</script>
 </body>
 </html>

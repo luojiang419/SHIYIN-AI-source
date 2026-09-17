@@ -20,13 +20,14 @@
     <section class="stage-panel">
       <div class="stage-toolbar">
         <div class="segmented" role="tablist">
-          <button class="view-tab active" data-view="overlay">叠加</button>
-          <button class="view-tab" data-view="cutout">透明结果</button>
+          <button class="view-tab" data-view="overlay">叠加</button>
+          <button class="view-tab active" data-view="cutout">透明结果</button>
           <button class="view-tab" data-view="original">原图</button>
         </div>
         <div class="stage-actions">
           <button id="undoButton" class="icon-button" title="撤销最后一个点" disabled>↶</button>
           <button id="clearButton" class="icon-button" title="清空选择" disabled>⌫</button>
+          <span id="liveStatus" class="live-status"><i></i>实时预览</span>
           <span id="imageMeta">尚未导入图片</span>
         </div>
       </div>

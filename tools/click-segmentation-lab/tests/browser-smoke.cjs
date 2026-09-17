@@ -33,8 +33,11 @@ const path = require('path');
       points: document.querySelectorAll('#maskCanvas').length,
       exportEnabled: !document.querySelector('#cutoutExportButton').disabled,
       outputSize: document.querySelector('#outputSize').textContent,
+      activeView: document.querySelector('.view-tab.active')?.dataset.view,
+      maskHasPixels: [...document.querySelector('#maskCanvas').getContext('2d').getImageData(0, 0, document.querySelector('#maskCanvas').width, document.querySelector('#maskCanvas').height).data].some((value, index) => index % 4 === 3 && value > 0),
     }));
     if (!selected.exportEnabled) throw new Error(`分割后导出未启用: ${JSON.stringify(selected)}`);
+    if (selected.activeView !== 'cutout' || !selected.maskHasPixels) throw new Error(`透明结果未实时显示: ${JSON.stringify(selected)}`);
     console.log(JSON.stringify(selected));
   }
   console.log(JSON.stringify(metrics));

@@ -102,6 +102,7 @@ class SegmentationSession:
     image: Image.Image
     embedding: object | None = None
     last_mask: np.ndarray | None = None
+    last_points: tuple[tuple[int, int, int], ...] | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -140,6 +141,12 @@ class SamSegmenter:
         if not points:
             raise ValueError("至少需要一个提示点")
         with session.lock:
+            point_key = tuple(
+                (round(float(item["x"])), round(float(item["y"])), int(item["label"]))
+                for item in points
+            )
+            if session.last_mask is not None and session.last_points == point_key:
+                return session.last_mask
             self.prepare(session)
             import torch
 
@@ -166,4 +173,5 @@ class SamSegmenter:
             candidates = masks[0].float().cpu().numpy()
             best = choose_mask(candidates, scores, points)
             session.last_mask = candidates[best]
+            session.last_points = point_key
             return session.last_mask

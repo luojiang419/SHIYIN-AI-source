@@ -10,18 +10,21 @@
     const url=node.outputUrl||input?.url||node.cutoutSourceUrl;
     const image=root.querySelector('[data-cutout-preview]');
     if(url){image.src=options.resolveUrl?.(url)||url;image.style.display='block';root.querySelector('[data-cutout-empty]').hidden=true;}
-    async function open(fullscreen){
+    async function open(){
       if(active)return;
       const source=options.getInputImage()?.url||node.cutoutSourceUrl;
       if(!source){options.toast('请先连接一张图片');return;}
       const initial=node.cutoutSourceUrl===source?node.cutoutSettings:null;
-      const overlay=document.createElement('div');
+      // 挂到同源应用顶层，覆盖侧栏；不依赖浏览器全屏权限或 Esc 的浏览器行为。
+      let host=window;
+      try{if(window.top.document)host=window.top;}catch(_error){}
+      const overlay=host.document.createElement('div');
       overlay.style.cssText='position:fixed;inset:0;z-index:100000;background:#000b;display:flex;align-items:center;justify-content:center';
       const panel=document.createElement('div');
-      panel.style.cssText='width:94vw;height:92vh;background:var(--panel);display:flex;flex-direction:column;border:1px solid var(--line-2)';
-      const close=document.createElement('button');close.textContent='关闭编辑（未保存修改将丢弃）';close.style.cssText='height:32px;flex-shrink:0;background:var(--soft);color:var(--text);border:0;cursor:pointer';
+      panel.style.cssText='width:100%;height:100%;background:var(--panel);display:flex;flex-direction:column';
       const frame=document.createElement('iframe');frame.src='/static/cutout-editor/index.html';frame.style.cssText='flex:1 1 0%;height:0;width:100%;border:0;min-height:0';frame.allow='fullscreen';
-      panel.append(close,frame);overlay.append(panel);document.body.append(overlay);active=overlay;
+      frame.cutoutOwnerWindow=window;
+      panel.append(frame);overlay.append(panel);host.document.body.append(overlay);active=overlay;
       function syncTheme(){
         const style=getComputedStyle(document.body);
         const colors={};
@@ -34,24 +37,22 @@
       observer.observe(document.body,{attributes:true,attributeFilter:['class','style']});
       const cleanup=()=>{
         observer.disconnect();
-        frame.contentWindow?.postMessage({type:'cutout:close'},location.origin);
-        window.removeEventListener('message',receive);
-        if(document.fullscreenElement===overlay)document.exitFullscreen().catch(()=>{});
+        host.removeEventListener('message',receive);
+        host.removeEventListener('keydown',escapeEditor,true);
+        window.removeEventListener('pagehide',cleanup);
         overlay.remove();active=null;
       };
-      close.onclick=cleanup;
+      function escapeEditor(event){if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();cleanup();}}
       async function receive(event){
         if(event.origin!==location.origin||event.source!==frame.contentWindow)return;
         if(event.data?.type==='cutout:ready'){
           syncTheme();
           frame.contentWindow.postMessage({type:'cutout:load',sourceUrl:source,settings:initial},location.origin);
-        }else if(event.data?.type==='cutout:fullscreen'){
-          panel.style.width='100%';panel.style.height='100%';
-          if(!document.fullscreenElement)overlay.requestFullscreen?.().catch(()=>{});
+        }else if(event.data?.type==='cutout:cancel'){
+          cleanup();
         }else if(event.data?.type==='cutout:saved'){
           if(event.data.sourceUrl!==source||!event.data.file?.url)return;
           if(options.getInputImage()?.url && options.getInputImage().url!==source){options.toast('上游图片已改变，请关闭后重新编辑');return;}
-          if(event.data.settings?.session_id)fetch('/api/cutout/api/images/'+encodeURIComponent(event.data.settings.session_id),{method:'DELETE'});
           node.cutoutSourceUrl=source;
           const {session_id,...settings}=event.data.settings||{};
           node.cutoutSettings=settings;
@@ -60,13 +61,15 @@
           options.onSaved();cleanup();options.toast('抠像已保存，下游图片引用已同步');
         }
       }
-      window.addEventListener('message',receive);
-      if(fullscreen){panel.style.width='100%';panel.style.height='100%';overlay.requestFullscreen?.().catch(()=>{});}
+      host.addEventListener('message',receive);
+      host.addEventListener('keydown',escapeEditor,true);
+      window.addEventListener('pagehide',cleanup);
+      frame.focus();
     }
     for(const button of root.querySelectorAll('[data-cutout-open],[data-cutout-fullscreen]')){
       button.addEventListener('pointerdown',e=>e.stopPropagation());
       button.addEventListener('mousedown',e=>e.stopPropagation());
-      button.onclick=e=>{e.stopPropagation();open(button.hasAttribute('data-cutout-fullscreen'));};
+      button.onclick=e=>{e.stopPropagation();open();};
     }
   }
   window.CanvasCutoutNode={bodyHtml,bind};

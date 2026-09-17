@@ -1,0 +1,67 @@
+// 依赖隔离测试服务（默认 8792）；请求故障注入，不修改用户画布。
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+(async()=>{
+  const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
+  try{
+    const page=await browser.newPage({viewport:{width:1440,height:900}});
+    const base=process.env.CUTOUT_TEST_URL||'http://127.0.0.1:8792';
+    await page.request.post(base+'/api/account/login',{data:{account:'jiang',password:'jiang'}});
+    const pixels=fs.readFileSync('generated-images/20260830-open-mannequin-refs/ref-01.png');
+    const preview='data:image/png;base64,'+pixels.toString('base64');
+    let failSegment=true,failExport=true,closed=0;
+    await page.route('**/__cutout_host',route=>route.fulfill({contentType:'text/html',body:'<body style="margin:0"><aside>应用侧栏</aside><iframe src="/__cutout_canvas" style="width:900px;height:600px"></iframe></body>'}));
+    await page.route('**/__cutout_canvas',route=>route.fulfill({contentType:'text/html',body:`<div id="node"></div><script src="/static/js/canvas-cutout-node.js"></script><script>
+      const node={};const root=document.querySelector('#node');root.innerHTML=CanvasCutoutNode.bodyHtml(node);
+      CanvasCutoutNode.bind(root,node,{getInputImage:()=>({url:'/__cutout_source'}),onSaved:()=>window.saved=node,toast:()=>{}});
+    </script>`}));
+    await page.route('**/__cutout_source',route=>route.fulfill({contentType:'image/png',body:pixels}));
+    await page.route('**/api/cutout/api/images',route=>route.fulfill({json:{session_id:'test-session',width:1112,height:869,preview}}));
+    await page.route('**/api/cutout/api/images/test-session',route=>{closed++;return route.fulfill({json:{ok:true}})});
+    await page.route('**/api/cutout/api/segment',route=>route.fulfill(failSegment?{status:500,json:{detail:'抠像推理组件缺失'}}:{json:{mask:preview}}));
+    await page.route('**/api/cutout/api/export/cutout',route=>route.fulfill(failExport?{status:404,json:{detail:'图片会话不存在，请重新导入'}}:{contentType:'image/png',body:pixels}));
+    await page.route('**/api/ai/upload',route=>route.fulfill({json:{files:[{url:'/saved.png',width:1112,height:869}]}}));
+    await page.goto(base+'/__cutout_host');
+    const canvas=page.frameLocator('iframe[src="/__cutout_canvas"]');
+    const frameSelector='iframe[src="/static/cutout-editor/index.html"]';
+    const editor=page.frameLocator(frameSelector);
+    async function open(){
+      await canvas.locator('[data-cutout-open]').click();
+      await editor.locator('#maskCanvas').waitFor({state:'visible'});
+      await editor.locator('#busy').waitFor({state:'hidden'});
+      const box=await page.locator(frameSelector).boundingBox();
+      assert.deepEqual(box,{x:0,y:0,width:1440,height:900});
+      assert.equal(await editor.locator('#saveNode').innerText(),'保存并返回');
+      assert(await editor.locator('#returnNode').isVisible());
+    }
+    await open();
+    await editor.locator('#maskCanvas').click();
+    await editor.locator('#busy').waitFor({state:'hidden'});
+    assert(await editor.locator('#saveNode').isDisabled());
+    assert.match(await editor.locator('#toast').innerText(),/推理组件缺失/);
+    assert.equal(await editor.locator('#modelStatus').innerText(),'处理失败');
+    await editor.locator('#returnNode').click();
+    await page.locator(frameSelector).waitFor({state:'detached'});
+    await open();
+    await editor.locator('#returnNode').press('Escape');
+    await page.locator(frameSelector).waitFor({state:'detached'});
+    await open();failSegment=false;
+    await editor.locator('#maskCanvas').click();
+    await editor.locator('#saveNode').waitFor({state:'visible'});
+    await editor.locator('#busy').waitFor({state:'hidden'});
+    assert(await editor.locator('#saveNode').isEnabled());
+    await editor.locator('#saveNode').click();
+    await editor.locator('#busy').waitFor({state:'hidden'});
+    assert.match(await editor.locator('#toast').innerText(),/图片会话不存在/);
+    assert(await page.locator(frameSelector).isVisible());
+    failExport=false;
+    await page.screenshot({path:'.codex-tmp/cutout-fullscreen-flow.png'});
+    await editor.locator('#saveNode').click();
+    await page.locator(frameSelector).waitFor({state:'detached'});
+    assert.equal(await canvas.locator('body').evaluate(()=>saved.outputUrl),'/saved.png');
+    await page.waitForTimeout(200);
+    assert.equal(closed,3);
+    console.log('PASS: nested fullscreen, return button, Escape, segmentation failure, export error, save-and-return, session cleanup');
+  }finally{await browser.close()}
+})().catch(error=>{console.error(error);process.exitCode=1});

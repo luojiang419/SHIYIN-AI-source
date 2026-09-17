@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
+import sys
 import threading
+from pathlib import Path
 from dataclasses import dataclass, field
 
 import cv2
@@ -12,6 +15,16 @@ from PIL import Image, ImageOps
 
 MAX_IMAGE_PIXELS = 60_000_000
 DEFAULT_MODEL = "facebook/sam-vit-base"
+
+
+def default_model_path() -> str:
+    """安装版使用随包 SAM 权重，避免依赖开发机缓存或首次联网下载。"""
+    bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "models" / "sam-vit-base"
+    if bundled.is_dir():
+        return str(bundled)
+    if getattr(sys, "frozen", False):
+        raise RuntimeError("抠像模型缺失，请更新完整热更新包后重试")
+    return DEFAULT_MODEL
 
 
 def decode_image(payload: bytes) -> Image.Image:
@@ -113,7 +126,7 @@ class SegmentationSession:
 
 class SamSegmenter:
     def __init__(self, model_id: str | None = None) -> None:
-        self.model_id = model_id or os.getenv("SHIYIN_SEGMENT_MODEL", DEFAULT_MODEL)
+        self.model_id = model_id or os.getenv("SHIYIN_SEGMENT_MODEL") or DEFAULT_MODEL
         self._model = None
         self._processor = None
         self._device = None
@@ -123,13 +136,19 @@ class SamSegmenter:
         with self._load_lock:
             if self._model is not None:
                 return
-            import torch
-            from transformers import SamModel, SamProcessor
+            try:
+                import torch
+                from transformers.models.sam.modeling_sam import SamModel
+                from transformers.models.sam.processing_sam import SamProcessor
+            except ImportError as exc:
+                logging.getLogger(__name__).exception("SAM 推理组件加载失败")
+                raise RuntimeError("抠像推理组件缺失，请安装包含抠像组件的完整热更新包") from exc
 
+            model_path = default_model_path() if self.model_id == DEFAULT_MODEL else self.model_id
             self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             dtype = torch.float16 if self._device.type == "cuda" else torch.float32
-            self._processor = SamProcessor.from_pretrained(self.model_id)
-            self._model = SamModel.from_pretrained(self.model_id, dtype=dtype).to(self._device).eval()
+            self._processor = SamProcessor.from_pretrained(model_path)
+            self._model = SamModel.from_pretrained(model_path, dtype=dtype).to(self._device).eval()
 
     def prepare(self, session: SegmentationSession) -> None:
         self._load()

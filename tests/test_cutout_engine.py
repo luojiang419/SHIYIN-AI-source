@@ -13,6 +13,18 @@ sys.path.insert(0, str(ROOT))
 from canvas_core.cutout_engine import choose_mask, decode_image, mask_png, refine_alpha, rgba_png
 
 
+def test_packaged_model_does_not_fall_back_to_developer_cache(monkeypatch, tmp_path):
+    import pytest
+    from canvas_core.cutout_engine import default_model_path
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    with pytest.raises(RuntimeError, match="抠像模型缺失"):
+        default_model_path()
+    bundled = tmp_path / "models" / "sam-vit-base"
+    bundled.mkdir(parents=True)
+    assert default_model_path() == str(bundled)
+
+
 def test_decode_and_export_keep_original_resolution() -> None:
     source = Image.new("RGB", (37, 23), (80, 120, 160))
     encoded = io.BytesIO()

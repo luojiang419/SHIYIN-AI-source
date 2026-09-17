@@ -5550,6 +5550,20 @@ function imageLinkAdvertisingGroups(state){
 function linkCreateButtonHtml(option){
     return `<button type="button" class="menu-btn" data-link-create="${escapeAttr(option.type)}" data-link-input-role="${escapeAttr(option.inputRole || '')}"><i data-lucide="${escapeAttr(option.icon)}" class="w-4 h-4"></i><span>${escapeHtml(option.label)}</span></button>`;
 }
+function linkFilmStageMenuHtml(items){
+    const phases = [
+        {title:'01 前期准备', description:'确定取景、形体和动作参考。', types:['panorama','multiView','dwpose','depthMap','poseReplicate']},
+        {title:'02 分镜预演', description:'明确构图并整理分镜画面。', types:['film-line-art','film-storyboard','storyboardMerge']},
+        {title:'03 镜头生成', description:'根据分镜选择视频生成路径。', types:['film-video','linkfox-video']},
+        {title:'04 后期处理', description:'处理已生成镜头的画面。', types:['depthVideo','topazVideo']}
+    ];
+    const workflow = items.find(item => item.type === 'film-workflow');
+    return (workflow ? linkCreateButtonHtml(workflow) : '') + phases.map(phase => {
+        const actions = items.filter(item => phase.types.includes(item.type));
+        if(!actions.length) return '';
+        return `<section class="film-menu-phase"><h3>${phase.title}</h3><div><p>${phase.description}</p><div class="film-menu-actions">${actions.map(linkCreateButtonHtml).join('')}</div></div></section>`;
+    }).join('');
+}
 function bindLinkAdvertisingSubmenus(){
     const hosts = [...linkCreateMenu.querySelectorAll('[data-link-ad-group]')];
     hosts.forEach(host => {
@@ -5594,7 +5608,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY, inputRole=''
     linkCreateMenu.innerHTML = options.map(linkCreateButtonHtml).join('') + imageLinkAdvertisingGroups(state).map(group => `
         <div class="menu-submenu-host" data-link-ad-group>
             <button type="button" class="menu-btn menu-submenu-trigger" aria-haspopup="menu" aria-expanded="false"><i data-lucide="${escapeAttr(group.icon)}" class="w-4 h-4"></i><span>${escapeHtml(group.label)}</span><i data-lucide="chevron-right" class="menu-submenu-chevron"></i></button>
-            <div class="create-submenu" role="menu" aria-label="${escapeAttr(group.label)}节点" style="display:none">${group.items.map(linkCreateButtonHtml).join('')}</div>
+            <div class="create-submenu film-stage-menu" role="menu" aria-label="${escapeAttr(group.label)}节点" style="display:none">${linkFilmStageMenuHtml(group.items)}</div>
         </div>`).join('');
     linkCreateMenu.style.left = `${clientX}px`;
     linkCreateMenu.style.top = `${clientY}px`;

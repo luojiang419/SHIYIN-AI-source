@@ -530,7 +530,7 @@
         dialog.innerHTML = `<div class="depth-video-compare-dialog" role="dialog" aria-modal="true" aria-label="源视频与深度视频对比播放">
             <div class="depth-video-compare-head"><div><strong>对比播放</strong><span>拖动分割线检查源视频与深度结果</span></div><button type="button" data-depth-video-compare-close title="关闭"><i data-lucide="x"></i></button></div>
             <div class="depth-video-compare-stage">
-                <video src="${esc(output.url)}" preload="auto" playsinline data-depth-compare-video="depth" style="filter:${depthVideoCssFilter(node.depthVideoControls)}"></video>
+                <div class="depth-video-compare-depth" style="filter:${depthVideoCssFilter(node.depthVideoControls)}"><video src="${esc(output.url)}" preload="auto" playsinline data-depth-compare-video="depth"></video></div>
                 <div class="depth-video-compare-source" data-depth-compare-source><video src="${esc(inputUrl)}" preload="auto" playsinline data-depth-compare-video="source"></video></div>
                 <span class="depth-video-compare-label is-source">源视频</span><span class="depth-video-compare-label is-depth">深度视频</span>
                 <div class="depth-video-compare-divider" data-depth-compare-divider><i data-lucide="chevrons-left-right"></i></div>

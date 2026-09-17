@@ -5449,7 +5449,7 @@ function linkCreateOptions(state){
     const node = nodes.find(n => n.id === state?.originId);
     if(!node) return [];
     if(state.originKind === 'out'){
-        if(node.type === 'video') return [
+        if(node.type === 'video' || (node.type === 'image' && node.url && mediaKindForNode(node) === 'video')) return [
             {type:'video-clip', label:'视频截取', icon:'scissors'},
             {type:'video-frames', label:'视频抽帧', icon:'images'},
             {type:'depthVideo', label:'深度视频', icon:'scan'},

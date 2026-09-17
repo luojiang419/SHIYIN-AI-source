@@ -10,8 +10,12 @@ const assert = require('node:assert/strict');
         page.on('pageerror', error => errors.push(error.message));
         await page.goto(`${process.argv[2] || 'http://127.0.0.1:3018'}/static/canvas.html?id=output-port-menu-check`);
         await page.waitForSelector('.node[data-id="generator"]');
+        await page.evaluate(() => {
+            nodes.push({id:'video-media',type:'image',mediaKind:'video',url:'/fixture-video.mp4',name:'a.mp4',x:1700,y:1200});
+            render();
+        });
 
-        for(const id of ['generator','video']){
+        for(const id of ['generator','video','video-media']){
             const port = await page.locator(`.node[data-id="${id}"] .port.out`).boundingBox();
             assert.ok(port,`${id}: output port`);
             await page.mouse.move(port.x + port.width / 2,port.y + port.height / 2);
@@ -27,6 +31,7 @@ const assert = require('node:assert/strict');
         const videoTypes = ['video-clip','video-frames','depthVideo','video-screenshot','topazVideo'];
         assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'generator',originKind:'out'}).map(item => item.type)), imageTypes);
         assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'video',originKind:'out'}).map(item => item.type)), videoTypes);
+        assert.deepEqual(await page.evaluate(() => linkCreateOptions({originId:'video-media',originKind:'out'}).map(item => item.type)), videoTypes);
 
         for(const type of imageTypes){
             const before = await page.evaluate(() => ({ids:nodes.map(node => node.id), edges:connections.length}));
@@ -50,11 +55,13 @@ const assert = require('node:assert/strict');
         await film.locator('[data-link-create="film-storyboard"]').click();
         assert.equal(await page.evaluate(() => connections.some(edge => edge.from === 'generator' && nodes.find(node => node.id === edge.to)?.type === 'film-storyboard' && canConnect(edge.from,edge.to,edge.inputRole || ''))),true);
 
-        for(const type of ['depthVideo','topazVideo']){
-            await page.evaluate(() => openLinkCreateMenu('video','out',600,120));
-            await page.locator(`#linkCreateMenu > [data-link-create="${type}"]`).click();
-            assert.equal(await page.evaluate(type => connections.some(edge => edge.from === 'video' && nodes.find(node => node.id === edge.to)?.type === type && canConnect(edge.from,edge.to,edge.inputRole || '')),type),true,type);
-            await page.evaluate(() => performUndo());
+        for(const source of ['video','video-media']){
+            for(const type of ['depthVideo','topazVideo']){
+                await page.evaluate(sourceId => openLinkCreateMenu(sourceId,'out',600,120),source);
+                await page.locator(`#linkCreateMenu > [data-link-create="${type}"]`).click();
+                assert.equal(await page.evaluate(({source,type}) => connections.some(edge => edge.from === source && nodes.find(node => node.id === edge.to)?.type === type && canConnect(edge.from,edge.to,edge.inputRole || '')),{source,type}),true,`${source} -> ${type}`);
+                await page.evaluate(() => performUndo());
+            }
         }
 
         const media = await page.evaluate(() => {
@@ -70,11 +77,13 @@ const assert = require('node:assert/strict');
             return {mergeUrl:entries[0]?.ref?.url, videoUrl:source?.url};
         });
         assert.deepEqual(media,{mergeUrl:'/fixture.png',videoUrl:'/fixture-video.mp4'});
-        for(const [type,modal] of [['video-clip','videoClipModal'],['video-screenshot','videoClipModal'],['video-frames','videoFrameModal']]){
-            await page.evaluate(() => openLinkCreateMenu('video','out',600,120));
-            await page.locator(`#linkCreateMenu > [data-link-create="${type}"]`).click();
-            assert.equal(await page.locator(`#${modal}`).evaluate(el => el.classList.contains('open')),true,type);
-            await page.evaluate(() => { closeVideoClipEditor(); closeVideoFrameExtractor(); });
+        for(const source of ['video','video-media']){
+            for(const [type,modal] of [['video-clip','videoClipModal'],['video-screenshot','videoClipModal'],['video-frames','videoFrameModal']]){
+                await page.evaluate(sourceId => openLinkCreateMenu(sourceId,'out',600,120),source);
+                await page.locator(`#linkCreateMenu > [data-link-create="${type}"]`).click();
+                assert.equal(await page.locator(`#${modal}`).evaluate(el => el.classList.contains('open')),true,`${source} -> ${type}`);
+                await page.evaluate(() => { closeVideoClipEditor(); closeVideoFrameExtractor(); });
+            }
         }
         const derived = await page.evaluate(() => {
             const source = videoToolSource(nodes.find(node => node.id === 'video'));

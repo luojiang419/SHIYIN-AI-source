@@ -53,6 +53,7 @@
     const personDepthBindings = new Map();
     let activeDepthMapDialog = null;
     let activeDepthVideoDialog = null;
+    let activeDepthVideoCompare = null;
     let depthMapSettings = {mode:'person', controls:{...DEFAULT_DEPTH_MAP_CONTROLS}};
     let depthMapSettingsPromise = null;
     let depthMapSettingsLoaded = false;
@@ -505,7 +506,67 @@
 
     function depthVideoPlayer(url, label, slot){
         if(!url) return `<div class="special-empty"><i data-lucide="${slot === 'input' ? 'video' : 'scan-line'}"></i><strong>${slot === 'input' ? '点击上传输入视频' : '等待生成'}</strong><span>${slot === 'input' ? '也支持从左侧端口连接视频' : '输出完整时长的相对深度视频'}</span></div>`;
-        return `<video src="${esc(url)}" preload="metadata" playsinline data-depth-video-media="${slot}"></video><button type="button" class="depth-video-play" data-depth-video-play="${slot}" title="播放${esc(label)}" aria-label="播放${esc(label)}"><i data-lucide="play"></i></button>`;
+        return `<video src="${esc(url)}" preload="metadata" playsinline data-depth-video-media="${slot}"></video><button type="button" class="depth-video-play" data-depth-video-play="${slot}" title="播放${esc(label)}" aria-label="播放${esc(label)}"><i data-lucide="play"></i></button><div class="depth-video-seek"><input type="range" min="0" max="1000" value="0" step="1" data-depth-video-seek="${slot}" aria-label="${esc(label)}播放进度"><span data-depth-video-time="${slot}">0:00 / 0:00</span></div>`;
+    }
+
+    function depthVideoTime(seconds){
+        const value = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+        return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
+    }
+
+    function closeDepthVideoCompare(){
+        activeDepthVideoCompare?.querySelectorAll('video').forEach(video => video.pause());
+        activeDepthVideoCompare?.remove();
+        activeDepthVideoCompare = null;
+    }
+
+    function openDepthVideoCompare(node){
+        closeDepthVideoCompare();
+        const output = outputItem(node);
+        const inputUrl = node.depthVideoManualInput?.url || node.depthVideoInputUrl || '';
+        if(!inputUrl || !output?.url) return;
+        const dialog = document.createElement('div');
+        dialog.className = 'depth-video-compare-modal';
+        dialog.innerHTML = `<div class="depth-video-compare-dialog" role="dialog" aria-modal="true" aria-label="源视频与深度视频对比播放">
+            <div class="depth-video-compare-head"><div><strong>对比播放</strong><span>拖动分割线检查源视频与深度结果</span></div><button type="button" data-depth-video-compare-close title="关闭"><i data-lucide="x"></i></button></div>
+            <div class="depth-video-compare-stage">
+                <video src="${esc(output.url)}" preload="auto" playsinline data-depth-compare-video="depth" style="filter:${depthVideoCssFilter(node.depthVideoControls)}"></video>
+                <div class="depth-video-compare-source" data-depth-compare-source><video src="${esc(inputUrl)}" preload="auto" playsinline data-depth-compare-video="source"></video></div>
+                <span class="depth-video-compare-label is-source">源视频</span><span class="depth-video-compare-label is-depth">深度视频</span>
+                <div class="depth-video-compare-divider" data-depth-compare-divider><i data-lucide="chevrons-left-right"></i></div>
+                <input class="depth-video-compare-wipe" type="range" min="0" max="100" value="50" aria-label="划像分割位置" data-depth-compare-wipe>
+            </div>
+            <div class="depth-video-compare-controls"><button type="button" data-depth-compare-play title="播放"><i data-lucide="play"></i></button><input type="range" min="0" max="1000" value="0" step="1" data-depth-compare-seek aria-label="播放进度"><span data-depth-compare-time>0:00 / 0:00</span></div>
+        </div>`;
+        document.body.appendChild(dialog); activeDepthVideoCompare = dialog;
+        const depth = dialog.querySelector('[data-depth-compare-video="depth"]');
+        const source = dialog.querySelector('[data-depth-compare-video="source"]');
+        const play = dialog.querySelector('[data-depth-compare-play]');
+        const seek = dialog.querySelector('[data-depth-compare-seek]');
+        const time = dialog.querySelector('[data-depth-compare-time]');
+        const wipe = dialog.querySelector('[data-depth-compare-wipe]');
+        const sourceLayer = dialog.querySelector('[data-depth-compare-source]');
+        const divider = dialog.querySelector('[data-depth-compare-divider]');
+        let seeking = false;
+        const setPlaying = playing => { play.innerHTML = `<i data-lucide="${playing ? 'pause' : 'play'}"></i>`; play.title = playing ? '暂停' : '播放'; window.lucide?.createIcons?.({nodes:[play]}); };
+        const syncFrame = () => {
+            const duration = Number.isFinite(depth.duration) ? depth.duration : 0;
+            if(!seeking) seek.value = duration ? Math.round(depth.currentTime / duration * 1000) : 0;
+            time.textContent = `${depthVideoTime(depth.currentTime)} / ${depthVideoTime(duration)}`;
+            if(Math.abs(source.currentTime - depth.currentTime) > 0.08) source.currentTime = Math.min(depth.currentTime, source.duration || depth.currentTime);
+        };
+        const applyWipe = () => { const value=Number(wipe.value); sourceLayer.style.clipPath=`inset(0 ${100-value}% 0 0)`; divider.style.left=`${value}%`; };
+        wipe.addEventListener('input', applyWipe); applyWipe();
+        play.addEventListener('click', () => { if(depth.paused){ source.currentTime=depth.currentTime; Promise.allSettled([depth.play(),source.play()]); } else { depth.pause(); source.pause(); } });
+        seek.addEventListener('pointerdown', () => { seeking=true; });
+        seek.addEventListener('input', () => { const duration=depth.duration || source.duration || 0; const target=duration * Number(seek.value) / 1000; depth.currentTime=target; source.currentTime=Math.min(target,source.duration || target); syncFrame(); });
+        seek.addEventListener('change', () => { seeking=false; syncFrame(); });
+        depth.addEventListener('timeupdate', syncFrame); depth.addEventListener('durationchange', syncFrame);
+        depth.addEventListener('play', () => setPlaying(true)); depth.addEventListener('pause', () => { source.pause(); setPlaying(false); });
+        depth.addEventListener('ended', () => { source.pause(); setPlaying(false); });
+        dialog.querySelector('[data-depth-video-compare-close]').onclick=closeDepthVideoCompare;
+        dialog.addEventListener('mousedown', event => { if(event.target === dialog) closeDepthVideoCompare(); });
+        window.lucide?.createIcons?.({nodes:[dialog]});
     }
 
     function depthVideoBodyHtml(node){
@@ -534,7 +595,7 @@
             </div>
             <div class="special-toolbar depth-map-toolbar">
                 <button type="button" data-special-action="upload-depth-video"><i data-lucide="upload"></i><span>导入视频</span></button>
-                <button type="button" data-special-action="import-depth-video-runtime" title="公网下载不可用时，从本机文件夹安装深度视频运行时"><i data-lucide="folder-input"></i><span>离线导入</span></button>
+                <button type="button" data-special-action="compare-depth-video" ${!inputUrl || !output?.url || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="columns-2"></i><span>对比播放</span></button>
                 <button type="button" data-special-action="retry-depth-video" ${!inputUrl || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="refresh-cw"></i><span>重新生成</span></button>
                 <button type="button" data-special-action="open-depth-video-controls" ${!output?.url || status === 'running' || status === 'queued' ? 'disabled' : ''}><i data-lucide="sliders-horizontal"></i><span>进阶控制</span></button>
                 <button type="button" data-special-action="export-depth-video" ${!output?.url || status === 'running' || status === 'queued' || node.depthVideoExporting ? 'disabled' : ''}><i data-lucide="${node.depthVideoExporting ? 'loader-2' : 'external-link'}"></i><span>${node.depthVideoExporting ? '导出中' : '导出深度视频'}</span></button>
@@ -673,18 +734,7 @@
         card?.addEventListener('click', choose);
         card?.addEventListener('keydown', event => { if(event.key === 'Enter' || event.key === ' ') choose(event); });
         root.querySelector('[data-special-action="upload-depth-video"]')?.addEventListener('click', choose);
-        root.querySelector('[data-special-action="import-depth-video-runtime"]')?.addEventListener('click', async event => {
-            event.preventDefault(); event.stopPropagation();
-            const directory = window.prompt('输入包含深度视频运行时 ZIP 的本机文件夹路径');
-            if(!directory?.trim()) return;
-            try {
-                options.toast?.('正在校验并安装运行时，请稍候');
-                const response = await fetch('/api/video-depth/runtime/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({directory:directory.trim()})});
-                if(!response.ok) throw new Error(await responseError(response, '运行时导入失败'));
-                options.toast?.('深度视频运行时已就绪');
-                if(source?.url) runDepthVideo(node, options, true).catch(error => options.toast?.(error.message));
-            } catch(error) { options.toast?.(error.message || '运行时导入失败'); }
-        });
+        root.querySelector('[data-special-action="compare-depth-video"]')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); openDepthVideoCompare(node); });
         if(input) input.onchange = async () => {
             try { node.depthVideoManualInput = await uploadDepthVideo(input.files?.[0]); source = depthVideoInput(node, options); syncDepthVideoInput(node, source); clearDepthVideoResult(node, options); notify(options, node, true); runDepthVideo(node, options, true).catch(error => options.toast?.(error.message)); }
             catch(error){ options.toast?.(error.message || '视频导入失败'); } finally { input.value = ''; }
@@ -705,6 +755,15 @@
             video.addEventListener('play', () => { button?.classList.add('is-playing'); if(button) button.innerHTML = '<i data-lucide="pause"></i>'; window.lucide?.createIcons?.({nodes:[button]}); });
             video.addEventListener('pause', () => { button?.classList.remove('is-playing'); if(button) button.innerHTML = '<i data-lucide="play"></i>'; window.lucide?.createIcons?.({nodes:[button]}); });
             video.addEventListener('ended', () => video.pause());
+            const seek = root.querySelector(`[data-depth-video-seek="${video.dataset.depthVideoMedia}"]`);
+            const time = root.querySelector(`[data-depth-video-time="${video.dataset.depthVideoMedia}"]`);
+            let dragging = false;
+            const update = () => { const duration=Number.isFinite(video.duration) ? video.duration : 0; if(seek && !dragging) seek.value=duration ? Math.round(video.currentTime/duration*1000) : 0; if(time) time.textContent=`${depthVideoTime(video.currentTime)} / ${depthVideoTime(duration)}`; };
+            seek?.addEventListener('pointerdown', event => { dragging=true; event.stopPropagation(); });
+            seek?.addEventListener('click', event => event.stopPropagation());
+            seek?.addEventListener('input', event => { event.stopPropagation(); if(video.duration) video.currentTime=video.duration*Number(seek.value)/1000; update(); });
+            seek?.addEventListener('change', event => { dragging=false; event.stopPropagation(); update(); });
+            video.addEventListener('loadedmetadata', update); video.addEventListener('durationchange', update); video.addEventListener('timeupdate', update);
         });
         if(node.depthVideoTaskId && (['queued','running'].includes(node.depthVideoStatus) || (!outputItem(node)?.url && depthVideoRecoveryAttempts.get(node) !== node.depthVideoTaskId))){
             depthVideoRecoveryAttempts.set(node, node.depthVideoTaskId);

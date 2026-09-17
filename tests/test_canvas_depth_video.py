@@ -25,6 +25,11 @@ def test_depth_video_frontend_contract():
     assert "object-fit:contain" in styles
     assert "aspect-ratio:16/9" in styles
     assert "depth-video-preview-grid" in styles
+    assert 'data-special-action="compare-depth-video"' in shared
+    assert 'data-special-action="import-depth-video-runtime"' not in shared
+    assert 'data-depth-video-seek="${slot}"' in shared
+    assert "function openDepthVideoCompare(node)" in shared
+    assert "depth-video-compare-wipe" in styles
     assert "type:'depthVideo'" in classic
     assert "specialType:'depth-video'" in smart
     assert "getInputVideo:classicSpecialInputVideo" in classic

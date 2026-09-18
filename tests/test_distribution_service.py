@@ -21,15 +21,19 @@ def snapshot(root, content=b'new', version='20260914180000'):
     return root
 
 
-def package_snapshot(root, content=b'packaged-update', version='20260915130001'):
+def package_snapshot(root, content=b'packaged-update', version='20260915130001', full=False):
     root.mkdir(parents=True)
     name=f'SHIYIN-Hot-Update-{version}.shiyin-update'
     package=root/name
-    path='app/web/index.html'
+    contents={'app/web/index.html':content}
+    if full:
+        contents.update({'SHIYIN AI.exe':b'desktop-'+content,
+                         'app/backend/canvas-backend/canvas-backend.exe':b'backend-'+content})
     with zipfile.ZipFile(package,'w',compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(path,content)
+        for path, value in contents.items(): archive.writestr(path,value)
     atomic_json(root/'manifest.json', {'protocol_version':3,'version':version,'min_desktop_version':'2.0.0',
-        'prune_roots':['app/web'],'files':[{'path':path,'size':len(content),'sha256':hashlib.sha256(content).hexdigest()}],
+        'prune_roots':['app/web'] + (['app/backend/canvas-backend'] if full else []),
+        'files':[{'path':path,'size':len(value),'sha256':hashlib.sha256(value).hexdigest()} for path,value in contents.items()],
         'package':{'name':name,'size':package.stat().st_size,'sha256':hashlib.sha256(package.read_bytes()).hexdigest()}})
     return root
 
@@ -124,6 +128,23 @@ def test_v2_baseline_replaces_legacy_upgrade_chain(server,tmp_path):
         assert r.status==206 and len(r.read())==manifest['package']['size']-1
     for kind in ('hot-bootstrap','hot-updater'):
         with pytest.raises(ValueError,match='旧更新器发布路线已停用'):c.import_release(tmp_path/'package',kind)
+
+
+def test_catalog_uses_latest_full_checkpoint_before_current_web_release(server,tmp_path):
+    center,url=server
+    checkpoint='20260915130001';target='20260915140000'
+    center.import_release(package_snapshot(tmp_path/'checkpoint',b'checkpoint',checkpoint,full=True),'hot')
+    center.import_release(package_snapshot(tmp_path/'target',b'latest-web',target),'hot')
+    headers={'X-Shiyin-Version':'2.0.1 / 20260915120000','X-Shiyin-Capabilities':'package-v3,fast-extract-v1'}
+    with get(url+'/v1/catalog',headers) as response: first=json.load(response)
+    assert json.loads(first['payload'])['version']==checkpoint
+    assert json.loads(first['plan_payload'])['target_version']==target
+    headers['X-Shiyin-Version']='2.0.1 / '+checkpoint
+    with get(url+'/v1/catalog',headers) as response: second=json.load(response)
+    assert json.loads(second['payload'])['version']==target
+    assert json.loads(second['plan_payload'])['target_version']==target
+    headers['X-Shiyin-Version']='2.0.1 / '+target
+    with get(url+'/v1/catalog',headers) as response: assert json.load(response)=={'release':None}
 
 
 def test_package_import_rejects_corruption(server,tmp_path):

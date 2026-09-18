@@ -503,6 +503,24 @@ class Center:
             row = db.execute("SELECT * FROM releases WHERE kind=? AND state='published' ORDER BY created DESC LIMIT 1", (kind,)).fetchone()
         return dict(row) if row else None
 
+    def hot_release_for(self, installed_version=''):
+        target = self.active('hot')
+        if not target or (installed_version and target['version'] <= installed_version):
+            return None
+        with self.db() as db:
+            rows = db.execute(
+                "SELECT * FROM releases WHERE kind='hot' AND state IN ('published','archived') "
+                "AND version>? AND version<=? ORDER BY version DESC",
+                (installed_version, target['version']),
+            ).fetchall()
+        for row in rows:
+            release = dict(row)
+            manifest = json.loads(json.loads(release['manifest'])['payload'])
+            paths = {str(item.get('path') or '') for item in manifest.get('files', [])}
+            if 'SHIYIN AI.exe' in paths and any(path.startswith('app/backend/canvas-backend/') for path in paths):
+                return release
+        return target
+
     def handler(self, admin):
         owner = self
         class Handler(BaseHTTPRequestHandler):
@@ -640,9 +658,12 @@ class Center:
                         owner.touch_client(self.client_address[0], self.headers.get('X-Shiyin-Version', ''))
                         capabilities = {value.strip() for value in self.headers.get('X-Shiyin-Capabilities', '').split(',')}
                         release = None
-                        desktop = self.headers.get('X-Shiyin-Version', '').split('/')[0].strip()
+                        reported = self.headers.get('X-Shiyin-Version', '')
+                        parts = reported.split('/', 1)
+                        desktop = parts[0].strip()
+                        installed = parts[1].strip() if len(parts) > 1 and re.fullmatch(r'\d{14}', parts[1].strip()) else ''
                         if re.fullmatch(r'\d+\.\d+\.\d+', desktop) and {'package-v3', 'fast-extract-v1'} <= capabilities:
-                            candidate = owner.active('hot')
+                            candidate = owner.hot_release_for(installed)
                             if candidate:
                                 manifest = json.loads(json.loads(candidate['manifest'])['payload'])
                                 minimum = max((2, 0, 0), tuple(map(int, manifest['min_desktop_version'].split('.'))))

@@ -12,14 +12,22 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const submittedPayloads = [];
         let uploadIndex = 0;
         let depthRequests = 0;
+        let professionalDepthRequests = 0;
+        let depthMode = 'person';
         let taskIndex = 0;
         const taskPollCounts = new Map();
         page.on('pageerror', error => errors.push(error.message));
         await page.route('**/fixture.png*', route => route.fulfill({status:200,contentType:'image/png',body:png}));
+        await page.route('**/api/app-settings', route => route.fulfill({json:{depth_map_mode:depthMode,depth_model_preference:'auto',depth_map_controls:{farPoint:0,nearPoint:100,midtone:0,contrast:100,brightness:0,smooth:0,invert:false}}}));
         await page.route('**/api/person-depth/component/status', route => route.fulfill({json:{state:'ready',ready:true,install_available:true,progress:1}}));
+        await page.route('**/api/depth/status', route => route.fulfill({json:{state:'ready',ready:true}}));
         await page.route('**/api/person-depth/estimate', route => {
             depthRequests += 1;
             return route.fulfill({status:200,contentType:'image/png',body:png,headers:{'X-Person-Depth-Width':'1','X-Person-Depth-Height':'1'}});
+        });
+        await page.route('**/api/depth/estimate', route => {
+            professionalDepthRequests += 1;
+            return route.fulfill({status:200,contentType:'image/png',body:png,headers:{'X-Depth-Width':'1','X-Depth-Height':'1'}});
         });
         await page.route('**/api/ai/upload', route => {
             uploadIndex += 1;
@@ -63,7 +71,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         await page.locator('#batchOutfitStyleName').fill('SS26-001');
         await page.locator('#confirmBatchOutfit').click();
         assert.equal(await page.locator('.ec-batch-group').count(), 1);
-        assert.equal(await page.locator('.ec-batch-group-slots > button').count(), 5);
+        assert.equal(await page.locator('.ec-batch-group-slots > button').count(), 6);
         assert.equal(await page.locator('.ec-batch-outfit-groups.is-single').count(), 1);
 
         await page.locator('[data-batch-group]').first().locator('[data-batch-upload="pose_reference"]').click();
@@ -119,6 +127,26 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.ok(submittedPayloads.every(payload => payload.mode === 'depth'));
         assert.equal(new Set(submittedPayloads.map(payload => payload.inputs.target_image.url)).size, 2);
         assert.equal(new Set(submittedPayloads.map(payload => payload.inputs.control_map.url)).size, 1);
+
+        depthMode = 'professional';
+        await page.locator('[data-batch-group]').first().locator('[data-batch-run]').click();
+        await page.waitForFunction(() => EcommerceBatchOutfit.snapshot().groups[0].works.length === 4);
+        assert.equal(professionalDepthRequests, 1);
+        assert.equal(depthRequests, 1);
+        assert.match((await page.evaluate(() => EcommerceBatchOutfit.snapshot().groups[0].control_settings_signature)), /^professional\|/);
+        assert.ok(submittedPayloads.slice(2).every(payload => payload.control_signature.includes('professional|')));
+
+        await page.evaluate(() => {
+            const saved = EcommerceBatchOutfit.snapshot();
+            const garment = saved.groups[0].inputs.target_image[0];
+            saved.groups[0].fabric_details = {[garment.url]:{url:'/fixture.png?fabric=1',name:'fabric.png'}};
+            EcommerceBatchOutfit.hydrate(saved);
+            EcommerceStudio.state.capabilities.models = [{provider_id:'fixture',model:'fixture-image',max_reference_images:3}];
+        });
+        await page.locator('[data-batch-group]').first().locator('[data-batch-run]').click();
+        await page.waitForFunction(() => EcommerceBatchOutfit.snapshot().groups[0].status === 'failed');
+        assert.match(await page.locator('.ec-batch-group-error').first().textContent(), /4 张参考图/);
+        assert.equal(submittedPayloads.length, 4);
 
         await page.locator('#addBatchOutfit').click();
         await page.locator('#batchOutfitStyleName').fill('SS26-002');

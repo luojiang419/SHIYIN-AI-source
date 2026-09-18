@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -199,6 +200,35 @@ def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_p
         "服装参考",
     ]
     assert response["pose_replicate"]["assistant_calls"] == 0
+
+
+@pytest.mark.parametrize(
+    ("depth_mode", "quality", "person_ready", "lite_ready", "allowed"),
+    [
+        ("person", True, True, False, True),
+        ("person", True, False, True, False),
+        ("person", False, False, True, True),
+        ("professional", True, False, True, True),
+        ("professional", False, True, False, False),
+    ],
+)
+def test_depth_replicate_checks_the_selected_depth_model(depth_mode, quality, person_ready, lite_ready, allowed):
+    submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
+    with patch.object(main, "read_app_config", return_value={"depth_map_mode": depth_mode}), patch.object(
+        main, "sync_depth_model_preference", return_value=SimpleNamespace(quality=quality)
+    ), patch.object(main.PERSON_DEPTH_COMPONENT_MANAGER, "public_status", return_value={"ready": person_ready}), patch.object(
+        main.DEPTH_MODEL_MANAGER, "public_status", return_value={"ready": lite_ready}
+    ), patch.object(main, "resolve_image_generation_selection", return_value={"provider_id": "shiying", "model": "gemini-3-pro-image-preview"}), patch.object(
+        main, "create_canvas_image_task", submit
+    ):
+        if allowed:
+            asyncio.run(main.create_pose_replicate_task(task_request(mode="depth")))
+            submit.assert_awaited_once()
+        else:
+            with pytest.raises(main.HTTPException) as error:
+                asyncio.run(main.create_pose_replicate_task(task_request(mode="depth")))
+            assert error.value.status_code == 503
+            submit.assert_not_awaited()
 
 
 def test_user_instruction_endpoint_calls_assistant_once_and_preserves_hard_template():

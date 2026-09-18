@@ -95,6 +95,8 @@ async def generate(app, report):
         generation=app.PoseReplicateGeneration(provider_id='shiying', model='gemini-3-pro-image-preview',
                                               resolution=os.environ.get('POSE_FABRIC_RESOLUTION', '2k'), aspect_ratio='3:4', count=1),
         control_signature='fresh-depth-sha256:' + hashlib.sha256((OUT / 'depth.png').read_bytes()).hexdigest(),
+        batch_outfit=(app.BatchOutfitContext(group_id='batch_smoke_1', style_name=os.environ['POSE_FABRIC_BATCH_STYLE'])
+                      if os.environ.get('POSE_FABRIC_BATCH_STYLE') else None),
     )
     save('request-audit.json', payload.model_dump())
     submission = await app.create_pose_replicate_task(payload)
@@ -114,6 +116,11 @@ async def generate(app, report):
     if task['status'] != 'succeeded':
         raise RuntimeError('generation_failed:' + str(task.get('status_code')))
     result = task['result']
+    if payload.batch_outfit:
+        archive = result.get('batch_outfit_archive') or []
+        if len(archive) != 1 or not Path(archive[0]['path']).is_file():
+            raise RuntimeError('batch_outfit_archive_missing')
+        report['batch_outfit_archive'] = archive[0]['path']
     images = result.get('images') or []
     if len(images) != 1:
         raise RuntimeError('expected_one_result')

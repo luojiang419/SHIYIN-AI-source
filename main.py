@@ -21254,8 +21254,15 @@ async def create_pose_replicate_task(payload: PoseReplicateTaskRequest):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,96}", group_id):
             raise HTTPException(status_code=400, detail="批量换款任务组标识不合法")
         batch_outfit_context = {"group_id": group_id, "style_name": style_name}
-    if mode == "depth" and not PERSON_DEPTH_COMPONENT_MANAGER.public_status().get("ready"):
-        raise HTTPException(status_code=503, detail="高精度人物深度组件尚未就绪，不能提交深度复刻任务")
+    if mode == "depth":
+        depth_config = read_app_config(APP_PATHS.data_root)
+        if depth_config.get("depth_map_mode") == "professional":
+            depth_manager = DEPTH_MODEL_MANAGER
+        else:
+            selection = sync_depth_model_preference(depth_config)
+            depth_manager = PERSON_DEPTH_COMPONENT_MANAGER if selection.quality else DEPTH_MODEL_MANAGER
+        if not depth_manager.public_status().get("ready"):
+            raise HTTPException(status_code=503, detail="当前深度模型尚未就绪，不能提交深度复刻任务")
     normalized_result: Dict[str, Any] = {}
     original_instruction = str(payload.user_instruction or "").strip()
     try:

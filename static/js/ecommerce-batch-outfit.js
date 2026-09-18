@@ -127,6 +127,7 @@
             baseControlMap,
             depthControls:normalizeDepthControls(value.depthControls || value.depth_controls),
             controlSourceUrl:String(value.controlSourceUrl || value.control_source_url || ''),
+            controlSettingsSignature:String(value.controlSettingsSignature || value.control_settings_signature || ''),
             taskIds,
             currentTaskId:String(value.currentTaskId || value.current_task_id || taskIds[taskIds.length - 1] || ''),
             runTaskIds,
@@ -144,7 +145,7 @@
 
     function snapshot(){
         return {
-            schema_version:3,
+            schema_version:4,
             grid_ratio:state.gridRatio,
             groups:state.groups.map(group => ({
                 id:group.id,
@@ -155,6 +156,7 @@
                 base_control_map:group.baseControlMap,
                 depth_controls:group.depthControls,
                 control_source_url:group.controlSourceUrl,
+                control_settings_signature:group.controlSettingsSignature,
                 task_ids:group.taskIds,
                 current_task_id:group.currentTaskId,
                 run_task_ids:group.runTaskIds,
@@ -181,6 +183,8 @@
             invert:Boolean(source.invert),
         };
         if(controls.nearPoint <= controls.farPoint) controls.nearPoint = Math.min(100,controls.farPoint + 1);
+        if(controls.nearPoint <= controls.farPoint) controls.farPoint = Math.max(0,controls.nearPoint - 1);
+        for(const key of Object.keys(controls)) if(key !== 'invert') controls[key] = Math.round(controls[key]);
         return controls;
     }
 
@@ -652,6 +656,7 @@
                 group.baseControlMap = null;
                 group.depthControls = normalizeDepthControls(null);
                 group.controlSourceUrl = '';
+                group.controlSettingsSignature = '';
             }
             group.status = 'draft';
             group.updatedAt = Date.now();
@@ -689,6 +694,7 @@
             group.baseControlMap = null;
             group.depthControls = normalizeDepthControls(null);
             group.controlSourceUrl = '';
+            group.controlSettingsSignature = '';
         }
         group.status = 'draft';
         group.error = '';
@@ -706,7 +712,7 @@
     }
 
     async function waitForPersonDepth(){
-        const deadline = Date.now() + 15 * 60 * 1000;
+        const deadline = Date.now() + 60 * 60 * 1000;
         while(Date.now() < deadline) {
             const status = await fetchJson('/api/person-depth/component/status', {cache:'no-store'});
             if(status.ready) return;
@@ -727,6 +733,27 @@
         await waitForPersonDepth();
     }
 
+    async function currentDepthSettings(){
+        const settings = await fetchJson('/api/app-settings', {cache:'no-store'});
+        const mode = settings.depth_map_mode === 'professional' ? 'professional' : 'person';
+        const controls = normalizeDepthControls(settings.depth_map_controls || DEFAULT_DEPTH_CONTROLS);
+        const preference = ['quality','lite'].includes(settings.depth_model_preference) ? settings.depth_model_preference : 'auto';
+        return {mode, controls, signature:`${mode}|${preference}|${Object.values(controls).join('|')}`};
+    }
+
+    async function ensureProfessionalDepthReady(){
+        const deadline = Date.now() + 60 * 60 * 1000;
+        while(Date.now() < deadline) {
+            const status = await fetchJson('/api/depth/status', {cache:'no-store'});
+            if(status.ready) return;
+            if(!['checking','downloading','installing'].includes(String(status.state || ''))) {
+                throw new Error(status.message || '专业深度模型尚未就绪');
+            }
+            await sleep(1500);
+        }
+        throw new Error('专业深度模型准备超时');
+    }
+
     async function uploadBlob(blob, name){
         const file = new File([blob], name, {type:blob.type || 'image/png'});
         return uploadFile(file);
@@ -735,31 +762,41 @@
     async function ensureControlMap(group){
         const source = group.inputs.pose_reference;
         if(!source?.url) throw new Error('请先添加目标图');
-        if(group.controlMap?.url && group.controlSourceUrl === source.url) return group.controlMap;
+        const settings = await currentDepthSettings();
+        if(group.controlMap?.url && group.controlSourceUrl === source.url && group.controlSettingsSignature === settings.signature) return group.controlMap;
         const existing = state.controlPromises.get(group.id);
-        if(existing?.sourceUrl === source.url) return existing.promise;
+        if(existing?.sourceUrl === source.url && existing.settingsSignature === settings.signature) return existing.promise;
         const promise = (async () => {
             group.status = 'preparing';
             group.error = '';
             persist();
             render();
-            await ensurePersonDepthReady();
+            if(settings.mode === 'professional') await ensureProfessionalDepthReady();
+            else await ensurePersonDepthReady();
             const sourceResponse = await fetch(source.url);
             if(!sourceResponse.ok) throw new Error('目标图读取失败');
             const form = new FormData();
             form.append('file', await sourceResponse.blob(), source.name || 'target.png');
-            form.append('bit_depth', '8');
-            const response = await fetch('/api/person-depth/estimate', {method:'POST', body:form});
+            if(settings.mode === 'person') form.append('bit_depth', '8');
+            const response = await fetch(settings.mode === 'professional' ? '/api/depth/estimate' : '/api/person-depth/estimate', {method:'POST', body:form});
             if(!response.ok) {
                 const data = await response.json().catch(() => ({}));
-                throw new Error(data.detail || '高精度人物深度图生成失败');
+                throw new Error(data.detail || '深度图生成失败');
             }
-            const controlMap = await uploadBlob(await response.blob(), `batch-outfit-depth-${Date.now()}.png`);
+            const baseControlMap = await uploadBlob(await response.blob(), `batch-outfit-${settings.mode}-depth-${Date.now()}.png`);
             if(group.inputs.pose_reference?.url !== source.url) return null;
+            let controlMap = baseControlMap;
+            if(!depthControlsAreDefault(settings.controls)) {
+                const image = await loadImage(baseControlMap.url);
+                const canvas = document.createElement('canvas');
+                renderAdjustedDepth(image, settings.controls, canvas, Number.POSITIVE_INFINITY);
+                controlMap = await uploadBlob(await canvasBlob(canvas), `batch-outfit-depth-adjusted-${Date.now()}.png`);
+            }
             group.controlMap = controlMap;
-            group.baseControlMap = controlMap;
-            group.depthControls = normalizeDepthControls(null);
+            group.baseControlMap = baseControlMap;
+            group.depthControls = settings.controls;
             group.controlSourceUrl = source.url;
+            group.controlSettingsSignature = settings.signature;
             group.status = 'draft';
             group.error = '';
             group.updatedAt = Date.now();
@@ -777,7 +814,7 @@
         }).finally(() => {
             if(state.controlPromises.get(group.id)?.promise === promise) state.controlPromises.delete(group.id);
         });
-        state.controlPromises.set(group.id, {sourceUrl:source.url, promise});
+        state.controlPromises.set(group.id, {sourceUrl:source.url, settingsSignature:settings.signature, promise});
         return promise;
     }
 
@@ -797,16 +834,22 @@
         const work = document.createElement('canvas'); work.width=width; work.height=height;
         const context=work.getContext('2d',{willReadFrequently:true}); context.drawImage(image,0,0,width,height);
         const pixels=context.getImageData(0,0,width,height); const data=pixels.data;
-        const far=controls.farPoint/100, near=controls.nearPoint/100, gamma=Math.pow(2,-controls.midtone/100);
-        for(let index=0;index<data.length;index+=4){
-            let value=(data[index]/255-far)/Math.max(.01,near-far);
+        const lut=new Uint8ClampedArray(256);
+        const far=controls.farPoint/100, near=controls.nearPoint/100, gamma=Math.pow(2,-controls.midtone/50);
+        for(let index=0;index<256;index++){
+            let value=(index/255-far)/Math.max(.05,near-far);
             value=Math.max(0,Math.min(1,value)); value=Math.pow(value,gamma);
             value=(value-.5)*(controls.contrast/100)+.5+controls.brightness/100;
             value=Math.max(0,Math.min(1,value)); if(controls.invert) value=1-value;
-            data[index]=data[index+1]=data[index+2]=Math.round(value*255);
+            lut[index]=Math.round(value*255);
+        }
+        for(let index=0;index<data.length;index+=4){
+            const gray=Math.round((data[index]+data[index+1]+data[index+2])/3);
+            data[index]=data[index+1]=data[index+2]=lut[gray];
         }
         context.putImageData(pixels,0,0); canvas.width=width; canvas.height=height;
         const output=canvas.getContext('2d'); output.save();
+        output.fillStyle=controls.invert?'#fff':'#000'; output.fillRect(0,0,width,height);
         if(controls.smooth>0) output.filter=`blur(${Math.max(.2,controls.smooth*width/1000).toFixed(2)}px)`;
         output.drawImage(work,0,0); output.restore();
     }
@@ -839,7 +882,8 @@
     function resolveGenerationRoute(group){
         const studio = api();
         const models = studio?.state?.capabilities?.models || [];
-        const referenceCount = 3 + (group.inputs.model_subject?.url ? 1 : 0) + (group.inputs.scene?.url ? 1 : 0);
+        const referenceCount = 3 + (group.inputs.model_subject?.url ? 1 : 0) + (group.inputs.scene?.url ? 1 : 0)
+            + (inputImages(group, 'target_image').some(image => group.fabricDetails?.[image.url]?.url) ? 1 : 0);
         const supports = item => Number(item.max_reference_images || 0) >= referenceCount;
         let route = studio.state.model
             ? models.find(item => item.provider_id === studio.state.providerId && item.model === studio.state.model && supports(item))
@@ -985,7 +1029,7 @@
                     user_instruction:'',
                     generation:{provider_id:route.provider_id, model:route.model, resolution, aspect_ratio:ratio, quality, count:1},
                     prompt_policy:global.PoseReplicateSettings.sharedPromptPolicy(policyInputs),
-                    control_signature:`batch-outfit-depth|${group.inputs.pose_reference.url}`,
+                    control_signature:`batch-outfit-depth|${group.controlSettingsSignature}|${group.inputs.pose_reference.url}`,
                     batch_outfit:{group_id:group.id, style_name:group.styleName},
                 };
                 try {

@@ -121,6 +121,12 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         assert.equal((await page.evaluate(() => EcommerceBatchOutfit.snapshot().groups[0].pending_works.length)), 0);
         assert.equal(await page.locator('.ec-batch-work-thumb-pending').count(), 0);
         assert.equal(await page.locator('.ec-batch-work-preview img').count(), 1);
+        const mainPreview = await page.locator('.ec-batch-work-preview').evaluate(button => {
+            const image = button.querySelector('img');
+            return {buttonHeight:button.getBoundingClientRect().height,imageHeight:image.getBoundingClientRect().height,fit:getComputedStyle(image).objectFit};
+        });
+        assert.equal(mainPreview.imageHeight, mainPreview.buttonHeight);
+        assert.equal(mainPreview.fit, 'contain');
         assert.deepEqual(await page.locator('.ec-batch-work-thumbs button:not(.ec-batch-work-thumb-pending)').evaluateAll(items => items.map(item => item.dataset.batchWorkIndex)), ['1','0']);
         assert.match(await page.locator('.ec-batch-work-thumbs button').first().locator('img').getAttribute('src'), /result=2/);
         assert.equal(submittedPayloads.length, 2);

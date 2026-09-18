@@ -6,6 +6,12 @@ use std::net::UdpSocket;
 const PUBLIC_KEY: &str = include_str!("../distribution-public-key.hex");
 const BASELINE_RELEASE: &str = include_str!("../distribution-baseline.txt");
 const DOWNLOAD_ATTEMPTS: usize = 6;
+const MODELSCOPE_REPOSITORY: &str = "jiangjiang419/shiyingai-updates";
+const MODELSCOPE_SOURCE: &str = "modelscope";
+
+fn modelscope_file(path: &str) -> String {
+    format!("https://modelscope.cn/api/v1/models/{MODELSCOPE_REPOSITORY}/repo?Revision=master&FilePath={path}")
+}
 
 fn effective_release(applied: &str, baseline: &str) -> String {
     [applied.trim(), baseline.trim()].into_iter()
@@ -148,36 +154,48 @@ fn discovered() -> Option<String> {
 }
 
 pub(super) fn check(data: &Path, settings: &UpdateSettings) -> Result<Option<(Manifest, String, String)>, String> {
-    if !settings.lan_update_enabled { return Ok(None); }
-    let small_agent = build_lan_update_agent();
     let applied = installed_release(data);
     let current=format!("{} / {}",env!("CARGO_PKG_VERSION"),applied);
-    let mut base = settings.lan_update_url.clone();
-    let raw = match read_small(&small_agent, &format!("{base}/v1/catalog"), &current) {
-        Ok(result) => result,
-        Err(_) => {
-            let Some(found) = discovered() else { return Err("无法连接局域网分发中心，请确认管理员电脑已启动服务。".into()); };
+    if settings.lan_update_enabled {
+        let small_agent = build_lan_update_agent();
+        let mut base = settings.lan_update_url.clone();
+        let raw = read_small(&small_agent, &format!("{base}/v1/catalog"), &current).or_else(|_| {
+            let found = discovered().ok_or_else(|| "局域网分发中心不可用".to_string())?;
             base = found;
-            read_small(&small_agent, &format!("{base}/v1/catalog"), &current)?
+            read_small(&small_agent, &format!("{base}/v1/catalog"), &current)
+        });
+        if let Ok(raw) = raw {
+            if !serde_json::from_str::<serde_json::Value>(&raw).ok().is_some_and(|v| v.get("release").is_some_and(|r| r.is_null())) {
+                let m = verify(&raw)?;
+                if version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) {
+                    return Err(format!("热更新要求桌面基线 {}，请联系管理员迁移更新器。", m.min_desktop_version));
+                }
+                if m.version > applied {
+                    if base != settings.lan_update_url {
+                        let mut updated = settings.clone(); updated.lan_update_url = base.clone(); save_settings_file(data, &updated)?;
+                    }
+                    return Ok(Some((m, raw, base)));
+                }
+            }
         }
+    }
+    let raw = match read_small(&agent(), &modelscope_file("public/catalog.json"), &current) {
+        Ok(raw) => raw,
+        Err(_) => return Ok(None),
     };
-    if serde_json::from_str::<serde_json::Value>(&raw).ok().is_some_and(|v| v.get("release").is_some_and(|r| r.is_null())) { return Ok(None); }
     let m = verify(&raw)?;
     if version_is_newer(&m.min_desktop_version, env!("CARGO_PKG_VERSION")) {
-        return Err(format!("热更新要求桌面基线 {}，请联系管理员迁移更新器。", m.min_desktop_version));
+        return Err(format!("热更新要求桌面基线 {}，请安装新的基准版本。", m.min_desktop_version));
     }
     if m.version <= applied { return Ok(None); }
-    if base != settings.lan_update_url {
-        let mut updated = settings.clone(); updated.lan_update_url = base.clone(); save_settings_file(data, &updated)?;
-    }
-    Ok(Some((m, raw, base)))
+    Ok(Some((m, raw, MODELSCOPE_SOURCE.into())))
 }
 
 pub(super) fn information(m: &Manifest, downloaded: bool, continuation: bool) -> UpdateInfo {
     UpdateInfo { current_version: env!("CARGO_PKG_VERSION").into(), latest_version: m.version.clone(),
         available: true, downloaded, asset_name: format!("热更新 {}", m.version),
         asset_size: m.package.as_ref().map(|p| p.size).unwrap_or_else(|| m.files.iter().map(|f| f.size).sum()), release_notes: m.notes.clone(),
-        message: "局域网增量包，安装后自动重启".into(), kind: "hot".into(),
+        message: "已签名增量包，安装后自动重启".into(), kind: "hot".into(),
         continuation, plan_target: m.plan_target.clone() }
 }
 
@@ -260,7 +278,10 @@ pub(super) fn download(root: &Path, data: &Path, m: &Manifest, raw: &str, base: 
         let target = dir.join(&package.name);
         if !file_matches(&target, package.size, &package.sha256) {
             let part = target.with_extension("download-part");
-            download_blob(&agent, &format!("{base}/v1/blobs/{}", package.sha256), &part,
+            let url = if base == MODELSCOPE_SOURCE {
+                modelscope_file(&format!("releases/{}/{}", m.version, package.name))
+            } else { format!("{base}/v1/blobs/{}", package.sha256) };
+            download_blob(&agent, &url, &part,
                 package.size, &package.sha256, &package.name)?;
             if target.exists() { fs::remove_file(&target).map_err(|e| e.to_string())?; }
             fs::rename(&part, &target).map_err(|e| e.to_string())?;

@@ -18129,7 +18129,10 @@ async def analyze_ecommerce_universal_references(inputs: List[Dict[str, Any]]) -
     items = dict(analyzed)
     succeeded = sum(1 for analysis in items.values() if analysis.get("status") == "succeeded")
     return {
-        "status": "succeeded" if succeeded else "failed",
+        # 逐图视觉识别是增强信息。所有上游识别均不可用时，调用方继续依据已选
+        # 角色构造可生成的提示词，因此将其标识为跳过而不是任务失败。
+        "status": "succeeded" if succeeded else "skipped",
+        "reason": "视觉模型未返回可用证据，已按参考角色规则继续" if not succeeded else "",
         "provider_id": route["provider_id"],
         "provider_name": route["provider_name"],
         "model": route["model"],
@@ -18163,17 +18166,10 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
         return working, None
     if str(working["options"].get("prompt_policy") or "").strip().lower() in {"free", "lookbook"}:
         return working, None
-    supplied_items = working["options"].get("reference_analysis")
-    if isinstance(supplied_items, dict) and supplied_items:
-        analysis = {
-            "status": "succeeded",
-            "source": "preview",
-            "succeeded": sum(1 for value in supplied_items.values() if isinstance(value, dict) and value.get("status") == "succeeded"),
-            "total": len(supplied_items),
-            "items": supplied_items,
-        }
-    else:
-        analysis = await analyze_ecommerce_universal_references(working["inputs"])
+    # 分析是服务端从已上传素材得出的派生数据。预览和任务通过素材指纹缓存复用，
+    # 不接受浏览器回传的全文，避免请求大小随图片数量和模型描述线性增长。
+    working["options"].pop("reference_analysis", None)
+    analysis = await analyze_ecommerce_universal_references(working["inputs"])
     items = analysis.get("items") if isinstance(analysis, dict) else {}
     if isinstance(items, dict) and any((value or {}).get("status") == "succeeded" for value in items.values() if isinstance(value, dict)):
         working["options"]["reference_analysis"] = items
@@ -18271,18 +18267,12 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         operation = validate_ecommerce_operation(payload.operation)
         mode = validate_ecommerce_mode(payload.mode)
         options_json = json.dumps(payload.options or {}, ensure_ascii=False)
-        # 完整导演计划和全能模式的逐图分析都由前端预览生成后回传，不能被普通参数的 20 KiB 限制拒绝。
-        has_universal_reference_analysis = (
-            operation == "universal"
-            and isinstance((payload.options or {}).get("reference_analysis"), dict)
-        )
-        options_limit = 512 * 1024 if (
-            str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook"
-            or has_universal_reference_analysis
-        ) else 20 * 1024
+        options_limit = 512 * 1024 if str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook" else 20 * 1024
         if len(options_json.encode("utf-8")) > options_limit:
             raise ValueError("功能参数过大")
         options = json.loads(options_json)
+        if operation == "universal":
+            options.pop("reference_analysis", None)
         normalized = validate_ecommerce_input_roles(
             operation,
             [item.model_dump() for item in payload.inputs],
@@ -20688,19 +20678,12 @@ async def prepare_ecommerce_analysis(payload: EcommerceAnalyzeRequest) -> Dict[s
         operation = validate_ecommerce_operation(payload.operation)
         mode = validate_ecommerce_mode(payload.mode)
         options_json = json.dumps(payload.options or {}, ensure_ascii=False)
-        # 全能模式分析完成后会将逐图证据回传到生成请求；预览请求必须接受同一份
-        # 数据，避免任务接口可接收而分析接口先以普通参数上限拒绝。
-        has_universal_reference_analysis = (
-            operation == "universal"
-            and isinstance((payload.options or {}).get("reference_analysis"), dict)
-        )
-        options_limit = 512 * 1024 if (
-            str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook"
-            or has_universal_reference_analysis
-        ) else 20 * 1024
+        options_limit = 512 * 1024 if str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook" else 20 * 1024
         if len(options_json.encode("utf-8")) > options_limit:
             raise ValueError("功能参数过大")
         options = json.loads(options_json)
+        if operation == "universal":
+            options.pop("reference_analysis", None)
         normalized = validate_ecommerce_input_roles(
             operation,
             [item.model_dump() for item in payload.inputs],

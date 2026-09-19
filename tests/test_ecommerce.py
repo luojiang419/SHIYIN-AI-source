@@ -1333,8 +1333,7 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["count"], 3)
         self.assertEqual(snapshot["parameters"], {"aspect_ratio": "4:5", "resolution": "2k", "quality": "high", "count": 3})
 
-    def test_ecommerce_task_allows_large_universal_reference_analysis(self):
-        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+    def test_ecommerce_task_rejects_large_universal_reference_analysis_from_client(self):
         payload = self.main.EcommerceTaskRequest(
             operation="universal",
             mode="standard",
@@ -1347,14 +1346,10 @@ class EcommerceBackendTests(unittest.TestCase):
             provider_id="shiying",
             model="gemini-3-pro-image-preview",
         )
-        with (
-            patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
-            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([{"role": "subject", "url": "/assets/input/subject.png"}], (900, 1200))),
-        ):
-            snapshot = self.main.prepare_ecommerce_request(payload)
-        self.assertEqual(snapshot["options"]["reference_analysis"]["subject"]["visual_details"], "细节" * 8000)
+        with self.assertRaisesRegex(self.main.HTTPException, "功能参数过大"):
+            self.main.prepare_ecommerce_request(payload)
 
-    def test_ecommerce_analysis_allows_large_universal_reference_analysis(self):
+    def test_ecommerce_analysis_rejects_large_universal_reference_analysis_from_client(self):
         payload = self.main.EcommerceAnalyzeRequest(
             operation="universal",
             inputs=[self.main.AIReference(role="subject", url="/assets/input/subject.png")],
@@ -1364,12 +1359,30 @@ class EcommerceBackendTests(unittest.TestCase):
                 },
             },
         )
+        with self.assertRaisesRegex(self.main.HTTPException, "功能参数过大"):
+            asyncio.run(self.main.prepare_ecommerce_analysis(payload))
+
+    def test_universal_request_discards_client_supplied_analysis_and_uses_server_analysis(self):
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        payload = self.main.EcommerceTaskRequest(
+            operation="universal",
+            inputs=[self.main.AIReference(role="subject", url="/assets/input/subject.png")],
+            options={"reference_analysis": {"subject": {"item_name": "不应被客户端控制"}}},
+            provider_id="shiying",
+            model="gemini-3-pro-image-preview",
+        )
         with (
-            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([{"role": "subject", "url": "/assets/input/subject.png"}], (900, 1200))),
-            patch.object(self.main, "configured_ecommerce_vision_route", return_value=None),
+            patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([{"reference_id": "subject", "reference_type": "subject", "role": "subject", "url": "/assets/input/subject.png"}], (900, 1200))),
         ):
-            result = asyncio.run(self.main.prepare_ecommerce_analysis(payload))
-        self.assertEqual(result["status"], "succeeded")
+            snapshot = self.main.prepare_ecommerce_request(payload)
+        self.assertNotIn("reference_analysis", snapshot["options"])
+        server_analysis = {"status": "succeeded", "items": {"subject": {"status": "succeeded", "item_name": "服务端分析"}}}
+        with patch.object(self.main, "analyze_ecommerce_universal_references", new=AsyncMock(return_value=server_analysis)) as analyzer:
+            enriched, returned = asyncio.run(self.main.enrich_ecommerce_snapshot_with_universal_analysis(snapshot))
+        analyzer.assert_awaited_once_with(snapshot["inputs"])
+        self.assertEqual(returned, server_analysis)
+        self.assertEqual(enriched["options"]["reference_analysis"], server_analysis["items"])
 
     def test_lookbook_count_option_is_authoritative_for_generation_snapshot(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
@@ -2094,7 +2107,7 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn('id="frame-ecommerce" data-src="/static/ecommerce.html?v=2026.09.18.batch-pose-parity.1"', self.index_html)
         self.assertNotIn('id="frame-free-creation"', self.index_html)
         self.assertNotIn("switchUI(this, 'free-creation')", self.index_html)
-        self.assertIn('/static/js/ecommerce.js?v=2026.09.06.batch-outfit.4', self.html)
+        self.assertIn('/static/js/ecommerce.js?v=2026.09.20.universal-analysis-cache.1', self.html)
         self.assertIn('/static/css/ecommerce.css?v=2026.09.19.universal-action-layout.1', self.html)
 
     def test_generation_parameters_render_before_slow_server_bootstrap(self):
@@ -2123,7 +2136,8 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("async function analyzeBeforeGenerate(payload)", self.javascript)
         self.assertIn("fetchJson('/api/ecommerce/analyze'", self.javascript)
         self.assertIn("payload = await analyzeBeforeGenerate(payload)", self.javascript)
-        self.assertIn("reference_analysis:result.analysis.items", self.javascript)
+        self.assertNotIn("reference_analysis:result.analysis.items", self.javascript)
+        self.assertIn("服务端按素材指纹缓存", self.javascript)
 
     def test_api_settings_auto_save_without_confirmation_buttons(self):
         self.assertNotIn('api-page-save-btn', self.api_html)

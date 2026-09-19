@@ -3105,10 +3105,8 @@
             body:JSON.stringify(payload),
         });
         renderAnalysisPreview(result);
-        // 后端已按用户类型完成排序；将证据带入任务，避免任务执行时重复请求视觉模型。
-        if(payload.operation === 'universal' && result.analysis?.status === 'succeeded' && result.analysis.items && typeof result.analysis.items === 'object') {
-            payload.options = {...(payload.options || {}), reference_analysis:result.analysis.items};
-        }
+        // 全能模式逐图分析由服务端按素材指纹缓存并在任务中复用，不能回传冗长的
+        // 模型文本到生成请求，避免参考图越多请求参数越大。
         if(payload.operation === 'try_on' && result.analysis?.status === 'succeeded' && result.analysis.category && result.analysis.category !== 'auto') {
             payload.options = {...(payload.options || {}), garment_category:result.analysis.category, garment_type:result.analysis.garment_type || ''};
         }

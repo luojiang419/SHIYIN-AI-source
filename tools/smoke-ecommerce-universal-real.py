@@ -112,7 +112,7 @@ def load_keys_from_markdown(path: Path) -> dict[str, str]:
     current_url = ""
     keys: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        url_match = re.search(r"(?i)\burl\s*[:：=]\s*(\S+)", raw)
+        url_match = re.search(r"(?i)(?:\burl|请求地址)\s*[:：=]\s*(\S+)", raw)
         if url_match:
             current_url = url_match.group(1).strip().lower()
             continue
@@ -126,6 +126,8 @@ def load_keys_from_markdown(path: Path) -> dict[str, str]:
             keys["API_PROVIDER_SHIYING_KEY"] = value
         elif "grsai" in current_url and "GRSAI_API_KEY" not in keys:
             keys["GRSAI_API_KEY"] = value
+        elif "115.231.35.105" in current_url and "API_PROVIDER_LOCAL_VISION_KEY" not in keys:
+            keys["API_PROVIDER_LOCAL_VISION_KEY"] = value
     return keys
 
 
@@ -194,6 +196,8 @@ def main() -> int:
     keys = load_keys_from_markdown(Path(args.api_key_file))
     for name, value in keys.items():
         os.environ.setdefault(name, value)
+    if keys.get("API_PROVIDER_LOCAL_VISION_KEY"):
+        os.environ.setdefault("API_PROVIDER_ECOMMERCE_VISION_KEY", keys["API_PROVIDER_LOCAL_VISION_KEY"])
     os.environ.setdefault("CANVAS_DESKTOP_TOKEN", "ecommerce-universal-real")
     os.environ.setdefault("CANVAS_RUNTIME_MODE", "desktop")
 
@@ -221,7 +225,11 @@ def main() -> int:
                 "local_file": str(local_path),
             })
 
-        with tempfile.TemporaryDirectory(prefix="canvas-universal-real-data-") as data_dir:
+        temp_root = PROJECT_ROOT / ".codex-tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        # 测试隔离数据目录必须与项目输出目录位于同一磁盘，Windows 的素材归档会
+        # 使用原子移动，跨盘目录会在提交任务前触发 WinError 17。
+        with tempfile.TemporaryDirectory(prefix="canvas-universal-real-data-", dir=temp_root) as data_dir:
             os.environ["CANVAS_DATA_DIR"] = data_dir
             os.environ.setdefault("CANVAS_DWPOSE_AUTO_DOWNLOAD", "0")
             from fastapi.testclient import TestClient
@@ -261,7 +269,7 @@ def main() -> int:
                         "instruction": item["instruction"],
                     })
 
-                response = client.post("/api/ecommerce/tasks", json={
+                request_payload = {
                     "operation": "universal",
                     "mode": "standard",
                     "provider_id": args.provider,
@@ -272,7 +280,15 @@ def main() -> int:
                     "count": 1,
                     "inputs": inputs,
                     "options": {},
-                })
+                }
+                preview_response = client.post("/api/ecommerce/analyze", json=request_payload)
+                preview_response.raise_for_status()
+                preview = preview_response.json()
+                report["analysis_preview"] = preview.get("analysis") or {}
+                preview_succeeded = preview.get("status") == "succeeded"
+                report["analysis_preview_status"] = preview.get("status")
+
+                response = client.post("/api/ecommerce/tasks", json=request_payload)
                 response.raise_for_status()
                 task_id = response.json()["id"]
                 report["task_id"] = task_id
@@ -287,6 +303,16 @@ def main() -> int:
                 })
                 if task.get("status") != "succeeded":
                     raise RuntimeError(task.get("error") or "真实全能模式任务失败")
+                analysis_items = (task.get("universal_analysis") or {}).get("items") or {}
+                if preview_succeeded:
+                    if len(analysis_items) != len(inputs) or not all(item.get("cached") for item in analysis_items.values()):
+                        raise RuntimeError("生成任务没有完整复用预览阶段的服务端逐图分析缓存")
+                    report["analysis_cache_reused"] = True
+                else:
+                    # 视觉分析是提示词增强而非生成前置条件。上游暂不可用时，严格的
+                    # 角色所有权规则仍会构造有效生成请求，且界面不应阻断用户任务。
+                    report["analysis_cache_reused"] = False
+                    report["analysis_fallback"] = "视觉分析不可用，按用户指定角色规则生成"
                 reference_plan = task.get("reference_plan") or {}
                 owners = reference_plan.get("owners") or {}
                 if task.get("composition_mode") != "subject_edit" or reference_plan.get("mode") != "subject_edit":

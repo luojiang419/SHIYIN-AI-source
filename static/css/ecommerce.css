@@ -124,8 +124,6 @@ svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8;
 .ec-detail-target select { min-width:0; width:100%; padding:6px 8px; border:1px solid var(--ec-border); border-radius:8px; background:var(--ec-panel); color:var(--ec-text); font:700 9px Inter,sans-serif; }
 .ec-detail-target.is-error { padding:7px 8px; border:1px solid color-mix(in srgb,var(--ec-danger) 45%,var(--ec-border)); border-radius:9px; color:var(--ec-danger); font-size:8px; }
 .ec-detail-target.is-error span { line-height:1.4; }
-.ec-add-fabric-detail { min-height:28px; border:1px dashed var(--ec-border-strong); border-radius:8px; background:transparent; color:var(--ec-text-soft); font-size:9px; font-weight:800; }
-.ec-add-fabric-detail:hover { border-color:var(--ec-accent); color:var(--ec-accent); }
 .ec-universal-reference > header select { min-width:0; height:34px; padding:0 9px; border:1px solid var(--ec-border); border-radius:9px; outline:0; background:var(--ec-control); color:var(--ec-text); font-size:9px; }
 .ec-universal-reference > header button { width:30px; height:30px; border:0; border-radius:8px; background:var(--ec-control-hover); color:var(--ec-muted); }
 .ec-drag-handle { color:var(--ec-muted); cursor:grab; font-size:13px; letter-spacing:-.18em; }

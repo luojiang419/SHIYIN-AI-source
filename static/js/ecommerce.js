@@ -759,21 +759,6 @@
         return `<label class="ec-detail-target"><b>${escapeHtml(t('ecommerce.detailTarget'))}</b><select data-detail-target="${escapeHtml(item.reference_id)}"><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
     }
 
-    function addUniversalFabricDetail(targetId){
-        const entries = universalEntries();
-        const limit = Number(state.capabilities?.universal_reference_limit || 14);
-        if(entries.length >= limit) {
-            showToast(t('ecommerce.referenceLimitReached'), true);
-            return;
-        }
-        const key = createUniversalReference('detail', entries.length);
-        state.inputs[key].detail_target_id = targetId;
-        state.inputs[key].label = '面料细节';
-        renderUniversalInputs();
-        persistSettings();
-        requestAnimationFrame(() => el.inputSlots?.querySelector(`[data-reference-key="${selectorValue(key)}"] [data-action="upload"]`)?.click());
-    }
-
     function createUniversalReference(role, order){
         const key = newUniversalKey();
         state.inputs[key] = {url:'',name:'',role,reference_type:role,slot_type:defaultSlotTypeIdForRole(role),reference_id:key,custom_type_label:'',label:'',instruction:'',order};
@@ -1102,7 +1087,6 @@
                 <header><span class="ec-drag-handle" draggable="true" data-reference-drag-handle="${escapeHtml(key)}" title="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</span><b>${escapeHtml(t('ecommerce.imageNumber',{count:index + 1}))}</b><button type="button" data-remove-reference="${escapeHtml(key)}" aria-label="${escapeHtml(t('ecommerce.remove'))}">×</button></header>
                 <div class="ec-upload-slot ${role==='subject' && !IS_FREE_CREATION?'required':''}" data-role="${escapeHtml(key)}">${universalUploadHtml(key,item,uploadLabel)}</div>
                 <label class="ec-reference-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected, context:'universal', fallbackRole:role, item, dataAttr:'data-reference-type', dataValue:key})}</label>
-                ${UNIVERSAL_PRODUCT_ROLES.has(role) ? `<button type="button" class="ec-add-fabric-detail" data-add-fabric-detail="${escapeHtml(item.reference_id)}">＋ 面料细节</button>` : ''}
                 ${universalDetailTargetHtml(item, plan)}
                 <div class="ec-reference-fields"><label><span>${escapeHtml(t('ecommerce.referenceLabel'))}</span><input data-reference-field="label" data-reference-key="${escapeHtml(key)}" maxlength="160" value="${escapeHtml(item.label || '')}" placeholder="${escapeHtml(t('ecommerce.referenceLabelHint'))}"></label><label><span>${escapeHtml(t('ecommerce.referenceInstruction'))}</span><input data-reference-field="instruction" data-reference-key="${escapeHtml(key)}" maxlength="300" value="${escapeHtml(item.instruction || '')}" placeholder="${escapeHtml(t('ecommerce.referenceInstructionHint'))}"></label></div>
             </article>`;
@@ -1752,7 +1736,6 @@
             persistSettings();
             validateForm(false);
         }));
-        el.inputSlots.querySelectorAll('[data-add-fabric-detail]').forEach(button => button.addEventListener('click', () => addUniversalFabricDetail(button.dataset.addFabricDetail || '')));
         el.inputSlots.querySelectorAll('[data-reference-field]').forEach(input => bindComposingInput(input, () => {
             const item=state.inputs[input.dataset.referenceKey]; if(item){ item[input.dataset.referenceField]=input.value; persistSettings({sync:false}); validateForm(false); }
         }));

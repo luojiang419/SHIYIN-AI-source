@@ -290,6 +290,11 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertNotIn("默认先确定主角与情境", body)
         self.assertNotIn("填写主推商品即可", body)
 
+    def test_lookbook_story_success_notice_is_not_shown_for_new_or_existing_nodes(self):
+        self.assertIn("node.lookbookStoryNotice=''", self.lookbook)
+        body = self.lookbook[self.lookbook.index("function bodyHtml"):self.lookbook.index("function bindGenerationChoices")]
+        self.assertIn("node.lookbookStoryNotice!==\'AI 已根据参考图生成服装展示故事，可继续编辑。\'", body)
+
     def test_selection_hub_keeps_panel_inside_board_and_prefers_above_anchor(self):
         self.assertIn("const availableAbove", self.canvas)
         self.assertIn("selectionHub.style.maxHeight", self.canvas)
@@ -314,7 +319,7 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
         self.assertIn("overflow-x:hidden", self.css)
 
     def test_static_cache_keys_are_bumped_for_the_fix(self):
-        self.assertIn("canvas-lookbook-node.js?v=2026.09.19.lookbook-brief.1", self.html)
+        self.assertIn("canvas-lookbook-node.js?v=2026.09.19.lookbook-story-notice.1", self.html)
         self.assertIn("feature=ime-composition.1", self.html)
         self.assertRegex(self.html, r"canvas\.css\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")
         self.assertRegex(self.html, r"canvas\.js\?v=[^\"\s]+&rev=\d+(?:\.\d+)?")

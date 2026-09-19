@@ -179,7 +179,7 @@
         node.lookbookPrompt=String(story.ad_brief);
         node.lookbookContextSignature=String(options.lookbook_context_signature||story.source_signature);
         node.lookbookStoryAppliedTaskId=taskId;
-        node.lookbookStoryNotice='AI 已根据参考图生成服装展示故事，可继续编辑。';
+        node.lookbookStoryNotice='';
         const request=task.request||{};
         if(Number(request.count)>0)node.count=Number(request.count);
         if(options.lookbook_cell_aspect_ratio||request.aspect_ratio)node.aspectRatio=String(options.lookbook_cell_aspect_ratio||request.aspect_ratio);
@@ -395,7 +395,7 @@
         return `<div class="ecom-node-panel lookbook-node-panel">
             <div class="lookbook-style-row"><div class="lookbook-style-cover ${node.lookbookStyleCover?'has-cover':''}">${node.lookbookStyleCover?`<img src="${esc(node.lookbookStyleCover)}" alt="${esc(node.lookbookStyleName)}">`:'<i data-lucide="palette"></i>'}</div><div class="lookbook-style-copy"><span>智能故事大片</span><strong>${esc(node.lookbookStyleName)}</strong><small>AI 自动理解故事、拆解连续分镜并生成组图</small></div><button type="button" class="lookbook-style-button" data-lookbook-choose><i data-lucide="sparkles"></i>选择风格</button></div>
             <label class="ecom-node-field"><span>故事 / 广告需求</span><textarea data-lookbook-field="lookbookPrompt" rows="5" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="可留空：AI 先综合参考图，生成以服装为主的自然情境与立意，再编写多机位提示词">${esc(node.lookbookPrompt)}</textarea></label>
-            ${node.lookbookStoryNotice?`<p class="lookbook-brief-hint" data-lookbook-story-notice>${esc(node.lookbookStoryNotice)}</p>`:''}
+            ${node.lookbookStoryNotice&&node.lookbookStoryNotice!=='AI 已根据参考图生成服装展示故事，可继续编辑。'?`<p class="lookbook-brief-hint" data-lookbook-story-notice>${esc(node.lookbookStoryNotice)}</p>`:''}
             ${node.lookbookStory?`<details class="lookbook-brief-hint" data-lookbook-original ${node.lookbookOriginalExpanded?'open':''}><summary>查看原始需求</summary><p style="white-space:pre-wrap">${esc(node.lookbookStoryInput||'未填写，依据参考图创作')}</p><button type="button" data-lookbook-restore-brief>恢复原始需求</button></details>`:''}
             <label class="lookbook-search-toggle"><input type="checkbox" data-lookbook-field="lookbookSearch" ${node.lookbookSearch?'checked':''}><span>联网研究杂志与品牌时尚大片（可选，最多30秒，优先执行已选风格）</span></label>${node.lookbookSearch&&node.lookbookResearchNote?`<p class="lookbook-brief-hint">${esc(node.lookbookResearchNote)}</p>`:''}
             <button type="button" class="lookbook-layout-button" data-lookbook-layout><i data-lucide="layout-grid"></i><span><small>拼图版式</small><strong>${esc(layoutSummary(node))}</strong></span><em>子图 ${esc(node.aspectRatio)} · 输出 ${esc(layoutOutputAspectRatio(node))}</em><i data-lucide="chevron-right"></i></button>

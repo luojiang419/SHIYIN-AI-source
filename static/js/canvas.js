@@ -6743,6 +6743,7 @@ function nodeTitleForMedia(node){
 }
 const CANVAS_OUTPUT_MEDIA_DRAG_TYPE = 'application/x-canvas-output-media';
 const IMAGE_DROP_EXT_RE = /\.(png|jpe?g|webp|gif)$/i;
+const MEDIA_DROP_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|avif|mp4|webm|mov|m4v|avi|mkv|flv|mxf|mts|m2ts|ts|mpg|mpeg|wmv|vob|3gp|mp3|wav|m4a|aac|ogg|flac)$/i;
 const IMAGE_DROP_TEXT_TYPES = [
     'text/uri-list',
     'text/plain',
@@ -6756,7 +6757,7 @@ const IMAGE_DROP_TEXT_TYPES = [
     'FileName',
     'FileNameW'
 ];
-const IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|image\/.+|text\/(?:uri-list|html|plain|x-moz-url|x-file-url)|downloadurl|public\.(?:file-url|url)|uniformresourcelocator|filenamew?)$|application\/x-qt-(?:windows-mime|image)|application\/x-moz-file|com\.eagle/i;
+const IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|(?:image|video|audio)\/.+|text\/(?:uri-list|html|plain|x-moz-url|x-file-url)|downloadurl|public\.(?:file-url|url)|uniformresourcelocator|filenamew?)$|application\/x-qt-(?:windows-mime|image)|application\/x-moz-file|com\.eagle/i;
 function dropDataTypes(dataTransfer){
     return [...(dataTransfer?.types || [])].map(type => String(type || ''));
 }
@@ -6802,7 +6803,7 @@ function dropTextCandidates(dataTransfer){
 }
 function isRemoteImageDropValue(value){
     const text = String(value || '').trim();
-    return /^https?:\/\/.+/i.test(text) || /^data:image\//i.test(text) || /^blob:/i.test(text);
+    return /^https?:\/\/.+/i.test(text) || /^data:(?:image|video|audio)\//i.test(text) || /^blob:/i.test(text);
 }
 function isLocalImageDropValue(value){
     const text = String(value || '').trim();
@@ -19977,7 +19978,9 @@ workflowTransferModal?.addEventListener('drop', event => {
 function hasCanvasAssetSaveDrop(dataTransfer){
     const types = Array.from(dataTransfer?.types || []);
     if(types.includes('application/x-canvas-asset')) return false;
-    return hasOutputImageDrag(dataTransfer) || hasImageDropData(dataTransfer);
+    // 桌面 WebView 在拖入文件夹或未知 MIME 文件时，dragover 阶段可能只暴露 Files。
+    // 素材面板仍需先接管事件，实际格式在 drop 时由统一媒体解析器确认。
+    return hasOutputMediaDrag(dataTransfer) || hasImageDropData(dataTransfer) || types.includes('Files');
 }
 function setCanvasAssetDropOver(active){
     canvasAssetDropZone?.classList.toggle('drag-over', Boolean(active));
@@ -20004,8 +20007,11 @@ async function handleCanvasAssetDrop(event){
     try {
         // 在任何异步文件/目录解析前锁定目标，避免用户切换下拉框后素材落入错误分组。
         const destination = canvasAssetDropDestination();
-        if(hasOutputImageDrag(event.dataTransfer)){
-            await addUrlToCanvasAssetLibrary(event.dataTransfer.getData('application/x-canvas-output-image'), 'output', destination);
+        if(hasOutputMediaDrag(event.dataTransfer)){
+            const media = outputMediaDragPayload(event.dataTransfer);
+            const url = media?.url || event.dataTransfer.getData('application/x-canvas-output-image');
+            if(!url) throw new Error('没有可保存的输出素材');
+            await addUrlToCanvasAssetLibrary(url, media?.name || outputImageName(url), destination);
             return;
         }
         const payload = await resolveImageDropPayload(event.dataTransfer);
@@ -20032,21 +20038,28 @@ async function handleCanvasAssetDrop(event){
             setStatus(`已保存 ${data.items?.length || 0} 个素材`);
         } else if(payload.type === 'url') {
             await addUrlToCanvasAssetLibrary(payload.url, outputImageName(payload.url), destination);
+        } else {
+            throw new Error('请拖入图片、视频或音频文件');
         }
     } catch(err) {
         showErrorModal(err.message || '保存素材失败', '保存素材失败');
     }
+}
+function resetCanvasAssetDropState(){
+    setCanvasAssetDropOver(false);
+    resetCanvasPackageDropOverlay();
 }
 canvasAssetDropZone?.addEventListener('dragover', handleCanvasAssetDragOver);
 canvasAssetDropZone?.addEventListener('dragleave', event => {
     if(!canvasAssetDropZone.contains(event.relatedTarget)) setCanvasAssetDropOver(false);
 });
 canvasAssetDropZone?.addEventListener('drop', handleCanvasAssetDrop);
-canvasAssetPanel?.addEventListener('dragover', handleCanvasAssetDragOver);
+// 在捕获阶段接管外部拖放，避免冒泡到 board 后激活“拖放素材到画布”遮罩。
+canvasAssetPanel?.addEventListener('dragover', handleCanvasAssetDragOver, true);
 canvasAssetPanel?.addEventListener('dragleave', event => {
     if(!canvasAssetPanel.contains(event.relatedTarget)) setCanvasAssetDropOver(false);
-});
-canvasAssetPanel?.addEventListener('drop', handleCanvasAssetDrop);
+}, true);
+canvasAssetPanel?.addEventListener('drop', handleCanvasAssetDrop, true);
 gateAssetManagerBtn?.addEventListener('click', openAssetManager);
 document.querySelectorAll('[data-manager-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -24550,8 +24563,8 @@ board.addEventListener('drop', async e => {
         showErrorModal(err.message || (langIsEn() ? 'Image import failed' : '导入图片失败'), langIsEn() ? 'Image import failed' : '导入图片失败');
     }
 });
-window.addEventListener('dragend', resetCanvasPackageDropOverlay);
-window.addEventListener('drop', resetCanvasPackageDropOverlay);
+window.addEventListener('dragend', resetCanvasAssetDropState);
+window.addEventListener('drop', resetCanvasAssetDropState);
 function cancelClassicNodePasteFallback(){
     if(!classicNodePasteTimer) return;
     clearTimeout(classicNodePasteTimer);

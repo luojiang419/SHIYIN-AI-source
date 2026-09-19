@@ -59,8 +59,20 @@ def test_external_asset_drop_locks_the_current_destination_before_async_resoluti
     assert drop.index("const destination = canvasAssetDropDestination();") < drop.index("await resolveImageDropPayload")
     assert "uploadFilesToLibrary(payload.files, destination.libraryId, destination.categoryId)" in drop
     assert "'/api/asset-library/items/batch'" in drop
-    assert "canvasAssetPanel?.addEventListener('drop', handleCanvasAssetDrop)" in drop
+    assert "types.includes('Files')" in drop
+    assert "hasOutputMediaDrag(dataTransfer)" in drop
+    assert "const media = outputMediaDragPayload(event.dataTransfer);" in drop
+    assert "canvasAssetPanel?.addEventListener('drop', handleCanvasAssetDrop, true)" in drop
+    assert "function resetCanvasAssetDropState()" in drop
     assert ".canvas-asset-panel.drag-over" in CANVAS_CSS
+
+
+def test_asset_library_drop_accepts_all_supported_media_and_clears_the_canvas_overlay():
+    assert "const MEDIA_DROP_EXT_RE" in CANVAS_JS
+    assert "(?:image|video|audio)" in CANVAS_JS
+    assert "^data:(?:image|video|audio)\\/" in CANVAS_JS
+    assert "window.addEventListener('dragend', resetCanvasAssetDropState)" in CANVAS_JS
+    assert "window.addEventListener('drop', resetCanvasAssetDropState)" in CANVAS_JS
 
 
 def test_asset_card_name_double_click_uses_inline_rename_without_adding_a_node():

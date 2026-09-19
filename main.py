@@ -559,7 +559,7 @@ ACTIVE_CANVAS_BY_ACCOUNT: dict[str, str] = {}
 ACTIVE_CANVAS_ID = ""
 ACTIVE_CANVAS_LAST_SEEN = 0.0
 STARTUP_CANVAS_GRACE_SECONDS = 12.0
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 GITHUB_REPO_URL = "https://github.com/luojiang419/SHIYIN-AI-source"
 GITHUB_VERSION_URL = "https://raw.githubusercontent.com/luojiang419/SHIYIN-AI-source/main/VERSION"
 GITHUB_TREE_URL = "https://api.github.com/repos/luojiang419/SHIYIN-AI-source/git/trees/main?recursive=1"
@@ -8810,7 +8810,7 @@ def asset_library_media_kind(path: str, content_type: str = "") -> str:
     ct = (content_type or "").lower()
     if ext in {".json", ".zip"}:
         return "workflow"
-    if ext in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"} or ct.startswith("video/"):
+    if ext in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv", ".flv", ".mxf", ".mts", ".m2ts", ".ts", ".mpg", ".mpeg", ".wmv", ".vob", ".3gp"} or ct.startswith("video/"):
         return "video"
     if ext in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"} or ct.startswith("audio/"):
         return "audio"
@@ -8819,8 +8819,8 @@ def asset_library_media_kind(path: str, content_type: str = "") -> str:
 def asset_library_safe_extension(path: str, kind: str) -> str:
     ext = os.path.splitext(path or "")[1].lower()
     allowed = {
-        "image": {".png", ".jpg", ".jpeg", ".webp", ".gif"},
-        "video": {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"},
+        "image": {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"},
+        "video": {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv", ".flv", ".mxf", ".mts", ".m2ts", ".ts", ".mpg", ".mpeg", ".wmv", ".vob", ".3gp"},
         "audio": {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"},
         "workflow": {".json", ".zip"},
     }
@@ -14661,8 +14661,8 @@ async def upload_ai_base64(payload: Base64UploadRequest):
 
 
 def _local_upload_kind_ext(filename, content_type):
-    image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-    video_exts = {".mp4", ".webm", ".mov", ".m4v", ".flv"}
+    image_exts = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"}
+    video_exts = {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv", ".flv", ".mxf", ".mts", ".m2ts", ".ts", ".mpg", ".mpeg", ".wmv", ".vob", ".3gp"}
     audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
     ext = os.path.splitext(filename or "")[1].lower()
     ct = (content_type or "").lower()

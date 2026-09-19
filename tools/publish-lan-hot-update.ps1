@@ -1,6 +1,6 @@
 param(
     [string]$Version = (Get-Date -Format 'yyyyMMddHHmmss'),
-    [string]$Notes = '局域网热更新',
+    [string]$Notes = 'LAN hot update',
     [switch]$WebOnly
 )
 $ErrorActionPreference = 'Stop'

@@ -17104,36 +17104,71 @@ def apply_lookbook_film_finish(batch: Dict[str, Any], snapshot: Dict[str, Any]) 
     return batch
 
 
+def ecommerce_fabric_reference_urls(operation: str, references: List[Any], context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """按页面的服装所有者角色选取可用于本地织纹还原的参考图。"""
+    context = context if isinstance(context, dict) else {}
+    roles = {
+        'pose_replicate': ('fabric_detail', 'target_image'),
+        'try_on': ('detail', 'garment', 'upper_garment', 'lower_garment', 'full_garment'),
+        'pose_transfer': ('source',),
+        'universal': ('detail', 'full_garment', 'upper_garment', 'lower_garment', 'garment'),
+    }.get(str(operation or ''), ())
+    explicit = context.get('fabric_reference_urls')
+    urls = [str(value) for value in explicit if isinstance(value, str) and value] if isinstance(explicit, list) else []
+    for reference in references or []:
+        role = str(reference.get('reference_type') or reference.get('role') or '') if isinstance(reference, dict) else str(getattr(reference, 'role', '') or '')
+        url = str(reference.get('url') or '') if isinstance(reference, dict) else str(getattr(reference, 'url', '') or '')
+        if role in roles and url:
+            urls.append(url)
+    return list(dict.fromkeys(urls))[:3]
+
+
+async def apply_fabric_enhancement(operation: str, references: List[Any], batch: Dict[str, Any], context: Optional[Dict[str, Any]] = None):
+    reference_urls = ecommerce_fabric_reference_urls(operation, references, context)
+    if not reference_urls:
+        return batch
+    from canvas_core.fabric_enhancement import enhance_fabric_image
+    by_role = {(str(ref.get('role') or '') if isinstance(ref, dict) else str(getattr(ref, 'role', '') or '')): ref for ref in references or []}
+    control_ref = by_role.get('control_map')
+    control_url = str(control_ref.get('url') or '') if isinstance(control_ref, dict) else str(getattr(control_ref, 'url', '') or '')
+    control = output_file_from_url(control_url) if control_url else None
+    audit, originals = [], list(batch['images'])
+    for index, url in enumerate(originals):
+        source = output_file_from_url(url)
+        entry = {'status': 'skipped', 'reason': 'reference_unavailable', 'original_url': url}
+        if source:
+            current, applied, skipped = source, [], []
+            for reference_url in reference_urls:
+                detail = output_file_from_url(reference_url)
+                if not detail:
+                    skipped.append('reference_unavailable')
+                    continue
+                destination = os.path.join(OUTPUT_OUTPUT_DIR, f'fabric_{uuid.uuid4().hex}.png')
+                try:
+                    outcome = await asyncio.to_thread(enhance_fabric_image, current, detail, destination, control)
+                    if outcome.get('status') == 'applied':
+                        current, applied = destination, [*applied, outcome]
+                    else:
+                        skipped.append(str(outcome.get('reason') or 'skipped'))
+                except Exception as exc:
+                    skipped.append(f'processing_failed:{type(exc).__name__}')
+            if applied:
+                entry = {'status': 'applied', 'original_url': url, 'steps': applied}
+                enhanced = media_url_from_path(current)
+                batch['images'][index] = enhanced
+                batch['image_items'][index] = image_output_meta(enhanced)
+            elif skipped:
+                entry['reason'] = skipped[-1]
+        audit.append(entry)
+    batch['fabric_enhancement'], batch['original_images'] = audit, originals
+    return batch
+
+
 async def apply_pose_fabric_enhancement(payload, batch):
     context = payload.prompt_context or {}
     if payload.operation != 'pose_replicate' or not context.get('fabric_enhancement'):
         return batch
-    from canvas_core.fabric_enhancement import enhance_fabric_image
-    by_role = {ref.role: ref for ref in payload.reference_images}
-    detail_ref = by_role.get('fabric_detail')
-    control_ref = by_role.get('control_map')
-    detail = output_file_from_url(detail_ref.url) if detail_ref else None
-    control = output_file_from_url(control_ref.url) if control_ref else None
-    audit = []
-    originals = list(batch['images'])
-    for index, url in enumerate(originals):
-        source = output_file_from_url(url)
-        entry = {'status': 'skipped', 'reason': 'reference_unavailable', 'original_url': url}
-        if source and detail and control and context.get('control_mode') == 'depth' and context.get('scenario_id') == 'base-wardrobe':
-            destination = os.path.join(OUTPUT_OUTPUT_DIR, f'fabric_{uuid.uuid4().hex}.png')
-            try:
-                entry.update(await asyncio.to_thread(enhance_fabric_image, source, detail, destination, control))
-                if entry['status'] == 'applied':
-                    entry.pop('reason', None)
-                    enhanced = media_url_from_path(destination)
-                    batch['images'][index] = enhanced
-                    batch['image_items'][index] = image_output_meta(enhanced)
-            except Exception as exc:
-                entry.update(status='skipped', reason='processing_failed', error_type=type(exc).__name__)
-        audit.append(entry)
-    batch['fabric_enhancement'] = audit
-    batch['original_images'] = originals
-    return batch
+    return await apply_fabric_enhancement(payload.operation, payload.reference_images, batch, context)
 
 
 async def build_online_image_result(payload: OnlineImageRequest):
@@ -20520,6 +20555,8 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     # FW 风格需要真实不规则颗粒；必须在质量门重生之后再处理，避免修复图丢失 finish。
                     batch = apply_lookbook_film_finish(batch, snapshot)
                 batch = await apply_selected_studio_background(batch, snapshot, route)
+                if snapshot["operation"] in {"universal", "try_on", "pose_transfer"}:
+                    batch = await apply_fabric_enhancement(snapshot["operation"], snapshot["inputs"], batch)
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",
@@ -20575,6 +20612,9 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                         "comparison_reference_url": snapshot.get("comparison_reference_url") or "",
                     },
                 }
+                if 'fabric_enhancement' in batch:
+                    result['fabric_enhancement'] = batch['fabric_enhancement']
+                    result['original_images'] = batch['original_images']
                 if lookbook_agent:
                     timings = dict(snapshot.get("lookbook_stage_timings") or {})
                     timings["generation"] = {"elapsed_seconds": batch.get("generation_elapsed_seconds", 0)}

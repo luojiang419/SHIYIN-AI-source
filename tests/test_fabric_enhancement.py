@@ -62,3 +62,25 @@ def test_postprocessor_updates_both_image_lists():
     assert result['images']==['/enhanced']
     assert result['image_items']==[{'url':'/enhanced'}]
     assert result['original_images']==['/original']
+
+
+def test_all_ecommerce_workspaces_select_their_garment_owner_as_texture_evidence():
+    cases = {
+        'universal': ([{'role':'full_garment','url':'/garment'}], ['/garment']),
+        'try_on': ([{'role':'upper_garment','url':'/upper'}, {'role':'source','url':'/person'}], ['/upper']),
+        'pose_transfer': ([{'role':'source','url':'/person'}], ['/person']),
+    }
+    for operation, (references, expected) in cases.items():
+        assert main.ecommerce_fabric_reference_urls(operation, references) == expected
+
+
+def test_shared_ecommerce_postprocessor_keeps_original_when_mask_is_ambiguous():
+    batch = {'images':['/original'], 'image_items':[{'url':'/original'}]}
+    references = [{'role':'full_garment', 'url':'/garment'}]
+    with patch.object(main, 'output_file_from_url', return_value='test.png'), patch(
+        'canvas_core.fabric_enhancement.enhance_fabric_image', return_value={'status':'skipped', 'reason':'garment_mask_ambiguous'}
+    ):
+        result = asyncio.run(main.apply_fabric_enhancement('universal', references, batch))
+    assert result['images'] == ['/original']
+    assert result['original_images'] == ['/original']
+    assert result['fabric_enhancement'][0]['reason'] == 'garment_mask_ambiguous'

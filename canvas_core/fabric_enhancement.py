@@ -33,7 +33,7 @@ def material_patch(reference):
     if not eligible:
         return None
     center = centers[max(eligible, key=lambda i: fractions[i])]
-    side = min(384, min(h, w) // 4)
+    side = min(384, min(h, w))
     best = None
     for y in range(0, h-side+1, max(64, side//2)):
         for x in range(0, w-side+1, max(64, side//2)):
@@ -67,7 +67,21 @@ def garment_mask(base, color, foreground):
     distance = np.linalg.norm(delta, axis=2)
     candidate = ((distance < 19) & (lab[:, :, 0] < color[0]+26)).astype('uint8')*255
     if foreground is None:
-        return None
+        # 常规电商页面没有深度控制图。只在颜色候选本身形成一个内嵌、足够大的
+        # 衣片时继续，宁可跳过也不要触及整张背景或画面边缘。
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, np.ones((9, 9), 'uint8'))
+        opening = max(9, int(min(h, w)*.027) | 1)
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (opening, opening)))
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(candidate, 8)
+        eligible = [i for i in range(1, n) if h*w*.025 < stats[i, 4] < h*w*.5]
+        if not eligible:
+            return None
+        index = max(eligible, key=lambda i: stats[i, 4])
+        x, y, bw, bh, _ = stats[index]
+        if x < 3 or y < 3 or x+bw >= w-3 or y+bh >= h-3:
+            return None
+        return (labels == index).astype('uint8')*255
     person = cv2.resize(foreground, (w, h), interpolation=cv2.INTER_LINEAR) > 12
     counts = np.sum((candidate > 0) & person, axis=1).astype('float32')
     counts = cv2.blur(counts[:, None], (1, max(15, h//80)))[:, 0]
@@ -134,7 +148,7 @@ def enhance_fabric_image(generated, detail, output, control=None):
         yy, xx = np.arange(h)%ph, np.arange(w)%pw
         weight = np.minimum(np.minimum(yy, ph-yy)[:, None], np.minimum(xx, pw-xx)[None, :])
         weight = np.clip(weight.astype('float32')/24, 0, 1)
-        texture = np.clip(tiled*weight+shifted*(1-weight), -12, 12)
+        texture = np.clip((tiled*weight+shifted*(1-weight))*.5, -12, 12)
         alpha = cv2.GaussianBlur(mask.astype('float32')/255, (0, 0), 1.5)
         alpha[mask == 0] = 0
         result = np.clip(base.astype('float32')+texture[:, :, None]*alpha[:, :, None], 0, 255).astype('uint8')

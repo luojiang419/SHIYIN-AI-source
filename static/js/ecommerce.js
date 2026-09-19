@@ -755,6 +755,7 @@
         if(IS_FREE_CREATION || String(item?.reference_type || item?.role || '') !== 'detail') return '';
         const selected = detailTargetIdForItem(item, plan);
         if(!plan.products.length) return `<div class="ec-detail-target is-error"><b>${escapeHtml(t('ecommerce.detailTarget'))}</b><span>${escapeHtml(t('ecommerce.detailMissingProduct'))}</span></div>`;
+        if(plan.products.length === 1) return '';
         const options = plan.products.map(([,product]) => `<option value="${escapeHtml(product.reference_id)}" ${product.reference_id === selected ? 'selected':''}>${escapeHtml(universalReferenceItemLabel(product))}</option>`).join('');
         return `<label class="ec-detail-target"><b>${escapeHtml(t('ecommerce.detailTarget'))}</b><select data-detail-target="${escapeHtml(item.reference_id)}"><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
     }

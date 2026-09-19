@@ -95,6 +95,23 @@ def test_asset_library_upload_returns_before_optional_image_classification_finis
     assert "await classify_asset_image_best_effort" not in add_many
 
 
+def test_asset_library_deletions_use_the_canvas_confirmation_dialog_instead_of_browser_confirm():
+    confirm = body(CANVAS_JS, "function closeCanvasAssetConfirm", "async function openCanvasAssetSaveDialog")
+
+    for element_id in (
+        "canvasAssetConfirmModal",
+        "canvasAssetConfirmMessage",
+        "canvasAssetConfirmCancel",
+        "canvasAssetConfirmDelete",
+    ):
+        assert f'id="{element_id}"' in CANVAS_HTML
+    assert "canvas-asset-confirm-modal" in CANVAS_CSS
+    assert "backdrop-filter:blur(12px)" in CANVAS_CSS
+    assert "return new Promise(resolve => { canvasAssetConfirmResolve = resolve; });" in confirm
+    assert "window.confirm(" not in CANVAS_JS
+    assert "await confirmCanvasAssetAction(`删除资产「${item.name || 'asset'}」？`)" in CANVAS_JS
+
+
 def test_asset_card_name_double_click_uses_inline_rename_without_adding_a_node():
     rename = body(CANVAS_JS, "function beginCanvasAssetInlineRename", "function renameCanvasAssetItem")
     render = body(CANVAS_JS, "function renderCanvasAssetLibrary", "function toggleCanvasAssetLibrary")

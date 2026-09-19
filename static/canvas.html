@@ -221,6 +221,19 @@
                     </div>
                 </div>
             </div>
+            <div id="canvasAssetConfirmModal" class="canvas-asset-confirm-modal" aria-hidden="true">
+                <div class="canvas-asset-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="canvasAssetConfirmTitle">
+                    <div class="canvas-asset-confirm-mark"><i data-lucide="trash-2" class="w-5 h-5"></i></div>
+                    <div class="canvas-asset-confirm-copy">
+                        <strong id="canvasAssetConfirmTitle">删除素材</strong>
+                        <p id="canvasAssetConfirmMessage"></p>
+                    </div>
+                    <div class="canvas-asset-confirm-actions">
+                        <button id="canvasAssetConfirmCancel" class="preview-text-btn secondary" type="button">取消</button>
+                        <button id="canvasAssetConfirmDelete" class="preview-text-btn canvas-asset-confirm-delete" type="button"><i data-lucide="trash-2" class="w-4 h-4"></i><span>删除</span></button>
+                    </div>
+                </div>
+            </div>
         </div>
         <div id="outputLightbox" class="output-lightbox" onclick="closeOutputLightbox()">
             <div id="outputLightboxShell" class="output-lightbox-shell" onclick="event.stopPropagation()">

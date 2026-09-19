@@ -529,6 +529,11 @@ const canvasAssetSaveLibrary = document.getElementById('canvasAssetSaveLibrary')
 const canvasAssetSaveCategory = document.getElementById('canvasAssetSaveCategory');
 const canvasAssetSaveKind = document.getElementById('canvasAssetSaveKind');
 const canvasAssetSaveStatus = document.getElementById('canvasAssetSaveStatus');
+const canvasAssetConfirmModal = document.getElementById('canvasAssetConfirmModal');
+const canvasAssetConfirmMessage = document.getElementById('canvasAssetConfirmMessage');
+const canvasAssetConfirmCancel = document.getElementById('canvasAssetConfirmCancel');
+const canvasAssetConfirmDelete = document.getElementById('canvasAssetConfirmDelete');
+let canvasAssetConfirmResolve = null;
 const canvasFpsValue = document.getElementById('canvasFpsValue');
 const canvasNodeCountValue = document.getElementById('canvasNodeCountValue');
 const workflowTransferToggle = document.getElementById('workflowTransferToggle');
@@ -12988,6 +12993,24 @@ function closeCanvasAssetSaveDialog(){
     canvasAssetSaveModal?.setAttribute('aria-hidden', 'true');
     setCanvasAssetSaveStatus('');
 }
+function closeCanvasAssetConfirm(confirmed=false){
+    const resolve = canvasAssetConfirmResolve;
+    canvasAssetConfirmResolve = null;
+    canvasAssetConfirmModal?.classList.remove('open');
+    canvasAssetConfirmModal?.setAttribute('aria-hidden', 'true');
+    resolve?.(Boolean(confirmed));
+}
+function confirmCanvasAssetAction(message, title='删除素材'){
+    if(!canvasAssetConfirmModal || !canvasAssetConfirmMessage) return Promise.resolve(false);
+    if(canvasAssetConfirmResolve) closeCanvasAssetConfirm(false);
+    document.getElementById('canvasAssetConfirmTitle').textContent = title;
+    canvasAssetConfirmMessage.textContent = message;
+    canvasAssetConfirmModal.classList.add('open');
+    canvasAssetConfirmModal.setAttribute('aria-hidden', 'false');
+    refreshIcons();
+    requestAnimationFrame(() => canvasAssetConfirmCancel?.focus());
+    return new Promise(resolve => { canvasAssetConfirmResolve = resolve; });
+}
 async function openCanvasAssetSaveDialog(target={}){
     const kind = String(target.mediaKind || canvasAssetItemKind(target)).toLowerCase();
     const url = canvasOriginalMediaUrl(target.url || '');
@@ -13116,7 +13139,7 @@ function beginCanvasAssetInlineRename(itemId){
 function renameCanvasAssetItem(itemId){ beginCanvasAssetInlineRename(itemId); }
 async function deleteCanvasAssetItem(itemId){
     const item = currentCanvasAssetItem(itemId);
-    if(!item || !window.confirm(`删除资产「${item.name || 'asset'}」？`)) return;
+    if(!item || !await confirmCanvasAssetAction(`删除资产「${item.name || 'asset'}」？`)) return;
     const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
     canvasAssetLibrary = data.library || canvasAssetLibrary;
     managerSelectedAssetIds.delete(item.id);
@@ -13722,7 +13745,7 @@ async function saveCanvasPromptTemplateEdit(){
 async function deleteCanvasPromptTemplate(){
     const item = selectedCanvasPromptTemplate();
     if(!item) return;
-    if(!window.confirm(`删除提示词「${canvasPromptTemplateName(item) || '提示词'}」？`)) return;
+    if(!await confirmCanvasAssetAction(`删除提示词「${canvasPromptTemplateName(item) || '提示词'}」？`, '删除提示词')) return;
     try {
         // 系统库现在是 remote，删除走后端 DELETE 并同步；仅非 remote 的内置项才退回本地隐藏。
         if(item.builtin && !item.remote){
@@ -13816,7 +13839,7 @@ async function renameCanvasPromptTemplateGroup(groupId){
 async function deleteCanvasPromptTemplateGroup(groupId){
     const lib = activeCanvasPromptLibrary();
     if(lib && lib.id !== 'system'){
-        if(!window.confirm(tr('smart.tplDeleteGroupConfirm'))) return;
+        if(!await confirmCanvasAssetAction(tr('smart.tplDeleteGroupConfirm'), '删除分组')) return;
         try {
             const data = await fetch(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {method:'DELETE'})
                 .then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '删除失败'); return r.json(); });
@@ -13831,7 +13854,7 @@ async function deleteCanvasPromptTemplateGroup(groupId){
         renameCanvasPromptTemplateGroup(groupId);
         return;
     }
-    if(!window.confirm(tr('smart.tplDeleteGroupConfirm'))) return;
+    if(!await confirmCanvasAssetAction(tr('smart.tplDeleteGroupConfirm'), '删除分组')) return;
     promptTemplateGroups = promptTemplateGroups.filter(g => g.id !== groupId);
     Object.entries(canvasPromptTemplateOverrides.editedBuiltins || {}).forEach(([id, item]) => {
         if(item?.category === groupId) canvasPromptTemplateOverrides.editedBuiltins[id] = {...item, category:'mine'};
@@ -19910,6 +19933,20 @@ canvasAssetSaveLibrary?.addEventListener('change', () => renderCanvasAssetSaveCa
 canvasAssetSaveClose?.addEventListener('click', closeCanvasAssetSaveDialog);
 canvasAssetSaveCancel?.addEventListener('click', closeCanvasAssetSaveDialog);
 canvasAssetSaveConfirm?.addEventListener('click', confirmCanvasAssetSave);
+canvasAssetConfirmCancel?.addEventListener('click', () => closeCanvasAssetConfirm(false));
+canvasAssetConfirmDelete?.addEventListener('click', () => closeCanvasAssetConfirm(true));
+canvasAssetConfirmModal?.addEventListener('mousedown', event => {
+    event.stopPropagation();
+    if(event.target === canvasAssetConfirmModal) closeCanvasAssetConfirm(false);
+});
+canvasAssetConfirmModal?.addEventListener('pointerdown', event => event.stopPropagation());
+canvasAssetConfirmModal?.addEventListener('keydown', event => {
+    if(event.key === 'Escape'){
+        event.preventDefault();
+        event.stopPropagation();
+        closeCanvasAssetConfirm(false);
+    }
+});
 canvasAssetSaveModal?.addEventListener('mousedown', event => {
     event.stopPropagation();
     if(event.target === canvasAssetSaveModal) closeCanvasAssetSaveDialog();
@@ -20129,7 +20166,7 @@ assetManagerModal?.addEventListener('click', async event => {
     if(workflowRemove){
         const itemId = workflowRemove.dataset.managerWorkflowRemove || '';
         const item = (activeCanvasWorkflowCategory()?.items || []).find(entry => entry.id === itemId);
-        if(!item || !window.confirm(`删除工作流「${item.name || 'workflow'}」？`)) return;
+        if(!item || !await confirmCanvasAssetAction(`删除工作流「${item.name || 'workflow'}」？`, '删除工作流')) return;
         const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         managerSelectedWorkflowIds.delete(item.id);
@@ -20149,7 +20186,7 @@ assetManagerModal?.addEventListener('click', async event => {
     if(assetRemove){
         const itemId = assetRemove.dataset.managerAssetRemove || '';
         const item = (activeCanvasMediaCategory()?.items || []).find(entry => entry.id === itemId);
-        if(!item || !window.confirm(`删除资产「${item.name || 'asset'}」？`)) return;
+        if(!item || !await confirmCanvasAssetAction(`删除资产「${item.name || 'asset'}」？`)) return;
         const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         managerSelectedAssetIds.delete(item.id);
@@ -20177,7 +20214,7 @@ assetManagerModal?.addEventListener('click', async event => {
         if(!lib || lib.readonly) return;
         const itemId = promptRemove.dataset.managerPromptRemove || '';
         const item = (lib.items || []).find(entry => entry.id === itemId);
-        if(!item || !window.confirm(`删除提示词「${item.name || '提示词'}」？`)) return;
+        if(!item || !await confirmCanvasAssetAction(`删除提示词「${item.name || '提示词'}」？`, '删除提示词')) return;
         const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         managerSelectedPromptIds.delete(item.id);
@@ -20203,7 +20240,7 @@ assetManagerModal?.addEventListener('click', async event => {
     }
     if(event.target.closest?.('[data-manager-asset-lib-delete]')){
         const lib = activeCanvasAssetLibrary();
-        if(!lib || !window.confirm(`删除素材库「${lib.name || '素材库'}」？`)) return;
+        if(!lib || !await confirmCanvasAssetAction(`删除素材库「${lib.name || '素材库'}」？`, '删除素材库')) return;
         const data = await fetch(`/api/asset-library/libraries/${encodeURIComponent(lib.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetLibraryId = canvasAssetLibrary.active_library_id || canvasAssetLibraries()[0]?.id || '';
@@ -20228,7 +20265,7 @@ assetManagerModal?.addEventListener('click', async event => {
     }
     if(event.target.closest?.('[data-manager-asset-cat-delete]')){
         const cat = activeCanvasMediaCategory();
-        if(!cat || !window.confirm(`删除分组「${cat.name || '分组'}」？`)) return;
+        if(!cat || !await confirmCanvasAssetAction(`删除分组「${cat.name || '分组'}」？`, '删除分组')) return;
         const data = await fetch(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetCategoryId = canvasMediaCategories()[0]?.id || '';
@@ -20288,7 +20325,7 @@ assetManagerModal?.addEventListener('click', async event => {
     }
     if(event.target.closest?.('[data-manager-prompt-lib-delete]')){
         const lib = activeCanvasPromptLibrary();
-        if(!lib || lib.readonly || !window.confirm(`删除提示词库「${lib.name || '提示词库'}」？`)) return;
+        if(!lib || lib.readonly || !await confirmCanvasAssetAction(`删除提示词库「${lib.name || '提示词库'}」？`, '删除提示词库')) return;
         const data = await fetch(`/api/prompt-libraries/${encodeURIComponent(lib.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         activePromptLibraryId = data.library?.active_library_id || canvasPromptLibraries.find(item => item.id !== 'system')?.id || 'system';

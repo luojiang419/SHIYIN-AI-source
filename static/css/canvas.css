@@ -1119,6 +1119,18 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .canvas-asset-save-actions { display:flex; justify-content:flex-end; gap:8px; }
 .canvas-asset-save-actions button { min-width:96px; justify-content:center; }
 .canvas-asset-save-actions button svg { width:14px; height:14px; }
+.canvas-asset-confirm-modal { position:absolute; inset:0; z-index:1101; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(8,10,14,.48); backdrop-filter:blur(12px); }
+.canvas-asset-confirm-modal.open { display:flex; }
+.canvas-asset-confirm-dialog { width:min(360px,calc(100vw - 32px)); border:1px solid var(--line); border-radius:16px; background:var(--card-solid); color:var(--text); box-shadow:0 28px 90px rgba(0,0,0,.34); padding:20px; display:grid; grid-template-columns:40px minmax(0,1fr); gap:12px; animation:canvas-asset-confirm-in .16s ease-out; }
+.canvas-asset-confirm-mark { width:40px; height:40px; display:grid; place-items:center; border:1px solid color-mix(in srgb, var(--danger) 34%, var(--line)); border-radius:12px; background:color-mix(in srgb, var(--danger) 10%, var(--soft)); color:var(--danger); }
+.canvas-asset-confirm-copy { min-width:0; padding-top:1px; }
+.canvas-asset-confirm-copy strong { display:block; font-size:15px; line-height:1.35; }
+.canvas-asset-confirm-copy p { margin:5px 0 0; color:var(--muted); font-size:12px; line-height:1.55; overflow-wrap:anywhere; }
+.canvas-asset-confirm-actions { grid-column:1 / -1; display:flex; justify-content:flex-end; gap:8px; margin-top:5px; }
+.canvas-asset-confirm-actions button { min-width:88px; justify-content:center; }
+.canvas-asset-confirm-delete { background:var(--danger)!important; border-color:var(--danger)!important; color:#fff!important; }
+.canvas-asset-confirm-delete:hover { filter:brightness(.94); }
+@keyframes canvas-asset-confirm-in { from { opacity:0; transform:translateY(6px) scale(.985); } to { opacity:1; transform:translateY(0) scale(1); } }
 .theme-dark .canvas-asset-panel.drag-over { box-shadow:0 22px 58px var(--shadow),0 0 0 3px rgba(255,255,255,.1); }
 .theme-dark .canvas-asset-name-input:focus,.theme-dark .canvas-asset-save-field input:focus,.theme-dark .canvas-asset-save-field select:focus { box-shadow:0 0 0 2px rgba(255,255,255,.1); }
 @media(max-width:520px){.canvas-asset-save-modal{padding:16px}.canvas-asset-save-dialog{padding:14px}.canvas-asset-save-actions button{min-width:0;flex:1}}

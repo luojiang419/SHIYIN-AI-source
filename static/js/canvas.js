@@ -9441,7 +9441,9 @@ window.CanvasEngineBridge = {
     },
     onNodeUnmount(node){
         const element = canvasNodeDomIndex.get(node.id);
-        const selector = node.type === 'output' ? '.node-body' : node.type === 'llm' ? '.llm-chat-log' : '';
+        const selector = node.type === 'output' ? '.node-body'
+            : node.type === 'llm' ? '.llm-chat-log'
+            : node.type === 'lookbook' ? 'textarea[data-lookbook-field="lookbookPrompt"]' : '';
         const target = selector && element?.querySelector(selector);
         if(target) engineNodeScrolls.set(element, {selector,top:target.scrollTop,left:target.scrollLeft,
             bottom:node.type === 'llm' && target.scrollHeight-target.scrollTop-target.clientHeight<12});
@@ -12139,7 +12141,7 @@ function renderNode(node){
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
     if(['panorama','dwpose','autoCutout','depthMap','depthVideo','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
-    if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
+    if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{bindScrollableText,run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmWorkflow?.handles(node)) window.CanvasFilmWorkflow.bind(el,node);
     else if(window.CanvasFilmNodes?.isType?.(node.type)) bindClassicFilmNode(el,node);

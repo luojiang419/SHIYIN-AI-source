@@ -443,6 +443,11 @@
         };
         root.querySelectorAll('[data-lookbook-field]').forEach(control=>{
             const key=control.dataset.lookbookField;
+            if(key==='lookbookPrompt'){
+                // 文本选择和滚动条拖动都必须留在编辑框内，不能传给无限画布。
+                if(typeof options.bindScrollableText==='function') options.bindScrollableText(control);
+                else control.addEventListener('wheel',event=>event.stopPropagation(),{passive:true});
+            }
             control.addEventListener('compositionstart',()=>{composingControls.add(control);if(key==='lookbookPrompt')composingNodes.add(node);});
             control.addEventListener('compositionend',()=>{
                 composingControls.delete(control);

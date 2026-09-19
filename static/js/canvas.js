@@ -20049,6 +20049,20 @@ function resetCanvasAssetDropState(){
     setCanvasAssetDropOver(false);
     resetCanvasPackageDropOverlay();
 }
+function canvasAssetLibraryConsumesExternalDrop(event){
+    return Boolean(canvasAssetLibraryOpen && hasCanvasAssetSaveDrop(event.dataTransfer));
+}
+// Tauri/WebView2 有时将 OS 文件拖放的命中目标固定为 board，而不会命中其上的 aside。
+// 素材库打开即代表用户选择了入库模式，因此在 document 捕获阶段消费外部媒体，避免 board 显示遮罩。
+document.addEventListener('dragover', event => {
+    if(!canvasAssetLibraryConsumesExternalDrop(event)) return;
+    handleCanvasAssetDragOver(event);
+    dropOverlay?.classList.remove('active');
+}, true);
+document.addEventListener('drop', event => {
+    if(!canvasAssetLibraryConsumesExternalDrop(event)) return;
+    void handleCanvasAssetDrop(event);
+}, true);
 canvasAssetDropZone?.addEventListener('dragover', handleCanvasAssetDragOver);
 canvasAssetDropZone?.addEventListener('dragleave', event => {
     if(!canvasAssetDropZone.contains(event.relatedTarget)) setCanvasAssetDropOver(false);

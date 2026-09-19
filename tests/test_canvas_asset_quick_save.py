@@ -64,6 +64,10 @@ def test_external_asset_drop_locks_the_current_destination_before_async_resoluti
     assert "const media = outputMediaDragPayload(event.dataTransfer);" in drop
     assert "canvasAssetPanel?.addEventListener('drop', handleCanvasAssetDrop, true)" in drop
     assert "function resetCanvasAssetDropState()" in drop
+    assert "function canvasAssetLibraryConsumesExternalDrop(event)" in drop
+    assert "document.addEventListener('dragover'" in drop
+    assert "document.addEventListener('drop'" in drop
+    assert "void handleCanvasAssetDrop(event);" in drop
     assert ".canvas-asset-panel.drag-over" in CANVAS_CSS
 
 

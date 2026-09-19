@@ -88,12 +88,15 @@ def test_batch_outfit_works_support_hover_and_fullscreen_navigation():
     assert ".ec-batch-preview-compare-handle" in BATCH_CSS
 
 
-def test_model_settings_are_collapsed_by_default_and_remember_manual_expansion():
-    assert 'id="advancedSettings" class="ec-model-panel collapsed"' in ECOMMERCE_HTML
-    assert 'id="modelPanelToggle" class="ec-model-panel-toggle" type="button" aria-expanded="false"' in ECOMMERCE_HTML
-    assert "modelPanelCollapsed:true" in ECOMMERCE_JS
-    assert "saved.model_panel_collapsed !== false" in ECOMMERCE_JS
+def test_universal_model_settings_default_to_expanded_and_remember_per_mode_choice():
+    assert 'id="advancedSettings" class="ec-model-panel"' in ECOMMERCE_HTML
+    assert 'id="modelPanelToggle" class="ec-model-panel-toggle" type="button" aria-expanded="true"' in ECOMMERCE_HTML
+    assert "universal:false" in ECOMMERCE_JS
+    assert "modelPanelCollapsed:false" in ECOMMERCE_JS
+    assert "model_panel_collapsed_by_operation" in ECOMMERCE_JS
+    assert "defaultModelPanelCollapsed(operation)" in ECOMMERCE_JS
     assert "state.modelPanelCollapsed = !state.modelPanelCollapsed" in ECOMMERCE_JS
+    assert "state.modelPanelCollapsedByOperation[state.operation] = state.modelPanelCollapsed" in ECOMMERCE_JS
 
 
 def test_batch_page_reuses_pose_replicate_runtime_and_shared_prompts():

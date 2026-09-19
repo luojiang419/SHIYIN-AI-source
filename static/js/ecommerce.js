@@ -13,8 +13,14 @@
     const SETTINGS_KEY = 'studio_ecommerce_settings_v2';
     const LEGACY_SETTINGS_KEY = 'studio_ecommerce_settings_v1';
     const CURRENT_TASK_KEY = 'ecommerce_current_task';
-    const SETTINGS_SCHEMA_VERSION = 6;
+    const SETTINGS_SCHEMA_VERSION = 7;
     const DEFAULT_OPERATION = 'universal';
+    const DEFAULT_MODEL_PANEL_COLLAPSED_BY_OPERATION = Object.freeze({
+        universal:false,
+        try_on:true,
+        batch_outfit:true,
+        pose_transfer:true,
+    });
     const ASPECT_RATIOS = ['source','1:1','2:3','3:2','3:4','4:3','4:5','9:16','16:9'];
     const RESOLUTIONS = ['auto','1k','2k','4k'];
     const QUALITIES = ['auto','low','medium','high'];
@@ -114,7 +120,8 @@
         resolution:'auto',
         quality:'auto',
         count:0,
-        modelPanelCollapsed:true,
+        modelPanelCollapsed:false,
+        modelPanelCollapsedByOperation:{},
         currentTask:null,
         tasks:[],
         selectedOutput:0,
@@ -356,9 +363,13 @@
             state.resolution = RESOLUTIONS.includes(saved.resolution) ? saved.resolution : 'auto';
             state.quality = QUALITIES.includes(saved.quality) ? saved.quality : 'auto';
             state.count = [0,1,2,3,4].includes(Number(saved.count)) ? Number(saved.count) : 0;
-            state.modelPanelCollapsed = schemaVersion >= SETTINGS_SCHEMA_VERSION
-                ? saved.model_panel_collapsed !== false
-                : true;
+            state.modelPanelCollapsedByOperation = saved.model_panel_collapsed_by_operation
+                && typeof saved.model_panel_collapsed_by_operation === 'object'
+                ? Object.fromEntries(Object.entries(saved.model_panel_collapsed_by_operation)
+                    .filter(([operation,collapsed]) => OPERATION_CONFIG[operation] && typeof collapsed === 'boolean'))
+                : {};
+            state.modelPanelCollapsed = state.modelPanelCollapsedByOperation[state.operation]
+                ?? defaultModelPanelCollapsed(state.operation);
             if(saved.batch_outfit && typeof saved.batch_outfit === 'object') state.batchOutfit = saved.batch_outfit;
             if(saved.workspaces && typeof saved.workspaces === 'object') {
                 Object.keys(OPERATION_CONFIG).forEach(operation => {
@@ -428,6 +439,7 @@
             quality:state.quality,
             count:state.count,
             model_panel_collapsed:state.modelPanelCollapsed,
+            model_panel_collapsed_by_operation:state.modelPanelCollapsedByOperation,
             batch_outfit:window.EcommerceBatchOutfit?.snapshot?.() || state.batchOutfit,
             workspaces:serializableWorkspaces(),
         };
@@ -2193,6 +2205,8 @@
         if(!OPERATION_CONFIG[operation] || operation === state.operation) return;
         captureWorkspace();
         state.operation = operation;
+        state.modelPanelCollapsed = state.modelPanelCollapsedByOperation[operation]
+            ?? defaultModelPanelCollapsed(operation);
         clearAnalysisPreview();
         state.candidateVisibleCount = ECOMMERCE_CANDIDATE_INITIAL_LIMIT;
         const workspace = restoreWorkspace(operation);
@@ -4039,6 +4053,10 @@
         el.modelPanelToggle?.setAttribute('aria-expanded', state.modelPanelCollapsed ? 'false' : 'true');
     }
 
+    function defaultModelPanelCollapsed(operation){
+        return DEFAULT_MODEL_PANEL_COLLAPSED_BY_OPERATION[operation] ?? true;
+    }
+
     function updateRouteSummary(){
         const route = resolveDisplayedRoute();
         const strong = el.routeSummary?.querySelector('strong');
@@ -4132,6 +4150,7 @@
         });
         el.modelPanelToggle.addEventListener('click', () => {
             state.modelPanelCollapsed = !state.modelPanelCollapsed;
+            state.modelPanelCollapsedByOperation[state.operation] = state.modelPanelCollapsed;
             updateModelPanelSelection();
             persistSettings();
         });

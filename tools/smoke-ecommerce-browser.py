@@ -273,10 +273,13 @@ async def run(args) -> dict:
                         select.value = value;
                         select.dispatchEvent(new Event('change',{bubbles:true}));
                     }
+                    const modelPanelInitiallyCollapsed = modelPanel.classList.contains('collapsed') && modelToggle.getAttribute('aria-expanded') === 'false';
+                    modelToggle.click();
+                    const modelPanelExpanded = !modelPanel.classList.contains('collapsed') && modelToggle.getAttribute('aria-expanded') === 'true';
                     modelToggle.click();
                     const modelPanelCollapsed = modelPanel.classList.contains('collapsed') && modelToggle.getAttribute('aria-expanded') === 'false';
-                    modelToggle.click();
                     document.querySelector('[data-operation="universal"]').click();
+                    const universalModelPanelExpanded = !modelPanel.classList.contains('collapsed') && modelToggle.getAttribute('aria-expanded') === 'true';
                     const dock = document.getElementById('universalDock').getBoundingClientRect();
                     const dockStyle = getComputedStyle(document.getElementById('universalDock'));
                     const generate = document.getElementById('generateButton').getBoundingClientRect();
@@ -383,7 +386,10 @@ async def run(args) -> dict:
                             count: window.EcommerceStudio.state.count,
                         },
                         ratioOptions: [...document.getElementById('ratioSelect').options].map(item => item.value),
+                        modelPanelInitiallyCollapsed,
+                        modelPanelExpanded,
                         modelPanelCollapsed,
+                        universalModelPanelExpanded,
                         universalLayout: {
                             presetRoles:universalCards.map(card => card.dataset.referenceRole),
                             cardCountBeforeAdd:universalCards.length,
@@ -946,8 +952,8 @@ async def run(args) -> dict:
                 raise AssertionError(f"Internal routing status is still visible: {runtime}")
             if "gemini-3-pro-image-preview" not in runtime["autoModelLabel"]:
                 raise AssertionError(f"Recommended model label did not refresh: {runtime}")
-            if not runtime["modelPanelCollapsed"]:
-                raise AssertionError(f"Model panel did not collapse accessibly: {runtime}")
+            if not runtime["modelPanelInitiallyCollapsed"] or not runtime["modelPanelExpanded"] or not runtime["modelPanelCollapsed"] or not runtime["universalModelPanelExpanded"]:
+                raise AssertionError(f"Model panel mode defaults or accessible toggling failed: {runtime}")
             result_frame = runtime["resultFrame"]
             if result_frame["width"] <= 0 or result_frame["height"] <= 0 or not result_frame["wideStage"] or result_frame["backdropCount"] != 2 or not result_frame["backdropBlurred"] or result_frame["backdropBrightness"] < 0.72 or result_frame["backdropBlur"] > 22 or not result_frame["unifiedGeneratedBackdrop"] or not result_frame["foregroundLayersTransparent"] or not result_frame["backdropStylesMatch"] or result_frame["candidateCount"] != 2 or not result_frame["metaOverlaysImage"] or not result_frame["candidatesInsideFrame"] or not result_frame["removedActions"]:
                 raise AssertionError(f"Universal result frame is not wide, layered, or has overlapping bands: {result_frame}")

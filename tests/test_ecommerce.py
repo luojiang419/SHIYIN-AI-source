@@ -1333,6 +1333,27 @@ class EcommerceBackendTests(unittest.TestCase):
         self.assertEqual(snapshot["count"], 3)
         self.assertEqual(snapshot["parameters"], {"aspect_ratio": "4:5", "resolution": "2k", "quality": "high", "count": 3})
 
+    def test_ecommerce_task_allows_large_universal_reference_analysis(self):
+        provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
+        payload = self.main.EcommerceTaskRequest(
+            operation="universal",
+            mode="standard",
+            inputs=[self.main.AIReference(role="subject", url="/assets/input/subject.png")],
+            options={
+                "reference_analysis": {
+                    "subject": {"item_name": "模特主体", "visual_details": "细节" * 8000},
+                },
+            },
+            provider_id="shiying",
+            model="gemini-3-pro-image-preview",
+        )
+        with (
+            patch.object(self.main, "configured_ecommerce_providers", return_value=[provider]),
+            patch.object(self.main, "validate_ecommerce_local_inputs", return_value=([{"role": "subject", "url": "/assets/input/subject.png"}], (900, 1200))),
+        ):
+            snapshot = self.main.prepare_ecommerce_request(payload)
+        self.assertEqual(snapshot["options"]["reference_analysis"]["subject"]["visual_details"], "细节" * 8000)
+
     def test_lookbook_count_option_is_authoritative_for_generation_snapshot(self):
         provider = {"id": "shiying", "name": "shiying", "enabled": True, "image_models": ["gemini-3-pro-image-preview"]}
         for count in range(1, 5):

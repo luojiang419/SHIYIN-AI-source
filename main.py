@@ -18271,8 +18271,15 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         operation = validate_ecommerce_operation(payload.operation)
         mode = validate_ecommerce_mode(payload.mode)
         options_json = json.dumps(payload.options or {}, ensure_ascii=False)
-        # 完整导演计划包含每个分格的拍摄决定，前端再次提交时不能被旧 20KB 限制拒绝。
-        options_limit = 512 * 1024 if str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook" else 20 * 1024
+        # 完整导演计划和全能模式的逐图分析都由前端预览生成后回传，不能被普通参数的 20 KiB 限制拒绝。
+        has_universal_reference_analysis = (
+            operation == "universal"
+            and isinstance((payload.options or {}).get("reference_analysis"), dict)
+        )
+        options_limit = 512 * 1024 if (
+            str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook"
+            or has_universal_reference_analysis
+        ) else 20 * 1024
         if len(options_json.encode("utf-8")) > options_limit:
             raise ValueError("功能参数过大")
         options = json.loads(options_json)

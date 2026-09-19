@@ -20688,7 +20688,17 @@ async def prepare_ecommerce_analysis(payload: EcommerceAnalyzeRequest) -> Dict[s
         operation = validate_ecommerce_operation(payload.operation)
         mode = validate_ecommerce_mode(payload.mode)
         options_json = json.dumps(payload.options or {}, ensure_ascii=False)
-        if len(options_json.encode("utf-8")) > 20 * 1024:
+        # 全能模式分析完成后会将逐图证据回传到生成请求；预览请求必须接受同一份
+        # 数据，避免任务接口可接收而分析接口先以普通参数上限拒绝。
+        has_universal_reference_analysis = (
+            operation == "universal"
+            and isinstance((payload.options or {}).get("reference_analysis"), dict)
+        )
+        options_limit = 512 * 1024 if (
+            str((payload.options or {}).get("prompt_policy") or "").lower() == "lookbook"
+            or has_universal_reference_analysis
+        ) else 20 * 1024
+        if len(options_json.encode("utf-8")) > options_limit:
             raise ValueError("功能参数过大")
         options = json.loads(options_json)
         normalized = validate_ecommerce_input_roles(

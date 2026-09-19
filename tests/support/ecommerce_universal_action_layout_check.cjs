@@ -40,6 +40,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
                 assert.ok(rect.top >= dock.top && rect.bottom <= dock.bottom, `${viewport.width}px: ${name} 纵向越出素材坞`);
             }
         }
+        await page.evaluate(() => document.querySelector('.ec-inline-error').classList.add('hidden'));
+        const centered = await page.evaluate(() => {
+            const rect = selector => document.querySelector(selector).getBoundingClientRect();
+            const add = rect('.ec-add-reference-action');
+            const generate = rect('.ec-primary-button');
+            return { add, generate };
+        });
+        assert.ok(Math.abs((centered.add.top + centered.add.bottom) / 2 - (centered.generate.top + centered.generate.bottom) / 2) <= 1, '无错误时生成按钮应与添加按钮垂直居中对齐');
         console.log('ecommerce universal action layout passed');
     } finally {
         await browser.close();

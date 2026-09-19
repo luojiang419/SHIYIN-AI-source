@@ -987,7 +987,7 @@ body {
 .ec-universal-dock .ec-generate-actions {
     display:grid;
     grid-template-columns:104px 184px;
-    grid-template-rows:minmax(0,1fr) 62px;
+    grid-template-rows:minmax(0,1fr);
     align-items:center;
     gap:31px;
 }
@@ -996,7 +996,7 @@ body {
 }
 .ec-universal-dock .ec-add-reference-action {
     grid-column:1;
-    grid-row:1 / span 2;
+    grid-row:1;
     position:relative;
     display:flex;
     align-items:center;
@@ -1020,7 +1020,8 @@ body {
 }
 .ec-universal-dock .ec-generate-actions .ec-primary-button {
     grid-column:2;
-    grid-row:2;
+    grid-row:1;
+    align-self:center;
     min-height:62px;
     margin:0;
     border-radius:999px;
@@ -1034,6 +1035,18 @@ body {
     max-height:100%;
     margin:0;
     overflow:auto;
+}
+.ec-universal-dock .ec-generate-actions:has(.ec-inline-error:not(.hidden)),
+.ec-universal-dock .ec-generate-actions:has(.ec-analysis-preview:not(.hidden)) {
+    grid-template-rows:minmax(0,1fr) 62px;
+}
+.ec-universal-dock .ec-generate-actions:has(.ec-inline-error:not(.hidden)) .ec-add-reference-action,
+.ec-universal-dock .ec-generate-actions:has(.ec-analysis-preview:not(.hidden)) .ec-add-reference-action {
+    grid-row:1 / span 2;
+}
+.ec-universal-dock .ec-generate-actions:has(.ec-inline-error:not(.hidden)) .ec-primary-button,
+.ec-universal-dock .ec-generate-actions:has(.ec-analysis-preview:not(.hidden)) .ec-primary-button {
+    grid-row:2;
 }
 .ec-universal-dock .ec-generate-actions .ec-primary-button svg {
     width:19px;

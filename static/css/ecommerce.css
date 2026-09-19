@@ -989,6 +989,7 @@ body {
 .ec-universal-dock .ec-generate-actions {
     display:grid;
     grid-template-columns:104px 184px;
+    grid-template-rows:minmax(0,1fr) 62px;
     align-items:center;
     gap:31px;
 }
@@ -996,6 +997,8 @@ body {
     display:none;
 }
 .ec-universal-dock .ec-add-reference-action {
+    grid-column:1;
+    grid-row:1 / span 2;
     position:relative;
     display:flex;
     align-items:center;
@@ -1018,10 +1021,21 @@ body {
     display:none;
 }
 .ec-universal-dock .ec-generate-actions .ec-primary-button {
+    grid-column:2;
+    grid-row:2;
     min-height:62px;
     margin:0;
     border-radius:999px;
     box-shadow:0 14px 30px rgba(154,102,54,.22),inset 0 1px 0 rgba(255,255,255,.18);
+}
+.ec-universal-dock .ec-generate-actions .ec-inline-error,
+.ec-universal-dock .ec-generate-actions .ec-analysis-preview {
+    grid-column:2;
+    grid-row:1;
+    min-width:0;
+    max-height:100%;
+    margin:0;
+    overflow:auto;
 }
 .ec-universal-dock .ec-generate-actions .ec-primary-button svg {
     width:19px;
@@ -1216,7 +1230,7 @@ html.studio-theme-dark body .ec-result-frame {
         flex:1 1 auto;
     }
     .ec-universal-dock-actions {
-        flex:0 0 54px;
+        flex:0 0 118px;
     }
     .ec-universal-dock .ec-input-slots,
     .ec-universal-dock.has-many-references .ec-input-slots {
@@ -1233,8 +1247,10 @@ html.studio-theme-dark body .ec-result-frame {
     .ec-universal-dock.has-many-references .ec-universal-reference {
         scroll-snap-align:start;
     }
-    .ec-universal-dock .ec-generate-actions {
+    .ec-page.is-universal .ec-universal-dock .ec-generate-actions {
+        display:grid;
         grid-template-columns:minmax(96px,.64fr) minmax(176px,1.36fr);
+        grid-template-rows:minmax(0,1fr) 54px;
         gap:10px;
     }
     .ec-universal-dock .ec-add-reference-action,
@@ -1326,17 +1342,23 @@ html.studio-theme-dark body .ec-result-frame {
         min-width:0;
         height:100%;
         grid-template-columns:minmax(0,1fr);
-        grid-template-rows:minmax(0,1fr) 56px;
+        grid-template-rows:42px minmax(0,1fr) 56px;
         gap:10px;
     }
     .ec-universal-dock .ec-add-reference-action {
+        grid-column:1;
+        grid-row:1;
         display:flex;
         align-items:center;
         justify-content:center;
-        min-height:0;
-        height:auto;
+        min-height:42px;
+        height:42px;
     }
+    .ec-universal-dock .ec-generate-actions .ec-inline-error,
+    .ec-universal-dock .ec-generate-actions .ec-analysis-preview { grid-column:1; grid-row:2; }
     .ec-universal-dock .ec-generate-actions .ec-primary-button {
+        grid-column:1;
+        grid-row:3;
         min-height:56px;
     }
 }

@@ -9375,6 +9375,9 @@ function engineNodeContentRevision(node){
     const seen = new WeakSet();
     return JSON.stringify(node, function(key, value) {
         if(this === node && ['x','y'].includes(key)) return undefined;
+        // Lookbook 的表单值由当前 DOM 控件即时维护。把这些纯编辑字段纳入
+        // 节点版本会让输入事件重建节点，从而中断焦点和中文输入法组合状态。
+        if(this === node && node.type === 'lookbook' && ['lookbookPrompt','lookbookInputRevision'].includes(key)) return undefined;
         if(['_ltxEditor','_activeLoopCtx','_blenderState'].includes(key)) return undefined;
         if(value && typeof value === 'object'){
             if(value instanceof Element || seen.has(value)) return undefined;

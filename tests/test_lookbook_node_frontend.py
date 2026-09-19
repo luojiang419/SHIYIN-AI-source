@@ -271,6 +271,12 @@ if(node.lookbookPlan!=='' || changes!==1) process.exit(3);
             encoding="utf-8",
         )
 
+    def test_lookbook_prompt_does_not_change_engine_node_revision_while_editing(self):
+        start = self.canvas.index("function engineNodeContentRevision")
+        body = self.canvas[start:self.canvas.index("function prepareEngineNodeRevisions", start)]
+        self.assertIn("node.type === 'lookbook'", body)
+        self.assertIn("['lookbookPrompt','lookbookInputRevision']", body)
+
     def test_selection_hub_keeps_panel_inside_board_and_prefers_above_anchor(self):
         self.assertIn("const availableAbove", self.canvas)
         self.assertIn("selectionHub.style.maxHeight", self.canvas)

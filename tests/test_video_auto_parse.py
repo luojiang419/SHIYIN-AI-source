@@ -64,6 +64,13 @@ def test_auto_parse_system_prompt_injects_selected_video_skill_content():
     assert "开场、发展、变化或揭示、收束" in h3
 
 
+def test_single_image_auto_parse_requires_one_continuous_shot():
+    system = _video_auto_parse_system_prompt("minimax-h3", "MiniMax H3", "mapping", image_count=1)
+    assert "同一主体、同一空间与同一时间连续发生的单镜头动作" in system
+    assert "不得切换机位、景别、角度、地点、时段或叙事段落" in system
+    assert "不能写 Shot 2、分镜、多角度覆盖" in system
+
+
 def test_prompt_polish_injects_director_rules_without_overriding_user_intent():
     prompt = video_prompt_polish_system_prompt(
         "minimax-h3", "MiniMax H3", text_to_video=False, reference_context="mapping"

@@ -813,7 +813,9 @@ ONLINE_IMAGE_TASKS_FILE = ""
 GLOBAL_CONFIG_FILE = ""
 CANVAS_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 LOCAL_IMAGE_IMPORT_MAX_BYTES = int(os.getenv("LOCAL_IMAGE_IMPORT_MAX_BYTES", str(50 * 1024 * 1024)))
-CANVAS_PACKAGE_MAX_UPLOAD_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
+# 工程包导入和导出使用同一归档上限。原先这里是 1GB，导致合法的
+# 2GB 解压上限工程在导出阶段先被错误拦截，且无法再导入导出的结果。
+CANVAS_PACKAGE_MAX_UPLOAD_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_UPLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
 CANVAS_PACKAGE_MAX_UNCOMPRESSED_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_UNCOMPRESSED_BYTES", str(2 * 1024 * 1024 * 1024)))
 CANVAS_PACKAGE_MAX_FILES = int(os.getenv("CANVAS_PACKAGE_MAX_FILES", "5000"))
 CANVAS_PACKAGE_MAX_RESOURCE_BYTES = int(os.getenv("CANVAS_PACKAGE_MAX_RESOURCE_BYTES", str(512 * 1024 * 1024)))
@@ -24593,6 +24595,7 @@ def _video_auto_parse_system_prompt(
     duration: Optional[float] = None,
     aspect_ratio: str = "",
     resolution: str = "",
+    image_count: int = 0,
 ) -> str:
     """自动解析单次多模态请求的导演提示词约束。"""
     skill_text, skill_id = _video_prompt_skill(video_provider, video_model)
@@ -24617,6 +24620,11 @@ def _video_auto_parse_system_prompt(
         format_rule = "使用图片N/视频N/音频N自然语言编号，不得输出任何 Kling Omni 三角标签。"
     else:
         format_rule = ""
+    single_image_rule = (
+        "本次仅有一张参考图：最终必须编排为同一主体、同一空间与同一时间连续发生的单镜头动作，不得切换机位、景别、角度、地点、时段或叙事段落。"
+        "可在一个连贯运镜内呈现准备、执行和情绪收束，但不能写 Shot 2、分镜、多角度覆盖或任何会造成跳跃感的镜头切换。"
+        if image_count == 1 else ""
+    )
     return (
         "你是资深影视分镜导演和视频模型提示词工程师。只输出最终可直接提交给视频模型的一段提示词，不要解释分析过程、不要输出案例摘要。"
         "本次请求中的全部图片已经按用户输入顺序一次性上传，请在同一个上下文中联合分析它们的连续关系；图片编号与上传顺序严格一致。若用户提供了提示词，必须把用户提示词中的故事情节、角色关系、动作和情绪作为叙事主线，同时结合全部图片和本 skill 生成结果；不得只参考提示词或只参考首尾图片。先以画面事实为准，再吸收案例中的可迁移经验；不得臆造图片中看不到的主体、文字或身份。"
@@ -24626,6 +24634,7 @@ def _video_auto_parse_system_prompt(
         f"{_VIDEO_DIRECTOR_EXPANSION_RULES}"
         f"{_VIDEO_ACTION_CHOREOGRAPHY_REQUIREMENTS}"
         "请灵活设计可执行的镜头调度：必要时拆分连续分镜，明确每个镜头的起止画面、景别、机位/视角、主体动作先后、身体朝向与视线、镜头运动方向和速度、节奏、光线、环境声/对白；镜头数量必须与素材叙事需要匹配，不能机械按图片数量拆分。"
+        f"{single_image_rule}"
         f"{'H3 Ref2VA 生成任务的 detailed_description 通常写 350-500 个英文词；在不牺牲时间节拍和动作因果的前提下，按镜头信息量充分展开，禁止压缩成每镜头一两句静态摘要。' if skill_id == 'minimax-h3' else ''}"
         f"{model_hint}{video_prompt_limit_rule(video_provider, video_model)}"
         f"{SEMANTIC_EQUIVALENCE_CONTRACT}"
@@ -24718,6 +24727,7 @@ async def canvas_video_auto_parse(payload: CanvasVideoAutoParseRequest, progress
         payload.duration,
         payload.aspect_ratio,
         payload.resolution,
+        len(images),
     )
     request = CanvasLLMRequest(
         message=user_message,

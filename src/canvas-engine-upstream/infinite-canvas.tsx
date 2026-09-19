@@ -34,7 +34,8 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
     const scaleRef = useRef(viewport.k);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
-    const [isSpacePressed, setIsSpacePressed] = useState(false);
+    const temporaryPanKeys = useRef({ space: false, control: false });
+    const [isTemporaryPanPressed, setIsTemporaryPanPressed] = useState(false);
     const [isPanning, setIsPanning] = useState(false);
 
     useEffect(() => {
@@ -49,24 +50,32 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
     );
 
     useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.code !== "Space") return;
+        const isEditableTarget = (event: KeyboardEvent) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true']")) return;
-            event.preventDefault();
-            setIsSpacePressed(true);
+            return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || Boolean(target?.closest("[contenteditable='true']"));
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.code !== "Space" && event.code !== "ControlLeft" && event.code !== "ControlRight") return;
+            if (isEditableTarget(event)) return;
+            if (event.code === "Space") event.preventDefault();
+            if (event.code === "Space") temporaryPanKeys.current.space = true;
+            else temporaryPanKeys.current.control = true;
+            setIsTemporaryPanPressed(true);
         };
 
         const handleKeyUp = (event: KeyboardEvent) => {
-            if (event.code === "Space") {
-                const target = event.target instanceof Element ? event.target : null;
-                if (!(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || target?.closest("[contenteditable='true']"))) event.preventDefault();
-                setIsSpacePressed(false);
-            }
+            if (event.code !== "Space" && event.code !== "ControlLeft" && event.code !== "ControlRight") return;
+            if (event.code === "Space" && !isEditableTarget(event)) event.preventDefault();
+            // Ctrl 与空格都可临时切换工具；只在两者都松开后才恢复。
+            if (event.code === "Space") temporaryPanKeys.current.space = false;
+            else temporaryPanKeys.current.control = false;
+            setIsTemporaryPanPressed(temporaryPanKeys.current.space || temporaryPanKeys.current.control);
         };
 
         const handleBlur = () => {
-            setIsSpacePressed(false);
+            temporaryPanKeys.current = { space: false, control: false };
+            setIsTemporaryPanPressed(false);
             panState.current.isPanning = false;
             setIsPanning(false);
             document.body.style.cursor = "";
@@ -108,7 +117,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
-        const temporaryTool = isSpacePressed;
+        const temporaryTool = isTemporaryPanPressed;
         const activeTool = temporaryTool ? (tool === "select" ? "pan" : "select") : tool;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],.node[data-id],.link-hit[data-connection-id]");
         const shouldPan = event.button === 1 || (event.button === 0 && activeTool === "pan" && isBackgroundClick);
@@ -214,7 +223,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
         };
     }, [containerRef, handleWheel]);
 
-    const temporaryTool = isSpacePressed;
+    const temporaryTool = isTemporaryPanPressed;
     const activeTool = temporaryTool ? (tool === "select" ? "pan" : "select") : tool;
     const cursor = isPanning ? "grabbing" : activeTool === "pan" ? "grab" : undefined;
 

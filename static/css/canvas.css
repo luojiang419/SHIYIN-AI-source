@@ -359,7 +359,7 @@ body.theme-dark .node-run-status.failed { background:rgba(239,68,68,.22); color:
 .video-node .generator-body { display:flex; flex-direction:column; }
 .video-node .generator-canvas-content { flex:0 0 auto; min-height:0; overflow:visible; }
 .video-node .node-bottom-controls { position:relative; bottom:auto; flex:0 0 auto; }
-.video-node .generator-prompt-input { height:76px; min-height:76px; max-height:140px; }
+.video-node .generator-prompt-input { height:152px; min-height:152px; max-height:280px; }
 .video-input-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .video-input-head .tool-btn { height:28px; min-width:0; padding:0 10px; font-size:10px; white-space:nowrap; }
 .video-input-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; }

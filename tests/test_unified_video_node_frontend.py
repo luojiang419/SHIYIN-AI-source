@@ -72,12 +72,16 @@ class UnifiedVideoNodeFrontendTests(unittest.TestCase):
         self.assertNotIn('${node.running ? \'disabled\' : \'\'}"><i data-lucide="clapperboard"', self.javascript)
         self.assertIn("/api/canvas-video-tasks/${encodeURIComponent(id)}/cancel", self.javascript)
 
-    def test_video_prompt_editor_is_scrollable_and_height_capped(self):
+    def test_video_prompt_editor_is_scrollable_and_twice_as_tall(self):
         self.assertIn("bindScrollableText(input);", self.javascript)
         self.assertIn("maxLines:12", self.javascript)
         self.assertIn("allowShrink:true", self.javascript)
-        self.assertIn("max-height:260px", self.styles)
+        self.assertIn(".video-node .generator-prompt-input { height:152px; min-height:152px; max-height:280px; }", self.styles)
         self.assertIn("overscroll-behavior:contain", self.styles)
+
+    def test_kling_uses_supported_1080p_for_a_new_resolution_selection(self):
+        self.assertIn("const default1080p = normalizedAllowedValues.find(option => option.toLowerCase() === '1080p');", self.javascript)
+        self.assertIn("argument.name === 'resolution' && (stored == null || stored === '') && default1080p", self.javascript)
 
 
 if __name__ == "__main__":

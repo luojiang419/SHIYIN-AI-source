@@ -15037,6 +15037,9 @@ function klingVideoSettingsHtml(node){
         const stored = node.modelParameters[argument.name];
         let value = stored == null || stored === '' ? String(argument.default || '') : String(stored);
         const normalizedAllowedValues = allowed_values.map(option => String(option));
+        // 新建可灵节点优先使用当前模型实际支持的 1080p，保留用户已经保存的选择。
+        const default1080p = normalizedAllowedValues.find(option => option.toLowerCase() === '1080p');
+        if(argument.name === 'resolution' && (stored == null || stored === '') && default1080p) value = default1080p;
         if(normalizedAllowedValues.length && !normalizedAllowedValues.includes(value)){
             const declaredDefault = String(argument.default || '');
             value = normalizedAllowedValues.includes(declaredDefault) ? declaredDefault : normalizedAllowedValues[0];

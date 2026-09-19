@@ -10,6 +10,7 @@ type InfiniteCanvasProps = {
     containerRef: React.RefObject<HTMLDivElement | null>;
     viewport: ViewportTransform;
     tool: "select" | "pan";
+    panButton: "primary" | "middle";
     backgroundMode?: CanvasBackgroundMode;
     onViewportChange: (viewport: ViewportTransform) => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
@@ -20,7 +21,7 @@ type InfiniteCanvasProps = {
     children: React.ReactNode;
 };
 
-export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgroundMode = "lines", onViewportChange, onCanvasMouseDown, onCanvasDeselect, onCanvasDoubleClick, onContextMenu, onDrop, children }: InfiniteCanvasProps) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const panState = useRef({
         isPanning: false,
@@ -120,7 +121,8 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
         const temporaryTool = isTemporaryPanPressed;
         const activeTool = temporaryTool ? (tool === "select" ? "pan" : "select") : tool;
         const isBackgroundClick = !target?.closest("[data-node-id],[data-connection-id],.node[data-id],.link-hit[data-connection-id]");
-        const shouldPan = event.button === 1 || (event.button === 0 && activeTool === "pan" && isBackgroundClick);
+        const panMouseButton = panButton === "primary" ? 0 : 1;
+        const shouldPan = isBackgroundClick && (activeTool === "pan" ? event.button === 0 : event.button === panMouseButton);
         if (activeTool === "pan" && (!target || !event.currentTarget.contains(target))) return;
         if (target?.closest("[data-canvas-no-zoom]") && activeTool !== "pan") return;
         if (target?.closest("[data-connection-create-menu]")) return;
@@ -128,7 +130,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, backgroundMode = 
 
         if (shouldPan) {
             event.preventDefault();
-            if (activeTool === "pan") event.stopPropagation();
+            event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
             panState.current = {
                 isPanning: true,

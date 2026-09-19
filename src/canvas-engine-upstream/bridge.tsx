@@ -5,7 +5,7 @@ import { InfiniteCanvas } from "./infinite-canvas";
 import type { ViewportTransform } from "./types";
 
 type CanvasNode = { id: string; x: number; y: number; w?: number; h?: number; type: string };
-type Scene = { nodes: CanvasNode[]; viewport: ViewportTransform; tool: "select" | "pan"; epoch: number };
+type Scene = { nodes: CanvasNode[]; viewport: ViewportTransform; tool: "select" | "pan"; panButton: "primary" | "middle"; epoch: number };
 type NodeBridge = {
     renderNode: (node: CanvasNode) => HTMLElement;
     nodeSize: (node: CanvasNode) => { w: number; h: number };
@@ -28,6 +28,7 @@ declare global {
             render: (nodes: CanvasNode[], viewport: ViewportTransform) => void;
             updateViewport: (viewport: ViewportTransform) => void;
             updateTool: (tool: "select" | "pan") => void;
+            updatePanButton: (button: "primary" | "middle") => void;
             visibleIds: () => string[];
             clear: () => void;
             invalidate: (ids: string[]) => void;
@@ -128,6 +129,7 @@ function EngineApp({ scene }: { scene: Scene }) {
         containerRef={containerRef}
         viewport={scene.viewport}
         tool={scene.tool}
+        panButton={scene.panButton}
         backgroundMode="blank"
         onViewportChange={(next) => window.CanvasEngineBridge?.onViewportChange(next)}
     >
@@ -141,7 +143,7 @@ const mount = document.getElementById("canvasEngineRoot");
 const nodeVersions = new Map<string, number>();
 if (mount && !mount.hidden) {
     const root = createRoot(mount);
-    let scene: Scene = { nodes: [], viewport: { x: 0, y: 0, k: 1 }, tool: "select", epoch: 0 };
+    let scene: Scene = { nodes: [], viewport: { x: 0, y: 0, k: 1 }, tool: "select", panButton: "middle", epoch: 0 };
     const draw = () => flushSync(() => root.render(<EngineApp scene={scene} />));
     draw();
     window.CanvasEngine = {
@@ -166,6 +168,10 @@ if (mount && !mount.hidden) {
         },
         updateTool(tool) {
             scene = { ...scene, tool };
+            draw();
+        },
+        updatePanButton(panButton) {
+            scene = { ...scene, panButton };
             draw();
         },
         visibleIds() { return currentVisibleIds.slice(); },

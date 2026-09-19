@@ -457,6 +457,7 @@ nodesEl?.addEventListener('focusout', event => {
 });
 const canvasSelectTool = document.getElementById('canvasSelectTool');
 const canvasPanTool = document.getElementById('canvasPanTool');
+const canvasPanGestureMenu = document.getElementById('canvasPanGestureMenu');
 const gateStatus = document.getElementById('gateStatus');
 const gateCreateBtn = document.getElementById('gateCreateBtn');
 const gateRefreshBtn = document.getElementById('gateRefreshBtn');
@@ -683,6 +684,7 @@ let knifeNeedsRender = false;
 let selectDrag = null;
 let isRKeyDown = false;
 let canvasToolMode = 'select';
+let canvasPanButton = (() => { try { return localStorage.getItem('canvasPanButton') === 'primary' ? 'primary' : 'middle'; } catch(e){ return 'middle'; } })();
 let isSpaceKeyDown = false;
 let isControlKeyDown = false;
 let classicShortcutOverrides = {};
@@ -768,6 +770,9 @@ function syncCanvasToolUi(){
     canvasPanTool?.classList.toggle('active', canvasToolMode === 'pan');
     canvasSelectTool?.setAttribute('aria-pressed', String(canvasToolMode === 'select'));
     canvasPanTool?.setAttribute('aria-pressed', String(canvasToolMode === 'pan'));
+    canvasPanGestureMenu?.querySelectorAll('[data-canvas-pan-button]').forEach(button => {
+        button.setAttribute('aria-checked', String(button.dataset.canvasPanButton === canvasPanButton));
+    });
     board?.classList.toggle('canvas-tool-pan', activeTool === 'pan');
 }
 function setCanvasToolMode(mode){
@@ -775,6 +780,61 @@ function setCanvasToolMode(mode){
     window.CanvasEngine?.updateTool?.(canvasToolMode);
     syncCanvasToolUi();
 }
+function setCanvasPanButton(button){
+    canvasPanButton = button === 'primary' ? 'primary' : 'middle';
+    try { localStorage.setItem('canvasPanButton', canvasPanButton); } catch(e) {}
+    window.CanvasEngine?.updatePanButton?.(canvasPanButton);
+    syncCanvasToolUi();
+}
+let canvasPanGesturePressTimer = 0;
+let canvasPanGestureLongPress = false;
+function closeCanvasPanGestureMenu(){
+    if(!canvasPanGestureMenu) return;
+    canvasPanGestureMenu.hidden = true;
+}
+function openCanvasPanGestureMenu(){
+    if(!canvasPanGestureMenu) return;
+    syncCanvasToolUi();
+    canvasPanGestureMenu.hidden = false;
+    refreshIcons(canvasPanGestureMenu);
+}
+canvasSelectTool?.addEventListener('pointerdown', event => {
+    if(event.button !== 0) return;
+    canvasPanGestureLongPress = false;
+    window.clearTimeout(canvasPanGesturePressTimer);
+    canvasPanGesturePressTimer = window.setTimeout(() => {
+        canvasPanGesturePressTimer = 0;
+        canvasPanGestureLongPress = true;
+        openCanvasPanGestureMenu();
+    }, 480);
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(type => canvasSelectTool?.addEventListener(type, () => {
+    window.clearTimeout(canvasPanGesturePressTimer);
+    canvasPanGesturePressTimer = 0;
+}));
+canvasSelectTool?.addEventListener('click', event => {
+    if(canvasPanGestureLongPress){
+        event.preventDefault();
+        canvasPanGestureLongPress = false;
+        return;
+    }
+    setCanvasToolMode('select');
+});
+canvasPanGestureMenu?.addEventListener('click', event => {
+    const button = event.target.closest('[data-canvas-pan-button]');
+    if(!button) return;
+    setCanvasPanButton(button.dataset.canvasPanButton);
+    closeCanvasPanGestureMenu();
+});
+document.addEventListener('pointerdown', event => {
+    if(!canvasPanGestureMenu || canvasPanGestureMenu.hidden) return;
+    if(event.target.closest('#canvasToolSwitch')) return;
+    closeCanvasPanGestureMenu();
+}, true);
+document.addEventListener('keydown', event => {
+    if(event.key === 'Escape') closeCanvasPanGestureMenu();
+});
+window.CanvasEngine?.updatePanButton?.(canvasPanButton);
 syncCanvasToolUi();
 let canvasSortMode = (() => { try { return localStorage.getItem('canvasSortMode') || 'recent'; } catch(e){ return 'recent'; } })();
 const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';

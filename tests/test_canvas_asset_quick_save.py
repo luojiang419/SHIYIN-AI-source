@@ -6,6 +6,7 @@ CANVAS_JS = (ROOT / "static/js/canvas.js").read_text(encoding="utf-8")
 CANVAS_HTML = (ROOT / "static/canvas.html").read_text(encoding="utf-8")
 CANVAS_CSS = (ROOT / "static/css/canvas.css").read_text(encoding="utf-8")
 SMART_HTML = (ROOT / "static/smart-canvas.html").read_text(encoding="utf-8")
+MAIN_PY = (ROOT / "main.py").read_text(encoding="utf-8")
 
 
 def body(source: str, start: str, end: str) -> str:
@@ -77,6 +78,21 @@ def test_asset_library_drop_accepts_all_supported_media_and_clears_the_canvas_ov
     assert "^data:(?:image|video|audio)\\/" in CANVAS_JS
     assert "window.addEventListener('dragend', resetCanvasAssetDropState)" in CANVAS_JS
     assert "window.addEventListener('drop', resetCanvasAssetDropState)" in CANVAS_JS
+
+
+def test_asset_library_upload_returns_before_optional_image_classification_finishes():
+    upload = body(MAIN_PY, "async def upload_asset_library_items", "@app.get(\"/api/shared-folders\")")
+    add_one = body(MAIN_PY, "async def add_asset_library_item", "@app.post(\"/api/asset-library/items/batch\")")
+    add_many = body(MAIN_PY, "async def batch_add_asset_library_items", "@app.post(\"/api/asset-library/items/upload\")")
+
+    assert "async def classify_asset_library_items_after_save" in MAIN_PY
+    assert "background_tasks.add_task(classify_asset_library_items_after_save, image_ids)" in MAIN_PY
+    assert "queue_asset_library_classification(background_tasks, added)" in upload
+    assert "queue_asset_library_classification(background_tasks, [item])" in add_one
+    assert "queue_asset_library_classification(background_tasks, added)" in add_many
+    assert "await classify_asset_image_best_effort" not in upload
+    assert "await classify_asset_image_best_effort" not in add_one
+    assert "await classify_asset_image_best_effort" not in add_many
 
 
 def test_asset_card_name_double_click_uses_inline_rename_without_adding_a_node():

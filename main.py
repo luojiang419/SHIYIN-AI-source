@@ -38,7 +38,7 @@ from threading import Lock, Thread
 import httpx
 from PIL import Image, ImageFilter, ImageOps
 from io import BytesIO
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse, RedirectResponse
@@ -9071,6 +9071,33 @@ async def classify_asset_image_best_effort(abs_path, provider_id="", model="", m
     except Exception as exc:
         print(f"素材智能分类失败: {exc}")
         return None
+
+async def classify_asset_library_items_after_save(item_ids: List[str]):
+    """分类在响应入库请求后执行，避免视觉模型延迟阻塞素材面板刷新。"""
+    for item_id in item_ids:
+        try:
+            lib = load_asset_library()
+            item = find_asset_item_in_library(lib, item_id)
+            if not item or item.get("kind") != "image" or item.get("classification"):
+                continue
+            path = output_file_from_url(item.get("url") or "")
+            if not path or not os.path.isfile(path):
+                continue
+            classification = await classify_asset_image_best_effort(path)
+            if not classification:
+                continue
+            latest = load_asset_library()
+            latest_item = find_asset_item_in_library(latest, item_id)
+            if latest_item:
+                latest_item["classification"] = classification
+                save_asset_library(latest)
+        except Exception as exc:
+            print(f"素材后台智能分类失败: {exc}")
+
+def queue_asset_library_classification(background_tasks: BackgroundTasks, items: List[Dict[str, Any]]):
+    image_ids = [str(item.get("id") or "") for item in items if item.get("kind") == "image" and item.get("id")]
+    if image_ids:
+        background_tasks.add_task(classify_asset_library_items_after_save, image_ids)
 
 def migrate_asset_library_into_dirs():
     """一次性整理：给所有图片分组（含默认的角色/场景）补上真实文件夹，并把仍在 library/ 根目录的
@@ -26044,7 +26071,7 @@ async def delete_asset_library_category(category_id: str, library_id: str = ""):
     return {"library": lib}
 
 @app.post("/api/asset-library/items")
-async def add_asset_library_item(payload: AssetLibraryAddRequest):
+async def add_asset_library_item(payload: AssetLibraryAddRequest, background_tasks: BackgroundTasks):
     lib = load_asset_library()
     cat = find_asset_category_in_library(lib, payload.category_id, payload.library_id)
     if not cat:
@@ -26055,16 +26082,13 @@ async def add_asset_library_item(payload: AssetLibraryAddRequest):
     if not src:
         raise HTTPException(status_code=400, detail="只支持保存本地 /assets 或 /output 媒体")
     _, item = make_asset_library_item(src, payload.name or os.path.basename(src), subdir=cat.get("dir") or "")
-    if item.get("kind") == "image":
-        classification = await classify_asset_image_best_effort(output_file_from_url(item.get("url") or "") or src)
-        if classification:
-            item["classification"] = classification
     cat.setdefault("items", []).append(item)
     save_asset_library(lib)
+    queue_asset_library_classification(background_tasks, [item])
     return {"library": lib, "item": item}
 
 @app.post("/api/asset-library/items/batch")
-async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
+async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest, background_tasks: BackgroundTasks):
     added = []
     lib = load_asset_library()
     cat = find_asset_category_in_library(lib, payload.category_id, payload.library_id)
@@ -26079,17 +26103,15 @@ async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
         if not src:
             continue
         _, item = make_asset_library_item(src, entry.name or os.path.basename(src), subdir=cat.get("dir") or "")
-        if item.get("kind") == "image":
-            classification = await classify_asset_image_best_effort(output_file_from_url(item.get("url") or "") or src)
-            if classification:
-                item["classification"] = classification
         cat.setdefault("items", []).append(item)
         added.append(item)
     save_asset_library(lib)
+    queue_asset_library_classification(background_tasks, added)
     return {"library": lib, "items": added}
 
 @app.post("/api/asset-library/items/upload")
 async def upload_asset_library_items(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     library_id: str = Form(""),
     category_id: str = Form(""),
@@ -26119,10 +26141,6 @@ async def upload_asset_library_items(
             with open(temp_path, "wb") as handle:
                 handle.write(content)
             _, item = make_asset_library_item(temp_path, file.filename or "asset", subdir=cat.get("dir") or "")
-            if item.get("kind") == "image":
-                classification = await classify_asset_image_best_effort(output_file_from_url(item.get("url") or "") or temp_path)
-                if classification:
-                    item["classification"] = classification
             cat.setdefault("items", []).append(item)
             added.append(item)
         finally:
@@ -26131,6 +26149,7 @@ async def upload_asset_library_items(
             except OSError:
                 pass
     save_asset_library(lib)
+    queue_asset_library_classification(background_tasks, added)
     return {"library": lib, "items": added}
 
 @app.get("/api/shared-folders")

@@ -6838,7 +6838,20 @@ function localImagePathsFromDataTransfer(dataTransfer){
 function imageUrlFromDataTransfer(dataTransfer){
     return dropTextCandidates(dataTransfer).find(isRemoteImageDropValue) || '';
 }
+function canvasAssetDropPayload(dataTransfer){
+    const raw = readDropData(dataTransfer, 'application/x-canvas-asset');
+    if(!raw) return null;
+    try {
+        const asset = JSON.parse(raw);
+        if(!asset?.url || String(asset.kind || '').toLowerCase() === 'workflow') return null;
+        return {url:String(asset.url), name:String(asset.name || outputImageName(asset.url)), kind:String(asset.kind || 'image').toLowerCase()};
+    } catch(_) {
+        return null;
+    }
+}
 function imageDropPayload(dataTransfer){
+    const asset = canvasAssetDropPayload(dataTransfer);
+    if(asset) return {type:'asset', asset};
     const files = imageFilesFromDataTransfer(dataTransfer);
     if(files.length) return {type:'files', files};
     const localPaths = localImagePathsFromDataTransfer(dataTransfer);
@@ -7133,6 +7146,42 @@ async function applyImageDropPayloadToNode(nodeId, payload){
         render();
         scheduleSave();
     }
+    if(payload.type === 'asset' && payload.asset?.url){
+        pushUndo();
+        node.url = payload.asset.url;
+        node.name = payload.asset.name || outputImageName(payload.asset.url);
+        node.mediaKind = payload.asset.kind || 'image';
+        node.previewUrl = '';
+        delete node.natural_w;
+        delete node.natural_h;
+        classicPortraitMediaNodeIds.delete(node.id);
+        render();
+        scheduleSave();
+    }
+}
+async function assetFileForCanvasUpload(asset){
+    const response = await fetch(asset.url);
+    if(!response.ok) throw new Error('素材读取失败，无法放入上传格');
+    const blob = await response.blob();
+    const type = blob.type || (asset.kind === 'image' ? 'image/png' : '');
+    return new File([blob], asset.name || outputImageName(asset.url), {type});
+}
+function canvasImageUploadDropTarget(target){
+    const scope = target?.closest?.('.node');
+    if(!scope) return null;
+    const slot = target.closest?.('[data-pose-replicate-upload-role], .ecom-node-panel, .special-panel, .special-input, .special-stage, .edit-node-panel');
+    const input = slot?.querySelector?.('input[type="file"][accept*="image"]')
+        || (scope.querySelectorAll('input[type="file"][accept*="image"]').length === 1
+            ? scope.querySelector('input[type="file"][accept*="image"]')
+            : null);
+    return input && !input.disabled ? input : null;
+}
+async function applyCanvasAssetToUploadTarget(input, asset){
+    const file = await assetFileForCanvasUpload(asset);
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', {bubbles:true}));
 }
 function allowImageNodeDropEvent(e, highlightEl){
     if(hasImageDropData(e.dataTransfer) || hasOutputImageDrag(e.dataTransfer) || Array.from(e.dataTransfer?.types || []).includes('application/x-canvas-asset')){
@@ -11707,7 +11756,9 @@ const CLASSIC_VIDEO_NODE_MIN_WIDTH = 440;
 const CLASSIC_VIDEO_NODE_MAX_WIDTH = 520;
 const CLASSIC_FILM_VIDEO_NODE_MIN_WIDTH = 520;
 const CLASSIC_FILM_VIDEO_NODE_MAX_WIDTH = 620;
-const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = 520;
+// 上传节点与选中后的浮动编辑栏共用 520px 宽度，避免底部参数与操作按钮被压缩。
+const CLASSIC_IMAGE_NODE_WIDTH = 520;
+const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = CLASSIC_IMAGE_NODE_WIDTH;
 const classicPortraitMediaNodeIds = new Set();
 const CLASSIC_NODE_MIN_HEIGHTS = Object.freeze({
     image:336,
@@ -11734,7 +11785,7 @@ function classicNodeLayoutLimits(nodeOrType){
     const isControlNode = !CLASSIC_COMPACT_NODE_TYPES.has(type);
     const autoHeight = portraitMedia || (isControlNode && !(Number(size.h) > 0) && !CLASSIC_FLEX_GENERATOR_NODE_TYPES.has(type));
     return {
-        minWidth:Math.max(220, Number(size.w) || 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0, type === 'film-video' ? CLASSIC_FILM_VIDEO_NODE_MIN_WIDTH : 0, portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0),
+        minWidth:Math.max(220, Number(size.w) || 0, type === 'image' ? CLASSIC_IMAGE_NODE_WIDTH : 0, isControlNode ? CLASSIC_VIDEO_NODE_MIN_WIDTH : 0, type === 'film-video' ? CLASSIC_FILM_VIDEO_NODE_MIN_WIDTH : 0, portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0),
         minHeight:Math.max(96, Number(size.h) || 0, Number(CLASSIC_NODE_MIN_HEIGHTS[type]) || 0, isControlNode ? 320 : 0),
         maxWidth:type === 'video' ? CLASSIC_VIDEO_NODE_MAX_WIDTH : type === 'film-video' ? CLASSIC_FILM_VIDEO_NODE_MAX_WIDTH : Number.POSITIVE_INFINITY,
         autoHeight,
@@ -12421,7 +12472,7 @@ function defaultNodeSize(type){
     if(ecommerceSize) return ecommerceSize;
     const filmSize = window.CanvasFilmWorkflow?.size(type) || window.CanvasFilmNodes?.size?.(type);
     if(filmSize) return filmSize;
-    if(type === 'image') return {w:260, h:336};
+    if(type === 'image') return {w:CLASSIC_IMAGE_NODE_WIDTH, h:336};
     if(type === 'prompt') return {w:310, h:0};
     if(type === 'loop') return {w:336, h:0};
     if(type === 'llm') return {w:420, h:590};
@@ -24549,7 +24600,7 @@ board.addEventListener('dragover', e => {
         perfEnd?.({route:'canvas-package'});
         return;
     }
-    if(e.target.closest?.('.image-node')){
+    if(e.target.closest?.('.image-node') || (canvasAssetDropPayload(e.dataTransfer) && canvasImageUploadDropTarget(e.target))){
         dropOverlay.classList.remove('active');
         perfEnd?.({route:'image-node'});
         return;
@@ -24584,6 +24635,15 @@ board.addEventListener('drop', async e => {
     resetCanvasPackageDropOverlay();
     if(packageFile){
         importCanvasPackageFromDrop(packageFile);
+        return;
+    }
+    const uploadTarget = canvasAssetDropPayload(e.dataTransfer) && canvasImageUploadDropTarget(e.target);
+    if(uploadTarget){
+        try {
+            await applyCanvasAssetToUploadTarget(uploadTarget, canvasAssetDropPayload(e.dataTransfer));
+        } catch(err) {
+            showErrorModal(err.message || '素材导入失败', '素材导入失败');
+        }
         return;
     }
     if(e.target.closest?.('.image-node')) return;

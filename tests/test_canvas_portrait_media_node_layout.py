@@ -8,12 +8,14 @@ HTML = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
 
 
 def test_portrait_image_and_video_media_nodes_use_wide_auto_height_layout():
-    assert "const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = 520;" in JS
+    assert "const CLASSIC_IMAGE_NODE_WIDTH = 520;" in JS
+    assert "const CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH = CLASSIC_IMAGE_NODE_WIDTH;" in JS
     assert "const classicPortraitMediaNodeIds = new Set();" in JS
     assert "function classicMediaNodeIsPortrait(node)" in JS
     assert "['image','video'].includes(mediaKindForNode(node))" in JS
     assert "const portraitMedia = classicMediaNodeIsPortrait(nodeOrType);" in JS
     assert "portraitMedia ? CLASSIC_PORTRAIT_MEDIA_NODE_MIN_WIDTH : 0" in JS
+    assert "type === 'image' ? CLASSIC_IMAGE_NODE_WIDTH : 0" in JS
     assert "const autoHeight = portraitMedia ||" in JS
     assert "const hasFixedSize = !layoutLimits.autoHeight && Boolean" in JS
     assert "portraitMedia ? 'portrait-media-node' : ''" in JS
@@ -34,3 +36,10 @@ def test_loaded_media_dimensions_can_promote_legacy_nodes_to_portrait_layout():
     assert "refreshNodes([node.id]);" in JS
     assert "syncClassicMediaNodeOrientation(el, node, loadedImg);" in JS
     assert "feature=portrait-media-stage.1" in HTML
+
+
+def test_upload_nodes_use_the_same_safe_width_as_the_floating_editor_panel():
+    assert "if(type === 'image') return {w:CLASSIC_IMAGE_NODE_WIDTH, h:336};" in JS
+    assert ".image-node { width:520px; }" in CSS
+    assert ".image-node-prompt-panel {" in CSS
+    assert "width:min(520px,100%)" in CSS

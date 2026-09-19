@@ -453,7 +453,7 @@ body.canvas-selecting .node select,
 body.canvas-selecting .node .node-body,
 body.canvas-selecting .node .llm-chat-log,
 body.canvas-selecting .node .llm-bubble { pointer-events:none !important; }
-.image-node { width:260px; }
+.image-node { width:520px; }
 .image-node .node-body { min-height:0; }
 .image-node.has-image .node-body,
 .image-node.has-image .image-preview-wrap,
@@ -1169,7 +1169,7 @@ input[type=range].canvas-range::-webkit-slider-runnable-track { height:3px; bord
 .asset-manager-card-actions button:hover { color:var(--text); border-color:var(--line-2); background:var(--soft-2); }
 .asset-manager-card-actions button.danger { color:#dc2626; }
 .asset-manager-card-actions button:disabled { opacity:.45; cursor:not-allowed; pointer-events:none; }
-.drop-overlay { position:absolute; inset:0; z-index:20; display:none; align-items:center; justify-content:center; color:#766f68; background:rgba(244,242,237,.72); backdrop-filter:blur(2px); font-weight:800; letter-spacing:.16em; pointer-events:none; }
+.drop-overlay { position:absolute; inset:0; z-index:20; display:none; align-items:center; justify-content:center; color:#766f68; background:rgba(244,242,237,.72); font-weight:800; letter-spacing:.16em; pointer-events:none; }
 .drop-overlay.active { display:flex; }
 .drop-overlay.package-drop { color:var(--text); background:rgba(244,242,237,.84); letter-spacing:.04em; }
 .canvas-package-progress-backdrop { position:fixed; inset:0; z-index:10030; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(18,18,17,.48); backdrop-filter:blur(10px); }

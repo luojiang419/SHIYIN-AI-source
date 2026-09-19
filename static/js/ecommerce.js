@@ -48,6 +48,7 @@
                 {role:'full_garment', labelKey:'ecommerce.refFullGarment', required:false},
                 {role:'shoes', labelKey:'ecommerce.refShoes', required:false},
                 {role:'accessory', labelKey:'ecommerce.refAccessory', required:false},
+                {role:'detail', labelKey:'ecommerce.refDetail', required:false},
                 {role:'pose', labelKey:'ecommerce.poseImage', required:false},
             ],
         },
@@ -758,6 +759,21 @@
         return `<label class="ec-detail-target"><b>${escapeHtml(t('ecommerce.detailTarget'))}</b><select data-detail-target="${escapeHtml(item.reference_id)}"><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
     }
 
+    function addUniversalFabricDetail(targetId){
+        const entries = universalEntries();
+        const limit = Number(state.capabilities?.universal_reference_limit || 14);
+        if(entries.length >= limit) {
+            showToast(t('ecommerce.referenceLimitReached'), true);
+            return;
+        }
+        const key = createUniversalReference('detail', entries.length);
+        state.inputs[key].detail_target_id = targetId;
+        state.inputs[key].label = '面料细节';
+        renderUniversalInputs();
+        persistSettings();
+        requestAnimationFrame(() => el.inputSlots?.querySelector(`[data-reference-key="${selectorValue(key)}"] [data-action="upload"]`)?.click());
+    }
+
     function createUniversalReference(role, order){
         const key = newUniversalKey();
         state.inputs[key] = {url:'',name:'',role,reference_type:role,slot_type:defaultSlotTypeIdForRole(role),reference_id:key,custom_type_label:'',label:'',instruction:'',order};
@@ -1086,6 +1102,7 @@
                 <header><span class="ec-drag-handle" draggable="true" data-reference-drag-handle="${escapeHtml(key)}" title="${escapeHtml(t('ecommerce.dragReorder'))}">⋮⋮</span><b>${escapeHtml(t('ecommerce.imageNumber',{count:index + 1}))}</b><button type="button" data-remove-reference="${escapeHtml(key)}" aria-label="${escapeHtml(t('ecommerce.remove'))}">×</button></header>
                 <div class="ec-upload-slot ${role==='subject' && !IS_FREE_CREATION?'required':''}" data-role="${escapeHtml(key)}">${universalUploadHtml(key,item,uploadLabel)}</div>
                 <label class="ec-reference-type-row"><span>${escapeHtml(t('ecommerce.referenceType'))}</span>${referenceTypeComboHtml({selected, context:'universal', fallbackRole:role, item, dataAttr:'data-reference-type', dataValue:key})}</label>
+                ${UNIVERSAL_PRODUCT_ROLES.has(role) ? `<button type="button" class="ec-add-fabric-detail" data-add-fabric-detail="${escapeHtml(item.reference_id)}">＋ 面料细节</button>` : ''}
                 ${universalDetailTargetHtml(item, plan)}
                 <div class="ec-reference-fields"><label><span>${escapeHtml(t('ecommerce.referenceLabel'))}</span><input data-reference-field="label" data-reference-key="${escapeHtml(key)}" maxlength="160" value="${escapeHtml(item.label || '')}" placeholder="${escapeHtml(t('ecommerce.referenceLabelHint'))}"></label><label><span>${escapeHtml(t('ecommerce.referenceInstruction'))}</span><input data-reference-field="instruction" data-reference-key="${escapeHtml(key)}" maxlength="300" value="${escapeHtml(item.instruction || '')}" placeholder="${escapeHtml(t('ecommerce.referenceInstructionHint'))}"></label></div>
             </article>`;
@@ -1179,6 +1196,7 @@
         const visibleOutfit = orderedWardrobe.some(item => state.inputs[item.role]?.url);
         if(state.inputs.garment?.url && !visibleOutfit) entries.push(['garment', state.inputs.garment]);
         orderedWardrobe.forEach(item => entries.push([item.role, state.inputs[item.role]]));
+        entries.push(['detail', state.inputs.detail]);
         return entries;
     }
 
@@ -1378,6 +1396,21 @@
         </div>`;
     }
 
+    function tryOnFabricDetailTargetHtml(){
+        const detail = state.inputs.detail || {};
+        const products = tryOnInputEntriesForRequest().filter(([role, item]) => role !== 'source' && role !== 'pose' && role !== 'detail' && item?.url);
+        if(!products.length) return '<div class="ec-detail-target is-error"><b>面料细节归属</b><span>请先上传需要换上的服装。</span></div>';
+        const explicit = String(detail.detail_target_id || '');
+        const selected = explicit || (products.length === 1 ? products[0][1].reference_id || products[0][0] : '');
+        const options = products.map(([role,item]) => `<option value="${escapeHtml(item.reference_id || role)}" ${String(item.reference_id || role) === selected ? 'selected':''}>${escapeHtml(tryOnSlotDisplayLabel(tryOnInputConfig(role) || {role}, item))}</option>`).join('');
+        return `<label class="ec-detail-target"><b>面料细节归属</b><select data-tryon-detail-target><option value="">${escapeHtml(t('ecommerce.detailTargetChoose'))}</option>${options}</select></label>`;
+    }
+
+    function tryOnFabricDetailCard(){
+        const input = tryOnInputConfig('detail') || {role:'detail', labelKey:'ecommerce.refDetail', required:false};
+        return `<div class="ec-tryon-slot-card is-fabric-detail"><div class="ec-tryon-card-kicker"><b>纹理</b><span>面料细节（可选）</span></div>${inputSlotHtml(input)}${tryOnFabricDetailTargetHtml()}</div>`;
+    }
+
     function tryOnReorderedPreviewOrder(draggedRole, targetRole){
         const order = tryOnSlotOrder().slice();
         const from = order.indexOf(draggedRole);
@@ -1523,6 +1556,7 @@
                         ${tryOnReferenceTypeRow('source')}
                     </div>
                     ${visibleWardrobe.map(tryOnWardrobeCard).join('')}
+                    ${tryOnFabricDetailCard()}
                     ${studioReferenceCardHtml('try_on')}
                 </div>
                 ${canAddReference ? `<button type="button" class="ec-tryon-add-reference" data-add-tryon-reference><span>＋ ${escapeHtml(t('ecommerce.addReference'))}</span><small>${visibleReferenceCount}/${referenceLimit}</small></button>` : ''}
@@ -1531,6 +1565,12 @@
         el.inputProgress.textContent = `${completedVisibleReferences}/${visibleReferenceCount}`;
         bindInputSlots();
         bindTryOnSlotControls();
+        el.inputSlots.querySelector('[data-tryon-detail-target]')?.addEventListener('change', event => {
+            state.inputs.detail = state.inputs.detail || {role:'detail', reference_type:'detail', reference_id:'detail'};
+            state.inputs.detail.detail_target_id = event.target.value;
+            persistSettings();
+            validateForm(false);
+        });
         bindStudioReferenceControls();
         syncTryOnLookPreview();
     }
@@ -1712,6 +1752,7 @@
             persistSettings();
             validateForm(false);
         }));
+        el.inputSlots.querySelectorAll('[data-add-fabric-detail]').forEach(button => button.addEventListener('click', () => addUniversalFabricDetail(button.dataset.addFabricDetail || '')));
         el.inputSlots.querySelectorAll('[data-reference-field]').forEach(input => bindComposingInput(input, () => {
             const item=state.inputs[input.dataset.referenceKey]; if(item){ item[input.dataset.referenceField]=input.value; persistSettings({sync:false}); validateForm(false); }
         }));
@@ -3122,6 +3163,7 @@
                 reference_type:role === 'source' ? 'source' : role,
                 label:requestReferenceLabel(item, t(tryOnInputConfig(slotRole)?.labelKey || 'ecommerce.garmentImage')),
                 instruction:item.instruction || '',
+                detail_target_id:role === 'detail' ? String(item.detail_target_id || '') : '',
                 kind:'image',
                 mime:item.mime || '',
             }));

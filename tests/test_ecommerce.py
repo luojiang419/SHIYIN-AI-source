@@ -299,6 +299,22 @@ class EcommerceContractTests(unittest.TestCase):
         self.assertIn("Use detail references only to refine corresponding garment or product fidelity", prompt)
         self.assertIn("without changing body identity, pose, framing, or unrelated garment regions", prompt)
 
+    def test_try_on_detail_is_bound_to_its_outfit_reference(self):
+        references = [
+            {"role": "source", "reference_id": "model", "url": "/assets/input/model.png"},
+            {"role": "upper_garment", "reference_id": "top", "url": "/assets/input/top.png"},
+            {"role": "lower_garment", "reference_id": "pants", "url": "/assets/input/pants.png"},
+            {"role": "detail", "reference_id": "weave", "detail_target_id": "pants", "url": "/assets/input/weave.png"},
+        ]
+        normalized = validate_input_roles("try_on", references, {})
+        detail = next(item for item in normalized if item["role"] == "detail")
+        self.assertEqual(detail["detail_target_id"], "pants")
+        prompt = build_prompt("try_on", references, {})
+        self.assertIn("detail reference for garment Image 3", prompt)
+        references[-1]["detail_target_id"] = "missing"
+        with self.assertRaisesRegex(ValueError, "必须绑定"):
+            validate_input_roles("try_on", references, {})
+
     def test_try_on_manual_prompt_is_used_verbatim(self):
         references = [
             {"role": "source", "reference_id": "slot_1", "url": "/assets/input/model.png", "label": "图1模特"},
@@ -2234,6 +2250,8 @@ class EcommerceFrontendContractTests(unittest.TestCase):
             self.assertIn(mode, self.javascript)
         self.assertNotIn("mode:'manual_prompt'", self.javascript)
         self.assertIn("data-detail-target", self.javascript)
+        self.assertIn("function addUniversalFabricDetail(targetId)", self.javascript)
+        self.assertIn("data-add-fabric-detail", self.javascript)
         self.assertIn("detail_target_id", self.javascript)
         self.assertNotIn("universalPlanPreview", self.javascript)
         self.assertNotIn('id="universalPlanPreview"', self.html)
@@ -2386,6 +2404,8 @@ class EcommerceFrontendContractTests(unittest.TestCase):
         self.assertIn("TRY_ON_WARDROBE_ROLES", self.javascript)
         self.assertIn("TRY_ON_POSE_ROLE", self.javascript)
         self.assertIn("TRY_ON_REQUEST_ROLES", self.javascript)
+        self.assertIn("function tryOnFabricDetailCard()", self.javascript)
+        self.assertIn("data-tryon-detail-target", self.javascript)
         for role in ("upper_garment", "lower_garment", "full_garment", "shoes", "accessory", "pose"):
             self.assertIn(role, self.javascript)
         for role in ("model_identity", "detail"):

@@ -576,6 +576,8 @@ def normalize_try_on_inputs(inputs: Iterable[dict[str, Any]]) -> list[dict[str, 
         for key in ("label", "instruction"):
             if value.get(key):
                 item[key] = re.sub(r"\s+", " ", str(value.get(key) or "").strip())[:300 if key == "instruction" else 160]
+        if value.get("detail_target_id"):
+            item["detail_target_id"] = re.sub(r"[^a-zA-Z0-9_-]", "", str(value.get("detail_target_id") or ""))[:80]
         normalized.append(item)
     return normalized
 
@@ -860,6 +862,14 @@ def validate_input_roles(operation: str, inputs: Iterable[dict[str, Any]], optio
         raise ValueError("缺少必需输入：" + "、".join(missing))
     if operation == "try_on" and not (roles & TRY_ON_OUTFIT_ROLES):
         raise ValueError("缺少必需输入：garment")
+    if operation == "try_on":
+        outfit_ids = {item["reference_id"] for item in normalized if item["role"] in TRY_ON_OUTFIT_ROLES}
+        for detail in (item for item in normalized if item["role"] == "detail"):
+            target_id = str(detail.get("detail_target_id") or "").strip()
+            if len(outfit_ids) == 1 and not target_id:
+                detail["detail_target_id"] = next(iter(outfit_ids))
+            elif target_id not in outfit_ids:
+                raise ValueError("面料细节图必须绑定到一个已上传的服装参考图")
     return normalized
 
 
@@ -1716,15 +1726,21 @@ def build_prompt(operation: str, inputs: Iterable[dict[str, Any]], options: dict
             role_label = legacy_category if item["role"] == "garment" else role_names.get(item["role"], item["role"])
             outfit_lines.append(f"{role_label}: exact reference product from its image ({detail}{note})")
         outfit_map = "; ".join(outfit_lines)
+        outfit_indices = {
+            item["reference_id"]: index
+            for index, item in enumerate(normalized, 1)
+            if item["role"] in TRY_ON_OUTFIT_ROLES
+        }
         detail_lines = []
         for index, item in enumerate(normalized, 1):
             if item["role"] != "detail":
                 continue
             detail = item.get("label") or item.get("name") or role_names.get(item["role"], item["role"])
             note = f"; specific instruction: {item['instruction']}" if item.get("instruction") else ""
-            detail_lines.append(f"Image {index}: exact local detail reference ({detail}{note})")
+            target_index = outfit_indices.get(str(item.get("detail_target_id") or ""), 0)
+            detail_lines.append(f"Image {index}: exact local detail reference for garment Image {target_index} ({detail}{note})")
         detail_instruction = (
-            " Use detail references only to refine corresponding garment or product fidelity: "
+            " Use detail references only to refine corresponding garment or product fidelity; each detail reference is explicitly bound to that garment: "
             + "; ".join(detail_lines)
             + ". Preserve their material, color, pattern, logo, readable text, stitching, edges, and craftsmanship without changing body identity, pose, framing, or unrelated garment regions."
             if detail_lines

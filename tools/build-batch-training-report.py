@@ -100,6 +100,12 @@ page=page.replace('</body>',"<script>['pixelsNative','pixelsFit'].forEach(id=>do
 if (OUT/'evidence/button-coverage-audit.json').exists():
     coverage='<article class="case"><h3>续验：纽扣周围的清晰度为何突变</h3><p>下方是同一次真实软件生成的模型原图、最终输出与像素变化图，裁片保留原始像素。模型原图的腰头本已偏软；软件增强漏掉了纽扣上方及周围的一块布面，相邻布面增强后形成明显清晰度落差。</p><div class="pair">'+shot('button-model-original.png','模型原图 · 增强前')+shot('button-software-final.png','真实软件输出 · 增强后')+shot('button-changed-mask.png','像素变化图 · 黑色为完全未变，白色为发生变化')+'</div><p class="note">纽扣上方 50×30 像素布面验证框变化为 0；相邻 100×60 布面框有 95.37% 像素变化。右侧纽扣中心保持原图。变化图不是内部掩膜，不能用它单独判定所有未变像素均漏选。生成记录确认本次叠加了两次增强。结论：纹理连续性仍未通过；没有把回归测试通过当作图片质量合格。</p><a href="evidence/button-coverage-audit.json" download>下载纽扣覆盖验证记录</a></article>'
     page=page.replace('<section class="panel" id="quality" hidden>','<section class="panel" id="quality" hidden>'+coverage)
+if (OUT/'evidence/denim-three-candidates.json').exists():
+    choices=json.loads((OUT/'evidence/denim-three-candidates.json').read_text('utf-8'))
+    model_note='当前模型在牛仔布织纹、车线颜色和洗水细节的精确还原上仍有能力限制。本次展示为现阶段效果演示，后续待更强模型可用后继续验证和改进。'
+    candidates='<article class="case"><h2>牛仔上衣 · 三轮候选待选</h2><p>'+model_note+'</p><div class="pair">'+''.join(pic(item['local'],f"候选 {i+1} · 软件真实生成，待选择") for i,item in enumerate(choices))+'</div></article>'
+    page=page.replace('<section class="panel" id="quality" hidden>','<section class="panel" id="quality" hidden>'+candidates)
+    page=page.replace('<div class="topactions">','<p class="note">'+model_note+'</p><div class="topactions">',1)
 (OUT/'index.html').write_text(page,encoding='utf-8')
 (OUT/'使用说明.txt').write_text('打开方式：解压整个文件夹，双击 index.html。\n汇报顺序：总览 → 真实案例 → 动态演示 → 美工验收 → 六步上手。\n键盘左右箭头切页，F 全屏；打开图片后，滚轮缩放、拖拽平移、左右键切图，双击或点击适应窗口重置，Esc 关闭。动态演示可暂停和逐步。\n所有样张来自本次真实生成，问题样张已说明；最终商用图请美工验收。\n素材与 assets、evidence 目录需与 index.html 一起发送。',encoding='utf-8')
 print(str(OUT/'index.html'))

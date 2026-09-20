@@ -1,6 +1,6 @@
 """用真实素材、成图及操作截图构建可离线携带的培训 HTML。"""
 from pathlib import Path
-import json, html
+import json, html, re
 from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -83,6 +83,13 @@ if boundary_fixed:
         im.crop((1450,2100,2100,2750)).save(OUT/'assets/b-texture-fixed-crop.png')
         im.crop((1550,850,2700,1500)).save(OUT/'assets/b-waist-fixed.png')
     page=page.replace('assets/b-texture-crop.png','assets/b-texture-fixed-crop.png').replace('assets/b-waist.png','assets/b-waist-fixed.png')
+# 演示页面使用与软件一致的主题，并用实际成图轮播替换静态封面。
+page=re.sub(r'<section class="panel" id="talk" hidden>.*?</section>', '', page, flags=re.S)
+page=re.sub(r'<button role="tab"[^>]*data-tab="talk"[^>]*>.*?</button>', '', page)
+page=page.replace('<div class="topactions">','<div class="topactions"><button id="themeToggle" aria-label="切换明暗主题">切换主题</button>')
+page=page.replace('<div class="heroart">','<div class="heroart" id="resultCarousel" aria-label="实际生成图片轮播">',1)
+page=page.replace('</style>',(ROOT/'tools/training-report-theme.css').read_text(encoding='utf-8')+'</style>',1)
+page=page.replace('</body>','<script>'+(ROOT/'tools/training-report-carousel.js').read_text(encoding='utf-8')+'</script></body>')
 (OUT/'index.html').write_text(page,encoding='utf-8')
 (OUT/'使用说明.txt').write_text('打开方式：解压整个文件夹，双击 index.html。\n汇报顺序：总览 → 真实案例 → 动态演示 → 美工验收 → 六步上手。\n键盘左右箭头切页，F 全屏，Esc 关闭图片；动态演示可暂停和逐步。\n所有样张来自本次真实生成，问题样张已说明；最终商用图请美工验收。\n素材与 assets、evidence 目录需与 index.html 一起发送。',encoding='utf-8')
 print(str(OUT/'index.html'))

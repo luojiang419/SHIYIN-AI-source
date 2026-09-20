@@ -17129,6 +17129,16 @@ def ecommerce_fabric_reference_urls(operation: str, references: List[Any], conte
     }.get(str(operation or ''), ())
     explicit = context.get('fabric_reference_urls')
     urls = [str(value) for value in explicit if isinstance(value, str) and value] if isinstance(explicit, list) else []
+    if operation == 'pose_replicate':
+        # 一次复刻仅有一款服装。有专属细节就只处理一次，不能再拿整衣叠第二层。
+        owned = {}
+        for ref in references or []:
+            role = str(ref.get('role') or '') if isinstance(ref, dict) else str(getattr(ref, 'role', '') or '')
+            url = str(ref.get('url') or '') if isinstance(ref, dict) else str(getattr(ref, 'url', '') or '')
+            if role in ('fabric_detail', 'target_image') and url:
+                owned.setdefault(role, url)
+        selected = owned.get('fabric_detail') or owned.get('target_image')
+        return [selected] if selected else list(dict.fromkeys(urls))[:1]
     if operation == 'universal':
         # 与批量换款相同：局部面料证据属于具体商品。已绑定细节时不再叠加
         # 同一件整衣的另一层纹理，也不能把其他商品的参考当成它的细节。

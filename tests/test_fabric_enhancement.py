@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import numpy as np
 from PIL import Image
 import main
-from canvas_core.fabric_enhancement import enhance_fabric_image, garment_mask
+from canvas_core.fabric_enhancement import enhance_fabric_image, garment_mask, refine_garment_boundary
 
 
 def test_flat_material_skips_without_writing(tmp_path):
@@ -101,7 +101,51 @@ def test_universal_legacy_single_product_detail_and_other_pages_are_preserved():
     assert main.ecommerce_fabric_reference_urls('universal', refs) == ['/detail']
     assert main.ecommerce_fabric_reference_urls('pose_replicate', [
         {'role':'fabric_detail','url':'/detail'}, {'role':'target_image','url':'/pants'}
-    ]) == ['/detail','/pants']
+    ]) == ['/detail']
+
+
+def test_pose_uses_garment_only_when_no_bound_detail():
+    assert main.ecommerce_fabric_reference_urls('pose_replicate', [
+        main.AIReference(url='/pants', role='target_image')
+    ]) == ['/pants']
+
+
+def test_pose_bound_detail_is_applied_once_not_followed_by_full_garment():
+    refs = [main.AIReference(url='/detail', role='fabric_detail'),
+            main.AIReference(url='/pants', role='target_image')]
+    batch = {'images':['/original'], 'image_items':[{'url':'/original'}]}
+    with patch.object(main, 'output_file_from_url', return_value='source.png'), patch(
+        'canvas_core.fabric_enhancement.enhance_fabric_image', return_value={'status':'applied'}
+    ) as enhance, patch.object(main, 'media_url_from_path', return_value='/enhanced'), patch.object(
+        main, 'image_output_meta', return_value={'url':'/enhanced'}
+    ):
+        result = asyncio.run(main.apply_fabric_enhancement('pose_replicate', refs, batch))
+    assert enhance.call_count == 1
+    assert len(result['fabric_enhancement'][0]['steps']) == 1
+
+
+def test_boundary_guard_removes_connected_skin_shadow_and_keeps_cloth():
+    base = np.full((1000, 700, 3), 210, dtype='uint8')
+    base[120:800, 180:520] = [65, 39, 40]
+    base[800:950, 210:480] = [155, 110, 121]
+    # 紧贴裤脚的皮肤阴影在旧颜色容差内，粗掩膜会连同阴影一起选中。
+    base[800:815, 290:380] = [89, 56, 65]
+    mask = np.zeros((1000, 700), dtype='uint8')
+    mask[120:800, 180:520] = 255
+    mask[800:815, 290:380] = 255
+    refined = refine_garment_boundary(base, mask)
+    assert refined is not None
+    assert not np.any(refined[800:])
+    assert np.all(refined[760:790, 210:480] == 255)
+    assert not np.any(refined[mask == 0])
+
+
+def test_uncertain_boundary_skips_instead_of_using_unprotected_mask():
+    with patch('canvas_core.fabric_enhancement.cv2.grabCut', side_effect=__import__('cv2').error('failure')):
+        base = np.full((400, 400, 3), 90, dtype='uint8')
+        mask = np.zeros((400, 400), dtype='uint8')
+        mask[80:320, 100:300] = 255
+        assert refine_garment_boundary(base, mask) is None
 
 
 def test_universal_material_mask_uses_depth_of_actual_output(tmp_path):

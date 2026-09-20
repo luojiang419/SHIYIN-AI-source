@@ -121,6 +121,43 @@ def garment_mask(base, color, foreground):
     return filled
 
 
+def refine_garment_boundary(base, mask):
+    """按生成图自身的颜色边界收紧衣片，禁止从粗掩膜向皮肤扩张。"""
+    h, w = mask.shape
+    scale = min(1., 1200 / max(h, w))
+    size = (max(1, round(w*scale)), max(1, round(h*scale)))
+    small = cv2.resize(base, size, interpolation=cv2.INTER_AREA)
+    coarse = cv2.resize(mask, size, interpolation=cv2.INTER_NEAREST)
+    radius = max(3, round(min(size)*.025))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius*2+1,)*2)
+    core = cv2.erode(coarse, kernel) > 0
+    outside = cv2.dilate(coarse, kernel) == 0
+    if not np.any(core) or not np.any(outside):
+        return None
+    labels = np.where(coarse > 0, cv2.GC_PR_FGD, cv2.GC_PR_BGD).astype('uint8')
+    labels[core], labels[outside] = cv2.GC_FGD, cv2.GC_BGD
+    # 阴影皮肤可与棕布亮度相同，但色度常偏离衣片内部。仅在不确定边缘
+    # 要求色度受内部像素支持；不用肤色常量，避免把不同肤色/服装写死。
+    chroma = cv2.cvtColor(small, cv2.COLOR_RGB2LAB)[:, :, 1:].astype('float32')
+    low, high = np.percentile(chroma[core], [1, 99], axis=0)
+    supported = np.all((chroma >= low-2) & (chroma <= high+2), axis=2)
+    labels[(~core) & (~supported)] = cv2.GC_BGD
+    try:
+        cv2.setRNGSeed(0)
+        cv2.grabCut(small, labels, None, np.zeros((1, 65)), np.zeros((1, 65)),
+                    4, cv2.GC_INIT_WITH_MASK)
+    except cv2.error:
+        return None
+    refined = np.isin(labels, [cv2.GC_FGD, cv2.GC_PR_FGD]).astype('uint8')*255
+    # 留出窄小保护边：裤脚/袖口的抗锯齿和阴影不能承担织纹来源。
+    refined = cv2.erode(refined, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    refined = cv2.resize(refined, (w, h), interpolation=cv2.INTER_LINEAR)
+    refined = ((refined == 255) & (mask > 0)).astype('uint8')*255
+    if np.count_nonzero(refined) < np.count_nonzero(mask)*.65:
+        return None
+    return refined
+
+
 def enhance_fabric_image(generated, detail, output, control=None):
     # 限制高分辨率数组并发，批量任务不同时占用数 GB 内存。
     with _LOCK:
@@ -136,6 +173,9 @@ def enhance_fabric_image(generated, detail, output, control=None):
         mask = garment_mask(base, color, foreground)
         if mask is None:
             return {'status': 'skipped', 'reason': 'garment_mask_ambiguous'}
+        mask = refine_garment_boundary(base, mask)
+        if mask is None:
+            return {'status': 'skipped', 'reason': 'garment_boundary_ambiguous'}
         h, w = base.shape[:2]
         scale = max(.5, min(1., max(h, w)/4800*.75))
         patch = cv2.resize(patch, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
@@ -155,4 +195,5 @@ def enhance_fabric_image(generated, detail, output, control=None):
         destination = Path(output)
         destination.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(result).save(destination, 'PNG')
-        return {'status': 'applied', 'masked_pixels': int(np.count_nonzero(mask)), 'scale': scale}
+        return {'status': 'applied', 'masked_pixels': int(np.count_nonzero(mask)), 'scale': scale,
+                'boundary_guard': 'image_edges_inset_v1'}

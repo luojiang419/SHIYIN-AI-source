@@ -2,6 +2,14 @@ import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+@pytest.mark.parametrize('ratio', ['2:3', '3:2', '5:4', '21:9'])
+def test_shared_pose_compiler_accepts_universal_output_ratios(ratio):
+    from canvas_core.pose_replicate_prompts import compile_pose_replicate_prompt
+    compiled = compile_pose_replicate_prompt('depth', has_fabric_detail=True, output_aspect_ratio=ratio)
+    assert compiled.output_aspect_ratio == ratio
+    assert ratio in compiled.final_prompt
 import main
 from canvas_core.pose_replicate_prompts import compile_pose_replicate_prompt
 

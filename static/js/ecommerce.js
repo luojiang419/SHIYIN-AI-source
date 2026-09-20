@@ -93,7 +93,7 @@
     const tryOnCutoutCache = new Map();
 
     const DEFAULT_OPTIONS = {
-        universal:{instruction:'', studio_reference:''},
+        universal:{instruction:'', studio_reference:'', generation_style:'standard_product'},
         try_on:{garment_category:'auto', instruction:'', slot_order:[], visible_slot_count:TRY_ON_DEFAULT_WARDROBE_SLOT_COUNT, studio_reference:''},
         batch_outfit:{},
         pose_transfer:{pose_source:'preset', pose_preset:'standing_front', instruction:'', studio_reference:''},
@@ -745,6 +745,9 @@
             ];
         } else {
             summary = [[t('ecommerce.planGenerationMode'), t('ecommerce.planMissingTarget')]];
+        }
+        if(currentOptions().generation_style === 'lookbook' && !IS_FREE_CREATION) {
+            summary = summary.map(row => row[0] === t('ecommerce.planPose') ? [row[0], t('ecommerce.creativePose')] : row);
         }
         return {
             mode, userSupplement, entries, byRole, products, conflicts, summary,
@@ -2025,6 +2028,7 @@
             const promptLabelKey = IS_FREE_CREATION ? 'freeCreation.prompt' : 'ecommerce.finalInstruction';
             const promptHintKey = IS_FREE_CREATION ? 'freeCreation.promptHint' : 'ecommerce.finalInstructionHint';
             html = `<label class="ec-field"><span>${escapeHtml(t(promptLabelKey))}</span><textarea class="ec-universal-instruction" data-option="instruction" maxlength="2000" placeholder="${escapeHtml(t(promptHintKey))}">${escapeHtml(options.instruction || '')}</textarea></label>`;
+            if(!IS_FREE_CREATION) html = `<button type="button" class="ec-generation-style-trigger" data-open-generation-style aria-haspopup="dialog"><span>${escapeHtml(t('ecommerce.generationStyle'))}</span><b>${escapeHtml(t(options.generation_style === 'lookbook' ? 'ecommerce.styleLookbook' : 'ecommerce.styleStandard'))}</b><span aria-hidden="true">↗</span></button>` + html;
         }
         el.operationControls.innerHTML = html;
         syncUniversalLayout();
@@ -2156,7 +2160,29 @@
         });
     }
 
+    function openGenerationStyleDialog(){
+        const dialog = document.createElement('dialog');
+        dialog.className = 'ec-generation-style-dialog';
+        dialog.setAttribute('aria-labelledby', 'ecGenerationStyleTitle');
+        dialog.innerHTML = `<header><div><small>CREATIVE DIRECTION</small><h2 id="ecGenerationStyleTitle">${escapeHtml(t('ecommerce.generationStyle'))}</h2></div><button type="button" data-close-style aria-label="${escapeHtml(t('ecommerce.styleClose'))}">×</button></header><div class="ec-generation-style-grid">${[['standard_product','styleStandard','styleStandardHint','01'],['lookbook','styleLookbook','styleLookbookHint','02']].map(([id,title,hint,number]) => `<button type="button" data-generation-style="${id}" aria-pressed="${(currentOptions().generation_style || 'standard_product') === id}" class="ec-generation-style-card"><span class="ec-style-number">${number}</span><span class="ec-style-art ec-style-art-${id}" aria-hidden="true"><i></i><i></i><i></i></span><strong>${escapeHtml(t('ecommerce.'+title))}</strong><p>${escapeHtml(t('ecommerce.'+hint))}</p><span class="ec-style-selected" aria-hidden="true">✓</span></button>`).join('')}</div>`;
+        document.body.appendChild(dialog);
+        dialog.addEventListener('close', () => dialog.remove(), {once:true});
+        dialog.querySelector('[data-close-style]').addEventListener('click', () => dialog.close());
+        dialog.addEventListener('click', event => { if(event.target === dialog) { const box=dialog.getBoundingClientRect(); if(event.clientX<box.left || event.clientX>box.right || event.clientY<box.top || event.clientY>box.bottom) dialog.close(); } });
+        dialog.querySelectorAll('[data-generation-style]').forEach(button => button.addEventListener('click', () => {
+            currentOptions().generation_style = button.dataset.generationStyle;
+            persistSettings();
+            dialog.close();
+            renderOperationControls();
+            renderInputs();
+            validateForm(false);
+            el.operationControls.querySelector('[data-open-generation-style]')?.focus();
+        }));
+        dialog.showModal();
+    }
+
     function bindOperationControls(){
+        el.operationControls.querySelector('[data-open-generation-style]')?.addEventListener('click', openGenerationStyleDialog);
         el.operationControls.querySelectorAll('[data-option]').forEach(input => {
             const update = (deferSync=false) => {
                 const key = input.dataset.option;
@@ -3571,6 +3597,9 @@
             metaItem(t('ecommerce.candidatesMeta'), t('ecommerce.imagesCount',{count:(result.images || []).length || Number(task.count || 0)})),
             metaItem(t('ecommerce.durationMeta'), elapsed > 0 ? t('ecommerce.seconds',{count:elapsed.toFixed(1)}) : t(`ecommerce.${task.status || 'queued'}`)),
         ];
+        const generationStyle = result.generation_style || task.options?.generation_style || task.request?.options?.generation_style;
+        const promptPolicy = task.options?.prompt_policy || task.request?.options?.prompt_policy;
+        if(!IS_FREE_CREATION && task.operation === 'universal' && !['free','lookbook'].includes(promptPolicy) && ['standard_product','lookbook'].includes(generationStyle)) items.unshift(metaItem(t('ecommerce.generationStyle'), t(generationStyle === 'lookbook' ? 'ecommerce.styleLookbook' : 'ecommerce.styleStandard')));
         if(garmentAnalysis?.status === 'succeeded') {
             items.push(metaItem(t('ecommerce.detectedGarmentMeta'), garmentAnalysis.garment_type || garmentAnalysis.category));
         }

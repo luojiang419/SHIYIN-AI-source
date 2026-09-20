@@ -1,6 +1,13 @@
 (function(){
     if(!window.StudioI18n) return;
     window.StudioI18n.register({
+        "ecommerce.generationStyle": {zh:"生成风格", en:"Generation style"},
+        "ecommerce.styleStandard": {zh:"标准产品图", en:"Standard product"},
+        "ecommerce.styleLookbook": {zh:"Lookbook", en:"Lookbook"},
+        "ecommerce.styleStandardHint": {zh:"精准复刻参考动作，清晰呈现版型、面料与产品细节。", en:"Match the reference pose and preserve cut, fabric and product details."},
+        "ecommerce.styleLookbookHint": {zh:"锁定商品细节，以创意动作与大胆构图呈现时装表现力。", en:"Preserve the product with expressive movement and bold editorial framing."},
+        "ecommerce.styleClose": {zh:"关闭风格选择", en:"Close style selection"},
+        "ecommerce.creativePose": {zh:"创意动作 · 保证商品细节可见", en:"Creative pose · Keep product details visible"},
         "ecommerce.eyebrow": { zh:"E-COMMERCE CREATIVE SUITE", en:"E-COMMERCE CREATIVE SUITE" },
         "ecommerce.title": { zh:"电商专用", en:"E-commerce Studio" },
         "ecommerce.subtitle": { zh:"保留人物与商品特征，只修改你指定的内容", en:"Preserve people and products. Change only what you choose." },

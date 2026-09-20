@@ -1,6 +1,6 @@
 from pathlib import Path
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import numpy as np
 from PIL import Image
@@ -84,3 +84,41 @@ def test_shared_ecommerce_postprocessor_keeps_original_when_mask_is_ambiguous():
     assert result['images'] == ['/original']
     assert result['original_images'] == ['/original']
     assert result['fabric_enhancement'][0]['reason'] == 'garment_mask_ambiguous'
+
+
+def test_universal_texture_reuses_bound_detail_without_double_overlay():
+    refs = [
+        {'reference_type':'lower_garment', 'reference_id':'pants', 'url':'/pants'},
+        {'reference_type':'upper_garment', 'reference_id':'shirt', 'url':'/shirt'},
+        {'reference_type':'detail', 'detail_target_id':'pants', 'url':'/pants-detail'},
+        {'reference_type':'detail', 'detail_target_id':'missing', 'url':'/unbound'},
+    ]
+    assert main.ecommerce_fabric_reference_urls('universal', refs) == ['/pants-detail', '/shirt']
+
+
+def test_universal_legacy_single_product_detail_and_other_pages_are_preserved():
+    refs = [{'role':'lower_garment','url':'/pants'}, {'role':'detail','url':'/detail'}]
+    assert main.ecommerce_fabric_reference_urls('universal', refs) == ['/detail']
+    assert main.ecommerce_fabric_reference_urls('pose_replicate', [
+        {'role':'fabric_detail','url':'/detail'}, {'role':'target_image','url':'/pants'}
+    ]) == ['/detail','/pants']
+
+
+def test_universal_material_mask_uses_depth_of_actual_output(tmp_path):
+    batch={'images':['/output'],'image_items':[{'url':'/output'}]}
+    refs=[{'role':'lower_garment','reference_id':'pants','url':'/pants'}, {'role':'detail','detail_target_id':'pants','url':'/detail'}]
+    with patch.object(main,'output_file_from_url',side_effect=lambda url:'output.png' if url=='/output' else 'detail.png'), patch.object(main,'render_universal_person_depth',AsyncMock(return_value=(b'depth','quality'))) as depth, patch.object(main,'OUTPUT_OUTPUT_DIR',str(tmp_path)), patch.object(main,'media_url_from_path',side_effect=lambda path:path), patch.object(main,'image_output_meta',return_value={}), patch('canvas_core.fabric_enhancement.enhance_fabric_image',return_value={'status':'applied'}) as enhance:
+        result=asyncio.run(main.apply_fabric_enhancement('universal',refs,batch,{'infer_output_depth':True}))
+    depth.assert_awaited_once_with('output.png')
+    assert Path(enhance.call_args.args[3]).read_bytes()==b'depth'
+    assert enhance.call_count==1
+    assert result['fabric_enhancement'][0]['output_depth']['source_url']=='/output'
+
+
+def test_universal_output_depth_failure_keeps_existing_mask_fallback():
+    batch={'images':['/output'],'image_items':[{'url':'/output'}]}
+    with patch.object(main,'output_file_from_url',return_value='output.png'), patch.object(main,'render_universal_person_depth',AsyncMock(side_effect=ValueError('not ready'))), patch('canvas_core.fabric_enhancement.enhance_fabric_image',return_value={'status':'skipped','reason':'garment_mask_ambiguous'}) as enhance:
+        result=asyncio.run(main.apply_fabric_enhancement('universal',[{'role':'lower_garment','url':'/pants'}],batch,{'infer_output_depth':True}))
+    assert enhance.call_args.args[3] is None
+    assert result['images']==['/output']
+    assert result['fabric_enhancement'][0]['output_depth']['status']=='skipped'

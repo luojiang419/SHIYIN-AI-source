@@ -50,6 +50,7 @@ if PROJECT_MODULE_DIR not in sys.path:
     sys.path.insert(0, PROJECT_MODULE_DIR)
 
 from canvas_core.paths import APP_PATHS
+from canvas_core.universal_photography import MATERIAL_IN_SCENE, build_universal_photography_contract
 from canvas_core.runtime import RUNTIME_OPTIONS, request_shutdown, run_uvicorn
 from canvas_core.storage_bootstrap import (
     ACCOUNT_STORE,
@@ -190,6 +191,8 @@ from canvas_core.topaz_video import (
     topaz_child_environment,
 )
 from canvas_core.ecommerce import (
+    build_universal_style_prompt as build_ecommerce_universal_style_prompt,
+    universal_style_references,
     QUALITY_CHECKS as ECOMMERCE_QUALITY_CHECKS,
     build_model_catalog as build_ecommerce_model_catalog,
     build_prompt as build_ecommerce_prompt,
@@ -670,7 +673,7 @@ async def run_deferred_task_recovery():
     await asyncio.sleep(STARTUP_RECOVERY_DELAY_SECONDS)
     operations = (
         ("在线生图任务", load_online_image_tasks_from_disk),
-        ("电商专用任务", load_ecommerce_tasks_from_disk),
+        ("电商专用任务", ensure_ecommerce_tasks_loaded),
         ("画布视频任务", load_canvas_video_tasks_from_disk),
     )
     try:
@@ -11625,12 +11628,12 @@ def gemini_reference_part(ref):
     role = str((ref or {}).get("role") or "").strip().lower()
     label = str((ref or {}).get("role_label") or (ref or {}).get("label") or "").strip()
     is_depth_map = role == "control_map" and "深度" in label
-    is_garment_reference = role in {"target_image", "fabric_detail"}
-    pose_pair = role in {"pose_reference", "control_map"}
+    is_garment_reference = role in {"target_image", "fabric_detail", "garment", "upper_garment", "lower_garment", "full_garment", "detail", "subject", "model_subject", "model_identity"} or (ref or {}).get("reference_id") == "universal_pose_anchor"
+    pose_pair = role in {"pose_reference", "pose", "control_map"}
     value = reference_to_data_url(
         ref,
         max_size=None if is_garment_reference else (2048 if pose_pair else 1536),
-        # 服装参考按原始尺寸无损编码，不设置软件端长边缩放上限。
+        # 身份、服装和两阶段编辑底图保留原尺寸，防止细节证据被下采样。
         lossless=is_depth_map or is_garment_reference,
     )
     if not value:
@@ -11651,6 +11654,13 @@ GEMINI_REFERENCE_ROLE_CONTRACTS = {
     "model_subject": "只提供最终人物身份、面部、肤色、发型与身体比例，不提供最终服装、姿势或场景。",
     "scene": "只提供最终环境、背景结构、透视与环境光，不提供最终人物身份、服装或姿势。",
     "fabric_detail": "这是服装面料的局部放大细节，提供实际可见的织物组织、织线方向与尺度和表面质感；只有图中确有绒毛时才参考绒毛。不能将放大倍率用于成衣图案尺度，款式、配色与纹样仍以完整服装参考为准。",
+    "subject": "只提供模特身体、发型与默认身份；有单独模特形象时以该图为面部身份。服装和场景以专用参考为准。",
+    "model_identity": "只替换模特脸部身份，不替换身体、发型、服装、动作或场景。",
+    "lower_garment": "仅提供下装版型、面料、颜色与结构；严格区分正面和背面，不能把后侧结构搬到正面。",
+    "upper_garment": "仅提供上装商品本身，不提供穿着者身份、动作或背景。",
+    "full_garment": "仅提供整套服装商品本身，不提供穿着者身份、动作或背景。",
+    "detail": "只提供绑定商品对应部位的面料与局部结构。依据可见部位判断前后左右，后袋、后腰调节扣和背面皮牌不得移植到正面。",
+    "pose": "只提供动作与空间结构，不提供人物身份、衣服或背景。",
 }
 
 
@@ -11664,7 +11674,11 @@ def gemini_reference_role_text(ref, fallback_index: int) -> str:
     except (TypeError, ValueError):
         index = max(1, int(fallback_index))
     contract = GEMINI_REFERENCE_ROLE_CONTRACTS.get(role, "")
-    if role == "control_map" and "深度" in label:
+    if (ref or {}).get("reference_id") == "universal_pose_anchor":
+        contract = "这是最终照片的唯一编辑底图。保留整个人物身份、头部与身体朝向、关节、交叠肢体、脚的位置、场景和构图，只编辑指定商品及其必要轮廓区域，绝不能根据商品穿着者转身或重新构图。"
+    elif role == "control_map" and (ref or {}).get("reference_id") == "derived_pose_depth":
+        contract = "这是紧邻动作图的人物深度辅助，只提供头部转向、肢体关节、前后遮挡与空间结构。动作必须保持画面左右方向，不能镜像。深度图旧衣的轮廓与褶皱不能覆盖新商品的宽松量、裤型、腰头和版型。"
+    elif role == "control_map" and "深度" in label:
         contract = "这是与目标图片配准的三维几何硬约束，严格提供人物体积、姿势、前后遮挡、可见轮廓与服装褶皱峰谷；不提供最终人物身份、服装款式、颜色、图案、面料纹理或场景。"
     elif role == "control_map" and "骨架" in label:
         contract = "只提供关节位置、肢体方向、左右关系和身体重心；不提供人物表面、服装褶皱、最终人物身份、服装设计或场景。"
@@ -17115,6 +17129,21 @@ def ecommerce_fabric_reference_urls(operation: str, references: List[Any], conte
     }.get(str(operation or ''), ())
     explicit = context.get('fabric_reference_urls')
     urls = [str(value) for value in explicit if isinstance(value, str) and value] if isinstance(explicit, list) else []
+    if operation == 'universal':
+        # 与批量换款相同：局部面料证据属于具体商品。已绑定细节时不再叠加
+        # 同一件整衣的另一层纹理，也不能把其他商品的参考当成它的细节。
+        items = [ref for ref in references or [] if isinstance(ref, dict)]
+        products = [ref for ref in items if (ref.get('reference_type') or ref.get('role')) in roles and (ref.get('reference_type') or ref.get('role')) != 'detail']
+        for product in products:
+            product_id = product.get('reference_id')
+            details = [ref for ref in items if (ref.get('reference_type') or ref.get('role')) == 'detail' and ref.get('url') and (
+                (product_id and ref.get('detail_target_id') == product_id)
+                or (len(products) == 1 and not ref.get('detail_target_id'))
+            )]
+            urls.extend(str(ref['url']) for ref in details)
+            if not details and product.get('url'):
+                urls.append(str(product['url']))
+        return list(dict.fromkeys(urls))[:3]
     for reference in references or []:
         role = str(reference.get('reference_type') or reference.get('role') or '') if isinstance(reference, dict) else str(getattr(reference, 'role', '') or '')
         url = str(reference.get('url') or '') if isinstance(reference, dict) else str(getattr(reference, 'url', '') or '')
@@ -17136,7 +17165,18 @@ async def apply_fabric_enhancement(operation: str, references: List[Any], batch:
     for index, url in enumerate(originals):
         source = output_file_from_url(url)
         entry = {'status': 'skipped', 'reason': 'reference_unavailable', 'original_url': url}
+        image_control, depth_audit = control, None
         if source:
+            if operation == 'universal' and (context or {}).get('infer_output_depth'):
+                try:
+                    depth_bytes, tier = await render_universal_person_depth(source)
+                    depth_path = Path(OUTPUT_OUTPUT_DIR) / f'fabric_depth_{uuid.uuid4().hex}.png'
+                    depth_path.write_bytes(depth_bytes)
+                    image_control = str(depth_path)
+                    depth_audit = {'status':'succeeded','url':media_url_from_path(image_control),'source_url':url,'tier':tier}
+                except Exception as exc:
+                    # 复用既有无控制图的保守回退，不让后处理丢失已生成图片。
+                    depth_audit = {'status':'skipped','reason':type(exc).__name__}
             current, applied, skipped = source, [], []
             for reference_url in reference_urls:
                 detail = output_file_from_url(reference_url)
@@ -17145,7 +17185,7 @@ async def apply_fabric_enhancement(operation: str, references: List[Any], batch:
                     continue
                 destination = os.path.join(OUTPUT_OUTPUT_DIR, f'fabric_{uuid.uuid4().hex}.png')
                 try:
-                    outcome = await asyncio.to_thread(enhance_fabric_image, current, detail, destination, control)
+                    outcome = await asyncio.to_thread(enhance_fabric_image, current, detail, destination, image_control)
                     if outcome.get('status') == 'applied':
                         current, applied = destination, [*applied, outcome]
                     else:
@@ -17159,6 +17199,8 @@ async def apply_fabric_enhancement(operation: str, references: List[Any], batch:
                 batch['image_items'][index] = image_output_meta(enhanced)
             elif skipped:
                 entry['reason'] = skipped[-1]
+        if depth_audit is not None:
+            entry['output_depth'] = depth_audit
         audit.append(entry)
     batch['fabric_enhancement'], batch['original_images'] = audit, originals
     return batch
@@ -18175,10 +18217,11 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
         working["options"]["reference_analysis"] = items
     composition_mode = ecommerce_universal_composition_mode(working["inputs"], working["options"])
     resolved_plan = resolve_ecommerce_universal_reference_plan(working["inputs"], working["options"])
-    compare_reference = ecommerce_comparison_reference(working["inputs"], composition_mode)
+    comparison_inputs = [item for item in working["inputs"] if not (working["options"].get("generation_style") == "lookbook" and item.get("reference_type") == "pose")]
+    compare_reference = ecommerce_comparison_reference(comparison_inputs, composition_mode)
     working.update({
         "composition_mode": composition_mode,
-        "reference_plan": public_ecommerce_reference_plan(resolved_plan),
+        "reference_plan": public_ecommerce_reference_plan(resolved_plan, working["options"]),
         "base_reference_id": "",
         "base_reference_url": "",
         "comparison_reference_url": str(compare_reference.get("url") or ""),
@@ -18187,14 +18230,23 @@ async def enrich_ecommerce_snapshot_with_universal_analysis(snapshot: Dict[str, 
     return working, analysis
 
 
-def public_ecommerce_reference_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+def public_ecommerce_reference_plan(plan: Dict[str, Any], options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    result = {
         "mode": str(plan.get("mode") or ""),
         "ordered_reference_ids": [str(item.get("reference_id") or "") for item in (plan.get("inputs") or [])],
         "owners": dict(plan.get("owners") or {}),
         "fallbacks": dict(plan.get("fallbacks") or {}),
         "conflicts": list(plan.get("conflicts") or []),
     }
+    options = options or {}
+    style = options.get("generation_style")
+    if style in {"standard_product", "lookbook"} and options.get("prompt_policy") not in {"free", "lookbook"}:
+        result["generation_style"] = style
+        result["ordered_reference_ids"] = [item["reference_id"] for item in universal_style_references(plan.get("inputs") or [], style, bool(options.get("instruction")))]
+        result["pose_strategy"] = "creative" if style == "lookbook" else "reference_with_depth"
+        if style == "lookbook":
+            result["owners"]["pose"] = "creative"
+    return result
 
 def validate_ecommerce_local_inputs(
     inputs: List[Dict[str, Any]],
@@ -18351,12 +18403,13 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
         inputs, source_dimensions = validate_ecommerce_local_inputs(normalized, operation, options=options)
     composition_mode = "" if free_creation and not inputs else (ecommerce_universal_composition_mode(inputs, options) if operation == "universal" else "")
     reference_plan = (
-        public_ecommerce_reference_plan(resolve_ecommerce_universal_reference_plan(inputs, options))
+        public_ecommerce_reference_plan(resolve_ecommerce_universal_reference_plan(inputs, options), options)
         if operation == "universal" and not free_creation else {}
     )
     base_reference = {}
-    pose_reference = ecommerce_primary_pose_reference(inputs)
-    compare_reference = ecommerce_comparison_reference(inputs, composition_mode)
+    comparison_inputs = [item for item in inputs if not (not free_creation and options.get("generation_style") == "lookbook" and item.get("reference_type") == "pose")]
+    pose_reference = ecommerce_primary_pose_reference(comparison_inputs)
+    compare_reference = ecommerce_comparison_reference(comparison_inputs, composition_mode)
     providers = configured_ecommerce_providers()
     catalog = build_ecommerce_model_catalog(providers)
     try:
@@ -18364,6 +18417,10 @@ def prepare_ecommerce_request(payload: EcommerceTaskRequest) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     reference_count = len(inputs)
+    if operation == "universal" and not free_creation and options.get("generation_style") in {"standard_product", "lookbook"}:
+        reference_count = len(universal_style_references(inputs, options["generation_style"], bool(options.get("instruction"))))
+        if options["generation_style"] == "standard_product" and pose_reference:
+            reference_count += 1
     candidates = [route for route in candidates if int(route.get("max_reference_images") or 0) >= reference_count]
     if not candidates:
         if operation == "universal":
@@ -20377,6 +20434,143 @@ def lookbook_completion_message(quality):
     return "Lookbook 图片已生成，质检通过。"
 
 
+async def render_universal_person_depth(path: str) -> Tuple[bytes, str]:
+    """共用现有人物深度组件；原动作与生成底图均从各自像素推理。"""
+    content = Path(path).read_bytes()
+    content, _, _, _ = normalize_image_orientation(content)
+    selection = sync_depth_model_preference()
+    manager = PERSON_DEPTH_COMPONENT_MANAGER if selection.quality else DEPTH_MODEL_MANAGER
+    if not manager.public_status().get("ready"):
+        raise ValueError("人物深度模型尚未就绪，标准产品图未提交生成；请先在设置中完成深度组件准备")
+    if selection.quality:
+        depth = await asyncio.to_thread(PERSON_DEPTH_WORKER.estimate, content, bit_depth=8)
+        return depth.content, selection.tier
+    image = prepare_dwpose_input(content, decode_max_pixels=DWPOSE_INPUT_MAX_PIXELS, inference_max_pixels=DWPOSE_INFERENCE_MAX_PIXELS, inference_max_edge=DWPOSE_INFERENCE_MAX_EDGE)
+    depth = await asyncio.to_thread(render_depth_image, image, person_only=True)
+    output = BytesIO()
+    Image.fromarray(depth.image_gray, mode="L").save(output, format="PNG")
+    return output.getvalue(), selection.tier
+
+
+async def prepare_universal_pose_depth(snapshot: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
+    """复用批量复刻的人物深度推理；实际顺序与提示词同步编译并保留审计。"""
+    options = snapshot.get("options") or {}
+    refs = list(snapshot.get("inputs") or [])
+    if snapshot.get("operation") == "universal" and options.get("generation_style") in {"standard_product", "lookbook"} and options.get("prompt_policy") not in {"free", "lookbook"}:
+        refs = universal_style_references(refs, options["generation_style"], bool(options.get("instruction")))
+    prompt = snapshot["prompt"]
+    if snapshot.get("operation") != "universal" or options.get("generation_style") != "standard_product" or options.get("prompt_policy") in {"free", "lookbook"}:
+        return refs, prompt, {"status": "not_required"}
+    pose = next((item for item in refs if item.get("reference_type") == "pose"), None)
+    if not pose:
+        return refs, prompt, {"status": "not_required", "reason": "no_pose_reference"}
+    if len(refs) >= ONLINE_IMAGE_REFERENCE_MAX:
+        raise ValueError("标准产品图需要为动作深度图预留一个参考图位置，请减少一张参考图")
+    path = output_file_from_url(pose.get("url") or "")
+    if not path or not os.path.isfile(path):
+        raise ValueError("动作参考图不可读取，无法生成深度图")
+    depth_bytes, tier = await render_universal_person_depth(path)
+    destination = Path(OUTPUT_OUTPUT_DIR) / f"universal_pose_depth_{uuid.uuid4().hex}.png"
+    destination.write_bytes(depth_bytes)
+    url = media_url_from_path(str(destination))
+    depth_ref = {"url": url, "role": "control_map", "reference_type": "control_map", "label": "动作人物深度图", "reference_id": "derived_pose_depth"}
+    prompt = build_ecommerce_universal_style_prompt(snapshot["inputs"], options, depth_reference=depth_ref)
+    refs = universal_style_references([*refs, depth_ref], options["generation_style"], bool(options.get("instruction")))
+    index = refs.index(depth_ref) + 1
+    return refs, prompt, {"status": "succeeded", "url": url, "source_url": pose["url"], "reference_index": index, "tier": tier}
+
+
+async def prepare_universal_product_anchor(snapshot, route, references, prompt):
+    """先锁动作与环境，再换商品，隔离服装参考穿着者的姿势干扰。"""
+    options = snapshot.get("options") or {}
+    roles = {item.get("reference_type"): item for item in references}
+    if snapshot.get("operation") != "universal" or options.get("generation_style") != "standard_product" or options.get("prompt_policy") in {"free", "lookbook"} or not all(role in roles for role in ("subject", "pose", "control_map")):
+        return references, prompt, {"status": "not_required"}
+    product_roles = {"upper_garment", "lower_garment", "full_garment", "shoes", "accessory", "prop", "scene_prop", "detail"}
+    products = [item for item in references if item.get("reference_type") in product_roles]
+    if not products:
+        return references, prompt, {"status": "not_required"}
+    # 数字引用必须继续对应用户原输入；不为两阶段处理悄悄改写手动引用语义。
+    text_values = [str(options.get("instruction") or ""), *[str(item.get("instruction") or "") for item in references]]
+    if any(re.search(r"(?:图|image)\s*\d", text, re.I) for text in text_values):
+        return references, prompt, {"status": "not_required", "reason": "explicit_numbered_references"}
+    order = ("pose", "control_map", "subject", "model_identity", "scene", "style")
+    role_alias = {"pose": "pose_reference", "subject": "model_subject"}
+    anchor_refs = [{**roles[role], "role": role_alias.get(role, role), "asset_index": index} for index, role in enumerate((role for role in order if role in roles), 1)]
+    indices = {item["reference_type"]: index for index, item in enumerate(anchor_refs, 1)}
+    lines = [
+        "动作底图阶段：只输出一张真实全身照片。图1是严格动作几何基准，图2是它的人物深度辅助，图3提供模特身体、发型、发长和默认身份。不是自由创作。",
+        "保持图1头部相对身体的转向、鼻尖朝向、视线、肩髋倾斜、脊柱、重心、手臂交叠、关节角度和双脚落点；画面左右不得镜像，不能把动作概括成普通站姿。图2白近灰远，黑色人物外没有环境信息。",
+        "将图3的同一张脸和身体投射到图1动作中，精确保留图3发长、发型、肤色和身体比例，绝不保留图3原站姿或原头部角度；暂时保留图3穿搭及鞋子，商品替换在下一阶段完成。",
+    ]
+    if "model_identity" in indices:
+        lines.append(f"唯一面部身份改用图{indices['model_identity']}，只换脸，发型和身体继续来自图3；头部方向始终来自图1。")
+    if "scene" in indices:
+        lines.append(f"图{indices['scene']}是唯一真实环境，保持它的可识别建筑、物体、材质和空间关系，不换成类似地点。人物落在合理地面或支撑物上，匹配环境光和接触阴影；不得为了场景改变内部关节动作。")
+    elif options.get("studio_reference"):
+        lines.append(build_ecommerce_prompt("background_change", [{"role": "source", "url": roles['subject']['url']}], {"background_mode": "preset", "studio_reference": options['studio_reference']}))
+    else:
+        lines.append("保留图3环境；只对动作所需的遮挡、接触和光照作必要调整。")
+    if "style" in indices:
+        lines.append(f"图{indices['style']}仅提供摄影光线与质感，不改变动作、身份或场景。")
+    lines.append(build_universal_photography_contract('standard_product', indices.get('scene')))
+    lines.append("改光不改物：保留模特参考中未指定替换衣物的领口形状、肩带宽度、露肤范围与鞋型、鞋跟和鞋带结构；不能为了适应新环境而重新设计穿搭。")
+    for index, ref in enumerate(anchor_refs, 1):
+        if ref.get("instruction"):
+            lines.append(f"图{index}的局部要求：{ref['instruction']}")
+    evidence = ((options.get("reference_analysis") or {}).get(roles['pose'].get('reference_id')) or {})
+    if evidence.get("status") == "succeeded":
+        lines.append("动作图已识别证据：" + json.dumps({key:evidence.get(key) for key in ('pose_description','face_direction','body_direction','left_right_semantics')}, ensure_ascii=False))
+    anchor_prompt = "\n".join(lines)
+    batch = await execute_ai_image_batch(prompt=anchor_prompt, provider_id=route['provider_id'], model=route['model'], size=snapshot['size'], quality=snapshot['quality'], references=anchor_refs, count=1, prefix='universal_pose_anchor_', allow_edit_endpoint_fallback=False, semantic_mask=True)
+    anchor_url = batch['images'][0]
+    base = {**roles['subject'], 'url':anchor_url, 'role':'source', 'reference_id':'universal_pose_anchor', 'label':'不可重构的人物动作与场景底图', 'instruction':'只修改指定商品区域，其他所有区域保持原样', 'name':'pose-anchor.png'}
+    final_refs = universal_style_references([base, *products], 'standard_product', bool(options.get('instruction')))
+    product_indices = {ref.get('reference_id'):i for i,ref in enumerate(final_refs,1) if ref.get('reference_type') != 'detail'}
+    final_lines = [
+        "FINAL LOCAL PRODUCT EDIT：只编辑图1现有指定商品覆盖的区域。图1是不可重构的最终照片底图，绝对保留脸、发型发长、头部转向、视线、肩髋、手臂、双腿双脚、人物尺寸、机位、场景、汽车、光照及未替换衣物。不是重新生成一个人或重新拍摄。",
+        "服装可编辑区域允许沿轮廓必要扩张或收缩，以还原目标版型、宽松量、长度和裤脚宽度；人体关节和肢体位置不能跟着商品穿着者改变，不把宽松新品塞进底图旧衣的紧身轮廓。",
+        "必须继承底图的真实环境光、鼻影和身体明暗转折、脚底接触、景深及远景虚化；不能在换装时把背景重新锐化、拉回全实焦或抹平现场阴影。新衣加入底图已有的光场，沿新衣几何重新计算局部阴影与高光，不复制商品参考的棚拍曝光。",
+        MATERIAL_IN_SCENE,
+    ]
+    for i,ref in enumerate(final_refs[1:],2):
+        if ref.get('reference_type') == 'detail':
+            final_lines.append(f"图{i}是商品图{product_indices.get(ref.get('detail_target_id'))}的局部面料与结构证据：{ref.get('label','')}。只应用到它真实所属部位；背面皮牌、后袋、后腰扣只在背面可见时出现，底图正面不得显示。不能为了展示细节转动底图人物。整体颜色与版型由完整商品控制，特写只补充真实织纹、缝线与当地结构，不放大纹样或用噪点代替面料。")
+        else:
+            final_lines.append(f"图{i}仅提供需要替换的 {ref.get('reference_type')} 商品：{ref.get('label','')}。提取它的实际版型、颜色、面料与结构，忽略穿着者、动作和背景，不增添原款不存在的设计。")
+        if ref.get('instruction'):
+            final_lines.append(f"图{i}商品自身要求（不得改变底图姿势）：{ref['instruction']}")
+    if options.get('instruction'):
+        final_lines.append("用户补充要求：" + str(options['instruction']))
+    final_lines.append("只交付一张修改后的原照片；不可转背、不可镜像、不可改头部方向，商品外的区域保持原样。")
+    final_prompt = '\n'.join(final_lines)
+    reuse_audit = {}
+    garments = [ref for ref in products if ref.get('reference_type') in {'upper_garment','lower_garment','full_garment'}]
+    details = [ref for ref in products if ref.get('reference_type') == 'detail']
+    if len(garments) == 1 and len(details) <= 1 and len(products) == len(garments) + len(details):
+        # 单款换装直接复用一键复刻/批量换款的基础换装编译器；控制图必须由
+        # 已生成底图重新推理，不能拿原动作图的深度冒充底图的像素对应关系。
+        depth_bytes, depth_tier = await render_universal_person_depth(output_file_from_url(anchor_url))
+        depth_path = Path(OUTPUT_OUTPUT_DIR) / f'universal_edit_depth_{uuid.uuid4().hex}.png'
+        depth_path.write_bytes(depth_bytes)
+        depth_url = media_url_from_path(str(depth_path))
+        edit_depth = {'role':'control_map','reference_type':'control_map','reference_id':'universal_edit_depth','label':'换装底图人物深度图','url':depth_url}
+        final_refs = [base, edit_depth, {**garments[0], 'role':'target_image'}, *[{**ref,'role':'fabric_detail'} for ref in details]]
+        edit_ratio = str(snapshot.get('aspect_ratio') or '2:3')
+        if edit_ratio == 'source':
+            edit_ratio = resolve_pose_replicate_aspect_ratio(edit_ratio, anchor_url)
+        compiled = compile_pose_replicate_prompt('depth', has_fabric_detail=bool(details), output_aspect_ratio=edit_ratio)
+        final_prompt = compiled.final_prompt + '\n【全能标准产品图适配】\n' + '\n'.join(final_lines[:4])
+        final_prompt += '\n后腰皮牌、后袋和调节扣仅属于背面，正面不可见时不显示，不能为展示后腰把人物转背。'
+        for i, ref in enumerate(final_refs[2:], 3):
+            if ref.get('instruction'):
+                final_prompt += f"\n图{i}商品说明：{ref['instruction']}"
+        if options.get('instruction'):
+            final_prompt += '\n用户补充要求：' + str(options['instruction'])
+        reuse_audit = {'product_edit_template':compiled.template_variant,'edit_depth':{'status':'succeeded','url':depth_url,'source_url':anchor_url,'tier':depth_tier}}
+    return final_refs, final_prompt, {'status':'succeeded', 'url':anchor_url, 'prompt':anchor_prompt, 'references':anchor_refs, 'generation_elapsed_seconds':batch.get('generation_elapsed_seconds',0), **reuse_audit}
+
+
 async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     update_ecommerce_task(task_id, {"status": "running", "error": ""})
     lookbook_agent = is_lookbook_snapshot(snapshot)
@@ -20424,8 +20618,13 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
     routes = list(snapshot.get("route_candidates") or [])
     failures = []
     try:
+        prepared_refs, prepared_prompt, pose_depth = await prepare_universal_pose_depth(snapshot)
+        snapshot["pose_depth"] = pose_depth
+        update_ecommerce_task(task_id, {"pose_depth": pose_depth, "generation_prompt": prepared_prompt, "generation_references": prepared_refs})
         for index, route in enumerate(routes):
             try:
+                generation_refs, generation_prompt, pose_anchor = await prepare_universal_product_anchor(snapshot, route, prepared_refs, prepared_prompt)
+                update_ecommerce_task(task_id, {"pose_anchor": pose_anchor, "generation_prompt": generation_prompt, "generation_references": generation_refs})
                 partial_images: List[str] = []
                 partial_items: List[Dict[str, Any]] = []
 
@@ -20523,12 +20722,12 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     batch = await execute_lookbook_story_batch(snapshot, route, publish_ecommerce_partial)
                 else:
                     batch = await execute_ai_image_batch(
-                        prompt=snapshot["prompt"],
+                        prompt=generation_prompt,
                         provider_id=route["provider_id"],
                         model=route["model"],
                         size=snapshot["size"],
                         quality=snapshot["quality"],
-                        references=snapshot["inputs"],
+                        references=generation_refs,
                         count=snapshot["count"],
                         prefix="ecommerce_",
                         allow_edit_endpoint_fallback=False,
@@ -20536,6 +20735,8 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                         progress_callback=publish_ecommerce_partial,
                         prompts=generation_prompts or None,
                     )
+                    if pose_anchor.get("status") == "succeeded":
+                        batch["generation_elapsed_seconds"] = round(float(batch.get("generation_elapsed_seconds") or 0) + float(pose_anchor.get("generation_elapsed_seconds") or 0), 3)
                 lookbook_quality = None
                 if lookbook_agent and bool((snapshot.get("options") or {}).get("lookbook_quality_gate", False)):
                     update_lookbook_agent_stage(task_id, "quality-check", "智能体正在检查单幅构图、人物情绪、场景忠实度与胶片细节…", 82)
@@ -20553,13 +20754,18 @@ async def execute_ecommerce_task(task_id: str, snapshot: Dict[str, Any]):
                     batch = apply_lookbook_film_finish(batch, snapshot)
                 batch = await apply_selected_studio_background(batch, snapshot, route)
                 if snapshot["operation"] in {"universal", "try_on", "pose_transfer"}:
-                    batch = await apply_fabric_enhancement(snapshot["operation"], snapshot["inputs"], batch)
+                    batch = await apply_fabric_enhancement(snapshot["operation"], snapshot["inputs"], batch, {'infer_output_depth':snapshot['operation']=='universal'})
                 raw = batch["raw"]
                 result = {
                     "type": "ecommerce",
                     "operation": snapshot["operation"],
                     "mode": snapshot["mode"],
                     "ecommerce_task_id": task_id,
+                    "generation_style": snapshot["options"].get("generation_style"),
+                    "generation_prompt": generation_prompt,
+                    "generation_references": generation_refs,
+                    "pose_depth": pose_depth,
+                    "pose_anchor": pose_anchor,
                     "parent_task_id": snapshot.get("parent_task_id") or "",
                     "prompt": snapshot["prompt"],
                     "inputs": snapshot["inputs"],
@@ -20717,7 +20923,7 @@ async def prepare_ecommerce_analysis(payload: EcommerceAnalyzeRequest) -> Dict[s
     plan = base.get("reference_plan") or {}
     if operation == "universal" and not plan and not free_creation:
         plan = public_ecommerce_reference_plan(
-            resolve_ecommerce_universal_reference_plan(inputs, base.get("options") or {})
+            resolve_ecommerce_universal_reference_plan(inputs, base.get("options") or {}), base.get("options") or {}
         )
     analysis_status = str((analysis or {}).get("status") or "not_required")
     return {

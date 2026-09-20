@@ -5,6 +5,7 @@
   setTheme(saved|| (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));
   theme.onclick=()=>{const next=root.dataset.theme==='dark'?'light':'dark';setTheme(next);try{localStorage.setItem('shiyin-training-theme',next)}catch{}};
   const items=[
+    ['denim-software-node-3.jpg','牛仔上衣 · 已选候选 1','一键复刻 · 现阶段效果演示，材质仍有差异'],
     ['a-product-result.jpg','黑白豹纹上衣','批量换款 · A1'],
     ['a-style-b-result.jpg','棕色豹纹上衣','批量换款 · A2'],
     ['b-product-fixed.png','棕色宽腿裤','批量换款 · B1 · 颜色与质感未通过'],

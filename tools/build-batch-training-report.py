@@ -8,6 +8,10 @@ ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'案例/批量复刻培训-20260920'
 records=json.loads((OUT/'evidence/generation-records.json').read_text(encoding='utf-8'))
 bykey={r['key']:r for r in records}
+if (OUT/'assets/denim-software-node-3.jpg').exists():
+    for record in records:
+        if record['key']=='a-style-c':
+            record['image']='assets/denim-software-node-3.jpg'
 boundary_fixed=(OUT/'assets/b-node-fixed.png').exists()
 def pic(src,title):
     return f'<figure><button class="photo" data-src="{src}" data-title="{title}" aria-label="放大：{title}"><img src="{src}" alt="{title}" loading="lazy"></button><figcaption>{title}</figcaption></figure>'
@@ -16,7 +20,7 @@ def shot(name,title):return pic('evidence/'+name,title)
 notes={
 'a-product':('A1 · 黑白豹纹','生成图呈现了豹纹、浅色底和面料绒感，同时保留了人物、墨镜、包和街景。','检查花纹大小、袖口和纽扣。图片清晰并不代表花纹与原款完全一致。'),
 'a-style-b':('A2 · 棕色豹纹','同一目标图更换另一款上衣，便于销售比较不同款式上身效果。','对照原款检查胸袋、门襟和衣长。生成图的部分结构发生了变化，需要美工确认。'),
-'a-style-c':('A3 · 蓝色牛仔','旧样张材质验收未通过：生成斜纹、洗水与车线颜色偏离实拍，不能用作高标准复刻成功案例。','原款与生成图均有毛边；还需对照毛边长度、下摆轮廓、胸袋及拼接线。'),
+'a-style-c':('A3 · 蓝色牛仔 · 已选候选 1','三轮真实软件生成后，由用户选定候选 1 作为现阶段效果展示。','模型对织纹、车线和洗水的精确还原仍有限；选用不代表原款材质完全一致，待更强模型可用后继续验证。'),
 'b-product':('B1 · 棕色宽腿裤','已完成蓝裤换棕裤并保留人物场景，但颜色与面料质感未通过验收。','生成图保留了目标图中露脚踝的裤长，与参考长裤不符。后腰五金、皮牌和纹理大小也需要复核。')}
 cards=''
 for key in ['a-product','a-style-b','a-style-c','b-product']:
@@ -103,9 +107,42 @@ if (OUT/'evidence/button-coverage-audit.json').exists():
 if (OUT/'evidence/denim-three-candidates.json').exists():
     choices=json.loads((OUT/'evidence/denim-three-candidates.json').read_text('utf-8'))
     model_note='当前模型在牛仔布织纹、车线颜色和洗水细节的精确还原上仍有能力限制。本次展示为现阶段效果演示，后续待更强模型可用后继续验证和改进。'
-    candidates='<article class="case"><h2>牛仔上衣 · 三轮候选待选</h2><p>'+model_note+'</p><div class="pair">'+''.join(pic(item['local'],f"候选 {i+1} · 软件真实生成，待选择") for i,item in enumerate(choices))+'</div></article>'
+    candidates='<article class="case"><h2>牛仔上衣 · 已选候选 1</h2><p>'+model_note+'</p><div class="pair">'+''.join(pic(item['local'],f"候选 {i+1} · "+('已选为汇报展示图' if i==0 else '保留对照')) for i,item in enumerate(choices))+'</div></article>'
     page=page.replace('<section class="panel" id="quality" hidden>','<section class="panel" id="quality" hidden>'+candidates)
     page=page.replace('<div class="topactions">','<p class="note">'+model_note+'</p><div class="topactions">',1)
+    selected=choices[0]
+    method='''# 牛仔上衣候选 1 · 生成记录
+
+用户选定候选 1 用于现阶段效果汇报，不代表商品材质完全一致。
+
+## 软件操作与输入
+在已安装软件的培训画布中使用一键复刻节点，深度图模式。
+目标图片：D:/data/图片/案例/A/目标图.jpg。
+服装参考：D:/data/图片/案例/A/服装参考C.jpg。
+面料细节：从服装参考C.jpg 原像素裁切 (2400,2450,2900,2950)，得到 500×500 的 denim-weave-only-reference.png；未缩放或锐化，绑定面料细节端口。
+内部人物深度图由目标图片提取；模特主体、场景可选端口留空。
+平台 shiying；模型 gemini-3-pro-image-preview；4K；高质量；画幅跟随原图。安装版 2.0.2，热更新 20260920214122。
+
+## 补充要求原文
+'''+selected['run_prompt']+'''
+
+## 实际执行及结果
+相同输入和参数通过软件提交三轮生成，用户选择第一张候选。AI 助手整理补充要求，再与软件固定复刻模板合并后提交模型；完整实际提示词与上下文保存在 evidence/denim-selected-generation.json。
+输出 SHIYIN-001407-20260920.jpg，3584×4800；节点总耗时 83.149 秒，模型生成 53.598 秒。
+软件面料增强因 no_reliable_woven_sample 跳过，因此展示的是模型原始输出，未做外部纹理贴图、锐化或修饰。
+原图：assets/denim-software-node-3.jpg。
+SHA-256：'''+selected['sha256']+'''
+
+## 效果边界
+本次是同配置三张中人工选优，不能证明某一句提示词单独造成改善，也不能保证再次生成完全相同结果。当前模型在织纹、车线颜色和洗水细节的精确还原上仍有限；后续待更强模型可用后继续验证和改进。
+'''
+    (OUT/'牛仔候选1-生成记录.md').write_text(method,encoding='utf-8')
+    process='<article class="case"><h2>候选 1 是如何生成的</h2><p>目标照片保留人物与场景，整件服装参考指定款式，另从同一原款裁出 500×500 的织纹近照，绑定面料细节端口。选择深度图模式、shiying / gemini-3-pro-image-preview、4K、高质量、跟随原图，填写下列补充要求后，以同一配置生成三张，由用户选定候选 1。</p><blockquote>'+html.escape(selected['run_prompt'])+'</blockquote><p>软件将助手整理后的要求与固定复刻模板合并后生成。成图为 3584×4800，模型耗时 53.598 秒；本次面料增强未执行，交付的是未经外部修饰的模型原始输出。同配置选优不保证下次生成相同结果。</p><a href="牛仔候选1-生成记录.md" download>下载完整生成记录</a> · <a href="evidence/denim-selected-generation.json" download>下载实际提示词与参数记录</a></article>'
+    page=page.replace('<section class="panel" id="cases" hidden>','<section class="panel" id="cases" hidden>'+process)
+    collage='牛仔三轮-100%细节拼图.png'
+    if (OUT/collage).exists():
+        block='<article class="case detail-case"><h2>原款与三轮候选 · 100% 细节拼图</h2><p>从左到右为原款、候选 1（已选）、候选 2、候选 3。默认按原始像素显示，横向滚动查看；未缩放、锐化或重绘。各图拍摄尺度不同。</p><div class="pixel-window" style="height:650px"><button class="photo" data-src="'+collage+'" data-title="牛仔三轮 · 100%细节拼图"><img src="'+collage+'" alt="原款与三轮候选的原像素细节拼图" width="3120" height="1180"></button></div><a href="'+collage+'" download>下载完整 3120 × 1180 拼图</a></article>'
+        page=page.replace('<div class="pixel-toolbar">',block+'<div class="pixel-toolbar">',1)
 (OUT/'index.html').write_text(page,encoding='utf-8')
 (OUT/'使用说明.txt').write_text('打开方式：解压整个文件夹，双击 index.html。\n汇报顺序：总览 → 真实案例 → 动态演示 → 美工验收 → 六步上手。\n键盘左右箭头切页，F 全屏；打开图片后，滚轮缩放、拖拽平移、左右键切图，双击或点击适应窗口重置，Esc 关闭。动态演示可暂停和逐步。\n所有样张来自本次真实生成，问题样张已说明；最终商用图请美工验收。\n素材与 assets、evidence 目录需与 index.html 一起发送。',encoding='utf-8')
 print(str(OUT/'index.html'))

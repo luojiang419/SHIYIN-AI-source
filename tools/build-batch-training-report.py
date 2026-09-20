@@ -8,10 +8,11 @@ ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'案例/批量复刻培训-20260920'
 records=json.loads((OUT/'evidence/generation-records.json').read_text(encoding='utf-8'))
 bykey={r['key']:r for r in records}
-if (OUT/'assets/denim-software-node-3.jpg').exists():
+denim_best = 'denim-software-node-6.jpg' if (OUT/'assets/denim-software-node-6.jpg').exists() else 'denim-software-node-3.jpg'
+if (OUT/'assets'/denim_best).exists():
     for record in records:
         if record['key']=='a-style-c':
-            record['image']='assets/denim-software-node-3.jpg'
+            record['image']='assets/'+denim_best
 boundary_fixed=(OUT/'assets/b-node-fixed.png').exists()
 def pic(src,title):
     return f'<figure><button class="photo" data-src="{src}" data-title="{title}" aria-label="放大：{title}"><img src="{src}" alt="{title}" loading="lazy"></button><figcaption>{title}</figcaption></figure>'
@@ -20,7 +21,7 @@ def shot(name,title):return pic('evidence/'+name,title)
 notes={
 'a-product':('A1 · 黑白豹纹','生成图呈现了豹纹、浅色底和面料绒感，同时保留了人物、墨镜、包和街景。','检查花纹大小、袖口和纽扣。图片清晰并不代表花纹与原款完全一致。'),
 'a-style-b':('A2 · 棕色豹纹','同一目标图更换另一款上衣，便于销售比较不同款式上身效果。','对照原款检查胸袋、门襟和衣长。生成图的部分结构发生了变化，需要美工确认。'),
-'a-style-c':('A3 · 蓝色牛仔 · 已选候选 1','三轮真实软件生成后，由用户选定候选 1 作为现阶段效果展示。','模型对织纹、车线和洗水的精确还原仍有限；选用不代表原款材质完全一致，待更强模型可用后继续验证。'),
+'a-style-c':('A3 · 蓝色牛仔 · 洗水复验当前最佳','已完成洗水分区优先的真实软件复验；用户在 100% 胸袋对照中认可当前样张接近原款。','仍需核对整图、门襟和下摆；未通过最终美工验收前，不作为商品上架结论。'),
 'b-product':('B1 · 棕色宽腿裤','已完成蓝裤换棕裤并保留人物场景，但颜色与面料质感未通过验收。','生成图保留了目标图中露脚踝的裤长，与参考长裤不符。后腰五金、皮牌和纹理大小也需要复核。')}
 cards=''
 for key in ['a-product','a-style-b','a-style-c','b-product']:
@@ -143,6 +144,14 @@ SHA-256：'''+selected['sha256']+'''
     if (OUT/collage).exists():
         block='<article class="case detail-case"><h2>原款与三轮候选 · 100% 细节拼图</h2><p>从左到右为原款、候选 1（已选）、候选 2、候选 3。默认按原始像素显示，横向滚动查看；未缩放、锐化或重绘。各图拍摄尺度不同。</p><div class="pixel-window" style="height:650px"><button class="photo" data-src="'+collage+'" data-title="牛仔三轮 · 100%细节拼图"><img src="'+collage+'" alt="原款与三轮候选的原像素细节拼图" width="3120" height="1180"></button></div><a href="'+collage+'" download>下载完整 3120 × 1180 拼图</a></article>'
         page=page.replace('<div class="pixel-toolbar">',block+'<div class="pixel-toolbar">',1)
+if (OUT/'evidence/denim-wash-priority-generation.json').exists():
+    wash=json.loads((OUT/'evidence/denim-wash-priority-generation.json').read_text('utf-8'))
+    wash_block='<article class="case"><h2>牛仔上衣 · 洗水分区复验</h2><p>本轮固定目标图、完整服装参考、深度模式与 4K，只将补充要求改为先还原深靛蓝阴影、浅中蓝主体与连续磨白过渡。用户在原始像素胸袋对照中确认右侧复验样张接近原款。</p><div class="triptych">'+asset('a-style-c.jpg','原款实拍')+asset('denim-wash-field-reference.png','原款洗水布面裁片')+asset('denim-software-node-6.jpg','真实软件复验 · 当前最佳')+'</div><p class="note">该图是模型原始输出，没有外部修图。当前结论仅为“胸袋裁片接近原款”；整图、门襟与下摆仍保留最终检查项。</p><a href="evidence/denim-wash-priority-generation.json" download>下载本轮真实生成记录</a></article>'
+    page=page.replace('<section class="panel" id="quality" hidden>','<section class="panel" id="quality" hidden>'+wash_block)
+    wash_collage='牛仔洗水复验-100%细节拼图.png'
+    if (OUT/wash_collage).exists():
+        pixels='<article class="case detail-case"><h2>洗水分区复验 · 100% 胸袋对照</h2><p>从左到右为原款、旧候选 1、洗水分区复验。每列直接裁自原图，未缩放、锐化或重绘。</p><div class="pixel-window" style="height:650px"><button class="photo" data-src="'+wash_collage+'" data-title="牛仔洗水分区复验 · 100% 胸袋对照"><img src="'+wash_collage+'" alt="牛仔洗水分区复验的原始像素胸袋对照" width="2250" height="1118"></button></div><a href="'+wash_collage+'" download>下载完整 2250 × 1118 拼图</a></article>'
+        page=page.replace('<div class="pixel-toolbar">',pixels+'<div class="pixel-toolbar">',1)
 (OUT/'index.html').write_text(page,encoding='utf-8')
 (OUT/'使用说明.txt').write_text('打开方式：解压整个文件夹，双击 index.html。\n汇报顺序：总览 → 真实案例 → 动态演示 → 美工验收 → 六步上手。\n键盘左右箭头切页，F 全屏；打开图片后，滚轮缩放、拖拽平移、左右键切图，双击或点击适应窗口重置，Esc 关闭。动态演示可暂停和逐步。\n所有样张来自本次真实生成，问题样张已说明；最终商用图请美工验收。\n素材与 assets、evidence 目录需与 index.html 一起发送。',encoding='utf-8')
 print(str(OUT/'index.html'))

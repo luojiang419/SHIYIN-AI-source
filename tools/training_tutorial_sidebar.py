@@ -5,12 +5,11 @@ from pathlib import Path
 TOOLS = Path(__file__).resolve().parent
 
 
-def build_sidebar(active: str, batch_href: str, universal_href: str, video_href: str, quick_href: str) -> str:
+def build_sidebar(active: str, batch_href: str, universal_href: str, video_href: str) -> str:
     items = [
         ('batch', '01', '批量换款', '换款与一键复刻', batch_href),
         ('universal', '02', '全能模式', '标准产品图与 Lookbook', universal_href),
         ('video', '03', '视频生成', '分镜、资产与深度视频', video_href),
-        ('quick', '04', '快速介绍', '功能、配置与管理', quick_href),
     ]
     links = ''.join(
         f'<a href="{href}" title="{title}" aria-current="{("page" if key == active else "false")}">'

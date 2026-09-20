@@ -18,14 +18,13 @@ CASES = ROOT/'案例'
 BATCH = CASES/'批量复刻培训-20260920'
 UNIVERSAL = CASES/'全能双风格'/'imgx-20260920'
 VIDEO = CASES/'视频生成培训-20260921'
-QUICK = CASES/'快速介绍培训-20260921'
 OUTPUT = CASES/'拾影培训教程-20260920'
 ARCHIVE = OUTPUT.with_suffix('.zip')
 
 
-def inject_sidebar(path: Path, active: str, batch_href: str, universal_href: str, video_href: str, quick_href: str) -> None:
+def inject_sidebar(path: Path, active: str, batch_href: str, universal_href: str, video_href: str) -> None:
     page = path.read_text(encoding='utf-8')
-    sidebar = build_sidebar(active, batch_href, universal_href, video_href, quick_href)
+    sidebar = build_sidebar(active, batch_href, universal_href, video_href)
     if 'id="tutorialSidebar"' in page:
         raise RuntimeError(f'页面已包含教程侧栏，不能重复注入：{path}')
     page = page.replace('</style>', sidebar_css()+'</style>', 1)
@@ -83,17 +82,14 @@ def main() -> None:
     subprocess.run([sys.executable, str(ROOT/'tools/build-video-generation-training.py')], check=True)
     video_output = staging/'视频生成'
     shutil.copytree(VIDEO, video_output)
-    quick_output = staging/'快速介绍'
-    shutil.copytree(QUICK, quick_output)
-    inject_sidebar(staging/'index.html', 'batch', 'index.html', '全能模式/index.html', '视频生成/index.html', '快速介绍/index.html')
-    inject_sidebar(universal_output/'index.html', 'universal', '../index.html', 'index.html', '../视频生成/index.html', '../快速介绍/index.html')
-    inject_sidebar(video_output/'index.html', 'video', '../index.html', '../全能模式/index.html', 'index.html', '../快速介绍/index.html')
-    inject_sidebar(quick_output/'index.html', 'quick', '../index.html', '../全能模式/index.html', '../视频生成/index.html', 'index.html')
+    inject_sidebar(staging/'index.html', 'batch', 'index.html', '全能模式/index.html', '视频生成/index.html')
+    inject_sidebar(universal_output/'index.html', 'universal', '../index.html', 'index.html', '../视频生成/index.html')
+    inject_sidebar(video_output/'index.html', 'video', '../index.html', '../全能模式/index.html', 'index.html')
     (staging/'使用说明.txt').write_text(
         '拾影离线培训教程\n\n'
         '1. 将整个“拾影培训教程-20260920”文件夹复制到演示电脑。\n'
         '2. 双击根目录 index.html 打开。\n'
-        '3. 使用左侧教程导航切换“批量换款”、“全能模式”、“视频生成”和“快速介绍”。\n'
+        '3. 使用左侧教程导航切换“批量换款”、“全能模式”和“视频生成”。\n'
         '4. 页面所需图片、视频、证据与说明均在本目录内，不需要联网。\n'
         '5. 不要只复制单个 HTML；需要分享时发送整个文件夹或 ZIP。\n',
         encoding='utf-8',
@@ -101,7 +97,6 @@ def main() -> None:
     verify_page(staging/'index.html')
     verify_page(universal_output/'index.html')
     verify_page(video_output/'index.html')
-    verify_page(quick_output/'index.html')
     manifest = {
         'name': '拾影培训教程',
         'entry': 'index.html',
@@ -109,7 +104,6 @@ def main() -> None:
             {'name': '批量换款', 'entry': 'index.html'},
             {'name': '全能模式', 'entry': '全能模式/index.html'},
             {'name': '视频生成', 'entry': '视频生成/index.html'},
-            {'name': '快速介绍', 'entry': '快速介绍/index.html'},
         ],
         'portable': True,
         'stats': directory_stats(staging),

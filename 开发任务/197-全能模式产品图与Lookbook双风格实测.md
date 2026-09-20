@@ -4,7 +4,7 @@
 下一步：从报告所列腰扣/皮牌位置与保守掩膜漏选继续定向优化；不再替换生图模型或另写面料算法。
 TODO：本轮 8 张 imgx 原图审阅 [x]；成熟编译器/深度/面料链路复用 [x]；HTML 与浏览器验证 [x]；缓存检查 [x]；腰头结构严格保真 [ ]；全裤无缝织纹覆盖 [ ]。
 最近验证：复用相关六组测试 136 passed；电商回归 138 passed / 2 failed（既有 Lookbook 计数、平台列表失败）；Python 编译、JS 语法、素材坞布局检查通过；界面双风格切换持久化通过；HTML 的 8 张图片、相对资源、筛选、原尺寸弹窗、Escape、390px 无溢出和控制台检查通过。
-分支：`feat/universal-product-lookbook`；仅提交本任务文件，其他修改保留。
+分支：`feat/universal-product-lookbook`；实现提交 `ccc2b2c6` 已推送至 `origin/feat/universal-product-lookbook`；仅提交本任务文件，其他修改保留。
 
 [CODEX_LONG_TASK_CONTINUE_V3]
 

@@ -35,6 +35,10 @@ def build_details(out):
         groups.append(('牛仔上衣：补充要求修复后实测','修复版软件已通过正常补充要求检查并完成生成；本次在隔离验证环境运行。新图仍有车线偏灰、织纹偏细的问题，材质验收未通过。检查问题修复不等于商品还原合格。',[
             ('denim-reference-detail.png',(0,0,750,1000),'原款胸袋与织纹'),
             ('denim-software-fixed-runtime.jpg',(1180,1750,1840,2510),'修复版软件实测 · 材质未通过')]))
+    if (assets/'denim-software-node-2.jpg').exists():
+        groups.append(('牛仔上衣：安装版更新后验收','安装版应用热更新 20260920214122 后，以同一组近照和补充要求重新生成，正常通过检查并出图。下图为安装版直接输出，车线与织纹仍未达到原款材质要求，不作为成功样张。',[
+            ('denim-reference-detail.png',(0,0,750,1000),'原款胸袋与织纹'),
+            ('denim-software-node-2.jpg',(1180,1750,1840,2510),'更新后安装版 · 材质未通过')]))
     content=[]
     for n,(title,note,entries) in enumerate(groups):
         cards=[]

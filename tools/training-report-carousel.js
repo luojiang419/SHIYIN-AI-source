@@ -8,8 +8,8 @@
     ['a-product-result.jpg','黑白豹纹上衣','批量换款 · A1'],
     ['a-style-b-result.jpg','棕色豹纹上衣','批量换款 · A2'],
     ['a-style-c-result.jpg','蓝色牛仔上衣','批量换款 · A3 · 胸袋与下摆对照'],
-    ['b-product-fixed.png','棕色宽腿裤','批量换款 · B1 · 边界修复版'],
-    ['b-node-fixed.png','棕色宽腿裤','一键复刻 · 边界修复版']
+    ['b-product-fixed.png','棕色宽腿裤','批量换款 · B1 · 颜色与质感未通过'],
+    ['b-node-fixed.png','棕色宽腿裤','一键复刻 · 边界修复，材质仍需复核']
   ];
   const el=document.getElementById('resultCarousel');
   el.innerHTML='<div class="carousel-top"><span class="carousel-live">实际生成作品</span><span id="carouselCount"></span></div><div class="carousel-stage">'+items.map(([src,title],i)=>`<figure class="carousel-slide ${i===0?'active':''}" aria-hidden="${i!==0}"><button class="photo" tabindex="${i===0?0:-1}" aria-label="查看原图：${title}"><img src="assets/${src}" alt="${title}" decoding="async"></button></figure>`).join('')+'</div><div class="carousel-meta"><div><strong id="carouselTitle"></strong><p id="carouselCaption"></p></div><div class="carousel-controls"><button id="carouselPrev" aria-label="上一张作品">←</button><button id="carouselPause">暂停</button><button id="carouselNext" aria-label="下一张作品">→</button></div></div><div class="carousel-thumbs">'+items.map(([src,title],i)=>`<button aria-label="切换到第 ${i+1} 张：${title}" aria-current="${i===0}"><img src="assets/${src}" alt=""></button>`).join('')+'</div><div class="carousel-track"><span></span></div>';

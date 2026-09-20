@@ -21,6 +21,11 @@ def build_details(out):
       ('牛仔上衣：下摆毛边与收口','原款本身带有毛边。应核对毛边长度、分布和下摆轮廓；此前“生成新增毛边”的表述已纠正。',[
         ('a-style-c.jpg',(2050,3390,4170,3700),'实拍毛边下摆'),('a-style-c-result.jpg',(1050,3200,2560,3650),'生成毛边下摆')]),
     ]
+    if (assets/'b-software-node-rerun.png').exists():
+        groups.insert(0,('真实软件重新生成：腰头与面料复核','两次均通过已安装软件实际提交：批量页使用内置模板；一键复刻增加颜色与材质要求。两次输出仍偏红、纹理平铺感明显，均未通过材质验收。未使用外部修图替换软件结果。',[
+            ('b-detail.jpg',(620,200,1070,550),'实拍原款'),
+            ('b-software-rerun.png',(1470,820,2020,1220),'软件批量页重生 · 未通过'),
+            ('b-software-node-rerun.png',(1470,820,2020,1220),'软件一键复刻重生 · 未通过')]))
     content=[]
     for n,(title,note,entries) in enumerate(groups):
         cards=[]

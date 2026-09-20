@@ -28,7 +28,7 @@ ROLE_LABELS = {
 }
 
 _ROLE_OVERRIDE_PATTERN = re.compile(
-    r"(?:图\s*[1-5]|参考图\s*[1-5]).{0,32}(?:重新编号|交换|身份来源|角色定义|控制权|作为唯一|改为.*来源)",
+    r"(?:图\s*[1-6]|参考图\s*[1-6]).{0,32}?(?P<action>重新编号|交换|作为唯一|改为.*来源|重新定义.*角色|改变.*控制权)",
     re.IGNORECASE,
 )
 _SYSTEM_OVERRIDE_PATTERN = re.compile(r"(?:忽略|覆盖|绕过|取消).{0,24}(?:硬约束|优先级|系统|模板|禁止事项)")
@@ -36,6 +36,32 @@ _IDENTITY_CHANGE_PATTERN = re.compile(r"(?:改变|替换|重绘|换掉).{0,16}(?
 _SCENE_CHANGE_PATTERN = re.compile(
     r"(?:(?:更换|替换|改成|改为|重建).{0,16}(?:背景|场景|环境)|(?:背景|场景|环境).{0,16}(?:更换|替换|改成|改为|重建))"
 )
+
+# 检查的是将要注入模板的动作，不能把“不改变身份”当成换脸要求。
+# 按分句限定否定作用域，防止“不改服装，但替换五官”被整体放行。
+_INSTRUCTION_CLAUSES = re.compile(r"[，,。；;！？!？\n]|但是|然而|而是|但|然后|并且|并|而|且")
+_NEGATED_ACTION = re.compile(
+    r"(?:不得|不能|不可|禁止|严禁|不要|避免|无需|不必|勿|不)"
+    r"(?:擅自|随意|额外|主动|重新|进行|再|去|将|把|让|\s)*$"
+)
+
+
+def _has_affirmative_violation(pattern: re.Pattern, text: str) -> bool:
+    for clause in _INSTRUCTION_CLAUSES.split(text):
+        for match in pattern.finditer(clause):
+            starts = [match.start()]
+            if 'action' in pattern.groupindex:
+                starts.append(match.start('action'))
+            negations = []
+            for start in starts:
+                prefix = clause[:start]
+                negated = _NEGATED_ACTION.search(prefix)
+                # “不要不改变”之类双重否定不能作为保留要求放行。
+                negations.append(bool(negated and not _NEGATED_ACTION.search(prefix[:negated.start()])))
+            if any(negations):
+                continue
+            return True
+    return False
 
 
 class PoseReplicatePromptError(ValueError):
@@ -105,20 +131,16 @@ def normalize_instruction_payload(payload: Mapping[str, Any], *, has_scene: bool
     normalized = _clean_text(payload.get("normalized_instruction"), 4000)
     if not normalized:
         raise PoseReplicatePromptError("AI 助手没有返回 normalized_instruction")
-    combined = "\n".join(
-        [normalized]
-        + _clean_list(payload.get("allowed_changes"))
-        + _clean_list(payload.get("must_preserve"))
-        + _clean_list(payload.get("material_and_fit"))
-        + _clean_list(payload.get("scene_adjustments"))
-        + _clean_list(payload.get("negative_constraints"))
-    )
-    if _ROLE_OVERRIDE_PATTERN.search(combined) or _SYSTEM_OVERRIDE_PATTERN.search(combined):
+    # 只有 normalized_instruction 会被编译进生图提示词；其余字段是审计说明。
+    # must_preserve / negative_constraints 中的“图1作为唯一身份来源”等
+    # 保留说明不应被拼成可执行增量，更不应跨字段匹配冲突关键词。
+    if (_has_affirmative_violation(_ROLE_OVERRIDE_PATTERN, normalized)
+            or _has_affirmative_violation(_SYSTEM_OVERRIDE_PATTERN, normalized)):
         raise PoseReplicatePromptError("AI 助手增量试图改变固定参考角色或硬约束")
-    if _IDENTITY_CHANGE_PATTERN.search(combined):
+    if _has_affirmative_violation(_IDENTITY_CHANGE_PATTERN, normalized):
         raise PoseReplicatePromptError("AI 助手增量与人物身份保留约束冲突")
     scene_adjustments = _clean_list(payload.get("scene_adjustments"))
-    if not has_scene and (scene_adjustments or _SCENE_CHANGE_PATTERN.search(normalized)):
+    if not has_scene and _has_affirmative_violation(_SCENE_CHANGE_PATTERN, normalized):
         raise PoseReplicatePromptError("未连接场景输入时不能要求更换场景")
     return {
         "intent_summary": _clean_text(payload.get("intent_summary"), 1200),

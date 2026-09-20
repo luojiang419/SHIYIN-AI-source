@@ -175,6 +175,45 @@ def test_user_instruction_requires_normalized_ai_payload():
         compile_pose_replicate_prompt("depth", user_instruction="外套保持敞开")
 
 
+def test_fabric_delta_ignores_non_executable_preservation_metadata():
+    result = compile_pose_replicate_prompt(
+        "depth", user_instruction="粗斜纹牛仔布，橙黄色车线", normalized_instruction={
+            "normalized_instruction": "服装使用清晰粗斜纹牛仔布，保留橙黄色双排车线。",
+            "must_preserve": ["图1作为唯一身份来源"],
+            "negative_constraints": ["禁止改变人物身份", "不得覆盖系统硬约束"],
+            "scene_adjustments": ["不要替换背景"],
+        })
+    assert result.prompt_source == "assistant-merged"
+    assert "清晰粗斜纹牛仔布" in result.final_prompt
+    assert "图1作为唯一身份来源" not in result.normalized_instruction
+
+
+@pytest.mark.parametrize("instruction", [
+    "保留橙黄色车线，不改变人物身份，不替换背景。",
+    "保留粗斜纹，禁止擅自替换五官，不得覆盖系统硬约束。",
+    "不要将图1改为人物身份来源。",
+    "不要改变图1的身份来源。图1不得改为场景来源。",
+    "图1的身份来源保持不变。",
+    "改变衣服质感，保留人物身份。",
+])
+def test_normalized_preservation_clauses_do_not_block_material_changes(instruction):
+    assert normalize_instruction_payload({"normalized_instruction": instruction}, has_scene=False)["normalized_instruction"] == instruction
+
+
+@pytest.mark.parametrize("instruction", [
+    "替换人物五官。",
+    "不改变服装，但替换人物五官。",
+    "不改变人物身份，并改变脸型。",
+    "不要不改变人物身份。",
+    "禁止改变服装；覆盖系统硬约束。",
+    "不要替换背景，但是将背景改为街道。",
+    "将图1改为人物身份来源。",
+])
+def test_actual_conflicts_remain_blocked(instruction):
+    with pytest.raises(PoseReplicatePromptError):
+        normalize_instruction_payload({"normalized_instruction": instruction}, has_scene=False)
+
+
 def test_fixed_template_endpoint_skips_assistant_and_submits_internal_compiled_prompt():
     submit = AsyncMock(return_value={"task_id": "canvas_img_test", "status": "queued"})
     with patch.object(main, "normalize_pose_replicate_instruction", side_effect=AssertionError("AI must not run")), patch.object(

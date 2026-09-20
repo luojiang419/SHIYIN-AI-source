@@ -7,7 +7,6 @@
   const items=[
     ['a-product-result.jpg','黑白豹纹上衣','批量换款 · A1'],
     ['a-style-b-result.jpg','棕色豹纹上衣','批量换款 · A2'],
-    ['a-style-c-result.jpg','蓝色牛仔上衣','批量换款 · A3 · 胸袋与下摆对照'],
     ['b-product-fixed.png','棕色宽腿裤','批量换款 · B1 · 颜色与质感未通过'],
     ['b-node-fixed.png','棕色宽腿裤','一键复刻 · 边界修复，材质仍需复核']
   ];

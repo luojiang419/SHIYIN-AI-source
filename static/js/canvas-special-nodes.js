@@ -2761,6 +2761,11 @@
         });
         root.querySelector('[data-special-action="run-pose-replicate"]')?.addEventListener('click', async event => {
             event.preventDefault(); event.stopPropagation();
+            // 点击时冻结实际输入值（包括空字符串），避免深度同步触发重绘后
+            // 从旧节点状态取回已经清空的补充要求。
+            const promptControl = root.querySelector('[data-pose-replicate-field="poseReplicatePrompt"]');
+            const prompt = String(promptControl ? promptControl.value : node.poseReplicatePrompt || '').trim();
+            node.poseReplicatePrompt = prompt;
             if(node.poseReplicateMode === 'depth' && node.poseDepthBaseUrl){
                 try {
                     const prepared = await applyPoseDepthGlobalControls(node, options);
@@ -2775,7 +2780,6 @@
             if(!currentAction?.url || !currentTargets.length || !control?.url){ options.toast?.(`请等待${node.poseReplicateMode === 'depth' ? '深度图' : '骨架图'}提取完成，并确认服装参考已添加`); return; }
             if(node.poseReplicateMode === 'depth' && !activeDepthMapStatus()?.ready){ options.toast?.(`${activeDepthMapModeLabel()}深度模型尚未就绪`); return; }
             if(!options.generatePoseReplicate){ options.toast?.('当前画布尚未配置一键复刻生成能力'); return; }
-            const prompt = String(node.poseReplicatePrompt || '').trim();
             const taskCount = currentTargets.length;
             node.poseReplicateActiveRuns = Math.max(0, Number(node.poseReplicateActiveRuns) || 0) + taskCount;
             notify(options, node, true);

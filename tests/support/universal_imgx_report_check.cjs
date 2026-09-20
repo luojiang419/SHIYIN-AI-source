@@ -9,7 +9,7 @@ const {chromium}=require('playwright');
   try{
     const page=await browser.newPage({viewport:{width:1440,height:1050}});
     const errors=[];page.on('pageerror',e=>errors.push(e.message));
-    await page.goto(pathToFileURL(path.join(dir,'实测论述报告.html')).href);
+    await page.goto(pathToFileURL(path.join(dir,fs.existsSync(path.join(dir,'技术验证归档.html'))?'技术验证归档.html':'实测论述报告.html')).href);
     const assets=await page.locator('img[src],a[href]').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('src')||n.getAttribute('href')).filter(v=>!v.startsWith('#')));
     for(const asset of assets)assert.ok(fs.existsSync(path.resolve(dir,decodeURIComponent(asset))),asset);
     await page.locator('img[src]').evaluateAll(async nodes=>{await Promise.all(nodes.map(async img=>{img.loading='eager';await img.decode()}))});

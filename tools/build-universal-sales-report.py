@@ -1,0 +1,89 @@
+"""从真实 imgx 验证素材生成销售汇报、无重采样细节证据和操作动画。"""
+import argparse
+import html
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from PIL import Image
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('case_dir')
+    case = Path(parser.parse_args().case_dir).resolve()
+    subprocess.run([sys.executable, str(Path(__file__).with_name('build-universal-imgx-report.py')), str(case)], check=True)
+    shutil.copy2(case/'实测论述报告.html', case/'技术验证归档.html')
+    assets = case/'report-assets'
+    assets.mkdir(exist_ok=True)
+    evidence = []
+
+    def crop(src, box, name):
+        with Image.open(case/src) as im:
+            assert 0 <= box[0] < box[2] <= im.width and 0 <= box[1] < box[3] <= im.height
+            im.crop(box).save(assets/name)
+        evidence.append(dict(file='report-assets/'+name, source=src, box=list(box), resampled=False))
+        return 'report-assets/'+name
+
+    texture = crop('references/3.jpg', (550,1600,970,2020), 'reference-texture.png')
+    waist = crop('references/3.jpg', (450,200,1750,850), 'reference-waist.png')
+    looks = [('standard','标准产品图','integrated-standard',(1660,3150,2080,3570),(1450,2050,2450,2600)),
+             ('lookbook','Lookbook','reuse-lookbook',(1660,3200,2080,3620),(1330,1800,2180,2350))]
+    def pic(src, title, detail=False):
+        return f'<figure><button class="photo" data-image="{src}" data-caption="{html.escape(title)}"><img src="{src}" alt="{html.escape(title)}"></button><figcaption>{title}</figcaption></figure>'
+    refs = ''.join(pic('references/'+f,t) for f,t in [('1.jpg','模特原图'),('2.jpg','商品原图 · 后侧'),('3.jpg','腰头／面料细节原图'),('4.png','动作原图'),('5.jpeg','场景原图')])
+    results = ''.join(pic(folder+'/fabric-depth-final.png',title+' · 最新最终候选') for _,title,folder,_,_ in looks)
+    comparisons = ''
+    for key,title,folder,tbox,wbox in looks:
+        blocks = []
+        for kind,box,ref,label in [('texture',tbox,texture,'面料织纹'),('waist',wbox,waist,'腰头特殊设计')]:
+            before=crop(folder+'/image-00001.jpg',box,key+'-'+kind+'-before.png')
+            after=crop(folder+'/fabric-depth-final.png',box,key+'-'+kind+'-after.png')
+            blocks.append('<h3>'+label+'</h3><div class="cropgrid">'+''.join(f'<figure><figcaption>{caption}</figcaption><div class="pixelbox"><img src="{src}" alt="{caption}"></div></figure>' for src,caption in [(ref,'原参考局部'),(before,'生成原图 · 处理前'),(after,'最终成图 · 处理后')])+'</div><p class="muted">成图裁切坐标：'+str(box)+'；处理前后完全相同。拖动下方滚动条查看完整区域。</p>')
+        note='当前为前侧视角，后腰双扣、皮牌不可见；不能据此验收后腰设计。' if key=='standard' else '对照检查双扣、腰耳、皮牌与口袋：部件位置、比例和文字仍存在差异，本张不能作为特殊腰头完全还原的承诺。'
+        comparisons+=f'<div data-comparison="{key}"'+(' hidden' if key!='standard' else '')+'><p class="notice">'+note+'</p>'+''.join(blocks)+'</div>'
+    depth_cards=[]
+    shutil.copy2(case.parent/'20260920/round-7-standard_product-depth-2.png',assets/'action-depth.png')
+    depth_cards.append('<div class="pair">'+pic('references/4.png','动作原图')+pic('report-assets/action-depth.png','对应的真实人物深度图')+'</div>')
+    spec=json.loads((case/'integrated-standard.json').read_text(encoding='utf-8'))
+    shutil.copy2(Path(spec['references'][1]),assets/'anchor-depth.png')
+    depth_cards.append('<div class="pair">'+pic('standard-anchor-refined/image-00001.jpg','标准图动作底图')+pic('report-assets/anchor-depth.png','该底图自身深度')+'</div>')
+    for key,title,folder,_,_ in looks:
+        audit=json.loads((case/folder/'fabric-depth-audit.json').read_text(encoding='utf-8'))
+        depth=Path(audit['result']['fabric_enhancement'][0]['output_depth']['url'])
+        shutil.copy2(depth,assets/(key+'-depth.png'))
+        depth_cards.append('<div class="pair">'+pic(folder+'/image-00001.jpg',title+' · 深度输入原图')+pic('report-assets/'+key+'-depth.png','该成图自身深度')+'</div>')
+    shutil.copy2(case.parent/'20260920/style-dialog-light.png',assets/'style-dialog.png')
+    guide='''<h2>五步上手，先做一款</h2><ol class="steps"><li><b>准备清楚的图片</b><p>一张模特、一张完整商品、一张清晰面料／腰头细节；需要指定动作或背景，再加动作图和场景图。商品正反面都要展示时，补齐正反面参考。</p></li><li><b>进入全能模式，逐张选对角色</b><p>模特、服装、细节、动作和场景各归各位。在细节图的「细节归属商品」中选中对应服装；有多款商品时，每张细节都要选对归属。</p></li><li><b>点击「生成风格」</b><p>需要按参考动作展示商品，选「标准产品图」；需要时装氛围和创意构图，选「Lookbook」。场景参考图与影棚预设二选一。</p></li><li><b>写清要求，点击「开始生成」</b><p>示例：保留模特与鞋子，换成参考裤装，使用指定场景。重点保留细斜纹与裤型；展示后腰双扣和皮牌时，采用后侧视角。</p></li><li><b>放大检查，再交付</b><p>先看整体动作、裤型和鞋子，再以 100% 查看面料、腰扣、腰耳、皮牌及裤脚。扣数或位置不对就重新调整，不把细节有偏差的图当作商品实拍依据。</p></li></ol><h3>向客户介绍，用这三句话</h3><p>① 同一组素材，可以制作标准产品图和 Lookbook。<br>② 提供完整商品图和清楚的细节图，并选对细节归属，更方便检查商品表现。<br>③ 成图先看整体，再放大看面料和特殊设计，确认后再使用。</p><p class="notice">本次是开发验证样张，尚未发布热更新。织纹可见性已有改善；特殊腰头位置及部分暗部纹理仍需人工复核，不承诺一键百分之百还原。</p>'''
+    demo_steps=[
+        ['准备素材','完整商品图＋局部细节，先从一款商品开始。','references/2.jpg','references/3.jpg'],
+        ['分配角色','上传后逐张选择角色；细节归属商品 → 这条裤装。','references/1.jpg','references/3.jpg'],
+        ['选择风格','生成风格 → 标准产品图 / Lookbook。','report-assets/style-dialog.png',None],
+        ['填写要求并生成','说清要保留什么、换什么、展示哪个视角；点击开始生成。','references/4.png','references/5.jpeg'],
+        ['检查整体','标准图检查动作与版型；Lookbook 检查构图与商品可见性。','integrated-standard/fabric-depth-final.png','reuse-lookbook/fabric-depth-final.png'],
+        ['放大细节后交付','检查织纹、双扣、腰耳、皮牌；有差异先调整再交付。',waist,'report-assets/lookbook-waist-after.png']]
+    css='''*{box-sizing:border-box}body{margin:0;background:#f3f2eb;color:#20392e;font:16px/1.75 system-ui,"Microsoft YaHei",sans-serif}header{background:#173b31;color:#fff;padding:28px max(24px,calc((100vw - 1320px)/2))}h1{font-size:36px;margin:8px 0}header p{color:#d6e3d9;margin:0}main{max-width:1368px;margin:auto;padding:26px 24px}nav{display:flex;gap:8px;overflow:auto;background:#fff;padding:14px 24px;position:sticky;top:0;z-index:3;border-bottom:1px solid #ddd}button,a{font:inherit}button{cursor:pointer;border:1px solid #b4c5b9;background:white;color:#234536;border-radius:7px;padding:9px 16px}button[aria-selected=true],button[aria-pressed=true]{background:#234d3b;color:white}nav button{white-space:nowrap}a{color:#386c51}h2{font-size:29px;margin-top:0}h3{margin-top:26px}.muted,figcaption{font-size:13px;color:#66746a}.notice{border-left:4px solid #ac8745;background:#eae4d6;padding:16px 20px}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}.pair,.cropgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.cropgrid{grid-template-columns:repeat(3,minmax(0,1fr))}figure{margin:0;min-width:0;background:#fff;padding:12px;border:1px solid #dbe1d8}figcaption{padding:8px 0}.photo{padding:0;border:0;border-radius:0;display:block;width:100%;background:#e8eae2;cursor:zoom-in}.photo img{width:100%;height:440px;object-fit:contain;display:block}.grid .photo img{height:235px}.pixelbox{height:450px;overflow:auto;background:#ddd}.pixelbox img{display:block;max-width:none;width:auto;height:auto}.fit .pixelbox img{max-width:100%;height:auto}.toolbar{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.steps{padding-left:25px}.steps li{padding:12px 16px;background:white;margin-bottom:10px}.steps p{margin:5px 0}.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:22px 0}.tiles article{background:#fff;padding:20px;border-top:3px solid #91a788}.tiles h3{margin:0}section[hidden],[hidden]{display:none!important}section{animation:appear .25s ease;scroll-margin-top:88px}.pair{margin:20px 0}.links{display:flex;gap:20px;flex-wrap:wrap;margin:20px 0}.demo{background:#173b31;color:#fff;padding:25px;border-radius:12px}.demo h2{color:white;font-size:28px;margin:4px 0}.demo p{margin:6px 0 16px}.demo-images{height:440px;display:flex;gap:16px;justify-content:center}.demo-images img{max-width:48%;width:auto;max-height:100%;object-fit:contain;animation:appear .65s ease}.demo-images img:only-child{max-width:100%}.progress{height:5px;background:#657b6d;margin-top:20px}.progress i{display:block;height:100%;background:#e7cb8e;transition:width .4s}.demo small{color:#d6dfd8}dialog{width:96vw;height:95vh;max-width:none;padding:18px;border:0;background:#173b31;color:white}dialog::backdrop{background:#000c}.viewer-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.viewport{overflow:auto;height:calc(100% - 90px);margin-top:12px}.viewport img{display:block;max-width:100%;max-height:100%;margin:auto;object-fit:contain}.viewport img.full{max-width:none;max-height:none;margin:0;width:auto}button:focus-visible,a:focus-visible{outline:3px solid #c99845;outline-offset:3px}footer{padding:24px;font-size:13px;text-align:center;color:#69756b}@keyframes appear{from{opacity:.3;transform:translateY(8px)}to{opacity:1;transform:none}}@media(max-width:700px){h1{font-size:27px}.pair,.cropgrid,.tiles{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}.photo img{height:360px}.grid .photo img{height:210px}.demo-images{height:330px}.demo{padding:16px}.demo h2{font-size:23px}main{padding:22px 16px}.pixelbox{height:350px}}@media print{nav,.toolbar,dialog,.demo{display:none}section[hidden]{display:block!important}section{break-before:page}.photo img{height:260px}header{background:white;color:#20392e}.pixelbox{height:auto;overflow:visible}.pixelbox img{max-width:100%}}'''
+    panels=[('overview','汇报总览',f'''<h2>一组素材，两种商品呈现</h2><div class="tiles"><article><h3>标准产品图</h3><p>适合明确展示动作与版型。给定模特、商品、动作和场景后生成候选图。</p></article><article><h3>Lookbook</h3><p>适合时装氛围和创意构图。特殊设计需要可见时，明确要求对应视角。</p></article><article><h3>细节检查</h3><p>完整参考与局部细节对照，放大确认织纹、扣件与腰头，合格后交付。</p></article></div><p class="notice">当前结论：标准图主要动作得到保留，细斜纹得到恢复；腰头部件位置、文字及部分暗部覆盖仍有偏差。以下是验证候选，尚未发布热更新。</p><div class="pair">{results}</div><p class="muted">全部新生成图片使用 imgx / Gemini 3 Pro Image。本轮 8 张成功图包含 2 张中间底图；此页展示最新两个候选，不以生成成功代替商品验收通过。</p>'''),
+        ('refs','原图与成图',f'<h2>先看参考，再看结果</h2><div class="grid">{refs}</div><h3>面料与特殊腰头，各自放大看</h3><p>两块均裁自同一张「腰头细节.jpg」，不是两张独立参考。点击任何图片可查看原尺寸。</p><div class="pair">{pic(texture,"面料细节 · 原像素裁切")}{pic(waist,"特殊腰头 · 原像素裁切")}</div><h3>对应最终成图</h3><div class="pair">{results}</div>'),
+        ('pixels','100% 细节对比',f'<h2>同坐标看增强前后，逐项核对商品</h2><p>100% 模式：1 个图像像素对应 1 个 CSS 像素，请将浏览器缩放设为 100%。参考与成图的拍摄距离、视角不同，未配准，不代表实物同尺度。</p><div class="toolbar"><button data-kind="standard" aria-pressed="true">标准产品图</button><button data-kind="lookbook" aria-pressed="false">Lookbook</button><button id="pixel-size" aria-pressed="true">100% 原像素（当前）</button><button id="pixel-fit" aria-pressed="false">适应宽度</button></div><div id="comparisons">{comparisons}</div>'),
+        ('depth','动作与深度', '<h2>每张深度图，都与自己的输入配对</h2><p>深度图由系统生成，销售不需要额外制作或上传。此页用于汇报检查动作和轮廓；灰度图不提供面料、腰扣或文字细节。</p>'+''.join(depth_cards)+'<p class="muted">不同图片的深度图不能直接叠加比较。点击图片可放大；原动作深度、动作底图深度和成图深度均为本次链路的真实文件。</p>'),
+        ('sales','销售使用说明',guide+'<div class="links"><a href="销售使用说明与功能汇报.html" target="_blank">打开可打印的销售说明</a><a href="销售使用说明与功能汇报.md" download>下载文字说明</a></div>'+pic('report-assets/style-dialog.png','实际界面截图 · 生成风格选择')),
+        ('animation','操作演示动画','''<h2>一分钟演示：从素材到交付检查</h2><p>六步操作示意，使用实际素材与界面截图。非实时软件操作录像；等待时间已压缩，不代表生成速度。</p><div class="demo"><small id="demo-count"></small><h2 id="demo-title"></h2><p id="demo-text"></p><div class="demo-images" id="demo-images"></div><div class="progress"><i id="demo-progress"></i></div></div><div class="toolbar"><button id="play">播放演示</button><button id="prev">上一步</button><button id="next">下一步</button><button id="restart">从头开始</button><label>每步 <select id="duration"><option value="8000">8 秒</option><option value="4000">4 秒</option><option value="12000">12 秒</option></select></label><span id="demo-status" aria-live="polite">已暂停</span></div><div id="step-buttons" class="toolbar"></div>''')]
+    if (case/'操作演示.mp4').exists():
+        key,label,content=panels[-1]
+        panels[-1]=(key,label,content+'<div class="links"><a href="操作演示.mp4" download>下载独立演示视频（MP4）</a></div><video controls preload="metadata" style="width:100%;max-width:1000px" src="操作演示.mp4" aria-label="销售操作示意演示视频"></video>')
+    nav='<nav role="tablist" aria-label="报告板块">'+''.join(f'<button role="tab" id="tab-{key}" data-tab="{key}" aria-controls="{key}" aria-selected="{str(i==0).lower()}" tabindex="{0 if i==0 else -1}">{label}</button>' for i,(key,label,_) in enumerate(panels))+'</nav>'
+    sections=''.join(f'<section role="tabpanel" id="{key}" aria-labelledby="tab-{key}"'+(' hidden' if i else '')+'>'+content+'</section>' for i,(key,_,content) in enumerate(panels))
+    js='''const tabs=[...document.querySelectorAll('[data-tab]')];function showTab(key){tabs.forEach(t=>{const on=t.dataset.tab===key;t.setAttribute('aria-selected',on);t.tabIndex=on?0:-1;document.getElementById(t.dataset.tab).hidden=!on});if(key!=='animation')stop();history.replaceState(null,'','#'+key)}tabs.forEach((t,i)=>{t.onclick=()=>showTab(t.dataset.tab);t.onkeydown=e=>{if(['ArrowRight','ArrowLeft','Home','End'].includes(e.key)){e.preventDefault();const n=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;tabs[n].click();tabs[n].focus()}}});document.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-comparison]').forEach(p=>p.hidden=p.dataset.comparison!==b.dataset.kind);document.querySelectorAll('[data-kind]').forEach(x=>x.setAttribute('aria-pressed',x===b))});['pixel-size','pixel-fit'].forEach(id=>document.getElementById(id).onclick=()=>{document.getElementById('comparisons').classList.toggle('fit',id==='pixel-fit');['pixel-size','pixel-fit'].forEach(k=>document.getElementById(k).setAttribute('aria-pressed',k===id));document.getElementById('pixel-size').textContent=id==='pixel-size'?'100% 原像素（当前）':'100% 原像素'});const viewer=document.getElementById('viewer'),large=document.getElementById('large');document.querySelectorAll('[data-image]').forEach(b=>b.onclick=()=>{large.src=b.dataset.image;large.alt=b.dataset.caption;large.classList.remove('full');document.getElementById('caption').textContent=b.dataset.caption;document.getElementById('download').href=b.dataset.image;document.getElementById('zoom').textContent='切换 100% 原像素';viewer.showModal()});document.getElementById('close').onclick=()=>viewer.close();document.getElementById('zoom').onclick=e=>{const full=large.classList.toggle('full');e.target.textContent=full?'切换适应窗口':'切换 100% 原像素'};let step=0,timer=null;const play=document.getElementById('play');function render(){const s=STEPS[step];document.getElementById('demo-count').textContent='操作示意 · '+(step+1)+' / '+STEPS.length;document.getElementById('demo-title').textContent=s[0];document.getElementById('demo-text').textContent=s[1];document.getElementById('demo-images').innerHTML=s.slice(2).filter(Boolean).map(p=>'<img src="'+p+'" alt="'+s[0]+'">').join('');document.getElementById('demo-progress').style.width=((step+1)/STEPS.length*100)+'%';document.querySelectorAll('[data-step]').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.step===step))}function stop(){clearTimeout(timer);timer=null;play.textContent='播放演示';document.getElementById('demo-status').textContent='已暂停'}function schedule(){timer=setTimeout(()=>{if(step===STEPS.length-1){stop();document.getElementById('demo-status').textContent='演示完成';return}step++;render();schedule()},+document.getElementById('duration').value)}play.onclick=()=>{if(timer){stop();return}if(step===STEPS.length-1)step=0;render();play.textContent='暂停演示';document.getElementById('demo-status').textContent='播放中';schedule()};document.getElementById('prev').onclick=()=>{stop();step=Math.max(0,step-1);render()};document.getElementById('next').onclick=()=>{stop();step=Math.min(STEPS.length-1,step+1);render()};document.getElementById('restart').onclick=()=>{stop();step=0;render()};document.getElementById('duration').onchange=()=>{if(timer){clearTimeout(timer);schedule()}};document.getElementById('step-buttons').innerHTML=STEPS.map((s,i)=>'<button data-step="'+i+'">'+(i+1)+'. '+s[0]+'</button>').join('');document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>{stop();step=+b.dataset.step;render()});render();if(tabs.some(t=>t.dataset.tab===location.hash.slice(1)))showTab(location.hash.slice(1));'''
+    document=f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>全能模式 · 销售演示与细节对比</title><style>{css}</style><body><header><small>SHIYIN AI / 2026.09.20 / IMGX 实测</small><h1>全能模式 · 销售演示与细节对比</h1><p>看效果 · 比细节 · 学操作 · 做汇报</p></header>{nav}<main>{sections}<div class="links"><a href="技术验证归档.html">完整样张与验证记录</a><a href="report-assets/crop-evidence.json">裁切来源与坐标</a></div></main><footer>离线可用 · 分享时携带整个案例目录 · 点击图片可放大查看</footer><dialog id="viewer"><div class="viewer-tools"><b id="caption"></b><button id="zoom">切换 100% 原像素</button><a id="download" download>下载原图</a><button id="close">关闭</button></div><div class="viewport"><img id="large" alt=""></div></dialog><script>const STEPS={json.dumps(demo_steps,ensure_ascii=False)};{js}</script></body></html>'
+    (case/'实测论述报告.html').write_text(document,encoding='utf-8')
+    (assets/'crop-evidence.json').write_text(json.dumps(evidence,ensure_ascii=False,indent=2),encoding='utf-8')
+    (case/'销售使用说明与功能汇报.html').write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>销售使用说明与功能汇报</title><style>{css}main{{max-width:960px}}@media print{{body{{font-size:12px}}h2{{font-size:21px}}.steps li{{padding:4px 8px}}}}</style><main><h1>全能模式 · 销售使用说明</h1><p>标准产品图：按参考动作呈现商品。Lookbook：以创意动作和构图呈现时装氛围。</p>{guide}<p>2026-09-20 验证版 · <a href="实测论述报告.html#animation">查看操作演示</a></p></main></html>',encoding='utf-8')
+    import re
+    (case/'销售使用说明与功能汇报.md').write_text('# 全能模式 · 销售使用说明与功能汇报\n\n标准产品图：按参考动作呈现商品。Lookbook：创意动作与时装氛围。\n\n'+html.unescape(re.sub('<[^>]+>','\n',guide)),encoding='utf-8')
+    print(case/'实测论述报告.html')
+
+
+if __name__ == '__main__':
+    main()

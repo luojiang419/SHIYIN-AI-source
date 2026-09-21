@@ -90,8 +90,14 @@ def inspect_color_fidelity(reference: np.ndarray, generated: np.ndarray) -> Colo
     normalized_overlap = palette_overlap(reference_lab, normalized)
     mean = float(raw_delta.mean())
     normalized_mean = float(normalized_delta.mean())
-    if normalized_mean <= 6 and normalized_overlap >= .62:
-        confidence = "可信：色相与饱和度接近，仍需人工检查材质与光线"
+    # 归一化结果只用于解释环境造成的偏移。商品色号验收仍必须通过原始亮度、
+    # 原始色差和原始色板覆盖度，不能把明显曝光差异误判为同一色号。
+    raw_lightness_ok = abs(float(offsets[0])) <= 3.5
+    raw_color_ok = mean <= 6 and raw_overlap >= .62
+    if raw_lightness_ok and raw_color_ok and normalized_mean <= 6 and normalized_overlap >= .62:
+        confidence = "可信：原始亮度与色彩均接近，仍需人工检查材质与光线"
+    elif normalized_mean <= 6 and normalized_overlap >= .62:
+        confidence = "不通过：综合色相接近，但原始亮度或色板覆盖度不符"
     elif normalized_mean <= 12 and normalized_overlap >= .42:
         confidence = "待人工确认：存在可见色差或环境不确定性"
     else:

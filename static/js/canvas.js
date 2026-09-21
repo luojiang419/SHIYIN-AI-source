@@ -1630,8 +1630,8 @@ async function loadMiniMaxH3Status({renderAfter=false}={}){
 }
 function minimaxH3ConnectionNote(){
     if(minimaxH3State.loading) return '正在检查 MiniMax H3 服务…';
-    if(minimaxH3State.generationEnabled) return 'MiniMax H3 本地服务已就绪';
-    return minimaxH3State.error || 'MiniMax H3 本地服务未启动，请联系本机管理员。';
+    if(minimaxH3State.generationEnabled) return '优云智算 MiniMax H3 已就绪';
+    return minimaxH3State.error || '优云智算 MiniMax H3 不可用，请检查 API 设置。';
 }
 function ensureKlingCapabilities(){
     if(klingCliState.loaded || klingCliState.loading) return;

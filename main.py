@@ -1654,7 +1654,8 @@ def merge_default_api_providers(providers):
         if not current:
             merged.append(minimax_h3_default)
         else:
-            current["name"] = str(current.get("name") or minimax_h3_default["name"])
+            # 固定平台沿用稳定 ID；旧客户端保存的名称也必须迁移，供所有节点共用。
+            current["name"] = minimax_h3_default["name"]
             current["base_url"] = normalize_minimax_h3_base_url(
                 current.get("base_url") or minimax_h3_default["base_url"]
             )

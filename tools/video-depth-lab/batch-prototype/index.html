@@ -38,7 +38,7 @@
         <aside class="settings-panel">
           <section class="panel preview-card">
             <header class="panel-head"><div><span class="eyebrow">DEPTH PREVIEW</span><h2>生成结果预览</h2></div><span class="preview-state" data-preview-state>处理中</span></header>
-            <button class="preview-stage" type="button" data-action="play-preview" aria-label="播放深度视频预览">
+            <button class="preview-stage" type="button" data-action="play-preview" aria-label="播放深度视频预览" title="点击播放，双击全屏划像对比">
               <span class="depth-scene" data-depth-scene><i></i><i></i><i></i><b></b></span><span class="play-button" data-play-icon>▶</span>
             </button>
             <div class="preview-meta"><strong data-preview-name>fashion_walk_01_depth.mp4</strong><span data-preview-info>深度结果生成中 · 可先调整输出参数</span></div>
@@ -54,6 +54,7 @@
               <label><span>平滑强度 <output data-value="smooth">4</output></span><input data-parameter="smooth" type="range" min="0" max="20" value="4"></label>
             </div>
             <label class="invert"><input data-parameter="invert" type="checkbox"><span>反转深度</span><i></i></label>
+            <button class="export-adjusted" data-action="export-adjusted" type="button">应用参数并导出调整版</button>
           </section>
           <section class="panel settings-card moved-setting">
             <header class="panel-head"><div><span class="eyebrow">MODEL</span><h2>提取设置</h2></div></header>
@@ -73,6 +74,8 @@
       <footer class="actions"><div class="action-note" data-note><b>正在处理 1 / 3</b><span>fashion_walk_01.mp4 · 正在进行深度推理</span></div><div class="action-buttons"><button class="button muted" data-action="pause" type="button">暂停队列</button><button class="button primary" data-action="start" type="button">开始批量提取</button></div></footer>
     </main>
     <div class="toast" data-toast hidden></div>
+    <dialog class="compare-dialog" data-compare-dialog><header><div><span class="eyebrow">COMPARE</span><h2>划像对比播放</h2></div><button class="icon-button" data-action="close-compare" type="button" title="关闭">×</button></header><div class="compare-stage" data-compare-stage><div class="compare-depth"><span class="depth-scene" data-compare-depth><i></i><i></i><i></i><b></b></span></div><div class="compare-source" data-compare-source><span>源视频</span></div><i class="compare-divider" data-compare-divider>↔</i><input data-compare-wipe type="range" min="0" max="100" value="50" aria-label="划像位置"></div><footer><span data-compare-name>fashion_walk_01.mp4</span><span>拖动中间手柄对比源视频与深度视频</span></footer></dialog>
     <script src="./app.js"></script>
+    <script src="./enhancements.js"></script>
   </body>
 </html>

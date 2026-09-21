@@ -95,6 +95,8 @@ test('人物模式传递到组件准备与推理请求', async () => {
     const calls = await page.evaluate(() => window.calls);
     assert.equal(calls.find(c => c.name === 'ensure_components').args.extractionMode,'person');
     assert.equal(calls.find(c => c.name === 'run_inference').args.request.extractionMode,'person');
+    assert.match(await page.locator('[data-note] b').textContent(), /全部提取完成 · 显存已释放/);
+    assert.match(await page.locator('[data-toast]').textContent(), /推理进程已退出，显存已释放/);
   } finally { await browser.close(); }
 });
 

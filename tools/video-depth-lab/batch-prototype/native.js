@@ -32,7 +32,7 @@ function render() {
   $('[data-queue-count]').textContent = `${queue.length} 个任务 · ${queue.filter(j => j.state === 'failed').length} 个失败`;
   $('[data-path]').textContent = outputRoot || '请选择输出目录';
   $('[data-action="open-output"]').disabled = !outputRoot;
-  $('[data-note] b').textContent = preparing ? '首次准备运行时与模型' : active ? `正在处理 ${active.name}` : paused ? '队列已暂停' : '准备就绪';
+  $('[data-note] b').textContent = preparing ? '首次准备运行时与模型' : exporting ? '正在应用参数并导出' : active ? `正在处理 ${active.name}` : paused ? '队列已暂停 · 显存已释放' : queue.length && queue.every(j => j.state === 'done') ? '全部提取完成 · 显存已释放' : '准备就绪';
   $('[data-note] span').textContent = active?.message || '按顺序提取，保留原始 FPS、全部帧与原始分辨率';
   $('[data-action="start"]').disabled = running || preparing || exporting || selectingOutput;
   $('[data-action="pause"]').textContent = preparing ? (cancelling ? '正在取消…' : '取消准备') : paused ? '恢复队列' : '暂停队列';
@@ -99,7 +99,7 @@ async function processQueue() {
     } catch(e) { job.state = 'failed'; job.error = String(e); }
     persist(); render();
   }
-  running = false; render(); toast(paused ? '当前视频已完成，队列已暂停' : '本轮队列处理结束');
+  running = false; render(); toast(paused ? '当前视频已完成，队列已暂停，推理显存已释放' : '本轮队列处理结束，推理进程已退出，显存已释放');
 }
 $('[data-action="add"]').onclick = async () => { try { add(await invoke('choose_input_videos')); } catch(e) { fail(e); } };
 $('[data-action="path"]').onclick = async () => { try { if (running || preparing) return; outputRoot = await invoke('choose_output_directory') || outputRoot; persist(); render(); } catch(e) { fail(e); } };

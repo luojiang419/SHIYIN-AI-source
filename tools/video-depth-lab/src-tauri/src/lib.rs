@@ -169,6 +169,34 @@ fn hidden_command(program: &Path) -> Command {
     command
 }
 
+// Own the inference process until it has exited, including every error path.
+// CUDA allocations belong to this process and are released by the driver on exit.
+struct WorkerProcess {
+    child: std::process::Child,
+    active_pid: Option<Arc<Mutex<Option<u32>>>>,
+}
+
+impl std::ops::Deref for WorkerProcess {
+    type Target = std::process::Child;
+    fn deref(&self) -> &Self::Target { &self.child }
+}
+impl std::ops::DerefMut for WorkerProcess {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.child }
+}
+impl Drop for WorkerProcess {
+    fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(Some(_))) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+        if let Some(slot) = &self.active_pid {
+            if let Ok(mut pid) = slot.lock() {
+                if *pid == Some(self.child.id()) { *pid = None; }
+            }
+        }
+    }
+}
+
 fn run_worker(
     app: Option<&AppHandle>,
     root: &Path,
@@ -194,9 +222,10 @@ fn run_worker(
         .env_remove("HTTP_PROXY")
         .env_remove("HTTPS_PROXY")
         .env_remove("ALL_PROXY");
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|error| format!("无法启动视频深度 worker：{error}"))?;
+    let mut child = WorkerProcess { child, active_pid: active_pid.cloned() };
     if let Some(slot) = active_pid {
         *slot
             .lock()
@@ -231,7 +260,12 @@ fn run_worker(
                     let _ = handle.emit("depth-progress", &value);
                 }
             }
-            Some("result") => result = value.get("result").cloned(),
+            Some("result") => {
+                result = value.get("result").cloned();
+                if let Some(handle) = app {
+                    let _ = handle.emit("depth-progress", json!({"percent": 99, "message": "正在退出推理进程并释放显存"}));
+                }
+            },
             Some("error") => {
                 worker_error = value
                     .get("error")
@@ -637,6 +671,13 @@ async fn cancel_inference(state: State<'_, LabState>) -> Result<bool, String> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 if let Some(state) = window.app_handle().try_state::<LabState>() {
@@ -714,6 +755,19 @@ mod tests {
         let saved: Value = serde_json::from_slice(&fs::read(metadata).unwrap()).unwrap();
         assert_eq!(saved["outputVideoPath"], result["outputVideoPath"]);
         assert_eq!(result["outputVideoPath"], expected.display().to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn worker_guard_reaps_process_and_clears_active_pid() {
+        let child = hidden_command(Path::new("ping.exe"))
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(Stdio::null()).spawn().unwrap();
+        let slot = Arc::new(Mutex::new(Some(child.id())));
+        let mut worker = WorkerProcess { child, active_pid: Some(slot.clone()) };
+        assert!(worker.try_wait().unwrap().is_none());
+        drop(worker);
+        assert_eq!(*slot.lock().unwrap(), None);
     }
 
     #[test]

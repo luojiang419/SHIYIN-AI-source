@@ -672,6 +672,7 @@ let settings = {
     videoEnhancePrompt:false,
     videoEnableUpsample:false,
     videoWatermark:false,
+    videoMuteAudio:false,
     videoCameraFixed:false,
     videoGenerateAudio:false,
     videoMultimodal:true,
@@ -2296,7 +2297,7 @@ async function runSmartFilmNode(node){
     node.running=true; node.runError=''; render(); scheduleSave();
     try {
         {
-            const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || '',videoSteps:node.steps || settingsForNodeRun.videoSteps || 12,videoMultimodal:node.multimodal !== undefined ? Boolean(node.multimodal) : Boolean(settingsForNodeRun.videoMultimodal),videoUseFrameRoles:node.useFrameRoles !== undefined ? Boolean(node.useFrameRoles) : Boolean(settingsForNodeRun.videoUseFrameRoles)};
+            const videoSettings={...settingsForNodeRun,engine:'api',apiKind:'video',videoProvider:node.apiProvider || settingsForNodeRun.videoProvider || 'comfly',videoModel:node.model || settingsForNodeRun.videoModel || 'veo3-fast',videoDuration:node.duration || settingsForNodeRun.videoDuration || 5,videoAspect:node.aspectRatio || settingsForNodeRun.videoAspect || '16:9',videoResolution:node.resolution || settingsForNodeRun.videoResolution || '',videoSteps:node.steps || settingsForNodeRun.videoSteps || 12,videoWatermark:Boolean(node.watermark),videoMuteAudio:Boolean(node.muteAudio),videoMultimodal:node.multimodal !== undefined ? Boolean(node.multimodal) : Boolean(settingsForNodeRun.videoMultimodal),videoUseFrameRoles:node.useFrameRoles !== undefined ? Boolean(node.useFrameRoles) : Boolean(settingsForNodeRun.videoUseFrameRoles)};
             if(node.apiProvider==='linkfox') Object.assign(videoSettings,{videoGenerateAudio:node.generateAudio,videoAspect:node.aspectRatio || '',linkfoxMode:node.linkfoxMode,linkfoxCamera:node.linkfoxCamera});
             const urls=await runApiVideoGeneration(built.prompt,built.refs,videoSettings,node);
             const images=(urls || []).map(item => typeof item==='object'?{...item,url:item.url || item.path || '',kind:'video'}:{url:item,kind:'video'}).filter(item=>item.url);
@@ -4438,6 +4439,36 @@ function smartMiniMaxH3ConnectionNote(){
     if(smartMiniMaxH3State.generationEnabled) return 'MiniMax H3 本地服务已就绪';
     return smartMiniMaxH3State.error || 'MiniMax H3 本地服务未启动，请联系本机管理员。';
 }
+let smartYouyunH3State = {loaded:false,loading:false,generationEnabled:false,resolutions:[],defaults:{},error:''};
+let smartYouyunH3StatusTask = null;
+async function loadSmartYouyunH3Status(){
+    if(smartYouyunH3StatusTask) return smartYouyunH3StatusTask;
+    smartYouyunH3StatusTask = (async () => {
+    smartYouyunH3State = {...smartYouyunH3State, loading:true};
+    try {
+        const response = await fetch('/api/youyun-h3/status', {cache:'no-store'});
+        const data = await response.json().catch(() => ({}));
+        if(!response.ok) throw new Error(data.detail || '读取 优云智算H3 状态失败');
+        smartYouyunH3State = {
+            loaded:true,
+            loading:false,
+            generationEnabled:Boolean(data.generation_enabled),
+            resolutions:Array.isArray(data.resolutions) ? data.resolutions : [],
+            defaults:data.defaults && typeof data.defaults === 'object' ? data.defaults : {},
+            error:String(data.error || '')
+        };
+    } catch(error) {
+        smartYouyunH3State = {...smartYouyunH3State, loaded:true, loading:false, generationEnabled:false, error:error.message || '读取 优云智算H3 状态失败'};
+    }
+    return smartYouyunH3State;
+    })().finally(() => { smartYouyunH3StatusTask = null; });
+    return smartYouyunH3StatusTask;
+}
+function smartYouyunH3ConnectionNote(){
+    if(smartYouyunH3State.loading) return '正在检查 优云智算H3 服务…';
+    if(smartYouyunH3State.generationEnabled) return '优云智算H3 已就绪';
+    return smartYouyunH3State.error || '优云智算H3 不可用，请检查 API 设置。';
+}
 function smartKlingConnectionNote(){
     const state = smartKlingCliState;
     if(state.loading) return '正在读取可灵账号模型…';
@@ -4475,8 +4506,10 @@ function renderVideoModelControl(models){
     </div>`;
 }
 function renderVideoDurationControl(){
-    const v = Math.max(1, Math.min(60, Number(settings.videoDuration) || 5));
-    const quick = Array.from({length:13}, (_, index) => index + 3);
+    const isH3 = isMiniMaxH3SmartSettings(settings), isYouyun = isYouyunH3SmartSettings(settings);
+    const min = isYouyun ? 4 : 1, max = isYouyun ? 30 : isH3 ? 15 : 60;
+    const v = Math.max(min, Math.min(max, Number(settings.videoDuration) || 5));
+    const quick = isYouyun ? [4,5,6,8,10,15,20,30] : Array.from({length:13}, (_, index) => index + 3);
     return `<div class="smart-control duration-control" title="${escapeHtml(tr('smart.videoDurationTip'))}">
         <button class="smart-pill" type="button"><i data-lucide="timer"></i><span>${v}s</span></button>
         <div class="smart-popover compact-popover">
@@ -4486,7 +4519,7 @@ function renderVideoDurationControl(){
             </div>
             <label class="duration-custom">
                 <span>${escapeHtml(tr('smart.custom'))}</span>
-                <input type="number" min="1" max="60" step="1" data-param="videoDuration" value="${v}">
+                <input type="number" min="${min}" max="${max}" step="1" data-param="videoDuration" value="${v}">
             </label>
         </div>
     </div>`;
@@ -4509,7 +4542,7 @@ function renderVideoAspectControl(){
     </div>`;
 }
 function renderH3VideoAspectControl(){
-    const options = ['21:9','16:9','4:3','1:1','3:4','9:16'];
+    const options = isYouyunH3SmartSettings(settings) ? ['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'] : ['21:9','16:9','4:3','1:1','3:4','9:16'];
     const value = options.includes(settings.videoAspect) ? settings.videoAspect : '16:9';
     return `<div class="smart-control aspect-control">
         <button class="smart-pill" type="button"><i data-lucide="scan"></i><span>${escapeHtml(value)}</span></button>
@@ -4532,10 +4565,12 @@ function renderVideoResolutionControl(){
         </div>
     </div>`;
 }
+function isYouyunH3SmartSettings(source=settings){ return source?.videoProvider === 'youyun-h3'; }
 function isMiniMaxH3SmartSettings(source=settings){
-    return Boolean(source && (source.videoProvider === 'minimax-h3' || source.videoModel === 'MiniMax H3'));
+    return Boolean(source && (['minimax-h3','youyun-h3'].includes(source.videoProvider) || (!source.videoProvider && source.videoModel === 'MiniMax H3')));
 }
-function h3SmartVideoResolutions(){
+function h3SmartVideoResolutions(source=settings){
+    if(isYouyunH3SmartSettings(source)) return ['768P','1080P','2K','4K'];
     return [
         '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
         '0.2MP 16:9 - 608x352','0.3MP 16:9 - 736x416','0.4MP 16:9 - 864x480','0.5MP 16:9 - 960x544','0.6MP 16:9 - 1056x608',
@@ -4551,12 +4586,19 @@ function h3SmartAspectForResolution(resolution=''){
 }
 function h3SmartResolutionForAspect(aspectRatio='', resolution=''){
     const target=['21:9','16:9','4:3','1:1','3:4','9:16'].includes(aspectRatio) ? aspectRatio : '16:9';
-    const candidates=h3SmartVideoResolutions().filter(value=>h3SmartAspectForResolution(value) === target);
+    const candidates=h3SmartVideoResolutions({videoProvider:'minimax-h3'}).filter(value=>h3SmartAspectForResolution(value) === target);
     const megapixels=String(resolution || '').match(/^(\d+(?:\.\d+)?)MP\b/i)?.[1] || '';
     return candidates.find(value=>megapixels && value.startsWith(`${megapixels}MP `)) || candidates[0] || '0.2MP 16:9 - 608x352';
 }
 function syncH3SmartVideoDimensions(target=settings, changedField='videoAspect'){
     if(!target || !isMiniMaxH3SmartSettings(target)) return target;
+    if(isYouyunH3SmartSettings(target)){
+        target.videoAspect=['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].includes(target.videoAspect) ? target.videoAspect : '16:9';
+        target.videoResolution=h3SmartVideoResolutions(target).includes(target.videoResolution) ? target.videoResolution : '768P';
+        target.videoDuration=Math.max(4,Math.min(30,Number(target.videoDuration)||5));
+        return target;
+    }
+    target.videoDuration=Math.max(1,Math.min(15,Number(target.videoDuration)||5));
     if(changedField === 'videoResolution') target.videoAspect=h3SmartAspectForResolution(target.videoResolution) || target.videoAspect || '16:9';
     else {
         target.videoAspect=['21:9','16:9','4:3','1:1','3:4','9:16'].includes(target.videoAspect) ? target.videoAspect : '16:9';
@@ -4566,10 +4608,10 @@ function syncH3SmartVideoDimensions(target=settings, changedField='videoAspect')
 }
 function renderH3VideoResolutionControl(){
     const options = h3SmartVideoResolutions();
-    const value = options.includes(settings.videoResolution) ? settings.videoResolution : '0.2MP 16:9 - 608x352';
+    const value = options.includes(settings.videoResolution) ? settings.videoResolution : (isYouyunH3SmartSettings(settings) ? '768P' : '0.2MP 16:9 - 608x352');
     return `<div class="smart-control resolution-control">
         <button class="smart-pill" type="button"><i data-lucide="monitor"></i><span>${escapeHtml(value)}</span></button>
-        <div class="smart-popover compact-popover"><div class="smart-popover-title">H3 分辨率</div><div class="model-list">
+        <div class="smart-popover compact-popover"><div class="smart-popover-title">${isYouyunH3SmartSettings(settings) ? '优云智算H3' : '本地 H3'} 分辨率</div><div class="model-list">
             ${options.map(item => `<button type="button" class="direct-option ${item === value ? 'active' : ''}" data-smart-param="videoResolution" data-smart-value="${escapeHtml(item)}"><span>${escapeHtml(item)}</span></button>`).join('')}
         </div></div>
     </div>`;
@@ -4778,15 +4820,15 @@ function renderApiVideoParams(){
         ${renderVideoProviderControl(providers)}
         ${renderVideoModelControl(models)}
         ${isKling ? `<div class="muted-note">${escapeHtml(smartKlingConnectionNote())}</div>` : ''}
-        ${isH3 ? `<div class="muted-note">${escapeHtml(smartMiniMaxH3ConnectionNote())}</div>` : ''}
+        ${isH3 ? `<div class="muted-note">${escapeHtml(isYouyunH3SmartSettings(settings) ? smartYouyunH3ConnectionNote() : smartMiniMaxH3ConnectionNote())}</div>` : ''}
         ${isH3 ? renderH3VideoResolutionControl() : renderVideoResolutionControl()}
         ${isH3 ? renderH3VideoAspectControl() : renderVideoAspectControl()}
         ${renderVideoDurationControl()}
-        ${isH3 ? renderH3VideoStepsControl() : renderVideoToggleControl('videoEnhancePrompt', tr('smart.videoEnhancePrompt'))}
+        ${isYouyunH3SmartSettings(settings) ? renderVideoToggleControl('videoMuteAudio', '移除音轨') : isH3 ? renderH3VideoStepsControl() : renderVideoToggleControl('videoEnhancePrompt', tr('smart.videoEnhancePrompt'))}
         ${isH3 ? '' : renderVideoToggleControl('videoEnableUpsample', tr('smart.videoUpsample'))}
         ${isH3 ? '' : renderVideoToggleControl('videoGenerateAudio', tr('smart.videoGenerateAudio'))}
         ${isH3 ? '' : renderVideoToggleControl('videoCameraFixed', tr('smart.videoCameraFixed'))}
-        ${isH3 ? '' : renderVideoToggleControl('videoWatermark', tr('smart.videoWatermark'))}
+        ${isH3 && !isYouyunH3SmartSettings(settings) ? '' : renderVideoToggleControl('videoWatermark', tr('smart.videoWatermark'))}
         ${renderVideoToggleControl('videoMultimodal', tr('smart.videoMultimodal'))}
         ${renderVideoToggleControl('videoUseFrameRoles', tr('smart.videoUseFrameRoles'))}
         ${settings.videoProvider === 'jimeng' || isH3 ? '' : renderVideoTrustedAssetControl()}
@@ -5843,7 +5885,13 @@ function setDynamicSetting(key, value){
     const layoutKeys = new Set(['provider_id','model','resolution','ratio','msgenModel','msCustomModel','msResolution','msRatio','videoProvider','videoModel','videoAspect','videoResolution','comfyMode','comfyWorkflow','quality','count','enhanceUpscaleRes','editUpscaleRes','rhConfigKey','rhPayment','rhInstanceType']);
     settings[key] = numericKeys.has(key) && value !== '' ? Number(value) : value;
     if(key === 'provider_id') settings.model = '';
-    if(key === 'videoProvider') settings.videoModel = '';
+    if(key === 'videoProvider'){
+        settings.videoModel = '';
+        if(isMiniMaxH3SmartSettings(settings)){
+            syncH3SmartVideoDimensions(settings);
+            settings.videoMultimodal = true; settings.videoUseFrameRoles = false;
+        }
+    }
     if(isMiniMaxH3SmartSettings(settings) && ['videoAspect','videoResolution'].includes(key)) syncH3SmartVideoDimensions(settings,key);
     if(key === 'videoMultimodal') settings._videoMultimodalUserSet = true;
     if(key === 'videoMultimodal' && settings.videoMultimodal) settings.videoUseFrameRoles = false;
@@ -6141,6 +6189,7 @@ async function loadConfig({deferSecondary=false}={}){
             const tasks = rhWorkflowIds.map(workflowId => ensureRunningHubWorkflow(workflowId));
             if(apiProviders.some(provider => provider.id === 'kling-cli')) tasks.push(loadSmartKlingCapabilities());
             if(apiProviders.some(provider => provider.id === 'minimax-h3')) tasks.push(loadSmartMiniMaxH3Status());
+            if(apiProviders.some(provider => provider.id === 'youyun-h3')) tasks.push(loadSmartYouyunH3Status());
             await Promise.allSettled(tasks);
         };
         lastConfigRefreshAt = Date.now();
@@ -19403,7 +19452,10 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
         }
         const uploadedRefs = applyUploadedUrlsToSmartRefs(refs, runSettings);
         const isH3 = isMiniMaxH3SmartSettings(runSettings);
-        if(isH3){
+        if(isYouyunH3SmartSettings(runSettings)){
+            await loadSmartYouyunH3Status();
+            if(!smartYouyunH3State.generationEnabled) throw new Error(smartYouyunH3ConnectionNote());
+        } else if(isH3){
             await loadSmartMiniMaxH3Status();
             if(!smartMiniMaxH3State.generationEnabled) throw new Error(smartMiniMaxH3ConnectionNote());
         }
@@ -19440,7 +19492,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             prompt,
             provider_id: runSettings.videoProvider || 'comfly',
             model: runSettings.videoModel || 'veo3-fast',
-            duration: Math.max(1, Math.min(60, Number(runSettings.videoDuration) || 5)),
+            duration: Math.max(isYouyunH3SmartSettings(runSettings) ? 4 : 1, Math.min(isYouyunH3SmartSettings(runSettings) ? 30 : isH3 ? 15 : 60, Number(runSettings.videoDuration) || 5)),
             aspect_ratio: runSettings.videoProvider === 'linkfox' ? (runSettings.videoAspect || '') : (runSettings.videoAspect || '16:9'),
             resolution: runSettings.videoResolution || '',
             images: refImages,
@@ -19449,6 +19501,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             enhance_prompt: Boolean(runSettings.videoEnhancePrompt),
             enable_upsample: Boolean(runSettings.videoEnableUpsample),
             watermark: Boolean(runSettings.videoWatermark),
+            mute_audio: isYouyunH3SmartSettings(runSettings) && Boolean(runSettings.videoMuteAudio),
             camerafixed: Boolean(runSettings.videoCameraFixed),
             generate_audio: Boolean(runSettings.videoGenerateAudio),
             multimodal: Boolean(runSettings.videoMultimodal),

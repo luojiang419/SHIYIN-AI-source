@@ -49,7 +49,7 @@ class MiniMaxH3CanvasFrontendTests(unittest.TestCase):
         settings_js = (root / "static" / "js" / "api-settings.js").read_text(encoding="utf-8")
         self.assertIn('<option value="minimax-h3">', settings_html)
         self.assertIn("'minimax-h3'", settings_js)
-        self.assertIn("item.id === 'minimax-h3'", settings_js)
+        self.assertIn("['minimax-h3','youyun-h3'].includes(item.id)", settings_js)
 
 
 if __name__ == "__main__":

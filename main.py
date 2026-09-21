@@ -849,7 +849,7 @@ JIMENG_LOGIN_SESSION = {
 }
 
 PROVIDER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{2,40}$")
-SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "responses", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3", "kling-cli"}
+SUPPORTED_PROVIDER_PROTOCOLS = {"openai", "responses", "apimart", "gemini", "volcengine", "runninghub", "jimeng", "codex", "minimax-h3", "youyun-h3", "kling-cli"}
 SUPPORTED_IMAGE_REQUEST_MODES = {"openai", "openai-json"}
 SUPPORTED_REQUEST_PROTOCOLS = {"chat_completions", "responses"}
 DEFAULT_RESPONSES_ENDPOINT = "/v1/responses"
@@ -869,6 +869,8 @@ MINIMAX_H3_ENV_BASE_URL = os.getenv("MINIMAX_H3_BASE_URL", "").strip().rstrip("/
 MINIMAX_H3_LOCAL_BASE_URL = "http://127.0.0.1:7860"
 MINIMAX_H3_DEFAULT_BASE_URL = MINIMAX_H3_ENV_BASE_URL or MINIMAX_H3_LOCAL_BASE_URL
 MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
+YOUYUN_H3_DEFAULT_BASE_URL = "https://cp.compshare.cn"
+YOUYUN_H3_DEFAULT_VIDEO_MODELS = ["MiniMax-H3"]
 KLING_CLI_PLACEHOLDER_VIDEO_MODELS = ["可灵（连接后选择模型）"]
 KLING_VIDEO_3_0_OMNI_MODEL = "kling-v3-omni"
 MINIMAX_H3_DEFAULT_RESOLUTION = "0.2MP 16:9 - 608x352"
@@ -1283,6 +1285,12 @@ def provider_env_key_value(provider_id: str) -> str:
     key = os.getenv(env_key, "") or read_api_env_value(env_key)
     if key:
         return key
+    if provider_id == "youyun-h3":
+        legacy = next((item for item in (ADMIN_DATABASE.load_providers() or [])
+                       if item.get("id") == "minimax-h3" and
+                       urllib.parse.urlparse(str(item.get("base_url") or "")).hostname == "cp.compshare.cn"), None)
+        if legacy:
+            return provider_env_key_value("minimax-h3")
     if provider_id == "modelscope":
         return MODELSCOPE_API_KEY or ""
     return ""
@@ -1466,6 +1474,23 @@ def api_provider_templates():
             "ms_defaults_version": 0,
         },
         {
+            "id": "youyun-h3",
+            "name": "优云智算H3",
+            "base_url": YOUYUN_H3_DEFAULT_BASE_URL,
+            "protocol": "youyun-h3",
+            "image_request_mode": "openai",
+            "image_generation_endpoint": "",
+            "image_edit_endpoint": "",
+            "enabled": True,
+            "primary": False,
+            "image_models": [],
+            "chat_models": [],
+            "video_models": YOUYUN_H3_DEFAULT_VIDEO_MODELS,
+            "model_protocols": {},
+            "ms_loras": [],
+            "ms_defaults_version": 0,
+        },
+        {
             "id": "kling-cli",
             "name": "可灵 CLI",
             "base_url": "",
@@ -1519,7 +1544,7 @@ def api_provider_templates():
 
 
 def default_api_providers():
-    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "ecommerce-vision", "minimax-h3", "kling-cli"}] + [
+    return [dict(item) for item in api_provider_templates() if item.get("id") in {"grsai", "shiying", "local-vision", "ecommerce-vision", "minimax-h3", "youyun-h3", "kling-cli"}] + [
         {"id": "linkfox", "name": "LinkFox", "protocol": "openai", "base_url": "", "enabled": True,
          "primary": False, "image_models": [], "chat_models": [], "video_models": list(LINKFOX_MODEL_SPECS)}]
 
@@ -1535,6 +1560,14 @@ def normalize_minimax_h3_base_url(value: Any = "") -> str:
 
 def merge_default_api_providers(providers):
     merged = [dict(item) for item in providers]
+    legacy_cloud = next((item for item in merged if item.get("id") == "minimax-h3"
+                         and urllib.parse.urlparse(str(item.get("base_url") or "")).hostname == "cp.compshare.cn"), None)
+    if legacy_cloud:
+        if not any(item.get("id") == "youyun-h3" for item in merged):
+            merged.append({**legacy_cloud, "id": "youyun-h3", "name": "优云智算H3", "protocol": "youyun-h3",
+                           "video_models": list(YOUYUN_H3_DEFAULT_VIDEO_MODELS)})
+        legacy_cloud.update(name="MiniMax H3", base_url=MINIMAX_H3_DEFAULT_BASE_URL,
+                            protocol="minimax-h3", video_models=list(MINIMAX_H3_DEFAULT_VIDEO_MODELS))
     linkfox_default = next(item for item in default_api_providers() if item['id'] == 'linkfox')
     if not any(item.get('id') == 'linkfox' for item in merged):
         merged.append(linkfox_default)
@@ -1654,8 +1687,9 @@ def merge_default_api_providers(providers):
         if not current:
             merged.append(minimax_h3_default)
         else:
-            # 固定平台沿用稳定 ID；旧客户端保存的名称也必须迁移，供所有节点共用。
-            current["name"] = minimax_h3_default["name"]
+            current["name"] = str(current.get("name") or minimax_h3_default["name"])
+            if current["name"] in {"优云智算 MiniMax H3", "优云智算H3"}:
+                current["name"] = minimax_h3_default["name"]
             current["base_url"] = normalize_minimax_h3_base_url(
                 current.get("base_url") or minimax_h3_default["base_url"]
             )
@@ -1663,6 +1697,18 @@ def merge_default_api_providers(providers):
             current["image_models"] = []
             current["chat_models"] = []
             current["video_models"] = model_list_from_values([*(current.get("video_models") or []), *MINIMAX_H3_DEFAULT_VIDEO_MODELS])
+    youyun_h3_default = next((d for d in default_api_providers() if d["id"] == "youyun-h3"), None)
+    if youyun_h3_default:
+        current = next((item for item in merged if item.get("id") == "youyun-h3"), None)
+        if not current:
+            merged.append(youyun_h3_default)
+        else:
+            current["name"] = youyun_h3_default["name"]
+            current["base_url"] = str(current.get("base_url") or youyun_h3_default["base_url"]).rstrip("/")
+            current["protocol"] = "youyun-h3"
+            current["image_models"] = []
+            current["chat_models"] = []
+            current["video_models"] = model_list_from_values([*(current.get("video_models") or []), *YOUYUN_H3_DEFAULT_VIDEO_MODELS])
     kling_cli_default = next((d for d in default_api_providers() if d["id"] == "kling-cli"), None)
     if kling_cli_default:
         current = next((item for item in merged if item.get("id") == "kling-cli"), None)
@@ -2098,8 +2144,8 @@ def normalize_provider(item):
     if provider_id == "local-vision":
         protocol = "openai"
         image_request_mode = "openai"
-    if provider_id == "minimax-h3":
-        protocol = "minimax-h3"
+    if provider_id in {"minimax-h3", "youyun-h3"}:
+        protocol = provider_id
         image_request_mode = "openai"
     if provider_id == "kling-cli":
         protocol = "kling-cli"
@@ -2118,11 +2164,11 @@ def normalize_provider(item):
         "image_edit_endpoint": image_edit_endpoint,
         "enabled": bool(item.get("enabled", True)),
         "primary": bool(item.get("primary", False)),
-        "image_models": [] if provider_id in {"local-vision", "minimax-h3", "kling-cli"} else model_list_from_values(item.get("image_models") or []),
-        "chat_models": [] if provider_id in {"minimax-h3", "kling-cli"} else model_list_from_values(item.get("chat_models") or []),
+        "image_models": [] if provider_id in {"local-vision", "minimax-h3", "youyun-h3", "kling-cli"} else model_list_from_values(item.get("image_models") or []),
+        "chat_models": [] if provider_id in {"minimax-h3", "youyun-h3", "kling-cli"} else model_list_from_values(item.get("chat_models") or []),
         "video_models": [] if provider_id == "local-vision" else model_list_from_values(
             item.get("video_models")
-            or (MINIMAX_H3_DEFAULT_VIDEO_MODELS if provider_id == "minimax-h3" else [])
+            or (MINIMAX_H3_DEFAULT_VIDEO_MODELS if provider_id == "minimax-h3" else YOUYUN_H3_DEFAULT_VIDEO_MODELS if provider_id == "youyun-h3" else [])
             or (KLING_CLI_PLACEHOLDER_VIDEO_MODELS if provider_id == "kling-cli" else [])
         ),
         "model_protocols": normalize_model_protocols(item.get("model_protocols")),
@@ -2177,6 +2223,13 @@ def prune_removed_provider_presets_once() -> Dict[str, Any]:
 
 def save_api_providers(providers):
     with GLOBAL_CONFIG_LOCK:
+        # 保存拆分配置前迁移误存于旧平台的云端密钥；已有独立密钥优先。
+        if any(item.get("id") == "youyun-h3" for item in providers):
+            key_name = provider_key_env("youyun-h3")
+            if not (os.getenv(key_name, "") or read_api_env_value(key_name)):
+                legacy_key = provider_env_key_value("youyun-h3")
+                if legacy_key:
+                    update_env_values({key_name: legacy_key})
         ADMIN_DATABASE.save_providers(providers)
     publish_entity_changed("platform", "global")
 
@@ -4623,6 +4676,7 @@ class CanvasVideoRequest(BaseModel):
     enhance_prompt: bool = False
     enable_upsample: bool = False
     watermark: bool = False
+    mute_audio: bool = False
     seed: Optional[int] = None
     camerafixed: bool = False
     return_last_frame: bool = False
@@ -6848,7 +6902,7 @@ def provider_protocol(provider):
 # 单模型可覆盖的协议（OpenAI Chat Completions、Responses、Gemini 可共用同一站点的 Base URL + Key）
 PER_MODEL_PROTOCOL_OPTIONS = {"openai", "responses", "gemini"}
 # 协议固定、不支持单模型覆盖的内置平台
-FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3", "kling-cli"}
+FIXED_PROTOCOL_PROVIDER_IDS = {"modelscope", "volcengine", "jimeng", "runninghub", "grsai", "codex", "local-vision", "minimax-h3", "youyun-h3", "kling-cli"}
 
 def normalize_model_protocols(value):
     """规整 {模型名: 协议} 覆盖表，仅保留支持的文本协议。"""
@@ -6918,6 +6972,9 @@ def is_codex_provider(provider):
 
 def is_minimax_h3_provider(provider):
     return provider_protocol(provider) == "minimax-h3" or str((provider or {}).get("id") or "").strip().lower() == "minimax-h3"
+
+def is_youyun_h3_provider(provider):
+    return provider_protocol(provider) == "youyun-h3" or str((provider or {}).get("id") or "").strip().lower() == "youyun-h3"
 
 def is_kling_cli_provider(provider):
     return provider_protocol(provider) == "kling-cli" or str((provider or {}).get("id") or "").strip().lower() == "kling-cli"
@@ -22236,6 +22293,7 @@ def minimax_h3_resolution(aspect_ratio: str = "", resolution: str = "") -> str:
 
     return MINIMAX_H3_RESOLUTIONS.get(target_aspect or "16:9", MINIMAX_H3_DEFAULT_RESOLUTION)
 
+
 async def minimax_h3_reference_value(client, url: str, kind: str) -> str:
     value = str(url or "").strip()
     if not value:
@@ -22360,6 +22418,164 @@ async def generate_minimax_h3_video(client, payload: CanvasVideoRequest, provide
         await asyncio.sleep(delay)
         delay = min(delay * 1.35, 10)
     raise HTTPException(status_code=504, detail=f"MiniMax H3 生成任务超时：{job_id}")
+
+def compshare_youyun_h3_resolution(value: str = "") -> str:
+    """Map legacy H3 canvas presets to the documented CompShare quality tiers."""
+    normalized = str(value or "").strip().upper()
+    if normalized in {"768P", "1080P", "2K", "4K"}:
+        return normalized
+    if "4K" in normalized:
+        return "4K"
+    if "2K" in normalized:
+        return "2K"
+    if "1080" in normalized:
+        return "1080P"
+    return "768P"
+
+
+def youyun_h3_headers(provider: Dict[str, Any]) -> Dict[str, str]:
+    api_key = provider_env_key_value(str(provider.get("id") or "youyun-h3"))
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置优云智算H3 的 API Key，请在 API 设置中填写。")
+    return {
+        "Authorization": bearer_auth_value(api_key),
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+async def youyun_h3_reference_value(client, url: str, kind: str) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    if value.startswith(f"data:{kind}/"):
+        return value
+    path = output_file_from_url(value)
+    if path:
+        try:
+            raw = Path(path).read_bytes()
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail="优云智算H3 参考素材读取失败") from exc
+        mime = mimetypes.guess_type(path)[0] or ("image/png" if kind == "image" else "video/mp4")
+    elif value.startswith("http://") or value.startswith("https://"):
+        try:
+            response = await client.get(value)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=400, detail="优云智算H3 远程参考素材下载失败") from exc
+        raw = response.content
+        mime = (response.headers.get("content-type") or mimetypes.guess_type(value)[0] or ("image/png" if kind == "image" else "video/mp4")).split(";", 1)[0]
+    else:
+        raise HTTPException(status_code=400, detail=f"优云智算H3 的参考{('图' if kind == 'image' else '视频')}地址无效")
+    max_bytes = {"image": 30, "video": 50, "audio": 15}.get(kind, 15) * 1024 * 1024
+    if len(raw) > max_bytes:
+        labels = {"image": "图片", "video": "视频", "audio": "音频"}
+        limits = {"image": 30, "video": 50, "audio": 15}
+        raise HTTPException(status_code=400, detail=f"优云智算H3 参考{labels.get(kind, '素材')}不能超过 {limits.get(kind, 15)}MB")
+    if not mime.startswith(f"{kind}/"):
+        raise HTTPException(status_code=400, detail=f"优云智算H3 参考素材不是有效{('图片' if kind == 'image' else '视频')}")
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+async def youyun_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[str, Any]:
+    image_refs = [ref for ref in (payload.images or []) if str(ref.url or "").strip()]
+    video_refs = [str(url or "").strip() for url in (payload.videos or []) if str(url or "").strip()]
+    audio_refs = [str(url or "").strip() for url in (payload.audios or []) if str(url or "").strip()]
+    use_references = bool((image_refs or video_refs or audio_refs) and (payload.multimodal or video_refs or audio_refs or len(image_refs) > 2))
+    prompt = normalize_video_prompt_references(
+        str(payload.prompt or "").strip(), "minimax-h3",
+        image_count=len(image_refs), video_count=len(video_refs),
+    )
+    content = [{"type": "text", "text": prompt}] if prompt else []
+    body = {
+        "model": "MiniMax-H3",
+        "content": content,
+        "resolution": compshare_youyun_h3_resolution(payload.resolution),
+        "duration": max(4, min(30, int(payload.duration or 5))),
+        "ratio": str(payload.aspect_ratio or "16:9").strip() or "16:9",
+        "use_context_ir": False,
+        "aigc_watermark": bool(payload.watermark),
+        "mute_audio": bool(payload.mute_audio),
+    }
+    if use_references:
+        for ref in image_refs[:9]:
+            content.append({"type": "image_url", "image_url": {"url": await youyun_h3_reference_value(client, ref.url, "image")}, "role": "reference_image"})
+        for url in video_refs[:3]:
+            content.append({"type": "video_url", "video_url": {"url": await youyun_h3_reference_value(client, url, "video")}, "role": "reference_video"})
+        remaining_audio_slots = max(0, 12 - (len(content) - (1 if prompt else 0)))
+        for url in audio_refs[:min(3, remaining_audio_slots)]:
+            content.append({"type": "audio_url", "audio_url": {"url": await youyun_h3_reference_value(client, url, "audio")}, "role": "reference_audio"})
+        if audio_refs and not (image_refs or video_refs):
+            raise HTTPException(status_code=400, detail="优云智算H3 的参考音频需要同时提供至少一张图片或一个参考视频")
+        if len(content) == (1 if prompt else 0):
+            raise HTTPException(status_code=400, detail="优云智算H3 全能参考模式至少需要 1 张图片或 1 个参考视频")
+    else:
+        first = next((ref for ref in image_refs if str(ref.role or "").lower() == "first_frame"), image_refs[0] if image_refs else None)
+        last = next((ref for ref in image_refs if str(ref.role or "").lower() == "last_frame"), image_refs[1] if len(image_refs) > 1 else None)
+        if first:
+            content.append({"type": "image_url", "image_url": {"url": await youyun_h3_reference_value(client, first.url, "image")}, "role": "first_frame"})
+        if last:
+            content.append({"type": "image_url", "image_url": {"url": await youyun_h3_reference_value(client, last.url, "image")}, "role": "last_frame"})
+    if not content:
+        raise HTTPException(status_code=400, detail="优云智算H3 至少需要提示词或参考素材")
+    return body
+
+
+async def submit_youyun_h3_video(client, payload: CanvasVideoRequest, provider):
+    base_url = str(provider.get("base_url") or YOUYUN_H3_DEFAULT_BASE_URL).rstrip("/")
+    body = await youyun_h3_video_request(client, payload)
+    headers = {**youyun_h3_headers(provider), "Idempotency-Key": f"shiyin-h3-{uuid.uuid4().hex}"}
+    response = await client.post(f"{base_url}/minimax/v2/video_generation", headers=headers, json=body)
+    response.raise_for_status()
+    result = response.json()
+    job_id = str(result.get("task_id") or result.get("id") or "").strip()
+    if not job_id:
+        raise HTTPException(status_code=502, detail=f"优云智算H3 未返回任务 ID：{result}")
+    return {
+        "upstream_task_id": job_id,
+        "status": str(result.get("status") or "queued").lower(),
+        "raw": result,
+        "request": body,
+        "base_url": base_url,
+    }
+
+
+async def query_youyun_h3_video(client, job_id: str, provider):
+    base_url = str(provider.get("base_url") or YOUYUN_H3_DEFAULT_BASE_URL).rstrip("/")
+    response = await client.get(
+        f"{base_url}/minimax/v2/query/video_generation/{urllib.parse.quote(str(job_id), safe='')}",
+        headers=youyun_h3_headers(provider),
+    )
+    response.raise_for_status()
+    result = response.json()
+    task = result.get("task") if isinstance(result.get("task"), dict) else result
+    status = str(task.get("status") or "").lower()
+    output_url = str(((task.get("content") or {}) if isinstance(task.get("content"), dict) else {}).get("url") or "").strip()
+    normalized_status = "succeeded" if status == "succeeded" and output_url else "failed" if status in {"failed", "cancelled", "canceled"} or status == "succeeded" else "running"
+    return {
+        "status": normalized_status,
+        "upstream_status": status,
+        "url": output_url,
+        "error": str(task.get("error") or result.get("error") or result.get("message") or ("任务完成但没有返回视频" if status == "succeeded" else "")),
+        "raw": result,
+    }
+
+
+async def generate_youyun_h3_video(client, payload: CanvasVideoRequest, provider):
+    submitted = await submit_youyun_h3_video(client, payload, provider)
+    job_id = submitted["upstream_task_id"]
+    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
+    delay = max(2.0, IMAGE_POLL_INTERVAL)
+    result = submitted.get("raw") or {}
+    while time.monotonic() < deadline:
+        queried = await query_youyun_h3_video(client, job_id, provider)
+        result = queried.get("raw") or {}
+        if queried["status"] == "succeeded":
+            local_url = await save_remote_video_to_output(queried["url"], prefix="youyun_h3_")
+            return {"videos": [local_url], "task_id": job_id, "raw": result, "request": submitted["request"]}
+        if queried["status"] == "failed":
+            raise HTTPException(status_code=502, detail=f"优云智算H3 生成失败：{queried.get('error') or queried.get('upstream_status')}")
+        await asyncio.sleep(delay)
+        delay = min(delay * 1.35, 10)
+    raise HTTPException(status_code=504, detail=f"优云智算H3 生成任务超时：{job_id}")
 
 def kling_cli_reference_value(value: str, temporary_dir: str, index: int) -> str:
     raw_value = str(value or "").strip()
@@ -23153,10 +23369,10 @@ async def submit_canvas_video_upstream(payload: CanvasVideoRequest, provider: Di
             raise HTTPException(status_code=502, detail='LinkFox 提交连接中断，结果尚不明确。请核对平台任务后再试，系统不会自动重复提交。') from exc
     if is_kling_cli_provider(provider):
         return await submit_kling_cli_video(payload)
-    if is_minimax_h3_provider(provider):
+    if is_minimax_h3_provider(provider) or is_youyun_h3_provider(provider):
         timeout = httpx.Timeout(connect=20.0, read=VIDEO_POLL_TIMEOUT, write=VIDEO_POLL_TIMEOUT, pool=20.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            return await submit_minimax_h3_video(client, payload, provider)
+            return await (submit_youyun_h3_video if is_youyun_h3_provider(provider) else submit_minimax_h3_video)(client, payload, provider)
     raise HTTPException(status_code=400, detail="当前视频平台不支持重启后自动续查")
 
 
@@ -23205,7 +23421,11 @@ async def query_canvas_video_upstream(task: Dict[str, Any], *, kling_service: Op
         provider = {**provider, "base_url": saved_base_url}
     timeout = httpx.Timeout(connect=20.0, read=120.0, write=60.0, pool=20.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        return await query_minimax_h3_video(client, upstream_task_id, provider)
+        # 已发布的错误版本将云端任务记在本地 ID 下；按持久化上游地址续查历史任务。
+        cloud_task = is_youyun_h3_provider(provider) or urllib.parse.urlparse(saved_base_url).hostname == "cp.compshare.cn"
+        if cloud_task:
+            provider = {**provider, "id": "youyun-h3", "protocol": "youyun-h3"}
+        return await (query_youyun_h3_video if cloud_task else query_minimax_h3_video)(client, upstream_task_id, provider)
 
 
 async def run_canvas_video_task(task_id: str):
@@ -23308,7 +23528,7 @@ async def create_canvas_video_task(payload: CanvasVideoTaskRequest):
             start_canvas_video_task_runner(task_id)
         return existing
     provider = get_api_provider(payload.provider_id)
-    if not (payload.provider_id == 'linkfox' or is_kling_cli_provider(provider) or is_minimax_h3_provider(provider)):
+    if not (payload.provider_id == 'linkfox' or is_kling_cli_provider(provider) or is_minimax_h3_provider(provider) or is_youyun_h3_provider(provider)):
         raise HTTPException(status_code=400, detail="只有 LinkFox、H3 和可灵视频任务支持重启后自动续查")
     if payload.provider_id == 'linkfox' and not linkfox_configured_key():
         raise HTTPException(status_code=400, detail='请先在 API 设置中配置 LinkFox API Key')
@@ -23457,6 +23677,35 @@ async def minimax_h3_status():
         "generation_enabled": True,
         "resolutions": config.get("resolutions") if isinstance(config.get("resolutions"), list) else [],
         "defaults": config.get("defaults") if isinstance(config.get("defaults"), dict) else {},
+        "error": "",
+    }
+
+@app.get("/api/youyun-h3/status")
+async def youyun_h3_status():
+    """Check the CompShare H3 point balance without leaking credentials."""
+    provider = get_api_provider("youyun-h3")
+    base_url = str(provider.get("base_url") or YOUYUN_H3_DEFAULT_BASE_URL).rstrip("/")
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=3.0),
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(f"{base_url}/minimax/v2/query/point_usage_summary", headers=youyun_h3_headers(provider))
+            response.raise_for_status()
+            balance = response.json()
+    except Exception:
+        return {
+            "available": False,
+            "generation_enabled": False,
+            "resolutions": [],
+            "defaults": {},
+            "error": "无法连接优云智算H3 服务，请检查 API Key、余额和网络。",
+        }
+    return {
+        "available": True,
+        "generation_enabled": True,
+        "resolutions": ["768P", "1080P", "2K", "4K"],
+        "defaults": {"available_points": balance.get("available_points", 0)},
         "error": "",
     }
 
@@ -23888,10 +24137,10 @@ async def generate_canvas_video(payload: CanvasVideoRequest):
         return await linkfox_video(LinkFoxVideoRequest(**request_data, canvas_id=payload.canvas_id, node_id=payload.node_id))
     if is_kling_cli_provider(provider):
         return await generate_kling_cli_video(payload)
-    if is_minimax_h3_provider(provider):
+    if is_minimax_h3_provider(provider) or is_youyun_h3_provider(provider):
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=VIDEO_POLL_TIMEOUT, write=VIDEO_POLL_TIMEOUT, pool=20.0), follow_redirects=True) as h3_client:
-                return await generate_minimax_h3_video(h3_client, payload, provider)
+                return await (generate_youyun_h3_video if is_youyun_h3_provider(provider) else generate_minimax_h3_video)(h3_client, payload, provider)
         except HTTPException:
             raise
         except httpx.HTTPStatusError as exc:

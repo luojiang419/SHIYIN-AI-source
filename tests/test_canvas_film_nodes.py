@@ -287,10 +287,10 @@ def test_film_video_h3_settings_reuse_a_self_contained_parameter_grid():
 
 
 def test_generic_and_h3_film_video_panels_share_the_same_control_language():
-    assert FILM.count('class="gen-settings-row film-video-provider-grid"') == 3
-    assert FILM.count('class="gen-settings-row film-video-primary-grid"') == 2
-    assert FILM.count('class="select-lite" data-film-field="apiProvider"') == 3
-    assert FILM.count('class="select-lite" data-film-field="model"') == 3
+    assert FILM.count('class="gen-settings-row film-video-provider-grid"') == 4
+    assert FILM.count('class="gen-settings-row film-video-primary-grid"') == 3
+    assert FILM.count('class="select-lite" data-film-field="apiProvider"') == 4
+    assert FILM.count('class="select-lite" data-film-field="model"') == 4
     assert ".film-video-settings .select-lite" in FILM_CSS
     assert ".film-video-settings .setting-input" in FILM_CSS
     assert "2026.09.04.film-video-layout.1" in CLASSIC_HTML
@@ -325,7 +325,7 @@ def test_smart_film_video_ignores_legacy_height_and_only_resizes_horizontally():
 
 
 def test_film_video_h3_settings_are_normalized_and_submitted_on_both_canvases():
-    assert "if(h3 && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;" in FILM
+    assert "if(h3 && !isYouyunH3(node) && !H3_RESOLUTION_PRESETS.includes(node.resolution)) node.resolution = H3_DEFAULT_RESOLUTION;" in FILM
     assert "key==='steps' && previousRule.id === 'minimax'" in FILM
     assert "previousRule.id !== 'minimax'" in FILM
     assert "const steps = providerId === 'minimax-h3'" in CLASSIC

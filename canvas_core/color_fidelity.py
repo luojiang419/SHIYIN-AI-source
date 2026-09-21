@@ -122,16 +122,158 @@ def calibrate_lightness_preview(reference: np.ndarray, generated: np.ndarray, ma
     return cv2.cvtColor(np.clip(encoded, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
 
 
-def smart_color_match_preview(reference: np.ndarray, generated: np.ndarray, strength: float = .82) -> np.ndarray:
-    """在商品 ROI 内拟合 L/a/b 的均值和对比度，保留原有纹理高频细节。"""
-    ref_lab, source_lab = rgb_to_lab(reference), rgb_to_lab(generated)
-    ref_mean, source_mean = ref_lab.reshape(-1, 3).mean(0), source_lab.reshape(-1, 3).mean(0)
-    ref_std = ref_lab.reshape(-1, 3).std(0).clip(min=3)
-    source_std = source_lab.reshape(-1, 3).std(0).clip(min=3)
-    fitted = (source_lab - source_mean) * (ref_std / source_std) + ref_mean
-    # 色相/饱和度和明度一起受限融合，避免平涂或破坏细密斜纹。
-    fitted = source_lab * (1 - strength) + fitted * strength
-    encoded = fitted.copy()
+def _lab_to_rgb(lab: np.ndarray) -> np.ndarray:
+    encoded = lab.copy()
     encoded[..., 0] *= 255.0 / 100.0
     encoded[..., 1:] += 128.0
     return cv2.cvtColor(np.clip(encoded, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)
+
+
+def _affine_lab_match(reference: np.ndarray, generated: np.ndarray, target: np.ndarray, strength: float) -> np.ndarray:
+    ref_lab, source_lab, target_lab = rgb_to_lab(reference), rgb_to_lab(generated), rgb_to_lab(target)
+    ref_mean, source_mean = ref_lab.reshape(-1, 3).mean(0), source_lab.reshape(-1, 3).mean(0)
+    ref_std = ref_lab.reshape(-1, 3).std(0).clip(min=3)
+    source_std = source_lab.reshape(-1, 3).std(0).clip(min=3)
+    fitted = (target_lab - source_mean) * (ref_std / source_std) + ref_mean
+    return _lab_to_rgb(target_lab * (1 - strength) + fitted * strength)
+
+
+def _quantile_lab_match(reference: np.ndarray, generated: np.ndarray, target: np.ndarray, strength: float) -> np.ndarray:
+    """按 L/a/b 的分位点做单调映射，保留每个像素的织纹相对层次。"""
+    ref_lab, source_lab, target_lab = rgb_to_lab(reference), rgb_to_lab(generated), rgb_to_lab(target)
+    quantiles = np.linspace(.005, .995, 199)
+    fitted = target_lab.copy()
+    for channel in range(3):
+        source_values = source_lab[..., channel].reshape(-1)
+        source_points = np.quantile(source_values, quantiles)
+        reference_points = np.quantile(ref_lab[..., channel].reshape(-1), quantiles)
+        # 平坦面料会出现相同分位点；先合并节点，保证插值单调有效。
+        source_points, indices = np.unique(source_points, return_index=True)
+        reference_points = reference_points[indices]
+        if source_points.size > 1:
+            fitted[..., channel] = np.interp(target_lab[..., channel], source_points, reference_points)
+        else:
+            fitted[..., channel] = reference_points[0]
+    return _lab_to_rgb(target_lab * (1 - strength) + fitted * strength)
+
+
+def smart_color_match_preview(reference: np.ndarray, generated: np.ndarray, strength: float = .82,
+                              strategy: str = "quantile", target: np.ndarray | None = None) -> np.ndarray:
+    """在商品 ROI 内拟合完整 Lab 色彩分布；默认分位数映射覆盖阴影、中间调和高光。"""
+    target = generated if target is None else target
+    if strategy == "affine":
+        return _affine_lab_match(reference, generated, target, strength)
+    if strategy == "quantile":
+        return _quantile_lab_match(reference, generated, target, strength)
+    raise ValueError("unsupported_color_match_strategy")
+
+
+def smart_color_match_auto(reference: np.ndarray, generated: np.ndarray,
+                           strengths: Iterable[float] = (.58, .72, .82, .92, 1.0),
+                           strategies: Iterable[str] = ("quantile", "affine")) -> tuple[np.ndarray, dict]:
+    """在有限候选中选取综合色差、尾部误差和色板覆盖度最优的实际拟合。"""
+    candidates = []
+    for strategy in strategies:
+        for strength in strengths:
+            image = smart_color_match_preview(reference, generated, float(strength), strategy)
+            report = inspect_color_fidelity(reference, image)
+            # DeltaE、P90 和综合色板分布共同决定，避免只把平均值压低。
+            score = report.delta_e00_mean + report.delta_e00_p90 * .08 + (1 - report.palette_overlap) * 5
+            candidates.append((score, image, {"strategy": strategy, "strength": float(strength), "score": round(score, 3),
+                                              "report": report.as_dict()}))
+    _, image, selected = min(candidates, key=lambda item: item[0])
+    return image, selected
+
+
+def feathered_roi_blend(source: np.ndarray, fitted_crop: np.ndarray, box: Iterable[int],
+                         feather: int = 16) -> np.ndarray:
+    """把 ROI 以渐变 alpha 融入原图，避免矩形色块边界。"""
+    x, y, width, height = (int(value) for value in box)
+    if fitted_crop.shape[:2] != (height, width):
+        raise ValueError("fitted_crop_shape_mismatch")
+    result = source.copy()
+    feather = max(0, min(int(feather), width // 3, height // 3))
+    if feather == 0:
+        result[y:y + height, x:x + width] = fitted_crop
+        return result
+    alpha = np.ones((height, width), dtype=np.float32)
+    ramp = np.linspace(0, 1, feather + 2, dtype=np.float32)[1:-1]
+    alpha[:feather, :] *= ramp[:, None]
+    alpha[-feather:, :] *= ramp[::-1, None]
+    alpha[:, :feather] *= ramp[None, :]
+    alpha[:, -feather:] *= ramp[None, ::-1]
+    original = result[y:y + height, x:x + width].astype(np.float32)
+    result[y:y + height, x:x + width] = np.clip(
+        original * (1 - alpha[..., None]) + fitted_crop.astype(np.float32) * alpha[..., None], 0, 255
+    ).astype(np.uint8)
+    return result
+
+
+def seeded_fabric_mask(image: np.ndarray, sample_box: Iterable[int], apply_box: Iterable[int]) -> np.ndarray:
+    """用纯布面样本和粗略服装范围生成连通面料掩码。"""
+    x, y, width, height = (int(value) for value in apply_box)
+    sample = crop_rgb(image, sample_box)
+    lab, sample_lab = rgb_to_lab(image), rgb_to_lab(sample)
+    mean = sample_lab.reshape(-1, 3).mean(0)
+    std = sample_lab.reshape(-1, 3).std(0).clip(min=np.array([7., 4., 4.]))
+    distance = np.sqrt(np.mean(((lab - mean) / std) ** 2, axis=2))
+    mask = np.full(image.shape[:2], cv2.GC_BGD, dtype=np.uint8)
+    mask[y:y + height, x:x + width] = cv2.GC_PR_BGD
+    likely_fabric = distance[y:y + height, x:x + width] <= 2.8
+    mask[y:y + height, x:x + width][likely_fabric] = cv2.GC_PR_FGD
+    sx, sy, sw, sh = (int(value) for value in sample_box)
+    mask[sy:sy + sh, sx:sx + sw] = cv2.GC_FGD
+    for edge in (mask[:4], mask[-4:], mask[:, :4], mask[:, -4:]):
+        edge[...] = cv2.GC_BGD
+    background = np.zeros((1, 65), np.float64)
+    foreground = np.zeros((1, 65), np.float64)
+    cv2.grabCut(image, mask, None, background, foreground, 3, cv2.GC_INIT_WITH_MASK)
+    binary = ((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)).astype(np.uint8)
+    binary[:y, :] = 0
+    binary[y + height:, :] = 0
+    binary[:, :x] = 0
+    binary[:, x + width:] = 0
+    # 仅保留与样本相连的区域，避免同色背景或另一件服装被一起校正。
+    count, labels, _, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    sample_labels = labels[sy:sy + sh, sx:sx + sw].reshape(-1)
+    valid = sample_labels[sample_labels > 0]
+    if valid.size:
+        chosen = int(np.bincount(valid).argmax())
+        binary = (labels == chosen).astype(np.uint8)
+    elif count > 1:
+        binary = np.zeros_like(binary)
+    return cv2.morphologyEx(binary, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+
+def feathered_mask_blend(source: np.ndarray, fitted: np.ndarray, mask: np.ndarray, feather: int = 16) -> np.ndarray:
+    """以服装掩码羽化融合完整拟合图，保留掩码外的原始像素。"""
+    if source.shape != fitted.shape or mask.shape != source.shape[:2]:
+        raise ValueError("mask_blend_shape_mismatch")
+    feather = max(0, int(feather))
+    alpha = mask.astype(np.float32)
+    if feather:
+        radius = max(1, feather * 2 + 1)
+        alpha = cv2.GaussianBlur(alpha, (radius | 1, radius | 1), feather / 2)
+    alpha = np.clip(alpha, 0, 1)[..., None]
+    return np.clip(source.astype(np.float32) * (1 - alpha) + fitted.astype(np.float32) * alpha, 0, 255).astype(np.uint8)
+
+
+def masked_fit_samples(image: np.ndarray, mask: np.ndarray, limit: int = 180_000) -> np.ndarray:
+    """从服装掩码均匀抽样，避免高分辨率整件图的拟合耗时随像素数失控。"""
+    pixels = image[mask > 0]
+    if pixels.shape[0] < 4096:
+        raise ValueError("fabric_mask_too_small")
+    if pixels.shape[0] > limit:
+        pixels = pixels[np.linspace(0, pixels.shape[0] - 1, limit, dtype=np.intp)]
+    return pixels.reshape(1, -1, 3)
+
+
+def apply_lab_controls(image: np.ndarray, lightness: float = 0, contrast: float = 1,
+                       chroma: float = 1, a_shift: float = 0, b_shift: float = 0) -> np.ndarray:
+    """验证节点的可解释人工微调，供面料档案保存和复用。"""
+    lab = rgb_to_lab(image)
+    lab[..., 0] = (lab[..., 0] - 50) * contrast + 50 + lightness
+    lab[..., 1:] = lab[..., 1:] * chroma
+    lab[..., 1] += a_shift
+    lab[..., 2] += b_shift
+    return _lab_to_rgb(lab)

@@ -1,6 +1,13 @@
 import numpy as np
 
-from canvas_core.color_fidelity import calibrate_lightness_preview, crop_rgb, inspect_color_fidelity, smart_color_match_preview
+from canvas_core.color_fidelity import (
+    calibrate_lightness_preview,
+    crop_rgb,
+    feathered_roi_blend,
+    inspect_color_fidelity,
+    smart_color_match_auto,
+    smart_color_match_preview,
+)
 
 
 def test_same_color_is_credible():
@@ -51,3 +58,21 @@ def test_smart_color_match_strength_controls_adjustment_amount():
     gentle = abs(inspect_color_fidelity(reference, smart_color_match_preview(reference, generated, .2)).lightness_offset)
     strong = abs(inspect_color_fidelity(reference, smart_color_match_preview(reference, generated, .9)).lightness_offset)
     assert before > gentle > strong
+
+
+def test_auto_match_selects_a_valid_strategy_and_improves_palette_overlap():
+    reference = np.full((64, 64, 3), [145, 101, 73], dtype=np.uint8)
+    generated = np.full((64, 64, 3), [87, 59, 42], dtype=np.uint8)
+    matched, selected = smart_color_match_auto(reference, generated)
+    assert selected["strategy"] in {"affine", "quantile"}
+    assert inspect_color_fidelity(reference, matched).palette_overlap > inspect_color_fidelity(reference, generated).palette_overlap
+
+
+def test_feathered_roi_blend_keeps_the_roi_edge_continuous():
+    source = np.full((48, 48, 3), [30, 30, 30], dtype=np.uint8)
+    fitted = np.full((24, 24, 3), [220, 100, 50], dtype=np.uint8)
+    blended = feathered_roi_blend(source, fitted, (12, 12, 24, 24), feather=6)
+    assert np.array_equal(blended[24, 24], fitted[12, 12])
+    edge_change = np.abs(blended[12, 12].astype(int) - source[12, 12].astype(int)).sum()
+    inner_change = np.abs(blended[15, 15].astype(int) - source[15, 15].astype(int)).sum()
+    assert 0 < edge_change < inner_change

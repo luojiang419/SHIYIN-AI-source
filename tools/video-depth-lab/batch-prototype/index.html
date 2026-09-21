@@ -31,6 +31,25 @@
         </section>
 
         <aside class="settings-panel">
+          <section class="panel preview-card">
+            <header class="panel-head"><div><span class="eyebrow">DEPTH PREVIEW</span><h2>生成结果预览</h2></div><span class="preview-state" data-preview-state>处理中</span></header>
+            <button class="preview-stage" type="button" data-action="play-preview" aria-label="播放深度视频预览">
+              <span class="depth-scene" data-depth-scene><i></i><i></i><i></i><b></b></span><span class="play-button" data-play-icon>▶</span>
+            </button>
+            <div class="preview-meta"><strong data-preview-name>fashion_walk_01_depth.mp4</strong><span data-preview-info>深度结果生成中 · 可先调整输出参数</span></div>
+          </section>
+          <section class="panel adjustment-card">
+            <header class="panel-head"><div><span class="eyebrow">ADJUSTMENT</span><h2>深度映射调参</h2></div><button class="text-button" data-action="reset-parameters">恢复默认</button></header>
+            <div class="preset-row" data-presets></div>
+            <div class="sliders">
+              <label><span>远景黑点 <output data-value="far">8%</output></span><input data-parameter="far" type="range" min="0" max="35" value="8"></label>
+              <label><span>近景白点 <output data-value="near">94%</output></span><input data-parameter="near" type="range" min="65" max="100" value="94"></label>
+              <label><span>中间层次 <output data-value="gamma">0</output></span><input data-parameter="gamma" type="range" min="-50" max="50" value="0"></label>
+              <label><span>对比度 <output data-value="contrast">115%</output></span><input data-parameter="contrast" type="range" min="60" max="180" value="115"></label>
+              <label><span>平滑强度 <output data-value="smooth">4</output></span><input data-parameter="smooth" type="range" min="0" max="20" value="4"></label>
+            </div>
+            <label class="invert"><input data-parameter="invert" type="checkbox"><span>反转深度</span><i></i></label>
+          </section>
           <section class="panel settings-card">
             <header class="panel-head"><div><span class="eyebrow">MODEL</span><h2>提取设置</h2></div></header>
             <label>深度模型<select><option>Video Depth Anything Base</option><option>Video Depth Anything Small</option></select><small>相对深度 · FP16 · 已验证链路</small></label>

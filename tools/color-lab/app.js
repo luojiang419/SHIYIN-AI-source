@@ -38,3 +38,17 @@ $('export').onclick=()=>{const a=document.createElement('a');a.href=URL.createOb
 $('wipe').oninput=()=>{$('split-after').style.clipPath=`inset(0 0 0 ${$('wipe').value}%)`;document.querySelector('.split-line').style.left=$('wipe').value+'%'};
 for(const type of ['grid','split'])$('view-'+type).onclick=()=>{$('grid').hidden=type!=='grid';$('split').hidden=type!=='split';$('view-grid').classList.toggle('active',type==='grid');$('view-split').classList.toggle('active',type==='split')};
 refresh().catch(e=>$('status').textContent=e.message);
+
+// 预览区直接接收文件，复用点击选择时的解码与实时预览逻辑。
+document.querySelectorAll('[data-upload]').forEach(zone=>{
+ let depth=0;
+ zone.addEventListener('dragenter',event=>{event.preventDefault();depth++;zone.classList.add('drag-over')});
+ zone.addEventListener('dragover',event=>{event.preventDefault();event.dataTransfer.dropEffect='copy'});
+ zone.addEventListener('dragleave',()=>{if(--depth<=0){depth=0;zone.classList.remove('drag-over')}});
+ zone.addEventListener('drop',event=>{
+  event.preventDefault();depth=0;zone.classList.remove('drag-over');
+  const file=event.dataTransfer.files[0];if(!file)return;
+  if(!file.type.startsWith('image/')){$('status').textContent='请拖入图片文件';return}
+  const input=$(zone.dataset.upload),transfer=new DataTransfer();transfer.items.add(file);input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+ });
+});

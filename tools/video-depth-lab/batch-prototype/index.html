@@ -24,6 +24,11 @@
       <section class="layout">
         <section class="queue-panel panel">
           <header class="panel-head"><div><span class="eyebrow">QUEUE</span><h2>待处理视频</h2></div><button class="text-button" data-action="clear">清空队列</button></header>
+          <section class="left-configuration" aria-label="批量提取设置">
+            <div class="compact-setting"><span class="eyebrow">MODEL</span><label>深度模型<select><option>Video Depth Anything Base</option><option>Video Depth Anything Small</option></select></label><div class="compact-grid"><label>输入尺寸<select><option>322 · 推荐</option><option>518 · 高质量</option></select></label><label>输出格式<select><option>MP4 · H.264</option></select></label></div></div>
+            <div class="compact-setting"><span class="eyebrow">DESTINATION</span><label>输出位置<button class="path" data-action="path" type="button"><span data-path>E:\输出\深度视频</span><b>浏览</b></button></label><small>保留原视频规格 · 每个视频独立输出</small></div>
+            <div class="compact-model-status"><span class="model-icon">↓</span><div><span>模型按需下载</span><strong>首次开始时从魔塔下载</strong><small>约 458 MB · SHA-256 校验</small></div><button class="link-button" type="button" data-action="model">模型状态</button></div>
+          </section>
           <button class="dropzone" data-action="add" type="button"><b>导入视频</b><span>点击选择或拖入多个 MP4、MOV、MKV、AVI、WEBM 文件</span><em>支持批量添加，队列会按顺序逐一处理</em></button>
           <input data-input type="file" accept="video/*,.mkv,.avi" multiple hidden>
           <div class="queue-list" data-queue></div>
@@ -50,16 +55,16 @@
             </div>
             <label class="invert"><input data-parameter="invert" type="checkbox"><span>反转深度</span><i></i></label>
           </section>
-          <section class="panel settings-card">
+          <section class="panel settings-card moved-setting">
             <header class="panel-head"><div><span class="eyebrow">MODEL</span><h2>提取设置</h2></div></header>
             <label>深度模型<select><option>Video Depth Anything Base</option><option>Video Depth Anything Small</option></select><small>相对深度 · FP16 · 已验证链路</small></label>
             <div class="form-grid"><label>模型输入尺寸<select><option>322 · 推荐</option><option>518 · 高质量</option></select></label><label>输出格式<select><option>MP4 · H.264</option></select></label></div>
             <div class="preserve"><span class="check">✓</span><div><b>保留原视频规格</b><small>原始 FPS、完整时长和原始分辨率</small></div></div>
           </section>
-          <section class="panel destination-card">
+          <section class="panel destination-card moved-setting">
             <span class="eyebrow">DESTINATION</span><h2>输出位置</h2><button class="path" data-action="path" type="button"><span data-path>E:\输出\深度视频</span><b>浏览</b></button><p>每个视频生成独立文件夹：<code>原文件名_depth</code></p>
           </section>
-          <section class="model-card">
+          <section class="model-card moved-setting">
             <div class="model-icon">↓</div><div><span>模型按需下载</span><strong>首次开始时从魔塔下载</strong><small>约 458 MB · SHA-256 校验后可离线使用</small></div><button class="link-button" type="button" data-action="model">查看模型状态</button>
           </section>
         </aside>

@@ -12,6 +12,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.shared = (STATIC / "js" / "canvas-special-nodes.js").read_text(encoding="utf-8")
         cls.styles = (STATIC / "css" / "canvas-special-nodes.css").read_text(encoding="utf-8")
+        cls.classic_styles = (STATIC / "css" / "canvas.css").read_text(encoding="utf-8")
         cls.angle_styles = (STATIC / "css" / "canvas-angle-3d.css").read_text(encoding="utf-8")
         cls.pose_replicate_styles = (STATIC / "css" / "pose-replicate-node.css").read_text(encoding="utf-8")
         cls.pose_settings = (STATIC / "js" / "pose-replicate-settings.js").read_text(encoding="utf-8")
@@ -50,6 +51,8 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "智能追色",
             "colorFidelityFitBodyHtml",
             "bindColorFidelityFit",
+            "color-fidelity-port",
+            "待追色生成图",
             "colorFidelityStrength",
             "data-color-fidelity-strength",
             "按当前强度重新追色并复验",
@@ -58,6 +61,7 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
             "/api/canvas/color-fidelity-fit",
         ):
             self.assertIn(marker, self.classic + self.shared + self.classic_html)
+        self.assertIn(".node.colorFidelityFit-node > .port.color-fidelity-port", self.classic_styles)
 
     def test_panorama_uses_full_sphere_source_and_perspective_projection(self):
         for marker in (

@@ -224,6 +224,7 @@
         if(type === 'depth-map' || type === 'depthMap') return '深度图';
         if(type === 'depth-video' || type === 'depthVideo') return '深度视频';
         if(type === 'pose-replicate' || type === 'poseReplicate') return '一键复刻';
+        if(type === 'color-fidelity-fit' || type === 'colorFidelityFit') return '智能追色';
         if(type === 'relight') return '灯光重塑';
         if(type === 'angle') return '角度调整';
         return '720°取景器';
@@ -3149,6 +3150,53 @@
     }
     function bindAngle(root, node, options={}){ bindEditNode(root, node, options, 'angle'); }
 
+    function normalizeColorFidelityFit(node){
+        const normalizeBox = value => {
+            const parts = String(value || '').split(',').map(item => Math.max(0, Math.round(Number(item.trim()) || 0)));
+            return parts.length === 4 && parts[2] >= 8 && parts[3] >= 8 ? parts.join(',') : '0,0,256,256';
+        };
+        node.colorFidelityReferenceRoi = normalizeBox(node.colorFidelityReferenceRoi);
+        node.colorFidelityGeneratedRoi = normalizeBox(node.colorFidelityGeneratedRoi);
+        node.colorFidelityStatus = node.colorFidelityStatus || 'idle';
+        return node;
+    }
+    function colorFidelityFitBodyHtml(node){
+        normalizeColorFidelityFit(node);
+        const result = node.colorFidelityResult;
+        const status = node.colorFidelityStatus === 'running' ? '正在拟合并复验商品色彩…' : node.colorFidelityError || (result ? (result.passed ? '复验通过：已生成受限追色结果' : `复验未通过：${result.after?.confidence || '请检查 ROI'}`) : '连接参考商品图和生成结果，再填写同一纯布面 ROI');
+        return `<div class="special-node color-fidelity-fit-special" data-special-node="color-fidelity-fit">
+            <p class="muted-note">只在生成图的指定商品区域内追色；原始生成图不会被覆盖。ROI 格式：x,y,width,height。</p>
+            <div class="special-input-grid"><label>参考商品 ROI<input data-color-fidelity-field="colorFidelityReferenceRoi" value="${esc(node.colorFidelityReferenceRoi)}"></label><label>生成结果 ROI<input data-color-fidelity-field="colorFidelityGeneratedRoi" value="${esc(node.colorFidelityGeneratedRoi)}"></label></div>
+            <p class="pose-status ${node.colorFidelityStatus === 'running' ? 'running' : result?.passed ? 'success' : result ? 'failed' : ''}"><span></span><b>${esc(status)}</b></p>
+            ${result ? `<div class="special-output-row"><span>前 ${esc(result.before?.delta_e00_mean)} DeltaE00 / 后 ${esc(result.after?.delta_e00_mean)} DeltaE00 / 覆盖度 ${esc(result.after?.palette_overlap)}</span></div>` : ''}
+            <div class="special-output-row"><button type="button" class="special-primary" data-special-action="run-color-fidelity-fit"><i data-lucide="palette"></i><span>智能追色并复验</span></button></div>
+        </div>`;
+    }
+    function bindColorFidelityFit(root, node, options={}){
+        normalizeColorFidelityFit(node);
+        root.querySelectorAll('[data-color-fidelity-field]').forEach(control => {
+            control.addEventListener('pointerdown', event => event.stopPropagation());
+            control.addEventListener('change', event => { node[event.target.dataset.colorFidelityField] = event.target.value; normalizeColorFidelityFit(node); notify(options, node, true); });
+        });
+        root.querySelector('[data-special-action="run-color-fidelity-fit"]')?.addEventListener('click', async event => {
+            event.preventDefault(); event.stopPropagation();
+            try {
+                const inputs = options.getColorFidelityInputs?.(node) || {};
+                if(!inputs.reference?.url || !inputs.generated?.url) throw new Error('请连接参考商品图和生成结果');
+                node.colorFidelityStatus = 'running'; node.colorFidelityError = ''; notify(options, node, true);
+                const result = await options.runColorFidelityFit?.(node, inputs);
+                if(!result?.image_url) throw new Error('智能追色没有返回图片');
+                node.colorFidelityResult = result;
+                node.colorFidelityStatus = 'done';
+                setOutputItem(node, {url:result.image_url, name:'color-match-preview.png', kind:'image'}, options);
+                notify(options, node, true);
+                options.toast?.(result.passed ? '智能追色已通过严格复验' : '智能追色完成，但未通过严格复验');
+            } catch(error) {
+                node.colorFidelityStatus = 'failed'; node.colorFidelityError = error.message || '智能追色失败'; notify(options, node, true); options.toast?.(node.colorFidelityError);
+            }
+        });
+    }
+
     window.addEventListener('message', event => {
         if(event.origin && event.origin !== location.origin) return;
         if(event.data?.type === 'depth-map-settings:changed') applyDepthMapSettingsMessage(event.data);
@@ -3157,8 +3205,8 @@
 
     window.CanvasSpecialNodes = {
         DEFAULT_PANORAMA_PROMPT, DEFAULT_ANGLE_PROMPT,
-        panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, depthVideoBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode,
-        bindPanorama, bindPose, bindDepthMap, bindDepthVideo, bindDirector3d, bindPoseReplicate, bindAngle,
+        panoramaBodyHtml, poseBodyHtml, depthMapBodyHtml, depthVideoBodyHtml, director3dBodyHtml, poseReplicateBodyHtml, angleBodyHtml, angleReferenceForNode, colorFidelityFitBodyHtml,
+        bindPanorama, bindPose, bindDepthMap, bindDepthVideo, bindDirector3d, bindPoseReplicate, bindAngle, bindColorFidelityFit,
         buildAnglePrompt, outputItem, sourceSignature, uploadBlob, normalizePanorama, normalizeAngle, generateReferenceDepth,
         disposePanoramaCanvas, disposePanoramasIn, normalizeEditGeneration,
         refreshDepthMapSettings, activeDepthMapMode

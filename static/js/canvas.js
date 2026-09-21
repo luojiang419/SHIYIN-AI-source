@@ -1119,6 +1119,7 @@ const CLASSIC_QUICK_TOOLBAR_DEFS = [
     {id:'depthMap', label:'深度图', icon:'scan', action:() => addDepthMapNode()},
     {id:'depthVideo', label:'深度视频', icon:'video', action:() => addDepthVideoNode()},
     {id:'poseReplicate', label:'一键复刻', icon:'refresh-cw', action:() => addPoseReplicateNode()},
+    {id:'colorFidelityFit', label:'智能追色', icon:'palette', action:() => addColorFidelityFitNode()},
     {id:'resultCompare', label:'结果对比', icon:'columns-2', action:() => addResultCompareNode()},
     {id:'blenderDirector', label:'外部导演台', icon:'box', action:() => addBlenderDirectorNode()},
     {id:'output', label:'Output', icon:'circle-dot', action:() => addOutputNode()},
@@ -4666,6 +4667,10 @@ function addPoseReplicateNode(point){
         poseReplicateStatus:'idle', poseStatus:'idle', poseDepthStatus:'idle', poseReplicateRuns:[]
     });
 }
+function addColorFidelityFitNode(point){
+    const p = point || defaultPoint(120, 40);
+    return addNode({id:uid('color-fit'), type:'colorFidelityFit', x:p.x, y:p.y, w:520, h:390, colorFidelityReferenceRoi:'0,0,256,256', colorFidelityGeneratedRoi:'0,0,256,256', colorFidelityStatus:'idle'});
+}
 function addAngleNode(point){
     const p = point || defaultPoint(140, 60);
     return addNode({
@@ -6353,6 +6358,7 @@ function createNodeByType(type, point){
     if(type === 'depthMap') return addDepthMapNode(point);
     if(type === 'depthVideo') return addDepthVideoNode(point);
     if(type === 'poseReplicate') return addPoseReplicateNode(point);
+    if(type === 'colorFidelityFit') return addColorFidelityFitNode(point);
     if(type === 'resultCompare') return addResultCompareNode(point);
     if(type === 'blenderDirector') return addBlenderDirectorNode(point);
     if(type === 'rh') return addRhNode(point);
@@ -6389,6 +6395,7 @@ function menuAdd(type){
         else if(type === 'depthMap') created = addDepthMapNode(point);
         else if(type === 'depthVideo') created = addDepthVideoNode(point);
         else if(type === 'poseReplicate') created = addPoseReplicateNode(point);
+        else if(type === 'colorFidelityFit') created = addColorFidelityFitNode(point);
         else if(type === 'resultCompare') created = addResultCompareNode(point);
         else if(type === 'blenderDirector') created = addBlenderDirectorNode(point);
         else if(type === 'rh') created = addRhNode(point);
@@ -10813,6 +10820,13 @@ function bindClassicSpecialNode(el, node){
         getInputImage:classicSpecialInputImage,
         getInputVideo:classicSpecialInputVideo,
         getInputImages:classicSpecialInputImages,
+        getColorFidelityInputs:target => ({reference:classicSpecialInputImage(target, 'color-reference'), generated:classicSpecialInputImage(target, 'color-generated')}),
+        runColorFidelityFit:async (target, inputs) => {
+            const parseRoi = value => String(value || '').split(',').map(item => Number(item.trim()));
+            const response = await cascadeFetch('/api/canvas/color-fidelity-fit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reference_url:inputs.reference.url, generated_url:inputs.generated.url, reference_roi:parseRoi(target.colorFidelityReferenceRoi), generated_roi:parseRoi(target.colorFidelityGeneratedRoi)})});
+            if(!response.ok) throw new Error(await responseErrorMessage(response, '智能追色失败'));
+            return response.json();
+        },
         getAngleGeometryReference:classicAngleGeometryReference,
         resolveUrl:url => canvasDisplayMediaUrl(url, ''),
         generatePanorama:generateClassicPanorama,
@@ -10840,6 +10854,7 @@ function bindClassicSpecialNode(el, node){
     if(node.type === 'depthVideo') api.bindDepthVideo?.(el, node, options);
     if(node.type === 'director3d') api.bindDirector3d?.(el, node, {...options, createDirectorOutputNode:createClassicDirectorOutputNode});
     if(node.type === 'poseReplicate') api.bindPoseReplicate(el, node, options);
+    if(node.type === 'colorFidelityFit') api.bindColorFidelityFit?.(el, node, options);
     if(node.type === 'angle') api.bindAngle(el, node, options);
 }
 function ecommerceConnectedEntries(node){
@@ -11880,7 +11895,7 @@ function renderNode(node){
     const ecommerceTitle = window.CanvasEcommerceNodes?.title?.(node.type);
     const filmTitle = window.CanvasFilmWorkflow?.title(node.type) || window.CanvasFilmNodes?.title?.(node.type);
     const lookbookTitle = window.CanvasLookbookNode?.title?.(node.type);
-    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'autoCutout' ? '自动抠像' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 视频超分' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
+    const title = lookbookTitle || ecommerceTitle || filmTitle || (node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? (node.title || 'Group') : node.type === 'output' ? 'Output' : node.type === 'storyboardMerge' ? '拼图' : node.type === 'resultCompare' ? '结果对比' : node.type === 'llm' ? 'AI助手' : node.type === 'panorama' ? '720°取景器' : node.type === 'multiView' ? '创建三视图' : node.type === 'dwpose' ? '动作提取 · DWPose' : node.type === 'autoCutout' ? '自动抠像' : node.type === 'depthMap' ? '深度图' : node.type === 'depthVideo' ? '深度视频' : node.type === 'director3d' ? '3D导演台' : node.type === 'poseReplicate' ? '一键复刻' : node.type === 'colorFidelityFit' ? '智能追色' : node.type === 'angle' ? '角度调整' : node.type === 'batchGenerator' ? '批量处理' : node.type === 'comfy' ? '本地生成已停用' : node.type === 'ltxDirector' ? '本地生成已停用' : node.type === 'blenderDirector' ? '外部导演台' : node.type === 'rh' ? 'RunningHub' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'topazVideo' ? 'Topaz 视频超分' : node.type === 'linkfox-video' ? 'LinkFox视频生成' : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate'));
     const displayTitle = node.type === 'group' ? escapeHtml(title) : (node.type === 'image' ? (node.url ? nodeTitleForMedia(node) : (langIsEn() ? 'Upload' : '上传')) : title);
     const groupImageCount = node.type === 'group'
         ? (node.items || []).map(id => nodes.find(item => item.id === id)).filter(item => item?.type === 'image').length
@@ -12099,6 +12114,7 @@ function renderNode(node){
     if(node.type === 'resultCompare') body.innerHTML = resultCompareBodyHtml(node);
     if(node.type === 'director3d') body.innerHTML = window.CanvasSpecialNodes?.director3dBodyHtml?.(node) || '<div class="muted-note">3D导演台加载失败</div>';
     if(node.type === 'poseReplicate') body.innerHTML = window.CanvasSpecialNodes?.poseReplicateBodyHtml(node, {providers:imageApiProviders().map(provider => ({id:provider.id, name:provider.name || provider.id, models:allImageModels(provider.id)}))}) || '<div class="muted-note">一键复刻节点加载失败</div>';
+    if(node.type === 'colorFidelityFit') body.innerHTML = window.CanvasSpecialNodes?.colorFidelityFitBodyHtml?.(node) || '<div class="muted-note">智能追色节点加载失败</div>';
     if(node.type === 'angle'){
         const prefix = node.type;
         const connectedSource = classicSpecialInputImage(node);
@@ -12172,6 +12188,8 @@ function renderNode(node){
         el.insertAdjacentHTML('beforeend', classicMultiViewInputSlots(node).map(([role, label], index) => `<div class="port in classic-multi-view-port" data-input-role="${escapeAttr(role)}" data-role-label="${escapeAttr(label)}" data-port-index="${index}" style="--multi-view-port-index:${index};--multi-view-port-top:${125 + index * 44}px" aria-label="${escapeAttr(`输入端口：${label}`)}" title="连接${escapeAttr(label)}"></div>`).join(''));
     } else if(node.type === 'poseReplicate'){
         el.insertAdjacentHTML('beforeend', [['pose-reference','目标图片'],['target-image','服装参考'],['model-subject','模特主体'],['scene','场景'],['fabric-detail','面料细节']].map(([role,label], index) => `<div class="port in pose-role-port" data-input-role="${role}" data-role-label="${label}" style="--pose-port-index:${index};" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
+    } else if(node.type === 'colorFidelityFit'){
+        el.insertAdjacentHTML('beforeend', [['color-reference','参考商品图'],['color-generated','生成结果']].map(([role,label], index) => `<div class="port in result-compare-port" data-input-role="${role}" data-role-label="${label}" style="--result-compare-port-top:${index ? '68%' : '32%'}" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(node.type === 'resultCompare'){
         el.insertAdjacentHTML('beforeend', [['compare-source','源文件'],['compare-target','目标文件']].map(([role,label], index) => `<div class="port in result-compare-port" data-input-role="${role}" data-role-label="${label}" style="--result-compare-port-top:${index ? '68%' : '32%'}" aria-label="输入端口：${label}" title="连接${label}"></div>`).join(''));
     } else if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
@@ -12258,6 +12276,7 @@ function renderNode(node){
     multiViewResolution?.addEventListener('change', event => { event.stopPropagation(); node.resolution = event.target.value; scheduleSave(); });
     multiViewQuality?.addEventListener('change', event => { event.stopPropagation(); node.quality = event.target.value; scheduleSave(); });
     if(['panorama','dwpose','autoCutout','depthMap','depthVideo','director3d','poseReplicate','angle'].includes(node.type)) bindClassicSpecialNode(el, node);
+    if(node.type === 'colorFidelityFit') bindClassicSpecialNode(el, node);
     if(window.CanvasLookbookNode?.isType?.(node.type)) window.CanvasLookbookNode.bind(el,node,{bindScrollableText,run:changed=>runLookbookNode(changed.id),onChange:(_changed,meta={})=>{if(meta.render) node.lookbookPlan=''; scheduleSave();if(meta.render) setTimeout(()=>{if(nodes.some(item => item.id===node.id)) render();},0);}});
     if(window.CanvasEcommerceNodes?.isType?.(node.type)) bindClassicEcommerceNode(el, node);
     if(window.CanvasFilmWorkflow?.handles(node)) window.CanvasFilmWorkflow.bind(el,node);
@@ -12495,6 +12514,7 @@ function defaultNodeSize(type){
     if(type === 'depthMap') return {w:520, h:560};
     if(type === 'depthVideo') return {w:620, h:390};
     if(type === 'resultCompare') return {w:520, h:560};
+    if(type === 'colorFidelityFit') return {w:520, h:390};
     if(type === 'poseReplicate') return {w:720, h:820};
     if(type === 'angle') return {w:460, h:660};
     if(type === 'storyboardMerge') return {w:460, h:0};
@@ -23438,6 +23458,10 @@ function canConnect(fromId, toId, inputRole=''){
         return (from.type === 'image' || mediaRefsFromNode(from).some(ref => ref?.url && mediaKindForRef(ref) === 'image'))
             && !wouldCreateGeneratorCycle(fromId, toId);
     }
+    if(to.type === 'colorFidelityFit'){
+        if(!['color-reference','color-generated'].includes(inputRole)) return false;
+        return mediaRefsFromNode(from).some(ref => ref?.url && mediaKindForRef(ref) === 'image') && !wouldCreateGeneratorCycle(fromId, toId);
+    }
     if(to.type === 'multiView'){
         if(!classicMultiViewInputSlots(to).some(([role]) => role === inputRole)) return false;
         if(window.CanvasBuildingMultiView?.roleKind(inputRole) === 'prompt'){
@@ -23513,7 +23537,7 @@ function canConnect(fromId, toId, inputRole=''){
         if(!['pose-reference','target-image','model-subject','scene','fabric-detail'].includes(inputRole)) return false;
         return ['image','group','output','panorama','dwpose','autoCutout','depthMap','angle','generator'].includes(from.type);
     }
-    if(from.type === 'poseReplicate') return to.type === 'output';
+    if(from.type === 'poseReplicate' || from.type === 'colorFidelityFit') return to.type === 'output';
     if(from.type === 'director3d') { if(to.type === 'output') return true; if(CANVAS_GENERATOR_TYPES.includes(to.type)) return !wouldCreateGeneratorCycle(fromId, toId); return false; }
     if(from.type === 'blenderDirector'){
         if(to.type === 'output') return true;

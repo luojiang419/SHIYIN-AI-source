@@ -44,6 +44,18 @@ class CanvasSpecialNodeContractTests(unittest.TestCase):
         self.assertIn("if(node.type === 'angle') body.innerHTML", self.classic)
         self.assertIn("if(node.specialType === 'angle') return", self.smart)
 
+    def test_color_fidelity_fit_is_available_in_the_current_canvas(self):
+        for marker in (
+            "colorFidelityFit",
+            "智能追色",
+            "colorFidelityFitBodyHtml",
+            "bindColorFidelityFit",
+            "color-reference",
+            "color-generated",
+            "/api/canvas/color-fidelity-fit",
+        ):
+            self.assertIn(marker, self.classic + self.shared + self.classic_html)
+
     def test_panorama_uses_full_sphere_source_and_perspective_projection(self):
         for marker in (
             "标准 2:1 等距柱状投影",

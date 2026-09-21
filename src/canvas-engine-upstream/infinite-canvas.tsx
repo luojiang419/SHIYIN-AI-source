@@ -32,6 +32,9 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
         hasMoved: false,
         startedOnBackground: false,
     });
+    // 视口由桥接层直接写入 DOM 时，React props 不会同步重渲染。
+    // 连续输入必须从此引用读取当前视口，避免重复使用首次事件的比例。
+    const viewportRef = useRef(viewport);
     const scaleRef = useRef(viewport.k);
     const frameRef = useRef<number | null>(null);
     const nextViewportRef = useRef<ViewportTransform | null>(null);
@@ -40,8 +43,15 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
     const [isPanning, setIsPanning] = useState(false);
 
     useEffect(() => {
+        viewportRef.current = viewport;
         scaleRef.current = viewport.k;
-    }, [viewport.k]);
+    }, [viewport]);
+
+    const publishViewport = (nextViewport: ViewportTransform) => {
+        viewportRef.current = nextViewport;
+        scaleRef.current = nextViewport.k;
+        onViewportChange(nextViewport);
+    };
 
     useEffect(
         () => () => {
@@ -100,16 +110,17 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
             event.stopPropagation();
         } else if (target?.closest("[data-canvas-no-zoom],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown")) return;
 
-        const newScale = viewport.k * (event.deltaY > 0 ? 0.92 : 1.08);
+        const currentViewport = viewportRef.current;
+        const newScale = currentViewport.k * (event.deltaY > 0 ? 0.92 : 1.08);
         const rect = containerRef.current?.getBoundingClientRect();
         if (!rect) return;
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
-        const worldX = (mouseX - viewport.x) / viewport.k;
-        const worldY = (mouseY - viewport.y) / viewport.k;
+        const worldX = (mouseX - currentViewport.x) / currentViewport.k;
+        const worldY = (mouseY - currentViewport.y) / currentViewport.k;
 
-        onViewportChange({
+        publishViewport({
             x: mouseX - worldX * newScale,
             y: mouseY - worldY * newScale,
             k: newScale,
@@ -129,6 +140,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
         if (event.button === 0 && isBackgroundClick && document.activeElement instanceof HTMLElement && (document.activeElement.isContentEditable || document.activeElement instanceof HTMLMediaElement)) document.activeElement.blur();
 
         if (shouldPan) {
+            const currentViewport = viewportRef.current;
             event.preventDefault();
             event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -136,8 +148,8 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
                 isPanning: true,
                 startX: event.clientX,
                 startY: event.clientY,
-                initialX: viewport.x,
-                initialY: viewport.y,
+                initialX: currentViewport.x,
+                initialY: currentViewport.y,
                 hasMoved: false,
                 startedOnBackground: isBackgroundClick,
             };
@@ -182,7 +194,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
             if (frameRef.current) return;
             frameRef.current = requestAnimationFrame(() => {
                 frameRef.current = null;
-                if (nextViewportRef.current) onViewportChange(nextViewportRef.current);
+                if (nextViewportRef.current) publishViewport(nextViewportRef.current);
             });
         };
 
@@ -206,7 +218,7 @@ export function InfiniteCanvas({ containerRef, viewport, tool, panButton, backgr
             window.removeEventListener("pointercancel", handlePointerUp);
             document.body.style.cursor = "";
         };
-    }, [onCanvasDeselect, onViewportChange]);
+    }, [onCanvasDeselect, publishViewport]);
 
     useEffect(() => {
         const container = containerRef.current;

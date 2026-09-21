@@ -106,6 +106,9 @@ python tools/build-universal-imgx-report.py 案例/全能双风格/imgx-20260920
             insertion+=f'<figure>{picture("texture-inspection/"+file,title)}<figcaption>{title}</figcaption></figure>'
     insertion+='</div></section>'
     body=body.replace('<section id="acceptance">',insertion+'<section id="acceptance">')
+    body = (body
+        .replace('SHIYIN AI', 'SHIYING AI')
+        .replace('SHIYIN-AI', 'SHIYING-AI'))
     document=f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>全能模式 imgx 实测论述报告</title><style>{css}</style></head><body>{body}<script>{js}</script></body></html>'
     (case/'实测论述报告.html').write_text(document,encoding='utf-8')
     (case/'manifest.json').write_text(json.dumps({'provider':'shiying','transport':'imgx','model':'gemini-3-pro-image-preview','mode':'image-to-image','succeeded':succeeded,'failed':failed,'totalJobs':total,'manifests':[p.relative_to(case).as_posix() for p in sorted(case.glob('*/manifest.json'))],'images':items},ensure_ascii=False,indent=2),encoding='utf-8')

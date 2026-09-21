@@ -20,7 +20,7 @@ def build_sidebar(active: str, batch_href: str, universal_href: str, video_href:
     return (
         '<aside class="tutorial-sidebar" id="tutorialSidebar">'
         '<div class="tutorial-sidebar-brand"><span class="tutorial-brand-mark">S</span>'
-        '<span class="tutorial-sidebar-copy"><strong>SHIYING</strong><small>SHIYIN TRAINING</small></span></div>'
+        '<span class="tutorial-sidebar-copy"><strong>SHIYING</strong><small>SHIYING TRAINING</small></span></div>'
         f'<nav class="tutorial-menu" aria-label="教程导航">{links}</nav>'
         '<p class="tutorial-sidebar-copy tutorial-sidebar-hint">整套教程可离线复制使用</p>'
         '</aside><button class="tutorial-sidebar-toggle" id="tutorialSidebarToggle" '

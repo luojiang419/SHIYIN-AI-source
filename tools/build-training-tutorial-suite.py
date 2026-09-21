@@ -1,4 +1,4 @@
-"""构建可整体复制的拾影离线培训教程套件。"""
+"""构建可整体复制的 SHIYING 离线培训教程套件。"""
 from __future__ import annotations
 
 from html.parser import HTMLParser
@@ -18,7 +18,7 @@ CASES = ROOT/'案例'
 BATCH = CASES/'批量复刻培训-20260920'
 UNIVERSAL = CASES/'全能双风格'/'imgx-20260920'
 VIDEO = CASES/'视频生成培训-20260921'
-OUTPUT = CASES/'拾影培训教程-20260920'
+OUTPUT = CASES/'SHIYING培训教程-20260920'
 ARCHIVE = OUTPUT.with_suffix('.zip')
 
 
@@ -62,6 +62,18 @@ def directory_stats(path: Path) -> dict[str, int]:
     return {'files': len(files), 'bytes': sum(item.stat().st_size for item in files)}
 
 
+def normalize_tutorial_brand(path: Path) -> None:
+    for suffix in ('*.html', '*.htm', '*.md', '*.txt'):
+        for file in path.rglob(suffix):
+            content = file.read_text(encoding='utf-8')
+            updated = (content
+                .replace('拾影', 'SHIYING')
+                .replace('SHIYIN TRAINING', 'SHIYING TRAINING')
+                .replace('SHIYIN AI', 'SHIYING AI'))
+            if updated != content:
+                file.write_text(updated, encoding='utf-8')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--skip-build', action='store_true', help='使用现有两份报告，不重新运行其构建脚本')
@@ -82,12 +94,13 @@ def main() -> None:
     subprocess.run([sys.executable, str(ROOT/'tools/build-video-generation-training.py')], check=True)
     video_output = staging/'视频生成'
     shutil.copytree(VIDEO, video_output)
+    normalize_tutorial_brand(staging)
     inject_sidebar(staging/'index.html', 'batch', 'index.html', '全能模式/index.html', '视频生成/index.html')
     inject_sidebar(universal_output/'index.html', 'universal', '../index.html', 'index.html', '../视频生成/index.html')
     inject_sidebar(video_output/'index.html', 'video', '../index.html', '../全能模式/index.html', 'index.html')
     (staging/'使用说明.txt').write_text(
-        '拾影离线培训教程\n\n'
-        '1. 将整个“拾影培训教程-20260920”文件夹复制到演示电脑。\n'
+        'SHIYING 离线培训教程\n\n'
+        '1. 将整个“SHIYING培训教程-20260920”文件夹复制到演示电脑。\n'
         '2. 双击根目录 index.html 打开。\n'
         '3. 使用左侧教程导航切换“批量换款”、“全能模式”和“视频生成”。\n'
         '4. 页面所需图片、视频、证据与说明均在本目录内，不需要联网。\n'
@@ -98,7 +111,7 @@ def main() -> None:
     verify_page(universal_output/'index.html')
     verify_page(video_output/'index.html')
     manifest = {
-        'name': '拾影培训教程',
+        'name': 'SHIYING培训教程',
         'entry': 'index.html',
         'tutorials': [
             {'name': '批量换款', 'entry': 'index.html'},
@@ -111,7 +124,7 @@ def main() -> None:
     (staging/'tutorial-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 
     if OUTPUT.exists():
-        if OUTPUT.parent != CASES or OUTPUT.name != '拾影培训教程-20260920':
+        if OUTPUT.parent != CASES or OUTPUT.name != 'SHIYING培训教程-20260920':
             raise RuntimeError(f'拒绝替换非预期目录：{OUTPUT}')
         shutil.rmtree(OUTPUT)
     shutil.move(str(staging), str(OUTPUT))

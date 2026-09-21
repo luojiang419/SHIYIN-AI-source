@@ -108,3 +108,15 @@ def inspect_color_fidelity(reference: np.ndarray, generated: np.ndarray) -> Colo
         palette_overlap=round(raw_overlap, 3), normalized_delta_e00_mean=round(normalized_mean, 2),
         normalized_palette_overlap=round(normalized_overlap, 3), confidence=confidence,
     )
+
+
+def calibrate_lightness_preview(reference: np.ndarray, generated: np.ndarray, max_shift: float = 12.0) -> np.ndarray:
+    """仅校正预览 ROI 的 CIE L* 中位数，禁止改动 a/b 色相和织物细节。"""
+    ref_lab, generated_lab = rgb_to_lab(reference), rgb_to_lab(generated)
+    shift = float(np.clip(np.median(ref_lab[..., 0]) - np.median(generated_lab[..., 0]), -max_shift, max_shift))
+    adjusted = generated_lab.copy()
+    adjusted[..., 0] = np.clip(adjusted[..., 0] + shift, 0, 100)
+    encoded = adjusted.copy()
+    encoded[..., 0] *= 255.0 / 100.0
+    encoded[..., 1:] += 128.0
+    return cv2.cvtColor(np.clip(encoded, 0, 255).astype(np.uint8), cv2.COLOR_LAB2RGB)

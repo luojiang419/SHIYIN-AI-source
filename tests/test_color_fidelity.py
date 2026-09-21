@@ -1,6 +1,6 @@
 import numpy as np
 
-from canvas_core.color_fidelity import crop_rgb, inspect_color_fidelity
+from canvas_core.color_fidelity import calibrate_lightness_preview, crop_rgb, inspect_color_fidelity
 
 
 def test_same_color_is_credible():
@@ -29,3 +29,10 @@ def test_large_lightness_gap_is_not_credible_even_after_normalization():
 def test_crop_rejects_out_of_bounds_roi():
     with np.testing.assert_raises(ValueError):
         crop_rgb(np.zeros((20, 20, 3), dtype=np.uint8), (10, 10, 20, 20))
+
+
+def test_lightness_preview_keeps_chroma_and_reduces_lightness_gap():
+    reference = np.full((32, 32, 3), [140, 96, 68], dtype=np.uint8)
+    generated = np.full((32, 32, 3), [82, 55, 40], dtype=np.uint8)
+    calibrated = calibrate_lightness_preview(reference, generated)
+    assert abs(inspect_color_fidelity(reference, calibrated).lightness_offset) < abs(inspect_color_fidelity(reference, generated).lightness_offset)

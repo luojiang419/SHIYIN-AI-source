@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from canvas_core.color_fidelity import crop_rgb, inspect_color_fidelity
+from canvas_core.color_fidelity import calibrate_lightness_preview, crop_rgb, inspect_color_fidelity
 
 
 def parse_box(value):
@@ -37,6 +37,7 @@ def main():
     parser.add_argument('--reference-roi', type=parse_box, required=True)
     parser.add_argument('--generated-roi', type=parse_box, required=True)
     parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--preview-calibrate', action='store_true', help='输出只校正明度的预览裁片')
     args = parser.parse_args()
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -45,6 +46,10 @@ def main():
     save_crop(reference, output / 'reference-100pct.png')
     save_crop(generated, output / 'generated-100pct.png')
     report = inspect_color_fidelity(reference, generated).as_dict()
+    if args.preview_calibrate:
+        calibrated = calibrate_lightness_preview(reference, generated)
+        save_crop(calibrated, output / 'generated-calibrated-preview.png')
+        report['calibrated_preview'] = inspect_color_fidelity(reference, calibrated).as_dict()
     report.update({'reference': str(Path(args.reference)), 'generated': str(Path(args.generated)),
                    'reference_roi': args.reference_roi, 'generated_roi': args.generated_roi})
     (output / 'color-fidelity.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

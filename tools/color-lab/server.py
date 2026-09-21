@@ -15,6 +15,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=='/profiles':
             self.send(json.loads((DATA/'profiles.json').read_text('utf-8')) if (DATA/'profiles.json').exists() else []);return
+        if self.path in ('/app.js', '/style.css'):
+            self.send_response(200);self.send_header('Content-Type', 'text/javascript; charset=utf-8' if self.path.endswith('.js') else 'text/css; charset=utf-8');self.end_headers();self.wfile.write(Path(__file__).with_name(self.path[1:]).read_bytes());return
         if self.path!='/': self.send({},404);return
         self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.end_headers();self.wfile.write(Path(__file__).with_name('index.html').read_bytes())
     def do_POST(self):
@@ -38,7 +40,9 @@ class Handler(BaseHTTPRequestHandler):
             fitted=target if c['model']=='manual' else smart_color_match_preview(refcrop,srccrop,c['strength'],c['model'],target)
             fitted=apply_lab_controls(fitted,c['lightness'],c['contrast'],c['chroma'],c['a_shift'],c['b_shift'])
             src[y:y+h,x:x+w]=fitted
-            out=DATA/('preview_'+uuid.uuid4().hex+'.png');Image.fromarray(src).save(out)
+            out=None
+            if not p.get('preview', False):
+                out=DATA/('preview_'+uuid.uuid4().hex+'.png');Image.fromarray(src).save(out)
             buf=io.BytesIO();Image.fromarray(src).save(buf,format='PNG')
             self.send({'image':'data:image/png;base64,'+base64.b64encode(buf.getvalue()).decode(),'path':str(out),'before':inspect_color_fidelity(refcrop,srccrop).as_dict(),'after':inspect_color_fidelity(refcrop,crop_rgb(src,p['source_roi'])).as_dict()})
         except Exception as exc:self.send({'error':str(exc)},400)

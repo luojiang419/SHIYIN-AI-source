@@ -18,5 +18,25 @@ PAGE = r'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta n
 <section class="panel" id="steps" hidden><div class="case"><span class="badge">实操顺序</span><h2>从豹纹案例复用到下一支片</h2><div class="steps"><article><b>1</b><div><strong>把已有参考视频或关键帧接入“生成线稿分镜”。</strong><br><span class="caption">只检查机位、人物数量、朝向、动作和前中后景是否正确。</span></div></article><article><b>2</b><div><strong>按角色、服装、道具、场景准备资产图。</strong><br><span class="caption">同一资产可复用到多镜，替换时只影响连接到它的镜头。</span></div></article><article><b>3</b><div><strong>用“分镜合成”得到每一镜的首帧。</strong><br><span class="caption">把线稿、资产和需要的深度图连接进去，先审首帧。</span></div></article><article><b>4</b><div><strong>需要高度保持原视频走位时，先生成并接入“深度视频”。</strong><br><span class="caption">重点检查人物边缘、遮挡切换和镜头推进是否贴合原片。</span></div></article><article><b>5</b><div><strong>确认一组首帧后，接入“生成视频”按组提交。</strong><br><span class="caption">出现问题只回到对应镜头的分镜或资产节点修正，再单独重跑。</span></div></article></div></div></section>
 </main><script>const tabs=[...document.querySelectorAll('[data-tab]')],panels=[...document.querySelectorAll('.panel')];tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.setAttribute('aria-selected',x===b));panels.forEach(p=>p.hidden=p.id!==b.dataset.tab);history.replaceState(null,'','#'+b.dataset.tab)});const initial=tabs.find(x=>x.dataset.tab===location.hash.slice(1));if(initial)initial.click();</script></body></html>'''
 
-OUT.write_text(PAGE, encoding='utf-8')
+page = PAGE.replace(
+    '</style>',
+    '.visual{display:block;width:100%;margin-top:18px;aspect-ratio:16/9;object-fit:cover;border:1px solid var(--line);border-radius:8px}</style>',
+    1,
+)
+page = page.replace(
+    '</div><p class="note">关键动作是“首帧通过后再生成视频”。',
+    '</div><img class="visual" src="assets/storyboard-planning.jpg" alt="分镜策划工作台，展示四个连续镜头构图"><p class="caption">配图示意：先把连续镜头排成可沟通的画面顺序，再逐镜进入资产合成与视频生成。</p></div><p class="note">关键动作是“首帧通过后再生成视频”。',
+    1,
+)
+page = page.replace(
+    '</svg></div><p class="note">“精准”指对原视频的构图、运动和空间关系提供更强约束，',
+    '</svg></div><img class="visual" src="assets/depth-reconstruction.jpg" alt="原视频、灰度深度层和复刻结果的对照示意"><p class="caption">配图示意：深度层保留近中远关系与人物遮挡，为下游画面替换提供连续空间参照。</p><p class="note">“精准”指对原视频的构图、运动和空间关系提供更强约束，',
+    1,
+)
+page = page.replace(
+    '<section class="panel" id="flow" hidden><div class="case"><span class="badge">核心制作链路</span>',
+    '<section class="panel" id="flow" hidden><div class="case"><span class="badge">前期资产准备</span><h2>三视图让资产在每个镜头里都认得出来</h2><p>从一个清晰正面参考开始，创建三视图补齐正、侧、背，再补充面料、道具或关键配饰细节。后续把它们分别接到角色、服装和道具端口，能减少同一主体在不同镜头中变形或换装的风险。</p><img class="visual" src="assets/asset-three-view.jpg" alt="角色正面、侧面、背面与材质道具参考组成的资产三视图板"><p class="caption">配图示意：三视图用于建立可复用的角色和造型参照，不需要每一镜从零描述人物外观。</p></div><div class="case"><span class="badge">核心制作链路</span>',
+    1,
+)
+OUT.write_text(page, encoding='utf-8')
 print(OUT)

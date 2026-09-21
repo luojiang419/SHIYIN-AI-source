@@ -871,6 +871,7 @@ MINIMAX_H3_DEFAULT_BASE_URL = MINIMAX_H3_ENV_BASE_URL or MINIMAX_H3_LOCAL_BASE_U
 MINIMAX_H3_DEFAULT_VIDEO_MODELS = ["MiniMax H3"]
 YOUYUN_H3_DEFAULT_BASE_URL = "https://cp.compshare.cn"
 YOUYUN_H3_DEFAULT_VIDEO_MODELS = ["MiniMax-H3"]
+YOUYUN_H3_MAX_REQUEST_BYTES = 72 * 1024 * 1024
 KLING_CLI_PLACEHOLDER_VIDEO_MODELS = ["可灵（连接后选择模型）"]
 KLING_VIDEO_3_0_OMNI_MODEL = "kling-v3-omni"
 MINIMAX_H3_DEFAULT_RESOLUTION = "0.2MP 16:9 - 608x352"
@@ -4677,6 +4678,7 @@ class CanvasVideoRequest(BaseModel):
     enable_upsample: bool = False
     watermark: bool = False
     mute_audio: bool = False
+    use_frame_roles: bool = False
     seed: Optional[int] = None
     camerafixed: bool = False
     return_last_frame: bool = False
@@ -22420,17 +22422,11 @@ async def generate_minimax_h3_video(client, payload: CanvasVideoRequest, provide
     raise HTTPException(status_code=504, detail=f"MiniMax H3 生成任务超时：{job_id}")
 
 def compshare_youyun_h3_resolution(value: str = "") -> str:
-    """Map legacy H3 canvas presets to the documented CompShare quality tiers."""
+    """使用优云当前公开的质量档位，不提交已移除的 4K。"""
     normalized = str(value or "").strip().upper()
-    if normalized in {"768P", "1080P", "2K", "4K"}:
-        return normalized
-    if "4K" in normalized:
-        return "4K"
-    if "2K" in normalized:
-        return "2K"
-    if "1080" in normalized:
-        return "1080P"
-    return "768P"
+    if normalized == "4K":
+        raise HTTPException(status_code=400, detail="优云智算H3 当前支持 768P、1080P、2K，请重新选择分辨率。")
+    return normalized if normalized in {"768P", "1080P", "2K"} else "768P"
 
 
 def youyun_h3_headers(provider: Dict[str, Any]) -> Dict[str, str]:
@@ -22445,44 +22441,70 @@ def youyun_h3_headers(provider: Dict[str, Any]) -> Dict[str, str]:
 
 async def youyun_h3_reference_value(client, url: str, kind: str) -> str:
     value = str(url or "").strip()
+    labels = {"image": "图片", "video": "视频", "audio": "音频"}
+    limits = {"image": 30, "video": 50, "audio": 15}
+    label, limit = labels[kind], limits[kind]
+    max_bytes = limit * 1024 * 1024
     if not value:
-        return ""
-    if value.startswith(f"data:{kind}/"):
-        return value
-    path = output_file_from_url(value)
-    if path:
+        raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}地址不能为空")
+    if value.startswith("data:"):
         try:
-            raw = Path(path).read_bytes()
-        except OSError as exc:
-            raise HTTPException(status_code=400, detail="优云智算H3 参考素材读取失败") from exc
-        mime = mimetypes.guess_type(path)[0] or ("image/png" if kind == "image" else "video/mp4")
-    elif value.startswith("http://") or value.startswith("https://"):
-        try:
-            response = await client.get(value)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=400, detail="优云智算H3 远程参考素材下载失败") from exc
-        raw = response.content
-        mime = (response.headers.get("content-type") or mimetypes.guess_type(value)[0] or ("image/png" if kind == "image" else "video/mp4")).split(";", 1)[0]
+            header, encoded = value.split(",", 1)
+            mime = header[5:].split(";", 1)[0].lower()
+            if len(encoded) > max_bytes * 4:
+                raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}不能超过 {limit} MiB")
+            raw = base64.b64decode(encoded, validate=True) if ";base64" in header else urllib.parse.unquote_to_bytes(encoded)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}的 Data URL 无效") from exc
     else:
-        raise HTTPException(status_code=400, detail=f"优云智算H3 的参考{('图' if kind == 'image' else '视频')}地址无效")
-    max_bytes = {"image": 30, "video": 50, "audio": 15}.get(kind, 15) * 1024 * 1024
+        path = output_file_from_url(value)
+        if path:
+            try:
+                if Path(path).stat().st_size > max_bytes:
+                    raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}不能超过 {limit} MiB")
+                raw = Path(path).read_bytes()
+            except OSError as exc:
+                raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}读取失败") from exc
+            mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        elif value.startswith(("http://", "https://")):
+            host = (urllib.parse.urlparse(value).hostname or "").lower()
+            try:
+                public = ipaddress.ip_address(host).is_global
+            except ValueError:
+                public = bool(host and "." in host and host != "localhost" and not host.endswith((".localhost", ".local", ".internal")))
+            if public:
+                # 公网素材交给平台下载，避免大视频转 Base64 后超过 72 MiB 请求限制。
+                return value
+            try:
+                response = await client.get(value)
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise HTTPException(status_code=400, detail=f"优云智算H3 内网参考{label}下载失败") from exc
+            raw = response.content
+            mime = (response.headers.get("content-type") or mimetypes.guess_type(value)[0] or "application/octet-stream").split(";", 1)[0].lower()
+        else:
+            raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}地址无效")
     if len(raw) > max_bytes:
-        labels = {"image": "图片", "video": "视频", "audio": "音频"}
-        limits = {"image": 30, "video": 50, "audio": 15}
-        raise HTTPException(status_code=400, detail=f"优云智算H3 参考{labels.get(kind, '素材')}不能超过 {limits.get(kind, 15)}MB")
+        raise HTTPException(status_code=400, detail=f"优云智算H3 参考{label}不能超过 {limit} MiB")
     if not mime.startswith(f"{kind}/"):
-        raise HTTPException(status_code=400, detail=f"优云智算H3 参考素材不是有效{('图片' if kind == 'image' else '视频')}")
+        raise HTTPException(status_code=400, detail=f"优云智算H3 参考素材不是有效{label}")
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
 async def youyun_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[str, Any]:
     image_refs = [ref for ref in (payload.images or []) if str(ref.url or "").strip()]
     video_refs = [str(url or "").strip() for url in (payload.videos or []) if str(url or "").strip()]
     audio_refs = [str(url or "").strip() for url in (payload.audios or []) if str(url or "").strip()]
-    use_references = bool((image_refs or video_refs or audio_refs) and (payload.multimodal or video_refs or audio_refs or len(image_refs) > 2))
+    if len(image_refs) > 9 or len(video_refs) > 3 or len(audio_refs) > 3 or len(image_refs) + len(video_refs) + len(audio_refs) > 12:
+        raise HTTPException(status_code=400, detail="优云智算H3 最多 9 张参考图片、3 个参考视频、3 个参考音频，合计最多 12 个；请移除超限素材后重试。")
+    if audio_refs and not (image_refs or video_refs):
+        raise HTTPException(status_code=400, detail="优云智算H3 的参考音频需要同时提供至少一张参考图片或一个参考视频")
+    explicit_frames = payload.use_frame_roles or any(str(ref.role or "").lower() in {"first_frame", "last_frame"} for ref in image_refs)
+    if explicit_frames and (video_refs or audio_refs or len(image_refs) > 2 or any(ref.role == "reference_image" for ref in image_refs)):
+        raise HTTPException(status_code=400, detail="优云智算H3 首尾帧模式不能混用参考图片、参考视频或参考音频；请关闭首尾帧模式并使用全能参考。")
+    use_references = not explicit_frames and bool((image_refs or video_refs or audio_refs) and (payload.multimodal or video_refs or audio_refs or len(image_refs) > 2))
     prompt = normalize_video_prompt_references(
         str(payload.prompt or "").strip(), "minimax-h3",
-        image_count=len(image_refs), video_count=len(video_refs),
+        image_count=len(image_refs), video_count=len(video_refs), audio_count=len(audio_refs),
     )
     content = [{"type": "text", "text": prompt}] if prompt else []
     body = {
@@ -22496,26 +22518,32 @@ async def youyun_h3_video_request(client, payload: CanvasVideoRequest) -> Dict[s
         "mute_audio": bool(payload.mute_audio),
     }
     if use_references:
-        for ref in image_refs[:9]:
+        for ref in image_refs:
             content.append({"type": "image_url", "image_url": {"url": await youyun_h3_reference_value(client, ref.url, "image")}, "role": "reference_image"})
-        for url in video_refs[:3]:
+        for url in video_refs:
             content.append({"type": "video_url", "video_url": {"url": await youyun_h3_reference_value(client, url, "video")}, "role": "reference_video"})
-        remaining_audio_slots = max(0, 12 - (len(content) - (1 if prompt else 0)))
-        for url in audio_refs[:min(3, remaining_audio_slots)]:
+        for url in audio_refs:
             content.append({"type": "audio_url", "audio_url": {"url": await youyun_h3_reference_value(client, url, "audio")}, "role": "reference_audio"})
-        if audio_refs and not (image_refs or video_refs):
-            raise HTTPException(status_code=400, detail="优云智算H3 的参考音频需要同时提供至少一张图片或一个参考视频")
         if len(content) == (1 if prompt else 0):
             raise HTTPException(status_code=400, detail="优云智算H3 全能参考模式至少需要 1 张图片或 1 个参考视频")
     else:
-        first = next((ref for ref in image_refs if str(ref.role or "").lower() == "first_frame"), image_refs[0] if image_refs else None)
-        last = next((ref for ref in image_refs if str(ref.role or "").lower() == "last_frame"), image_refs[1] if len(image_refs) > 1 else None)
+        tagged = any(str(ref.role or "").lower() in {"first_frame", "last_frame"} for ref in image_refs)
+        if tagged:
+            first = next((ref for ref in image_refs if ref.role == "first_frame"), None)
+            last = next((ref for ref in image_refs if ref.role == "last_frame"), None)
+            if sum(ref.role == "first_frame" for ref in image_refs) > 1 or sum(ref.role == "last_frame" for ref in image_refs) > 1 or any(ref.role not in {"first_frame", "last_frame"} for ref in image_refs):
+                raise HTTPException(status_code=400, detail="优云智算H3 首尾帧最多各一张，请明确每张图片的首帧/尾帧角色。")
+        else:
+            first = image_refs[0] if image_refs else None
+            last = image_refs[1] if len(image_refs) > 1 else None
         if first:
             content.append({"type": "image_url", "image_url": {"url": await youyun_h3_reference_value(client, first.url, "image")}, "role": "first_frame"})
         if last:
             content.append({"type": "image_url", "image_url": {"url": await youyun_h3_reference_value(client, last.url, "image")}, "role": "last_frame"})
     if not content:
         raise HTTPException(status_code=400, detail="优云智算H3 至少需要提示词或参考素材")
+    if len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > YOUYUN_H3_MAX_REQUEST_BYTES:
+        raise HTTPException(status_code=400, detail="优云智算H3 请求体超过 72 MiB，请减少素材或使用可公开访问的素材链接。")
     return body
 
 
@@ -23704,7 +23732,7 @@ async def youyun_h3_status():
     return {
         "available": True,
         "generation_enabled": True,
-        "resolutions": ["768P", "1080P", "2K", "4K"],
+        "resolutions": ["768P", "1080P", "2K"],
         "defaults": {"available_points": balance.get("available_points", 0)},
         "error": "",
     }
@@ -24765,8 +24793,9 @@ def normalize_video_prompt_references(
     profile: str,
     image_count: int = 0,
     video_count: int = 0,
+    audio_count: int = 0,
 ) -> str:
-    """将图1/图片1/视频1等自然引用确定性转换为目标格式标签。"""
+    """将图片、视频、音频的自然引用转换为各自编号的目标标签。"""
     output = str(prompt or "")
     image_patterns = [
         r"<<<\s*image_(\d+)\s*>>>",
@@ -24792,6 +24821,12 @@ def normalize_video_prompt_references(
         output = _replace_numbered_prompt_mentions(
             output, video_patterns, lambda index: _video_prompt_reference_tag(profile, "video", index), video_count
         )
+    if audio_count > 0:
+        output = _replace_numbered_prompt_mentions(
+            output, [r"<\s*Audio\s+(\d+)\s*>", r"@?(?:参考)?音频\s*(\d+)", r"(?<!<)\baudio\s*#?\s*(\d+)\b"],
+            lambda index: _video_prompt_reference_tag(profile, "audio", index), audio_count
+        )
+
     if profile == "minimax-h3":
         subject_patterns = [r"<<<\s*element_(\d+)\s*>>>", r"(?:主体|人物)\s*(\d+)", r"(?<!<)\belement\s*#?\s*(\d+)\b"]
     else:

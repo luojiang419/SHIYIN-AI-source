@@ -155,7 +155,7 @@ class YouyunH3VideoTests(unittest.TestCase):
         self.assertEqual(sum(item["type"] == "video_url" for item in client.post_body["content"]), 3)
 
 
-    def test_remote_reference_is_downloaded_and_converted_to_data_url(self):
+    def test_public_reference_url_is_preserved_without_base64_expansion(self):
         class FakeResponse:
             content = b"image-bytes"
             headers = {"content-type": "image/png"}
@@ -168,4 +168,4 @@ class YouyunH3VideoTests(unittest.TestCase):
                 return FakeResponse()
 
         value = asyncio.run(self.main.youyun_h3_reference_value(FakeClient(), "https://assets.example/ref.png", "image"))
-        self.assertTrue(value.startswith("data:image/png;base64,"))
+        self.assertEqual(value, "https://assets.example/ref.png")

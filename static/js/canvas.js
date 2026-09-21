@@ -1852,7 +1852,7 @@ function h3VideoResolutionForAspect(aspectRatio='', resolution=''){
 function syncMiniMaxH3VideoDimensions(node, changedField='aspectRatio'){
     if(isYouyunH3VideoNode(node)){
         node.aspectRatio = ['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].includes(node.aspectRatio) ? node.aspectRatio : '16:9';
-        node.resolution = ['768P','1080P','2K','4K'].includes(node.resolution) ? node.resolution : '768P';
+        node.resolution = ['768P','1080P','2K'].includes(node.resolution) ? node.resolution : '768P';
         node.duration = Math.max(4, Math.min(30, Number(node.duration) || 5));
         return node;
     }
@@ -15095,7 +15095,7 @@ function youyunH3VideoSettingsHtml(node){
             <label class="field"><div class="setting-title">${tr('canvas.videoAspect')}</div><select class="select-lite video-aspect compact-select">
                 ${['21:9','16:9','4:3','1:1','3:4','9:16','adaptive'].map(value => `<option value="${value}" ${value === (node.aspectRatio || MINIMAX_H3_VIDEO_DEFAULTS.aspectRatio) ? 'selected' : ''}>${value}</option>`).join('')}
             </select></label>
-            <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${['768P','1080P','2K','4K'].map(value => `<option value="${value}" ${value === node.resolution ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+            <label class="field"><div class="setting-title">${tr('canvas.videoResolution')}</div><select class="select-lite video-resolution compact-select">${['768P','1080P','2K'].map(value => `<option value="${value}" ${value === node.resolution ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
         </div>
         <div class="gen-settings-row">
             <div class="field"><div class="setting-title">参考能力</div><div class="text-[11px] text-gray-500">最多 9 图、3 视频、3 音频，素材合计不超过 12 个</div></div>
@@ -17252,7 +17252,7 @@ async function runVideoNode(nodeId, opts={}){
             resolution:node.resolution || '',
             images:refs,
             videos:isH3
-                ? videoRefs.map(ref => ref.url).filter(Boolean).slice(0, 3)
+                ? (isYouyunH3VideoNode(node) ? videoRefs : videoRefs.slice(0, 3)).map(ref => ref.url).filter(Boolean)
                 : manualVideoUrlForNode(node)
                     ? [manualVideoUrlForNode(node)]
                     : videoRefs.map(ref => tempShUploadedUrlForNode(node, ref.url)),
@@ -17264,6 +17264,7 @@ async function runVideoNode(nodeId, opts={}){
             generate_audio:Boolean(node.generateAudio),
             mute_audio:isYouyunH3VideoNode(node) && Boolean(node.muteAudio),
             multimodal:Boolean(node.multimodal),
+            use_frame_roles:Boolean(node.useFrameRoles),
             steps:Number(node.steps || 12),
             model_parameters:isKling ? {...(node.modelParameters || {})} : {},
             canvas_id:canvas?.id || '',

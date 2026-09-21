@@ -64,7 +64,7 @@ async function run(){
   await page.locator('#smart [data-smart-param="videoProvider"][data-smart-value="youyun-h3"]').click();
   for(const panel of ['classic','film','smart']){
     const text=await page.locator('#'+panel).textContent();
-    assert.match(text,/768P/);assert.match(text,/4K/);assert.match(text,/移除音轨/);assert.doesNotMatch(text,/采样步数|0\.2MP/);
+    assert.match(text,/768P/);assert.match(text,/2K/);assert.doesNotMatch(text,/4K/);assert.match(text,/移除音轨/);assert.doesNotMatch(text,/采样步数|0\.2MP/);
   }
   await page.selectOption('#film [data-film-field="resolution"]','2K');
   assert.equal(await page.locator('#film [data-film-field="resolution"]').inputValue(),'2K');
@@ -90,7 +90,7 @@ async function run(){
   assert.equal(await page.evaluate(()=>isMiniMaxH3SmartSettings({videoProvider:'other',videoModel:'MiniMax H3'})),false);
   await page.screenshot({path:'.codex-tmp/h3-provider-split/local-panels.png',fullPage:true});
   assert.deepEqual(browserErrors,[]);
-  console.log('PASS: classic / film / smart local-cloud-local switching, 18 local presets, 4 cloud tiers, duration bounds, local steps, cloud audio/watermark, strict provider identity');
+  console.log('PASS: classic / film / smart local-cloud-local switching, 18 local presets, 3 cloud tiers, duration bounds, local steps, cloud audio/watermark, strict provider identity');
  }finally{await browser.close();}
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

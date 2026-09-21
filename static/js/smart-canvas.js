@@ -4570,7 +4570,7 @@ function isMiniMaxH3SmartSettings(source=settings){
     return Boolean(source && (['minimax-h3','youyun-h3'].includes(source.videoProvider) || (!source.videoProvider && source.videoModel === 'MiniMax H3')));
 }
 function h3SmartVideoResolutions(source=settings){
-    if(isYouyunH3SmartSettings(source)) return ['768P','1080P','2K','4K'];
+    if(isYouyunH3SmartSettings(source)) return ['768P','1080P','2K'];
     return [
         '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
         '0.2MP 16:9 - 608x352','0.3MP 16:9 - 736x416','0.4MP 16:9 - 864x480','0.5MP 16:9 - 960x544','0.6MP 16:9 - 1056x608',
@@ -19462,7 +19462,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
         const trustedMode = Boolean(runSettings.videoTrustedAsset);
         const trustedSource = trustedMode ? (['library','cloud','manual'].includes(runSettings.videoTrustedSource) ? runSettings.videoTrustedSource : 'library') : 'none';
         // 仅「素材库链接」来源才走 asset:// 认证地址 + 后端可信素材路由；上传云端/手动网址走普通直链。
-        const useAssetUris = trustedSource === 'library';
+        const useAssetUris = !isH3 && trustedSource === 'library';
         const targetPlatform = videoProviderPlatform(runSettings.videoProvider || 'comfly');
         let mismatchedAsset = false;
         const effUrl = ref => {
@@ -19484,9 +19484,10 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
         });
         const manualVideo = manualSmartVideoLink(runSettings)?.url || '';
         const refVideos = isH3
-            ? videoRefsOnly(refs).map(ref => ref?.url).filter(Boolean).slice(0, 3)
+            ? (isYouyunH3SmartSettings(runSettings) ? videoRefsOnly(refs) : videoRefsOnly(refs).slice(0, 3)).map(ref => ref?.url).filter(Boolean)
             : manualVideo ? manualSmartMediaLinks(runSettings).map(item => item.url).filter(Boolean) : videoRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean);
-        const refAudios = audioRefsOnly(uploadedRefs).map(ref => effUrl(ref)).filter(Boolean).slice(0, 3);
+        const sourceAudios = audioRefsOnly(isH3 ? refs : uploadedRefs);
+        const refAudios = (isYouyunH3SmartSettings(runSettings) ? sourceAudios : sourceAudios.slice(0, 3)).map(ref => effUrl(ref)).filter(Boolean);
         if(mismatchedAsset) toast('部分认证素材属于其它平台，已回退为普通素材。切换到对应平台的视频接口才能用 asset:// 认证地址。');
         const payload = {
             prompt,
@@ -19505,6 +19506,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings,sourceNo
             camerafixed: Boolean(runSettings.videoCameraFixed),
             generate_audio: Boolean(runSettings.videoGenerateAudio),
             multimodal: Boolean(runSettings.videoMultimodal),
+            use_frame_roles: Boolean(runSettings.videoUseFrameRoles),
             trusted_asset: useAssetUris,
             steps: isH3
                 ? (Number.isFinite(Number(runSettings.videoSteps)) ? Number(runSettings.videoSteps) : 12)

@@ -125,4 +125,4 @@ def test_status_queries_are_separate(provider_id,endpoint):
     result=asyncio.run(run())
     assert requests[0].url.path == endpoint
     assert result['generation_enabled'] is True
-    assert result['resolutions'] == (['768P','1080P','2K','4K'] if provider_id=='youyun-h3' else ['local-preset'])
+    assert result['resolutions'] == (['768P','1080P','2K'] if provider_id=='youyun-h3' else ['local-preset'])

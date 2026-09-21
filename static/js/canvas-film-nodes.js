@@ -27,7 +27,7 @@
         minimax: {id:'minimax', name:'MiniMax H3', prefix:'Picture ', template:'<Picture {index}> is {role}', maxImages:9},
     };
     const isYouyunH3 = node => node?.apiProvider === 'youyun-h3';
-    const YOUYUN_H3_RESOLUTIONS = ['768P','1080P','2K','4K'];
+    const YOUYUN_H3_RESOLUTIONS = ['768P','1080P','2K'];
     const H3_DEFAULT_RESOLUTION = '0.2MP 16:9 - 608x352';
     const H3_RESOLUTION_PRESETS = [
         '0.2MP 21:9 - 672x288','0.3MP 21:9 - 896x384','0.5MP 21:9 - 1120x480',
@@ -164,6 +164,10 @@
                 {role:'storyboard',label:'分镜图',title:'连接分镜图或首帧参考'},
                 {role:'prompt',label:'提示词',title:'连接外部提示词、提示词组或 AI 输出'},
                 ...Array.from({length:count}, (_,i) => actorAssetPorts(i,'演员')).flat(),
+                ...(isYouyunH3(node) ? [
+                    {role:'reference-video',label:'参考视频',title:'最多 3 个参考视频，与参考图片和音频合计最多 12 个'},
+                    {role:'reference-audio',label:'参考音频',title:'最多 3 个参考音频，需同时连接参考图片或参考视频'},
+                ] : []),
             ];
         }
         if(node.type === LINE_ART_TYPE){
@@ -219,7 +223,7 @@
     function mapping(node, assets=[], options={}){
         const rule = modelRule(node.apiProvider || options.provider, node.model || options.model);
         const assetRefs = assetList(node, assets);
-        const refs = (node.type === LINE_ART_TYPE ? assetRefs : assetRefs.slice(0, rule.maxImages)).map((ref,index) => ({
+        const refs = (node.type === LINE_ART_TYPE || isYouyunH3(node) ? assetRefs : assetRefs.slice(0, rule.maxImages)).map((ref,index) => ({
             ...ref,
             assetIndex:index + 1,
             asset_index:index + 1,

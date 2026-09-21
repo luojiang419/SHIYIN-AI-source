@@ -7,6 +7,8 @@ try { saved = JSON.parse(localStorage.getItem(key) || '{}'); } catch {}
 let queue = (saved.queue || []).map(j => ({...j, state: j.state === 'active' ? 'waiting' : j.state}));
 let outputRoot = saved.outputRoot || '';
 let selected = 0, running = false, paused = false, preparing = false, exporting = false;
+let cancelling = false, preparationMessage = '', preparationStarted = 0;
+let selectingOutput = false;
 const defaults = { far: 0, near: 100, gamma: 0, contrast: 100, smooth: 0, invert: false };
 const presets = { '默认': defaults, '主体增强': {...defaults, far: 12, near: 90, gamma: 8, contrast: 142, smooth: 7}, '空间层次': {...defaults, far: 4, near: 98, gamma: -8, contrast: 126, smooth: 3} };
 let parameters = {...defaults};
@@ -34,7 +36,10 @@ function render() {
   $('[data-path]').textContent = outputRoot || '请选择输出目录';
   $('[data-note] b').textContent = preparing ? '首次准备运行时与模型' : active ? `正在处理 ${active.name}` : paused ? '队列已暂停' : '准备就绪';
   $('[data-note] span').textContent = active?.message || '按顺序提取，保留原始 FPS、全部帧与原始分辨率';
-  $('[data-action="start"]').disabled = running || preparing || exporting;
+  $('[data-action="start"]').disabled = running || preparing || exporting || selectingOutput;
+  $('[data-action="pause"]').textContent = preparing ? (cancelling ? '正在取消…' : '取消准备') : paused ? '恢复队列' : '暂停队列';
+  $('[data-action="pause"]').disabled = cancelling;
+  if (preparing) $('[data-note] span').textContent = `${preparationMessage || '正在启动组件检查'} · 已等待 ${Math.floor((Date.now()-preparationStarted)/1000)} 秒`;
   $('[data-action="clear"]').disabled = running || exporting;
   modelSelect.disabled = running || preparing; sizeSelect.disabled = running;
   const job = queue[selected];
@@ -64,13 +69,13 @@ async function status() {
   $('.compact-model-status small').textContent = modelSelect.selectedIndex === 1 ? 'Small · 约 116 MB · Apache-2.0' : 'Base · 约 458 MB · 仅限非商业用途';
 }
 async function processQueue() {
-  if (running || preparing || exporting) return;
+  if (running || preparing || exporting || selectingOutput) return;
   if (!queue.length) return toast('请先导入视频');
-  if (!outputRoot) { outputRoot = await invoke('choose_output_directory') || ''; if (!outputRoot) return; }
-  paused = false; $('[data-action="pause"]').textContent = '暂停队列'; preparing = true; render();
-  try { await invoke('ensure_components', {model:modelKey()}); await status(); }
-  catch (e) { fail(e); return; }
-  finally { preparing = false; render(); }
+  if (!outputRoot) { selectingOutput = true; render(); try { outputRoot = await invoke('choose_output_directory') || ''; } finally { selectingOutput = false; render(); } if (!outputRoot) return; persist(); }
+  paused = false; preparing = true; cancelling = false; preparationMessage = ''; preparationStarted = Date.now(); render();
+  try { await invoke('ensure_components', {model:modelKey()}); if (cancelling) return; await status(); if (cancelling) return; }
+  catch (e) { if (cancelling) toast('准备已取消，已下载文件保留，下次可继续'); else fail(e); return; }
+  finally { preparing = false; cancelling = false; render(); }
   running = true;
   const model = modelKey(), inputSize = sizeSelect.selectedIndex === 1 ? 518 : 322;
   const pending = queue.filter(j => j.state === 'waiting' || j.state === 'failed');
@@ -89,7 +94,7 @@ async function processQueue() {
 $('[data-action="add"]').onclick = async () => { try { add(await invoke('choose_input_videos')); } catch(e) { fail(e); } };
 $('[data-action="path"]').onclick = async () => { try { if (running || preparing) return; outputRoot = await invoke('choose_output_directory') || outputRoot; persist(); render(); } catch(e) { fail(e); } };
 $('[data-action="start"]').onclick = () => processQueue().catch(fail);
-$('[data-action="pause"]').onclick = () => { if (preparing) return toast('组件下载期间请等待，重新启动后可续传'); paused = !paused; $('[data-action="pause"]').textContent = paused ? '恢复队列' : '暂停队列'; if (!paused && !running) processQueue().catch(fail); else toast('将在当前视频完成后暂停'); render(); };
+$('[data-action="pause"]').onclick = async () => { if (preparing) { cancelling = true; render(); try { await invoke('cancel_inference'); } catch(e) { cancelling = false; fail(e); render(); } return; } paused = !paused; if (!paused && !running) processQueue().catch(fail); else toast('将在当前视频完成后暂停'); render(); };
 $('[data-action="clear"]').onclick = () => { if (running || exporting) return; queue = []; persist(); select(0); };
 $('[data-queue]').onclick = e => { if (e.target.dataset.remove !== undefined) { const i = Number(e.target.dataset.remove); if (queue[i].state === 'active' || exporting) return; queue.splice(i, 1); persist(); select(Math.min(selected, queue.length - 1)); } else { const row = e.target.closest('[data-select]'); if(row) select(Number(row.dataset.select)); } };
 $('[data-action="model"]').onclick = () => status().then(() => toast($('.health strong').textContent + '；' + $('.compact-model-status strong').textContent)).catch(fail);
@@ -117,9 +122,10 @@ sourceVideo.ontimeupdate = () => { if (Math.abs(sourceVideo.currentTime - depthV
 $('[data-action="close-compare"]').onclick = () => dialog.close(); dialog.onclose = () => { sourceVideo.pause(); depthVideo.pause(); };
 $('[data-compare-wipe]').oninput = wipe;
 async function init() {
-  await api.event.listen('depth-progress', ({payload}) => { const job = queue.find(j => j.state === 'active'); if (job) { job.progress = payload.percent; job.message = payload.message; render(); } else if (preparing) $('[data-note] span').textContent = payload.message; });
+  await api.event.listen('depth-progress', ({payload}) => { const job = queue.find(j => j.state === 'active'); if (job) { job.progress = payload.percent; job.message = payload.message; render(); } else if (preparing) { preparationMessage = payload.message; render(); } });
   await api.event.listen('tauri://drag-drop', async ({payload}) => { for (const path of payload.paths || []) { try { add([await invoke('load_input_video', {path})]); } catch(e) { fail(e); } } });
   await status();
 }
 $('.queue-foot span:last-child').textContent = '失败任务点击开始重试 · 关闭后保留队列';
+setInterval(() => { if (preparing) render(); }, 1000);
 select(0); init().catch(fail);

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     fs,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Mutex},
@@ -328,56 +328,73 @@ async fn ensure_components(app: AppHandle, state: State<'_, LabState>, model: St
         command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(snapshot.root.join("scripts/prepare-components.ps1"))
             .arg("-Root").arg(&snapshot.root).arg("-Model").arg(model)
+            .env_remove("PSModulePath")
             .stdout(Stdio::piped()).stderr(Stdio::piped());
+        let _ = fs::create_dir_all(snapshot.root.join("runtime"));
+        let mut log = fs::File::create(snapshot.root.join("runtime/component-install.log")).ok();
         let mut child = command.spawn().map_err(|e| e.to_string())?;
         *snapshot.active_pid.lock().map_err(|_| "进程锁已损坏")? = Some(child.id());
         let stderr = child.stderr.take().ok_or("无法读取安装日志")?;
         let reader = thread::spawn(move || { let mut s = String::new(); let _ = BufReader::new(stderr).read_to_string(&mut s); s });
         for line in BufReader::new(child.stdout.take().ok_or("无法读取下载进度")?).lines().map_while(Result::ok) {
+            if let Some(file) = log.as_mut() { let _ = writeln!(file, "{line}"); }
             let _ = app.emit("depth-progress", json!({"percent": 0, "message": line}));
         }
         let status = child.wait().map_err(|e| e.to_string())?;
         *snapshot.active_pid.lock().map_err(|_| "进程锁已损坏")? = None;
         let detail = reader.join().unwrap_or_default();
+        if let Some(file) = log.as_mut() { let _ = writeln!(file, "Exit: {status}\n{detail}"); }
         if status.success() { Ok(()) } else { Err(format!("组件安装失败：{detail}")) }
     }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn choose_input_video(state: State<'_, LabState>) -> Result<Option<Value>, String> {
+async fn choose_input_video(window: tauri::Window, state: State<'_, LabState>) -> Result<Option<Value>, String> {
+    let root = state.root.clone();
+    tauri::async_runtime::spawn_blocking(move || {
     let Some(path) = FileDialog::new()
+        .set_parent(&window)
         .set_title("选择输入视频")
         .add_filter("视频", &["mp4", "mov", "mkv", "avi", "webm", "m4v"])
         .pick_file()
     else {
         return Ok(None);
     };
-    load_video_payload(&state.root, &path).map(Some)
+    load_video_payload(&root, &path).map(Some)
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn choose_input_videos(state: State<'_, LabState>) -> Result<Vec<Value>, String> {
+async fn choose_input_videos(window: tauri::Window, state: State<'_, LabState>) -> Result<Vec<Value>, String> {
+    let root = state.root.clone();
+    tauri::async_runtime::spawn_blocking(move || {
     let Some(paths) = FileDialog::new()
+        .set_parent(&window)
         .set_title("选择待批量提取的视频")
         .add_filter("视频", &["mp4", "mov", "mkv", "avi", "webm", "m4v"])
         .pick_files()
     else {
         return Ok(Vec::new());
     };
-    paths.iter().map(|path| load_video_payload(&state.root, path)).collect()
+    paths.iter().map(|path| load_video_payload(&root, path)).collect()
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn load_input_video(state: State<'_, LabState>, path: String) -> Result<Value, String> {
-    load_video_payload(&state.root, Path::new(path.trim()))
+async fn load_input_video(state: State<'_, LabState>, path: String) -> Result<Value, String> {
+    let root = state.root.clone();
+    tauri::async_runtime::spawn_blocking(move || load_video_payload(&root, Path::new(path.trim())))
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn choose_output_directory() -> Option<String> {
-    FileDialog::new()
+async fn choose_output_directory(window: tauri::Window) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || FileDialog::new()
+        .set_parent(&window)
         .set_title("选择深度视频输出目录")
         .pick_folder()
-        .map(|path| path.display().to_string())
+        .map(|path| path.display().to_string()))
+        .await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -560,7 +577,7 @@ fn open_output_directory(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn cancel_inference(state: State<'_, LabState>) -> Result<bool, String> {
+async fn cancel_inference(state: State<'_, LabState>) -> Result<bool, String> {
     let pid = *state
         .active_pid
         .lock()
@@ -570,12 +587,14 @@ fn cancel_inference(state: State<'_, LabState>) -> Result<bool, String> {
     };
     #[cfg(target_os = "windows")]
     {
+        return tauri::async_runtime::spawn_blocking(move || {
         let mut command = hidden_command(Path::new("taskkill.exe"));
         let status = command
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .status()
             .map_err(|error| format!("无法停止 worker：{error}"))?;
-        return Ok(status.success());
+        Ok(status.success())
+        }).await.map_err(|e| e.to_string())?;
     }
     #[allow(unreachable_code)]
     Ok(false)
@@ -586,13 +605,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 if let Some(state) = window.app_handle().try_state::<LabState>() {
-                    if let Ok(mut slot) = state.active_pid.lock() {
-                        if let Some(pid) = slot.take() {
+                    let pid = state.active_pid.lock().ok().and_then(|mut slot| slot.take());
+                        if let Some(pid) = pid {
                             #[cfg(target_os = "windows")]
                             let _ = hidden_command(Path::new("taskkill.exe"))
-                                .args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+                                .args(["/PID", &pid.to_string(), "/T", "/F"]).spawn();
                         }
-                    }
                 }
             }
         })

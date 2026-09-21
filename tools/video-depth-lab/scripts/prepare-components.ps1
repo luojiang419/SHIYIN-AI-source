@@ -11,6 +11,7 @@ if ($Root.StartsWith('\\?\UNC\', [StringComparison]::OrdinalIgnoreCase)) {
 $Root = [IO.Path]::GetFullPath($Root)
 $cache = Join-Path $Root 'runtime/downloads'
 New-Item -ItemType Directory -Force $cache | Out-Null
+Write-Output 'Checking runtime and model files...'
 function Get-Sha256([string]$Path) {
     $algorithm = [Security.Cryptography.SHA256]::Create()
     $stream = [IO.File]::OpenRead($Path)
@@ -19,14 +20,30 @@ function Get-Sha256([string]$Path) {
 }
 function Get-Verified($Package, [string]$Destination) {
     if (Test-Path -LiteralPath $Destination) {
+        Write-Output "Verifying $($Package.id)..."
         if ((Get-Item -LiteralPath $Destination).Length -eq $Package.size -and (Get-Sha256 $Destination) -eq $Package.sha256) { return }
         throw "Existing file failed integrity verification: $Destination"
     }
     New-Item -ItemType Directory -Force (Split-Path -Parent $Destination) | Out-Null
     Write-Output "Downloading $($Package.id) ($([math]::Round($Package.size / 1MB)) MB)..."
     $partial = "$Destination.partial"
-    & curl.exe --fail --location --retry 3 --connect-timeout 30 --speed-time 120 --speed-limit 1024 --continue-at - --output $partial $Package.domestic_url
-    if ($LASTEXITCODE -ne 0) { throw "Download failed; restart to resume: $($Package.id)" }
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = (Get-Command curl.exe -ErrorAction Stop).Source
+    $start.Arguments = '--silent --show-error --fail --location --retry 3 --connect-timeout 30 --speed-time 120 --speed-limit 1024 --continue-at - --output "' + $partial + '" "' + $Package.domestic_url + '"'
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardError = $true
+    $download = [Diagnostics.Process]::Start($start)
+    $downloadError = $download.StandardError.ReadToEndAsync()
+    try {
+        do {
+            $finished = $download.WaitForExit(1000)
+            $bytes = if (Test-Path -LiteralPath $partial) { (Get-Item -LiteralPath $partial).Length } else { 0 }
+            Write-Output ("Downloading {0}: {1:N1} / {2:N1} MB" -f $Package.id, ($bytes / 1MB), ($Package.size / 1MB))
+        } while (!$finished)
+        if ($download.ExitCode -ne 0) { throw "Download failed; restart to resume: $($Package.id). $($downloadError.Result)" }
+    } finally { $download.Dispose() }
+    Write-Output "Verifying $($Package.id)..."
     if ((Get-Item -LiteralPath $partial).Length -ne $Package.size -or (Get-Sha256 $partial) -ne $Package.sha256) {
         Remove-Item -LiteralPath $partial -Force
         throw "Download integrity check failed: $($Package.id)"
@@ -60,6 +77,7 @@ if (!(Test-Path -LiteralPath $worker) -and !(Test-Path -LiteralPath $devPython))
         $archives += $destination
     }
     if ($variant.assemble_archive) {
+        Write-Output 'Assembling runtime archive...'
         $joined = Join-Path $cache "$variantId.zip"
         $stream = [IO.File]::Create($joined)
         try { foreach ($file in $archives) { $inputStream = [IO.File]::OpenRead($file); try { $inputStream.CopyTo($stream) } finally { $inputStream.Dispose() } } } finally { $stream.Dispose() }
@@ -69,9 +87,11 @@ if (!(Test-Path -LiteralPath $worker) -and !(Test-Path -LiteralPath $devPython))
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $staging = Join-Path $cache ('extract-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory $staging | Out-Null
+    Write-Output 'Extracting runtime archive. This may take several minutes...'
     foreach ($archive in $archives) { [IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging) }
     foreach ($path in $variant.required_paths) { if (!(Test-Path -LiteralPath (Join-Path $staging $path))) { throw "Runtime file missing: $path" } }
     Set-Content -LiteralPath (Join-Path $Root 'runtime/variant.txt') -Value $variantId -Encoding ASCII
+    Write-Output 'Installing runtime files...'
     foreach ($item in Get-ChildItem -LiteralPath (Join-Path $staging 'runtime')) {
         Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $Root 'runtime') -Recurse -Force
     }

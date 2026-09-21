@@ -45,3 +45,30 @@ test('批量界面串行调用真实命令、保留参数并隔离失败任务',
     assert.deepEqual(errors,[]);
   } finally { await browser.close(); }
 });
+
+test('组件准备期间显示进度并可取消，不进入推理', async () => {
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      window.calls = []; window.listeners = {};
+      window.__TAURI__ = {event:{listen:async (name, callback) => { window.listeners[name] = callback; }},core:{convertFileSrc:p => p,invoke:async name => {
+        window.calls.push(name);
+        if(name === 'get_runtime_status') return {runtimeReady:false,models:[]};
+        if(name === 'choose_input_videos') return [{name:'one.mp4',path:'C:/one.mp4'}];
+        if(name === 'choose_output_directory') return 'C:/output';
+        if(name === 'ensure_components') return new Promise((resolve,reject) => { window.cancelPreparation = () => reject('cancelled'); setTimeout(() => window.listeners['depth-progress']({payload:{percent:0,message:'Downloading: 12 / 500 MB'}}),20); });
+        if(name === 'cancel_inference') { window.cancelPreparation(); return true; }
+      }}};
+    });
+    await page.goto(pathToFileURL(fileURLToPath(new URL('../batch-prototype/index.html',import.meta.url))).href);
+    await page.locator('[data-action=add]').click();
+    await page.locator('[data-action=start]').click();
+    await page.waitForFunction(() => document.querySelector('[data-note]').textContent.includes('12 / 500'));
+    assert.equal(await page.locator('[data-action=pause]').textContent(),'取消准备');
+    await page.locator('[data-action=pause]').click();
+    await page.waitForFunction(() => !document.querySelector('[data-action=start]').disabled);
+    assert.equal(await page.evaluate(() => window.calls.includes('run_inference')),false);
+    assert.match(await page.locator('[data-toast]').textContent(),/已取消/);
+  } finally { await browser.close(); }
+});

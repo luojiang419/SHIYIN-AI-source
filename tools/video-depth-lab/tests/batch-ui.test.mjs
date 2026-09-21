@@ -124,3 +124,53 @@ test('组件准备期间显示进度并可取消，不进入推理', async () =>
     assert.match(await page.locator('[data-toast]').textContent(),/已取消/);
   } finally { await browser.close(); }
 });
+
+test('真实视频可播放定位、独立全屏及划像同步，并可打开输出目录', async t => {
+  const { readFile, mkdir } = await import('node:fs/promises');
+  const sample = new URL('../runtime/inputs/full-1080p-8f.mp4', import.meta.url);
+  let bytes;
+  try { bytes = await readFile(sample); } catch (e) { if (e.code === 'ENOENT') return t.skip('需要本地 runtime/inputs/full-1080p-8f.mp4 媒体样本'); throw e; }
+  const media = 'data:video/mp4;base64,' + bytes.toString('base64');
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage({viewport:{width:1520,height:940}});
+    const errors = []; page.on('pageerror', e => errors.push(e.message));
+    await page.addInitScript(media => {
+      localStorage.setItem('shiyin-depth-batch-v1', JSON.stringify({outputRoot:'C:/output',queue:[{name:'人物.sample.mov',path:'source',state:'done',result:{outputVideoPath:'depth',outputDirectory:'C:/output/run',rawDepthPath:'raw'}}]}));
+      window.calls = [];
+      window.__TAURI__ = {event:{listen:async () => {}},core:{convertFileSrc:() => media,invoke:async (name,args) => {
+        window.calls.push({name,args});
+        if (name === 'get_runtime_status') return {runtimeReady:true,models:[]};
+        if (name === 'apply_parameters') return {outputVideoPath:args.request.outputPath};
+      }}};
+    },media);
+    await page.goto(pathToFileURL(fileURLToPath(new URL('../batch-prototype/index.html',import.meta.url))).href);
+    await page.waitForFunction(() => document.querySelector('.preview-stage video').readyState >= 2);
+    await page.locator('[data-action=play-preview]').click();
+    await page.waitForFunction(() => !document.querySelector('.preview-stage video').paused);
+    await page.locator('[data-play-icon]').waitFor({state:'hidden'});
+    await page.locator('[data-preview-controls] [data-player-toggle]').click();
+    await page.locator('[data-play-icon]').waitFor({state:'visible'});
+    await page.locator('[data-preview-controls] [data-player-seek]').fill('500');
+    assert.equal(await page.evaluate(() => { const v = document.querySelector('.preview-stage video'); return Math.abs(v.currentTime/v.duration-.5)<.02; }),true);
+    await page.locator('[data-preview-controls] [data-player-fullscreen]').click();
+    await page.waitForFunction(() => document.fullscreenElement?.hasAttribute('data-preview-player'));
+    assert.equal(await page.locator('[data-compare-dialog]').isVisible(),false);
+    await page.evaluate(() => document.exitFullscreen());
+    await page.locator('[data-action=play-preview]').dblclick();
+    await page.waitForFunction(() => document.querySelector('[data-compare-source] video').readyState >= 2);
+    await page.locator('[data-compare-controls] [data-player-toggle]').click();
+    await page.locator('[data-compare-controls] [data-player-seek]').fill('600');
+    assert.equal(await page.evaluate(() => Math.abs(document.querySelector('[data-compare-source] video').currentTime-document.querySelector('.compare-depth video').currentTime)<.03),true);
+    await mkdir('.codex-tmp/depth-batch-player', {recursive:true});
+    await page.screenshot({path:'.codex-tmp/depth-batch-player/compare.png'});
+    await page.locator('[data-action=close-compare]').click();
+    await page.locator('[data-action=open-output]').click();
+    await page.locator('[data-action=export-adjusted]').click();
+    const calls = await page.evaluate(() => window.calls);
+    assert.equal(calls.find(c => c.name === 'open_output_directory').args.path,'C:/output');
+    assert.equal(calls.find(c => c.name === 'apply_parameters').args.request.outputPath,'C:/output/run/adjusted/人物.sample_depth.mp4');
+    await page.screenshot({path:'.codex-tmp/depth-batch-player/player.png'});
+    assert.deepEqual(errors,[]);
+  } finally { await browser.close(); }
+});

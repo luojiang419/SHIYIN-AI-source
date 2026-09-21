@@ -407,6 +407,21 @@ async fn choose_output_directory(window: tauri::Window) -> Result<Option<String>
         .await.map_err(|e| e.to_string())
 }
 
+fn name_depth_output(mut result: Value, input: &Path) -> Result<Value, String> {
+    let source = PathBuf::from(result["outputVideoPath"].as_str().ok_or("推理结果缺少输出视频")?);
+    let stem = input.file_stem().and_then(|s| s.to_str()).ok_or("源文件名无效")?;
+    let target = source.with_file_name(format!("{stem}_depth.mp4"));
+    if source != target {
+        fs::rename(&source, &target).map_err(|e| format!("输出视频命名失败：{e}"))?;
+    }
+    result["outputVideoPath"] = Value::String(target.display().to_string());
+    if let Some(path) = result["metadataPath"].as_str() {
+        let content = serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?;
+        fs::write(path, content).map_err(|e| format!("更新输出元数据失败：{e}"))?;
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 async fn run_inference(
     app: AppHandle,
@@ -442,6 +457,7 @@ async fn run_inference(
         };
         fs::create_dir_all(&base).map_err(|error| format!("无法创建输出根目录：{error}"))?;
         let output_dir = base.join(run_id(&request.model));
+        let input_path = PathBuf::from(&request.input_path);
         let args = vec![
             "infer".to_string(),
             "--model".to_string(),
@@ -463,12 +479,13 @@ async fn run_inference(
             "--params-json".to_string(),
             serde_json::to_string(&request.parameters).map_err(|error| error.to_string())?,
         ];
-        run_worker(
+        let result = run_worker(
             Some(&app),
             &snapshot.root,
             &args,
             Some(&snapshot.active_pid),
-        )
+        )?;
+        name_depth_output(result, &input_path)
     })
     .await
     .map_err(|error| format!("推理后台任务失败：{error}"))?
@@ -486,6 +503,9 @@ async fn apply_parameters(
             .operation_lock
             .lock()
             .map_err(|_| "参数任务锁已损坏".to_string())?;
+        if let Some(parent) = Path::new(&request.output_path).parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("无法创建调整版输出目录：{e}"))?;
+        }
         let args = vec![
             "postprocess".to_string(),
             "--raw".to_string(),
@@ -677,6 +697,23 @@ mod tests {
         assert!(python_executable(temp.path())
             .unwrap()
             .ends_with("python.exe"));
+    }
+
+    #[test]
+    fn names_depth_output_after_source_and_updates_metadata() {
+        let temp = tempdir().unwrap();
+        let video = temp.path().join("depth-adjusted.mp4");
+        let metadata = temp.path().join("run-metadata.json");
+        fs::write(&video, b"encoded video").unwrap();
+        let result = name_depth_output(serde_json::json!({
+            "outputVideoPath": video, "metadataPath": metadata
+        }), Path::new("人物.sample.mov")).unwrap();
+        let expected = temp.path().join("人物.sample_depth.mp4");
+        assert_eq!(fs::read(&expected).unwrap(), b"encoded video");
+        assert!(!video.exists());
+        let saved: Value = serde_json::from_slice(&fs::read(metadata).unwrap()).unwrap();
+        assert_eq!(saved["outputVideoPath"], result["outputVideoPath"]);
+        assert_eq!(result["outputVideoPath"], expected.display().to_string());
     }
 
     #[test]

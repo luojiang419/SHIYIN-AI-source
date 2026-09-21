@@ -31,6 +31,7 @@ function render() {
   $('[data-queue]').innerHTML = queue.map((j, i) => `<article class="job ${j.state} ${i === selected ? 'selected' : ''}" data-select="${i}"><span class="thumb">${j.state === 'done' ? '✓' : '▶'}</span><div><div class="job-name">${escapeHtml(j.name)}</div><div class="job-meta" title="${escapeHtml(j.error || j.path)}">${escapeHtml(j.error || j.meta || '保留原视频规格')}</div>${j.state === 'active' ? `<div class="job-progress"><i style="width:${j.progress || 0}%"></i></div>` : ''}</div><div class="job-status">${({waiting:'等待', active:`${j.progress || 0}%`, done:'已完成', failed:'失败 · 点开始重试'})[j.state]}<button class="job-remove" data-remove="${i}" ${j.state === 'active' ? 'disabled' : ''}>×</button></div></article>`).join('');
   $('[data-queue-count]').textContent = `${queue.length} 个任务 · ${queue.filter(j => j.state === 'failed').length} 个失败`;
   $('[data-path]').textContent = outputRoot || '请选择输出目录';
+  $('[data-action="open-output"]').disabled = !outputRoot;
   $('[data-note] b').textContent = preparing ? '首次准备运行时与模型' : active ? `正在处理 ${active.name}` : paused ? '队列已暂停' : '准备就绪';
   $('[data-note] span').textContent = active?.message || '按顺序提取，保留原始 FPS、全部帧与原始分辨率';
   $('[data-action="start"]').disabled = running || preparing || exporting || selectingOutput;
@@ -41,7 +42,7 @@ function render() {
   modelSelect.disabled = running || preparing; sizeSelect.disabled = running; modeSelect.disabled = running || preparing;
   const job = queue[selected];
   const path = job?.adjustedPath || job?.result?.outputVideoPath || '';
-  if (path !== previewPath) { previewPath = path; if (path) preview.src = api.core.convertFileSrc(path); else { preview.removeAttribute('src'); preview.load(); } }
+  if (path !== previewPath) { preview.pause(); previewPath = path; if (path) preview.src = api.core.convertFileSrc(path); else { preview.removeAttribute('src'); preview.load(); } }
   $('[data-preview-name]').textContent = job?.name || '等待导入视频';
   $('[data-preview-info]').textContent = path ? '点击播放 · 双击划像对比 · 调参预览为近似效果，导出精确计算' : '提取完成后显示真实深度视频';
   $('[data-preview-state]').textContent = job?.state === 'done' ? '已完成' : '未完成';
@@ -102,6 +103,7 @@ async function processQueue() {
 }
 $('[data-action="add"]').onclick = async () => { try { add(await invoke('choose_input_videos')); } catch(e) { fail(e); } };
 $('[data-action="path"]').onclick = async () => { try { if (running || preparing) return; outputRoot = await invoke('choose_output_directory') || outputRoot; persist(); render(); } catch(e) { fail(e); } };
+$('[data-action="open-output"]').onclick = () => invoke('open_output_directory', {path:outputRoot}).catch(fail);
 $('[data-action="start"]').onclick = () => processQueue().catch(fail);
 $('[data-action="pause"]').onclick = async () => { if (preparing) { cancelling = true; render(); try { await invoke('cancel_inference'); } catch(e) { cancelling = false; fail(e); render(); } return; } paused = !paused; if (!paused && !running) processQueue().catch(fail); else toast('将在当前视频完成后暂停'); render(); };
 $('[data-action="clear"]').onclick = () => { if (running || exporting) return; queue = []; persist(); select(0); };
@@ -120,7 +122,7 @@ preview.onplay = () => $('[data-play-icon]').hidden = true; preview.onpause = ()
 $('[data-action="export-adjusted"]').onclick = async () => {
   const job = queue[selected]; if (!job?.result || running || exporting) return;
   exporting = true; render();
-  try { const result = await invoke('apply_parameters', {request:{rawPath:job.result.rawDepthPath, outputPath:job.result.outputDirectory + '/' + job.name.replace(/\.[^.]+$/, '') + '_depth_adjusted.mp4', parameters:controls(parameters)}}); job.adjustedPath = result.outputVideoPath; persist(); toast(`已导出：${job.adjustedPath}`); }
+  try { const result = await invoke('apply_parameters', {request:{rawPath:job.result.rawDepthPath, outputPath:job.result.outputDirectory + '/adjusted/' + job.name.replace(/\.[^.]+$/, '') + '_depth.mp4', parameters:controls(parameters)}}); job.adjustedPath = result.outputVideoPath; previewPath = ''; persist(); toast(`已导出：${job.adjustedPath}`); }
   catch(e) { fail(e); } finally { exporting = false; render(); }
 };
 const dialog = $('[data-compare-dialog]');
@@ -129,6 +131,9 @@ for (const v of [sourceVideo, depthVideo]) { v.muted = true; v.loop = true; v.cl
 $('[data-compare-source]').replaceChildren(sourceVideo); $('.compare-depth').replaceChildren(depthVideo);
 function wipe() { const value = Number($('[data-compare-wipe]').value); $('[data-compare-source]').style.clipPath = `inset(0 ${100-value}% 0 0)`; $('[data-compare-divider]').style.left = value + '%'; }
 $('[data-action="play-preview"]').ondblclick = () => { const job = queue[selected]; if(!previewPath || !job) return; preview.pause(); sourceVideo.src = api.core.convertFileSrc(job.path); depthVideo.src = api.core.convertFileSrc(previewPath); $('[data-compare-name]').textContent = job.name; dialog.showModal(); wipe(); Promise.all([sourceVideo.play(), depthVideo.play()]).catch(fail); };
+sourceVideo.onpause = () => depthVideo.pause();
+sourceVideo.onplay = () => depthVideo.play().catch(fail);
+sourceVideo.onseeking = () => { depthVideo.currentTime = sourceVideo.currentTime; };
 sourceVideo.ontimeupdate = () => { if (Math.abs(sourceVideo.currentTime - depthVideo.currentTime) > .15) depthVideo.currentTime = sourceVideo.currentTime; };
 $('[data-action="close-compare"]').onclick = () => dialog.close(); dialog.onclose = () => { sourceVideo.pause(); depthVideo.pause(); };
 $('[data-compare-wipe]').oninput = wipe;
@@ -145,3 +150,30 @@ for (const eventName of ['dragenter','dragover','dragleave','drop']) {
 $('.queue-foot span:last-child').textContent = '失败任务点击开始重试 · 关闭后保留队列';
 setInterval(() => { if (preparing) render(); }, 1000);
 select(0); init().catch(fail);
+
+function attachPlaybackControls(container, video, fullscreenTarget, companions = []) {
+  const playIcon = '<svg viewBox="0 0 24 24"><path d="m9 5 10 7-10 7Z"/></svg>';
+  const pauseIcon = '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>';
+  container.innerHTML = `<button type="button" data-player-toggle aria-label="播放">${playIcon}</button><span class="playback-time" data-player-time>00:00 / 00:00</span><input data-player-seek type="range" min="0" max="1000" step="1" value="0" aria-label="播放进度"><button type="button" data-player-fullscreen aria-label="全屏播放" title="全屏播放"><svg viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></svg></button>`;
+  const toggle = container.querySelector('[data-player-toggle]'), seek = container.querySelector('[data-player-seek]');
+  const time = container.querySelector('[data-player-time]'), fullscreen = container.querySelector('[data-player-fullscreen]');
+  const clock = value => { const n = Math.floor(Number.isFinite(value) ? value : 0); return `${Math.floor(n/60).toString().padStart(2,'0')}:${(n%60).toString().padStart(2,'0')}`; };
+  function sync() {
+    const ready = Number.isFinite(video.duration) && video.duration > 0;
+    seek.disabled = !ready; toggle.disabled = !video.getAttribute('src'); fullscreen.disabled = !video.getAttribute('src'); fullscreen.hidden = !fullscreenTarget;
+    seek.value = ready ? video.currentTime / video.duration * 1000 : 0;
+    time.textContent = `${clock(video.currentTime)} / ${clock(video.duration)}`;
+    toggle.innerHTML = video.paused ? playIcon : pauseIcon;
+    toggle.setAttribute('aria-label', video.paused ? '播放' : '暂停');
+  }
+  toggle.onclick = () => { if (video.paused) video.play().catch(fail); else video.pause(); };
+  seek.oninput = () => { if (!Number.isFinite(video.duration)) return; const position = Number(seek.value) / 1000 * video.duration; video.currentTime = position; companions.forEach(v => v.currentTime = position); sync(); };
+  fullscreen.onclick = async () => {
+    try { if (document.fullscreenElement) await document.exitFullscreen(); else await fullscreenTarget.requestFullscreen(); }
+    catch (e) { fail(`无法切换全屏：${e}`); }
+  };
+  for (const event of ['loadedmetadata','durationchange','timeupdate','play','pause','ended','emptied']) video.addEventListener(event, sync);
+  sync();
+}
+attachPlaybackControls($('[data-preview-controls]'), preview, $('[data-preview-player]'));
+attachPlaybackControls($('[data-compare-controls]'), sourceVideo, null, [depthVideo]);

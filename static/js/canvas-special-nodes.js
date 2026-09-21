@@ -3157,6 +3157,7 @@
         };
         node.colorFidelityReferenceRoi = normalizeBox(node.colorFidelityReferenceRoi);
         node.colorFidelityGeneratedRoi = normalizeBox(node.colorFidelityGeneratedRoi);
+        node.colorFidelityStrength = Math.min(1, Math.max(.1, Number(node.colorFidelityStrength) || .82));
         node.colorFidelityStatus = node.colorFidelityStatus || 'idle';
         return node;
     }
@@ -3167,9 +3168,10 @@
         return `<div class="special-node color-fidelity-fit-special" data-special-node="color-fidelity-fit">
             <p class="muted-note">只在生成图的指定商品区域内追色；原始生成图不会被覆盖。ROI 格式：x,y,width,height。</p>
             <div class="special-input-grid"><label>参考商品 ROI<input data-color-fidelity-field="colorFidelityReferenceRoi" value="${esc(node.colorFidelityReferenceRoi)}"></label><label>生成结果 ROI<input data-color-fidelity-field="colorFidelityGeneratedRoi" value="${esc(node.colorFidelityGeneratedRoi)}"></label></div>
+            <label class="color-fidelity-strength">追色强度 <output data-color-fidelity-strength-value>${Math.round(node.colorFidelityStrength * 100)}%</output><input type="range" min="0.1" max="1" step="0.01" value="${node.colorFidelityStrength}" data-color-fidelity-strength aria-label="追色强度"></label>
             <p class="pose-status ${node.colorFidelityStatus === 'running' ? 'running' : result?.passed ? 'success' : result ? 'failed' : ''}"><span></span><b>${esc(status)}</b></p>
-            ${result ? `<div class="special-output-row"><span>前 ${esc(result.before?.delta_e00_mean)} DeltaE00 / 后 ${esc(result.after?.delta_e00_mean)} DeltaE00 / 覆盖度 ${esc(result.after?.palette_overlap)}</span></div>` : ''}
-            <div class="special-output-row"><button type="button" class="special-primary" data-special-action="run-color-fidelity-fit"><i data-lucide="palette"></i><span>智能追色并复验</span></button></div>
+            ${result ? `<div class="special-output-row"><span>强度 ${Math.round((result.strength || node.colorFidelityStrength) * 100)}% · 前 ${esc(result.before?.delta_e00_mean)} DeltaE00 / 后 ${esc(result.after?.delta_e00_mean)} DeltaE00 / 覆盖度 ${esc(result.after?.palette_overlap)}</span></div>` : ''}
+            <div class="special-output-row"><button type="button" class="special-primary" data-special-action="run-color-fidelity-fit"><i data-lucide="palette"></i><span>${result ? '按当前强度重新追色并复验' : '智能追色并复验'}</span></button></div>
         </div>`;
     }
     function bindColorFidelityFit(root, node, options={}){
@@ -3178,6 +3180,15 @@
             control.addEventListener('pointerdown', event => event.stopPropagation());
             control.addEventListener('change', event => { node[event.target.dataset.colorFidelityField] = event.target.value; normalizeColorFidelityFit(node); notify(options, node, true); });
         });
+        const strength = root.querySelector('[data-color-fidelity-strength]');
+        const strengthValue = root.querySelector('[data-color-fidelity-strength-value]');
+        strength?.addEventListener('pointerdown', event => event.stopPropagation());
+        strength?.addEventListener('input', event => {
+            node.colorFidelityStrength = Number(event.target.value);
+            if(strengthValue) strengthValue.textContent = `${Math.round(node.colorFidelityStrength * 100)}%`;
+            notify(options, node, false);
+        });
+        strength?.addEventListener('change', event => { node.colorFidelityStrength = Number(event.target.value); normalizeColorFidelityFit(node); notify(options, node, true); });
         root.querySelector('[data-special-action="run-color-fidelity-fit"]')?.addEventListener('click', async event => {
             event.preventDefault(); event.stopPropagation();
             try {

@@ -4669,7 +4669,7 @@ function addPoseReplicateNode(point){
 }
 function addColorFidelityFitNode(point){
     const p = point || defaultPoint(120, 40);
-    return addNode({id:uid('color-fit'), type:'colorFidelityFit', x:p.x, y:p.y, w:520, h:390, colorFidelityReferenceRoi:'0,0,256,256', colorFidelityGeneratedRoi:'0,0,256,256', colorFidelityStatus:'idle'});
+    return addNode({id:uid('color-fit'), type:'colorFidelityFit', x:p.x, y:p.y, w:520, h:420, colorFidelityReferenceRoi:'0,0,256,256', colorFidelityGeneratedRoi:'0,0,256,256', colorFidelityStrength:.82, colorFidelityStatus:'idle'});
 }
 function addAngleNode(point){
     const p = point || defaultPoint(140, 60);
@@ -10823,7 +10823,7 @@ function bindClassicSpecialNode(el, node){
         getColorFidelityInputs:target => ({reference:classicSpecialInputImage(target, 'color-reference'), generated:classicSpecialInputImage(target, 'color-generated')}),
         runColorFidelityFit:async (target, inputs) => {
             const parseRoi = value => String(value || '').split(',').map(item => Number(item.trim()));
-            const response = await cascadeFetch('/api/canvas/color-fidelity-fit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reference_url:inputs.reference.url, generated_url:inputs.generated.url, reference_roi:parseRoi(target.colorFidelityReferenceRoi), generated_roi:parseRoi(target.colorFidelityGeneratedRoi)})});
+            const response = await cascadeFetch('/api/canvas/color-fidelity-fit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reference_url:inputs.reference.url, generated_url:inputs.generated.url, reference_roi:parseRoi(target.colorFidelityReferenceRoi), generated_roi:parseRoi(target.colorFidelityGeneratedRoi), strength:target.colorFidelityStrength})});
             if(!response.ok) throw new Error(await responseErrorMessage(response, '智能追色失败'));
             return response.json();
         },
@@ -12514,7 +12514,7 @@ function defaultNodeSize(type){
     if(type === 'depthMap') return {w:520, h:560};
     if(type === 'depthVideo') return {w:620, h:390};
     if(type === 'resultCompare') return {w:520, h:560};
-    if(type === 'colorFidelityFit') return {w:520, h:390};
+    if(type === 'colorFidelityFit') return {w:520, h:420};
     if(type === 'poseReplicate') return {w:720, h:820};
     if(type === 'angle') return {w:460, h:660};
     if(type === 'storyboardMerge') return {w:460, h:0};

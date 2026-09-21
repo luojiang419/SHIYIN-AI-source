@@ -42,3 +42,12 @@ def test_smart_color_match_moves_all_lab_offsets_toward_reference():
     reference = np.full((32, 32, 3), [140, 96, 68], dtype=np.uint8)
     generated = np.full((32, 32, 3), [82, 55, 40], dtype=np.uint8)
     assert inspect_color_fidelity(reference, smart_color_match_preview(reference, generated)).delta_e00_mean < inspect_color_fidelity(reference, generated).delta_e00_mean
+
+
+def test_smart_color_match_strength_controls_adjustment_amount():
+    reference = np.full((32, 32, 3), [140, 96, 68], dtype=np.uint8)
+    generated = np.full((32, 32, 3), [82, 55, 40], dtype=np.uint8)
+    before = abs(inspect_color_fidelity(reference, generated).lightness_offset)
+    gentle = abs(inspect_color_fidelity(reference, smart_color_match_preview(reference, generated, .2)).lightness_offset)
+    strong = abs(inspect_color_fidelity(reference, smart_color_match_preview(reference, generated, .9)).lightness_offset)
+    assert before > gentle > strong

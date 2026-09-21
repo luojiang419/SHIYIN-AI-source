@@ -4360,6 +4360,7 @@ class ColorFidelityFitRequest(BaseModel):
     generated_url: str
     reference_roi: List[int] = Field(min_length=4, max_length=4)
     generated_roi: List[int] = Field(min_length=4, max_length=4)
+    strength: float = Field(default=0.82, ge=0.1, le=1.0)
 
 
 class PoseReplicateInputs(BaseModel):
@@ -8179,7 +8180,7 @@ async def canvas_color_fidelity_fit(payload: ColorFidelityFitRequest):
         reference_crop = crop_rgb(reference, payload.reference_roi)
         generated_crop = crop_rgb(generated, payload.generated_roi)
         before = inspect_color_fidelity(reference_crop, generated_crop).as_dict()
-        fitted_crop = smart_color_match_preview(reference_crop, generated_crop)
+        fitted_crop = smart_color_match_preview(reference_crop, generated_crop, payload.strength)
         x, y, w, h = (int(value) for value in payload.generated_roi)
         generated[y:y + h, x:x + w] = fitted_crop
         destination = os.path.join(OUTPUT_OUTPUT_DIR, f'colorfit_{uuid.uuid4().hex}.png')
@@ -8189,7 +8190,8 @@ async def canvas_color_fidelity_fit(payload: ColorFidelityFitRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {'original_url': payload.generated_url, 'image_url': media_url_from_path(destination),
             'reference_roi': payload.reference_roi, 'generated_roi': payload.generated_roi,
-            'before': before, 'after': after, 'passed': after['confidence'].startswith('可信')}
+            'strength': payload.strength, 'before': before, 'after': after,
+            'passed': after['confidence'].startswith('可信')}
 
 MEDIA_REFERENCE_URL_RE = re.compile(r"(?P<url>/(?:assets/(?:input|output|uploads)|output)/[^\s\"'<>),;]+)")
 MEDIA_FILE_KIND_EXTS = {

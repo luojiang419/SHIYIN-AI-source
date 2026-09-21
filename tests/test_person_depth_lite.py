@@ -1,6 +1,15 @@
 import numpy as np
 import pytest
 from canvas_core.depth_inference import DepthInference, DepthUnavailableError
+from canvas_core.person_depth_lite import MASK_SPEC
+
+
+def test_person_segmentation_model_has_pinned_modelscope_mirror():
+    assert MASK_SPEC.domestic_url.startswith(
+        "https://modelscope.cn/models/jiangjiang419/shiyin-depth-lite-models/resolve/"
+    )
+    assert "/image-depth/human_segmentation_pphumanseg_2023mar.onnx" in MASK_SPEC.domestic_url
+    assert "/resolve/master/" not in MASK_SPEC.domestic_url
 
 
 def test_person_normalization_ignores_background(monkeypatch):

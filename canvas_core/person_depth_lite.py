@@ -11,6 +11,7 @@ MASK_SPEC = DepthModelSpec(
     name=MASK_NAME, size=6_163_938,
     sha256="552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24",
     official_url="https://huggingface.co/opencv/human_segmentation_pphumanseg/resolve/e876e63603f6c65c1a22576bfd5fc7c07ecf9eb9/" + MASK_NAME,
+    domestic_url="https://modelscope.cn/models/jiangjiang419/shiyin-depth-lite-models/resolve/3b6ff0e8986bef30ce82c1d46e326a4e8b305e46/image-depth/" + MASK_NAME,
 )
 
 

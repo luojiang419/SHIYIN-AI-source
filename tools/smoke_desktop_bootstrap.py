@@ -29,6 +29,18 @@ def request_status(url: str, cookie_jar: http.cookiejar.CookieJar | None = None)
         return int(error.code), dict(error.headers.items())
 
 
+def post_json(url: str, payload: dict[str, str], cookie_jar: http.cookiejar.CookieJar) -> int:
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with opener.open(request, timeout=5) as response:
+        return int(response.status)
+
+
 def wait_for_health(port: int, process: subprocess.Popen[bytes]) -> None:
     deadline = time.monotonic() + 30
     url = f"http://127.0.0.1:{port}/api/health"
@@ -107,6 +119,16 @@ def main() -> int:
                 raise AssertionError("Packaged bootstrap Cache-Control header is missing")
             if normalized_headers.get("referrer-policy") != "no-referrer":
                 raise AssertionError("Packaged bootstrap Referrer-Policy header is missing")
+            first_location = normalized_headers.get("location")
+            if first_location != "/login":
+                raise AssertionError(f"Desktop bootstrap did not open login page: {first_location}")
+            register_status = post_json(
+                f"http://127.0.0.1:{arguments.port}/api/account/register",
+                {"account": "desktopSmoke", "password": "desktop-smoke-password"},
+                cookie_jar,
+            )
+            if register_status != 201:
+                raise AssertionError(f"Desktop user registration failed: {register_status}")
             authenticated_opener = urllib.request.build_opener(
                 urllib.request.HTTPCookieProcessor(cookie_jar)
             )
@@ -120,7 +142,7 @@ def main() -> int:
                 canvases_payload = json.loads(canvases_response.read().decode("utf-8"))
             if not isinstance(canvases_payload.get("canvases"), list):
                 raise AssertionError("Authenticated canvas API did not return a canvas list")
-            print(json.dumps({"statuses": statuses, "result": "pass"}, ensure_ascii=False))
+            print(json.dumps({"statuses": statuses, "register_status": register_status, "result": "pass"}, ensure_ascii=False))
         finally:
             process.terminate()
             try:

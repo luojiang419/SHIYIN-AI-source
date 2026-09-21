@@ -63,9 +63,13 @@ def main() -> int:
 
         require_status(
             remote_admin.post("/api/account/login", json={"account": "jiang", "password": "jiang"}),
-            403,
+            200,
             "Remote admin login",
         )
+        remote_admin_me = remote_admin.get("/api/account/me").json().get("account") or {}
+        if not remote_admin_me.get("is_admin"):
+            raise AssertionError(f"Remote admin identity is incorrect: {remote_admin_me}")
+        require_status(remote_admin.get("/api/admin/accounts"), 200, "Remote admin account management")
         require_status(
             local_admin.post("/api/account/login", json={"account": "jiang", "password": "jiang"}),
             200,
@@ -261,7 +265,7 @@ def main() -> int:
         result = {
             "http_operations": len(operations),
             "account_authentication": True,
-            "local_admin_only": True,
+            "administrator_web_access": True,
             "api_configuration_hidden_from_users": True,
             "account_data_isolation": True,
             "account_websocket_isolation": True,

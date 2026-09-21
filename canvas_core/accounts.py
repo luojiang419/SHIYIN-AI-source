@@ -354,9 +354,7 @@ class AccountStore:
         with self.connect() as connection:
             connection.execute("DELETE FROM sessions WHERE token_hash=?", (session_hash(token),))
 
-    def create_admin_session(self, account: str, password: str, remote_address: str) -> str:
-        if not is_loopback_address(remote_address):
-            raise PermissionError("管理员只能在安装软件的本机登录")
+    def create_admin_session(self, account: str, password: str, _remote_address: str = "") -> str:
         if not hmac.compare_digest(str(account or ""), ADMIN_ACCOUNT) or not hmac.compare_digest(
             str(password or ""), ADMIN_PASSWORD
         ):

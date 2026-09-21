@@ -26,7 +26,7 @@
       <button class="submit" id="submit" type="submit">登录</button>
     </form>
     <p id="message" aria-live="polite"></p>
-    <p class="note" id="note">普通用户输入已注册账号和密码，英文字母大小写视为同一账号。管理员仅可在安装软件的本机登录。</p>
+    <p class="note" id="note">输入已注册账号和密码，桌面端与 Web 均可登录所有账号；英文字母大小写视为同一账号。</p>
   </main>
   <script>
     let mode='login';
@@ -34,7 +34,7 @@
     document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
       mode=tab.dataset.mode;document.querySelectorAll('.tab').forEach(item=>item.classList.toggle('active',item===tab));
       submit.textContent=mode==='register'?'注册并进入':'登录';password.autocomplete=mode==='register'?'new-password':'current-password';
-      note.textContent=mode==='register'?'账号可使用中文、英文字母和数字；密码不限制长度或复杂度，但不能为空。注册后数据将保存到独立账户目录。':'普通用户输入已注册账号和密码，英文字母大小写视为同一账号。管理员仅可在安装软件的本机登录。';message.textContent='';
+      note.textContent=mode==='register'?'账号可使用中文、英文字母和数字；密码不限制长度或复杂度，但不能为空。注册后数据将保存到独立账户目录。':'输入已注册账号和密码，桌面端与 Web 均可登录所有账号；英文字母大小写视为同一账号。';message.textContent='';
     }));
     form.addEventListener('submit',async event=>{
       event.preventDefault();submit.disabled=true;message.className='';message.textContent=mode==='register'?'正在创建独立账户…':'正在登录…';

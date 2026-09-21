@@ -37,13 +37,13 @@ class AccountStoreTests(unittest.TestCase):
             store.logout(token)
             self.assertIsNone(store.resolve_session(token))
 
-    def test_admin_is_fixed_and_loopback_only(self):
+    def test_admin_is_fixed_and_can_login_from_web_or_desktop(self):
         with tempfile.TemporaryDirectory() as root:
             store = self.make_store(root)
             token = store.create_admin_session(ADMIN_ACCOUNT, ADMIN_PASSWORD, "127.0.0.1")
             self.assertTrue(store.resolve_session(token).is_admin)
-            with self.assertRaises(PermissionError):
-                store.create_admin_session(ADMIN_ACCOUNT, ADMIN_PASSWORD, "192.168.1.20")
+            remote_token = store.create_admin_session(ADMIN_ACCOUNT, ADMIN_PASSWORD, "192.168.1.20")
+            self.assertTrue(store.resolve_session(remote_token).is_admin)
             with self.assertRaises(PermissionError):
                 store.create_admin_session(ADMIN_ACCOUNT, "wrong", "127.0.0.1")
 

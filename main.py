@@ -398,8 +398,15 @@ def request_identity(request: Request) -> AccountIdentity:
 
 def require_admin(request: Request) -> AccountIdentity:
     identity = request_identity(request)
-    if not identity.is_admin or not is_loopback_address(request_remote_address(request)):
-        raise HTTPException(status_code=403, detail="仅安装软件的本机管理员可以访问")
+    if not identity.is_admin:
+        raise HTTPException(status_code=403, detail="仅管理员账号可以访问")
+    return identity
+
+
+def require_local_admin(request: Request) -> AccountIdentity:
+    identity = require_admin(request)
+    if not is_loopback_address(request_remote_address(request)):
+        raise HTTPException(status_code=403, detail="此操作仅允许安装软件的本机管理员执行")
     return identity
 
 
@@ -417,8 +424,6 @@ async def account_authentication_middleware(request: Request, call_next):
             {"detail": "正在准备账号数据，请稍后重试", "code": "account_database_busy"},
             status_code=503, headers={"Retry-After": "1"},
         )
-    if identity and identity.is_admin and not is_loopback_address(request_remote_address(request)):
-        identity = None
     if not identity:
         if path == "/" or (not path.startswith("/api/") and "text/html" in request.headers.get("accept", "")):
             return RedirectResponse("/login", status_code=303)
@@ -761,9 +766,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
     try:
         session_token = str(websocket.cookies.get(ACCOUNT_SESSION_COOKIE, "") or "")
         identity = ACCOUNT_STORE.resolve_session(session_token)
-        remote_address = str(websocket.client.host if websocket.client else "")
-        if identity and identity.is_admin and not is_loopback_address(remote_address):
-            identity = None
         if not identity:
             await websocket.close(code=4401, reason="请先登录")
             return
@@ -3090,7 +3092,7 @@ def desktop_bootstrap(request: Request, token: str = ""):
         )
 
     existing_identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
-    if existing_identity and existing_identity.is_admin:
+    if existing_identity:
         return RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
 
     # 桌面模式只接受 loopback，启动页不再依赖 URL 中的一次性令牌，
@@ -3104,18 +3106,7 @@ def desktop_bootstrap(request: Request, token: str = ""):
                 detail=str(exc),
                 headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS,
             ) from exc
-    identity = AccountIdentity("admin", ADMIN_ACCOUNT, "admin", "")
-    session_token = ACCOUNT_STORE.create_session(identity, ttl_seconds=12 * 60 * 60)
-    response = RedirectResponse("/", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
-    response.set_cookie(
-        ACCOUNT_SESSION_COOKIE,
-        session_token,
-        max_age=12 * 60 * 60,
-        httponly=True,
-        samesite="strict",
-        path="/",
-    )
-    return response
+    return RedirectResponse("/login", status_code=303, headers=DESKTOP_BOOTSTRAP_RESPONSE_HEADERS)
 
 
 @app.get("/api/preferences")
@@ -13597,7 +13588,7 @@ async def build_chat_text_reply(payload, conversation):
 @app.get("/login")
 async def login_page(request: Request):
     identity = ACCOUNT_STORE.resolve_session(request_account_token(request))
-    if identity and (not identity.is_admin or is_loopback_address(request_remote_address(request))):
+    if identity:
         return RedirectResponse("/", status_code=303)
     return static_html_response("login.html")
 
@@ -23515,7 +23506,7 @@ async def kling_cli_capabilities(request: Request):
 
 @app.get("/api/kling-cli/account")
 async def kling_cli_account(request: Request):
-    require_admin(request)
+    require_local_admin(request)
     from canvas_core.kling_login import LOGIN_MANAGER
     async with KLING_CLI_MANAGEMENT_LOCK:
         if LOGIN_MANAGER.snapshot()["status"] in {"starting", "waiting"}:
@@ -23532,7 +23523,7 @@ async def kling_cli_account(request: Request):
 
 @app.post("/api/kling-cli/install")
 async def kling_cli_install(payload: KlingCliInstallRequest, request: Request):
-    require_admin(request)
+    require_local_admin(request)
     from canvas_core.kling_login import LOGIN_MANAGER
     async with KLING_CLI_MANAGEMENT_LOCK:
         if LOGIN_MANAGER.snapshot()["status"] in {"starting", "waiting"}:
@@ -23545,7 +23536,7 @@ async def kling_cli_install(payload: KlingCliInstallRequest, request: Request):
 
 @app.post("/api/kling-cli/login")
 async def kling_cli_login(request: Request):
-    require_admin(request)
+    require_local_admin(request)
     async with KLING_CLI_MANAGEMENT_LOCK:
         environment = await asyncio.to_thread(resolve_kling_cli)
         if not environment.is_ready:
@@ -23559,14 +23550,14 @@ async def kling_cli_login(request: Request):
 
 @app.get("/api/kling-cli/login-status")
 async def kling_cli_login_status(request: Request):
-    require_admin(request)
+    require_local_admin(request)
     from canvas_core.kling_login import LOGIN_MANAGER
     return LOGIN_MANAGER.snapshot()
 
 
 @app.post("/api/kling-cli/login-open")
 async def kling_cli_login_open(request: Request):
-    require_admin(request)
+    require_local_admin(request)
     from canvas_core.kling_login import LOGIN_MANAGER
     try:
         await asyncio.to_thread(LOGIN_MANAGER.open_browser)

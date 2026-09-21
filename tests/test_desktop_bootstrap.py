@@ -19,12 +19,19 @@ url = "/api/auth/bootstrap"
 with TestClient(main.app, client=("127.0.0.1", 50000)) as client:
     first = client.get(url, follow_redirects=False)
     assert first.status_code == 303, first.text
-    assert first.headers["location"] == "/", first.headers
+    assert first.headers["location"] == "/login", first.headers
     assert first.headers["cache-control"] == "no-store", first.headers
     assert first.headers["referrer-policy"] == "no-referrer", first.headers
 
     cookie_retry = client.get(url, follow_redirects=False)
     assert cookie_retry.status_code == 303, cookie_retry.text
+    assert cookie_retry.headers["location"] == "/login", cookie_retry.headers
+
+    registered = client.post("/api/account/register", json={"account": "desktopUser", "password": "desktop-pass"})
+    assert registered.status_code == 201, registered.text
+    signed_in_retry = client.get(url, follow_redirects=False)
+    assert signed_in_retry.status_code == 303, signed_in_retry.text
+    assert signed_in_retry.headers["location"] == "/", signed_in_retry.headers
 
 for retry_index in range(64):
     with TestClient(main.app, client=("127.0.0.1", 50001 + retry_index)) as retry_client:
